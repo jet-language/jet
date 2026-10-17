@@ -1,0 +1,32 @@
+// A `:=` binding of a place that nothing ever writes reads the place in
+// place like a `::` binding (#5041); one that is written, or whose root
+// changes while it is still read, keeps its own copy.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+fn pick(rows: [Blob], i: Int) -> Int {
+    row := rows[i]
+    row.data.len() + row.text.len()
+}
+
+fn run() {
+    rows := [Blob]{Blob{data: [Int]{1, 2, 3}, text: "a"}, Blob{data: [Int]{4}, text: "bb"}}
+    first := rows[0]
+    rows[0] = Blob{data: [Int]{}, text: "z"}
+    print("first {first.data.len()} {first.text}")
+    second := rows[1]
+    print("second {second.text} {pick(rows, 1)}")
+    third := rows[1]
+    third.text = "changed"
+    print("third {rows[1].text} {third.text}")
+    label := rows[0].text
+    print("label {label} {rows[0].text}")
+    // Written on a later turn of a loop that reads it: a copy of its own.
+    cur := rows[0]
+    loop _ in 0..<2 {
+        print("cur {cur.text}")
+        cur = rows[1]
+    }
+}

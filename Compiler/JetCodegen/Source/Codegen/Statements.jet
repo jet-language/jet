@@ -2355,10 +2355,11 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                         // while the function runs, so the alias reads exactly
                         // what a copy would hold. So does one of a place
                         // whose root its scope leaves alone
-                        // (jet_codegen_stable_element_lets).
+                        // (jet_codegen_stable_element_lets), and (#5041) a
+                        // `:=` binding that walk proves nothing ever writes.
                         read_alias := MIRPlaceID?{None}
-                        if binds_init_type && !local.mutable && !local.generated && !gc_root_requested {
-                            stable_root :: builder.stable_element_lets.get(jet_codegen_element_let_key(local, span)) == (Val(true))
+                        stable_root :: builder.stable_element_lets.get(jet_codegen_element_let_key(local, span)) == (Val(true))
+                        if binds_init_type && (!local.mutable || stable_root) && !local.generated && !gc_root_requested {
                             read_alias = if init.kind == {
                                 .OrFallback(subject, fallback, ambient_err) -> jet_codegen_lower_or_fallback_window(&builder, program, init, subject, fallback, ambient_err, stable_root)
                                 else -> jet_codegen_read_binding_place(&builder, program, init, stable_root)
@@ -3336,7 +3337,9 @@ struct JetCodegenLetStability {
 // A binding (`name :: <place rooted at root>`) recorded at tick `start` and
 // consuming-use count `use_start`; `broken` once a read found its root
 // changed. A `scoped` (pattern) binding answers where its arm or branch ends;
-// a `consume` one is unstable once consumed.
+// a `consume` one is unstable once consumed. A `mutable` one (`name :=
+// <place>`, #5041) is also unstable once its own name is changed: only a
+// `:=` binding nothing ever writes may alias its place like a `::` one.
 struct JetCodegenLetCandidate {
     key: String
     name: String
@@ -3345,6 +3348,7 @@ struct JetCodegenLetCandidate {
     use_start: Int
     scoped: Bool
     consume: Bool
+    mutable: Bool
     broken: Bool
 }
 
@@ -3430,7 +3434,7 @@ fn jet_codegen_stability_loop_exit(state: &JetCodegenLetStability, entry: Int) N
 // Records a binding of `name` over a place rooted at `root`, from now on.
 fn jet_codegen_stability_bind(state: &JetCodegenLetStability, key: String, name: String, root: String, scoped: Bool, consume: Bool) Never! {
     state.tick += 1
-    &state.pending.push(JetCodegenLetCandidate{key: key, name: name, root: root, start: state.tick, use_start: state.uses, scoped: scoped, consume: consume, broken: false})
+    &state.pending.push(JetCodegenLetCandidate{key: key, name: name, root: root, start: state.tick, use_start: state.uses, scoped: scoped, consume: consume, mutable: false, broken: false})
 }
 
 // Answers one candidate whose scope ends here. A captured or address-taken
@@ -3439,6 +3443,7 @@ fn jet_codegen_stability_bind(state: &JetCodegenLetStability, key: String, name:
 fn jet_codegen_stability_answer(state: &JetCodegenLetStability, candidate: JetCodegenLetCandidate) Never! {
     stable := !candidate.broken && state.pinned.get("*") == None && state.pinned.get(candidate.root) == None && state.pinned.get(candidate.name) == None
     if candidate.consume && (state.consumed.get(candidate.name) ?? 0) > candidate.use_start -> stable = false
+    if candidate.mutable && (state.last.get(candidate.name) ?? 0) > candidate.start -> stable = false
     if state.stable.get(candidate.key) == .Val(known) -> stable = stable && known
     state.stable[candidate.key] = stable
 }
@@ -3514,9 +3519,10 @@ fn jet_codegen_stability_list(state: &JetCodegenLetStability, statements: [TStmt
         if statement == {
             .Let(local, _, init, _, _, span) -> {
                 place_root := TLocal?{None}
-                if !local.mutable && !local.generated -> place_root = jet_codegen_stability_place_root(init)
+                if !local.generated -> place_root = jet_codegen_stability_place_root(init)
                 if place_root == .Val(root) {
                     jet_codegen_stability_bind(&state, jet_codegen_element_let_key(local, span), local.name, root.name, false, jet_codegen_stability_whole_root(init))
+                    if local.mutable -> state.pending[state.pending.len() - 1].mutable = true
                 } else if !jet_codegen_stability_scalar(init.ty) {
                     // A value derived from a binding (a slice, a view, a call
                     // result) may borrow its place: reading it reads the
