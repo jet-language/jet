@@ -100,7 +100,7 @@ fn cli_push_package_ref(refs: &[String], package: String) Never! {
 // `package@source` refs, and the merged `prompt` becomes the shell label.
 fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     plan :: envmodel_evaluate_env_with_selections(src, dir, requested_preset, requested_environment) ?? {
-        term.eprint(diagnostics_render_all(ENV_FILE, src, [Diagnostic]{err.diagnostic}))
+        term.eprint(diagnostic_render_all(ENV_FILE, src, [Diagnostic]{err.diagnostic}, false))
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     table := plan.table

@@ -93,6 +93,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
 ]
+use jet_parser.parser_guest_import_symbol
 
 fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
@@ -1557,7 +1558,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
 // declaration lowers as a foreign C call of the marker's symbol; the
 // declaration itself has no Jet body and no TFunc.
 fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
-    symbol :: sema_guest_import_symbol(registered.declaration) ?? return None
+    symbol :: parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
     params :: sema_checked_foreign_params(graph, module_identity, registered.parameters)
     // The failure solve projects an unannotated import onto `T Never!` (a C

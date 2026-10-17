@@ -1223,6 +1223,21 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
     func.body = [Stmt]{}
 }
 
+// Rust Sema `guest_import_symbol`: the fixed C symbol the parser bound as the
+// `#Import(c)` marker's compile-time fact. A missing or empty value is an
+// invalid declaration (E3212 above), never an import. Sema and the Jetpack
+// bridge read the binding through this one reader.
+fn parser_guest_import_symbol(function: Func) -> String? Never! {
+    loop marker in function.markers {
+        if !parser_marker_is_c_guest_import(marker) -> next
+        if marker.ct == .Val(value) {
+            if value == .Str(symbol) && symbol != "" -> return Val(symbol)
+        }
+        return None
+    }
+    None
+}
+
 struct ParsedFuncEffects {
     effects: [EffectRowEntry]?
     via: NamedSpan?

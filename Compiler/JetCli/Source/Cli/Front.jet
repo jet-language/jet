@@ -843,20 +843,6 @@ fn jet_cli_test_option_error(what: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", what, jet_cli_why("E2104"), "use the canonical `jet test` flag spelling", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// ASCII lowercase (Rust `to_ascii_lowercase`).
-fn jet_cli_ascii_lower(value: String) -> String Never! {
-    bytes := [U8]{}
-    loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
-        if code >= 65 && code <= 90 {
-            &bytes.push(U8.from_int(code + 32) ?? byte)
-        } else {
-            &bytes.push(byte)
-        }
-    }
-    String.from_bytes(bytes) ?? value
-}
-
 // Source/Doctest.rs `discover` is non-empty: a ```` ```jet ```` (or bare
 // ```` ``` ````) fence opened and closed inside one `///` comment run.
 fn jet_cli_has_doctests(source: String) -> Bool Never! {

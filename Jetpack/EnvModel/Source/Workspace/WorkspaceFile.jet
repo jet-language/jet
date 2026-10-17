@@ -121,7 +121,7 @@ fn envmodel_workspace_has_build_entry(src: String) -> Bool Never! {
     source :: pkg_strip_overlay_policy(src)
     lexed :: lex(source.bytes())
     if lexed.diagnostics.len() > 0 -> return false
-    parsed :: parse_with_source(lexed, source.bytes())
+    parsed :: parse_lexed_with_source(^lexed, source.bytes(), parser_line_starts(source.bytes()))
     if parsed.diagnostics.len() > 0 -> return false
     loop item in parsed.program.items {
         if item == {
@@ -169,7 +169,7 @@ fn envmodel_workspace_evaluate_with_resolver(src: String, base_dir: String, role
     eval_src :: pkg_strip_overlay_policy(src)
     lexed :: lex(eval_src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
-    parsed :: parse_with_source(lexed, eval_src.bytes())
+    parsed :: parse_lexed_with_source(^lexed, eval_src.bytes(), parser_line_starts(eval_src.bytes()))
     if parsed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: parsed.diagnostics[parsed.diagnostics.len() - 1]})
     program :: parsed.program
 

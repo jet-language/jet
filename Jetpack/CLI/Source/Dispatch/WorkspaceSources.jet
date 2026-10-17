@@ -31,7 +31,7 @@ fn cli_current_dir() -[FS, Env]> String Never! {
 
 // Render one authority diagnostic against `workspace.jet` and exit 2.
 fn cli_report_authority_error(diagnostic: Diagnostic) -[IO, Exec, Time.Wait]> Never {
-    terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+    terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))
     process.exit(EXIT_USAGE)
 }
 
@@ -80,7 +80,7 @@ fn cli_reject_retired_jetpack_toml(dir: String) -[IO, FS, Env, Exec, Time.Wait]>
     walk := AuthorityResolver.authority_walk_root(dir) ?? cli_report_authority_error(err.diagnostic())
     loop {
         if files.is_file(files.join(walk, JETPACK_TOML)) {
-            terminal_write_output(diagnostics_render_all(JETPACK_TOML, "", [Diagnostic]{cli_retired_jetpack_toml_diagnostic()}))
+            terminal_write_output(diagnostic_render_all(JETPACK_TOML, "", [Diagnostic]{cli_retired_jetpack_toml_diagnostic()}, false))
             return Val(EXIT_USAGE)
         }
         walk = AuthorityResolver.authority_walk_parent(walk) ?? return None
@@ -211,7 +211,7 @@ fn cli_load_workspace_for_source(cache: &WorkspaceDeclarationCache, dir: String,
 
 // Render a workspace discovery or evaluation failure; it exits 2.
 fn cli_render_workspace_error(error: CLIError) -[IO, Time.Wait]> CLIError Never! {
-    terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{cli_discovery_diagnostic(error)}))
+    terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{cli_discovery_diagnostic(error)}, false))
     CLIError.Reported(EXIT_USAGE)
 }
 
@@ -223,12 +223,12 @@ fn cli_finish_workspace_load(cache: &WorkspaceDeclarationCache, dir: String, fou
         .Ok(_) -> Ok(Val(snapshot.plan))
         .Err(error) -> {
             if error == .Gate(gate) {
-                terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", gate.diagnostics))
+                terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", gate.diagnostics, false))
                 return Err(CLIError.Reported(EXIT_USAGE))
             }
             lock_path :: files.join(dir, UNIFIED_LOCK_FILE)
             diagnostic :: pkg_lock_e1202_workspace_write(lock_path, error.message())
-            terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+            terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))
             Err(CLIError.Reported(EXIT_USAGE))
         }
     }
@@ -308,7 +308,7 @@ fn cli_workspace_lock_index(cache: &WorkspaceDeclarationCache, dir: String) -[IO
     looks_like_workspace_lock :: pkg_lock_looks_like_workspace_lock(source)
     lock :: pkg_workspace_lock_load_checked_file(&cache, resolver, lock_file)
     if lock == None && looks_like_workspace_lock {
-        terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{pkg_lock_e1202_workspace(path)}))
+        terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{pkg_lock_e1202_workspace(path)}, false))
         process.exit(EXIT_USAGE)
     }
     lock

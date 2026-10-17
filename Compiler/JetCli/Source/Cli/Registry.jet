@@ -193,26 +193,6 @@ fn jet_cli_is_known_flag(flag: String) -> Bool Never! {
     false
 }
 
-// Levenshtein distance over characters.
-fn jet_cli_edit_distance(left: String, right: String) -> Int Never! {
-    a :: left.chars()
-    b :: right.chars()
-    previous := [Int]{}
-    loop index in 0..<b.len() + 1 -> &previous.push(index)
-    loop i in 0..<a.len() {
-        current := [Int]{i + 1}
-        loop j in 0..<b.len() {
-            cost :: if a[i] == b[j] -> 0 else -> 1
-            best := previous[j] + cost
-            if previous[j + 1] + 1 < best -> best = previous[j + 1] + 1
-            if current[j] + 1 < best -> best = current[j] + 1
-            &current.push(best)
-        }
-        previous = current
-    }
-    previous[b.len()]
-}
-
 // The first closest candidate within distance 3 and at most its own length.
 fn jet_cli_closest(needle: String, candidates: [String]) -> String? Never! {
     best := ""
