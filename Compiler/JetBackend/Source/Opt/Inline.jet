@@ -1,6 +1,9 @@
-// P5 known code pointers, followed by P4 bounded, non-recursive inlining.
-// Clone the original callee body, not a previously expanded version: the
-// 40-instruction eligibility and 200-instruction caller budget stay exact.
+// P5 known code pointers, followed by P4 bounded, non-recursive inlining in
+// bottom-up call-graph order (callees before callers, Tarjan's SCC order):
+// a callee is cloned in its final form, already inlined into (and, through
+// lir_optimize_module, already optimized), so a wrapper of a wrapper of an
+// asm leaf collapses into its caller. The 40-instruction eligibility and the
+// 200-instruction caller budget are measured on exactly the body cloned.
 // The Simplify renumbering helpers preserve every instruction's full metadata.
 
 struct InlineGraph {
@@ -11,6 +14,22 @@ struct InlineGraph {
     stack: [Int]
     recursive: [Bool]
     counter: Int
+    // Every function, each SCC in the order Tarjan completes it: an SCC
+    // completes only after every SCC it calls into.
+    order: [Int]
+}
+
+// The module being inlined bottom-up: `functions[id]` is final once `id`
+// has been visited in `order`; `sizes` and `consumed` describe that body.
+struct LIRInlineState {
+    signatures: [LIRSignature]
+    functions: [LIRFunction]
+    data: [LIRData]
+    debug: LIRModuleDebug
+    recursive: [Bool]
+    sizes: [Int]
+    consumed: [[Bool]]
+    order: [Int]
 }
 
 fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never! {
@@ -75,18 +94,19 @@ fn inline_visit(graph: &InlineGraph, node: Int) Never! {
             loop target in graph.edges[node] { if target == node -> cyclic = true }
         }
         if cyclic { loop member in members -> graph.recursive[member] = true }
+        loop member in members -> &graph.order.push(member)
     }
 }
 
-fn inline_graph(program: LIRModule) -> InlineGraph Never! {
-    graph := InlineGraph{edges: [[Int]]{}, index: [Int]{}, low: [Int]{}, active: [Bool]{}, stack: [Int]{}, recursive: [Bool]{}, counter: 0}
-    loop function in program.functions {
+fn inline_graph(functions: [LIRFunction]) -> InlineGraph Never! {
+    graph := InlineGraph{edges: [[Int]]{}, index: [Int]{}, low: [Int]{}, active: [Bool]{}, stack: [Int]{}, recursive: [Bool]{}, counter: 0, order: [Int]{}}
+    loop function in functions {
         edges := [Int]{}
         loop block in function.blocks {
             loop inst in block.insts {
                 if inst == .Call(_, _, callee, _) {
                     if callee == .Function(target) {
-                        if target.value >= 0 && target.value < program.functions.len() -> &edges.push(target.value)
+                        if target.value >= 0 && target.value < functions.len() -> &edges.push(target.value)
                     }
                 }
             }
@@ -97,7 +117,7 @@ fn inline_graph(program: LIRModule) -> InlineGraph Never! {
         &graph.active.push(false)
         &graph.recursive.push(false)
     }
-    loop node in 0..<program.functions.len() {
+    loop node in 0..<functions.len() {
         if graph.index[node] < 0 -> inline_visit(&graph, node)
     }
     graph
@@ -136,7 +156,7 @@ fn inline_alias_safe(caller: LIRFunction, callee: LIRFunction, consumed: [Bool],
     true
 }
 
-fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
+fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
     function := original
     uses := [Int]{}
     loop _ in original.values -> &uses.push(0)
@@ -163,9 +183,9 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
             if inst == .Call(dst, signature, callee, arguments) {
                 if callee == .Function(target) {
                     id :: target.value
-                    if id >= 0 && id < program.functions.len() {
+                    if id >= 0 && id < functions.len() {
                         if !recursive[id] && sizes[id] <= 40 && expanded + sizes[id] <= 200 {
-                            candidate :: program.functions[id]
+                            candidate :: functions[id]
                             if candidate.signature == signature && candidate.blocks.len() > 0 && inline_alias_safe(original, candidate, consumed[id], uses, arguments) {
                                 selected = id
                                 result = dst
@@ -180,7 +200,7 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
                 &lines.push(opt_debug_line(block, index))
                 next
             }
-            callee :: program.functions[selected]
+            callee :: functions[selected]
             expanded += sizes[selected]
             changed = true
             // Entry parameters are aliases of the call arguments. LIR lint
@@ -235,27 +255,56 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
     opt_compact(function)
 }
 
-fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
+// P5 over every function, the call graph, and the bottom-up visit order.
+// Until lir_inline_finish measures a function's final body it is not
+// eligible (size 41); a non-recursive callee is always finished before any
+// caller is visited, and a recursive one is never inlined.
+fn lir_inline_start(program: LIRModule) -> LIRInlineState Never! {
     direct := [LIRFunction]{}
     loop function in program.functions -> &direct.push(inline_direct(program, function))
-    exposed :: LIRModule{signatures: program.signatures, functions: direct, data: program.data, debug: program.debug}
-    graph :: inline_graph(exposed)
+    graph := inline_graph(direct)
     sizes := [Int]{}
     consumed := [[Bool]]{}
-    loop function in exposed.functions {
-        size := 0
-        flags := [Bool]{}
-        loop _ in function.values -> &flags.push(false)
-        loop block in function.blocks {
-            size += block.insts.len()
-            loop inst in block.insts {
-                loop value in lir_inst_consumes(inst) -> flags[value.value] = true
-            }
-        }
-        &consumed.push(flags)
-        &sizes.push(size)
+    loop _ in direct {
+        &sizes.push(41)
+        &consumed.push([Bool]{})
     }
-    functions := [LIRFunction]{}
-    loop function in exposed.functions -> &functions.push(inline_caller(exposed, function, graph.recursive, sizes, consumed))
-    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
+    LIRInlineState{signatures: program.signatures, functions: ^direct, data: program.data, debug: program.debug, recursive: ^graph.recursive, sizes: ^sizes, consumed: ^consumed, order: ^graph.order}
+}
+
+// Function `id` with its eligible direct calls inlined from the final
+// bodies of its (already visited) callees.
+fn lir_inline_step(state: LIRInlineState, id: Int) -> LIRFunction Never! {
+    inline_caller(state.functions, state.functions[id], state.recursive, state.sizes, state.consumed)
+}
+
+// `function` is the final body of `id`: every caller visited later inlines
+// exactly this body, measured here.
+fn lir_inline_finish(state: &LIRInlineState, id: Int, function: ^LIRFunction) Never! {
+    size := 0
+    flags := [Bool]{}
+    loop _ in function.values -> &flags.push(false)
+    loop block in function.blocks {
+        size += block.insts.len()
+        loop inst in block.insts {
+            loop value in lir_inst_consumes(inst) -> flags[value.value] = true
+        }
+    }
+    state.sizes[id] = size
+    state.consumed[id] = ^flags
+    state.functions[id] = ^function
+}
+
+fn lir_inline_result(state: ^LIRInlineState) -> LIRModule Never! {
+    LIRModule{signatures: ^state.signatures, functions: ^state.functions, data: ^state.data, debug: ^state.debug}
+}
+
+fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
+    state := lir_inline_start(program)
+    loop position in 0..<state.order.len() {
+        id :: state.order[position]
+        inlined :: lir_inline_step(state, id)
+        lir_inline_finish(&state, id, ^inlined)
+    }
+    lir_inline_result(^state)
 }

@@ -7,26 +7,32 @@
 
 fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
     if level <= 0 -> return program.copy()
-    // P5/P4 first (module): inlined bodies then go through the per-function
-    // passes. Strength reduction before Simplify: Simplify folds its constants
-    // and removes what it leaves dead. P3 facts before Simplify, so Simplify
-    // folds the inline tests P3 proved and drops their slow paths; P6 CSE on
-    // the simplified function, then Simplify again removes what CSE aliased.
-    // Level 2: scalar replacement on the simplified function (inlined struct
-    // returns are local slots by then), Simplify propagates the promoted
-    // fields, CSE, LICM hoists what is invariant, and Simplify cleans up.
-    inlined :: lir_inline_module(program)
-    functions := [LIRFunction]{}
-    loop function in inlined.functions {
-        simplified :: lir_simplify_function(lir_inline_facts_function(lir_strength_function(function)))
-        if level == 1 {
-            &functions.push(lir_simplify_function(lir_cse_function(simplified)))
-            next
-        }
-        promoted :: lir_simplify_function(lir_scalar_replace_function(simplified))
-        &functions.push(lir_simplify_function(lir_licm_function(lir_cse_function(promoted))))
+    // Bottom-up over the call graph (callees first, Opt/Inline.jet): each
+    // function inlines the final, already optimized bodies of its callees
+    // (P5/P4), then runs the per-function passes, and only then becomes
+    // inlinable itself, so wrapper chains collapse into their callers.
+    state := lir_inline_start(program)
+    loop position in 0..<state.order.len() {
+        id :: state.order[position]
+        inlined :: lir_inline_step(state, id)
+        optimized :: opt_function_passes(inlined, level)
+        lir_inline_finish(&state, id, ^optimized)
     }
-    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
+    lir_inline_result(^state)
+}
+
+// The per-function passes. Strength reduction before Simplify: Simplify
+// folds its constants and removes what it leaves dead. P3 facts before
+// Simplify, so Simplify folds the inline tests P3 proved and drops their slow
+// paths; P6 CSE on the simplified function, then Simplify again removes what
+// CSE aliased. Level 2: scalar replacement on the simplified function
+// (inlined struct returns are local slots by then), Simplify propagates the
+// promoted fields, CSE, LICM hoists what is invariant, and Simplify cleans up.
+fn opt_function_passes(function: LIRFunction, level: Int) -> LIRFunction Never! {
+    simplified :: lir_simplify_function(lir_inline_facts_function(lir_strength_function(function)))
+    if level == 1 -> return lir_simplify_function(lir_cse_function(simplified))
+    promoted :: lir_simplify_function(lir_scalar_replace_function(simplified))
+    lir_simplify_function(lir_licm_function(lir_cse_function(promoted)))
 }
 
 // Unknown source positions stay zero, including generated instructions.
