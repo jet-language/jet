@@ -387,6 +387,7 @@ fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph:
     if diagnostic.source_path != None || diagnostic.span == None -> return diagnostic.copy()
     span :: diagnostic.span ?? return diagnostic
     location :: jet_driver_source_location_for_registration_module(graph, module_identity, span) ?? return diagnostic
+    // copy: `diagnostic` is a read parameter; the source-mapped result owns its own value.
     diagnostic_with_source_mapping(diagnostic.copy(), location.source_path, location.aggregate_start, location.source_start)
 }
 // jet_driver_attach_registration_source_location on the graph `program` owns

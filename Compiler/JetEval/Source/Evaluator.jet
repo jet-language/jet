@@ -1705,6 +1705,7 @@ fn jet_eval_task_start(root: ^JetEvalTaskRoot, config: ^JetEvalConfig, args: [Je
             return jet_eval_result(^machine, None, false)
         }
     }
+    // copy: `args` is a read parameter (the runtime entry signature); the callback invocation owns its arguments.
     callback := jet_eval_callback_invoke(&machine, lease, args.copy(), span)
     jet_eval_merge_callback_output(&machine, callback.stdout, callback.stderr)
     if callback.outcome == {

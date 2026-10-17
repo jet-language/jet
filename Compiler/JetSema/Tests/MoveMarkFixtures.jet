@@ -1,6 +1,7 @@
 // Assemble with production Bootstrap sources, replacing the CLI entry.
 // An explicit `^` move never lowers to a copy: a call argument `^p` / `^p.f`
-// on a read parameter is E0201, and on an owned root it is a checked move.
+// on a read parameter is E0201, `^xs[i]` is E0225, and on an owned root it
+// is a checked move.
 use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
 use jet_cli.[jet_cli_compile_file]
 use jet_foundation.[DIAGNOSTIC_ERROR]
@@ -40,6 +41,8 @@ fn run() {
     move_mark_fixture_reject("{root}/move_read_param_argument.jet", "E0201")
     move_mark_fixture_reject("{root}/move_read_param_field_argument.jet", "E0201")
     move_mark_fixture_reject("{root}/move_read_param_push.jet", "E0201")
+    move_mark_fixture_reject("{root}/move_element_argument.jet", "E0225")
+    move_mark_fixture_reject("{root}/move_element_push.jet", "E0225")
     move_mark_fixture_accept("{root}/move_owned_param_argument.jet")
     print("explicit move marks on call arguments: passed")
 }

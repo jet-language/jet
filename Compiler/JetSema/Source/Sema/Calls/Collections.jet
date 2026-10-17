@@ -318,9 +318,12 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         // ownership walk below records no move for a collection argument, so
         // a later read of the owner must still find its value. A read
         // parameter or its field has no storage to give up: the mark is
-        // E0201, never a silent copy.
+        // E0201, and an element stays owned by its collection (E0225): never
+        // a silent copy.
         stores_argument :: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove"
-        taken_place := stores_argument && updated_args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty) && sema_call_marked_move_place(updated_args[index].expr, value)
+        consuming_mark :: stores_argument && updated_args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
+        if consuming_mark && sema_call_reject_element_move(updated_args[index].expr, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        taken_place := consuming_mark && sema_call_marked_move_place(updated_args[index].expr, value)
         if taken_place && sema_ownership_reject_read_param_move(&state, updated_args[index].expr, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         if taken_place && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
         stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value

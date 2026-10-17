@@ -397,10 +397,13 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // argument moves out of its owner (MovePlace, clearing its drop
         // flag) instead of reaching lowering as a bare read that only a
         // last-use proof turns into a move. A read parameter or its field has
-        // no storage to give up: the mark is E0201, never a silent copy. A
-        // write parameter's field keeps the refill move the last-use pass
-        // proves.
-        marked_place :: parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty) && sema_call_marked_move_place(args[index].expr, value)
+        // no storage to give up: the mark is E0201, never a silent copy, and
+        // an element (or a place inside one) stays owned by its collection
+        // (E0225). A write parameter's field keeps the refill move the
+        // last-use pass proves.
+        consuming_mark :: parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
+        if consuming_mark && sema_call_reject_element_move(args[index].expr, &diagnostics) -> return None
+        marked_place :: consuming_mark && sema_call_marked_move_place(args[index].expr, value)
         if marked_place && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return None
         taken_place := marked_place
         if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
@@ -533,6 +536,25 @@ fn sema_call_marked_move_place(expr: Expr, value: TExpr) -> Bool Never! {
         .Ident(_, _) -> value.kind == .Local(_) && !sema_ownership_type_is_copy(value.ty)
         else -> false
     }
+}
+
+// A consuming argument `^xs[i]` or `^xs[i].f`: an element stays owned by its
+// collection, so the mark is E0225 (as at a value-position mark,
+// Expressions/Places.jet), never a silent copy. True when rejected.
+fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool Never! {
+    element :: if expr == {
+        .Index(_, _, _, _) -> true
+        else -> false
+    }
+    if !element && !sema_expression_place_below_element(expr) -> return false
+    start :: expr_span(expr).start
+    mark_span :: Span{start: start - 1, end: start}
+    if element {
+        &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "pass `.copy()` of the element instead of `^`, or take it out with a removing call such as `pop`"))
+    } else {
+        &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take a field out of a collection element", "an element stays owned by its collection together with every field inside it, so this value can only be a copy", "remove `^` and call `.copy()` on the field instead"))
+    }
+    true
 }
 
 fn sema_call_widen_union(required: Type, offered: Type) -> Type? {

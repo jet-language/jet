@@ -473,7 +473,8 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
             &keys.sort_by((left: String, right: String) -> left <=> right)
             loop key in keys {
                 at :: positions.get(key) ?? panic("SQL grouping key lost its position")
-                &grouped.push(^unsorted[at])
+                // copy: the group's row indices stay in `unsorted` (an element has no hole to leave); a small [U64] list per group.
+                &grouped.push(unsorted[at].copy())
             }
         }
     } else {
@@ -481,7 +482,8 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
     }
     projected := [internal.SQLOrderedRow]{}
     loop at in 0..<grouped.len() {
-        row :: sql_project_group(fields, query, ^grouped[at], cell)
+        // copy: the group's row indices stay in `grouped` (an element has no hole to leave); a small [U64] list per group.
+        row :: sql_project_group(fields, query, grouped[at].copy(), cell)
         order := JetSQLValue?{None}
         if query.order == .Val(clause) {
             order = sql_output_value(row, clause.field)
@@ -507,7 +509,8 @@ fn execute_sql_rows(fields: [String], row_count: U64, query: JetSQLQuery, cell: 
         loop limit < (U64.from_int(projected.len()) ?? panic("SQL result length")) -> _ :: &projected.pop()
     }
     rows := [JetSQLResultRow]{}
-    loop at in 0..<projected.len() -> &rows.push(^projected[at].row)
+    // copy: each result row stays in its `projected` element (an element has no hole to leave); one row per result.
+    loop at in 0..<projected.len() -> &rows.push(projected[at].row.copy())
     rows
 }
 
