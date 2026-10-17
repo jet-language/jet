@@ -400,15 +400,27 @@ fn lower_constant_into(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     _ := lower_constant_tree_value(p, &m, &f, ty, constant, Val(dst))
 }
 
-fn lower_global_definition(p: MIRProgram, name: String) -> MIRConstantDef? Never! {
-    // A fully qualified key wins over a coincidentally matching short name.
-    loop constant in p.constants {
-        if constant.key == name -> return Val(constant)
+// A fully qualified key wins over a coincidentally matching short name: the
+// first constant with that key, else the first with that name. The rows are
+// indexed once per module (LowerModule.global_rows) instead of scanning every
+// constant of the program per read.
+fn lower_global_definition(p: MIRProgram, m: &LowerModule, name: String) -> MIRConstantDef? Never! {
+    if m.global_rows.len() == 0 && p.constants.len() > 0 {
+        rows := [String:Int]{}
+        loop (row, constant) in p.constants {
+            key :: "k:{constant.key}"
+            if rows.get(key) == None -> &rows.add(key, row).drop("checked absent above")
+        }
+        loop (row, constant) in p.constants {
+            short :: "n:{constant.name}"
+            if rows.get(short) == None -> &rows.add(short, row).drop("checked absent above")
+        }
+        m.global_rows = rows
     }
-    loop constant in p.constants {
-        if constant.name == name -> return Val(constant)
-    }
-    None
+    row := m.global_rows.get("k:{name}") ?? -1
+    if row < 0 -> row = m.global_rows.get("n:{name}") ?? -1
+    if row < 0 -> return None
+    Val(p.constants[row])
 }
 
 // MIRRust.rs:typed_enum_constant (:29399, :29430): a declared recursive

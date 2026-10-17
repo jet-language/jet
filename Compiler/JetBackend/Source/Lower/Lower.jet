@@ -241,6 +241,14 @@ struct LowerModule {
     // lower_repr_key -> one lazy descriptor level's type facts (LazyIter.jet
     // lower_lazy_meta_facts), once per module.
     lazy_meta_facts: [String:LowerLazyMetaFacts]{[String:LowerLazyMetaFacts]{}}
+    // p.impls rows a Display / Printable render may select, and the first
+    // p.functions row per function id (Display.jet lower_render_rows,
+    // lower_render_function_rows), once per module on the first render.
+    render_rows: [[Int]]{[[Int]]{}}
+    function_rows: [U64:Int]{[U64:Int]{}}
+    // "k:<key>" / "n:<name>" -> the first p.constants row with that key or
+    // name (Constants.jet lower_global_definition), once per module.
+    global_rows: [String:Int]{[String:Int]{}}
     // MIR source file id -> its row in program.source_files.
     source_rows: [U64:Int]
     // Shared stop classification indexes checked Prelude effects once.

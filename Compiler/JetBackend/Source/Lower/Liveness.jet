@@ -176,11 +176,18 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
             index -= 1
         }
     }
+    // Set bits only, ascending: an empty word costs one test, not one per slot.
     rows := [[Int]]{}
     loop bits in live {
         row := [Int]{}
-        loop slot in 0..<slots.len() {
-            if lower_live_has(bits, slot) -> &row.push(slot)
+        loop word in 0..<words {
+            set :: bits[word]
+            if set == 0 -> next
+            base :: word * LOWER_LIVE_BITS
+            loop bit in 0..<LOWER_LIVE_BITS {
+                if base + bit >= slots.len() -> break
+                if ((set >> bit).bit_and(1)) == 1 -> &row.push(base + bit)
+            }
         }
         &rows.push(row)
     }

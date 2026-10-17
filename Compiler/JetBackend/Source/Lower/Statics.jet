@@ -310,9 +310,9 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
 // only an ownership-bearing checked MIR result clones it.
 fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, name: String) Never! {
     // jet_transaction(): a fresh #Transact handle (Transaction.jet).
-    if name == "transaction" && lower_global_definition(p, name) == None -> return lower_transaction_new(p, c, &m, &f, instruction)
-    if name == "stm" && lower_global_definition(p, name) == None -> return lower_stm_new(p, c, &m, &f, instruction)
-    definition :: lower_global_definition(p, name) ?? return lower_fail(&m, &f, "global constant {name} without a definition is not lowered at O0 yet")
+    if name == "transaction" && lower_global_definition(p, &m, name) == None -> return lower_transaction_new(p, c, &m, &f, instruction)
+    if name == "stm" && lower_global_definition(p, &m, name) == None -> return lower_stm_new(p, c, &m, &f, instruction)
+    definition :: lower_global_definition(p, &m, name) ?? return lower_fail(&m, &f, "global constant {name} without a definition is not lowered at O0 yet")
     if definition.value == .SharedSite(site) {
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
         if m.shared_sites_dynamic {
@@ -379,7 +379,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // mutated in place. A place rooted at an immutable constant (#5001) only
 // reads: it names the constant's one frozen value, never a copy.
 fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRPlace, name: String) -> LowerFieldAddress? {
-    definition :: lower_global_definition(p, name) ?? {
+    definition :: lower_global_definition(p, &m, name) ?? {
         lower_fail(&m, &f, "module storage {name} without a definition is not lowered at O0 yet")
         return None
     }
@@ -570,7 +570,7 @@ fn lower_static_list_drop_guard(f: &LowerFunction, cap: LIRValueID, data: LIRVal
 // The sole getter body for a pinned Core publication site. Every local read
 // calls this helper; dynamic images import its stable symbol instead.
 fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
-    definition :: lower_global_definition(p, glue.helper) ?? panic("publication helper has no checked site row")
+    definition :: lower_global_definition(p, &m, glue.helper) ?? panic("publication helper has no checked site row")
     site :: if definition.value == {.SharedSite(value) -> value else -> panic("publication helper names an ordinary constant")}
     f := lower_helper_start(&m, glue, [LIRLayout]{}, Val(lir_layout_pointer()))
     if m.shared_sites_dynamic -> panic("dynamic image attempted to emit a Core publication getter")
