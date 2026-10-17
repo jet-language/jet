@@ -188,7 +188,7 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         if !member -> function.blocks[row].terminator = opt_licm_redirect(function.blocks[row].terminator, header_id, preheader)
     }
     &hoisted_lines.push(opt_debug_line(function.blocks[header], function.blocks[header].insts.len()))
-    &function.blocks.push(LIRBlock{id: preheader, params: params, insts: hoisted, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: header_id, args: params}}, lines: hoisted_lines})
+    &function.blocks.push(LIRBlock{id: preheader, params: params, insts: hoisted, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: header_id, args: params}}, lines: hoisted_lines, cold: false})
 }
 
 fn lir_licm_function(original: LIRFunction) -> LIRFunction Never! {

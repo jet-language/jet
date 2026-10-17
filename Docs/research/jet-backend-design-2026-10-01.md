@@ -599,7 +599,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `Constant` String | `DataAddress` of the literal's bytes, `Const` length, call `jet_rt_string_from_static(ptr, len) -> String` |
 | `Copy` | the same value for dropless word, flag and tag carriers; `jet_rt_int_clone` for owned exact Int (packed tag fast path, BigInt retains one reference); `jet_rt_string_clone` for a String; clone glue for boxes; a fresh `StackSlot` filled by clone glue for an owned inline aggregate (a borrowing copy names the source) |
 | `Move`, `AttachTag`, transparent `Convert` | the same value |
-| exact-Int `+ - *` (Prelude route, arity 2) | inline test (`(x ^ (x << 1)) >= 0` on both operands), native op (Mul also checks `Overflows`), inline test of the result, else the route's runtime symbol; joined in a block parameter |
+| exact-Int `+ - *` (Prelude route, arity 2) | inline test of each operand (`Overflows(Add, x, x)`: doubling an inline word does not overflow; `add; jo slow`), native op (Mul also checks `Overflows`), the same inline test of the result, else the route's runtime symbol in a cold block laid out after the hot code; joined in a block parameter |
 | exact-Int other ops (division family, pow, shifts, bit ops) | call of the route's runtime symbol with `(left, right)`, plus `(file_ptr, file_len, line)` for routes of arity 4 |
 | exact-Int comparison (Primitive) | native `Compare` when both are inline, else `jet_int_compare(l, r)` compared with 0 |
 | word `+ - *` (Primitive) | `Binary`; with `overflow: Trap`, an `Overflows` test branches to `jet_rt_panic_overflow` first |
@@ -1379,7 +1379,7 @@ zero-extended words, so a branch tests the whole register.
 | `Div Rem` | `mov rax, l; mov r11, r; push rdx; cqo; idiv r11; pop rdx` (Rem takes rdx) |
 | `Shl Shr` | `mov rax, l; mov r11, r; push rcx; mov rcx, r11; shl/sar rax, cl; pop rcx` |
 | `Compare` | `cmp l, r; setcc r8; movzx r, r8`, or fused into the block's `cmp` + `jcc` when the branch is its only use |
-| `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx` |
+| `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx`; fused into the block's `jcc` when the branch is its only use, and then without the `mov`/`add` when the Binary right before it already computed `l op r` (`add; jo`) |
 | `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; 1/2/4-byte layouts use zero-extending byte/word/dword loads and matching stores |
 | `DataAddress` | `lea r, [rip + disp32]`, a data relocation |
 | `Call` | stack arguments pushed last to first (8 bytes of padding first for an odd count), Float arguments `movq xmm_i, r`, then parallel moves into rdi, rsi, rdx, rcx, r8, r9; `call rel32` with a function or runtime relocation; `add rsp` for the stack arguments; a Bool result is `movzx rax, al` first (System V defines only al), a Float result `movq rax, xmm0` |

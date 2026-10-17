@@ -325,7 +325,8 @@ fn x64_fixtures() -> Bool Never! {
     arithmetic :: x64_fx_address_arithmetic()
     frame :: x64_fx_frame_branch()
     split :: x64_fx_split_loop()
-    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic && frame && split
+    fused :: x64_fx_fused_overflow()
+    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic && frame && split && fused
 }
 
 fn x64_fx_executable(name: String, program: LIRModule, argument: Int?, expected: Int) -> Bool Never! {
@@ -475,7 +476,7 @@ fn x64_fx_address_plan() -> Bool Never! {
     escaped.blocks[0].insts = escaped.blocks[0].insts.slice(0, 4)
     escaped.blocks[0].lines = [Int]{0, 0, 0, 0, 0}
     escaped.blocks[0].terminator = .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}}
-    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}, lines: [Int]{0, 0}})
+    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}, lines: [Int]{0, 0}, cold: false})
     if x64_address_folds(escaped).skipped[pointer.value] -> ok = false
     if !x64_fx_address_lint(escaped) -> ok = false
     // A non-memory use retains the pointer and its shift.
@@ -794,4 +795,55 @@ fn x64_fx_split_loop() -> Bool Never! {
         LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
     }, functions: [LIRFunction]{function, lir_builder_finish(clobber)}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("split-loop", program, Val(1), 210)
+}
+
+// A Binary followed by the Overflows of the same operands and a branch on it
+// is `add; jo` / `imul; jo` (x64_binary_sets_overflow), and a block marked
+// cold is laid out last without making a loop of the edge back into the hot
+// code (lir_builder_finish, x64_block_depths). Entry n: sum = n + 2 (jo
+// cold), prod = sum * sum (jo cold), prod inline test (`add prod, prod; jo
+// cold`), exit prod; the cold block exits 7. n = 3 exits 25; n = MAX
+// overflows the first add and exits 7.
+fn x64_fx_fused_overflow() -> Bool Never! {
+    b := x64_fx_builder()
+    n :: lir_builder_word(&b)
+    two :: lir_builder_word(&b)
+    sum :: lir_builder_word(&b)
+    carried :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: two, value: 2})
+    lir_builder_push(&b, .Binary{dst: sum, op: .Add, left: n, right: two})
+    lir_builder_push(&b, .Overflows{dst: carried, op: .Add, left: n, right: two})
+    cold :: LIRBlockID{value: 1}
+    lir_builder_mark_cold(&b, cold)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{n}, .Branch{condition: carried, then_target: LIRJumpTarget{block: cold, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{sum}}})
+    seven :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: seven, value: 7})
+    lir_builder_seal(&b, cold, [LIRValueID]{}, .Return{value: Val(seven)})
+    s :: lir_builder_word(&b)
+    prod :: lir_builder_word(&b)
+    wide :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Binary{dst: prod, op: .Mul, left: s, right: s})
+    lir_builder_push(&b, .Overflows{dst: wide, op: .Mul, left: s, right: s})
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{s}, .Branch{condition: wide, then_target: LIRJumpTarget{block: cold, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 3}, args: [LIRValueID]{}}})
+    tagged :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Overflows{dst: tagged, op: .Add, left: prod, right: prod})
+    lir_builder_seal(&b, LIRBlockID{value: 3}, [LIRValueID]{}, .Branch{condition: tagged, then_target: LIRJumpTarget{block: cold, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 4}, args: [LIRValueID]{prod}}})
+    result :: lir_builder_word(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 4}, [LIRValueID]{result}, .Return{value: Val(result)})
+    function :: lir_builder_finish(b)
+    ok := function.blocks.len() == 5 && function.blocks[4].id == cold && function.blocks[4].cold && !function.blocks[0].cold
+    loop depth in x64_block_depths(function, x64_block_rows(function)) { if depth != 0 -> ok = false }
+    folds :: x64_address_folds(function)
+    if !x64_binary_sets_overflow(function, folds, function.blocks[0].insts[1], .Add, n, two) -> ok = false
+    if !x64_binary_sets_overflow(function, folds, function.blocks[1].insts[0], .Mul, s, s) -> ok = false
+    if x64_binary_sets_overflow(function, folds, function.blocks[0].insts[1], .UMul, n, two) -> ok = false
+    if x64_binary_sets_overflow(function, folds, function.blocks[0].insts[1], .Add, two, n) -> ok = false
+    if !ok {
+        print("X64 FAIL fused-overflow layout")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
+    x64_fx_executable("fused-overflow", program, Val(3), 25) && x64_fx_executable("fused-overflow-cold", program, Val(9223372036854775807), 7)
 }

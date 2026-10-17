@@ -524,11 +524,10 @@ fn lower_enum_glue_shape(p: MIRProgram, definition: MIRTypeDef, variant: MIRVari
 // existing ownership policy; these helpers are only for owning glue.
 fn lower_glue_clone_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) -> LIRValueID Never! {
     result :: lower_word(&f)
-    inline :: lower_inline_test(&f, [LIRValueID]{value})
     retain :: lower_new_block(&f)
     done :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(done, [LIRValueID]{value}), else_target: lower_target(retain, [LIRValueID]{})})
-    lower_start(&f, retain, [LIRValueID]{})
+    lower_inline_branch(&f, [LIRValueID]{value}, retain, Val(lower_target(done, [LIRValueID]{value})))
+    lower_start_cold(&f, retain, [LIRValueID]{})
     duplicate :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{value}, Val(duplicate))
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{duplicate})})
@@ -537,11 +536,10 @@ fn lower_glue_clone_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) -
 }
 
 fn lower_glue_drop_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Never! {
-    inline :: lower_inline_test(&f, [LIRValueID]{value})
     release :: lower_new_block(&f)
     done :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
-    lower_start(&f, release, [LIRValueID]{})
+    lower_inline_branch(&f, [LIRValueID]{value}, release, Val(lower_target(done, [LIRValueID]{})))
+    lower_start_cold(&f, release, [LIRValueID]{})
     lower_call_runtime(&m, &f, "jet_rt_int_drop", [LIRValueID]{value}, None)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})

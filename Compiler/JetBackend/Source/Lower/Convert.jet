@@ -209,24 +209,21 @@ fn lower_convert_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, valu
     merge_block :: lower_new_block(&f)
     no_args :: [LIRValueID]{}
     layout :: lower_value_layout(f, dst)
-    fits :: lower_inline_test(&f, [LIRValueID]{value})
     if to_float {
-        fast_block :: lower_new_block(&f)
-        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-        lower_start(&f, fast_block, no_args)
+        lower_inline_branch(&f, [LIRValueID]{value}, slow_block, None)
         fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Convert{dst: fast, src: value})
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
     } else {
-        // The merge parameter is a word copy, not an owner: the jump hands
-        // nothing over (LowerFunction.consumed), so a temporary converted for a
-        // call is still released after it (lower_temp_release).
+        // The merge parameter is a word copy, not an owner: the inline edge
+        // hands nothing over (LowerFunction.consumed), so a temporary
+        // converted for a call is still released after it (lower_temp_release).
         tracking :: f.track_consumes
         f.track_consumes = false
-        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge_block, [LIRValueID]{value}), else_target: lower_target(slow_block, no_args)})
+        lower_inline_branch(&f, [LIRValueID]{value}, slow_block, Val(lower_target(merge_block, [LIRValueID]{value})))
         f.track_consumes = tracking
     }
-    lower_start(&f, slow_block, no_args)
+    lower_start_cold(&f, slow_block, no_args)
     slow :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{value}, Val(slow))
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
@@ -548,16 +545,13 @@ fn lower_convert_checked_widen(p: MIRProgram, c: LowerContext, m: &LowerModule, 
     if !exact -> return lower_widen_word(p, c, &m, &f, dst, operand, unsigned_word, single, stop_at)
     layout :: lower_value_layout(f, dst)
     no_args :: [LIRValueID]{}
-    fast_block :: lower_new_block(&f)
     slow_block :: lower_new_block(&f)
     merge_block :: lower_new_block(&f)
-    fits :: lower_inline_test(&f, [LIRValueID]{operand})
-    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-    lower_start(&f, fast_block, no_args)
+    lower_inline_branch(&f, [LIRValueID]{operand}, slow_block, None)
     fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_widen_word(p, c, &m, &f, fast, operand, false, single, stop_at)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
-    lower_start(&f, slow_block, no_args)
+    lower_start_cold(&f, slow_block, no_args)
     args := [LIRValueID]{operand}
     loop parameter in parameters {
         flag :: lower_use(&m, &f, parameter) ?? return
@@ -823,9 +817,8 @@ fn lower_convert_try_fixed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     if exact {
         small :: lower_new_block(&f)
         big :: lower_new_block(&f)
-        inline :: lower_inline_test(&f, [LIRValueID]{operand})
-        lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(small, no_args), else_target: lower_target(big, no_args)})
-        lower_start(&f, big, no_args)
+        lower_inline_branch(&f, [LIRValueID]{operand}, big, Val(lower_target(small, no_args)))
+        lower_start_cold(&f, big, no_args)
         lower_convert_try_big(&m, &f, operand, t_signed, t_bits, ok_block, err_block)
         lower_start(&f, small, no_args)
     }

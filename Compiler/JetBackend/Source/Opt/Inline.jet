@@ -69,7 +69,7 @@ fn inline_direct(signatures: [LIRSignatureID], original: ^LIRFunction) -> LIRFun
             }
             &insts.push(rewritten)
         }
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: block.lines, cold: block.cold})
     }
     function.blocks = blocks
     function
@@ -235,7 +235,7 @@ fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bo
             fresh_block += 1
             entry :: LIRBlockID{value: block_map.get(callee.blocks[0].id.value) ?? -1}
             &lines.push(opt_debug_line(block, index))
-            &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: entry, args: [LIRValueID]{}}}, lines: lines})
+            &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: entry, args: [LIRValueID]{}}}, lines: lines, cold: block.cold})
             loop (position, copied) in callee.blocks {
                 copied_params :: if position == 0 -> [LIRValueID]{} else -> opt_ns(map, copied.params)
                 copied_insts := [LIRInst]{}
@@ -247,7 +247,7 @@ fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bo
                     line :: if callee.debug.file == function.debug.file -> opt_debug_line(copied, at) else -> opt_debug_line(block, index)
                     &copied_lines.push(line)
                 }
-                &blocks.push(LIRBlock{id: LIRBlockID{value: block_map.get(copied.id.value) ?? -1}, params: copied_params, insts: copied_insts, terminator: inline_terminator(map, block_map, continuation, copied.terminator), lines: copied_lines})
+                &blocks.push(LIRBlock{id: LIRBlockID{value: block_map.get(copied.id.value) ?? -1}, params: copied_params, insts: copied_insts, terminator: inline_terminator(map, block_map, continuation, copied.terminator), lines: copied_lines, cold: block.cold || copied.cold})
             }
             current = continuation
             params = [LIRValueID]{}
@@ -256,7 +256,7 @@ fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bo
             lines = [Int]{}
         }
         &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: block.terminator, lines: lines})
+        &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: block.terminator, lines: lines, cold: block.cold})
     }
     if !changed -> return function
     function.blocks = blocks

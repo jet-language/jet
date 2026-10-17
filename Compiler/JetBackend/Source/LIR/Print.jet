@@ -71,7 +71,8 @@ fn lir_print_function_head_ids(function: LIRFunction, ids: LIRPrintIds) -> Strin
 
 fn lir_print_block_head_ids(function: LIRFunction, block: LIRBlock, ids: LIRPrintIds) -> String Never! {
     params :: loop param in block.params -> lir_print_def_ids(function, param, ids)
-    "b{block.id.value}({params.join(", ")}):"
+    marker :: if block.cold -> " cold" else -> ""
+    "b{block.id.value}({params.join(", ")}):{marker}"
 }
 
 fn lir_print_layout(layout: LIRLayout) -> String Never! {

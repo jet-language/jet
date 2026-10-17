@@ -6384,57 +6384,66 @@ fn lower_result_box(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // Arithmetic.
 
 // Inline-integer test: a word is an inline Int when bits 63 and 62 agree,
-// i.e. when `value.bit_xor(value << 1)` is non-negative. `values` are or-ed first.
-fn lower_inline_test(f: &LowerFunction, values: [LIRValueID]) -> LIRValueID Never! {
-    one :: lower_const(&f, 1)
-    combined := LIRValueID{value: -1}
-    loop value in values {
-        shifted :: lower_word(&f)
-        lower_emit(&f, LIRInst.Binary{dst: shifted, op: LIRBinaryOp.Shl, left: value, right: one})
-        mixed :: lower_word(&f)
-        lower_emit(&f, LIRInst.Binary{dst: mixed, op: LIRBinaryOp.Xor, left: value, right: shifted})
-        if combined.value < 0 {
-            combined = mixed
-        } else {
-            both :: lower_word(&f)
-            lower_emit(&f, LIRInst.Binary{dst: both, op: LIRBinaryOp.Or, left: combined, right: mixed})
-            combined = both
+// i.e. when doubling it does not overflow. Each value is tested by the
+// overflow flag of `value + value` and a branch to `slow` on it: `mov; add;
+// jo slow` (Select fuses the Overflows into the branch), no xor/or/setcc
+// round trip. Lowering continues in a block every value reaches inline: the
+// last test's else edge is `inline` when given (its arguments ride on that
+// edge), else a fresh parameterless block. `slow` takes no arguments; mark
+// it cold (lower_start_cold) so the hot code falls through.
+fn lower_inline_branch(f: &LowerFunction, values: [LIRValueID], slow: LIRBlockID, inline: LIRJumpTarget?) Never! {
+    no_args :: [LIRValueID]{}
+    loop (index, value) in values {
+        overflowed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: LIRBinaryOp.Add, left: value, right: value})
+        if index == values.len() - 1 {
+            if inline == .Val(target) {
+                lower_seal(&f, LIRTerminator.Branch{condition: overflowed, then_target: lower_target(slow, no_args), else_target: lower_target(target.block, target.args)})
+                return
+            }
         }
+        next_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: overflowed, then_target: lower_target(slow, no_args), else_target: lower_target(next_block, no_args)})
+        lower_continue(&f, next_block, no_args)
     }
-    zero :: lower_const(&f, 0)
-    fits :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: fits, condition: LIRCondition.Ge, left: combined, right: zero})
-    fits
+}
+
+// Opens block `id` as a cold one (LIRBlock.cold): laid out after the hot
+// blocks by lir_builder_finish.
+fn lower_start_cold(f: &LowerFunction, id: LIRBlockID, params: [LIRValueID]) Never! {
+    lir_builder_mark_cold(&f.builder, id)
+    lower_start(&f, id, params)
+}
+
+// Opens block `id` as the continuation of the block just sealed: cold when
+// that one is (a check inside a cold path stays out of the hot layout).
+fn lower_continue(f: &LowerFunction, id: LIRBlockID, params: [LIRValueID]) Never! {
+    if lir_builder_is_cold(f.builder, f.open) -> lir_builder_mark_cold(&f.builder, id)
+    lower_start(&f, id, params)
 }
 
 // Exact Int `left op right` for Add, Sub, Mul: native when both operands and
-// the result are inline, else the runtime route (which builds big integers).
+// the result are inline, else the runtime route (which builds big integers)
+// in a cold block. The hot path is straight-line: `jo slow` per operand,
+// the operation (Mul with its own `jo slow`: two inline operands cannot
+// overflow Add or Sub), and `jo slow` on the result's inline test.
 fn lower_exact_arithmetic(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID, symbol: String) Never! {
-    fast_block :: lower_new_block(&f)
-    check_block :: lower_new_block(&f)
     slow_block :: lower_new_block(&f)
     merge_block :: lower_new_block(&f)
     no_args :: [LIRValueID]{}
-    eligible :: lower_inline_test(&f, [LIRValueID]{left, right})
-    lower_seal(&f, LIRTerminator.Branch{condition: eligible, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-
-    lower_start(&f, fast_block, no_args)
+    lower_inline_branch(&f, [LIRValueID]{left, right}, slow_block, None)
     fast :: lower_word(&f)
     lower_emit(&f, LIRInst.Binary{dst: fast, op: op, left: left, right: right})
     if op == .Mul {
-        // Two inline operands cannot overflow Add or Sub, but can overflow Mul.
         overflowed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: op, left: left, right: right})
-        lower_seal(&f, LIRTerminator.Branch{condition: overflowed, then_target: lower_target(slow_block, no_args), else_target: lower_target(check_block, no_args)})
-    } else {
-        lower_seal(&f, LIRTerminator.Jump{target: lower_target(check_block, no_args)})
+        fits_block :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: overflowed, then_target: lower_target(slow_block, no_args), else_target: lower_target(fits_block, no_args)})
+        lower_continue(&f, fits_block, no_args)
     }
+    lower_inline_branch(&f, [LIRValueID]{fast}, slow_block, Val(lower_target(merge_block, [LIRValueID]{fast})))
 
-    lower_start(&f, check_block, no_args)
-    fits :: lower_inline_test(&f, [LIRValueID]{fast})
-    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge_block, [LIRValueID]{fast}), else_target: lower_target(slow_block, no_args)})
-
-    lower_start(&f, slow_block, no_args)
+    lower_start_cold(&f, slow_block, no_args)
     slow :: lower_word(&f)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{left, right}, Val(slow))
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
@@ -6454,22 +6463,18 @@ fn lower_condition_of(op: MIRBinaryOp) -> LIRCondition? {
     }
 }
 
-// Exact Int comparison: native when both are inline, else the sign of the
-// runtime's three-way order.
+// Exact Int comparison: native when both are inline, else (cold) the sign of
+// the runtime's three-way order.
 fn lower_exact_compare(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) Never! {
-    fast_block :: lower_new_block(&f)
     slow_block :: lower_new_block(&f)
     merge_block :: lower_new_block(&f)
     no_args :: [LIRValueID]{}
-    eligible :: lower_inline_test(&f, [LIRValueID]{left, right})
-    lower_seal(&f, LIRTerminator.Branch{condition: eligible, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-
-    lower_start(&f, fast_block, no_args)
+    lower_inline_branch(&f, [LIRValueID]{left, right}, slow_block, None)
     fast :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: fast, condition: condition, left: left, right: right})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
 
-    lower_start(&f, slow_block, no_args)
+    lower_start_cold(&f, slow_block, no_args)
     order :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_int_compare", [LIRValueID]{left, right}, Val(order))
     zero :: lower_const(&f, 0)
@@ -6495,14 +6500,10 @@ fn lower_three_way(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     b := right
     lt := LIRCondition.Lt
     if lower_is_exact_int(ty) {
-        fast_block :: lower_new_block(&f)
         slow_block :: lower_new_block(&f)
         merge_block :: lower_new_block(&f)
-        eligible :: lower_inline_test(&f, [LIRValueID]{left, right})
-        lower_seal(&f, LIRTerminator.Branch{condition: eligible, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-        lower_start(&f, fast_block, no_args)
-        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{left, right})})
-        lower_start(&f, slow_block, no_args)
+        lower_inline_branch(&f, [LIRValueID]{left, right}, slow_block, Val(lower_target(merge_block, [LIRValueID]{left, right})))
+        lower_start_cold(&f, slow_block, no_args)
         order :: lower_word(&f)
         lower_call_runtime(&m, &f, "jet_int_compare", [LIRValueID]{left, right}, Val(order))
         zero :: lower_const(&f, 0)
@@ -6741,13 +6742,17 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         lower_logic(&f, both, true, is_minus_one, is_minimum)
         if can_trap -> lower_numeric_check(p, Val(c), &m, &f, both, location, lower_numeric_overflow_message("div"))
     }
+    result_op :: if unsigned && word_op == .Shr -> LIRBinaryOp.UShr else -> word_op
     if checked == .Trap && (word_op == .Add || word_op == .Sub || word_op == .Mul) {
+        // The operation first, then its overflow test: Select fuses the pair
+        // and the branch into `add; jo stop` (x64_binary_sets_overflow).
+        lower_emit(&f, LIRInst.Binary{dst: dst, op: result_op, left: left_value, right: right_value})
         overflowed :: lower_flag(&f)
         lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: if unsigned -> lower_unsigned_overflow_op(word_op) else -> word_op, left: left_value, right: right_value})
         operation :: if word_op == .Add -> "add" else if word_op == .Sub -> "sub" else -> "mul"
-        lower_numeric_check(p, Val(c), &m, &f, overflowed, location, lower_numeric_overflow_message(operation))
+        return lower_numeric_check(p, Val(c), &m, &f, overflowed, location, lower_numeric_overflow_message(operation))
     }
-    lower_emit(&f, LIRInst.Binary{dst: dst, op: if unsigned && word_op == .Shr -> LIRBinaryOp.UShr else -> word_op, left: left_value, right: right_value})
+    lower_emit(&f, LIRInst.Binary{dst: dst, op: result_op, left: left_value, right: right_value})
 }
 
 // F32's public carrier is a word, not an integer value: enter SSE via Bitcast.
@@ -6815,17 +6820,14 @@ fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
             // in place and stays inline; a big integer takes the runtime's
             // exact xor with -1, which is the same value.
             minus_one :: lower_const(&f, -1)
-            fast_block :: lower_new_block(&f)
             slow_block :: lower_new_block(&f)
             merge_block :: lower_new_block(&f)
             no_args :: [LIRValueID]{}
-            fits :: lower_inline_test(&f, [LIRValueID]{operand})
-            lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-            lower_start(&f, fast_block, no_args)
+            lower_inline_branch(&f, [LIRValueID]{operand}, slow_block, None)
             fast :: lower_word(&f)
             lower_emit(&f, LIRInst.Binary{dst: fast, op: LIRBinaryOp.Xor, left: operand, right: minus_one})
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
-            lower_start(&f, slow_block, no_args)
+            lower_start_cold(&f, slow_block, no_args)
             slow :: lower_word(&f)
             lower_call_runtime(&m, &f, "jet_int_bit_xor", [LIRValueID]{operand, minus_one}, Val(slow))
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})

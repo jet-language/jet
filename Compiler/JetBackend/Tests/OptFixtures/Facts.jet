@@ -1,22 +1,20 @@
-// P3 witnesses construct lowering's exact shape. Expectations specify the
-// precise result IDs to replace; all other instructions/edges must be identical.
-fn ofacts_test(b: &LIRFunctionBuilder, values: [LIRValueID], shift: Int) -> LIRValueID Never! {
-    one :: ofx_const(&b, shift)
-    combined := LIRValueID{value: -1}
-    loop value in values {
-        shifted :: ofx_binary(&b, LIRBinaryOp.Shl, value, one)
-        mixed :: ofx_binary(&b, LIRBinaryOp.Xor, value, shifted)
-        if combined.value < 0 -> combined = mixed
-        else -> combined = ofx_binary(&b, LIRBinaryOp.Or, combined, mixed)
-    }
-    zero :: ofx_const(&b, 0)
-    fits :: lir_builder_bool(&b)
-    lir_builder_push(&b, LIRInst.Compare{dst: fits, condition: LIRCondition.Ge, left: combined, right: zero})
-    fits
+// P3 witnesses construct lowering's exact shape (Lower.jet lower_inline_branch:
+// `Overflows(Add, x, x)` holds when x is not inline, so x is inline on the
+// else edge of a branch on it). Expectations specify the precise result IDs
+// to replace; all other instructions/edges must be identical.
+fn ofacts_test(b: &LIRFunctionBuilder, value: LIRValueID) -> LIRValueID Never! {
+    wide :: lir_builder_bool(&b)
+    lir_builder_push(&b, LIRInst.Overflows{dst: wide, op: LIRBinaryOp.Add, left: value, right: value})
+    wide
 }
 
 fn ofacts_target(block: Int, args: [LIRValueID]) -> LIRJumpTarget Never! {
     LIRJumpTarget{block: LIRBlockID{value: block}, args: args}
+}
+
+// A branch on `condition`: `slow` when it holds (not inline), `inline` else.
+fn ofacts_branch(condition: LIRValueID, slow: LIRJumpTarget, inline: LIRJumpTarget) -> LIRTerminator Never! {
+    LIRTerminator.Branch{condition: condition, then_target: slow, else_target: inline}
 }
 
 fn ofacts_check(function: LIRFunction, replaced: [LIRValueID]) -> Bool Never! {
@@ -27,47 +25,74 @@ fn ofacts_check(function: LIRFunction, replaced: [LIRValueID]) -> Bool Never! {
         loop inst in block.insts {
             replacement := inst
             if lir_inst_def(inst) == .Val(dst) {
-                loop id in replaced { if id == dst -> replacement = LIRInst.Const{dst: dst, value: 1} }
+                loop id in replaced { if id == dst -> replacement = LIRInst.Const{dst: dst, value: 0} }
             }
             &insts.push(replacement)
         }
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: block.lines, cold: block.cold})
     }
     expected.blocks = blocks
     ofx_check(function, lir_inline_facts_function(function), lir_print_module(ofx_module(expected)))
 }
 
+// Block 0 tests x (and, `pair`, block 5 then tests y); block 10 is the inline
+// target, where later tests of the proven values fold; block 20 is the slow
+// target, where nothing folds. `duplicate` sends both edges to block 10
+// (Branch(t, t): no fact); `partial` also tests an untested z in block 10;
+// `params` passes x into block 10's parameter p; `reorder` stores the blocks
+// out of dominator order.
 fn ofacts_edges(name: String, pair: Bool, duplicate: Bool, partial: Bool, params: Bool, reorder: Bool) -> Bool Never! {
     b := ofx_builder(name)
     x :: lir_builder_word(&b)
     y :: lir_builder_word(&b)
     z :: lir_builder_word(&b)
-    tested :: if pair -> [LIRValueID]{x, y} else -> [LIRValueID]{x}
-    condition :: ofacts_test(&b, tested, 1)
     p :: if params -> lir_builder_word(&b) else -> x
     args :: if params -> [LIRValueID]{x} else -> [LIRValueID]{}
-    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y, z}, LIRTerminator.Branch{condition: condition, then_target: ofacts_target(10, args), else_target: ofacts_target(if duplicate -> 10 else -> 20, if duplicate -> args else -> [LIRValueID]{})})
-    later_values :: if partial -> [LIRValueID]{p, z} else if pair -> [LIRValueID]{p, y} else -> [LIRValueID]{p}
-    later :: ofacts_test(&b, later_values, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 10}, if params -> [LIRValueID]{p} else -> [LIRValueID]{}, LIRTerminator.Return{value: Val(later)})
+    inline :: ofacts_target(10, args)
+    slow :: ofacts_target(if duplicate -> 10 else -> 20, if duplicate -> args else -> [LIRValueID]{})
+    first :: ofacts_test(&b, x)
+    if pair {
+        lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y, z}, ofacts_branch(first, slow, ofacts_target(5, [LIRValueID]{})))
+        second :: ofacts_test(&b, y)
+        lir_builder_seal(&b, LIRBlockID{value: 5}, [LIRValueID]{}, ofacts_branch(second, slow, inline))
+    } else {
+        lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y, z}, ofacts_branch(first, slow, inline))
+    }
+    later :: ofacts_test(&b, p)
+    later_pair :: if pair -> ofacts_test(&b, y) else -> later
+    other :: if partial -> ofacts_test(&b, z) else -> later
+    lir_builder_seal(&b, LIRBlockID{value: 10}, if params -> [LIRValueID]{p} else -> [LIRValueID]{}, LIRTerminator.Return{value: Val(other)})
     if !duplicate {
-        false_test :: ofacts_test(&b, tested, 1)
+        false_test :: ofacts_test(&b, x)
         lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Return{value: Val(false_test)})
     }
     function := lir_builder_finish(b)
-    if reorder -> function.blocks = [LIRBlock]{function.blocks[0], function.blocks[2], function.blocks[1]}
-    ofacts_check(function, if duplicate || partial -> [LIRValueID]{} else -> [LIRValueID]{later})
+    if reorder {
+        reordered := [LIRBlock]{function.blocks[0]}
+        row := function.blocks.len() - 1
+        loop row > 0 {
+            &reordered.push(function.blocks[row])
+            row -= 1
+        }
+        function.blocks = reordered
+    }
+    replaced := [LIRValueID]{}
+    if !duplicate {
+        &replaced.push(later)
+        if pair -> &replaced.push(later_pair)
+    }
+    ofacts_check(function, replaced)
 }
 
 fn ofacts_flow(name: String, join: Bool, backedge: Bool) -> Bool Never! {
     b := ofx_builder(name)
     x :: lir_builder_word(&b)
     gate :: lir_builder_bool(&b)
-    condition :: ofacts_test(&b, [LIRValueID]{x}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, gate}, LIRTerminator.Branch{condition: condition, then_target: ofacts_target(10, [LIRValueID]{}), else_target: ofacts_target(20, [LIRValueID]{})})
+    condition :: ofacts_test(&b, x)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, gate}, ofacts_branch(condition, ofacts_target(20, [LIRValueID]{}), ofacts_target(10, [LIRValueID]{})))
     lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Jump{target: ofacts_target(30, [LIRValueID]{})})
     lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, if join -> LIRTerminator.Jump{target: ofacts_target(30, [LIRValueID]{})} else -> LIRTerminator.Unreachable)
-    later :: ofacts_test(&b, [LIRValueID]{x}, 1)
+    later :: ofacts_test(&b, x)
     lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, if backedge -> LIRTerminator.Branch{condition: gate, then_target: ofacts_target(10, [LIRValueID]{}), else_target: ofacts_target(40, [LIRValueID]{})} else -> LIRTerminator.Return{value: Val(later)})
     if backedge -> lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Return{value: Val(later)})
     ofacts_check(lir_builder_finish(b), if join || backedge -> [LIRValueID]{} else -> [LIRValueID]{later})
@@ -77,74 +102,63 @@ fn ofacts_loop_below() -> Bool Never! {
     b := ofx_builder("facts-loop-below-edge")
     x :: lir_builder_word(&b)
     gate :: lir_builder_bool(&b)
-    condition :: ofacts_test(&b, [LIRValueID]{x}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, gate}, LIRTerminator.Branch{condition: condition, then_target: ofacts_target(10, [LIRValueID]{}), else_target: ofacts_target(20, [LIRValueID]{})})
+    condition :: ofacts_test(&b, x)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, gate}, ofacts_branch(condition, ofacts_target(20, [LIRValueID]{}), ofacts_target(10, [LIRValueID]{})))
     lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Jump{target: ofacts_target(30, [LIRValueID]{})})
     lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Unreachable)
-    later :: ofacts_test(&b, [LIRValueID]{x}, 1)
+    later :: ofacts_test(&b, x)
     lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Branch{condition: gate, then_target: ofacts_target(30, [LIRValueID]{}), else_target: ofacts_target(40, [LIRValueID]{})})
     lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Return{value: Val(later)})
     ofacts_check(lir_builder_finish(b), [LIRValueID]{later})
 }
 
-fn ofacts_constant(name: String, left: Int, right: Int, fold: Bool) -> Bool Never! {
+fn ofacts_constant(name: String, value: Int, fold: Bool) -> Bool Never! {
     b := ofx_builder(name)
-    x :: ofx_const(&b, left)
-    y :: ofx_const(&b, right)
-    result :: ofacts_test(&b, [LIRValueID]{x, y}, 1)
+    x :: ofx_const(&b, value)
+    result :: ofacts_test(&b, x)
     ofacts_check(ofx_finish(&b, [LIRValueID]{}, result), if fold -> [LIRValueID]{result} else -> [LIRValueID]{})
 }
 
-fn ofacts_malformed() -> Bool Never! {
-    b := ofx_builder("facts-shift-two-refused")
+// An Overflows of two different operands, or of another operator, is no
+// inline test: its false edge proves nothing.
+fn ofacts_malformed(name: String, op: LIRBinaryOp, same: Bool) -> Bool Never! {
+    b := ofx_builder(name)
     x :: lir_builder_word(&b)
-    condition :: ofacts_test(&b, [LIRValueID]{x}, 2)
-    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x}, LIRTerminator.Branch{condition: condition, then_target: ofacts_target(10, [LIRValueID]{}), else_target: ofacts_target(20, [LIRValueID]{})})
-    later :: ofacts_test(&b, [LIRValueID]{x}, 1)
+    y :: lir_builder_word(&b)
+    condition :: lir_builder_bool(&b)
+    lir_builder_push(&b, LIRInst.Overflows{dst: condition, op: op, left: x, right: if same -> x else -> y})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y}, ofacts_branch(condition, ofacts_target(20, [LIRValueID]{}), ofacts_target(10, [LIRValueID]{})))
+    later :: ofacts_test(&b, x)
     lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Return{value: Val(later)})
     lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Unreachable)
     ofacts_check(lir_builder_finish(b), [LIRValueID]{})
 }
 
+// x's inline region holds y's test: both fold where both edges passed, and
+// only x's where y's test failed.
 fn ofacts_nested() -> Bool Never! {
     b := ofx_builder("facts-nested-independent-values")
     x :: lir_builder_word(&b)
     y :: lir_builder_word(&b)
-    first :: ofacts_test(&b, [LIRValueID]{x}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y}, LIRTerminator.Branch{condition: first, then_target: ofacts_target(10, [LIRValueID]{}), else_target: ofacts_target(20, [LIRValueID]{})})
-    second :: ofacts_test(&b, [LIRValueID]{y}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Branch{condition: second, then_target: ofacts_target(30, [LIRValueID]{}), else_target: ofacts_target(40, [LIRValueID]{})})
+    first :: ofacts_test(&b, x)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y}, ofacts_branch(first, ofacts_target(20, [LIRValueID]{}), ofacts_target(10, [LIRValueID]{})))
+    second :: ofacts_test(&b, y)
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, ofacts_branch(second, ofacts_target(40, [LIRValueID]{}), ofacts_target(30, [LIRValueID]{})))
     lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Unreachable)
-    later :: ofacts_test(&b, [LIRValueID]{x, y}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(later)})
-    false_later :: ofacts_test(&b, [LIRValueID]{x, y}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Return{value: Val(false_later)})
-    ofacts_check(lir_builder_finish(b), [LIRValueID]{later})
-}
-
-fn ofacts_bad_leaf(name: String, unknown_or: Bool) -> Bool Never! {
-    b := ofx_builder(name)
-    x :: lir_builder_word(&b)
-    y :: lir_builder_word(&b)
-    one :: ofx_const(&b, 1)
-    shifted :: ofx_binary(&b, LIRBinaryOp.Shl, if unknown_or -> x else -> y, one)
-    mixed :: ofx_binary(&b, LIRBinaryOp.Xor, x, shifted)
-    combined :: if unknown_or -> ofx_binary(&b, LIRBinaryOp.Or, mixed, y) else -> mixed
-    zero :: ofx_const(&b, 0)
-    condition :: lir_builder_bool(&b)
-    lir_builder_push(&b, LIRInst.Compare{dst: condition, condition: LIRCondition.Ge, left: combined, right: zero})
-    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, y}, LIRTerminator.Branch{condition: condition, then_target: ofacts_target(10, [LIRValueID]{}), else_target: ofacts_target(20, [LIRValueID]{})})
-    later :: ofacts_test(&b, [LIRValueID]{x}, 1)
-    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Return{value: Val(later)})
-    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Unreachable)
-    ofacts_check(lir_builder_finish(b), [LIRValueID]{})
+    later_x :: ofacts_test(&b, x)
+    later_y :: ofacts_test(&b, y)
+    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(later_y)})
+    failed_x :: ofacts_test(&b, x)
+    failed_y :: ofacts_test(&b, y)
+    lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Return{value: Val(failed_y)})
+    ofacts_check(lir_builder_finish(b), [LIRValueID]{later_x, later_y, failed_x})
 }
 
 fn opt_fixtures_facts() -> Bool Never! {
     passed := true
-    if !ofacts_edges("facts-single-true-not-false", false, false, false, false, false) -> passed = false
+    if !ofacts_edges("facts-single-false-not-true", false, false, false, false, false) -> passed = false
     if !ofacts_edges("facts-pair", true, false, false, false, false) -> passed = false
-    if !ofacts_edges("facts-partial-refused", true, false, true, false, false) -> passed = false
+    if !ofacts_edges("facts-partial-untested-kept", false, false, true, false, false) -> passed = false
     if !ofacts_edges("facts-duplicate-edge-refused", false, true, false, false, false) -> passed = false
     if !ofacts_edges("facts-target-parameter", false, false, false, true, false) -> passed = false
     if !ofacts_edges("facts-storage-not-dom-order", true, false, false, false, true) -> passed = false
@@ -152,12 +166,12 @@ fn opt_fixtures_facts() -> Bool Never! {
     if !ofacts_flow("facts-join-refused", true, false) -> passed = false
     if !ofacts_flow("facts-target-backedge-refused", false, true) -> passed = false
     if !ofacts_loop_below() -> passed = false
-    if !ofacts_constant("facts-inline-boundaries", -4611686018427387904, 4611686018427387903, true) -> passed = false
-    if !ofacts_constant("facts-outside-positive", 4611686018427387904, 0, false) -> passed = false
-    if !ofacts_constant("facts-outside-negative", -4611686018427387905, 0, false) -> passed = false
-    if !ofacts_malformed() -> passed = false
+    if !ofacts_constant("facts-inline-lower-boundary", -4611686018427387904, true) -> passed = false
+    if !ofacts_constant("facts-inline-upper-boundary", 4611686018427387903, true) -> passed = false
+    if !ofacts_constant("facts-outside-positive", 4611686018427387904, false) -> passed = false
+    if !ofacts_constant("facts-outside-negative", -4611686018427387905, false) -> passed = false
+    if !ofacts_malformed("facts-other-operand-refused", LIRBinaryOp.Add, false) -> passed = false
+    if !ofacts_malformed("facts-sub-refused", LIRBinaryOp.Sub, true) -> passed = false
     if !ofacts_nested() -> passed = false
-    if !ofacts_bad_leaf("facts-unknown-or-leaf-refused", true) -> passed = false
-    if !ofacts_bad_leaf("facts-xor-other-shift-refused", false) -> passed = false
     passed
 }

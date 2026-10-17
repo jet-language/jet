@@ -280,8 +280,6 @@ fn opt_defs(function: LIRFunction) -> OptDefs Never! {
 
 // `Compare(Ge|Lt, Or(x, c), 0)` with a non-negative constant c tests the sign
 // of x alone: or-ing a word whose sign bit is clear never changes the sign.
-// Exact Int lowering builds this shape for the inline test of a variable and
-// a constant operand.
 fn opt_sign_test(facts: OptFacts, defs: OptDefs, function: LIRFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> OptRewrite? {
     if condition != .Ge && condition != .Lt -> return None
     if !facts.known[right.value] || facts.consts[right.value] != 0 -> return None
@@ -364,7 +362,7 @@ fn opt_fold_sweep(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
         }
         if terminator != block.terminator -> changed = true
         &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: terminator, lines: lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: terminator, lines: lines, cold: block.cold})
     }
     function.blocks = blocks
     changed
@@ -496,7 +494,7 @@ fn opt_thread(function: &LIRFunction) -> Bool Never! {
             else -> block.terminator
         }
         if terminator != block.terminator -> changed = true
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines, cold: block.cold})
     }
     function.blocks = blocks
     changed
@@ -526,7 +524,7 @@ fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
                     lines := [Int]{}
                     loop at in 0..<block.insts.len() -> &lines.push(opt_debug_line(block, at))
                     loop at in 0..<(successor.insts.len() + 1) -> &lines.push(opt_debug_line(successor, at))
-                    function.blocks[index] = LIRBlock{id: block.id, params: block.params, insts: insts, terminator: successor.terminator, lines: lines}
+                    function.blocks[index] = LIRBlock{id: block.id, params: block.params, insts: insts, terminator: successor.terminator, lines: lines, cold: block.cold}
                     kept := [LIRBlock]{}
                     loop (other, candidate) in function.blocks {
                         if other != row -> &kept.push(candidate)
@@ -668,7 +666,7 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
             }
         }
         &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: block.terminator, lines: lines})
+        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: block.terminator, lines: lines, cold: block.cold})
     }
     // Drop the arguments of removed parameters on every edge.
     rewired := [LIRBlock]{}
@@ -678,7 +676,7 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
             .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: condition, then_target: opt_live_args(function, rows, live, then_target), else_target: opt_live_args(function, rows, live, else_target)}
             else -> block.terminator
         }
-        &rewired.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines})
+        &rewired.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines, cold: block.cold})
     }
     function.blocks = rewired
     changed
@@ -726,7 +724,7 @@ fn opt_compact(function: LIRFunction) -> LIRFunction Never! {
         loop param in block.params -> &params.push(opt_n(map, param))
         insts := [LIRInst]{}
         loop inst in block.insts -> &insts.push(opt_renumber_inst(map, inst))
-        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: opt_renumber_terminator(map, block.terminator), lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: opt_renumber_terminator(map, block.terminator), lines: block.lines, cold: block.cold})
     }
     debug := function.debug
     bindings := [LIRDebugBinding]{}
@@ -828,7 +826,7 @@ fn opt_rename_all(function: &LIRFunction, facts: OptFacts) Never! {
     loop block in function.blocks {
         insts := [LIRInst]{}
         loop inst in block.insts -> &insts.push(opt_rename_inst(facts, inst))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator), lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator), lines: block.lines, cold: block.cold})
     }
     function.blocks = blocks
     bindings := [LIRDebugBinding]{}

@@ -451,6 +451,8 @@ fn x64_hint_arguments(function: LIRFunction, values: [LIRValueID], hint_regs: &[
 // Loop depth per block row: a loop is a header row with a back edge from the
 // same or a later row and spans the header through its last such row; a
 // row's depth counts the spans holding it (one difference array, one pass).
+// A cold block (LIRBlock.cold) sits after the hot code it rejoins, so its
+// edges are no loops.
 fn x64_block_depths(function: LIRFunction, block_rows: [Int:Int]) -> [Int] Never! {
     latest := [Int]{}
     deltas := [Int]{0}
@@ -459,6 +461,7 @@ fn x64_block_depths(function: LIRFunction, block_rows: [Int:Int]) -> [Int] Never
         &deltas.push(0)
     }
     loop (row, block) in function.blocks {
+        if block.cold -> next
         loop target in lir_terminator_targets(block.terminator) {
             header :: block_rows.get(target.block.value) ?? -1
             if header >= 0 && header <= row && row > latest[header] -> latest[header] = row

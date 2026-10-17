@@ -637,13 +637,19 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         &defining.push(false)
         located :: block.lines.len() == block.insts.len() + 1
         fused := false
+        flags_set := false
         // A Compare or Overflows whose only use is this block's Branch sets
-        // the flags the branch tests: no setcc/movzx/test round trip.
+        // the flags the branch tests: no setcc/movzx/test round trip. When
+        // that Overflows repeats the Binary before it, the Binary's own
+        // arithmetic already left those flags: `add; jo`, no second add.
         if block.terminator == .Branch(condition, _, _) {
             if block.insts.len() > 0 {
                 if block.insts[block.insts.len() - 1] == {
                     .Compare(dst, _, left, _) -> fused = dst == condition && allocation.folds.uses[dst.value] == 1 && !x64_is_float(function, left)
-                    .Overflows(dst, _, _, _) -> fused = dst == condition && allocation.folds.uses[dst.value] == 1
+                    .Overflows(dst, op, left, right) -> {
+                        fused = dst == condition && allocation.folds.uses[dst.value] == 1
+                        if fused && block.insts.len() > 1 -> flags_set = x64_binary_sets_overflow(function, allocation.folds, block.insts[block.insts.len() - 2], op, left, right)
+                    }
                     else -> {}
                 }
             }
@@ -657,7 +663,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         &positions.push(emitter.code.len())
         &defining.push(false)
         if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[block.insts.len()])
-        x64_select_terminator(&emitter, function, allocation, block, block_index, fused, block_rows)
+        x64_select_terminator(&emitter, function, allocation, block, block_index, fused, flags_set, block_rows)
     }
     &positions.push(emitter.code.len())
     loop fixup in emitter.fixups -> x64_patch_rel32(&emitter.code, fixup.at, block_offsets[fixup.block])
@@ -862,9 +868,16 @@ fn x64_select_binary_imm(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValu
     true
 }
 
+// The condition set exactly when `left op right` overflows: MUL's carry
+// tests unsigned range; IMUL's overflow tests signed range
+// (FixedArithmetic.rs:318-326).
+fn x64_overflow_condition(op: LIRBinaryOp) -> X64Cond Never! {
+    if op == .UAdd || op == .USub || op == .UMul -> return X64Cond.B
+    X64Cond.O
+}
+
 // The flags of `left op right` in rax (rdx preserved); returns the condition
-// set exactly when the operation overflows. MUL's carry tests unsigned range;
-// IMUL's overflow tests signed range (FixedArithmetic.rs:318-326).
+// set exactly when the operation overflows (x64_overflow_condition).
 fn x64_emit_overflow(emitter: &X64Emitter, locations: [X64Loc], op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> X64Cond Never! {
     left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
     right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
@@ -879,8 +892,29 @@ fn x64_emit_overflow(emitter: &X64Emitter, locations: [X64Loc], op: LIRBinaryOp,
     }
     // POP does not alter MUL's carry flag.
     if op == .UMul -> x64_pop(&emitter.code, X64_RDX)
-    if op == .UAdd || op == .USub || op == .UMul -> return X64Cond.B
-    X64Cond.O
+    x64_overflow_condition(op)
+}
+
+// Whether `inst`, the instruction before an `Overflows{op, left, right}`
+// fused into its block's branch, is the Binary of the same operands whose
+// selected arithmetic (`add`, `sub` or `imul`, then at most a flag-neutral
+// store of its result) already leaves the flags that Overflows tests, so
+// the branch is `op; jcc` with no second operation. Signed and unsigned
+// Add/Sub share one instruction; UMul's unsigned test is MUL's carry, which
+// the Binary's IMUL does not set, so it never fuses. A Binary that
+// selection folds into an address or skips emits no arithmetic.
+fn x64_binary_sets_overflow(function: LIRFunction, folds: X64AddressFolds, inst: LIRInst, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> Bool Never! {
+    if inst == .Binary(dst, binary_op, binary_left, binary_right) {
+        if binary_left != left || binary_right != right -> return false
+        if folds.skipped[dst.value] || folds.addresses[dst.value] != None || x64_is_float(function, dst) -> return false
+        if op == {
+            .Add | .UAdd -> return binary_op == .Add || binary_op == .UAdd
+            .Sub | .USub -> return binary_op == .Sub || binary_op == .USub
+            .Mul -> return binary_op == .Mul || binary_op == .UMul
+            else -> return false
+        }
+    }
+    false
 }
 
 struct X64SelectedAddress {
@@ -1139,7 +1173,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
     }
 }
 
-fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool, block_rows: [Int:Int]) Never! {
+// `fused`: the block's last instruction sets the branch's flags (see
+// x64_compile_function); `flags_set`: the Binary before it already did.
+fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool, flags_set: Bool, block_rows: [Int:Int]) Never! {
     if block.terminator == {
         .Return(value) -> {
             if value == .Val(returned) {
@@ -1158,7 +1194,7 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
             if fused {
                 if block.insts[block.insts.len() - 1] == {
                     .Compare(_, compare, left, right) -> cond = x64_emit_compare(&emitter, allocation.locations, compare, left, right)
-                    .Overflows(_, op, left, right) -> cond = x64_emit_overflow(&emitter, allocation.locations, op, left, right)
+                    .Overflows(_, op, left, right) -> cond = if flags_set -> x64_overflow_condition(op) else -> x64_emit_overflow(&emitter, allocation.locations, op, left, right)
                     else -> {}
                 }
             } else {
