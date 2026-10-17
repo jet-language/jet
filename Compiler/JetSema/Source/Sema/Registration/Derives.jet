@@ -1745,26 +1745,36 @@ fn sema_derive_has_name(derives: [NamedSpan], name: String) -> Bool {
 }
 
 // Membership facts over one module's items, built once per expansion so
-// readiness and selection ask keyed questions instead of rescanning items.
+// readiness, selection, and the codec expansion ask keyed questions instead of
+// rescanning items. `trait_impls` maps an impl key to its sources
+// (sema_derive_impl_flags); `nominals` maps a name to its first struct, enum,
+// or distinct position.
 struct SemaDeriveItemIndex {
-    trait_impls: [String:Bool]
+    trait_impls: [String:Int]
     nominals: [String:Int]
     distincts: [String:Bool]
 }
 
 fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
-    index := SemaDeriveItemIndex{trait_impls: [String:Bool]{}, nominals: [String:Int]{}, distincts: [String:Bool]{}}
+    index := SemaDeriveItemIndex{trait_impls: [String:Int]{}, nominals: [String:Int]{}, distincts: [String:Bool]{}}
     loop (position, item) in items {
         if item == {
             .Impl(definition) -> {
-                index.trait_impls[sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")] = true
+                key :: sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")
+                index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), definition.is_generated_serde)
             }
             .Struct(definition) -> {
-                loop block in definition.trait_impls -> index.trait_impls[sema_type_metadata_impl_key(definition.name, block.trait_name)] = true
+                loop block in definition.trait_impls {
+                    key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
+                    index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                }
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
             .Enum(definition) -> {
-                loop block in definition.trait_impls -> index.trait_impls[sema_type_metadata_impl_key(definition.name, block.trait_name)] = true
+                loop block in definition.trait_impls {
+                    key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
+                    index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                }
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
             }
             .Distinct(definition) -> {
@@ -1775,6 +1785,16 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
         }
     }
     index
+}
+
+// The sources of one (type, trait) impl key: bit 1 a written impl item or
+// inline trait block, bit 2 a compiler-generated one (a generated codec impl
+// item, or a derived inline block).
+fn sema_derive_impl_flags(existing: Int?, generated: Bool) -> Int Never! {
+    flags :: existing ?? 0
+    bit :: if generated -> 2 else -> 1
+    if flags == 3 || flags == bit -> return flags
+    flags + bit
 }
 
 fn sema_derive_has_trait_impl(index: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Bool {

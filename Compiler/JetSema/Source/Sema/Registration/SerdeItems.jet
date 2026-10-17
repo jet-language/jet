@@ -64,7 +64,9 @@ use jet_foundation.[
 
 // Rust `expand_builtin_serde_items`: selects each declaration's codecs from
 // its explicit derives and this module's structural auto-derive fixed point,
-// then appends the generated impl headers after the written items.
+// then appends the generated impl headers after the written items. Every
+// question is keyed on `facts`, built once over the unchanged written items:
+// O(items + types × wire fields), not a rescan per type and field.
 fn sema_serde_expand_builtin_items(items: &[Item]) {
     facts :: sema_derive_item_index(items)
     auto_encode :: sema_derive_auto_selected(items, facts, "Encode")
@@ -73,30 +75,30 @@ fn sema_serde_expand_builtin_items(items: &[Item]) {
     loop index in 0..<items.len() {
         if items[index] == {
             .Struct(definition) -> {
-                explicit_encode :: sema_serde_items_has_impl(items, definition.name, "Encode", false)
-                explicit_decode :: sema_serde_items_has_impl(items, definition.name, "Decode", false)
+                encode_impls :: sema_serde_items_impl_flags(facts, definition.name, "Encode")
+                decode_impls :: sema_serde_items_impl_flags(facts, definition.name, "Decode")
                 // An explicit marker is a request to materialize the compiler
                 // candidate even when a source impl exists; registration then
                 // reports the duplicate. An unmarked hand codec stays the only one.
-                encode :: sema_derive_has_name(definition.derives, "Encode") || (!explicit_encode && auto_encode.get(definition.name) != None)
-                decode :: sema_derive_has_name(definition.derives, "Decode") || (!explicit_decode && auto_decode.get(definition.name) != None)
+                encode :: sema_derive_has_name(definition.derives, "Encode") || (!sema_serde_items_written(encode_impls) && auto_encode.get(definition.name) != None)
+                decode :: sema_derive_has_name(definition.derives, "Decode") || (!sema_serde_items_written(decode_impls) && auto_decode.get(definition.name) != None)
                 span :: sema_serde_items_derive_span(definition.derives, definition.name_span)
                 // Rust `invalid_serde_derive_impls`: a requested codec whose
                 // field registration reports (E2411/E2415) is not generated,
                 // so the body check does not repeat that problem at a
                 // generated span. (A non-constant default, E2414, is folded
                 // and reported after registration.)
-                if encode && !sema_serde_items_has_impl(items, definition.name, "Encode", true) && sema_serde_items_struct_valid(items, definition, "Encode", auto_encode) -> &generated.push(sema_serde_items_struct_encode(definition, span))
-                if decode && !sema_serde_items_has_impl(items, definition.name, "Decode", true) && sema_serde_items_struct_valid(items, definition, "Decode", auto_decode) -> &generated.push(sema_serde_items_struct_decode(definition, span))
+                if encode && !sema_serde_items_generated(encode_impls) && sema_serde_items_struct_valid(items, facts, definition, "Encode", auto_encode) -> &generated.push(sema_serde_items_struct_encode(definition, span))
+                if decode && !sema_serde_items_generated(decode_impls) && sema_serde_items_struct_valid(items, facts, definition, "Decode", auto_decode) -> &generated.push(sema_serde_items_struct_decode(definition, span))
             }
             .Enum(definition) -> {
-                explicit_encode :: sema_serde_items_has_impl(items, definition.name, "Encode", false)
-                explicit_decode :: sema_serde_items_has_impl(items, definition.name, "Decode", false)
-                encode :: sema_derive_has_name(definition.derives, "Encode") || (!explicit_encode && auto_encode.get(definition.name) != None)
-                decode :: sema_derive_has_name(definition.derives, "Decode") || (!explicit_decode && auto_decode.get(definition.name) != None)
+                encode_impls :: sema_serde_items_impl_flags(facts, definition.name, "Encode")
+                decode_impls :: sema_serde_items_impl_flags(facts, definition.name, "Decode")
+                encode :: sema_derive_has_name(definition.derives, "Encode") || (!sema_serde_items_written(encode_impls) && auto_encode.get(definition.name) != None)
+                decode :: sema_derive_has_name(definition.derives, "Decode") || (!sema_serde_items_written(decode_impls) && auto_decode.get(definition.name) != None)
                 span :: sema_serde_items_derive_span(definition.derives, definition.name_span)
-                if encode && !sema_serde_items_has_impl(items, definition.name, "Encode", true) && sema_serde_items_enum_valid(items, definition, "Encode", auto_encode) -> &generated.push(sema_serde_items_enum_encode(definition, encode, decode, span))
-                if decode && !sema_serde_items_has_impl(items, definition.name, "Decode", true) && sema_serde_items_enum_valid(items, definition, "Decode", auto_decode) -> &generated.push(sema_serde_items_enum_decode(definition, encode, decode, span))
+                if encode && !sema_serde_items_generated(encode_impls) && sema_serde_items_enum_valid(items, facts, definition, "Encode", auto_encode) -> &generated.push(sema_serde_items_enum_encode(definition, encode, decode, span))
+                if decode && !sema_serde_items_generated(decode_impls) && sema_serde_items_enum_valid(items, facts, definition, "Decode", auto_decode) -> &generated.push(sema_serde_items_enum_decode(definition, encode, decode, span))
             }
             else -> {}
         }
@@ -105,20 +107,20 @@ fn sema_serde_expand_builtin_items(items: &[Item]) {
 }
 
 // Rust `invalid_serde_derive_impls`, negated, for one declaration and codec.
-fn sema_serde_items_struct_valid(items: [Item], definition: StructDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+fn sema_serde_items_struct_valid(items: [Item], facts: SemaDeriveItemIndex, definition: StructDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
     decode :: trait_name == "Decode"
     loop field in definition.fields {
         if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") || sema_serde_items_has_marker(field.serde_markers, "Flatten") -> next
-        if !sema_serde_items_codable(items, field.ty, trait_name, auto) -> return false
+        if !sema_serde_items_codable(items, facts, field.ty, trait_name, auto) -> return false
         if decode && sema_serde_items_union_shapes_invalid(items, field.ty, field.name_span) -> return false
     }
     true
 }
 
-fn sema_serde_items_enum_valid(items: [Item], definition: EnumDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+fn sema_serde_items_enum_valid(items: [Item], facts: SemaDeriveItemIndex, definition: EnumDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
     decode :: trait_name == "Decode"
     loop ty in sema_serde_items_enum_wire(definition) {
-        if !sema_serde_items_codable(items, ty, trait_name, auto) -> return false
+        if !sema_serde_items_codable(items, facts, ty, trait_name, auto) -> return false
         if decode && sema_serde_items_union_shapes_invalid(items, ty, definition.name_span) -> return false
     }
     true
@@ -132,33 +134,34 @@ fn sema_serde_items_union_shapes_invalid(items: [Item], ty: Type, span: Span) ->
     problems.len() > 0
 }
 
-// Rust `is_encodable_ty` / `is_decodable_ty` over this module's declarations:
-// an imported (non-local) nominal is trusted — its own declaration answers
-// for its codec, and a use site checks the bound (E0905).
-fn sema_serde_items_codable(items: [Item], ty: Type, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+// Rust `is_encodable_ty` / `is_decodable_ty` over this module's declarations
+// (`facts` is sema_derive_item_index of `items`): an imported (non-local)
+// nominal is trusted — its own declaration answers for its codec, and a use
+// site checks the bound (E0905).
+fn sema_serde_items_codable(items: [Item], facts: SemaDeriveItemIndex, ty: Type, trait_name: String, auto: [String:Bool]) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> true
-        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_items_codable(items, inner, trait_name, auto)
-        .Map(key, _, value) -> key == Type.String && sema_serde_items_codable(items, value, trait_name, auto)
+        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_items_codable(items, facts, inner, trait_name, auto)
+        .Map(key, _, value) -> key == Type.String && sema_serde_items_codable(items, facts, value, trait_name, auto)
         .Named(name) -> {
             if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
             if trait_name == "Encode" && sema_data_is_json_name(name) -> return true
-            sema_serde_items_nominal_codable(items, name, trait_name, auto)
+            sema_serde_items_nominal_codable(items, facts, name, trait_name, auto)
         }
         .Apply(name, args) -> {
-            if !sema_serde_items_nominal_codable(items, name, trait_name, auto) -> return false
+            if !sema_serde_items_nominal_codable(items, facts, name, trait_name, auto) -> return false
             // A local generic type obliges only its wire-reaching arguments.
-            wire :: sema_serde_items_wire_params(items, name)
+            wire :: sema_serde_items_wire_params(items, facts, name)
             loop (index, arg) in args {
                 required := true
                 if wire == .Val(flags) && index < flags.len() -> required = flags[index]
-                if required && !sema_serde_items_codable(items, arg, trait_name, auto) -> return false
+                if required && !sema_serde_items_codable(items, facts, arg, trait_name, auto) -> return false
             }
             true
         }
         .Union(members) -> {
             loop member in members {
-                if !sema_serde_items_codable(items, member, trait_name, auto) -> return false
+                if !sema_serde_items_codable(items, facts, member, trait_name, auto) -> return false
             }
             true
         }
@@ -166,94 +169,75 @@ fn sema_serde_items_codable(items: [Item], ty: Type, trait_name: String, auto: [
     }
 }
 
-fn sema_serde_items_nominal_codable(items: [Item], name: String, trait_name: String, auto: [String:Bool]) -> Bool Never! {
-    loop index in 0..<items.len() {
-        derives := [NamedSpan]{}
-        if items[index] == {
-            .Struct(definition) -> {
-                if definition.name != name -> next
-                derives = definition.derives.copy()
-            }
-            .Enum(definition) -> {
-                if definition.name != name -> next
-                derives = definition.derives.copy()
-            }
-            .Distinct(definition) -> {
-                if definition.name != name -> next
-                derives = definition.derives.copy()
-            }
-            else -> next
+// The first local struct, enum, or distinct `name` answers; a name this
+// module does not declare is trusted.
+fn sema_serde_items_nominal_codable(items: [Item], facts: SemaDeriveItemIndex, name: String, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+    position :: facts.nominals.get(name) ?? return true
+    if items[position] == {
+        .Struct(definition) -> {
+            if sema_derive_has_name(definition.derives, trait_name) -> return true
         }
-        return sema_derive_has_name(derives, trait_name) || auto.get(name) != None || sema_serde_items_has_impl(items, name, trait_name, false) || sema_serde_items_has_impl(items, name, trait_name, true)
+        .Enum(definition) -> {
+            if sema_derive_has_name(definition.derives, trait_name) -> return true
+        }
+        .Distinct(definition) -> {
+            if sema_derive_has_name(definition.derives, trait_name) -> return true
+        }
+        else -> {}
     }
-    true
+    auto.get(name) != None || sema_serde_items_impl_flags(facts, name, trait_name) != 0
 }
 
 // Rust `serde_wire_params`: for a local generic struct or enum, which type
-// parameters a wire type mentions; None for any other name.
-fn sema_serde_items_wire_params(items: [Item], name: String) -> [Bool]? Never! {
-    loop index in 0..<items.len() {
-        params := [TypeParam]{}
-        wire := [Type]{}
-        if items[index] == {
+// parameters a wire type mentions; None for any other name. The first struct
+// or enum `name` answers: normally the indexed position itself; only a
+// duplicate distinct declared first is stepped past.
+fn sema_serde_items_wire_params(items: [Item], facts: SemaDeriveItemIndex, name: String) -> [Bool]? Never! {
+    position := facts.nominals.get(name) ?? return None
+    loop position < items.len() {
+        if items[position] == {
             .Struct(definition) -> {
-                if definition.name != name -> next
-                params = definition.type_params.copy()
-                loop field in definition.fields {
-                    if field.computed == None && !sema_serde_items_has_marker(field.serde_markers, "Skip") -> &wire.push(field.ty.copy())
-                }
+                if definition.name == name -> return sema_serde_items_param_flags(definition.type_params, sema_serde_items_struct_wire(definition))
             }
             .Enum(definition) -> {
-                if definition.name != name -> next
-                params = definition.type_params.copy()
-                wire = sema_serde_items_enum_wire(definition)
+                if definition.name == name -> return sema_serde_items_param_flags(definition.type_params, sema_serde_items_enum_wire(definition))
             }
-            else -> next
+            else -> {}
         }
-        if params.len() == 0 -> return None
-        flags := [Bool]{}
-        loop param in params {
-            mentioned := false
-            loop ty in wire {
-                if sema_serde_mentions_parameter(ty, param.name) {
-                    mentioned = true
-                    break
-                }
-            }
-            &flags.push(mentioned)
-        }
-        return Val(flags)
+        position += 1
     }
     None
 }
 
-// Rust `has_explicit_codec` (generated: false) and the already-generated
-// codec set (generated: true): an impl item, or an inline trait block of the
-// declaration itself, for `trait_name`.
-fn sema_serde_items_has_impl(items: [Item], type_name: String, trait_name: String, generated: Bool) -> Bool Never! {
-    loop index in 0..<items.len() {
-        if items[index] == {
-            .Impl(implementation) -> {
-                if implementation.type_name == type_name && implementation.trait_name == Val(trait_name) && implementation.is_generated_serde == generated -> return true
+fn sema_serde_items_param_flags(params: [TypeParam], wire: [Type]) -> [Bool]? Never! {
+    if params.len() == 0 -> return None
+    flags := [Bool]{}
+    loop param in params {
+        mentioned := false
+        loop ty in wire {
+            if sema_serde_mentions_parameter(ty, param.name) {
+                mentioned = true
+                break
             }
-            .Struct(definition) -> {
-                if definition.name == type_name {
-                    loop block in definition.trait_impls {
-                        if block.trait_name == trait_name && block.compiler_generated == generated -> return true
-                    }
-                }
-            }
-            .Enum(definition) -> {
-                if definition.name == type_name {
-                    loop block in definition.trait_impls {
-                        if block.trait_name == trait_name && block.compiler_generated == generated -> return true
-                    }
-                }
-            }
-            else -> {}
         }
+        &flags.push(mentioned)
     }
-    false
+    Val(flags)
+}
+
+// Rust `has_explicit_codec` (written) and the already-generated codec set
+// (generated) for `type_name`'s `trait_name`: an impl item, or an inline trait
+// block of the declaration itself (sema_derive_impl_flags bits).
+fn sema_serde_items_impl_flags(facts: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Int Never! {
+    facts.trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) ?? 0
+}
+
+fn sema_serde_items_written(flags: Int) -> Bool Never! {
+    flags == 1 || flags == 3
+}
+
+fn sema_serde_items_generated(flags: Int) -> Bool Never! {
+    flags >= 2
 }
 
 // The generated items carry the first codec derive's span, else the
@@ -351,31 +335,27 @@ fn sema_serde_items_decode_span(span: Span) -> Span Never! {
     Span{start: span.end, end: span.end}
 }
 
-// The body of declaration `type_name`'s generated `trait_name` codec, built
-// when the codec is first demanded, and the wire types that body encodes or
-// decodes (each one's codec is demanded with it). None when `items` declares
-// no struct or enum `type_name`.
+// The body of declaration `items[position]`'s generated `trait_name` codec,
+// built when the codec is first demanded, and the wire types that body
+// encodes or decodes (each one's codec is demanded with it). None when that
+// item is not a struct or enum.
 struct SemaSerdeCodecBody {
     body: [Stmt]
     wire: [Type]
 }
 
-fn sema_serde_items_codec_body(items: [Item], type_name: String, trait_name: String, span: Span) -> SemaSerdeCodecBody? Never! {
+fn sema_serde_items_codec_body(items: [Item], position: Int, trait_name: String, span: Span) -> SemaSerdeCodecBody? Never! {
     encode :: trait_name == "Encode"
-    loop index in 0..<items.len() {
-        if items[index] == {
-            .Struct(definition) -> {
-                if definition.name != type_name -> next
-                body :: if encode -> sema_serde_items_struct_encode_body(definition, span) else -> sema_serde_items_struct_decode_body(definition, items, span)
-                return Val(SemaSerdeCodecBody{body: body, wire: sema_serde_items_struct_wire(definition)})
-            }
-            .Enum(definition) -> {
-                if definition.name != type_name -> next
-                body :: if encode -> sema_serde_items_enum_encode_body(definition, span) else -> sema_serde_items_enum_decode_body(definition, span)
-                return Val(SemaSerdeCodecBody{body: body, wire: sema_serde_items_enum_wire(definition)})
-            }
-            else -> {}
+    if items[position] == {
+        .Struct(definition) -> {
+            body :: if encode -> sema_serde_items_struct_encode_body(definition, span) else -> sema_serde_items_struct_decode_body(definition, items, span)
+            return Val(SemaSerdeCodecBody{body: body, wire: sema_serde_items_struct_wire(definition)})
         }
+        .Enum(definition) -> {
+            body :: if encode -> sema_serde_items_enum_encode_body(definition, span) else -> sema_serde_items_enum_decode_body(definition, span)
+            return Val(SemaSerdeCodecBody{body: body, wire: sema_serde_items_enum_wire(definition)})
+        }
+        else -> {}
     }
     None
 }
@@ -1188,10 +1168,13 @@ fn sema_codec_impl_pending(implementation: SemaRegistrationImpl) -> Bool Never! 
 // each demanded generated codec still without a body gets it (recorded on
 // `trail`), and the codecs of its wire types are demanded in turn. The filled
 // impls become the next wave (graph.codec_wave_rows); returns their modules
-// in first-demand order.
+// in first-demand order. A module's items are indexed once, on its first
+// pending codec (sema_codec_index_module), so each codec is keyed lookups.
 fn sema_codec_fill_demanded(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail) -> [Int] {
     wave := [String:Bool]{}
     modules := [Int]{}
+    positions := [String:Int]{}
+    indexed := [Int:Bool]{}
     loop {
         keys :: sema_codec_demand_take(graph.codec_demand)
         if keys.len() == 0 -> break
@@ -1205,8 +1188,14 @@ fn sema_codec_fill_demanded(graph: &SemaRegistrationGraph, trail: &SemaGraphTrai
                 row :: row_ref.row
                 if graph.modules[module_index].impls[row].trait_name != (Val(trait_name)) -> next
                 if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> next
-                generated :: sema_serde_items_codec_body(graph.modules[module_index].program.items, graph.modules[module_index].impls[row].target_type_name, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? next
-                sema_codec_set_body(&graph, module_index, row, generated.body)
+                if indexed.get(module_index) == None {
+                    sema_codec_index_module(graph.modules[module_index].program.items, module_index, &positions)
+                    indexed[module_index] = true
+                }
+                type_key :: "{module_index}|{graph.modules[module_index].impls[row].target_type_name}"
+                declaration :: positions.get(type_key) ?? next
+                generated :: sema_serde_items_codec_body(graph.modules[module_index].program.items, declaration, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? next
+                sema_codec_set_body(&graph, module_index, row, generated.body, positions.get("{type_key}|{trait_name}"))
                 &trail.entries.push(SemaGraphUndo.CodecBody{module_index: module_index, row: row})
                 if !modules.contains(module_index) -> &modules.push(module_index)
                 wave["{module_index}:{row}"] = true
@@ -1218,33 +1207,54 @@ fn sema_codec_fill_demanded(graph: &SemaRegistrationGraph, trail: &SemaGraphTrai
     modules
 }
 
+// Module `module_index`'s item positions for the codec fill: its first struct
+// or enum per name ("{module}|{name}") and its first generated codec impl item
+// per type and trait ("{module}|{type}|{trait}"). Filling rewrites impl items
+// in place, so the positions hold for the whole fill.
+fn sema_codec_index_module(items: [Item], module_index: Int, positions: &[String:Int]) Never! {
+    loop (position, item) in items {
+        key := ""
+        if item == {
+            .Struct(definition) -> key = "{module_index}|{definition.name}"
+            .Enum(definition) -> key = "{module_index}|{definition.name}"
+            .Impl(implementation) -> {
+                if !implementation.is_generated_serde -> next
+                trait_name :: implementation.trait_name ?? next
+                key = "{module_index}|{implementation.type_name}|{trait_name}"
+            }
+            else -> next
+        }
+        if positions.get(key) == None -> positions[key] = position
+    }
+}
+
+// The first generated codec impl item for `type_name`'s `trait_name`.
+fn sema_codec_impl_position(items: [Item], type_name: String, trait_name: String?) -> Int? Never! {
+    loop index in 0..<items.len() {
+        if items[index] == .Impl(implementation) {
+            if implementation.is_generated_serde && implementation.type_name == type_name && implementation.trait_name == trait_name -> return Val(index)
+        }
+    }
+    None
+}
+
 // Gives generated codec impl `row` of module `module_index` its body: the
 // registered method rows, the impl declaration, and the program's impl item
-// (the function memory plan reads the items). An empty `body` undoes it.
-fn sema_codec_set_body(graph: &SemaRegistrationGraph, module_index: Int, row: Int, body: [Stmt]) Never! {
+// at `position` (the function memory plan reads the items). An empty `body`
+// undoes it.
+fn sema_codec_set_body(graph: &SemaRegistrationGraph, module_index: Int, row: Int, body: [Stmt], position: Int?) Never! {
     loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
         graph.modules[module_index].impls[row].methods[method_index].declaration.body = body
     }
     loop method_index in 0..<graph.modules[module_index].impls[row].declaration.methods.len() {
         graph.modules[module_index].impls[row].declaration.methods[method_index].body = body
     }
-    type_name :: graph.modules[module_index].impls[row].target_type_name.copy()
-    trait_name :: graph.modules[module_index].impls[row].trait_name.copy()
-    found := Int?{None}
-    loop index in 0..<graph.modules[module_index].program.items.len() {
-        if graph.modules[module_index].program.items[index] == .Impl(implementation) {
-            if implementation.is_generated_serde && implementation.type_name == type_name && implementation.trait_name == trait_name {
-                found = Val(index)
-                break
-            }
-        }
-    }
-    position :: found ?? return
-    updated := graph.modules[module_index].program.items[position].copy()
+    item_index :: position ?? return
+    updated := graph.modules[module_index].program.items[item_index].copy()
     if updated == .Impl(implementation) {
         rewritten := implementation.copy()
         loop method_index in 0..<rewritten.methods.len() -> rewritten.methods[method_index].body = body
-        graph.modules[module_index].program.items[position] = Item.Impl{value: ^rewritten}
+        graph.modules[module_index].program.items[item_index] = Item.Impl{value: ^rewritten}
     }
 }
 
@@ -1252,7 +1262,8 @@ fn sema_codec_set_body(graph: &SemaRegistrationGraph, module_index: Int, row: In
 // header again and its requirement is new again, so a later pass over the
 // same graph that reaches the codec demands it afresh.
 fn sema_codec_undo_body(graph: &SemaRegistrationGraph, module_index: Int, row: Int) {
-    sema_codec_set_body(&graph, module_index, row, [Stmt]{})
+    position :: sema_codec_impl_position(graph.modules[module_index].program.items, graph.modules[module_index].impls[row].target_type_name, graph.modules[module_index].impls[row].trait_name)
+    sema_codec_set_body(&graph, module_index, row, [Stmt]{}, position)
     trait_name :: graph.modules[module_index].impls[row].trait_name ?? return
     key :: "{trait_name}|{graph.modules[module_index].impls[row].target_type_name}"
     demand := graph.codec_demand

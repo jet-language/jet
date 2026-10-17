@@ -2597,6 +2597,10 @@ fn sema_registration_cli_marker_string(marker: Marker) -> String? {
 // is not part of this pass (an enum reports it while its checked declaration
 // is built).
 fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
+    if !sema_registration_serde_any_explicit(items) -> return
+    // Keyed wire-form questions: one index per module, not a rescan per field.
+    facts :: sema_derive_item_index(items)
+    no_auto :: [String:Bool]{}
     loop item in items {
         if item == .Struct(definition) {
             encode :: sema_registration_serde_derives(definition.derives, "Encode")
@@ -2614,7 +2618,7 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
                     next
                 }
                 if skip || flatten -> next
-                sema_registration_serde_wire_form(items, field.ty, encode, decode, field.name_span, &diagnostics)
+                sema_registration_serde_wire_form(items, facts, no_auto, field.ty, encode, decode, field.name_span, &diagnostics)
                 if decode -> sema_registration_serde_union_shapes(items, field.ty, field.name_span, &diagnostics)
             }
         }
@@ -2626,11 +2630,11 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
                 if variant.payload == {
                     .Unit -> {}
                     .Single(ty, _) -> {
-                        sema_registration_serde_wire_form(items, ty, encode, decode, variant.name_span, &diagnostics)
+                        sema_registration_serde_wire_form(items, facts, no_auto, ty, encode, decode, variant.name_span, &diagnostics)
                         if decode -> sema_registration_serde_union_shapes(items, ty, variant.name_span, &diagnostics)
                     }
                     .Named(fields) -> loop field in fields {
-                        sema_registration_serde_wire_form(items, field.ty, encode, decode, variant.name_span, &diagnostics)
+                        sema_registration_serde_wire_form(items, facts, no_auto, field.ty, encode, decode, variant.name_span, &diagnostics)
                         if decode -> sema_registration_serde_union_shapes(items, field.ty, variant.name_span, &diagnostics)
                     }
                 }
@@ -2639,14 +2643,33 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
+// Whether any struct or enum derives a codec explicitly (the only
+// declarations sema_registration_serde_items checks).
+fn sema_registration_serde_any_explicit(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                if sema_registration_serde_derives(definition.derives, "Encode") || sema_registration_serde_derives(definition.derives, "Decode") -> return true
+            }
+            .Enum(definition) -> {
+                if sema_registration_serde_derives(definition.derives, "Encode") || sema_registration_serde_derives(definition.derives, "Decode") -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
 // Rust `e2411` over `is_encodable_ty`/`is_decodable_ty`: the generated and
-// written codecs are already items here, so no automatic set is needed.
-fn sema_registration_serde_wire_form(items: [Item], ty: Type, encode: Bool, decode: Bool, span: Span, diagnostics: &[Diagnostic]) {
-    shown :: sema_type_show(ty)
-    if encode && !sema_serde_items_codable(items, ty, "Encode", [String:Bool]{}) {
+// written codecs are already items here, so no automatic set is needed. The
+// type is shown only for a report.
+fn sema_registration_serde_wire_form(items: [Item], facts: SemaDeriveItemIndex, no_auto: [String:Bool], ty: Type, encode: Bool, decode: Bool, span: Span, diagnostics: &[Diagnostic]) {
+    if encode && !sema_serde_items_codable(items, facts, ty, "Encode", no_auto) {
+        shown :: sema_type_show(ty)
         &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be serialized", "only types that opt in (and their fields) have a wire form; `{shown}` does not", "add `#[Codable]` or `#[Encode]` to `{shown}`, or remove it from the encoded value"))
     }
-    if decode && !sema_serde_items_codable(items, ty, "Decode", [String:Bool]{}) {
+    if decode && !sema_serde_items_codable(items, facts, ty, "Decode", no_auto) {
+        shown :: sema_type_show(ty)
         &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be decoded", "only types that opt in (and their fields) have a wire form; `{shown}` does not", "add `#[Codable]` or `#[Decode]` to `{shown}`, or remove it from the decoded value"))
     }
 }
