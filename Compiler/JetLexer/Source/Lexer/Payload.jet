@@ -123,11 +123,15 @@ fn parse_integer_literal(text: String) -> Int? {
         }
     }
     if i >= raw.len() -> return None
+    // value * radix + digit <= max exactly when value < limit, or value ==
+    // limit and digit <= rest: one exact division per literal, not per digit.
+    limit :: 9223372036854775807 /% radix
+    rest :: 9223372036854775807 - limit * radix
     value := 0
     loop i < raw.len() {
         digit :: digit_value(Int.from_u8(raw[i]))
         if digit < 0 || digit >= radix -> return None
-        if value > (9223372036854775807 - digit) /% radix -> return None
+        if value > limit || (value == limit && digit > rest) -> return None
         value = value * radix + digit
         i += 1
     }
