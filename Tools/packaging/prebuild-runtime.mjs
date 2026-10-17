@@ -101,7 +101,12 @@ try {
   if (factoryRecord) {
     factory = invokeStageZeroFactory({ recordFile: factoryRecord, repo, sourceRoot: library, entry: 'unit.jet', work: join(out, 'factory'), policy });
   } else {
-    const run = spawnSync(jet, ['check', join(library, 'unit.jet')], {
+    // A native compiler: the runtime-library seam in the hosted source loader
+    // (Request.jet jet_cli_compile_for_target) under `jet doc` (checked MIR,
+    // no lowering of the unit itself; its pages land in the temporary work
+    // directory). Native `jet check` aborts before compiling in every native
+    // compiler so far, and `doc --check` exits 1 on undocumented public items.
+    const run = spawnSync(jet, ['doc', join(library, 'unit.jet')], {
       cwd: library, stdio: 'inherit',
       env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, ...policy },
     });
