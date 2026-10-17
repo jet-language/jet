@@ -492,7 +492,7 @@ fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: Proven
     if !grant.read -> return Err(store_broker_invalid("shared-store peer has no read authority"))
     if !write -> return
     if !grant.write -> return Err(store_broker_invalid("shared-store peer has no write authority"))
-    if grant.credential == Val(STORE_BROKER_PRIVATE_OWNER) {
+    if grant.credential == .Val(granted) && granted == STORE_BROKER_PRIVATE_OWNER {
         if credential != STORE_BROKER_PRIVATE_OWNER -> return Err(store_broker_invalid("shared-store writer credential is invalid"))
         return
     }

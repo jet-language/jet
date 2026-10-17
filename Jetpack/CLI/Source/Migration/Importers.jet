@@ -3,30 +3,6 @@
 // metadata, and SwiftPM manifests become an ImportPlan whose provider facts
 // keep every loss visible.
 
-// A Cargo dependency table's role.
-enum CargoDependencyKind {
-    Runtime
-    Dev
-    Build
-
-    fn label(self) -> String Never! {
-        if self == {
-            .Runtime -> "runtime"
-            .Dev -> "dev"
-            .Build -> "build"
-        }
-    }
-
-    // The table suffix (`[target.<cfg>.<suffix>]` or bare `[<suffix>]`).
-    fn suffix(self) -> String Never! {
-        if self == {
-            .Runtime -> ".dependencies"
-            .Dev -> ".dev-dependencies"
-            .Build -> ".build-dependencies"
-        }
-    }
-}
-
 // One Cargo dependency table header with its role and target platform.
 struct CargoDependencySection {
     header: String

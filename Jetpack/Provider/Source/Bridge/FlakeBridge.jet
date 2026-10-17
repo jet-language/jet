@@ -214,17 +214,6 @@ fn provider_parse_facts_json(text: String) -> DevShellFacts ProviderError! {
     Ok(DevShellFacts{packages: provider_sorted_unique(packages), unmapped})
 }
 
-// Sorted, with exact duplicates removed.
-fn provider_sorted_unique(values: [String]) -> [String] Never! {
-    sorted := values
-    &sorted.sort()
-    unique := [String]{}
-    loop value in sorted {
-        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
-    }
-    unique
-}
-
 // The generated `env.jet` shim. A sorted, unique package list makes re-running
 // the bridge on an unchanged flake reproduce the same bytes.
 fn provider_render_shim(facts: DevShellFacts) -> String Never! {

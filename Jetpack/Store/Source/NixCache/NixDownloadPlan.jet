@@ -39,15 +39,15 @@ struct NixDownloadPlan {
 // endpoint (Rust thread-local `PLANNED_NARINFOS`).
 store_nix_planned_narinfos := [String: [String: FetchedInfo]]{}
 
-fn store_nix_planned_key(roots: HangarRoots, endpoint: CacheEndpoint) -> String Never! {
+fn store_nix_planned_key(roots: HangarRoots, endpoint: NixCacheEndpoint) -> String Never! {
     "{roots.root}\n{endpoint.endpoint}"
 }
 
-fn store_nix_remember_planned_narinfos(roots: HangarRoots, endpoint: CacheEndpoint, infos: ^[String: FetchedInfo]) Never! {
+fn store_nix_remember_planned_narinfos(roots: HangarRoots, endpoint: NixCacheEndpoint, infos: ^[String: FetchedInfo]) Never! {
     store_nix_planned_narinfos[store_nix_planned_key(roots, endpoint)] = infos
 }
 
-fn store_nix_planned_narinfos_for(roots: HangarRoots, endpoint: CacheEndpoint) -> [String: FetchedInfo] Never! {
+fn store_nix_planned_narinfos_for(roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String: FetchedInfo] Never! {
     store_nix_planned_narinfos.get(store_nix_planned_key(roots, endpoint)) ?? [String: FetchedInfo]{}
 }
 
@@ -90,7 +90,7 @@ fn store_nix_take_wave(queue: &Rank<String>, limit: Int) -> [String] Never! {
 // NAR. Rust fans each wave out over OS threads; the cooperative port walks the
 // same waves in the same sorted order, so results and first failures agree.
 fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
-    endpoint :: CacheEndpoint.from_roots(roots)
+    endpoint :: NixCacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
     cache_info_loaded := offline
     existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, roots))

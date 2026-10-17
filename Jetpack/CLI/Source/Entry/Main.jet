@@ -4,17 +4,22 @@
 // any engine startup, routes the two hidden sandbox-host protocols, and
 // otherwise runs the verb. The Wasmtime-backed hosts live only in this
 // entry, so the jetpack library linked into `jet` stays plugin-free.
+// The same binary is the two publication helpers (Rust bins
+// jetpack-nix-index and jetpack-trust-root) when invoked under their names.
 
 // `argv` is the full process argument vector, program name first.
 fn cli_jetpack_main(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    program :: files.basename(argv.get(0) ?? "")
+    if program == "jetpack-nix-index" -> return cli_nix_index_main(cli_tail(argv, 1))
+    if program == "jetpack-trust-root" -> return cli_trust_root_main(cli_tail(argv, 1))
     // The root `jet` process probes this hidden flag before every engine
     // dispatch; the answer is only the lockstep release version.
-    if argv.get(1) == Val(ENGINE_PROTOCOL_FLAG) {
+    if argv.get(1) == .Val(flag) && flag == ENGINE_PROTOCOL_FLAG {
         print(COMPILER_VERSION)
         return EXIT_OK
     }
     args :: cli_tail(argv, 1)
-    if args.get(0) == Val(EXTENSION_HOST_SUBCOMMAND) -> return cli_run_compiler_extension_host(cli_tail(args, 1))
-    if args.get(0) == Val(BUILD_PLUGIN_HOST_SUBCOMMAND) -> return cli_run_build_plugin_host(cli_tail(args, 1))
+    if args.get(0) == .Val(verb) && verb == EXTENSION_HOST_SUBCOMMAND -> return cli_run_compiler_extension_host(cli_tail(args, 1))
+    if args.get(0) == .Val(verb) && verb == BUILD_PLUGIN_HOST_SUBCOMMAND -> return cli_run_build_plugin_host(cli_tail(args, 1))
     cli_run(args)
 }

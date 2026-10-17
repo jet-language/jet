@@ -544,7 +544,7 @@ fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
     layout :: producer.facts.get("cc.layout") ?? ""
     if producer.provider == CC_TOOLCHAIN_PRODUCER -> return layout == CC_TOOLCHAIN_FIXTURE_LAYOUT
     if producer.provider == CC_TOOLCHAIN_NIX_PRODUCER {
-        return layout == CC_TOOLCHAIN_NIX_LAYOUT && producer.facts.get("cc.producer") == Val(CC_TOOLCHAIN_PRODUCER)
+        return layout == CC_TOOLCHAIN_NIX_LAYOUT && producer.facts.get("cc.producer") == .Val(producer_name) && producer_name == CC_TOOLCHAIN_PRODUCER
     }
     false
 }

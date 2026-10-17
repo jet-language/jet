@@ -288,7 +288,7 @@ fn store_broker_writer_credential(config: SharedStoreConfig) -> String? StoreErr
         }
     }
     if !grant.write -> return Ok(None)
-    if grant.credential == Val(STORE_BROKER_PRIVATE_OWNER) -> return Ok(Val(STORE_BROKER_PRIVATE_OWNER))
+    if grant.credential == .Val(granted) && granted == STORE_BROKER_PRIVATE_OWNER -> return Ok(Val(STORE_BROKER_PRIVATE_OWNER))
     loop list in grant.allowlists() {
         if list.allowed.len() == 0 -> return Ok(None)
     }

@@ -92,7 +92,7 @@ struct NixAdmission {
         verification :: self.verification
         download_started :: time.start()
         requests :: store_nix_validate_requests(requested)
-        endpoint :: CacheEndpoint.from_roots(self.roots)
+        endpoint :: NixCacheEndpoint.from_roots(self.roots)
         store_dir := "/nix/store"
         if !offline -> store_dir = endpoint.cache_info().store_dir
         existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, self.roots))
@@ -189,7 +189,7 @@ struct NixAdmission {
     }
 
     // Planned signed metadata first, else a fresh narinfo lookup, then fetch.
-    fn fetch_pending(self, endpoint: CacheEndpoint, planned_infos: [String: FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
+    fn fetch_pending(self, endpoint: NixCacheEndpoint, planned_infos: [String: FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
         info :: planned_infos.get(store_path) ?? {
             looked :: endpoint.narinfo(store_path, store_dir)
             looked ?? return Err(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
@@ -197,7 +197,7 @@ struct NixAdmission {
         self.fetch_object(endpoint, info, store_dir, progress)
     }
 
-    fn fetch_object(self, endpoint: CacheEndpoint, info: FetchedInfo, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
+    fn fetch_object(self, endpoint: NixCacheEndpoint, info: FetchedInfo, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
         verification :: self.verification
         compression :: info.info.compression
         if compression == .Xz || compression == .Bzip2 {
