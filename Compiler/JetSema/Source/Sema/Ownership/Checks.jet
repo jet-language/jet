@@ -2787,8 +2787,9 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             }
         }
         // E0204 (#4702, Rust `reject_take_while_lent`): an earlier argument
-        // of this call already holds the name a take parameter would receive.
-        take_lent :: param.convention == AccessConvention.Move && !binder_rooted && sema_ownership_unmarked_moves_name(arg.expr) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) && sema_ownership_call_places_lent(accesses, places)
+        // of this call already holds the name, or the projected place
+        // (`pair(d.title, ^d.title)`), a take parameter would receive.
+        take_lent :: param.convention == AccessConvention.Move && !binder_rooted && (sema_ownership_unmarked_moves_name(arg.expr) || sema_ownership_takes_projected_place(arg)) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) && sema_ownership_call_places_lent(accesses, places)
         if places.len() > 0 && write_place_ok {
             loop actual in places {
                 if sema_ownership_call_access_conflict(accesses, actual, arg.convention) {
@@ -2824,7 +2825,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             if sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) -> next
             if take_lent {
                 accepted = false
-                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
+                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
                 next
             }
             // D-CALLSITE-MARK1=A: a name in two argument slots of one call has
@@ -2856,10 +2857,18 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 }
             }
         }
+        // Exact-place inference already consumed a projected take; while an
+        // earlier argument still reads that place, the take is E0204, never a
+        // move the backend would find used after it was moved.
+        if take_lent && sema_ownership_takes_projected_place(arg) {
+            accepted = false
+            &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
+            next
+        }
         if !mark_implicit_take && param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted && sema_ownership_unmarked_moves_name(arg.expr) {
             if take_lent {
                 accepted = false
-                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
+                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
                 next
             }
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
@@ -2878,6 +2887,25 @@ fn sema_ownership_call_places_lent(accesses: [SemaOwnershipCallAccess], places: 
         }
     }
     false
+}
+
+// An explicit `^` argument naming a projected place (`^d.title`), which
+// exact-place inference moves as that field, never as its whole owner.
+fn sema_ownership_takes_projected_place(arg: CallArg) -> Bool Never! {
+    if arg.convention != AccessConvention.Move -> return false
+    if arg.expr == {
+        .Place(value, access, _) -> access == PlaceAccess.Take && !sema_ownership_unmarked_moves_name(value)
+        .Field(_, _, _) -> true
+        else -> false
+    }
+}
+
+// The source spelling a take-while-lent report names: the argument's name,
+// else its projected place (`d.title`).
+fn sema_ownership_taken_name(arg: CallArg, places: [SemaOwnershipPlace]) -> String Never! {
+    if arg.expr == .Ident(name, _) -> return name
+    if places.len() > 0 -> return sema_ownership_place_name(places[0])
+    "this value"
 }
 
 fn sema_ownership_diag_take_while_lent(name: String, callee: String, span: Span) -> Diagnostic {
