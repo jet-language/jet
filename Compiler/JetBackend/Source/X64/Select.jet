@@ -1167,10 +1167,13 @@ X64_COMPILE_PARTS_PER_THREAD :: 8
 // at its task's join) compiles as a trap (x64_trap_function) with one error
 // naming it, so the function table stays whole and the object, link and
 // every later function still run and report. Its output is never shipped.
-fn x64_compile_module_owned(program: ^LIRModule, threads: CompilerThreads, keep_going: Bool) -> X64CompiledModule Never! {
+// `linted` is the lint of this exact module when its producer already ran it
+// (an O0 module straight from the lowering, LIRLowering.lint); the compile
+// reports and traps those findings instead of linting the module again.
+fn x64_compile_module_owned(program: ^LIRModule, threads: CompilerThreads, keep_going: Bool, linted: [LIRLintIssue]?) -> X64CompiledModule Never! {
     errors := [String]{}
     trapped := [String:Bool]{}
-    loop issue in lir_lint_module(program) {
+    loop issue in linted ?? lir_lint_module(program) {
         &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
         if keep_going && issue.function != "" -> trapped[issue.function] = true
     }
