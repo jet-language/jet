@@ -225,10 +225,18 @@ fn jet_cli_struct_conflict(kind: String, base: JetCLIStructUnit, ours: JetCLIStr
 }
 
 fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: &[JetCLIStructConflict]) -> String Never! {
+    // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if ours == theirs -> return ours.copy()
+    // copy: `theirs` stays with the caller (`theirs` is a read parameter: no move out of it, E0201)
+    // and the new value owns its own.
     if ours == base -> return theirs.copy()
+    // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if theirs == base -> return ours.copy()
     &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{mir_sha256_hex(ours)}", theirs: "sha256:{mir_sha256_hex(theirs)}"})
+    // copy: `base` stays with the caller (`base` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     base.copy()
 }
 

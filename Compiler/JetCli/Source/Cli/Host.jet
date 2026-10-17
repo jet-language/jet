@@ -1209,6 +1209,8 @@ fn jet_cli_fmt_relative(path: String, root: String) -> String Never! {
     if path == root -> return ""
     prefix :: if root.ends_with("/") -> root else -> "{root}/"
     if path.starts_with(prefix) -> return path.slice(prefix.len()..<path.len())
+    // copy: `path` stays with the caller (`path` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     path.copy()
 }
 
@@ -1320,6 +1322,8 @@ fn jet_cli_external_fmt_collect(cwd: String, project_dir: String, explicit_paths
     }
     position := 1
     loop position < found.len() {
+        // copy: `found[position]` stays in its list (owner: `found`; no move out of an element,
+        // E0225) and the binding `current` owns its own.
         current :: found[position].copy()
         slot := position
         loop slot > 0 && jet_cli_external_fmt_path_less(current, found[slot - 1]) {

@@ -24,18 +24,25 @@ fn jet_cli_flash_parse_args(args: [String]) -> JetCLIFlashParse JetCLIFlashError
                 break
             }
         }
+        // copy: the flag text is a sub-range copied out of `raw` (which keeps its bytes), or the
+        // argument itself, which stays in `args` (a read parameter: no move out of it, E0201);
+        // `flag` owns its own text.
         flag :: if equal >= 0 -> String.from_bytes(raw[0..<equal].copy()) ?? panic("UTF-8 flag") else -> argument.copy()
+        // copy: the inline value is a sub-range copied out of `raw` (which keeps its whole byte
+        // list); a range has no owner to move from.
         inline :: if equal >= 0 -> Val(String.from_bytes(raw[equal + 1..<raw.len()].copy()) ?? panic("UTF-8 value")) else -> None
         if flag != "--target" && flag != "--image" && flag != "--audit" && flag != "--adapter" -> return Err(jet_cli_flash_error("unexpected flash argument `{argument}`"))
         value := ""
         if inline == {
             .Val(text) -> {
                 if text.is_empty() -> return Err(jet_cli_flash_error("`{flag}` needs a value"))
-                value = text.copy()
+                value = ^text
             }
             .None -> {
                 index += 1
                 if index >= args.len() || args[index].starts_with("-") -> return Err(jet_cli_flash_error("`{flag}` needs a value"))
+                // copy: `args[index]` stays with the caller (`args` is a read parameter: no move
+                // out of it, E0201) and `value` owns its own.
                 value = args[index].copy()
             }
         }
@@ -51,8 +58,12 @@ fn jet_cli_flash_parse_args(args: [String]) -> JetCLIFlashParse JetCLIFlashError
 }
 // Rust canonical_flash_args (CmdFlash.rs:926-934).
 fn jet_cli_flash_canonical_args(args: [String]) -> [String] Never! {
+    // copy: `args` stays with the caller (`args` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if args.len() > 0 && args[0] == "flash" -> return args.copy()
     result := [String]{"flash"}
+    // copy: `word` stays in the iterated collection (`word` is a view of its element; no move out
+    // of an element, E0225) and the pushed row owns its own.
     loop word in args -> &result.push(word.copy())
     result
 }
@@ -64,9 +75,9 @@ fn jet_cli_flash_help() -> String Never! {
 // #4378's typed raw-address refusal is never treated as an absent candidate.
 fn jet_cli_flash_candidate_metadata<H: JetCLIFlashHost>(host: &H, path: Path) -> JetCLIFlashMetadata? JetCLIFlashError! {
     if &host.symlink_metadata(path) == {
-        .Ok(metadata) -> Ok(Val(metadata.copy()))
+        .Ok(metadata) -> Ok(Val(^metadata))
         .Err(cause) -> {
-            if cause.byte_offset != None -> return Err(cause.copy())
+            if cause.byte_offset != None -> return Err(^cause)
             Ok(jet_cli_flash_no_metadata())
         }
     }
@@ -78,7 +89,7 @@ fn jet_cli_flash_resolve_tool<H: JetCLIFlashHost>(host: &H, name: String) -> Pat
     // #4376: a result match retains the checked owner of fallible optional Core Paths.
     snapshot :: if &host.path_snapshot() == {
         .Ok(value) -> ^value
-        .Err(cause) -> { return Err(cause.copy()) }
+        .Err(cause) -> { return Err(^cause) }
     }
     directories :: snapshot ?? return Err(jet_cli_flash_error("cannot resolve declared flash tool without a PATH snapshot"))
     loop directory in directories {
@@ -121,6 +132,8 @@ fn jet_cli_flash_resolve_audit<H: JetCLIFlashHost>(host: &H, image: Path, target
         _ :: inspected ?? next
         &existing.push(jet_cli_flash_regular_file<H>(&host, candidate, "target audit"))
     }
+    // copy: `existing[0]` stays in its list (owner: `existing`; no move out of an element, E0225)
+    // and the returned value owns its own.
     if existing.len() == 1 -> return Ok(existing[0].copy())
     if existing.is_empty() -> return Err(jet_cli_flash_error("no target audit sidecar found beside `{flash_paths.show(image)}`; pass `--audit <target.json>`"))
     Err(jet_cli_flash_error("multiple target audit sidecars found beside `{flash_paths.show(image)}`; pass one with `--audit`"))
@@ -136,6 +149,9 @@ fn jet_cli_flash_read_audit<H: JetCLIFlashHost>(host: &H, path: Path) -> String 
 // Rust verify_audit_identity (CmdFlash.rs:1025-1059); tokens are never decoded.
 fn jet_cli_flash_verify_audit(fields: [String:String], machine: MIRTargetMachine, digest: String) JetCLIFlashError! {
     keys :: [String]{"name", "triple", "environment", "provider_identity"}
+    // copy: `machine.name` stays with the caller (`machine` is a read parameter: no move out of it,
+    // E0201) and the new value owns its own. `machine.triple` stays with the caller (`machine` is a
+    // read parameter: no move out of it, E0201) and the new value owns its own.
     expected :: [String]{machine.name.copy(), machine.triple.copy(), jet_target_environment_identity(machine), jet_target_provider_identity(machine)}
     loop (index, key) in keys {
         actual :: fields.get(key) ?? return Err(jet_cli_flash_error("target audit has no `{key}` identity field"))
@@ -222,6 +238,8 @@ fn jet_cli_flash_parse_json_string_token(cursor: &JetCLIFlashTokenCursor) -> Str
             next
         }
         if byte == 92 -> escaped = true
+        // copy: the string token is a sub-range copied out of the cursor's bytes (owner: `cursor`,
+        // a write parameter that keeps its whole buffer).
         if byte == 34 -> return Ok(String.from_bytes(cursor.bytes[start..<cursor.at - 1].copy()) ?? return Err(jet_cli_flash_error("JSON string is not UTF-8")))
         if byte <= 31 -> return Err(jet_cli_flash_error("JSON string contains a control character"))
     }
@@ -279,13 +297,19 @@ fn jet_cli_flash_skip_json_value(cursor: &JetCLIFlashTokenCursor) JetCLIFlashErr
 // Rust json_string_token (CmdFlash.rs:1228-1231).
 fn jet_cli_flash_json_string_token(value: String) -> String Never! {
     bytes :: canonical_json_bytes(CanonicalJSON.String(value))
+    // copy: the unquoted text is a sub-range copied out of `bytes` (which keeps its whole list); a
+    // range has no owner to move from.
     String.from_bytes(bytes[1..<bytes.len() - 2].copy()) ?? panic("canonical JSON string is UTF-8")
 }
 struct JetCLIFlashCapture { bytes: [U8], truncated: Bool }
 // Rust bound_capture (CmdFlash.rs:1233-1242).
 fn jet_cli_flash_bound_capture(bytes: [U8]) -> JetCLIFlashCapture Never! {
+    // copy: `bytes` stays with the caller (`bytes` is a read parameter: no move out of it, E0201)
+    // and the field `bytes` owns its own.
     if bytes.len() <= JET_CLI_FLASH_MAX_CAPTURE_BYTES -> return JetCLIFlashCapture{bytes: bytes.copy(), truncated: false}
     marker :: "\n<output truncated>\n".bytes()
+    // copy: the bounded capture is a sub-range copied out of `bytes` (owner: the caller, a read
+    // parameter); a range has no owner to move from.
     bounded := bytes[0..<JET_CLI_FLASH_MAX_CAPTURE_BYTES - marker.len()].copy()
     loop byte in marker -> &bounded.push(byte)
     JetCLIFlashCapture{bytes: bounded, truncated: true}
@@ -306,6 +330,8 @@ fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
         .Null -> Dyn.Null
         .Bool(flag) -> Dyn.Bool(flag)
         .Integer(text) -> Dyn.Int(Int.parse(text) ?? panic("canonical flash integer must fit status integer"))
+        // copy: `text` is a payload view of `value` (owner: the caller, a read parameter: no move
+        // out of it, E0201); the Dyn text owns its own.
         .String(text) -> Dyn.Text(text.copy())
         .Array(values) -> {
             rows := [Dyn]{}
@@ -314,6 +340,8 @@ fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
         }
         .Object(values) -> {
             fields := [(key: String, value: Dyn)]{}
+            // copy: `row.key` stays in the iterated collection (`row` is a view of its element; no
+            // move out of an element, E0225) and the field `key` owns its own.
             loop row in values -> &fields.push((key: row.key.copy(), value: jet_cli_flash_status_value(row.value)))
             Dyn.Object(fields)
         }
@@ -322,12 +350,16 @@ fn jet_cli_flash_status_value(value: CanonicalJSON) -> Dyn Never! {
 // Rust programmer_json (CmdFlash.rs:1338-1377).
 fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJSON Never! {
     config := [CanonicalJSON]{}
+    // copy: `value` stays in the iterated collection (`value` is a view of its element; no move out
+    // of an element, E0225) and the new `CanonicalJSON.String` value owns its own.
     loop value in facts.config -> &config.push(CanonicalJSON.String(value.copy()))
     CanonicalJSON.Object([CanonicalJSONField]{
         CanonicalJSONField{key: "adapter", value: CanonicalJSON.String(jet_target_programmer_adapter_name(facts.adapter))},
         CanonicalJSONField{key: "chip", value: jet_cli_flash_optional_json(facts.chip)},
         CanonicalJSONField{key: "config", value: CanonicalJSON.Array(config)},
         CanonicalJSONField{key: "cpu", value: jet_cli_flash_optional_json(facts.cpu)},
+        // copy: `facts.executable` stays with the caller (`facts` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
         CanonicalJSONField{key: "executable", value: CanonicalJSON.String(facts.executable.copy())},
         CanonicalJSONField{key: "interface", value: jet_cli_flash_optional_json(facts.interface)},
         CanonicalJSONField{key: "machine", value: jet_cli_flash_optional_json(facts.machine)},
@@ -335,6 +367,8 @@ fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJS
         CanonicalJSONField{key: "speed_khz", value: if facts.speed_khz == .Val(speed) -> CanonicalJSON.Integer("{speed}") else -> CanonicalJSON.Null},
     })
 }
+// copy: `text` is a payload view of `value` (owner: the caller, a read parameter: no move out of
+// it, E0201); the JSON string owns its own.
 fn jet_cli_flash_optional_json(value: String?) -> CanonicalJSON Never! { if value == .Val(text) -> CanonicalJSON.String(text.copy()) else -> CanonicalJSON.Null }
 // Rust programmer_value (CmdFlash.rs:1303-1336).
 fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> Dyn Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }

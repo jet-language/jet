@@ -224,7 +224,11 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
         // CmdInspect.rs Gates arm: CmdGates.rs `run` over the resolved entry
         // followed by the plane flags (filters and invocation writers).
         "gates" -> {
+            // copy: `file` stays with `file`, which is read again at line 229, and the new value
+            // owns its own.
             gate_args := [String]{file.copy()}
+            // copy: `option` stays in the iterated collection (`option` is a view of its element;
+            // no move out of an element, E0225) and the pushed row owns its own.
             loop option in request.options -> &gate_args.push(option.copy())
             return JetCLIPlan.Gates{file: file, args: gate_args, color: color, json: json, notice: notice}
         }
@@ -395,6 +399,8 @@ fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
+    // copy: `path` stays with the caller (`path` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if path.starts_with("/") -> return path.copy()
     cwd :: cli_files.cwd() ?? "."
     "{cwd}/{path}"
@@ -1807,7 +1813,11 @@ fn jet_cli_impact_walk(calls: [JetCLISemCall], symbol: String, depth_limit: Int,
     depths := [Int]{0}
     cursor := 0
     loop cursor < frontier.len() {
+        // copy: `frontier[cursor]` stays in its list (owner: `frontier`; no move out of an element,
+        // E0225) and the binding `current` owns its own.
         current :: frontier[cursor].copy()
+        // copy: `depths[cursor]` stays in its list (owner: `depths`; no move out of an element,
+        // E0225) and the binding `depth` owns its own.
         depth :: depths[cursor].copy()
         cursor += 1
         if depth >= depth_limit -> next

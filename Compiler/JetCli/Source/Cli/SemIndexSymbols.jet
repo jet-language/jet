@@ -843,6 +843,8 @@ fn jet_cli_symbol_display(modules: [JetDriverDocModule], module_path: String, na
         permit :: storage.guard_read()
         return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
     }
+    // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     name.copy()
 }
 

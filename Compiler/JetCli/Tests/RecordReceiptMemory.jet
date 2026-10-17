@@ -30,15 +30,21 @@ fn run() {
     record_receipt_memory_require(sequence == U64{2}, "sequence increment")
     fresh :: jet_cli_record_index_fresh_sequence(restored, JetCLIRecordIndexEntry{identity: identity, kind: "replay", artifact_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", path: ".jet/replays/new.jetreplay", recorded_sequence: U64{1}, size: U64{1}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}) ?? panic("fresh sequence")
     record_receipt_memory_require(fresh.recorded_sequence == U64{2}, "new key receives a sequence after the latest disk snapshot")
+    // copy: `entry` (a payload view of the index lookup above) is compared again at line 35, and
+    // the take argument needs its own row (owner: `sequence_entry`).
     sequence_entry := entry.copy()
     same :: jet_cli_record_index_fresh_sequence(restored, ^sequence_entry) ?? panic("existing sequence")
     record_receipt_memory_require(same == entry, "existing identity preserves its sequence for idempotence")
     section :: jet_cli_receipt_section_new("test", "TestRecord", "{}".bytes()) ?? panic("section")
     appended :: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: receipt.digest, section: section}
+    // copy: `receipt` stays with `receipt`, which is read again at line 40, and the binding
+    // `original` owns its own.
     original := receipt.copy()
     projected :: jet_cli_receipt_merge_sections(^original, claim, [JetCLIReceiptSectionRecord]{appended, appended}) ?? panic("merge")
     record_receipt_memory_require(projected.sections.len() == 1 && projected.digest == receipt.digest, "append-only sections deduplicate and retain immutable parent identity")
     wrong :: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: digest, section: section}
+    // copy: `receipt` stays the test's fixture (read for its digest and claim) while the rejected
+    // merge takes its own copy (owner: `invalid_parent`).
     invalid_parent := receipt.copy()
     rejected :: jet_cli_receipt_merge_sections(^invalid_parent, claim, [JetCLIReceiptSectionRecord]{wrong}) == .Err(_)
     record_receipt_memory_require(rejected, "section parent authentication is mandatory")

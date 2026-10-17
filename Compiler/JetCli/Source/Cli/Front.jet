@@ -1275,6 +1275,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCL
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
+    // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
+    // the binding `argv` owns its own.
     argv := raw.copy()
     if jet_cli_moved_command(argv[0]) == .Val(moved) {
         group :: JET_CLI_COMMANDS[moved.group].name
@@ -1287,6 +1289,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCL
             JET_DRIVER_EXIT_USAGE,
         )
     }
+    // copy: `argv[0]` stays in its list (owner: `argv`; no move out of an element, E0225) and the
+    // binding `group` owns its own.
     group :: argv[0].copy()
     exhaustive := false
     if jet_cli_group_index(group) == .Val(index) {
@@ -1296,6 +1300,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCL
         if (exhaustive || group == "env") && asks_help -> return jet_cli_renderable(jet_cli_group_help(group), json)
     }
     if argv.len() > 1 {
+        // copy: `argv[1]` stays in its list (owner: `argv`; no move out of an element, E0225) and
+        // the binding `sub` owns its own.
         sub :: argv[1].copy()
         nested :: jet_cli_nested_command(group, sub)
         if exhaustive && nested == None {

@@ -38,9 +38,15 @@ fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
 // normalized (`.` dropped, `..` pops a component, never above the root). No
 // filesystem lookup is involved, so the path need not exist.
 fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
+    // copy: `value` stays with the caller (`value` is a read parameter: no move out of it, E0201)
+    // and the new value owns its own.
     if value.len() == 0 || value.starts_with("<") -> return value.copy()
+    // copy: `value` stays with the caller (`value` is a read parameter: no move out of it, E0201)
+    // and the binding `absolute` owns its own.
     absolute := value.copy()
     if !value.starts_with("/") {
+        // copy: `value` stays with the caller (`value` is a read parameter: no move out of it,
+        // E0201) and the new value owns its own.
         base :: cwd ?? return value.copy()
         absolute = "{base}/{value}"
     }
@@ -267,7 +273,11 @@ fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
 // and `source` its bytes; a diagnostic's own origin replaces both. `cwd`
 // makes origin paths absolute the way `ReportPath::from_process` does.
 fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
+    // copy: `file` stays with the caller (`file` is a read parameter: no move out of it, E0201) and
+    // the binding `report_file` owns its own.
     report_file := file.copy()
+    // copy: `source` stays with the caller (`source` is a read parameter: no move out of it, E0201)
+    // and the binding `text` owns its own.
     text := source.copy()
     if diagnostic.origin == .Val(origin) {
         report_file = jet_cli_report_path(cwd, origin.path)

@@ -31,8 +31,12 @@ fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact]
     loop doc in result.doc_modules {
         storage :: doc.name_ledger ?? next
         permit :: storage.guard_read()
+        // copy: the structure facts stay in the shared name ledger (owner: its storage cell, read
+        // through a guard view) and the caller gets its own list.
         return permit.value.facts.structure_facts.copy()
     }
+    // copy: the structure facts stay in the compile result's program (owner: `result`, a read
+    // parameter: no move out of it, E0201) and the caller gets its own list.
     if result.mir == .Val(program) -> return program.names.structure_facts.copy()
     result.structure_facts
 }

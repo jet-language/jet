@@ -228,11 +228,15 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
             &errors.push("row is not counted: {id}")
         } else { counted += 1 }
     }
+    // copy: `identity_names` stays with `identity_names`, which is read again at line 234, and the
+    // binding `sorted_names` owns its own.
     sorted_names := identity_names.copy()
     &sorted_names.sort()
     loop identity_name in sorted_names {
         loop (index, name) in identity_names {
             if name != identity_name -> next
+            // copy: `identity_modes[index]` stays in its list (owner: `identity_modes`; no move out
+            // of an element, E0225) and the binding `modes` owns its own.
             modes := identity_modes[index].copy()
             &modes.sort()
             loop mode in modes {

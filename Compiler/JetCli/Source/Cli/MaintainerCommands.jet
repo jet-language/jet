@@ -25,6 +25,8 @@ fn jet_cli_maintainer_name(file: String) -> String Never! {
         if bytes[index] == 47 -> return file.slice(index + 1..<bytes.len())
         index -= 1
     }
+    // copy: `file` stays with the caller (`file` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     file.copy()
 }
 fn jet_cli_maintainer_dot(name: String) -> Int? Never! {

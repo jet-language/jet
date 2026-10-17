@@ -96,6 +96,8 @@ fn jet_cli_try_absolute(raw: String) -> String JetCLIReadError! {
     Ok("{cwd}/{raw}")
 }
 fn jet_cli_try_resolve(plan_path: String, raw: String) -> String Never! {
+    // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if raw.starts_with("/") -> return raw.copy()
     "{jet_cli_parent(plan_path) ?? "."}/{raw}"
 }

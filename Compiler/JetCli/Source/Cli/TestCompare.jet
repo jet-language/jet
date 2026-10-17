@@ -138,6 +138,8 @@ fn jet_cli_comparison_canonical_data(value: Dyn) -> String Never! {
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Int(number) -> "{number}"
         .Float(number) -> "{number}"
+        // copy: `number` is a payload view of `value` (owner: the caller, a read parameter: no move
+        // out of it, E0201); the canonical text owns its own.
         .Number(number) -> number.copy()
         .Text(text) -> foundation_json_quote(text)
         .Bytes(bytes) -> "bytes:{bytes.len()}"

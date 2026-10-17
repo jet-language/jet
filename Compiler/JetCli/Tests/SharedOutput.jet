@@ -28,6 +28,8 @@ fn shared_output_pair() -> JetCLIAdaptiveTable Never! {
 }
 fn shared_output_term_error(term: [U8]) Never! {
     facts := shared_output_facts()
+    // copy: `term` stays with the caller (`term` is a read parameter: no move out of it, E0201) and
+    // the new `Val` value owns its own.
     facts.term = Val(term.copy())
     result :: jet_cli_output_profile(facts)
     if result == .Err(error) {

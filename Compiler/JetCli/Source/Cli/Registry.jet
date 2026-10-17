@@ -50,6 +50,8 @@ JET_CLI_RETIRED :: prep { [JetCLIRetiredSpec]{
 // `text` left-aligned in `width` characters (Rust `{:<width}`).
 fn jet_cli_pad(text: String, width: Int) -> String Never! {
     padding :: width - text.len()
+    // copy: `text` stays with the caller (`text` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if padding <= 0 -> return text.copy()
     "{text}{" ".repeat(padding)}"
 }
@@ -139,6 +141,8 @@ fn jet_cli_retired_fix(retired: JetCLIRetiredSpec, argv: [String]) -> String Nev
         retired.spelling == "store lock" && argv.len() > 2 -> return "jet fetch --lock {argv[2]}"
         else -> {}
     }
+    // copy: `retired.fix` stays with the caller (`retired` is a read parameter: no move out of it,
+    // E0201) and the returned value owns its own.
     retired.fix.copy()
 }
 
@@ -268,6 +272,8 @@ fn jet_cli_action_help_summary(group: String, action: JetCLIActionSpec) -> Strin
             else -> {}
         }
     }
+    // copy: `action.summary` stays with the caller (`action` is a read parameter: no move out of
+    // it, E0201) and the returned value owns its own.
     action.summary.copy()
 }
 

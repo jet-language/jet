@@ -134,6 +134,8 @@ fn jet_cli_sem_active_scope(ctx: JetCLISemWalk) -> String Never! {
 // sema `effect_key`: `Owner::name` for a method, the bare name otherwise.
 fn jet_cli_sem_effect_key(owner: String?, name: String) -> String Never! {
     if owner == .Val(owner_name) -> return "{owner_name}::{name}"
+    // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     name.copy()
 }
 
@@ -347,6 +349,8 @@ fn jet_cli_sem_method_fact(ctx: JetCLISemWalk, owner: String, function: Func, or
 
 fn jet_cli_sem_reference_kind(kind: String) -> String Never! {
     if kind == "type" -> return "struct"
+    // copy: `kind` stays with the caller (`kind` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     kind.copy()
 }
 
@@ -826,7 +830,11 @@ fn jet_cli_sem_item(item: Item, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             identity :: if m.instance_identity == .Val(instance) -> "instance:{instance.fingerprint}" else -> jet_cli_sem_module_identity(ctx.scope_identity, m.name)
             &db.defs.push(jet_cli_sem_def(ctx, identity, m.name, jet_cli_sem_display(ctx, None, m.name), m.name_span, JetCLISemKind.Module))
             if m.body == .Val(body) {
+                // copy: `ctx.scope_identity` stays in `ctx` (a write parameter stays whole for its
+                // caller) and the binding `previous_scope` owns its own.
                 previous_scope :: ctx.scope_identity.copy()
+                // copy: `ctx.display_prefix` stays in `ctx` (a write parameter stays whole for its
+                // caller) and the binding `previous_prefix` owns its own.
                 previous_prefix :: ctx.display_prefix.copy()
                 ctx.scope_identity = identity
                 ctx.display_prefix = "{previous_prefix}{m.name}."
@@ -1485,6 +1493,8 @@ struct JetCLISemWitness {
 // `effect` from `function`.
 fn jet_cli_sem_witness(function: String, effect_name: String, summaries: [JetCLISemSummary], seen: [String], modules: [JetDriverDocModule]) -> JetCLISemWitness? {
     if seen.contains(function) -> return None
+    // copy: `seen` stays with the caller (`seen` is a read parameter: no move out of it, E0201) and
+    // the binding `visited` owns its own.
     visited := seen.copy()
     &visited.push(function)
     summary :: jet_cli_sem_summary(summaries, function) ?? return None
@@ -2017,8 +2027,13 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
     loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
     summaries :: jet_cli_sem_summaries(modules)
     loop doc_module in modules {
+        // copy: `doc_module.block_spans` stays in the iterated collection (`doc_module` is a view
+        // of its element; no move out of an element, E0225) and the binding `block_spans` owns its
+        // own.
         block_spans := doc_module.block_spans.copy()
         loop index in 1..<block_spans.len() {
+            // copy: `block_spans[index]` stays in its list (owner: `block_spans`; no move out of an
+            // element, E0225) and the binding `value` owns its own.
             value :: block_spans[index].copy()
             position := index
             loop position > 0 && block_spans[position - 1].start > value.start {

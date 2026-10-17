@@ -56,6 +56,8 @@ fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileE
     if value == JET_CLI_COLOR_AUTO_BYTES -> return Ok(.Auto)
     if value == JET_CLI_COLOR_ALWAYS_BYTES -> return Ok(.Always)
     if value == JET_CLI_COLOR_NEVER_BYTES -> return Ok(.Never)
+    // copy: `value` stays with the caller (`value` is a read parameter: no move out of it, E0201)
+    // and the field `value` owns its own.
     Err(.InvalidColorRequest{value: value.copy()})
 }
 
@@ -75,6 +77,8 @@ fn jet_cli_output_term_control(term: [U8]) -> Bool Never! {
 fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
     dumb := false
     if facts.term == .Val(term) {
+        // copy: `term` is a payload view of `facts.term` (owner: `facts`, a read parameter: no move
+        // out of it, E0201); the error value owns its own text.
         if term.len() == 0 || jet_cli_output_term_control(term) -> return Err(.InvalidTerm{value: term.copy()})
         dumb = term == JET_CLI_TERM_DUMB_BYTES
     }

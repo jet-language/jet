@@ -40,6 +40,8 @@ fn jet_cli_flash_execute(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Jet
     cli_files.create_dir(output) ?? return jet_cli_flash_execution_failed("authority_setup", "cannot create private flash output: {err}", status.mechanism, status.policy)
     source :: cli_files.dirname(plan.image.raw)
     args := [String]{}
+    // copy: `plan.argv[index]` stays with the caller (`plan` is a read parameter: no move out of
+    // it, E0201) and the pushed row owns its own.
     loop index in 1..<plan.argv.len() -> &args.push(plan.argv[index].copy())
     executed :: foundation_run_native_sandboxed(plan.executable.raw, args, source, Val(output), [String:String]{}, false)
     cli_files.remove_all(output) ?? ()

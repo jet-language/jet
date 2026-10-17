@@ -253,9 +253,13 @@ fn jet_cli_doc_stable_path(path: String) -> String Never! {
 
 // Docs.rs `module_name`: the alias, else the file stem.
 fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
+    // copy: `alias` stays with the caller (`alias` is a read parameter: no move out of it, E0201)
+    // and the new value owns its own.
     if alias != "" -> return alias.copy()
     parts :: path.split("/").to_list()
     file :: parts[parts.len() - 1]
+    // copy: `path` stays with the caller (`path` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if file == "" || file == "." || file == ".." -> return path.copy()
     bytes :: file.bytes()
     dot := -1
@@ -267,6 +271,8 @@ fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
 }
 
 fn jet_cli_doc_qualified(parent: String, name: String) -> String Never! {
+    // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if parent == "" -> return name.copy()
     "{parent}::{name}"
 }
