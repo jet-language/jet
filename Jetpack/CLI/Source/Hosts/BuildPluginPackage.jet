@@ -1,0 +1,203 @@
+// The packaged build-plugin unit the hidden host verifies before it
+// instantiates a component, ported from crates/jet-comptime
+// Build/plugins_modules.rs: the wire limits, the bounded package-file read,
+// the dependency-free manifest, and the Component Model envelope check.
+
+BUILD_PLUGIN_API_VERSION :: "jet.build.plugin.v1"
+BUILD_PLUGIN_MAX_REQUEST_BYTES :: 65536
+BUILD_PLUGIN_MAX_RESPONSE_BYTES :: 4194304
+BUILD_PLUGIN_MAX_MANIFEST_BYTES :: 65536
+BUILD_PLUGIN_MAX_COMPONENT_BYTES :: 67108864
+
+// A plugin package refusal: the Rust error string.
+#Error
+struct BuildPluginPackageError {
+    message: String
+}
+
+fn cli_build_plugin_error(message: String) -> BuildPluginPackageError Never! {
+    BuildPluginPackageError{message: message}
+}
+
+// One verified plugin package: manifest identity, API, component digest, and
+// the build abilities it requests (canonical effect order, once each).
+struct WasmComponentPluginSpec {
+    name: String
+    version: String
+    api_version: String
+    component_digest: ContentDigest
+    requested_caps: [BuildEffect]
+
+    // Rust `load_packaged_bytes`: validate a manifest/component byte pair
+    // without reading either path, so the bytes verified are the bytes run.
+    fn load_packaged_bytes(manifest: [U8], component: [U8]) -> WasmComponentPluginSpec BuildPluginPackageError! {
+        if manifest.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES -> return Err(cli_build_plugin_error("plugin manifest exceeds {BUILD_PLUGIN_MAX_MANIFEST_BYTES} bytes"))
+        if component.len() > BUILD_PLUGIN_MAX_COMPONENT_BYTES -> return Err(cli_build_plugin_error("plugin component exceeds {BUILD_PLUGIN_MAX_COMPONENT_BYTES} bytes"))
+        text :: String.from_bytes(manifest) ?? return Err(cli_build_plugin_error("plugin manifest is not UTF-8"))
+        spec :: WasmComponentPluginSpec.from_manifest_text(text) ?? return Err(err)
+        actual :: ContentDigest.from_bytes(component)
+        if spec.component_digest.as_str() != actual.as_str() {
+            return Err(cli_build_plugin_error("plugin component digest mismatch: manifest declares {spec.component_digest.as_str()}, bytes are {actual.as_str()}"))
+        }
+        cli_build_plugin_validate_component(component) ?? return Err(err)
+        Ok(spec)
+    }
+
+    // Rust `from_manifest_text`: `key = value` lines, `#` comments outside
+    // quotes, each field once.
+    fn from_manifest_text(text: String) -> WasmComponentPluginSpec BuildPluginPackageError! {
+        if text.bytes().len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES -> return Err(cli_build_plugin_error("plugin manifest exceeds {BUILD_PLUGIN_MAX_MANIFEST_BYTES} bytes"))
+        name := String?{None}
+        version := String?{None}
+        api_version := String?{None}
+        component_digest := String?{None}
+        requested_caps := [BuildEffect]{}
+        fields := [String]{}
+        loop raw_line in text.lines() {
+            line :: cli_build_plugin_manifest_line(raw_line).trim()
+            if line == "" -> next
+            split :: line.split_once("=") ?? return Err(cli_build_plugin_error("plugin manifest line {line} needs key = value"))
+            key :: split.before.trim()
+            value :: split.after.trim()
+            if fields.contains(key) -> return Err(cli_build_plugin_error("plugin manifest field {key} is declared more than once"))
+            &fields.push(key)
+            if key == {
+                "name" -> name = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
+                "version" -> version = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
+                "api_version" -> api_version = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
+                "component_digest" -> component_digest = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
+                "capabilities" -> requested_caps = cli_build_plugin_manifest_capabilities(value) ?? return Err(err)
+                else -> return Err(cli_build_plugin_error("unknown plugin manifest field {key}"))
+            }
+        }
+        spec_name :: name ?? return Err(cli_build_plugin_error("plugin manifest is missing name"))
+        spec_version :: version ?? return Err(cli_build_plugin_error("plugin manifest is missing version"))
+        spec_api :: api_version ?? return Err(cli_build_plugin_error("plugin manifest is missing api_version"))
+        declared :: component_digest ?? return Err(cli_build_plugin_error("plugin manifest is missing component_digest"))
+        digest :: ContentDigest.parse(declared) ?? return Err(cli_build_plugin_error("invalid plugin component digest: {err.message}"))
+        if spec_api != BUILD_PLUGIN_API_VERSION -> return Err(cli_build_plugin_error("unsupported build plugin API {spec_api}; expected {BUILD_PLUGIN_API_VERSION}"))
+        Ok(WasmComponentPluginSpec{name: spec_name, version: spec_version, api_version: spec_api, component_digest: digest, requested_caps: requested_caps})
+    }
+}
+
+// Rust `manifest_line_without_comment`: the line before an unquoted `#`.
+fn cli_build_plugin_manifest_line(line: String) -> String Never! {
+    quoted := false
+    escaped := false
+    raw :: line.bytes()
+    loop (index, byte) in raw {
+        if escaped {
+            escaped = false
+            next
+        }
+        if {
+            byte == (U8{92}) && quoted -> escaped = true
+            byte == (U8{34}) -> quoted = !quoted
+            byte == (U8{35}) && !quoted -> return String.from_bytes(raw.slice(0, index)) ?? line
+            else -> {}
+        }
+    }
+    line
+}
+
+// Rust `manifest_string`: a non-empty quoted string with `\"` and `\\` only.
+fn cli_build_plugin_manifest_string(value: String, field: String) -> String BuildPluginPackageError! {
+    text :: value.trim()
+    if text.len() < 2 || !text.starts_with("\"") || !text.ends_with("\"") -> return Err(cli_build_plugin_error("plugin manifest field {field} must be a quoted string"))
+    raw :: text.bytes()
+    inner :: raw.slice(1, raw.len() - 1)
+    if inner.len() == 0 -> return Err(cli_build_plugin_error("plugin manifest field {field} cannot be empty"))
+    out := [U8]{}
+    escaped := false
+    loop byte in inner {
+        if escaped {
+            if byte == (U8{34}) || byte == (U8{92}) {
+                &out.push(byte)
+            } else {
+                return Err(cli_build_plugin_error("plugin manifest field {field} contains an unsupported escape"))
+            }
+            escaped = false
+        } else if byte == (U8{92}) {
+            escaped = true
+        } else if byte == (U8{34}) {
+            return Err(cli_build_plugin_error("plugin manifest field {field} contains an unescaped quote"))
+        } else {
+            &out.push(byte)
+        }
+    }
+    if escaped -> return Err(cli_build_plugin_error("plugin manifest field {field} ends with an escape"))
+    Ok(String.from_bytes(out) ?? "")
+}
+
+// Rust `manifest_capabilities`: a bracketed list of quoted build abilities,
+// kept in canonical order (Rust `BTreeSet`).
+fn cli_build_plugin_manifest_capabilities(value: String) -> [BuildEffect] BuildPluginPackageError! {
+    if !value.starts_with("[") || !value.ends_with("]") -> return Err(cli_build_plugin_error("plugin manifest abilities must be a list"))
+    raw :: value.bytes()
+    inner :: String.from_bytes(raw.slice(1, raw.len() - 1)) ?? ""
+    capabilities := [BuildEffect]{}
+    loop part in inner.split(",") {
+        item :: part.trim()
+        if item == "" -> next
+        name :: cli_build_plugin_manifest_string(item, "abilities") ?? return Err(err)
+        capability :: BuildEffect.parse(name) ?? return Err(cli_build_plugin_error("unknown build ability {name}"))
+        if capabilities.contains(capability) -> next
+        index := capabilities.len()
+        loop index > 0 && capabilities[index - 1].rank() > capability.rank() -> index -= 1
+        &capabilities.insert(index, capability)
+    }
+    Ok(capabilities)
+}
+
+// Rust `validate_component_binary`: the Component Model preamble, then every
+// section's id and length framing up to the end of the bytes.
+fn cli_build_plugin_validate_component(bytes: [U8]) BuildPluginPackageError! {
+    preamble :: [U8]{U8{0}, U8{97}, U8{115}, U8{109}, U8{13}, U8{0}, U8{1}, U8{0}}
+    if bytes.len() < 8 || bytes.slice(0, 8) != preamble -> return Err(cli_build_plugin_error("plugin component is not a valid WebAssembly Component Model binary"))
+    offset := 8
+    loop offset < bytes.len() {
+        id :: Int.from_u8(bytes[offset])
+        offset += 1
+        if id > 13 -> return Err(cli_build_plugin_error("plugin component uses unknown section id {id}"))
+        length :: cli_build_plugin_read_u32_leb(bytes, &offset) ?? return Err(err)
+        end :: offset + length
+        if end > bytes.len() -> return Err(cli_build_plugin_error("plugin component section is truncated"))
+        offset = end
+    }
+}
+
+// Rust `read_u32_leb`: one unsigned LEB128 u32 at `offset`, advancing it.
+fn cli_build_plugin_read_u32_leb(bytes: [U8], offset: &Int) -> Int BuildPluginPackageError! {
+    value := 0
+    shift := 0
+    loop shift < 35 {
+        if offset >= bytes.len() -> return Err(cli_build_plugin_error("plugin component section length is truncated"))
+        byte :: Int.from_u8(bytes[offset])
+        offset += 1
+        if shift == 28 && byte.bit_and(0xf0) != 0 -> return Err(cli_build_plugin_error("plugin component section length overflows u32"))
+        value = value.bit_or(byte.bit_and(0x7f) << shift)
+        if byte.bit_and(0x80) == 0 -> return Ok(value)
+        shift += 7
+    }
+    Err(cli_build_plugin_error("plugin component section length uses an overlong integer"))
+}
+
+// Rust `read_packaged_file_bounded`: a regular, non-symlink package file of
+// at most `limit` bytes, opened without following a final link and checked
+// again after opening, read with one byte of headroom.
+fn cli_read_packaged_file_bounded(path: String, label: String, limit: Int) -[FS]> [U8] BuildPluginPackageError! {
+    linked :: files.lstat(path) ?? return Err(cli_build_plugin_error("could not stat plugin {label}: {err}"))
+    if linked.is_symlink || !linked.is_file -> return Err(cli_build_plugin_error("plugin {label} must be a regular non-symlink file"))
+    if linked.size > limit -> return Err(cli_build_plugin_error("plugin {label} exceeds {limit} bytes"))
+    reader :: files.open(path, links: .Refuse) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
+    opened :: reader.stat() ?? return Err(cli_build_plugin_error("could not stat plugin {label}: {err}"))
+    if !opened.is_file -> return Err(cli_build_plugin_error("plugin {label} must be a regular file"))
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(65536) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > limit -> return Err(cli_build_plugin_error("plugin {label} exceeds {limit} bytes"))
+    }
+    Ok(bytes)
+}
