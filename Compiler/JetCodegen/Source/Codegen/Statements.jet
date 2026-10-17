@@ -3623,6 +3623,39 @@ fn jet_codegen_stability_arm_root(value: TExpr, roots: &[String]) Never! {
     }
 }
 
+// #5041: the payload binding `p` of `root = p` when `p` is a pending pattern
+// binding over `root` itself (jet_codegen_stability_pattern records it with
+// `root` as its root): the refill takes `p` out of the subject it replaces.
+fn jet_codegen_stability_subject_refill(state: JetCodegenLetStability, place: TPlace, assigned: TExpr) -> String? Never! {
+    taken :: jet_codegen_refill_binding(assigned) ?? return None
+    target :: jet_codegen_refill_target(place) ?? return None
+    loop candidate in state.pending {
+        if candidate.scoped && candidate.name == taken.name && candidate.root == target.name -> return Val(taken.name)
+    }
+    None
+}
+
+// The whole local an assignment writes, if its place is one.
+fn jet_codegen_refill_target(place: TPlace) -> TLocal? Never! {
+    if place == {
+        .Local(local) -> Val(local)
+        .Expr(target) -> {
+            if target.kind == .Local(local) -> return Val(local)
+            None
+        }
+    }
+}
+
+// The local an assignment stores, under at most a compiler-inserted clone or
+// a move.
+fn jet_codegen_refill_binding(value: TExpr) -> TLocal? Never! {
+    if value.kind == {
+        .Local(local) -> Val(local)
+        .Clone(inner, _) | .Move(inner) -> jet_codegen_refill_binding(inner)
+        else -> None
+    }
+}
+
 // The pending binding names `expression` mentions anywhere.
 fn jet_codegen_stability_pending_mentions(state: JetCodegenLetStability, expression: TExpr) -> [String] Never! {
     names := [String]{}
@@ -3810,14 +3843,24 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
             jet_codegen_stability_inspected(&state, init)
             jet_codegen_stability_list(&state, fallback, false)
         }
-        .Assign(place, _, assigned, _, _, _) -> {
-            jet_codegen_stability_expr(&state, assigned, value)
-            // A value derived from a binding stored into a place that outlives
-            // the walk's view of it (an earlier local, a field): the binding
-            // copies.
-            if !jet_codegen_stability_scalar(assigned.ty) {
-                mentioned :: jet_codegen_stability_pending_mentions(state, assigned)
-                loop name in mentioned -> state.pinned[name] = true
+        .Assign(place, op, assigned, _, _, _) -> {
+            refill := String?{None}
+            if op == None -> refill = jet_codegen_stability_subject_refill(state, place, assigned)
+            if refill == .Val(taken) {
+                // #5041: `root = p` refilling the subject `p` was bound over
+                // takes `p` out of that subject (jet_codegen_subject_refill_take):
+                // it reads `p` and stores no alias of it.
+                seen := [String]{}
+                jet_codegen_stability_read(&state, taken, &seen)
+            } else {
+                jet_codegen_stability_expr(&state, assigned, value)
+                // A value derived from a binding stored into a place that
+                // outlives the walk's view of it (an earlier local, a field):
+                // the binding copies.
+                if !jet_codegen_stability_scalar(assigned.ty) {
+                    mentioned :: jet_codegen_stability_pending_mentions(state, assigned)
+                    loop name in mentioned -> state.pinned[name] = true
+                }
             }
             if place == {
                 .Local(local) -> jet_codegen_stability_disturb(&state, local.name)
