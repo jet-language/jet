@@ -1417,6 +1417,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if lower_is_stm(ty) -> return LowerRepr.Handle{drop: "jet_rt_native_stm_rollback", clone: ""}
             if lower_is_condition(ty) && !lower_type_def_exists(p, ty) -> return LowerRepr.Handle{drop: "jet_rt_native_condition_drop", clone: "jet_rt_native_condition_clone"}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
+            if lower_event_repr(p, ty) == .Val(handle) -> return handle
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
             if lower_ptr_element(ty) != None -> return LowerRepr.Word
@@ -2892,6 +2893,7 @@ fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunct
     if semantic == .ClosureMethod(receiver, args, call) {
         row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
         symbol :: lower_runtime_symbol(p.prelude_calls[row])
+        if lower_event_reads_operand(p.prelude_calls[row], receiver, args, value) -> return lower_release_result_kind(function, fact_index, instruction)
         if receiver == value {
             if symbol == "jet_option_map_ref" -> return lower_release_result_kind(function, fact_index, instruction)
             return LOWER_RELEASE_KEEP

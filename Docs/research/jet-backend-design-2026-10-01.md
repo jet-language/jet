@@ -3862,6 +3862,41 @@ accessors; their C witnesses default to canonical packed stride1 and keep all
 byte indexing/allocation expectations derived from their stride constant.
 
 
+### Native synchronous Event provider
+
+`JetRuntime/Source/Events.jet` is the Jet-native provider of the synchronous
+Event family (D-EVENT1=D), one meaning with `ReactiveEventWatch.rs`
+JetEventPolicy/JetEventTrace/JetSubscription/JetEventScope/JetEvent. Its
+single-thread shared cells use plain counts: an `Event<T>` handle is its
+EventCore (strong/weak counts and the ordered listener list); a Subscription
+holds a weak count on the core and its listener id; each listener holds one
+count per owner (the core's list and every dispatch snapshot), so a handler
+that unsubscribes itself or a later listener keeps its running closure alive
+and the skipped listener is never invoked. Dispatch snapshots the active
+listeners in priority order (highest first), registration order among equal
+priorities; a once listener is consumed before its handler runs; nested emits
+dispatch immediately (AllowDepthFirst, the sole policy). A cancelled scope
+returns an inactive Subscription and releases the handler unregistered; the
+last EventScope handle cancels, unsubscribing every tracked Subscription; the
+last Event handle releases its handlers while Subscriptions outlive it. A
+handler stop ends the dispatch and leaves the trace null.
+
+The backend (`Lower/Events.jet`) lowers every `core.event` ClosureMethod row and
+`core.event.__event_with_policy` to these exports. A handler is the moved
+closure box with the typed `lazy.callback` adapter (the payload's native slot
+is lent to each handler, which reads it) and `lazy.callback.drop` as its
+release; a consumed owned payload is released after the dispatch. Sema
+(`Calls/EventHandles.jet`) produces `THandleOp.EventMethod` with the Rust
+method table (`Collections.rs` event/subscription/event_scope/event_trace
+method returns); handlers are retained `Fn(T) -> Unit` callbacks.
+`JetRuntime/Tests/EventProviderWitness.c` links the real object with
+`--wrap=jet_rt_alloc --wrap=jet_rt_free` and checks registration order,
+priority, once, unsubscribe (also mid-dispatch), cancelled-scope registration,
+scope and Event teardown, nested emit, trace text, and that every scenario
+returns to its allocation baseline. `Examples/features/concurrency/event_lifecycle.jet`
+is the end-to-end golden. AsyncEvent, Hook and DecisionHook are not part of
+this provider.
+
 ### Native Process value enums
 
 `JetRuntime/Source/ProcessEnums.jet` supplies the complete ResourceLimit6 and

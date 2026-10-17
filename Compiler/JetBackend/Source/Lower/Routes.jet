@@ -357,6 +357,17 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
         }
         return Val(values)
     }
+    if lower_event_constructor(row) {
+        values := [MIRValueID]{}
+        loop arg in args {
+            if arg.access == .Write {
+                lower_fail(&m, &f, "{what} Event.with_policy requires a borrowed or moved policy")
+                return None
+            }
+            &values.push(arg.value)
+        }
+        return Val(values)
+    }
     route :: lower_runtime_route(lower_route_symbol(row)) ?? {
         lower_fail(&m, &f, "{what} {row.module_name}.{row.member} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
         return None
@@ -385,6 +396,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if lower_native_control_call(p, c, &m, &f, instruction, row, args) -> return
     if lower_tls_transport_route(row) -> return lower_fail(&m, &f, lower_tls_transport_message())
     if lower_realtime_deadline(p, c, &m, &f, instruction, row, args) -> return
+    if lower_event_with_policy(p, c, &m, &f, instruction, row, args) -> return
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     if lower_environment_route(lower_route_symbol(row)) == .Val(environment) {
         lower_environment_call(p, c, &m, &f, instruction, environment, args)

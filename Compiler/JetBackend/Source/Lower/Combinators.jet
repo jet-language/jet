@@ -155,6 +155,7 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     if row.module_name == "core.collections" && row.member == "edit_disjoint" && lower_runtime_symbol(row) == "jet_edit_disjoint" -> return lower_disjoint_edit(p, c, &m, &f, instruction, receiver, args)
     if lower_parallel_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
+    if lower_event_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
     // An inline element loop calls the closure box directly; in a stop-point
     // module (#4720) every call is followed by lower_callback_guard, so a
