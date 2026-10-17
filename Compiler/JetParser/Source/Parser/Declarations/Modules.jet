@@ -642,7 +642,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
                 field :: parser_expect_name(&state, "for a profile field")
                 parser_expect(&state, TOKEN_COLON, "after a profile field")
                 field_name :: parser_value(state, field)
-                &profile_fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+                &profile_fields.push(NamedExpr{name: ^field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
             }
             else -> {
                 field :: parser_expect_name(&state, "for a performance field")
@@ -897,7 +897,7 @@ fn parser_module_services_map(state: &JetParserState) -> [ServiceEntry] {
             field :: parser_expect_name(&state, "for a service field")
             parser_expect(&state, TOKEN_COLON, "after a service field")
             field_name :: parser_value(state, field)
-            &fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+            &fields.push(NamedExpr{name: ^field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
             if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
         }
         close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after service fields")
@@ -924,7 +924,7 @@ fn parser_module_options_list(state: &JetParserState) -> [OptionEntry] {
         parser_expect(&state, TOKEN_COLON, "after an option key")
         value :: parser_parse_expression(&state, 1, 0)
         value_end :: value.span
-        &entries.push(OptionEntry{key: name, key_span: parser_cover(key.span, end), value: value.expr, value_span: value_end, span: parser_cover(key.span, value_end)})
+        &entries.push(OptionEntry{key: ^name, key_span: parser_cover(key.span, end), value: value.expr, value_span: value_end, span: parser_cover(key.span, value_end)})
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state) else -> break
     }
     parser_expect(&state, TOKEN_RBRACKET, "`]` after options")

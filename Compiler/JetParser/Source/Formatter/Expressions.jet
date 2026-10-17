@@ -242,7 +242,7 @@ fn jfmt_result_handler_parts(f: JetFmt, expr: Expr) -> JetFmtResultHandler? Neve
     if question < 0 || question >= outer.span.end -> return None
     bang :: jfmt_bytes_find(f.src_bytes, question + 1, "!")
     if bang < 0 || bang >= outer.span.end -> return None
-    Val(JetFmtResultHandler{subject: ok_test.subject, ok_binding: binding, ok_body: outer.then_body, ok_value: outer.then_value, err_binding: err_binding, err_body: inner.then_body, err_value: inner.then_value})
+    Val(JetFmtResultHandler{subject: ok_test.subject, ok_binding: ^binding, ok_body: outer.then_body, ok_value: outer.then_value, err_binding: ^err_binding, err_body: inner.then_body, err_value: inner.then_value})
 }
 
 fn jfmt_result_handler_branch_inlineable(f: JetFmt, body: [Stmt], value: Expr) -> Bool Never! {

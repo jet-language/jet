@@ -1490,7 +1490,7 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
             parser_add_error_code(&state, "E0003", parsed.span, "this unit-fallible signature uses the retired arrow-and-unit form", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
-    ParsedCallableResult{return_type: return_type, return_type_span: return_type_span, effects: effects.effects, via: effects.via, prefix_effect: prefix_effect, retired_shape: retired_shape, plain_arrow: plain_arrow}
+    ParsedCallableResult{return_type: ^return_type, return_type_span: ^return_type_span, effects: effects.effects, via: effects.via, prefix_effect: ^prefix_effect, retired_shape: retired_shape, plain_arrow: plain_arrow}
 }
 
 // The marker that opens a recovered one-line function body. A `->` here is
@@ -1870,7 +1870,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                     }
                     marker_index += 1
                 }
-                &value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: computed, default: default, default_ct: None})
+                &value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: ^computed, default: ^default, default_ct: None})
                 separator_kind := parser_current_kind(&state)
                 if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(&state)
             }
@@ -2292,7 +2292,7 @@ fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifier
         else -> parser_parse_type(&state, 0)
     }
     parser_finish_statement(&state)
-    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: ^type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
 }
 
 fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
@@ -2350,7 +2350,7 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 method := parsed.value
                 default_body := [Stmt]?{None}
                 if parsed.has_body -> default_body = Val(method.body)
-                &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
+                &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: ^default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
             }
             else -> {
                 parser_add_error_here(&state, "expected a trait method or associated type", "trait bodies declare callable requirements and associated types", "write `fn name(...)` or `type Name;`")

@@ -714,7 +714,7 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct pattern fields")
     span :: parser_cover(type_span, close.span)
-    ParsedPattern{pattern: Pattern.Struct{fields: fields, rest: rest, span: span, type_name: type_name}, span: span}
+    ParsedPattern{pattern: Pattern.Struct{fields: ^fields, rest: ^rest, span: span, type_name: type_name}, span: span}
 }
 
 fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
@@ -821,7 +821,7 @@ fn parser_parse_bracket_pattern(state: &JetParserState, depth: Int) -> ParsedPat
             if optional -> parser_bump(&state)
             parser_expect(&state, TOKEN_COLON, "`:` between a map key and pattern")
             slot :: parser_parse_pattern_slot(&state, depth + 1)
-            &entries.push(MapPatEntry{key: key.expr, optional: optional, slot: slot, span: parser_cover(key.span, parser_lookahead(&state, -1).span)})
+            &entries.push(MapPatEntry{key: key.expr, optional: optional, slot: ^slot, span: parser_cover(key.span, parser_lookahead(&state, -1).span)})
         } else {
             &items.push(parser_parse_pattern_slot(&state, depth + 1))
         }

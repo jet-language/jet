@@ -634,7 +634,7 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     parser_literal_close_terminators(&state)
     close := parser_expect(&state, TOKEN_RBRACE, "`}}` to close a typed literal")
     span := parser_cover(start, close.span)
-    ParsedExpr{expr: Expr.TypedLit{head: head, body: body, span: span}, span: span}
+    ParsedExpr{expr: Expr.TypedLit{head: head, body: ^body, span: span}, span: span}
 }
 
 fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedExpr? {
@@ -994,7 +994,7 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
         &parts.push(StrPart.Lit{text: label})
         &parts.push(StrPart.Lit{text: " = "})
     }
-    &parts.push(StrPart.Interp{expr: value.expr, format: format})
+    &parts.push(StrPart.Interp{expr: value.expr, format: ^format})
 }
 
 // Rust's debug-label spelling of one token, or "" when the token cannot
@@ -1351,7 +1351,7 @@ fn parser_parse_lambda_arrow_body(state: &JetParserState, depth: Int, fallback_e
         right :: parser_parse_expression(&state, 1, depth + 1)
         target :: parser_expression_lvalue(&state, value.expr, value.span, operator)
         end :: if right.span.end > fallback_end -> right.span.end else -> fallback_end
-        return ParsedLambdaBody{body: LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}, end: end}
+        return ParsedLambdaBody{body: LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: ^target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}, end: end}
     }
     end :: if value.span.end > fallback_end -> value.span.end else -> fallback_end
     ParsedLambdaBody{body: LambdaBody.Expr{value: value.expr}, end: end}
@@ -1404,7 +1404,7 @@ fn parser_parse_member_spread(state: &JetParserState, base: ParsedExpr) -> Parse
     }
     close :: parser_expect(&state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
     span :: parser_cover(base.span, close.span)
-    ParsedExpr{expr: Expr.MemberSpread{base: base.expr, members: members, span: span}, span: span}
+    ParsedExpr{expr: Expr.MemberSpread{base: base.expr, members: ^members, span: span}, span: span}
 }
 
 fn parser_report_member_spread_entry(state: &JetParserState) {
@@ -1512,7 +1512,7 @@ fn parser_parse_task_surface(state: &JetParserState, depth: Int) -> ParsedExpr {
     if parser_current_kind(&state) != TOKEN_LBRACE {
         value :: parser_parse_expression(&state, 1, depth + 1)
         span :: parser_cover(head, value.span)
-        return ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Expr{value: value.expr}, value.span), span: span}
+        return ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Expr{value: value.expr}, value.span), span: ^span}
     }
     // A brace body holding one tail expression folds into an expression
     // body, so every tier sees one task-value shape.
@@ -1692,7 +1692,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                         span: span,
                     }
                 }
-                else -> expression = ParsedExpr{expr: Expr.CallValue{callee: expression.expr, args: args, span: span}, span: span}
+                else -> expression = ParsedExpr{expr: Expr.CallValue{callee: expression.expr, args: ^args, span: span}, span: span}
             }
             owner_type_args = [Type]{}
             call_type_args = [Type]{}
@@ -1750,7 +1750,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 }
                 selector_close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after an index")
                 selector_span :: parser_cover(open.span, selector_close.span)
-                expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: selector, span: selector_span, kind: IndexKind.Unknown}, span: selector_span}
+                expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: ^selector, span: selector_span, kind: IndexKind.Unknown}, span: selector_span}
                 next
             }
             index :: parser_parse_expression(&state, 1, depth + 1)
@@ -1965,7 +1965,7 @@ fn parser_mark_maximal_place(expr: Expr, access: PlaceAccess, mark: Span) -> Exp
         else -> {}
     }
     span :: parser_cover(mark, expr_span(expr))
-    Expr.Place{value: expr, access: access, span: span}
+    Expr.Place{value: expr, access: access, span: ^span}
 }
 
 fn parser_call_access_prefix(state: &JetParserState) -> AccessConvention Never! {
@@ -2021,7 +2021,7 @@ fn parser_parse_call_args(state: &JetParserState, depth: Int, allow_marker_label
                 marked :: parser_mark_maximal_place(argument.expr, access, mark_span)
                 &args.push(CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread})
             } else {
-                &args.push(CallArg{convention: convention, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread})
+                &args.push(CallArg{convention: ^convention, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: ^label, spread: spread})
             }
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
             if parser_current_kind(&state) != TOKEN_COMMA {

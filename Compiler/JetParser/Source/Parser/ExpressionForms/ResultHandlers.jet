@@ -96,8 +96,8 @@ fn parser_expression_form_result_handler_inner(state: &JetParserState, value: Pa
     err_cond :: Expr.PatternTest{subject: value.expr, pattern: Pattern.Err{binding: parser_value(state, err_binding), binding_span: err_binding.span, inner: None, span: err_pattern_span}, span: err_pattern_span}
     end :: expr_span(err_branch.value)
     span :: parser_cover(value.span, end)
-    err_if :: Expr.If{cond: err_cond, then_body: err_branch.body, then_value: err_branch.value, else_body: [Stmt]{}, else_value: Expr.NoElse{span: Span{start: end.end, end: end.end}}, span: span}
-    output :: Expr.If{cond: ok_cond, then_body: ok_branch.body, then_value: ok_branch.value, else_body: [Stmt]{}, else_value: err_if, span: span}
+    err_if :: Expr.If{cond: ^err_cond, then_body: err_branch.body, then_value: err_branch.value, else_body: [Stmt]{}, else_value: Expr.NoElse{span: Span{start: end.end, end: end.end}}, span: span}
+    output :: Expr.If{cond: ^ok_cond, then_body: ok_branch.body, then_value: ok_branch.value, else_body: [Stmt]{}, else_value: ^err_if, span: span}
     ParsedExpr{expr: output, span: span}
 }
 

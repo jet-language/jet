@@ -1334,7 +1334,7 @@ fn jfmt_strip_optional_returns_in_body(body: [Stmt]) -> [Stmt] Never! {
                 loop arm in arms -> &stripped_arms.push(SwitchArm{cond: arm.cond, body: jfmt_strip_optional_returns_in_body(arm.body), span: arm.span})
                 stripped_else := [Stmt]?{None}
                 if else_body == .Val(inner) -> stripped_else = Val(jfmt_strip_optional_returns_in_body(inner))
-                &out.push(Stmt.Switch{subject: subject, arms: stripped_arms, else_body: stripped_else, span: span})
+                &out.push(Stmt.Switch{subject: subject, arms: ^stripped_arms, else_body: ^stripped_else, span: span})
             }
             else -> &out.push(stmt)
         }
