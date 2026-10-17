@@ -2728,6 +2728,12 @@ fn lower_release_member_kind(p: MIRProgram, function: MIRFunction, fact_index: [
 fn lower_release_semantic_kind(p: MIRProgram, m: LowerModule, function: MIRFunction, fact_index: [U64:Int], instruction: MIRInstruction, semantic: MIRSemanticOp) -> Int Never! {
     if semantic == .Print(_, _) -> return LOWER_RELEASE_BORROW
     if semantic == .StaticPreludeCall(_, _, _, _) | .HostCall(_, _) -> return lower_release_result_kind(function, fact_index, instruction)
+    // `spawn` only reads its group, site and label (Tasks.jet
+    // lower_task_spawn: the runtime keeps its own text of the label); the
+    // closure it takes over is a consumed operand.
+    if semantic == .CoreClosureCall(_, kind, _, _, _, _) {
+        if kind == .Spawn -> return lower_release_result_kind(function, fact_index, instruction)
+    }
     if semantic == .BuiltinMethod(call, _, _, _, _) {
         row :: m.prelude_positions.get(call.value) ?? return LOWER_RELEASE_KEEP
         if LOWER_RELEASE_BORROWING_BUILTINS.contains(lower_runtime_symbol(p.prelude_calls[row])) -> return lower_release_result_kind(function, fact_index, instruction)
