@@ -6,8 +6,8 @@ use jet_foundation.[
     TFuncKind,
     TStmt,
     TLambda,
-    tir_expr_children,
-    tir_stmt_children,
+    tir_each_expr_child,
+    tir_each_stmt_child,
 ]
 use jet_foundation.[Span, TExprKind, TStrPart, Type]
 
@@ -202,19 +202,20 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys:
 fn jet_codegen_core_reach_function_keys(function: TFunc, functions: [TFunc], fmt_keys: [String:String]) -> [String] Never! {
     keys := [String]{}
     jet_codegen_core_reach_stmt_keys(function.body, functions, &keys)
-    pending := [TExpr]{}
     loop parameter in function.params {
-        if parameter.default == Val(value) -> &pending.push(value)
+        if parameter.default == Val(value) -> jet_codegen_core_reach_tree_keys(value, functions, &keys, fmt_keys)
     }
     loop statement in function.body {
-        loop child in tir_stmt_children(statement) -> &pending.push(child)
-    }
-    loop pending.len() > 0 {
-        expression :: &pending.pop() ?? return keys
-        jet_codegen_core_reach_expr_keys(expression, functions, &keys, fmt_keys)
-        loop child in tir_expr_children(expression) -> &pending.push(child)
+        tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_core_reach_tree_keys(child, functions, &keys, fmt_keys))
     }
     keys
+}
+
+// The keys one checked expression and every expression below it name, read
+// in place (tir_each_expr_child).
+fn jet_codegen_core_reach_tree_keys(expression: TExpr, functions: [TFunc], keys: &[String], fmt_keys: [String:String]) Never! {
+    jet_codegen_core_reach_expr_keys(expression, functions, &keys, fmt_keys)
+    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_core_reach_tree_keys(child, functions, &keys, fmt_keys))
 }
 
 // The `Core/math/math.jet` helper one checked expression lowers to by name
@@ -240,20 +241,21 @@ fn jet_codegen_precise_expr_helper(expression: TExpr) -> String? Never! {
 // so it adds these (`jet_driver_comptime_function_closure`).
 fn jet_codegen_precise_helper_names(roots: [TExpr], body: [TStmt]) -> [String] Never! {
     names := [String]{}
-    pending := [TExpr]{}
-    loop root in roots -> &pending.push(root)
+    loop root in roots -> jet_codegen_precise_tree_names(root, &names)
     loop statement in body {
-        loop child in tir_stmt_children(statement) -> &pending.push(child)
-    }
-    loop pending.len() > 0 {
-        expression :: &pending.pop() ?? return names
-        helper :: jet_codegen_precise_expr_helper(expression)
-        if helper == .Val(name) {
-            if !names.contains(name) -> &names.push(name)
-        }
-        loop child in tir_expr_children(expression) -> &pending.push(child)
+        tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_precise_tree_names(child, &names))
     }
     names
+}
+
+// The precise helpers one checked expression and every expression below it
+// lower to, each added once, read in place (tir_each_expr_child).
+fn jet_codegen_precise_tree_names(expression: TExpr, names: &[String]) Never! {
+    helper :: jet_codegen_precise_expr_helper(expression)
+    if helper == .Val(name) {
+        if !names.contains(name) -> &names.push(name)
+    }
+    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_precise_tree_names(child, &names))
 }
 
 // Reachability precedes concrete instance lowering. A checked generic/operator

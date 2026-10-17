@@ -26,8 +26,8 @@ use jet_foundation.[
     core_source_owns_type,
     UnOp,
     expr_span,
-    tir_expr_children,
-    tir_stmt_children,
+    tir_each_expr_child,
+    tir_each_stmt_child,
 ]
 
 struct SemaServiceCoreMethodContract {
@@ -551,7 +551,7 @@ struct SemaServiceWorkerHandler {
     span: Span
 }
 
-fn sema_services_find_handlers_expr(expression: TExpr, handlers: &[SemaServiceWorkerHandler]) {
+fn sema_services_find_handlers_expr(expression: TExpr, handlers: &[SemaServiceWorkerHandler]) Never! {
     if expression.kind == {
         .CoreCall(record, arguments, _, _, _, _, _) -> {
             if record.module_name == "core.service" && record.member == "worker" && arguments.len() >= 5 {
@@ -571,11 +571,11 @@ fn sema_services_find_handlers_expr(expression: TExpr, handlers: &[SemaServiceWo
         }
         else -> {}
     }
-    loop child in tir_expr_children(expression) -> sema_services_find_handlers_expr(child, &handlers)
+    tir_each_expr_child(expression, (child: TExpr) -> sema_services_find_handlers_expr(child, &handlers))
 }
 
-fn sema_services_find_handlers_stmt(statement: TStmt, handlers: &[SemaServiceWorkerHandler]) {
-    loop child in tir_stmt_children(statement) -> sema_services_find_handlers_expr(child, &handlers)
+fn sema_services_find_handlers_stmt(statement: TStmt, handlers: &[SemaServiceWorkerHandler]) Never! {
+    tir_each_stmt_child(statement, (child: TExpr) -> sema_services_find_handlers_expr(child, &handlers))
 }
 
 fn sema_services_find_function(functions: [TFunc], key: String) -> TFunc? {

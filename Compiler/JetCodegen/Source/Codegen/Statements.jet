@@ -116,10 +116,10 @@ use jet_foundation.[
     mir_type_identity_key,
     stable_id,
     symbol_id,
-    tir_expr_children,
+    tir_each_expr_child,
     tir_generated_local,
-    tir_pattern_children,
-    tir_stmt_children,
+    tir_each_pattern_child,
+    tir_each_stmt_child,
     tir_symbol_local,
     tir_user_local,
     type_identity_key,
@@ -3606,7 +3606,7 @@ fn jet_codegen_stability_collect_locals(expression: TExpr, names: &[String]) Nev
         &names.push(local.name)
         return
     }
-    loop child in tir_expr_children(expression) -> jet_codegen_stability_collect_locals(child, &names)
+    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_stability_collect_locals(child, &names))
 }
 
 // A view of a binding (a slice, a `View`/`ViewMut` value) may outlive the
@@ -3675,7 +3675,7 @@ fn jet_codegen_stability_cond(state: &JetCodegenLetStability, condition: TIfCond
             jet_codegen_stability_cond(&state, right, true)
         }
         .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
-            jet_codegen_stability_values(&state, tir_pattern_children(pattern))
+            tir_each_pattern_child(pattern, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
             jet_codegen_stability_inspected(&state, subject)
             jet_codegen_stability_pattern(&state, pattern, subject, true)
             // #5031: a window over an indexed place is defined where its
@@ -3723,7 +3723,7 @@ fn jet_codegen_stability_guarded(state: &JetCodegenLetStability, condition: TIfC
 
 fn jet_codegen_stability_arms(state: &JetCodegenLetStability, subject: TExpr, arms: [TMatchArm]) Never! {
     loop arm in arms {
-        jet_codegen_stability_values(&state, tir_pattern_children(arm.pattern))
+        tir_each_pattern_child(arm.pattern, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
         mark :: state.pending.len()
         jet_codegen_stability_pattern(&state, arm.pattern, subject, true)
         jet_codegen_stability_list(&state, arm.body, false)
@@ -3767,7 +3767,7 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
         }
         .ListDestructure(_, init, _, _, _, _, _) -> jet_codegen_stability_owner(&state, init)
         .RefutableBind(pattern, init, fallback, _) -> {
-            jet_codegen_stability_values(&state, tir_pattern_children(pattern))
+            tir_each_pattern_child(pattern, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
             jet_codegen_stability_inspected(&state, init)
             jet_codegen_stability_list(&state, fallback, false)
         }
@@ -3911,7 +3911,7 @@ fn jet_codegen_stability_stmt_body(state: &JetCodegenLetStability, statement: TS
         }
         .Reactive(_, _) -> state.pinned["*"] = true
         // Return, ExprStmt, BreakValue, DeferClose, Contract: values only.
-        else -> jet_codegen_stability_values(&state, tir_stmt_children(statement))
+        else -> tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
     }
 }
 
@@ -4043,7 +4043,7 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
             jet_codegen_stability_expr(&state, argument.value, use_kind_arg)
         }
         .PatternMatches(subject, pattern) -> {
-            jet_codegen_stability_values(&state, tir_pattern_children(pattern))
+            tir_each_pattern_child(pattern, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
             jet_codegen_stability_inspected(&state, subject)
         }
         // A closure changes only what it captures; its body lowers as its
@@ -4070,17 +4070,17 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
             jet_codegen_stability_owner(&state, subject)
-            jet_codegen_stability_values(&state, tir_pattern_children(ok_pattern))
+            tir_each_pattern_child(ok_pattern, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
             jet_codegen_stability_list(&state, ok_body, false)
             jet_codegen_stability_expr(&state, ok_value, value)
-            jet_codegen_stability_values(&state, tir_pattern_children(err_pattern))
+            tir_each_pattern_child(err_pattern, (child: TExpr) -> jet_codegen_stability_expr(&state, child, JetCodegenStabilityUse.Value))
             jet_codegen_stability_list(&state, err_body, false)
             jet_codegen_stability_expr(&state, err_value, value)
             jet_codegen_stability_expr(&state, terminal, value)
         }
         // A call of a closure value may change whatever that closure captured.
         .IndirectCall(_, _, _, _) | .OptionLift2(_, _, _) | .HostBorrowCallback(_, _) -> {
-            loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+            tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_stability_expr(&state, child, write))
             jet_codegen_stability_disturb(&state, "*")
         }
         .FnValue(kind) -> {
@@ -4090,7 +4090,7 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
                     if lambda != None -> state.pinned["*"] = true
                 }
                 .Call(_, _) -> {
-                    loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+                    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_stability_expr(&state, child, write))
                     jet_codegen_stability_disturb(&state, "*")
                 }
                 else -> state.pinned["*"] = true
@@ -4100,17 +4100,17 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
             if call == {
                 .CCallback(_, _, _, _, _, _) -> state.pinned["*"] = true
                 .GCEdit(root, _, edges, _, _, _) -> {
-                    loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+                    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_stability_expr(&state, child, write))
                     jet_codegen_stability_disturb(&state, root.name)
                     loop edge in edges -> jet_codegen_stability_disturb(&state, edge.name)
                 }
-                else -> loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+                else -> tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_stability_expr(&state, child, write))
             }
         }
         // Executables whose captures this walk does not read.
         .CoreClosureCall(_) | .SharedGuardWait(_, _, _) -> state.pinned["*"] = true
         // Any other form may write what it names.
-        else -> loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+        else -> tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_stability_expr(&state, child, write))
     }
 }
 

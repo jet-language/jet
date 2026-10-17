@@ -5,7 +5,7 @@ use jet_foundation.[
     LambdaParam, Marker, MarkerCallArg, NamedSpan, Span, Symbol, SymbolKind,
     TExpr, TExprKind, TLetTy, TStmt, Type,
     ast_binding, ast_empty_call_arg_flags, ast_empty_lambda_meta, symbol_id,
-    tir_symbol_local, tir_expr_children, tir_stmt_list_children, type_name,
+    tir_symbol_local, tir_each_expr_child, tir_each_stmt_list_child, type_name,
 ]
 
 fn sema_http_route_marker_verb(marker: Marker, graph: SemaRegistrationGraph, module_identity: String) -> String? {
@@ -116,14 +116,15 @@ fn sema_http_collect_mounted(expression: TExpr, graph: SemaRegistrationGraph, mo
             }
         }
     }
-    loop child in tir_expr_children(expression) -> sema_http_collect_mounted(child, graph, module_identity, &mounted)
+    tir_each_expr_child(expression, (child: TExpr) -> sema_http_collect_mounted(child, graph, module_identity, &mounted))
 }
 
 fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     mounted := [String]{}
     loop module_row in modules {
+        identity :: module_row.module_identity
         loop function in module_row.functions {
-            loop expression in tir_stmt_list_children(function.body) -> sema_http_collect_mounted(expression, graph, module_row.module_identity, &mounted)
+            tir_each_stmt_list_child(function.body, (expression: TExpr) -> sema_http_collect_mounted(expression, graph, identity, &mounted))
         }
     }
     diagnostics := [Diagnostic]{}

@@ -76,9 +76,9 @@ use jet_foundation.[
     stable_id,
     type_identity_equal,
     type_mir_identity_key,
-    tir_expr_children,
-    tir_if_cond_children,
-    tir_stmt_children,
+    tir_each_expr_child,
+    tir_each_if_cond_child,
+    tir_each_stmt_child,
 ]
 use jet_sema.[
     SemaGraphModuleResult,
@@ -1786,7 +1786,7 @@ fn jet_codegen_partial_move_expression(expression: TExpr, roots: &[String:Bool])
         }
         else -> {}
     }
-    loop child in tir_expr_children(expression) -> jet_codegen_partial_move_expression(child, &roots)
+    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_partial_move_expression(child, &roots))
 }
 
 fn jet_codegen_partial_move_condition(condition: TIfCond, roots: &[String:Bool]) Never! {
@@ -1799,7 +1799,7 @@ fn jet_codegen_partial_move_condition(condition: TIfCond, roots: &[String:Bool])
             jet_codegen_partial_move_condition(left, &roots)
             jet_codegen_partial_move_condition(right, &roots)
         }
-        else -> loop child in tir_if_cond_children(condition) -> jet_codegen_partial_move_expression(child, &roots)
+        else -> tir_each_if_cond_child(condition, (child: TExpr) -> jet_codegen_partial_move_expression(child, &roots))
     }
 }
 
@@ -1916,7 +1916,7 @@ fn jet_codegen_partial_move_statements(statements: [TStmt], roots: &[String:Bool
             }
             else -> {}
         }
-        loop child in tir_stmt_children(statement) -> jet_codegen_partial_move_expression(child, &roots)
+        tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_partial_move_expression(child, &roots))
     }
 }
 

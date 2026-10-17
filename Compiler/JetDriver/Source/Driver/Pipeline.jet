@@ -136,8 +136,8 @@ use jet_foundation.[
     mir_type_same_checked_type,
     stable_id,
     symbol_id,
-    tir_expr_children,
-    tir_stmt_children,
+    tir_each_expr_child,
+    tir_each_stmt_child,
     TTypeDef,
 ]
 use jet_parser.[
@@ -5070,24 +5070,32 @@ fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, funct
     }
 }
 
-// The first direct-call callee key in `function` (its body and parameter
-// defaults) that `targets` does not hold.
+// The first direct-call callee key in `function` (its parameter defaults,
+// then its body, each expression before the ones below it) that `targets`
+// does not hold.
 fn jet_driver_unresolved_direct_call(function: TFunc, targets: [String:Bool]) -> String? Never! {
-    pending := [TExpr]{}
+    missing := String?{None}
     loop parameter in function.params {
-        if parameter.default == Val(value) -> &pending.push(value)
+        if parameter.default == Val(value) -> jet_driver_unresolved_call_in(value, targets, &missing)
     }
     loop statement in function.body {
-        loop child in tir_stmt_children(statement) -> &pending.push(child)
+        if missing != None -> break
+        tir_each_stmt_child(statement, (child: TExpr) -> jet_driver_unresolved_call_in(child, targets, &missing))
     }
-    loop pending.len() > 0 {
-        expression :: &pending.pop() ?? return None
-        if expression.kind == .Call(callee, _, _) {
-            if targets.get(callee.key) == None -> return Val(callee.key)
+    missing
+}
+
+// Records in `missing` (once) the first direct-call callee key in
+// `expression` or below it that `targets` does not hold, read in place.
+fn jet_driver_unresolved_call_in(expression: TExpr, targets: [String:Bool], missing: &String?) Never! {
+    if missing != None -> return
+    if expression.kind == .Call(callee, _, _) {
+        if targets.get(callee.key) == None {
+            missing = Val(callee.key)
+            return
         }
-        loop child in tir_expr_children(expression) -> &pending.push(child)
     }
-    None
+    tir_each_expr_child(expression, (child: TExpr) -> jet_driver_unresolved_call_in(child, targets, &missing))
 }
 
 // `emit:<name>@<position>` skip entries: the function at that position of

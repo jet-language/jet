@@ -33,8 +33,6 @@ use jet_foundation.[
     diagnostic_with_edit_grade,
     expr_span,
     symbol_id,
-    tir_expr_children,
-    tir_stmt_children,
     type_name,
 ]
 use jet_parser.[
@@ -314,7 +312,7 @@ struct SemaPreludeDemandWalk {
 // One expression of the demand walk: a propagation site whose conversion is
 // this module's prelude routine for a Core error family member reaching `Err`
 // demands it (first site per routine), then its children are walked in place
-// (sema_effect_walk_expr_children), in the order tir_expr_children gives them.
+// (sema_effect_walk_expr_children), in the order tir_each_expr_child visits them.
 fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     conversion :: if expression.kind == {
         .Try(_, value, _) -> Val(value)

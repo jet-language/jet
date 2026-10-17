@@ -70,13 +70,15 @@ fn method_wave_lowered(checked: SemaGraphResult, source: String) -> JetCodegenFu
     lower_functions(&functions, &modules, [MIRSourceFile]{MIRSourceFile{id: mir_source_file_id("method-wave.jet"), path: "method-wave.jet", source: source}}, compiler_threads_single(), None, false, "2028", false)
 }
 
-fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int {
+fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int Never! {
     found := 0
     if value.kind == .RequireStop(_, location, _) {
         method_wave_require(location.function == function_name && location.file == "method-wave.jet" && location.line > 0, "panic retains the current method and authored source coordinates after worker/inline drain")
         found += 1
     }
-    loop child in tir_expr_children(value) -> found += method_wave_panic_witness(child, function_name)
+    tir_each_expr_child(value, (child: TExpr) -> {
+        found += method_wave_panic_witness(child, function_name)
+    })
     found
 }
 
@@ -126,11 +128,12 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
                 raw_products += 1
             }
             if function.name != "fail" && function.name != "method_2" -> next
+            name :: function.name
             loop statement in function.body {
-                loop value in tir_stmt_children(statement) {
-                    if function.name == "fail" -> panic_sites += method_wave_panic_witness(value, function.name)
-                    if function.name == "method_2" && negative && keep_going -> stub_sites += method_wave_panic_witness(value, function.name)
-                }
+                tir_each_stmt_child(statement, (value: TExpr) -> {
+                    if name == "fail" -> panic_sites += method_wave_panic_witness(value, name)
+                    if name == "method_2" && negative && keep_going -> stub_sites += method_wave_panic_witness(value, name)
+                })
             }
         }
     }

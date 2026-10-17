@@ -2109,393 +2109,369 @@ fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
     TAddressLifetime.Unknown
 }
 
-fn tir_pattern_children(pattern: TPattern) -> [TExpr] Never! {
-    tir_pattern_shape_children(pattern.shape)
+fn tir_each_pattern_child(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    tir_each_pattern_shape_child(pattern.shape, visit)
 }
 
-fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if shape == {
         .Variant(_, slots, _, _) | .List(slots, _, _) -> {
             loop slot in slots {
-                loop child in tir_pattern_slot_children(slot) -> &children.push(child)
+                tir_each_pattern_slot_child(slot, visit)
             }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
-            if inner == .Val(nested) -> loop child in tir_pattern_shape_children(nested.shape) -> &children.push(child)
+            if inner == .Val(nested) -> tir_each_pattern_shape_child(nested.shape, visit)
         }
         .Map(entries, _, _) -> loop entry in entries {
-            &children.push(entry.key)
-            loop child in tir_pattern_slot_children(entry.slot) -> &children.push(child)
+            visit(entry.key)
+            tir_each_pattern_slot_child(entry.slot, visit)
         }
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
-                loop child in tir_pattern_shape_children(alternative) -> &children.push(child)
+                tir_each_pattern_shape_child(alternative, visit)
             }
         }
         .Struct(fields, _, _) -> {
             loop field in fields {
                 if field == {
-                    .Value(_, value, _) -> &children.push(value)
-                    .Nested(_, inner, _) -> loop child in tir_pattern_shape_children(inner.shape) -> &children.push(child)
+                    .Value(_, value, _) -> visit(value)
+                    .Nested(_, inner, _) -> tir_each_pattern_shape_child(inner.shape, visit)
                     else -> {}
                 }
             }
         }
         else -> {}
     }
-    children
 }
 
-fn tir_pattern_slot_children(slot: TPatternBinding) -> [TExpr] Never! {
+fn tir_each_pattern_slot_child(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if slot == {
-        .Value(value) -> [TExpr]{value}
-        .Nested(inner) -> tir_pattern_shape_children(inner.shape)
-        else -> [TExpr]{}
+        .Value(value) -> visit(value)
+        .Nested(inner) -> tir_each_pattern_shape_child(inner.shape, visit)
+        else -> {}
     }
 }
 
-fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if condition == {
-        .Plain(value) -> &children.push(value)
+        .Plain(value) -> visit(value)
         .And(left, right) -> {
-            loop child in tir_if_cond_children(left) -> &children.push(child)
-            loop child in tir_if_cond_children(right) -> &children.push(child)
+            tir_each_if_cond_child(left, visit)
+            tir_each_if_cond_child(right, visit)
         }
         .IfLet(pattern, subj) | .Matches(pattern, subj) -> {
-            loop child in tir_pattern_children(pattern) -> &children.push(child)
-            &children.push(subj)
+            tir_each_pattern_child(pattern, visit)
+            visit(subj)
         }
-        .IsNone(subj) -> &children.push(subj)
+        .IsNone(subj) -> visit(subj)
         .WithPrelude(prelude, cond) -> {
             loop statement in prelude {
-                loop child in tir_stmt_children(statement) -> &children.push(child)
+                tir_each_stmt_child(statement, visit)
             }
-            loop child in tir_if_cond_children(cond) -> &children.push(child)
+            tir_each_if_cond_child(cond, visit)
         }
     }
-    children
 }
 
-fn tir_lambda_children(lambda: TLambda) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if lambda.executable == {
-        .Expr(value) -> &children.push(value)
+        .Expr(value) -> visit(value)
         .Block(body) | .SharedBlock(body) -> {
             loop statement in body {
-                loop child in tir_stmt_children(statement) -> &children.push(child)
+                tir_each_stmt_child(statement, visit)
             }
         }
     }
-    children
 }
 
-fn tir_stmt_list_children(statements: [TStmt]) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_stmt_list_child(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop statement in statements {
-        loop child in tir_stmt_children(statement) -> &children.push(child)
+        tir_each_stmt_child(statement, visit)
     }
-    children
 }
 
-fn tir_match_arm_children(arms: [TMatchArm]) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop arm in arms {
-        loop child in tir_pattern_children(arm.pattern) -> &children.push(child)
-        loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
+        tir_each_pattern_child(arm.pattern, visit)
+        tir_each_stmt_list_child(arm.body, visit)
     }
-    children
 }
 
-// Appends the children of an `else` to `children`. An else-if chain (an
-// `else` that is exactly one `if`, the shape sema gives every N-arm decision
-// table) is followed by direct recursion over read parameters, one frame per
-// arm: each link is read in place and its children are copied once, where a
-// loop would copy the rest of the chain into a local at every step.
-fn tir_else_children_into(children: &[TExpr], else_body: [TStmt]?) Never! {
+// Visits the children of an `else`. An else-if chain (an `else` that is
+// exactly one `if`, the shape sema gives every N-arm decision table) is
+// followed by direct recursion over read parameters, one frame per arm:
+// each link is read in place, never copied.
+fn tir_each_else_child(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if else_body == .Val(statements) {
         loop statement in statements {
             if statement == .If(condition, then_body, nested_else, _, _) {
-                loop child in tir_if_cond_children(condition) -> &children.push(child)
-                loop child in tir_stmt_list_children(then_body) -> &children.push(child)
-                tir_else_children_into(&children, nested_else)
+                tir_each_if_cond_child(condition, visit)
+                tir_each_stmt_list_child(then_body, visit)
+                tir_each_else_child(nested_else, visit)
             } else {
-                loop child in tir_stmt_children(statement) -> &children.push(child)
+                tir_each_stmt_child(statement, visit)
             }
         }
     }
 }
 
-fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if statement == {
         .Contract(contract) -> {
-            &children.push(contract.condition)
-            &children.push(contract.message)
+            visit(contract.condition)
+            visit(contract.message)
         }
         .ContractScope(pre, body, post, result, _) -> {
             loop contract in pre {
-                &children.push(contract.condition)
-                &children.push(contract.message)
+                visit(contract.condition)
+                visit(contract.message)
             }
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            tir_each_stmt_list_child(body, visit)
             loop contract in post {
-                &children.push(contract.condition)
-                &children.push(contract.message)
+                visit(contract.condition)
+                visit(contract.message)
             }
             _ := result
         }
-        .Let(_, _, init, _, _, _) -> &children.push(init)
+        .Let(_, _, init, _, _, _) -> visit(init)
         .RefutableBind(pattern, init, fallback, _) -> {
-            loop child in tir_pattern_children(pattern) -> &children.push(child)
-            &children.push(init)
-            loop child in tir_stmt_list_children(fallback) -> &children.push(child)
+            tir_each_pattern_child(pattern, visit)
+            visit(init)
+            tir_each_stmt_list_child(fallback, visit)
         }
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> &children.push(init)
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> visit(init)
         .Assign(place, _, value, _, _, _) -> {
             if place == {
-                .Expr(place_value) -> &children.push(place_value)
+                .Expr(place_value) -> visit(place_value)
                 else -> {}
             }
-            &children.push(value)
+            visit(value)
         }
         .Return(value, _) -> {
-            if value == Val(nested) -> &children.push(nested)
+            if value == Val(nested) -> visit(nested)
         }
-        .ExprStmt(value, _) -> &children.push(value)
+        .ExprStmt(value, _) -> visit(value)
         .TaskGroup(_, limit, body, _) -> {
-            if limit == Val(nested) -> &children.push(nested)
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            if limit == Val(nested) -> visit(nested)
+            tir_each_stmt_list_child(body, visit)
         }
-        .DeferClose(close, _, _, _) -> &children.push(close)
+        .DeferClose(close, _, _, _) -> visit(close)
         .If(condition, then_body, else_body, _, _) -> {
-            loop child in tir_if_cond_children(condition) -> &children.push(child)
-            loop child in tir_stmt_list_children(then_body) -> &children.push(child)
-            tir_else_children_into(&children, else_body)
+            tir_each_if_cond_child(condition, visit)
+            tir_each_stmt_list_child(then_body, visit)
+            tir_each_else_child(else_body, visit)
         }
-        .Loop(_, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .Loop(_, body, _) -> tir_each_stmt_list_child(body, visit)
         .While(_, condition, body, _) -> {
-            &children.push(condition)
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            visit(condition)
+            tir_each_stmt_list_child(body, visit)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            loop child in tir_stmt_children(init) -> &children.push(child)
-            &children.push(condition)
+            tir_each_stmt_child(init, visit)
+            visit(condition)
             if step == Val(nested) {
-                loop child in tir_stmt_children(nested) -> &children.push(child)
+                tir_each_stmt_child(nested, visit)
             }
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            tir_each_stmt_list_child(body, visit)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            &children.push(start)
-            &children.push(end)
-            if step == Val(nested) -> &children.push(nested)
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            visit(start)
+            visit(end)
+            if step == Val(nested) -> visit(nested)
+            tir_each_stmt_list_child(body, visit)
         }
         .Range(_, _, source, start, end, step, _, _, body, _) -> {
-            if source == Val(nested_source) -> &children.push(nested_source)
-            &children.push(start)
-            &children.push(end)
-            if step == Val(nested_step) -> &children.push(nested_step)
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            if source == Val(nested_source) -> visit(nested_source)
+            visit(start)
+            visit(end)
+            if step == Val(nested_step) -> visit(nested_step)
+            tir_each_stmt_list_child(body, visit)
         }
-        .BreakValue(_, value, _) -> &children.push(value)
+        .BreakValue(_, value, _) -> visit(value)
         .Match(subject, arms, _, _) -> {
-            &children.push(subject)
-            loop child in tir_match_arm_children(arms) -> &children.push(child)
+            visit(subject)
+            tir_each_match_arm_child(arms, visit)
         }
         .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
-            &children.push(scrutinee)
-            loop child in tir_match_arm_children(arms) -> &children.push(child)
+            visit(scrutinee)
+            tir_each_match_arm_child(arms, visit)
             if else_body == Val(nested) {
-                loop child in tir_stmt_list_children(nested) -> &children.push(child)
+                tir_each_stmt_list_child(nested, visit)
             }
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            &children.push(subject)
+            visit(subject)
             loop arm in arms {
-                loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
+                tir_each_stmt_list_child(arm.body, visit)
             }
-            loop child in tir_stmt_list_children(else_body) -> &children.push(child)
+            tir_each_stmt_list_child(else_body, visit)
         }
         .IndexAssign(_, base, index, _, value, _) -> {
-            &children.push(base)
-            &children.push(index)
-            &children.push(value)
+            visit(base)
+            visit(index)
+            visit(value)
         }
         .IndexFieldAssign(value, _) -> {
-            &children.push(value.base)
-            &children.push(value.index)
-            &children.push(value.value)
+            visit(value.base)
+            visit(value.index)
+            visit(value.value)
         }
         .IndexHookAssign(_, base, index, value, _) -> {
-            &children.push(base)
-            &children.push(index)
-            &children.push(value)
+            visit(base)
+            visit(index)
+            visit(value)
         }
         .MathSwizzleAssign(base, _, _, value, _, _) -> {
-            &children.push(base)
-            &children.push(value)
+            visit(base)
+            visit(value)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
-            &children.push(source)
-            &children.push(collection)
-            if step == Val(nested) -> &children.push(nested)
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            visit(source)
+            visit(collection)
+            if step == Val(nested) -> visit(nested)
+            tir_each_stmt_list_child(body, visit)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> tir_each_stmt_list_child(body, visit)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            &children.push(subject)
+            visit(subject)
             loop arm in arms {
-                &children.push(arm.condition)
-                loop child in tir_stmt_list_children(arm.body) -> &children.push(child)
+                visit(arm.condition)
+                tir_each_stmt_list_child(arm.body, visit)
             }
             if else_body == Val(nested) {
-                loop child in tir_stmt_list_children(nested) -> &children.push(child)
+                tir_each_stmt_list_child(nested, visit)
             }
         }
-        .Unsafe(_, body) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
-        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
-        .Reactive(executable, _) -> loop child in tir_lambda_children(executable) -> &children.push(child)
-        .Layout(_, _, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .Unsafe(_, body) -> tir_each_stmt_list_child(body, visit)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> tir_each_stmt_list_child(body, visit)
+        .Reactive(executable, _) -> tir_each_lambda_child(executable, visit)
+        .Layout(_, _, body, _) -> tir_each_stmt_list_child(body, visit)
         .ContextBlock(guards, body, _) -> {
-            loop guard in guards -> &children.push(guard.value)
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            loop guard in guards -> visit(guard.value)
+            tir_each_stmt_list_child(body, visit)
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
-                .Timeout(duration) -> &children.push(duration)
+                .Timeout(duration) -> visit(duration)
                 else -> {}
             }
-            loop child in tir_stmt_list_children(body) -> &children.push(child)
+            tir_each_stmt_list_child(body, visit)
         }
-        .Transact(_, _, _, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
+        .Transact(_, _, _, body, _) -> tir_each_stmt_list_child(body, visit)
         .GCEdit(_, _, _, _, index_temp, edited, _) -> {
-            if index_temp == Val(nested) -> &children.push(nested)
-            loop child in tir_stmt_children(edited) -> &children.push(child)
+            if index_temp == Val(nested) -> visit(nested)
+            tir_each_stmt_child(edited, visit)
         }
         .SplitViews(owner, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
-            if owner == Val(nested) -> &children.push(nested)
+            if owner == Val(nested) -> visit(nested)
         }
         else -> {}
     }
-    children
 }
 
-fn tir_place_children(place: TPlace) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_place_child(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if place == {
-        .Expr(value) -> &children.push(value)
+        .Expr(value) -> visit(value)
         else -> {}
     }
-    children
 }
 
-fn tir_require_children(requirement: TRequireKind) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if requirement == {
         .Require(condition, message) -> {
-            &children.push(condition)
-            if message == Val(message_value) -> &children.push(message_value)
+            visit(condition)
+            if message == Val(message_value) -> visit(message_value)
         }
         .RequireEq(left, right) -> {
-            &children.push(left)
-            &children.push(right)
+            visit(left)
+            visit(right)
         }
-        .Panic(message) -> &children.push(message)
+        .Panic(message) -> visit(message)
     }
-    children
 }
 
-fn tir_or_fallback_children(fallback: TOrFallback) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if fallback == {
-        .Value(value) -> &children.push(value)
+        .Value(value) -> visit(value)
         .Return(value) -> {
-            if value == Val(nested) -> &children.push(nested)
+            if value == Val(nested) -> visit(nested)
         }
-        .Panic(message, _) -> &children.push(message)
+        .Panic(message, _) -> visit(message)
         else -> {}
     }
-    children
 }
 
-fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop part in parts {
         if part == {
-            .Element(value) | .Spread(value) -> &children.push(value)
+            .Element(value) | .Spread(value) -> visit(value)
         }
     }
-    children
 }
 
 
-fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if call == {
         .Method(receiver, _, args) -> {
-            &children.push(receiver)
-            loop value in args -> &children.push(value)
+            visit(receiver)
+            loop value in args -> visit(value)
         }
-        .CarrierFact(receiver, _, _) -> &children.push(receiver)
-        .CellGuardProject(receiver, _, _, _, _) -> &children.push(receiver)
+        .CarrierFact(receiver, _, _) -> visit(receiver)
+        .CellGuardProject(receiver, _, _, _, _) -> visit(receiver)
         .FixedListIndex(base, index, _) -> {
-            &children.push(base)
-            &children.push(index)
+            visit(base)
+            visit(index)
         }
-        .TypedText(_, argument) -> &children.push(argument)
+        .TypedText(_, argument) -> visit(argument)
         .GCEdit(_, _, _, edit, index_temp, _) -> {
-            &children.push(edit)
-            if index_temp == Val(index_value) -> &children.push(index_value)
+            visit(edit)
+            if index_temp == Val(index_value) -> visit(index_value)
         }
-        .OptionProbe(inner, _) -> &children.push(inner)
-        .TupleIndex(base, _) -> &children.push(base)
-        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> &children.push(subject)
-        .YieldSend(value) -> &children.push(value)
-        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> &children.push(hole)
-        .ExpectSnapshot(value, _) -> &children.push(value)
+        .OptionProbe(inner, _) -> visit(inner)
+        .TupleIndex(base, _) -> visit(base)
+        .StrMatchScan(subject, _, _) | .BinMatchScan(subject, _, _) -> visit(subject)
+        .YieldSend(value) -> visit(value)
+        .TypedTextInterp(_, _, holes, _) -> loop hole in holes -> visit(hole)
+        .ExpectSnapshot(value, _) -> visit(value)
         .EnvSet(name, value, _) -> {
-            &children.push(name)
-            &children.push(value)
+            visit(name)
+            visit(value)
         }
-        .CCallback(_, lambda, _, _, _, _) -> loop child in tir_lambda_children(lambda) -> &children.push(child)
+        .CCallback(_, lambda, _, _, _, _) -> tir_each_lambda_child(lambda, visit)
         else -> {}
     }
-    children
 }
 
-fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .Spawn(group, _, _, executable) -> {
-            if group == Val(group_value) -> &children.push(group_value)
-            loop child in tir_lambda_children(executable) -> &children.push(child)
+            if group == Val(group_value) -> visit(group_value)
+            tir_each_lambda_child(executable, visit)
         }
         .Realtime(rate, frames, executable) -> {
-            &children.push(rate)
-            &children.push(frames)
-            loop child in tir_lambda_children(executable) -> &children.push(child)
+            visit(rate)
+            visit(frames)
+            tir_each_lambda_child(executable, visit)
         }
         .UITextInputOnDrop(state, ime, executable, _) -> {
-            &children.push(state)
-            &children.push(ime)
-            loop child in tir_lambda_children(executable) -> &children.push(child)
+            visit(state)
+            visit(ime)
+            tir_each_lambda_child(executable, visit)
         }
         .Serve(address, executable) -> {
-            &children.push(address)
-            loop child in tir_lambda_children(executable) -> &children.push(child)
+            visit(address)
+            tir_each_lambda_child(executable, visit)
         }
-        .OnInterrupt(callback) -> &children.push(callback)
-        .Guard(executable) -> loop child in tir_lambda_children(executable) -> &children.push(child)
-        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> loop child in tir_lambda_children(executable) -> &children.push(child)
-        .OnCommit(_, executable) | .OnRollback(_, executable) -> loop child in tir_lambda_children(executable) -> &children.push(child)
+        .OnInterrupt(callback) -> visit(callback)
+        .Guard(executable) -> tir_each_lambda_child(executable, visit)
+        .ReactiveDerived(executable, _) | .ReactiveEffect(executable, _) | .UIReactiveRender(executable, _) -> tir_each_lambda_child(executable, visit)
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> tir_each_lambda_child(executable, visit)
         .UIButtonOnClick(label, shortcut, accessible_label, executable, _) -> {
-            &children.push(label)
-            &children.push(shortcut)
-            &children.push(accessible_label)
-            loop child in tir_lambda_children(executable) -> &children.push(child)
+            visit(label)
+            visit(shortcut)
+            visit(accessible_label)
+            tir_each_lambda_child(executable, visit)
         }
         .UIPreview(name, viewport, executable, site, playground, source_file, source_span, source_start_line, source_start_column, source_end_line, source_end_column, build_id, revision) -> {
             _ := site
@@ -2508,226 +2484,221 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] Never! {
             _ := source_end_column
             _ := build_id
             _ := revision
-            &children.push(name)
-            if viewport == Val(viewport_value) -> &children.push(viewport_value)
-            loop child in tir_lambda_children(executable) -> &children.push(child)
+            visit(name)
+            if viewport == Val(viewport_value) -> visit(viewport_value)
+            tir_each_lambda_child(executable, visit)
         }
     }
 
-    children
 }
-fn tir_expr_children(expression: TExpr) -> [TExpr] {
-    children := [TExpr]{}
+fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if expression.kind == {
         .StrLit(parts) -> loop part in parts {
             if part == {
-                .Interpolation(value, _) -> &children.push(value)
+                .Interpolation(value, _) -> visit(value)
                 else -> {}
             }
         }
-        .InlineBlock(body) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
-        .Call(_, _, args) -> loop argument in args -> &children.push(argument.value)
+        .InlineBlock(body) -> tir_each_stmt_list_child(body, visit)
+        .Call(_, _, args) -> loop argument in args -> visit(argument.value)
         .IndirectCall(callee, _, args, _) -> {
-            &children.push(callee)
-            loop argument in args -> &children.push(argument.value)
+            visit(callee)
+            loop argument in args -> visit(argument.value)
         }
         .MethodCall(receiver, _, _, args) -> {
-            &children.push(receiver)
-            loop argument in args -> &children.push(argument.value)
+            visit(receiver)
+            loop argument in args -> visit(argument.value)
         }
-        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> &children.push(argument)
+        .DistinctCtor(_, argument, _) | .RangeCheckedCtor(_, argument, _) | .DistinctConvert(_, argument, _, _, _) | .TraitBox(argument, _) -> visit(argument)
         .UnitConvert(_, argument, _, _, rounding, _, _, _, _) -> {
-            &children.push(argument)
-            if rounding == Val(rounding_value) -> &children.push(rounding_value.digits)
+            visit(argument)
+            if rounding == Val(rounding_value) -> visit(rounding_value.digits)
         }
-        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> &children.push(value)
-        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> &children.push(value)
+        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> visit(value)
+        .Print(value) | .Drop(value) | .Close(value) | .Move(value) | .ResourceNew(value) -> visit(value)
         .AmbientInput(prompt) -> {
-            if prompt == Val(prompt_value) -> &children.push(prompt_value)
+            if prompt == Val(prompt_value) -> visit(prompt_value)
         }
-        .RequireStop(kind, _, _) -> loop child in tir_require_children(kind) -> &children.push(child)
+        .RequireStop(kind, _, _) -> tir_each_require_child(kind, visit)
         .Binary(_, _, _, lhs, rhs) -> {
-            &children.push(lhs)
-            &children.push(rhs)
+            visit(lhs)
+            visit(rhs)
         }
-        .CompareChain(operands, _, _) -> loop value in operands -> &children.push(value)
-        .Unary(_, operand) -> &children.push(operand)
-        .StructLit(fields, _) -> loop field in fields -> &children.push(field.value)
-        .Field(receiver, _) -> &children.push(receiver)
+        .CompareChain(operands, _, _) -> loop value in operands -> visit(value)
+        .Unary(_, operand) -> visit(operand)
+        .StructLit(fields, _) -> loop field in fields -> visit(field.value)
+        .Field(receiver, _) -> visit(receiver)
         .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
-            &children.push(base)
-            &children.push(index)
+            visit(base)
+            visit(index)
         }
         .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
-            &children.push(base)
-            &children.push(start)
-            &children.push(end)
-            if range == Val(range_value) -> &children.push(range_value)
+            visit(base)
+            visit(start)
+            visit(end)
+            if range == Val(range_value) -> visit(range_value)
         }
         .Range(start, end, _) -> {
-            &children.push(start)
-            &children.push(end)
+            visit(start)
+            visit(end)
         }
-        .Tuple(values) | .List(values, _) -> loop value in values -> &children.push(value)
+        .Tuple(values) | .List(values, _) -> loop value in values -> visit(value)
         .Map(entries) | .MapLit(entries) -> loop entry in entries {
-            &children.push(entry.key)
-            &children.push(entry.value)
+            visit(entry.key)
+            visit(entry.value)
         }
         .EnumCtor(_, _, payload) | .EnumLit(_, _, payload) -> {
             if payload == {
-                .Positional(args) -> loop argument in args -> &children.push(argument.value)
-                .Named(fields) -> loop field in fields -> &children.push(field.value.value)
+                .Positional(args) -> loop argument in args -> visit(argument.value)
+                .Named(fields) -> loop field in fields -> visit(field.value.value)
                 .Unit -> {}
             }
         }
-        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> &children.push(value)
-        .Try(value, _, _) -> &children.push(value)
+        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> visit(value)
+        .Try(value, _, _) -> visit(value)
         .TryWithContext(inner, note, _, _, _, _) -> {
-            &children.push(inner)
-            if note == Val(note_value) -> &children.push(note_value)
+            visit(inner)
+            if note == Val(note_value) -> visit(note_value)
         }
-        .Lambda(value) | .LambdaValue(value) -> loop child in tir_lambda_children(value) -> &children.push(child)
-        .Borrow(place, _) -> &children.push(place)
-        .AddressOf(place, _, _) | .RawAddressOf(place) -> loop child in tir_place_children(place) -> &children.push(child)
-        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> &children.push(value)
+        .Lambda(value) | .LambdaValue(value) -> tir_each_lambda_child(value, visit)
+        .Borrow(place, _) -> visit(place)
+        .AddressOf(place, _, _) | .RawAddressOf(place) -> tir_each_place_child(place, visit)
+        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) | .LayoutLit(value) -> visit(value)
         .LayoutCompare(_, lhs, rhs) -> {
-            &children.push(lhs)
-            &children.push(rhs)
+            visit(lhs)
+            visit(rhs)
         }
-        .SharedGuardValue(guard, _) -> &children.push(guard)
-        .SharedGuardMap(guard, _, _) -> &children.push(guard)
-        .SharedGuardSplit(guard, _, _, _) -> &children.push(guard)
+        .SharedGuardValue(guard, _) -> visit(guard)
+        .SharedGuardMap(guard, _, _) -> visit(guard)
+        .SharedGuardSplit(guard, _, _, _) -> visit(guard)
         .SharedGuardWait(guard, condition, predicate) -> {
-            &children.push(guard)
-            &children.push(condition)
-            loop child in tir_lambda_children(predicate) -> &children.push(child)
+            visit(guard)
+            visit(condition)
+            tir_each_lambda_child(predicate, visit)
         }
-        .ConditionNotify(condition, _) -> &children.push(condition)
-        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> &children.push(value)
-        .HostCall(call) -> loop child in tir_host_call_children(call) -> &children.push(child)
+        .ConditionNotify(condition, _) -> visit(condition)
+        .CoreCall(_, args, _, _, _, _, _) -> loop value in args -> visit(value)
+        .HostCall(call) -> tir_each_host_call_child(call, visit)
         .JSONLit(_, argument, _) | .DBValueLit(_, argument, _) -> {
-            if argument == Val(argument_value) -> &children.push(argument_value)
+            if argument == Val(argument_value) -> visit(argument_value)
         }
-        .AllocNew(_, args) -> loop argument in args -> &children.push(argument.value)
-        .ListLit(values) -> loop value in values -> &children.push(value)
-        .ListSpread(parts) -> loop child in tir_list_spread_children(parts) -> &children.push(child)
-        .ColumnarListLit(_, elements) -> loop value in elements -> &children.push(value)
+        .AllocNew(_, args) -> loop argument in args -> visit(argument.value)
+        .ListLit(values) -> loop value in values -> visit(value)
+        .ListSpread(parts) -> tir_each_list_spread_child(parts, visit)
+        .ColumnarListLit(_, elements) -> loop value in elements -> visit(value)
         .ColumnarGather(base, index, _) | .ColumnarColumnRead(base, index, _, _, _, _) -> {
-            &children.push(base)
-            &children.push(index)
+            visit(base)
+            visit(index)
         }
-        .TupleLit(_, fields) -> loop field in fields -> &children.push(field.value)
+        .TupleLit(_, fields) -> loop field in fields -> visit(field.value)
         .PoolSlot(pool, id, _, _, _, _) -> {
-            &children.push(pool)
-            &children.push(id)
+            visit(pool)
+            visit(id)
         }
         .IndexHook(_, base, index, _) | .MathLaneIndex(_, base, index, _) -> {
-            &children.push(base)
-            &children.push(index)
+            visit(base)
+            visit(index)
         }
-        .MathSwizzleRead(_, receiver, _) -> &children.push(receiver)
-        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> &children.push(value)
-        .StaticCall(_, _, _, _, args) -> loop argument in args -> &children.push(argument.value)
+        .MathSwizzleRead(_, receiver, _) -> visit(receiver)
+        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> visit(value)
+        .StaticCall(_, _, _, _, args) -> loop argument in args -> visit(argument.value)
         .DecodeUnder(segment, inner) -> {
-            &children.push(segment)
-            &children.push(inner)
+            visit(segment)
+            visit(inner)
         }
         .BuiltinMethod(receiver, _, args) -> {
-            &children.push(receiver)
-            loop value in args -> &children.push(value)
+            visit(receiver)
+            loop value in args -> visit(value)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
-            loop child in tir_if_cond_children(cond) -> &children.push(child)
-            loop child in tir_stmt_list_children(then_body) -> &children.push(child)
-            &children.push(then_value)
-            loop child in tir_stmt_list_children(else_body) -> &children.push(child)
-            &children.push(else_value)
+            tir_each_if_cond_child(cond, visit)
+            tir_each_stmt_list_child(then_body, visit)
+            visit(then_value)
+            tir_each_stmt_list_child(else_body, visit)
+            visit(else_value)
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            &children.push(subject)
-            loop child in tir_pattern_children(ok_pattern) -> &children.push(child)
-            loop child in tir_stmt_list_children(ok_body) -> &children.push(child)
-            &children.push(ok_value)
-            loop child in tir_pattern_children(err_pattern) -> &children.push(child)
-            loop child in tir_stmt_list_children(err_body) -> &children.push(child)
-            &children.push(err_value)
-            &children.push(terminal)
+            visit(subject)
+            tir_each_pattern_child(ok_pattern, visit)
+            tir_each_stmt_list_child(ok_body, visit)
+            visit(ok_value)
+            tir_each_pattern_child(err_pattern, visit)
+            tir_each_stmt_list_child(err_body, visit)
+            visit(err_value)
+            visit(terminal)
         }
         .OrFallback(value, fallback, _) -> {
-            &children.push(value)
-            loop child in tir_or_fallback_children(fallback) -> &children.push(child)
+            visit(value)
+            tir_each_or_fallback_child(fallback, visit)
         }
-        .OptField(base, _, _) -> &children.push(base)
+        .OptField(base, _, _) -> visit(base)
         .OptMethodCall(base, _, call, _) -> {
-            &children.push(base)
-            &children.push(call)
+            visit(base)
+            visit(call)
         }
         .PatternMatches(subject, pattern) -> {
-            &children.push(subject)
-            loop child in tir_pattern_children(pattern) -> &children.push(child)
+            visit(subject)
+            tir_each_pattern_child(pattern, visit)
         }
         .OptionLift2(function, left, right) -> {
-            &children.push(function)
-            &children.push(left)
-            &children.push(right)
+            visit(function)
+            visit(left)
+            visit(right)
         }
         .ClosureMethod(receiver, _, args) -> {
-            &children.push(receiver)
-            loop value in args -> &children.push(value)
+            visit(receiver)
+            loop value in args -> visit(value)
         }
-        .HostBorrowCallback(callable, _) -> &children.push(callable)
-        .NumericMethod(receiver, _) -> &children.push(receiver)
+        .HostBorrowCallback(callable, _) -> visit(callable)
+        .NumericMethod(receiver, _) -> visit(receiver)
         .NumericBinaryMethod(receiver, _, argument) -> {
-            &children.push(receiver)
-            &children.push(argument)
+            visit(receiver)
+            visit(argument)
         }
         .OverflowOpt(_, _, _, _, lhs, rhs) -> {
-            &children.push(lhs)
-            &children.push(rhs)
+            visit(lhs)
+            visit(rhs)
         }
         .HandleMethod(receiver, _, args) -> {
-            &children.push(receiver)
-            loop value in args -> &children.push(value)
+            visit(receiver)
+            loop value in args -> visit(value)
         }
-        .CoreClosureCall(kind) -> loop child in tir_core_closure_children(kind) -> &children.push(child)
-        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> &children.push(tasks)
+        .CoreClosureCall(kind) -> tir_each_core_closure_child(kind, visit)
+        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> visit(tasks)
         .SelectRecv(builder, channel) -> {
-            &children.push(builder)
-            &children.push(channel)
+            visit(builder)
+            visit(channel)
         }
         .SelectAfter(builder, duration, value) -> {
-            &children.push(builder)
-            &children.push(duration)
-            if value == Val(nested) -> &children.push(nested)
+            visit(builder)
+            visit(duration)
+            if value == Val(nested) -> visit(nested)
         }
-        .SelectWait(builder, _) -> &children.push(builder)
-        .FnValue(kind) -> loop child in tir_fn_value_children(kind) -> &children.push(child)
-        .ModuleCall(_, _, _, _, args) -> loop argument in args -> &children.push(argument.value)
-        .ExternCall(_, _, args) -> loop argument in args -> &children.push(argument.value)
+        .SelectWait(builder, _) -> visit(builder)
+        .FnValue(kind) -> tir_each_fn_value_child(kind, visit)
+        .ModuleCall(_, _, _, _, args) -> loop argument in args -> visit(argument.value)
+        .ExternCall(_, _, args) -> loop argument in args -> visit(argument.value)
         else -> {}
     }
-    children
 }
 
-fn tir_fn_value_children(kind: TFnValueKind) -> [TExpr] Never! {
-    children := [TExpr]{}
+fn tir_each_fn_value_child(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .NamedFn(_, lambda) -> {
             if lambda == Val(lambda_value) {
-                loop child in tir_lambda_children(lambda_value) -> &children.push(child)
+                tir_each_lambda_child(lambda_value, visit)
             }
         }
         .Policy(_, policy_args, _, _, _, callee) -> {
-            loop argument in policy_args -> &children.push(argument.value)
-            &children.push(callee)
+            loop argument in policy_args -> visit(argument.value)
+            visit(callee)
         }
         .Call(callee, args) -> {
-            &children.push(callee)
-            loop argument in args -> &children.push(argument.value)
+            visit(callee)
+            loop argument in args -> visit(argument.value)
         }
-        .Send(value) -> &children.push(value)
+        .Send(value) -> visit(value)
     }
-    children
 }
 
 fn tir_func_facts(function: TFunc) -> TFactChannel Never! {

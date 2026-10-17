@@ -2,7 +2,7 @@
 // checker that checked the original module. The checked TIR owns goal types.
 use core.files as cli_files
 use jet_driver.[JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.[Func, Item, Span, TExpr, TFunc, diagnostic_line_at, diagnostic_render_all, tir_expr_children, tir_stmt_children, type_name]
+use jet_foundation.[Func, Item, Span, TExpr, TFunc, diagnostic_line_at, diagnostic_render_all, tir_each_expr_child, tir_each_stmt_child, type_name]
 
 struct JetCLIFillFunction {
     name: String
@@ -46,11 +46,11 @@ fn jet_cli_fill_function_infos(items: [Item], infos: &[JetCLIFillFunction]) Neve
     }
 }
 
-fn jet_cli_fill_expr(expression: TExpr, goals: &[JetCLIFillGoal]) {
+fn jet_cli_fill_expr(expression: TExpr, goals: &[JetCLIFillGoal]) Never! {
     if expression.kind == .Never(reason) && reason == "todo" {
         &goals.push(JetCLIFillGoal{span: expression.span, expected: expression.goal_expected_type ?? "(unknown)"})
     }
-    loop child in tir_expr_children(expression) -> jet_cli_fill_expr(child, &goals)
+    tir_each_expr_child(expression, (child: TExpr) -> jet_cli_fill_expr(child, &goals))
 }
 
 fn jet_cli_fill_function_name(function: TFunc) -> String Never! {
@@ -135,9 +135,7 @@ fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?
             if function.synthetic -> next
             goals := [JetCLIFillGoal]{}
             loop statement in function.body {
-                loop expression in tir_stmt_children(statement) {
-                    jet_cli_fill_expr(expression, &goals)
-                }
+                tir_each_stmt_child(statement, (expression: TExpr) -> jet_cli_fill_expr(expression, &goals))
             }
             loop goal in goals {
                 goal_line :: diagnostic_line_at(unit.source, goal.span.start)

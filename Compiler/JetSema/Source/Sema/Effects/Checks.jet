@@ -2309,12 +2309,11 @@ fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts:
 }
 
 // The child expressions of TIR, visited in place: the same expressions in
-// the same order as tir_expr_children / tir_stmt_children (TIR.jet), each read
-// from its borrowed parent. Those return copies, and a walker recursing on
-// them copied every subtree once per enclosing level (O(size x depth) per
-// function). Every match below names each variant and has no wildcard arm, so
-// a new TIR variant fails to compile here instead of being silently skipped;
-// add it here in the order TIR.jet's child functions give it.
+// the same order as tir_each_expr_child / tir_each_stmt_child (TIR.jet)
+// visit them, each read from its borrowed parent. Every match below names
+// each variant and has no wildcard arm, so a new TIR variant fails to compile
+// here instead of being silently skipped; add it here in the order TIR.jet's
+// child visitors give it.
 fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     if expression.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .DefaultLit | .Uninit | .CtLit(_) | .ConstRef(_) | .GlobalShared(_, _) | .ResourceTake(_) | .Todo(_) | .InvariantViolation(_, _) | .Unreachable(_) | .Absent | .SelectStart | .Never(_) -> {}
@@ -2528,7 +2527,7 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
     }
 }
 
-// tir_stmt_children in place (see sema_effect_walk_expr_children).
+// tir_each_stmt_child's children in place (see sema_effect_walk_expr_children).
 fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, statement: TStmt) {
     if statement == {
         .Contract(contract) -> {
@@ -2691,7 +2690,7 @@ fn sema_effect_walk_if_cond_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
     }
 }
 
-// Visit the canonical tir_pattern_children expressions in place, including
+// Visit the canonical tir_each_pattern_child expressions in place, including
 // nested payloads and map keys, without materializing child lists.
 fn sema_effect_walk_pattern_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, shape: TPatternShape) {
     if shape == {

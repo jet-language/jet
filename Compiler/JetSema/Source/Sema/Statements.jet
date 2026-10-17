@@ -72,12 +72,12 @@ use jet_foundation.[
     expr_span,
     measure_literal_value,
     symbol_id,
-    tir_expr_children,
+    tir_each_expr_child,
     tir_cost_integer_bounds,
     tir_generated_local,
-    tir_if_cond_children,
-    tir_pattern_children,
-    tir_stmt_children,
+    tir_each_if_cond_child,
+    tir_each_pattern_child,
+    tir_each_stmt_child,
     tir_symbol_local,
     type_identity_equal,
     type_identity_key,
@@ -1282,14 +1282,16 @@ fn sema_stmt_for_in_body_mentions(state: SemaOwnershipState, references_before: 
 // state is dropped: `loop x in s.xs { if c { f(&s, x); return } }` looked
 // stable, lowered an in-place walk, and rustc rejected the `&mut s` call
 // that also borrows `s.xs[i]` (E0502).
-fn sema_stmt_for_in_tir_mentions(statements: [TStmt], key: String) -> Bool {
+fn sema_stmt_for_in_tir_mentions(statements: [TStmt], key: String) -> Bool Never! {
     if sema_stmt_for_in_tir_assigns(statements, key) -> return true
+    found := false
     loop statement in statements {
-        loop child in tir_stmt_children(statement) {
-            if sema_stmt_for_in_tir_expr_names(child, key) -> return true
-        }
+        if found -> break
+        tir_each_stmt_child(statement, (child: TExpr) -> {
+            if !found && sema_stmt_for_in_tir_expr_names(child, key) -> found = true
+        })
     }
-    false
+    found
 }
 
 fn sema_stmt_for_in_tir_local_is(local: TLocal, key: String) -> Bool Never! {
@@ -1298,8 +1300,8 @@ fn sema_stmt_for_in_tir_local_is(local: TLocal, key: String) -> Bool Never! {
 }
 
 // A local read, an address of the whole local, or a lambda capture of it;
-// `tir_expr_children` covers every nested expression.
-fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool {
+// `tir_each_expr_child` covers every nested expression.
+fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool Never! {
     if value.kind == {
         .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
         .AddressOf(place, _, _) | .RawAddressOf(place) -> {
@@ -1315,14 +1317,15 @@ fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool {
         }
         else -> {}
     }
-    loop child in tir_expr_children(value) {
-        if sema_stmt_for_in_tir_expr_names(child, key) -> return true
-    }
-    false
+    found := false
+    tir_each_expr_child(value, (child: TExpr) -> {
+        if !found && sema_stmt_for_in_tir_expr_names(child, key) -> found = true
+    })
+    found
 }
 
 // A whole-local assignment `key = …` at any depth: its place is not an
-// expression child (`tir_stmt_children`).
+// expression child (`tir_each_stmt_child`).
 fn sema_stmt_for_in_tir_assigns(statements: [TStmt], key: String) -> Bool Never! {
     loop statement in statements {
         if statement == {
@@ -1406,7 +1409,7 @@ fn sema_stmt_for_in_body_keeps(state: SemaOwnershipState, references_before: Int
 // break or next at any depth (a nested loop's included), no statement of
 // type Never, and no expression that leaves or diverges
 // (sema_stmt_for_in_tir_expr_stays).
-fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool {
+fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool Never! {
     loop statement in statements {
         if statement == {
             .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return false
@@ -1461,9 +1464,11 @@ fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool {
             }
             else -> {}
         }
-        loop child in tir_stmt_children(statement) {
-            if !sema_stmt_for_in_tir_expr_stays(child, key) -> return false
-        }
+        stays := true
+        tir_each_stmt_child(statement, (child: TExpr) -> {
+            if stays && !sema_stmt_for_in_tir_expr_stays(child, key) -> stays = false
+        })
+        if !stays -> return false
     }
     true
 }
@@ -1471,7 +1476,7 @@ fn sema_stmt_for_in_tir_stays(statements: [TStmt], key: String) -> Bool {
 // An expression that neither leaves the loop (`?`, a diverging `??`), nor
 // diverges (type Never), nor write-borrows or captures the root `key`; an
 // inline block's statements fall through too.
-fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String) -> Bool {
+fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String) -> Bool Never! {
     if value.ty == (Type.Named{name: "Never"}) -> return false
     if value.kind == {
         .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Unreachable(_) -> return false
@@ -1496,10 +1501,11 @@ fn sema_stmt_for_in_tir_expr_stays(value: TExpr, key: String) -> Bool {
         }
         else -> {}
     }
-    loop child in tir_expr_children(value) {
-        if !sema_stmt_for_in_tir_expr_stays(child, key) -> return false
-    }
-    true
+    stays := true
+    tir_each_expr_child(value, (child: TExpr) -> {
+        if stays && !sema_stmt_for_in_tir_expr_stays(child, key) -> stays = false
+    })
+    stays
 }
 
 fn sema_stmt_for_in_stable_list(collection_type: Type) -> Bool Never! {
@@ -3750,14 +3756,46 @@ fn sema_stmt_transaction_stm_local(span: Span) -> TLocal Never! {
     local
 }
 
-fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool {
+// Whether any child expression of `value` touches shared state; the
+// children are read in place (tir_each_*_child), never copied.
+fn sema_stmt_tir_children_touch_shared(value: TExpr) -> Bool Never! {
+    found := false
+    tir_each_expr_child(value, (child: TExpr) -> {
+        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_tir_pattern_touches_shared(pattern: TPattern) -> Bool Never! {
+    found := false
+    tir_each_pattern_child(pattern, (child: TExpr) -> {
+        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_tir_condition_touches_shared(condition: TIfCond) -> Bool Never! {
+    found := false
+    tir_each_if_cond_child(condition, (child: TExpr) -> {
+        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_tir_statement_children_touch_shared(statement: TStmt) -> Bool Never! {
+    found := false
+    tir_each_stmt_child(statement, (child: TExpr) -> {
+        if !found && sema_stmt_tir_expr_touches_shared(child) -> found = true
+    })
+    found
+}
+
+fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool Never! {
     if value.kind == {
         .Lambda(_) | .LambdaValue(_) -> return false
         .InlineBlock(body) -> return sema_stmt_tir_statements_touch_shared(body)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            loop child in tir_if_cond_children(condition) {
-                if sema_stmt_tir_expr_touches_shared(child) -> return true
-            }
+            if sema_stmt_tir_condition_touches_shared(condition) -> return true
             if sema_stmt_tir_statements_touch_shared(then_body) -> return true
             if sema_stmt_tir_expr_touches_shared(then_value) -> return true
             if sema_stmt_tir_statements_touch_shared(else_body) -> return true
@@ -3765,14 +3803,10 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool {
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
             if sema_stmt_tir_expr_touches_shared(subject) -> return true
-            loop child in tir_pattern_children(ok_pattern) {
-                if sema_stmt_tir_expr_touches_shared(child) -> return true
-            }
+            if sema_stmt_tir_pattern_touches_shared(ok_pattern) -> return true
             if sema_stmt_tir_statements_touch_shared(ok_body) -> return true
             if sema_stmt_tir_expr_touches_shared(ok_value) -> return true
-            loop child in tir_pattern_children(err_pattern) {
-                if sema_stmt_tir_expr_touches_shared(child) -> return true
-            }
+            if sema_stmt_tir_pattern_touches_shared(err_pattern) -> return true
             if sema_stmt_tir_statements_touch_shared(err_body) -> return true
             if sema_stmt_tir_expr_touches_shared(err_value) -> return true
             return sema_stmt_tir_expr_touches_shared(terminal)
@@ -3801,18 +3835,15 @@ fn sema_stmt_tir_expr_touches_shared(value: TExpr) -> Bool {
         }
         else -> {}
     }
-    loop child in tir_expr_children(value) {
-        if sema_stmt_tir_expr_touches_shared(child) -> return true
-    }
-    false
+    sema_stmt_tir_children_touch_shared(value)
 }
 
-fn sema_stmt_tir_contract_touches_shared(contract: TContract) -> Bool {
+fn sema_stmt_tir_contract_touches_shared(contract: TContract) -> Bool Never! {
     if sema_stmt_tir_expr_touches_shared(contract.condition) -> return true
     sema_stmt_tir_expr_touches_shared(contract.message)
 }
 
-fn sema_stmt_tir_core_closure_touches_shared(kind: TCoreClosureKind) -> Bool {
+fn sema_stmt_tir_core_closure_touches_shared(kind: TCoreClosureKind) -> Bool Never! {
     if kind == {
         .Spawn(group, _, _, _) -> {
             if group != None {
@@ -3838,7 +3869,7 @@ fn sema_stmt_tir_core_closure_touches_shared(kind: TCoreClosureKind) -> Bool {
     }
 }
 
-fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
+fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool Never! {
     if statement == {
         .Transact(_, _, _, _, _) -> false
         .ContractScope(pre, body, post, _, _) -> {
@@ -3852,10 +3883,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
             false
         }
         .RefutableBind(pattern, init, fallback, _) -> {
-            pattern_children :: tir_pattern_children(pattern)
-            loop child in pattern_children {
-                if sema_stmt_tir_expr_touches_shared(child) -> return true
-            }
+            if sema_stmt_tir_pattern_touches_shared(pattern) -> return true
             if sema_stmt_tir_expr_touches_shared(init) -> return true
             sema_stmt_tir_statements_touch_shared(fallback)
         }
@@ -3883,10 +3911,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
             sema_stmt_tir_statements_touch_shared(body)
         }
         .If(condition, then_body, else_body, _, _) -> {
-            condition_children :: tir_if_cond_children(condition)
-            loop child in condition_children {
-                if sema_stmt_tir_expr_touches_shared(child) -> return true
-            }
+            if sema_stmt_tir_condition_touches_shared(condition) -> return true
             if sema_stmt_tir_statements_touch_shared(then_body) -> return true
             if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements) else -> false
         }
@@ -3898,10 +3923,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         .Match(subject, arms, _, _) -> {
             if sema_stmt_tir_expr_touches_shared(subject) -> return true
             loop arm in arms {
-                pattern_children :: tir_pattern_children(arm.pattern)
-                loop child in pattern_children {
-                    if sema_stmt_tir_expr_touches_shared(child) -> return true
-                }
+                if sema_stmt_tir_pattern_touches_shared(arm.pattern) -> return true
                 if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
             }
             false
@@ -3909,10 +3931,7 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
         .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
             if sema_stmt_tir_expr_touches_shared(scrutinee) -> return true
             loop arm in arms {
-                pattern_children :: tir_pattern_children(arm.pattern)
-                loop child in pattern_children {
-                    if sema_stmt_tir_expr_touches_shared(child) -> return true
-                }
+                if sema_stmt_tir_pattern_touches_shared(arm.pattern) -> return true
                 if sema_stmt_tir_statements_touch_shared(arm.body) -> return true
             }
             if else_body == .Val(else_statements) -> sema_stmt_tir_statements_touch_shared(else_statements) else -> false
@@ -3965,17 +3984,11 @@ fn sema_stmt_tir_statement_touches_shared(statement: TStmt) -> Bool {
             sema_stmt_tir_statement_touches_shared(nested)
         }
         .Reactive(_, _) -> false
-        else -> {
-            statement_children :: tir_stmt_children(statement)
-            loop child in statement_children {
-                if sema_stmt_tir_expr_touches_shared(child) -> return true
-            }
-            false
-        }
+        else -> sema_stmt_tir_statement_children_touch_shared(statement)
     }
 }
 
-fn sema_stmt_tir_statements_touch_shared(statements: [TStmt]) -> Bool {
+fn sema_stmt_tir_statements_touch_shared(statements: [TStmt]) -> Bool Never! {
     loop statement in statements {
         if sema_stmt_tir_statement_touches_shared(statement) -> return true
     }
