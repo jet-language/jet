@@ -1,0 +1,10 @@
+// #5037 case 2 (V p2/p7, `[]&int{len: 1}`): V allocates a list of unset
+// references with a warning and crashes when one is read. Jet's only way to
+// skip initialization is the visible `uninit` body (D-UNINIT-SENTINEL2), and
+// sema proves every element is written before it is read (D-UNINIT1).
+use core.mem as mem
+
+fn run() {
+    cells := [Int#1]{ uninit }
+    print(cells[0])
+}
