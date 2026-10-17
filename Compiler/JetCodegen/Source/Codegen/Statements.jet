@@ -3606,25 +3606,58 @@ fn jet_codegen_stability_scalar(ty: Type) -> Bool Never! {
 
 // #5041: the roots of the places a conditional initializer's arms copy
 // (`n :: if c -> a.f else -> if d -> b[i] else -> f(x)`: `a`, `b`), down its
-// else chain as jet_codegen_lower_if_expression lowers it.
+// else chain as jet_codegen_lower_if_expression lowers it. An arm reading a
+// payload binding of its own guard's pattern (`if s.kind == .V(p) -> p`)
+// copies a slot of that pattern's subject, so its root is the subject's.
 fn jet_codegen_stability_arm_roots(expression: TExpr, roots: &[String]) Never! {
-    if expression.kind == .IfExpr(_, _, then_value, _, else_value) {
-        jet_codegen_stability_arm_root(then_value, &roots)
+    if expression.kind == .IfExpr(condition, _, then_value, _, else_value) {
+        jet_codegen_stability_arm_root(then_value, condition, true, &roots)
         if else_value.kind == .IfExpr(_, _, _, _, _) {
             jet_codegen_stability_arm_roots(else_value, &roots)
         } else {
-            jet_codegen_stability_arm_root(else_value, &roots)
+            jet_codegen_stability_arm_root(else_value, condition, false, &roots)
         }
     }
 }
 
 // The root of the place one conditional arm copies (a compiler-inserted
-// clone of a jet_codegen_element_place_root chain), if any.
-fn jet_codegen_stability_arm_root(value: TExpr, roots: &[String]) Never! {
-    if value.kind == .Clone(inner, _) {
-        if jet_codegen_element_place_root(inner) == .Val(root) {
-            if !roots.contains(root.name) -> &roots.push(root.name)
+// clone of a jet_codegen_element_place_root chain), if any; `guarded`: the
+// arm runs under `condition`, so its pattern bindings are in scope, and a
+// payload binding's slot is lent even when the arm reads it uncopied.
+fn jet_codegen_stability_arm_root(value: TExpr, condition: TIfCond, guarded: Bool, roots: &[String]) Never! {
+    if value.kind == .Clone(inner, _) -> return jet_codegen_stability_chain_root(inner, condition, guarded, true, &roots)
+    if guarded -> jet_codegen_stability_chain_root(value, condition, guarded, false, &roots)
+}
+
+fn jet_codegen_stability_chain_root(inner: TExpr, condition: TIfCond, guarded: Bool, copied: Bool, roots: &[String]) Never! {
+    root :: jet_codegen_element_place_root(inner) ?? return
+    name := root.name
+    if guarded {
+        if jet_codegen_arm_subject_root(condition, root.name) == .Val(subject_root) {
+            name = subject_root.name
+        } else if !copied {
+            return
         }
+    }
+    if !roots.contains(name) -> &roots.push(name)
+}
+
+// #5041: the root of the subject a pattern of `condition` binds `name` over
+// (jet_codegen_stability_place_root), if the pattern binds it.
+fn jet_codegen_arm_subject_root(condition: TIfCond, name: String) -> TLocal? Never! {
+    if condition == {
+        .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
+            loop fact in pattern.bindings {
+                if fact.name == name -> return jet_codegen_stability_place_root(subject)
+            }
+            None
+        }
+        .And(left, right) -> {
+            found :: jet_codegen_arm_subject_root(left, name)
+            if found != None -> return found
+            jet_codegen_arm_subject_root(right, name)
+        }
+        else -> None
     }
 }
 
