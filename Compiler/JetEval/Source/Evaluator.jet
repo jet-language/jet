@@ -1705,7 +1705,7 @@ fn jet_eval_task_start(root: ^JetEvalTaskRoot, config: ^JetEvalConfig, args: [Je
             return jet_eval_result(^machine, None, false)
         }
     }
-    callback := jet_eval_callback_invoke(&machine, lease, ^args, span)
+    callback := jet_eval_callback_invoke(&machine, lease, args.copy(), span)
     jet_eval_merge_callback_output(&machine, callback.stdout, callback.stderr)
     if callback.outcome == {
         .Value(value) -> return jet_eval_result(^machine, Val(value), true)

@@ -145,7 +145,7 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     if binding != None {
         info :: binding
         if sema_ownership_binding_is_borrowed_param(info) {
-            &diagnostics.push(sema_error("E0201", mark_span, "`{info.symbol.name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `.copy()`, or accept it with the move marker `^`"))
+            &diagnostics.push(sema_ownership_diag_move_from_borrowed(info.symbol.name, mark_span))
             return None
         }
     }

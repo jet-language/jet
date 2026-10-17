@@ -396,9 +396,13 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // passed to a consuming parameter is the exact-place move, so the
         // argument moves out of its owner (MovePlace, clearing its drop
         // flag) instead of reaching lowering as a bare read that only a
-        // last-use proof turns into a move. A borrowed parameter or its field
-        // has no storage to give up and keeps its copy.
-        taken_place := parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && sema_call_marked_move_place(args[index].expr, value)
+        // last-use proof turns into a move. A read parameter or its field has
+        // no storage to give up: the mark is E0201, never a silent copy. A
+        // write parameter's field keeps the refill move the last-use pass
+        // proves.
+        marked_place :: parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty) && sema_call_marked_move_place(args[index].expr, value)
+        if marked_place && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return None
+        taken_place := marked_place
         if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
         stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
         &values.push(stored)

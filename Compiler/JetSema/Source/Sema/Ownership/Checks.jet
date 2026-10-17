@@ -2618,6 +2618,23 @@ fn sema_ownership_call_diag_not_copyable(callee: String, index: Int, name: Strin
     sema_error("E0201", span, "`{callee}` needs the move marker `^` here — this value can't be copied", "parameter {index + 1} takes ownership through the move marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied", "write the move marker `^` (`^{name}`) to move ownership to `{callee}`")
 }
 
+fn sema_ownership_diag_move_from_borrowed(name: String, mark_span: Span) -> Diagnostic {
+    sema_error("E0201", mark_span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `.copy()`, or accept it with the move marker `^`")
+}
+
+// An explicit `^` never lowers to a copy. A call argument `^p` or `^p.f`
+// whose root is a read parameter has no storage to give up: report it at the
+// mark (E0201, as at a value-position mark in Expressions/Places.jet) instead
+// of letting lowering copy the place. A write parameter's field keeps the
+// refill-before-exit move the last-use pass proves. True when rejected.
+fn sema_ownership_reject_read_param_move(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    root :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return false
+    if root.symbol.kind != SymbolKind.Parameter || root.access != AccessConvention.Read -> return false
+    start :: expr_span(expr).start
+    &diagnostics.push(sema_ownership_diag_move_from_borrowed(root.symbol.name, Span{start: start - 1, end: start}))
+    true
+}
+
 // `borrowed_read` is Rust `check_call_argument_access`'s flag: a read argument
 // of a non-scalar read parameter keeps its loan through the call.
 fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: ^[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool, borrowed_read: Bool) -> SemaOwnershipCheckResult {
