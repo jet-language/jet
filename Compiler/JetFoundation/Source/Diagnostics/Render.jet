@@ -137,6 +137,77 @@ fn diagnostic_column_at(source: String, offset: Int) -> Int Never! {
     column
 }
 
+// One source's bytes and line starts, built once per file of a rendered
+// batch: every diagnostic of the file reads these bytes in place, and a line
+// or column is a binary search plus a scan of one line, never a copy and a
+// scan of the whole file (the self-hosted compiler unit is one 25 MB file
+// with thousands of lints).
+struct DiagnosticSourceText {
+    bytes: [U8]
+    // The byte offset of each line's first byte, ascending; line one is 0.
+    line_starts: [Int]
+}
+
+fn diagnostic_source_text(source: String) -> DiagnosticSourceText Never! {
+    bytes :: source.bytes()
+    starts := [Int]{0}
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) -> &starts.push(index + 1)
+    }
+    DiagnosticSourceText{bytes: bytes, line_starts: starts}
+}
+
+// The 0-based line holding the clamped offset `limit`: the last line start
+// at or before it.
+fn diagnostic_source_line_index(text: DiagnosticSourceText, limit: Int) -> Int Never! {
+    low := 0
+    high := text.line_starts.len() - 1
+    loop low < high {
+        middle :: (low + high + 1) /% 2
+        if text.line_starts[middle] <= limit -> low = middle else -> high = middle - 1
+    }
+    low
+}
+
+// diagnostic_line_at over an indexed source.
+fn diagnostic_source_line(text: DiagnosticSourceText, offset: Int) -> Int Never! {
+    diagnostic_source_line_index(text, diagnostic_clamp_offset(text.bytes, offset)) + 1
+}
+
+// diagnostic_column_at over an indexed source.
+fn diagnostic_source_column(text: DiagnosticSourceText, offset: Int) -> Int Never! {
+    limit :: diagnostic_clamp_offset(text.bytes, offset)
+    column := 1
+    loop index in text.line_starts[diagnostic_source_line_index(text, limit)]..<limit {
+        if !diagnostic_is_continuation(Int.from_u8(text.bytes[index])) -> column += 1
+    }
+    column
+}
+
+// The sources one batch renders, each indexed once (DiagnosticSourceText).
+// A batch spans few files, so lookup is a scan of `keys`.
+struct DiagnosticSourceTexts {
+    keys: [String]
+    texts: [DiagnosticSourceText]
+}
+
+fn diagnostic_source_texts() -> DiagnosticSourceTexts Never! {
+    DiagnosticSourceTexts{keys: [String]{}, texts: [DiagnosticSourceText]{}}
+}
+
+// The position in `sources.texts` of the source a diagnostic reads: its
+// origin's bytes (keyed by path and revision), else the batch's `source`.
+// The source is indexed on first use.
+fn diagnostic_source_position(sources: &DiagnosticSourceTexts, origin: DiagnosticOrigin?, source: String) -> Int Never! {
+    key :: if origin == .Val(found) -> "origin:{found.path}\n{found.revision}" else -> "batch"
+    loop (position, known) in sources.keys {
+        if known == key -> return position
+    }
+    &sources.keys.push(key)
+    if origin == .Val(found) -> &sources.texts.push(diagnostic_source_text(found.source)) else -> &sources.texts.push(diagnostic_source_text(source))
+    sources.keys.len() - 1
+}
+
 // The text of the line holding `offset`, as Rust `str::lines` yields it.
 fn diagnostic_line_text_at(bytes: [U8], offset: Int) -> String Never! {
     start :: diagnostic_line_start(bytes, diagnostic_clamp_offset(bytes, offset))
@@ -180,14 +251,14 @@ fn diagnostic_right_align(text: String, width: Int) -> String Never! {
 }
 
 // Draw one `--> file:line:col` snippet with a caret under `span`; a secondary
-// label prints its message after the carets.
-fn diagnostic_push_snippet(out: &[U8], diagnostic: Diagnostic, color: Bool, file: String, source: String, span: Span, message: String?) Never! {
-    bytes :: source.bytes()
-    line :: diagnostic_line_at(source, span.start)
-    column :: diagnostic_column_at(source, span.start)
+// label prints its message after the carets. `text` is the indexed source,
+// read in place.
+fn diagnostic_push_snippet(out: &[U8], diagnostic: Diagnostic, color: Bool, file: String, text: DiagnosticSourceText, span: Span, message: String?) Never! {
+    line :: diagnostic_source_line(text, span.start)
+    column :: diagnostic_source_column(text, span.start)
     location :: diagnostic_theme_dim(color, "--> {file}:{line}:{column}")
     diagnostic_push_text(&out, "  {location}\n")
-    raw_line_text :: diagnostic_line_text_at(bytes, span.start)
+    raw_line_text :: diagnostic_line_text_at(text.bytes, span.start)
     line_text :: diagnostic_escape_terminal_text(raw_line_text)
     diagnostic_push_text(&out, "    |\n")
     diagnostic_push_text(&out, "{diagnostic_right_align("{line}", 3)} | {line_text}\n")
@@ -195,7 +266,7 @@ fn diagnostic_push_snippet(out: &[U8], diagnostic: Diagnostic, color: Bool, file
     // the span, then draw carets as wide as the spanned text.
     prefix :: diagnostic_escape_terminal_text(diagnostic_prefix_chars(raw_line_text, column - 1))
     pad_width :: diagnostic_unicode.display_width(prefix)
-    snippet_first_line :: diagnostic_escape_terminal_text(diagnostic_snippet_first_line(bytes, span))
+    snippet_first_line :: diagnostic_escape_terminal_text(diagnostic_snippet_first_line(text.bytes, span))
     line_width :: diagnostic_unicode.display_width(line_text)
     avail :: if line_width > pad_width -> line_width - pad_width else -> 0
     caret_len := diagnostic_unicode.display_width(snippet_first_line)
@@ -246,13 +317,14 @@ fn diagnostic_join_escaped(parts: [String], separator: String) -> String Never! 
 // One diagnostic as terminal text. `file` and `source` name the checked
 // source; a diagnostic's own origin replaces both.
 fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, color: Bool) -> String Never! {
-    display := file
-    text := source
-    if diagnostic.origin == .Val(origin) {
-        display = origin.display
-        text = origin.source
-    }
-    display = diagnostic_escape_terminal_text(display)
+    sources := diagnostic_source_texts()
+    diagnostic_render_with(diagnostic, file, source, color, &sources)
+}
+
+// diagnostic_render over the batch's indexed sources: a source is indexed the
+// first time a snippet reads it, and only then.
+fn diagnostic_render_with(diagnostic: Diagnostic, file: String, source: String, color: Bool, sources: &DiagnosticSourceTexts) -> String Never! {
+    display :: diagnostic_escape_terminal_text(if diagnostic.origin == .Val(origin) -> origin.display else -> file)
     what :: diagnostic_escape_terminal_text(diagnostic.what)
     why :: diagnostic_escape_terminal_text(diagnostic.why)
     fix :: diagnostic_escape_terminal_text(diagnostic.fix)
@@ -266,8 +338,11 @@ fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, color
         lint_name == .Val(name) -> diagnostic_push_text(&out, "{label} [{diagnostic.code}] ({name}): {what}\n")
         else -> diagnostic_push_text(&out, "{label} [{diagnostic.code}]: {what}\n")
     }
-    if diagnostic.span == .Val(span) -> diagnostic_push_snippet(&out, diagnostic, color, display, text, span, None)
-    loop secondary in diagnostic.labels -> diagnostic_push_snippet(&out, diagnostic, color, display, text, secondary.span, Val(secondary.message))
+    if diagnostic.span != None || diagnostic.labels.len() > 0 {
+        position :: diagnostic_source_position(&sources, diagnostic.origin, source)
+        if diagnostic.span == .Val(span) -> diagnostic_push_snippet(&out, diagnostic, color, display, sources.texts[position], span, None)
+        loop secondary in diagnostic.labels -> diagnostic_push_snippet(&out, diagnostic, color, display, sources.texts[position], secondary.span, Val(secondary.message))
+    }
     diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Why:")} {why}\n")
     diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
     if diagnostic.detail == .Val(detail) {
@@ -291,12 +366,11 @@ fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, color
     String.from_bytes(out) ?? ""
 }
 
-// A batch of diagnostics, one blank line between each.
+// A batch of diagnostics, one blank line between each. Each source the batch
+// reads is indexed once (DiagnosticSourceTexts), and the reports are joined
+// once at the end.
 fn diagnostic_render_all(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
-    rendered := ""
-    loop (index, diagnostic) in diagnostics {
-        text :: diagnostic_render(diagnostic, file, source, color)
-        rendered = if index == 0 -> text else -> "{rendered}\n{text}"
-    }
-    rendered
+    sources := diagnostic_source_texts()
+    rendered :: loop diagnostic in diagnostics -> diagnostic_render_with(diagnostic, file, source, color, &sources)
+    rendered.join("\n")
 }

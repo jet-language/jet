@@ -983,8 +983,9 @@ fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, ch
 }
 
 fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, check: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if jet_cli_errors(diagnostics).len() > 0 {
+    // Errors are found on the raw rows; only a failing doc presents and prints its diagnostics.
+    if jet_cli_errors(result.diagnostics).len() > 0 {
+        diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         if json -> return JetDriverVerbOutput{stdout: jet_cli_render_all_json(jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
@@ -1024,8 +1025,8 @@ fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverV
 }
 
 fn jet_cli_semindex_result(file: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if jet_cli_errors(diagnostics).len() > 0 {
+    if jet_cli_errors(result.diagnostics).len() > 0 {
+        diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         source :: cli_files.read(file) ?? ""
         if json -> return JetDriverVerbOutput{stdout: jet_cli_render_all_json(jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         // One report per diagnostic, each followed by a blank line.

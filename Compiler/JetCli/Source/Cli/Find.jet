@@ -535,8 +535,8 @@ fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json
 }
 
 fn jet_cli_find_result(file: String, query: String, mode: JetCLIFindMode, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if jet_cli_errors(diagnostics).len() > 0 {
+    if jet_cli_errors(result.diagnostics).len() > 0 {
+        diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         source :: cli_files.read(file) ?? ""
         if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}

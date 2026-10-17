@@ -16,12 +16,15 @@ use jet_foundation.[
     DiagnosticMoment,
     DiagnosticNoFixReasonKind,
     DiagnosticOrigin,
+    DiagnosticSourceTexts,
     DiagnosticStructured,
     DIAGNOSTIC_LINT,
     TextEdit,
-    diagnostic_column_at,
     diagnostic_from_registry,
-    diagnostic_line_at,
+    diagnostic_source_column,
+    diagnostic_source_line,
+    diagnostic_source_position,
+    diagnostic_source_texts,
 ]
 
 JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
@@ -274,16 +277,17 @@ fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
 // and `source` its bytes; a diagnostic's own origin replaces both. `cwd`
 // makes origin paths absolute the way `ReportPath::from_process` does.
 fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
+    sources := diagnostic_source_texts()
+    jet_cli_report_json_with(diagnostic, cwd, file, source, clears, &sources)
+}
+
+// jet_cli_report_json over a batch's indexed sources (`sources`, Render.jet):
+// each source a line or column reads is indexed once per batch.
+fn jet_cli_report_json_with(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int, sources: &DiagnosticSourceTexts) -> String Never! {
     // copy: `file` stays with the caller (`file` is a read parameter: no move out of it, E0201) and
     // the binding `report_file` owns its own.
     report_file := file.copy()
-    // copy: `source` stays with the caller (`source` is a read parameter: no move out of it, E0201)
-    // and the binding `text` owns its own.
-    text := source.copy()
-    if diagnostic.origin == .Val(origin) {
-        report_file = jet_cli_report_path(cwd, origin.path)
-        text = origin.source
-    }
+    if diagnostic.origin == .Val(origin) -> report_file = jet_cli_report_path(cwd, origin.path)
     severity :: if diagnostic.severity == DIAGNOSTIC_LINT -> "warning" else -> "error"
     out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
     if diagnostic.applicability == .Val(applicability) {
@@ -297,7 +301,8 @@ fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, sourc
     file_json :: if report_file.len() > 0 -> jet_cli_json_string(report_file) else -> "null"
     out = "{out},\"file\":{file_json}"
     if diagnostic.span == .Val(span) {
-        out = "{out},\"line\":{diagnostic_line_at(text, span.start)},\"col\":{diagnostic_column_at(text, span.start)},\"span\":{jet_cli_report_span(span.start, span.end)}"
+        position :: diagnostic_source_position(&sources, diagnostic.origin, source)
+        out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)},\"span\":{jet_cli_report_span(span.start, span.end)}"
     } else {
         out = "{out},\"line\":null,\"col\":null,\"span\":null"
     }
@@ -321,8 +326,9 @@ fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, sourc
             path :: jet_cli_report_path(cwd, cause_origin.path)
             if path.len() > 0 -> cause_file = jet_cli_json_string(path)
             if cause.span == .Val(cause_span) {
-                cause_line = "{diagnostic_line_at(cause_origin.source, cause_span.start)}"
-                cause_col = "{diagnostic_column_at(cause_origin.source, cause_span.start)}"
+                position :: diagnostic_source_position(&sources, cause.origin, "")
+                cause_line = "{diagnostic_source_line(sources.texts[position], cause_span.start)}"
+                cause_col = "{diagnostic_source_column(sources.texts[position], cause_span.start)}"
             }
         }
         cause_span_json :: if cause.span == {
@@ -333,7 +339,8 @@ fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, sourc
     }
     out = "{out},\"cause\":[{causes.join(",")}]"
     if diagnostic.labels.len() > 0 {
-        labels :: loop label in diagnostic.labels -> "{{\"line\":{diagnostic_line_at(text, label.span.start)},\"col\":{diagnostic_column_at(text, label.span.start)},\"span\":{jet_cli_report_span(label.span.start, label.span.end)},\"message\":{jet_cli_json_string(label.message)}}}"
+        position :: diagnostic_source_position(&sources, diagnostic.origin, source)
+        labels :: loop label in diagnostic.labels -> "{{\"line\":{diagnostic_source_line(sources.texts[position], label.span.start)},\"col\":{diagnostic_source_column(sources.texts[position], label.span.start)},\"span\":{jet_cli_report_span(label.span.start, label.span.end)},\"message\":{jet_cli_json_string(label.message)}}}"
         out = "{out},\"labels\":[{labels.join(",")}]"
     }
     out = "{out},\"clears\":{clears}"
@@ -356,17 +363,18 @@ fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, sourc
 fn jet_cli_reports_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
     report_file :: jet_cli_report_path(cwd, file)
     clears :: jet_cli_report_clear_counts(diagnostics)
+    sources := diagnostic_source_texts()
     reports := [String]{}
-    loop (index, diagnostic) in diagnostics -> &reports.push(jet_cli_report_json(diagnostic, cwd, report_file, source, clears[index]))
+    loop (index, diagnostic) in diagnostics -> &reports.push(jet_cli_report_json_with(diagnostic, cwd, report_file, source, clears[index], &sources))
     reports
 }
 
 // Diagnostics.rs `render_all_json`: JSON Lines, one report per line; an empty
 // batch is no bytes.
 fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
-    out := ""
-    loop report in jet_cli_reports_json(cwd, file, source, diagnostics) -> out = "{out}{report}\n"
-    out
+    reports :: jet_cli_reports_json(cwd, file, source, diagnostics)
+    if reports.len() == 0 -> return ""
+    "{reports.join("\n")}\n"
 }
 
 // The one status line around a batch of reports (main.rs `report_problems`,
