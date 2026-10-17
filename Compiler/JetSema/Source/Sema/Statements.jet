@@ -5633,9 +5633,15 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Region(_, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .Switched(_, _, _) | .Transact(_, _, _, _, _) | .Policy(_, _, _) | .AuthorityScope(_, _, _, _, _) | .TaskGroup(_, _, _, _, _) -> {
                 if !sema_stmt_check_scoped_statement(statements[index], return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
-            .ComptimeIf(_, _, _, _, span, _) | .ComptimeSwitch(_, _, _, span) | .ComptimeBlock(_, _, span) -> {
+            .ComptimeIf(cond, cond_span, then_body, else_body, span, _) -> {
+                if !sema_stmt_check_prep_if(cond, cond_span, then_body, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
+            }
+            .ComptimeSwitch(subject, arms, else_body, span) -> {
+                if !sema_stmt_check_prep_switch(subject, arms, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
+            }
+            .ComptimeBlock(_, _, span) -> {
                 complete = false
-                sema_check_unsupported(&context, "the statement-level `prep` form at offset {span.start} is not executed by the self-hosted checker yet")
+                sema_check_unsupported(&context, "the statement-level `prep` block at offset {span.start} is not executed by the self-hosted checker yet")
             }
             .Live(_, span) -> {
                 complete = false
@@ -5872,6 +5878,171 @@ fn sema_stmt_context_allocator_type(ty: Type) -> Bool Never! {
         .Named(name) -> name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed"
         else -> false
     }
+}
+
+// Rust CheckerCore `check_comptime_if` (D-WHEN1/D-WHEN2, D-PREP-BRANCH1=A):
+// `prep if` selects a branch while building. Its condition is compile-time
+// code, like `name :: prep { value }` (sema_stmt_check_prepared_binding): a
+// value already known here selects at once; any other value is staged through
+// the body comptime evaluator, and the branch is selected when the owner body
+// is checked again. The selected arm is an ordinary nested block emitted
+// inline; the dropped arm is checked for name resolution only (its other
+// reports and everything it did to the scope, the context and the ownership
+// state are rolled back). False while the arm is unselected or incomplete.
+fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    scopes.comptime_execution_depth += 1
+    checked :: sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.comptime_execution_depth -= 1
+    condition :: checked ?? return false
+    if sema_expr_unwrap_tag(condition.ty) != Type.Bool {
+        &diagnostics.push(sema_stmt_prep_if_not_bool(cond_span))
+        return false
+    }
+    value := sema_expr_comptime_value(condition)
+    if value == None -> value = sema_fact_constant_path_value(condition)
+    if value == None {
+        staged :: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), cond_span, span)
+        if staged == .Val(body_value) {
+            value = Val(body_value.value)
+        } else {
+            _ := sema_comptime_body_capture(&context, environment, program, scopes, "prep if", cond, condition.ty, cond_span, span)
+            return false
+        }
+    }
+    known :: value ?? return false
+    selected := false
+    if known == .Bool(flag) {
+        selected = flag
+    } else {
+        &diagnostics.push(sema_stmt_prep_if_not_bool(cond_span))
+        return false
+    }
+    owner :: "prep-if@{span.start}"
+    nested := SemaStatementResult{value: [TStmt]{}, complete: true}
+    if selected {
+        nested = sema_stmt_check_block(then_body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, owner, loop_depth)
+        if else_body == .Val(dropped) -> sema_stmt_check_dropped_prep_arm(dropped, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, owner, loop_depth)
+    } else {
+        if else_body == .Val(chosen) -> nested = sema_stmt_check_block(chosen, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, owner, loop_depth)
+        sema_stmt_check_dropped_prep_arm(then_body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, owner, loop_depth)
+    }
+    if !nested.complete -> return false
+    &output.push(TStmt.Inline{body: nested.value, span: span})
+    true
+}
+
+fn sema_stmt_prep_if_not_bool(cond_span: Span) -> Diagnostic {
+    sema_error("E0989", cond_span, "a `prep if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `prep if flag {{ … }}`")
+}
+
+// D-WHEN2 / D-FACT-FLOW1: the dropped arm is not a path through this code.
+// It is walked for name resolution only: unknown names (E0107, E0102) are
+// reported, and nothing else it reports or does survives it.
+fn sema_stmt_check_dropped_prep_arm(body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], owner: String, loop_depth: Int) {
+    scope_mark :: sema_scope_mark(&scopes)
+    context_mark :: sema_check_context_mark(&context)
+    fork :: sema_ownership_fork(&state)
+    arm_diagnostics := [Diagnostic]{}
+    _ := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &arm_diagnostics, "{owner}.dropped", loop_depth)
+    sema_ownership_fork_rollback(&state, fork)
+    sema_ownership_fork_close(&state, fork)
+    sema_check_context_rollback(&context, context_mark)
+    sema_scope_rollback(&scopes, scope_mark)
+    loop diagnostic in arm_diagnostics {
+        if diagnostic.code == "E0107" || diagnostic.code == "E0102" -> &diagnostics.push(diagnostic)
+    }
+}
+
+// Rust OSTarget `fold_switch` (D-CONF-READ1=A, D-OSTARGET2=B): `prep if
+// $build.os == { .Linux -> … }` folds to the chain of `prep if` arms whose
+// conditions are this build's `$build.os == .OS` as Bool literals, so the
+// `prep if` check selects the arm. Every arm head is a distinct bare OS
+// variant, and the arms cover every OS or carry an `else`, whatever the
+// target. A `$build.settings.<key>` dispatch folds against the declared
+// setting; the Jet loader declares no manifest settings yet, so it reports
+// the undeclared setting, as a `$build.settings` read does
+// (sema_fact_build_read).
+fn sema_stmt_check_prep_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    subject_span :: expr_span(subject)
+    path :: sema_fact_expr_path(subject)
+    if path != (Val("$build.os")) {
+        if path == .Val(text) {
+            if sema_fact_build_setting_key(text) == .Val(key) {
+                &diagnostics.push(sema_fact_build_setting_undeclared(key, subject_span))
+                return false
+            }
+        }
+        &diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `prep if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)", "write `prep if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        return false
+    }
+    active := ""
+    if program.registration_graph == .Val(graph) {
+        active = graph.build_facts.os
+    } else {
+        sema_check_unsupported(&context, "the `prep if $build.os` dispatch at offset {span.start} has no build facts to fold on")
+        return false
+    }
+    oses :: [String]{"Linux", "MacOS", "Windows"}
+    seen := [String]{}
+    valid := true
+    loop arm in arms {
+        variant := ""
+        if arm.cond == .PatternTest(_, pattern, _) {
+            if pattern == .Variant(name, bindings, _, _) {
+                if bindings.len() == 0 -> variant = name
+            }
+        }
+        if !oses.contains(variant) || seen.contains(variant) {
+            &diagnostics.push(sema_stmt_os_dispatch_arm(sema_stmt_os_dispatch_arm_head(arm.cond), arm.span))
+            valid = false
+            next
+        }
+        &seen.push(variant)
+    }
+    if !valid -> return false
+    if else_body == None {
+        missing := [String]{}
+        loop os in oses {
+            if !seen.contains(os) -> &missing.push(os)
+        }
+        if missing.len() != 0 {
+            list :: missing.join(", ")
+            &diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `$build.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or an `else -> …` catch-all"))
+            return false
+        }
+    }
+    // Only an `else` arm: it always runs.
+    if arms.len() == 0 {
+        fallback :: else_body ?? return true
+        nested :: sema_stmt_check_block(fallback, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "prep-switch@{span.start}", loop_depth)
+        if !nested.complete -> return false
+        &output.push(TStmt.Inline{body: nested.value, span: span})
+        return true
+    }
+    // The nested chain below arm 0; each condition is `active == OS`.
+    tail := else_body
+    index := arms.len()
+    loop index > 1 {
+        index -= 1
+        arm :: arms[index]
+        node :: Stmt.ComptimeIf{cond: Expr.Bool{value: seen[index] == active, span: arm.span}, cond_span: arm.span, then_body: arm.body, else_body: tail, span: arm.span, selected_then: None}
+        tail = Val([Stmt]{node})
+    }
+    first :: arms[0]
+    sema_stmt_check_prep_if(Expr.Bool{value: seen[0] == active, span: first.span}, first.span, first.body, tail, first.span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
+}
+
+fn sema_stmt_os_dispatch_arm(found: String, span: Span) -> Diagnostic {
+    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — a `$build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`", "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once", "write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback)")
+}
+
+// A short display of a refused `$build.os` arm head.
+fn sema_stmt_os_dispatch_arm_head(cond: Expr) -> String Never! {
+    if cond == .PatternTest(_, pattern, _) {
+        if pattern == .Variant(variant, _, _, _) -> return ".{variant}"
+        return "this pattern"
+    }
+    "this arm head"
 }
 
 // sema_check_statements's block-scoped statements (unsafe, impure, reactive,
