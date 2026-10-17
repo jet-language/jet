@@ -5110,18 +5110,25 @@ struct LowerUseSite {
 // The MIRRust.rs FunctionIndex rows carrier_has_later_use reads.
 struct LowerUseIndex {
     definitions: [U64:LowerUseSite]
-    uses: [U64:[LowerUseSite]]
+    // Value -> its row in `use_lists`: the sites using it, in block and
+    // instruction order (a site once), read in place rather than copied out
+    // of a map per query or per added use.
+    use_rows: [U64:Int]
+    use_lists: [[LowerUseSite]]
     predecessors: [[Int]]
 }
 
-fn lower_use_index_add(uses: &[U64:[LowerUseSite]], value: U64, at: LowerUseSite) Never! {
-    rows := uses.get(value) ?? [LowerUseSite]{}
-    if rows.len() > 0 {
-        last :: rows[rows.len() - 1]
+fn lower_use_index_add(use_rows: &[U64:Int], use_lists: &[[LowerUseSite]], value: U64, at: LowerUseSite) Never! {
+    row := use_rows.get(value) ?? -1
+    if row < 0 {
+        row = use_lists.len()
+        _ := &use_rows.add(value, row)
+        &use_lists.push([LowerUseSite]{})
+    } else {
+        last :: use_lists[row][use_lists[row].len() - 1]
         if last.block == at.block && last.position == at.position -> return
     }
-    &rows.push(at)
-    _ := &uses.add(value, rows)
+    &use_lists[row].push(at)
 }
 
 // MIRRust.rs FunctionIndex::new: definitions, uses (an SSA-bound local's
@@ -5140,7 +5147,8 @@ fn lower_use_index(function: MIRFunction, block_index: [U64:Int]) -> LowerUseInd
         }
     }
     definitions := [U64:LowerUseSite]{}
-    uses := [U64:[LowerUseSite]]{}
+    use_rows := [U64:Int]{}
+    use_lists := [[LowerUseSite]]{}
     predecessors := [[Int]]{}
     loop _ in function.blocks -> &predecessors.push([Int]{})
     loop (block, row) in function.blocks {
@@ -5148,17 +5156,87 @@ fn lower_use_index(function: MIRFunction, block_index: [U64:Int]) -> LowerUseInd
             if instruction.result == .Val(result) {
                 if definitions.get(result.value) == None -> _ := &definitions.add(result.value, LowerUseSite{block: block, position: position})
             }
-            loop value in mir_operation_value_uses(instruction.operation) -> lower_use_index_add(&uses, value.value, LowerUseSite{block: block, position: position})
+            loop value in mir_operation_value_uses(instruction.operation) -> lower_use_index_add(&use_rows, &use_lists, value.value, LowerUseSite{block: block, position: position})
             if instruction.operation == .ReadPlace(place) | .MovePlace(place) {
-                if bound_places.get(place.value) == .Val(value) -> lower_use_index_add(&uses, value, LowerUseSite{block: block, position: position})
+                if bound_places.get(place.value) == .Val(value) -> lower_use_index_add(&use_rows, &use_lists, value, LowerUseSite{block: block, position: position})
             }
         }
-        loop value in mir_terminator_value_uses(row.terminator) -> lower_use_index_add(&uses, value.value, LowerUseSite{block: block, position: -1})
+        loop value in mir_terminator_value_uses(row.terminator) -> lower_use_index_add(&use_rows, &use_lists, value.value, LowerUseSite{block: block, position: -1})
         loop target in mir_terminator_targets(row.terminator) {
             if block_index.get(target.value) == .Val(at) -> &predecessors[at].push(block)
         }
     }
-    LowerUseIndex{definitions: definitions, uses: uses, predecessors: predecessors}
+    LowerUseIndex{definitions: definitions, use_rows: use_rows, use_lists: use_lists, predecessors: predecessors}
+}
+
+// Whether each block lies on a cycle of terminator edges (reaches itself
+// along one edge or more): a self edge, or a strongly connected component of
+// two blocks or more. One Kosaraju pass per function, so each query is a
+// lookup instead of a walk from the block.
+fn lower_cycle_blocks(index: LowerUseIndex) -> [Bool] Never! {
+    count :: index.predecessors.len()
+    successors := [[Int]]{}
+    on_cycle := [Bool]{}
+    loop _ in 0..<count {
+        &successors.push([Int]{})
+        &on_cycle.push(false)
+    }
+    loop block in 0..<count {
+        loop predecessor in index.predecessors[block] {
+            &successors[predecessor].push(block)
+            if predecessor == block -> on_cycle[block] = true
+        }
+    }
+    // Finish order of a depth-first walk along successors.
+    visited := (loop _ in 0..<count -> false)
+    next_edge := (loop _ in 0..<count -> 0)
+    order := [Int]{}
+    loop root in 0..<count {
+        if visited[root] -> next
+        visited[root] = true
+        stack := [Int]{root}
+        loop stack.len() > 0 {
+            at :: stack[stack.len() - 1]
+            if next_edge[at] < successors[at].len() {
+                target :: successors[at][next_edge[at]]
+                next_edge[at] += 1
+                if !visited[target] {
+                    visited[target] = true
+                    &stack.push(target)
+                }
+            } else {
+                &order.push(at)
+                _ := &stack.pop()
+            }
+        }
+    }
+    // Components along predecessors, in reverse finish order.
+    component := (loop _ in 0..<count -> -1)
+    sizes := [Int]{}
+    cursor := order.len() - 1
+    loop cursor >= 0 {
+        root :: order[cursor]
+        cursor -= 1
+        if component[root] >= 0 -> next
+        id :: sizes.len()
+        &sizes.push(0)
+        component[root] = id
+        stack := [Int]{root}
+        loop stack.len() > 0 {
+            at := &stack.pop() ?? { break }
+            sizes[id] += 1
+            loop predecessor in index.predecessors[at] {
+                if component[predecessor] < 0 {
+                    component[predecessor] = id
+                    &stack.push(predecessor)
+                }
+            }
+        }
+    }
+    loop block in 0..<count {
+        if sizes[component[block]] > 1 -> on_cycle[block] = true
+    }
+    on_cycle
 }
 
 // The test a branch condition names: a trivial phi (every incoming value
@@ -5195,8 +5273,7 @@ fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_
         if condition != known -> return None
     }
     site :: index.definitions.get(known.value) ?? return None
-    reached := [Bool]{}
-    loop _ in function.blocks -> &reached.push(false)
+    reached := [Int:Bool]{}
     pending := [Int]{block}
     cursor := 0
     loop cursor < pending.len() {
@@ -5206,8 +5283,8 @@ fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_
             position :: block_index.get(target.value) ?? next
             if position == definition_block -> next
             if position == site.block -> return None
-            if !reached[position] {
-                reached[position] = true
+            if reached.get(position) == None {
+                _ := &reached.add(position, true)
                 &pending.push(position)
             }
         }
@@ -5228,10 +5305,12 @@ fn lower_use_infeasible(function: MIRFunction, index: LowerUseIndex, block_index
 // only at its last reachable use. A match arm is entered only on the true
 // edge of its test and the arm chain re-branches on that same test, so a
 // later arm's probe of the carrier is no later use of this arm's payload.
-fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], subject: MIRValueID, projection: MIRValueID) -> Bool Never! {
+// `uses` are the carrier's use sites (in any order), `on_cycle` the
+// function's lower_cycle_blocks.
+fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], on_cycle: [Bool], subject: MIRValueID, uses: [LowerUseSite], projection: MIRValueID) -> Bool Never! {
     site :: index.definitions.get(projection.value) ?? return true
     block :: site.block
-    uses :: index.uses.get(subject.value) ?? return false
+    if uses.len() == 0 -> return false
     loop used in uses {
         if used.block == block && (used.position < 0 || used.position > site.position) -> return true
     }
@@ -5243,15 +5322,15 @@ fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, bloc
     }
     // A carrier defined outside the loop the projection runs in is read
     // again by the next iteration: never its last use.
-    if lower_block_in_cycle(index, block) && (definition_block < 0 || !lower_block_reaches(index, block, definition_block)) -> return true
+    if on_cycle[block] && (definition_block < 0 || !lower_block_reaches(index, block, definition_block)) -> return true
     if local -> return false
     known :: lower_use_known_condition(function, index, block_index, block, definition_block)
-    seen := [Bool]{}
-    loop _ in function.blocks -> &seen.push(false)
+    // Visited blocks by map: a query costs what it walks, not the block count.
+    seen := [Int:Bool]{}
     pending := [Int]{}
     loop used in uses {
-        if used.block != block && !seen[used.block] {
-            seen[used.block] = true
+        if used.block != block && seen.get(used.block) == None {
+            _ := &seen.add(used.block, true)
             &pending.push(used.block)
         }
     }
@@ -5263,8 +5342,8 @@ fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, bloc
         loop predecessor in index.predecessors[used_block] {
             if lower_use_infeasible(function, index, block_index, known, predecessor, used_block) -> next
             if predecessor == block -> return true
-            if !seen[predecessor] {
-                seen[predecessor] = true
+            if seen.get(predecessor) == None {
+                _ := &seen.add(predecessor, true)
                 &pending.push(predecessor)
             }
         }
@@ -5302,6 +5381,11 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
     }
     if !candidate -> return takes
     index :: lower_use_index(function, block_index)
+    on_cycle :: lower_cycle_blocks(index)
+    // Built on the first place-read carrier, once per function.
+    facts := lower_payload_local_facts_none()
+    facts_built := false
+    no_uses :: [LowerUseSite]{}
     loop block in function.blocks {
         loop instruction in block.instructions {
             result :: instruction.result ?? next
@@ -5309,11 +5393,17 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
                 if lower_payload_place_read(function, index, subject) {
                     // A subject switch binds its non-place subject to a local
                     // (`it`); the Rust tier's subject is that value itself.
-                    local_index :: lower_payload_local_uses(function, index, subject) ?? next
-                    if !lower_carrier_has_later_use(function, local_index, block_index, subject, result) -> _ := &takes.add(result.value, true)
+                    if !facts_built {
+                        facts = lower_payload_local_facts(function, index)
+                        facts_built = true
+                    }
+                    local_uses :: lower_payload_local_uses(function, index, facts, subject) ?? next
+                    if !lower_carrier_has_later_use(function, index, block_index, on_cycle, subject, local_uses, result) -> _ := &takes.add(result.value, true)
                     next
                 }
-                if !lower_carrier_has_later_use(function, index, block_index, subject, result) -> _ := &takes.add(result.value, true)
+                row :: index.use_rows.get(subject.value) ?? -1
+                later :: if row < 0 -> lower_carrier_has_later_use(function, index, block_index, on_cycle, subject, no_uses, result) else -> lower_carrier_has_later_use(function, index, block_index, on_cycle, subject, index.use_lists[row], result)
+                if !later -> _ := &takes.add(result.value, true)
             }
         }
     }
@@ -5410,11 +5500,6 @@ fn lower_inspect_carriers(function: MIRFunction, inspect_moves: [U64:Bool]) -> [
     lower_inspected_only(function, moved, inspect_moves)
 }
 
-// Whether `block` can reach itself along terminator edges (it is in a loop).
-fn lower_block_in_cycle(index: LowerUseIndex, block: Int) -> Bool Never! {
-    lower_block_reaches(index, block, block)
-}
-
 // Whether a path of one edge or more leads from block `from` to block `to`
 // (walked backwards from `to` over predecessors).
 fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! {
@@ -5441,18 +5526,121 @@ fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! 
     false
 }
 
-// Whether the value a local holds at its read `site` can reach that read
+// One instruction touching a local's places (lower_payload_local_facts):
+// its site, and whether it lets the local's address escape (AddressOf,
+// RawAddressOf, Closure).
+struct LowerLocalTouch {
+    site: LowerUseSite
+    escape: Bool
+}
+
+// Per-function facts of locals that lower_payload_local_uses reads, built
+// once per function instead of rescanning every place and instruction per
+// carrier.
+struct LowerPayloadLocalFacts {
+    // Place id -> the local its row is rooted at (any projections).
+    place_locals: [U64:U64]
+    // Place ids whose row has projections.
+    projected: [U64:Bool]
+    // Local id -> its row in `touches`: every instruction (in block and
+    // instruction order, once each) that uses one of the local's places or
+    // passes one as a call argument, except a MovePlace only dropped (the
+    // local's cleanup).
+    touch_rows: [U64:Int]
+    touches: [[LowerLocalTouch]]
+    // Local id -> its row in `write_blocks`: the blocks holding a whole
+    // write (WritePlace, ReplacePlace or InitializeUninit of an unprojected
+    // place) of the local.
+    write_rows: [U64:Int]
+    write_blocks: [[Int]]
+    // Local ids some MIRLocal row of which is not owned (a borrowed local).
+    unowned_locals: [U64:Bool]
+}
+
+fn lower_payload_local_facts_none() -> LowerPayloadLocalFacts Never! {
+    LowerPayloadLocalFacts{place_locals: [U64:U64]{}, projected: [U64:Bool]{}, touch_rows: [U64:Int]{}, touches: [[LowerLocalTouch]]{}, write_rows: [U64:Int]{}, write_blocks: [[Int]]{}, unowned_locals: [U64:Bool]{}}
+}
+
+fn lower_payload_local_facts(function: MIRFunction, index: LowerUseIndex) -> LowerPayloadLocalFacts Never! {
+    place_locals := [U64:U64]{}
+    projected := [U64:Bool]{}
+    unowned_locals := [U64:Bool]{}
+    loop row in function.locals {
+        if !lower_is_owned(row.ownership) -> unowned_locals[row.id.value] = true
+    }
+    loop row in function.places {
+        if row.projections.len() > 0 -> projected[row.id.value] = true
+        if row.base == .Local(owner) -> place_locals[row.id.value] = owner.value
+    }
+    touch_rows := [U64:Int]{}
+    touches := [[LowerLocalTouch]]{}
+    write_rows := [U64:Int]{}
+    write_blocks := [[Int]]{}
+    loop (block, row) in function.blocks {
+        loop (position, instruction) in row.instructions {
+            written := MIRPlaceID?{None}
+            if instruction.operation == .WritePlace(place, _) | .ReplacePlace(place, _) -> written = Val(place)
+            if instruction.operation == .InitializeUninit(place) -> written = Val(place)
+            if written == .Val(place) {
+                if projected.get(place.value) == None && place_locals.get(place.value) == .Val(local) {
+                    at := write_rows.get(local) ?? -1
+                    if at < 0 {
+                        at = write_blocks.len()
+                        write_rows[local] = at
+                        &write_blocks.push([Int]{})
+                    }
+                    count :: write_blocks[at].len()
+                    if count == 0 || write_blocks[at][count - 1] != block -> &write_blocks[at].push(block)
+                }
+            }
+            locals := [U64]{}
+            loop used in mir_operation_place_uses(instruction.operation) {
+                if place_locals.get(used.value) == .Val(local) {
+                    if !locals.contains(local) -> &locals.push(local)
+                }
+            }
+            if instruction.operation == .Call(_, args, _) | .IndirectCall(_, args, _) {
+                loop arg in args {
+                    if arg.place == .Val(used) {
+                        if place_locals.get(used.value) == .Val(local) {
+                            if !locals.contains(local) -> &locals.push(local)
+                        }
+                    }
+                }
+            }
+            if locals.len() == 0 -> next
+            escape := false
+            if instruction.operation == {
+                .AddressOf(_, _) | .RawAddressOf(_) | .Closure(_, _, _) -> escape = true
+                .MovePlace(_) -> { if lower_payload_drop_only(function, index, instruction.result) -> next }
+                else -> {}
+            }
+            loop local in locals {
+                at := touch_rows.get(local) ?? -1
+                if at < 0 {
+                    at = touches.len()
+                    touch_rows[local] = at
+                    &touches.push([LowerLocalTouch]{})
+                }
+                &touches[at].push(LowerLocalTouch{site: LowerUseSite{block: block, position: position}, escape: escape})
+            }
+        }
+    }
+    LowerPayloadLocalFacts{place_locals: place_locals, projected: projected, touch_rows: touch_rows, touches: touches, write_rows: write_rows, write_blocks: write_blocks, unowned_locals: unowned_locals}
+}
+
+// Whether the value `local` holds at its read `site` can reach that read
 // again along a back edge: a path from the read to itself that no whole
-// write of the local (`places` are its places; WritePlace, ReplacePlace or
-// InitializeUninit of an unprojected one) crosses. Walked backwards over
+// write of the local (facts.write_blocks) crosses. Walked backwards over
 // predecessors from the read's block; a block holding such a write, the
 // read's own included, stops the path.
-fn lower_local_read_recurs(function: MIRFunction, index: LowerUseIndex, places: [U64:Bool], site: LowerUseSite) -> Bool Never! {
-    roots := [U64:Bool]{}
-    loop row in function.places {
-        if row.projections.len() == 0 && places.get(row.id.value) != None -> _ := &roots.add(row.id.value, true)
+fn lower_local_read_recurs(index: LowerUseIndex, facts: LowerPayloadLocalFacts, local: U64, site: LowerUseSite) -> Bool Never! {
+    writes := [Int:Bool]{}
+    row :: facts.write_rows.get(local) ?? -1
+    if row >= 0 {
+        loop block in facts.write_blocks[row] -> writes[block] = true
     }
-    if lower_block_writes_local(function, roots, site.block) -> return false
+    if writes.get(site.block) != None -> return false
     seen := [Int:Bool]{}
     pending := [Int]{}
     loop predecessor in index.predecessors[site.block] {
@@ -5466,24 +5654,12 @@ fn lower_local_read_recurs(function: MIRFunction, index: LowerUseIndex, places: 
         at :: pending[cursor]
         cursor += 1
         if at == site.block -> return true
-        if lower_block_writes_local(function, roots, at) -> next
+        if writes.get(at) != None -> next
         loop predecessor in index.predecessors[at] {
             if seen.get(predecessor) == None {
                 _ := &seen.add(predecessor, true)
                 &pending.push(predecessor)
             }
-        }
-    }
-    false
-}
-
-fn lower_block_writes_local(function: MIRFunction, roots: [U64:Bool], block: Int) -> Bool Never! {
-    loop instruction in function.blocks[block].instructions {
-        if instruction.operation == .WritePlace(place, _) | .ReplacePlace(place, _) {
-            if roots.get(place.value) != None -> return true
-        }
-        if instruction.operation == .InitializeUninit(place) {
-            if roots.get(place.value) != None -> return true
         }
     }
     false
@@ -5495,19 +5671,19 @@ fn lower_block_writes_local(function: MIRFunction, roots: [U64:Bool], block: Int
 // value itself (and MIRRust.rs moves the payload out at the carrier's last
 // use, a non-Clone FileWriter/FileReader included). For a carrier that is
 // such a read (a ReadPlace of a whole local whose places never escape, used
-// only by variant tests and payload reads), `index` with the carrier's uses
-// widened to every access of the local: its later reads then count as later
-// uses of the carrier. The local's cleanup moves (a MovePlace feeding only
-// Drop) do not: the take clears the payload in the local's carrier
-// (lower_read_member), so that drop releases only what remains. None when
-// the carrier is not such a read, or when the local's value is live across a
-// back edge into the read (lower_local_read_recurs): the next iteration
-// re-reads the same value, and the widened uses (which skip the read's own
-// site) cannot see that iteration's tests and payload reads. A local
-// written again inside the loop before each read (a subject switch's `it`
-// bound to a call made in the loop body) holds a fresh value each time, and
-// its payload is still taken.
-fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject: MIRValueID) -> LowerUseIndex? Never! {
+// only by variant tests and payload reads), the carrier's uses widened to
+// every access of the local: its later reads then count as later uses of the
+// carrier. The local's cleanup moves (a MovePlace feeding only Drop) do not:
+// the take clears the payload in the local's carrier (lower_read_member), so
+// that drop releases only what remains. None when the carrier is not such a
+// read, or when the local's value is live across a back edge into the read
+// (lower_local_read_recurs): the next iteration re-reads the same value, and
+// the widened uses (which skip the read's own site) cannot see that
+// iteration's tests and payload reads. A local written again inside the loop
+// before each read (a subject switch's `it` bound to a call made in the loop
+// body) holds a fresh value each time, and its payload is still taken.
+// Costs the carrier's uses and the local's touches, read from `facts`.
+fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, facts: LowerPayloadLocalFacts, subject: MIRValueID) -> [LowerUseSite]? Never! {
     site :: index.definitions.get(subject.value) ?? return None
     read :: function.blocks[site.block].instructions[site.position].operation
     place := MIRPlaceID{value: U64.MAX}
@@ -5516,61 +5692,32 @@ fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject
     } else {
         return None
     }
-    local := U64.MAX
-    found := false
-    loop row in function.places {
-        if row.id != place -> next
-        if row.projections.len() > 0 -> return None
-        if row.base == .Local(owner) {
-            local = owner.value
-            found = true
-        }
-    }
-    if !found -> return None
+    if facts.projected.get(place.value) != None -> return None
+    local :: facts.place_locals.get(place.value) ?? return None
     // A borrowed local (a ReadBorrow MIRLocal, JetCodegen
     // jet_codegen_bind_borrowed_local) holds what its subject owns: nothing
     // is ever taken from it.
-    loop row in function.locals {
-        if row.id.value == local && !lower_is_owned(row.ownership) -> return None
-    }
+    if facts.unowned_locals.get(local) != None -> return None
     // The carrier is inspected only: it aliases the local's value.
-    inspected :: index.uses.get(subject.value) ?? [LowerUseSite]{}
-    loop used in inspected {
-        if used.position < 0 -> return None
-        if function.blocks[used.block].instructions[used.position].operation == {
-            .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> {}
-            else -> return None
+    widened := [LowerUseSite]{}
+    row :: index.use_rows.get(subject.value) ?? -1
+    if row >= 0 {
+        loop used in index.use_lists[row] {
+            if used.position < 0 -> return None
+            if function.blocks[used.block].instructions[used.position].operation == {
+                .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> {}
+                else -> return None
+            }
+            &widened.push(used)
         }
     }
-    places := [U64:Bool]{}
-    loop row in function.places {
-        if row.base == .Local(owner) {
-            if owner.value == local -> _ := &places.add(row.id.value, true)
-        }
-    }
-    if lower_local_read_recurs(function, index, places, site) -> return None
-    widened := index.copy()
-    loop (block, row) in function.blocks {
-        loop (position, instruction) in row.instructions {
-            touched := false
-            loop used in mir_operation_place_uses(instruction.operation) {
-                if places.get(used.value) != None -> touched = true
-            }
-            if instruction.operation == .Call(_, args, _) | .IndirectCall(_, args, _) {
-                loop arg in args {
-                    if arg.place == .Val(used) {
-                        if places.get(used.value) != None -> touched = true
-                    }
-                }
-            }
-            if !touched -> next
-            if block == site.block && position == site.position -> next
-            if instruction.operation == {
-                .AddressOf(_, _) | .RawAddressOf(_) | .Closure(_, _, _) -> return None
-                .MovePlace(_) -> { if lower_payload_drop_only(function, index, instruction.result) -> next }
-                else -> {}
-            }
-            lower_use_index_add(&widened.uses, subject.value, LowerUseSite{block: block, position: position})
+    if lower_local_read_recurs(index, facts, local, site) -> return None
+    touch_row :: facts.touch_rows.get(local) ?? -1
+    if touch_row >= 0 {
+        loop touch in facts.touches[touch_row] {
+            if touch.site.block == site.block && touch.site.position == site.position -> next
+            if touch.escape -> return None
+            &widened.push(touch.site)
         }
     }
     Val(widened)
@@ -5579,13 +5726,13 @@ fn lower_payload_local_uses(function: MIRFunction, index: LowerUseIndex, subject
 // Whether `value` (a MovePlace result) is only dropped: a local's cleanup.
 fn lower_payload_drop_only(function: MIRFunction, index: LowerUseIndex, value: MIRValueID?) -> Bool Never! {
     moved :: value ?? return false
-    uses :: index.uses.get(moved.value) ?? return false
-    loop used in uses {
+    row :: index.use_rows.get(moved.value) ?? return false
+    loop used in index.use_lists[row] {
         if used.position < 0 -> return false
         if function.blocks[used.block].instructions[used.position].operation == .Drop(_, _) -> next
         return false
     }
-    uses.len() > 0
+    index.use_lists[row].len() > 0
 }
 
 // MIRRust.rs loop_iter_init `consumed` with plan_move_facts `single_use`: a
