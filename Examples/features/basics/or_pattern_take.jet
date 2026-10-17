@@ -1,0 +1,65 @@
+// An or-pattern arm whose subject dies there: each alternative binds the
+// subject's payload on its own path, and the last-use pass takes the subject
+// once for all of them (one Move, MIR legality: a value is consumed once).
+// Subjects: a call result, an owned local, a list element read through a
+// table's `it`, and a loop-body local whose binding is pushed.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+enum Shape {
+    Circle(blob: Blob, size: Int)
+    Square(blob: Blob, size: Int)
+    Empty
+}
+
+fn make(k: Int) -> Shape {
+    if k % 3 == 0 -> return Shape.Circle{blob: Blob{data: [Int]{k, k + 1}, text: "c{k}"}, size: k}
+    if k % 3 == 1 -> return Shape.Square{blob: Blob{data: [Int]{k}, text: "s{k}"}, size: k}
+    Shape.Empty
+}
+
+fn from_call(k: Int) -> Blob {
+    if make(k) == {
+        .Circle(blob, _) | .Square(blob, _) -> return blob
+        else -> return Blob{data: [Int]{}, text: "none"}
+    }
+}
+
+fn from_local(k: Int) -> Blob {
+    shape :: make(k)
+    if shape == {
+        .Circle(blob, _) | .Square(blob, _) -> return blob
+        else -> return Blob{data: [Int]{}, text: "none"}
+    }
+}
+
+fn first_size(shapes: [Shape]) -> Int {
+    total := 0
+    if shapes[0] == {
+        .Circle(_, size) | .Square(_, size) -> total = size
+        else -> total = -1
+    }
+    total
+}
+
+fn run() {
+    loop k in 0..<3 {
+        a :: from_call(k)
+        b :: from_local(k)
+        print("{a.text}:{a.data.len()} {b.text}:{b.data.len()}")
+    }
+    print(first_size([Shape]{make(4), make(3)}))
+    print(first_size([Shape]{make(2)}))
+    kept := [Blob]{}
+    loop k in 0..<5 {
+        shape := make(k)
+        if shape == {
+            .Circle(blob, _) | .Square(blob, _) -> &kept.push(blob)
+            .Empty -> {}
+        }
+    }
+    texts :: loop blob in kept -> blob.text
+    print(texts.join(","))
+}

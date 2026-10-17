@@ -975,16 +975,50 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     // converted read becomes a MovePlace of its own place, and a whole
     // local's is followed by its drop-flag clear. A field move leaves its
     // owner live: the refill that follows makes it whole again.
+    // A value is consumed once (MIR legality), so a subject with several
+    // moved groups (an or-pattern's alternatives, each binding the subject's
+    // payloads on its own path; arms of one match over one subject) is taken
+    // by one Move right after its definition, and every variant test and
+    // payload read of it reads the moved value instead.
     takes := [Int:MIRInstruction]{}
+    after_takes := [Int:MIRInstruction]{}
     retarget := [Int:MIRValueID]{}
     touched := [Int:Bool]{}
+    moved_counts := [Int:Int]{}
+    loop group_index in moved_groups {
+        candidate :: groups[group_index].candidate
+        _ := &moved_counts.add(candidate, (moved_counts.get(candidate) ?? 0) + 1)
+    }
+    shared_takes := [Int:Bool]{}
     loop group_index in moved_groups {
         row :: groups[group_index]
         subject :: candidates[row.candidate].value
-        first_span := builder.blocks[row.block].instructions[row.payloads[0]].span
         if value_row.get(subject.value) == None -> next
         fact_row :: value_row.get(subject.value) ?? panic("checked last-use row is missing")
         subject_ty := builder.values[fact_row].ty
+        if (moved_counts.get(row.candidate) ?? 0) > 1 {
+            if shared_takes.get(row.candidate) != None -> next
+            _ := &shared_takes.add(row.candidate, true)
+            defined_block :: def_block.get(subject.value) ?? panic("checked last-use row is missing")
+            after := def_index.get(subject.value) ?? panic("checked last-use row is missing")
+            // A phi subject's Move follows the block's whole phi prefix.
+            count :: builder.blocks[defined_block].instructions.len()
+            loop after + 1 < count && builder.blocks[defined_block].instructions[after + 1].operation == .Phi(_) -> after += 1
+            take_span := builder.blocks[defined_block].instructions[after].span
+            shared_take :: jet_codegen_last_use_instruction(&builder, program, take_span, "match.payload.take", Val(subject_ty), mir_ownership_from_access(MIRAccess.Move), MIROperation.Move{value: subject})
+            if shared_take.result == None -> next
+            shared :: shared_take.result ?? panic("checked last-use row is missing")
+            _ := &after_takes.add(jet_codegen_last_use_key(defined_block, after), shared_take)
+            _ := &touched.add(defined_block, true)
+            use_rows :: uses_by_subject.get(subject.value) ?? panic("checked last-use row is missing")
+            loop use_row in use_rows {
+                entry :: enum_uses[use_row]
+                _ := &retarget.add(jet_codegen_last_use_key(entry.block, entry.index), shared)
+                _ := &touched.add(entry.block, true)
+            }
+            next
+        }
+        first_span := builder.blocks[row.block].instructions[row.payloads[0]].span
         moved_take :: jet_codegen_last_use_instruction(&builder, program, first_span, "match.payload.take", Val(subject_ty), mir_ownership_from_access(MIRAccess.Move), MIROperation.Move{value: subject})
         if moved_take.result == None -> next
         taken :: moved_take.result ?? panic("checked last-use row is missing")
@@ -1031,8 +1065,12 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             key :: jet_codegen_last_use_key(block, index)
             if takes.get(key) == .Val(moved_take) -> &rewritten.push(moved_take)
             instruction := original
-            if retarget.get(key) == .Val(taken) && original.operation == .EnumPayload(_, owner, variant, field) {
-                instruction.operation = MIROperation.EnumPayload{subject: taken, owner: owner, variant: variant, index: field}
+            if retarget.get(key) == .Val(taken) {
+                if original.operation == {
+                    .EnumPayload(_, owner, variant, field) -> instruction.operation = MIROperation.EnumPayload{subject: taken, owner: owner, variant: variant, index: field}
+                    .EnumIs(_, owner, variant) -> instruction.operation = MIROperation.EnumIs{subject: taken, owner: owner, variant: variant}
+                    else -> {}
+                }
             }
             if moved_reads.get(key) == .Val(read_place) -> instruction.operation = MIROperation.MovePlace{place: read_place}
             if iter_takes.get(key) != None && original.operation == .LoopIterInit(call, collection, iter_step, _, source_kind) {
@@ -1042,6 +1080,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             if clears.get(key) == .Val(extra) {
                 loop added in extra -> &rewritten.push(added)
             }
+            if after_takes.get(key) == .Val(shared_take) -> &rewritten.push(shared_take)
         }
         builder.blocks[block].instructions = rewritten
     }
