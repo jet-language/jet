@@ -1384,9 +1384,9 @@ fn jet_codegen_drop_temporary_shared_guard(builder: &JetCodegenBuilder, program:
     place_row :: row ?? return
     if place_row.base == {
         .Temporary(value) -> {
-            row :: builder.value_first_positions.get(value.value) ?? return
-            drop_kind := builder.values[row].ownership.drop
-            if jet_codegen_is_shared_guard_mir_type(builder.values[row].ty) && drop_kind != MIRDropKind.NoDrop {
+            value_row :: builder.value_first_positions.get(value.value) ?? return
+            drop_kind := builder.values[value_row].ownership.drop
+            if jet_codegen_is_shared_guard_mir_type(builder.values[value_row].ty) && drop_kind != MIRDropKind.NoDrop {
                 _ := jet_codegen_emit(&builder, program, span, None, MIROperation.Drop{value: value, kind: drop_kind})
             }
         }
