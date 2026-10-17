@@ -17,7 +17,7 @@ fn envmodel_is_module_surface(src: String) -> Bool Never! {
         if token.kind == TOKEN_KW_MODULE -> has_module = true
     }
     if lexed.diagnostics.len() > 0 -> return has_module
-    parsed :: parse_lexed(lexed)
+    parsed :: parse_lexed(^lexed)
     if envmodel_first_error(parsed.diagnostics) != None -> return has_module
     loop item in parsed.program.items {
         if item == {

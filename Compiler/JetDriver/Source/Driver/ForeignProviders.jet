@@ -788,7 +788,7 @@ fn jet_driver_foreign_parse_cache(file: JetDriverAuthorizedSourceFile, diagnosti
     // file.
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    parsed := parse_lexed(lexed)
+    parsed := parse_lexed(^lexed)
     parse_failed :: jet_driver_has_errors(parsed.diagnostics)
     loop diagnostic in ^parsed.diagnostics {
         offset :: jet_driver_foreign_diagnostic_offset(diagnostic)
@@ -833,7 +833,7 @@ fn jet_driver_foreign_make_adapter_function(handle: String, raw_function: String
     // origin.
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(diagnostic.copy(), origin_path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    parsed := parse_lexed(lexed)
+    parsed := parse_lexed(^lexed)
     parse_failed :: jet_driver_has_errors(parsed.diagnostics)
     loop diagnostic in ^parsed.diagnostics {
         offset :: jet_driver_foreign_diagnostic_offset(diagnostic)
@@ -1016,7 +1016,7 @@ fn jet_driver_foreign_parse_shifted(path: String, source: String, offset: Int, d
     }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     loop token_index in 0..<lexed.tokens.len() -> token_shift_spans(&lexed.tokens[token_index], offset, &lexed.tables.literals)
-    parsed := parse_lexed(lexed)
+    parsed := parse_lexed(^lexed)
     parse_failed :: jet_driver_has_errors(parsed.diagnostics)
     loop diagnostic in ^parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(^diagnostic, path, offset))
     if parse_failed -> return None

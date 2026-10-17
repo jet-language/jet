@@ -1670,6 +1670,10 @@ fn jfmt_resugar_layout_stmt(layout_name: String, stmt: Stmt) -> Stmt Never! {
             b2.init = jfmt_resugar_layout_expr(layout_name, b.init)
             Stmt.Val{binding: b2}
         }
+        // copy: a read-parameter rewriter returns a statement with no layout to resugar unchanged
+        // as a new tree (owner: the result) while the caller keeps the input (owner: the read
+        // parameter, a payload view of the caller's tree); taking the input would need a consuming
+        // match of every rebuilt variant (children arrive as payload views).
         else -> stmt.copy()
     }
 }
@@ -1712,6 +1716,10 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)
             Expr.Call{call: call2}
         }
+        // copy: a read-parameter rewriter returns an expression with no layout to resugar unchanged
+        // as a new tree (owner: the result) while the caller keeps the input (owner: the read
+        // parameter, a payload view of the caller's tree); taking the input would need a consuming
+        // match of every rebuilt variant (children arrive as payload views).
         else -> e.copy()
     }
 }

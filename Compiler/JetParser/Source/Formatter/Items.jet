@@ -219,6 +219,8 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             loop index in 0..<params.len() {
                 if index < args.len() && params[index].name == name -> return args[index]
             }
+            // copy: an unsubstituted named type is returned (owner: the result) while the caller
+            // keeps its type (owner: the read parameter, reused for every substitution).
             ty.copy()
         }
         .Apply(name, nested) -> {
@@ -594,17 +596,7 @@ fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
     }
     // Rust `sort_unstable_by_key(start)`.
     sorted := edits
-    position_index := 1
-    loop position_index < sorted.len() {
-        current :: sorted[position_index].copy()
-        position := position_index
-        loop position > 0 && current.start < sorted[position - 1].start {
-            sorted[position] = sorted[position - 1]
-            position -= 1
-        }
-        sorted[position] = current
-        position_index += 1
-    }
+    &sorted.sort_by((left: JetFmtSourceEdit, right: JetFmtSourceEdit) -> left.start <=> right.start)
     out := ""
     cursor := span.start
     loop edit in sorted {
@@ -1670,6 +1662,9 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func) {
             }
         }
     }
+    // copy: the enclosing return type (owner: f, a write parameter the body formatting reads) is
+    // restored after this function (owner: `saved_return_type`); a write parameter's field cannot
+    // be left moved out across the calls that borrow f.
     saved_return_type :: f.expected_return_type.copy()
     f.expected_return_type = func.return_type
     // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single

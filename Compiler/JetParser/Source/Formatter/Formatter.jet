@@ -865,6 +865,9 @@ fn jfmt_emit_remaining_comments(f: &JetFmt) Never! {
 
 fn jfmt_emit_leading(f: &JetFmt, pos: Int) Never! {
     loop f.comment_i < f.comments.len() {
+        // copy: the pending comment (owner: f.comments) is emitted through `&f`; a view into
+        // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
+        // refcounted text.
         comment :: f.comments[f.comment_i].copy()
         if comment.span.start >= pos -> break
         if jfmt_is_trailing_comment_at(f, comment.span) -> break
@@ -876,6 +879,9 @@ fn jfmt_emit_leading(f: &JetFmt, pos: Int) Never! {
 
 fn jfmt_emit_trailing(f: &JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
+        // copy: the pending comment (owner: f.comments) is written through `&f`; a view into
+        // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
+        // refcounted text.
         comment :: f.comments[f.comment_i].copy()
         if comment.span.start >= f.trailing_comment_limit -> break
         if comment.span.start >= end && jfmt_line_of(f, comment.span.start) == jfmt_line_of(f, end) {
@@ -1280,11 +1286,19 @@ fn jfmt_self_typed(expr: Expr) -> Bool Never! {
 
 fn jfmt_unwrap_redundant_optional_value(value: Expr) -> Expr Never! {
     if value == .EnumLit(type_name, variant, _, args, _, _) {
+        // copy: a read-parameter rewriter returns a value that is not a redundant `Val(..)`
+        // unchanged as a new tree (owner: the result) while the caller keeps the input (owner: the
+        // read parameter, a payload view of the caller's tree); taking the input would need a
+        // consuming match of every rebuilt variant (children arrive as payload views).
         if type_name.len() > 0 || variant != "Val" || args.len() != 1 -> return value.copy()
         if args[0] == .Positional(inner) {
             if jfmt_self_typed(inner) -> return inner
         }
     }
+    // copy: a read-parameter rewriter returns a value that is not a redundant `Val(..)` unchanged
+    // as a new tree (owner: the result) while the caller keeps the input (owner: the read
+    // parameter, a payload view of the caller's tree); taking the input would need a consuming
+    // match of every rebuilt variant (children arrive as payload views).
     value.copy()
 }
 
@@ -1292,6 +1306,10 @@ fn jfmt_strip_optional_returns_in_if(expr: Expr) -> Expr Never! {
     if expr == .If(cond, then_body, then_value, else_body, else_value, span) {
         return Expr.If{cond: cond, then_body: jfmt_strip_optional_returns_in_body(then_body), then_value: then_value, else_body: jfmt_strip_optional_returns_in_body(else_body), else_value: jfmt_strip_optional_returns_in_if(else_value), span: span}
     }
+    // copy: a read-parameter rewriter returns an expression that is not an `if` unchanged as a new
+    // tree (owner: the result) while the caller keeps the input (owner: the read parameter, a
+    // payload view of the caller's tree); taking the input would need a consuming match of every
+    // rebuilt variant (children arrive as payload views).
     expr.copy()
 }
 
@@ -1336,6 +1354,10 @@ fn jfmt_strip_optional_func(function: Func) -> Func Never! {
             return updated
         }
     }
+    // copy: a read-parameter rewriter returns a function with nothing to strip unchanged as a new
+    // tree (owner: the result) while the caller keeps the input (owner: the read parameter, a
+    // payload view of the caller's tree); taking the input would need a consuming match of every
+    // rebuilt variant (children arrive as payload views).
     function.copy()
 }
 
@@ -1411,17 +1433,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     source :: src.bytes()
     ordered := edits
     // Rust sorts by descending start; apply from the end of the source.
-    index := 1
-    loop index < ordered.len() {
-        current :: ordered[index].copy()
-        position := index
-        loop position > 0 && current.span.start > ordered[position - 1].span.start {
-            ordered[position] = ordered[position - 1]
-            position -= 1
-        }
-        ordered[position] = current
-        index += 1
-    }
+    &ordered.sort_by((left: TextEdit, right: TextEdit) -> right.span.start <=> left.span.start)
     replaced_start := JFMT_NO_LIMIT
     loop edit in ordered {
         if edit.span.end > source.len() || edit.span.start > edit.span.end || edit.span.end > replaced_start -> return None
@@ -1452,17 +1464,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
 
 fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
     sorted := edits
-    index := 1
-    loop index < sorted.len() {
-        current :: sorted[index].copy()
-        position := index
-        loop position > 0 && current.span.start < sorted[position - 1].span.start {
-            sorted[position] = sorted[position - 1]
-            position -= 1
-        }
-        sorted[position] = current
-        index += 1
-    }
+    &sorted.sort_by((left: TextEdit, right: TextEdit) -> left.span.start <=> right.span.start)
     sorted
 }
 

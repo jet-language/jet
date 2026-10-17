@@ -88,19 +88,15 @@ fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerG
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
 }
 
-fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed.copy(), [U8]{}, [Int]{}, false)
+// The parse entry points take the caller's tokens: they move into the parser
+// instead of being copied.
+fn parse_lexed(lexed: ^Lexed) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, [U8]{}, [Int]{}, false)
 }
 
 // Parse just the supplied token slice with its aggregate source available for
 // canonical source-dependent diagnostics. REPL turns never reparse old tokens.
-fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
-    parser_parse_lexed_lines(lexed.copy(), source, line_starts, false)
-}
-
-// parse_lexed_with_source for a caller that is done with its tokens: they
-// move into the parser instead of being copied.
-fn parse_lexed_owned_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+fn parse_lexed_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     parser_parse_lexed_lines(^lexed, source, line_starts, false)
 }
 
@@ -108,8 +104,8 @@ fn parse_lexed_owned_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
 // for config values whose spelling is not a general Jet expression.
-fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lexed.copy(), source, parser_line_starts(source), true)
+fn parse_config_with_source(lexed: ^Lexed, source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, source, parser_line_starts(source), true)
 }
 
 // The lexed tokens move into the parser state (field moves reset the field,

@@ -316,6 +316,9 @@ fn jfmt_result_handler_source_end(f: JetFmt, expr: Expr) -> Int Never! {
 
 fn jfmt_emit_result_handler_comments(f: &JetFmt, start: Int, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
+        // copy: the pending comment (owner: f.comments) is emitted through `&f`; a view into
+        // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
+        // refcounted text.
         comment :: f.comments[f.comment_i].copy()
         if comment.span.start < start || comment.span.start >= end -> break
         jfmt_emit_comment_line(&f, comment.text.copy())
