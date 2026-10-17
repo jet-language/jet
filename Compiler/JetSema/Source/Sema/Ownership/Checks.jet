@@ -230,6 +230,11 @@ struct SemaOwnershipState {
     forks: Int
     trail: [SemaOwnershipUndo]
     freeze_sites: [SemaOwnershipFreezeSite]{[SemaOwnershipFreezeSite]{}}
+    // Match payload bindings (sema_ownership_payload_key) and the subject
+    // places their payload is read from (Expressions/Control.jet
+    // sema_expression_pattern_binding_sources): an explicit `^p` takes the
+    // payload out of that subject (sema_ownership_move_pattern_payload).
+    pattern_sources: [String:[Expr]]{[String:[Expr]]{}}
 }
 
 // First/last declaration rows and total reference/write counts for one key.
@@ -1442,6 +1447,70 @@ fn sema_ownership_record_pattern_views(state: &SemaOwnershipState, carrier: Stri
         }
     }
     recorded
+}
+
+// One match payload binding: its name at its declaration (a reused name in
+// another arm is a different binding).
+fn sema_ownership_payload_key(name: String, span: Span) -> String Never! {
+    "{name}@{span.start}"
+}
+
+fn sema_ownership_note_pattern_sources(state: &SemaOwnershipState, symbol: Symbol, sources: [Expr]) Never! {
+    state.pattern_sources[sema_ownership_payload_key(symbol.name, symbol.span)] = sources
+}
+
+// `expr` (`p` or `p.f`) with its root name replaced by `source`.
+fn sema_ownership_rebase_root(expr: Expr, source: Expr) -> Expr Never! {
+    if expr == {
+        .Field(base, member, span) -> Expr.Field{base: sema_ownership_rebase_root(base, source), member: member, span: span}
+        .Paren(inner, _) -> sema_ownership_rebase_root(inner, source)
+        else -> source.copy()
+    }
+}
+
+// An explicit `^p` (or `^p.f`) of a match payload binding takes the payload
+// out of the subject it was read from, never a copy: the subject's payload
+// place is moved like `^subject.payload` (a later use of the moved part is
+// E0121), and a subject in a read parameter is E0201. A subject inside a
+// collection element or a write parameter keeps its payload (the binding's
+// own value, as before: an element has no hole to leave, and a write
+// parameter's refill is not proven here). A list or map pattern's bindings
+// record no subject (Expressions/Control.jet).
+// -1: rejected; 0: not a match payload binding; 1: the payload is taken.
+fn sema_ownership_move_pattern_payload(state: &SemaOwnershipState, expr: Expr, mark_span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Int {
+    root :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return 0
+    sources :: state.pattern_sources.get(sema_ownership_payload_key(root.symbol.name, root.symbol.span)) ?? return 0
+    taken := 0
+    loop source in sources {
+        if source == {
+            .Field(_, _, _) | .Ident(_, _) -> {}
+            else -> next
+        }
+        place :: sema_ownership_rebase_root(expr, source)
+        owner :: sema_ownership_binding_for_expr(&state, place, scopes) ?? next
+        // A payload of a payload binding: take it from the outer subject. A
+        // binding that refines its own subject (`x == .Val(x)`) is its root.
+        own_root :: owner.symbol.name == root.symbol.name && owner.symbol.span.start == root.symbol.span.start
+        nested :: if own_root -> 0 else -> sema_ownership_move_pattern_payload(&state, place, mark_span, scopes, &diagnostics)
+        if nested < 0 -> return -1
+        if nested > 0 {
+            taken = 1
+            next
+        }
+        element :: if place == {
+            .Index(_, _, _, _) -> true
+            else -> sema_expression_place_below_element(place)
+        }
+        if element -> next
+        if owner.symbol.kind == SymbolKind.Parameter && owner.access == AccessConvention.Read {
+            &diagnostics.push(sema_ownership_diag_move_from_borrowed(root.symbol.name, mark_span))
+            return -1
+        }
+        if sema_ownership_binding_lends(owner) -> next
+        if !sema_ownership_mark_move(&state, place, scopes, "the move `^{root.symbol.name}`", &diagnostics) -> return -1
+        taken = 1
+    }
+    taken
 }
 
 fn sema_ownership_record_binding_view(state: &SemaOwnershipState, binding: Binding, scopes: SemaScopeTable) -> Bool {

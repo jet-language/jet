@@ -3466,6 +3466,12 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MIRFunction, id:
         if place.id == id {
             if place.projections.len() != 0 {
                 if jet_rust_emit_partial_move(&ctx, function, id) == .Val(partial) -> return partial
+                // A taken match payload (a checked `^p`): Rust cannot move
+                // out of an enum through a place, so this tier reads a copy
+                // and the subject keeps (and later drops) its own payload.
+                loop projection in place.projections {
+                    if projection == .Payload(_, _) -> return jet_rust_emit_place_read(&ctx, function, id)
+                }
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "projected MIR move lacks a source ownership projection", "checked projected moves require a canonical partial-move plan", Val(place.span))
                 return "unreachable!(\"unsupported projected MIR move\")"
             }

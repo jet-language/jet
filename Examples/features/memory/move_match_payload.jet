@@ -1,0 +1,58 @@
+//! An explicit `^p` of a match payload takes the payload out of its subject,
+//! never a copy. The subject keeps (and later closes) its other fields, and
+//! the taken payload closes exactly once, with its new owner: after the
+//! payload moved, in a loop, and through a nested pattern.
+struct Secret {
+    id: Int
+    token: String
+}
+
+impl Secret.Close {
+    fn close(^self) { print("close {self.id}") }
+}
+
+enum Slot {
+    Full(secret: Secret, label: String)
+    Empty
+}
+
+struct Holder {
+    slot: Slot
+    keep: Secret
+}
+
+fn consume(secret: ^Secret) { print("consume {secret.id}") }
+
+// The payload moves out; the subject's other field is still used.
+fn remaining() {
+    holder :: Holder{slot: Slot.Full{secret: Secret{id: 1, token: "owned"}, label: "first"}, keep: Secret{id: 2, token: "owned"}}
+    if holder.slot == .Full(secret, label) {
+        consume(^secret)
+        print("label {label}")
+    }
+    print("keep {holder.keep.id}")
+}
+
+fn looped() {
+    loop n in [3, 4] {
+        slot :: Slot.Full{secret: Secret{id: n, token: "owned"}, label: "loop {n}"}
+        if slot == .Full(secret, label) {
+            consume(^secret)
+            print(label)
+        }
+    }
+}
+
+fn nested() {
+    held :: Val(Slot.Full{secret: Secret{id: 5, token: "owned"}, label: "nested"})
+    if held == .Val(.Full(secret, label)) {
+        consume(^secret)
+        print(label)
+    }
+}
+
+fn run() {
+    remaining()
+    looped()
+    nested()
+}

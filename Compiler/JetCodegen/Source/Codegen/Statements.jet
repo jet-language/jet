@@ -3983,7 +3983,24 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         }
         .Clone(copied, _) | .ExplicitCopy(copied) | .MaterializeView(copied) -> jet_codegen_stability_expr(&state, copied, inspect)
         .Borrow(place, access) -> jet_codegen_stability_expr(&state, place, jet_codegen_stability_access(access))
-        .Move(moved) | .Drop(moved) | .Close(moved) -> jet_codegen_stability_expr(&state, moved, write)
+        // A checked `^p` of a match payload (TLocal.payload_take) takes the
+        // payload through its subject's window, a partial move sema already
+        // tracks: it reads the binding without consuming or disturbing the
+        // subject, so the subject keeps its window.
+        .Move(moved) -> {
+            if moved.kind == {
+                .Local(local) -> {
+                    if local.payload_take {
+                        seen := [String]{}
+                        jet_codegen_stability_read(&state, local.name, &seen)
+                        return
+                    }
+                }
+                else -> {}
+            }
+            jet_codegen_stability_expr(&state, moved, write)
+        }
+        .Drop(moved) | .Close(moved) -> jet_codegen_stability_expr(&state, moved, write)
         .ResourceTake(local) -> {
             seen := [String]{}
             jet_codegen_stability_read(&state, local.name, &seen)

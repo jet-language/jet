@@ -37,6 +37,10 @@ struct TLocal {
     uninit_scalar: Bool
     uninit_fixed: Bool
     direct_closure: Bool
+    // The checked `^p` of a match payload binding whose subject sema marked
+    // partially moved (sema_ownership_move_pattern_payload): lowering may
+    // take the payload out of the subject's storage instead of copying it.
+    payload_take: Bool{false}
 }
 
 fn tir_user_local(name: String, span: Span) -> TLocal Never! {

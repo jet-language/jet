@@ -1559,6 +1559,14 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
             symbol :: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, &sources, &diagnostics)
+            // An explicit `^name` takes this payload out of its subject
+            // (sema_ownership_move_pattern_payload). A list or map pattern
+            // names its whole subject, so its bindings record none.
+            collection :: if checked.pattern.shape == {
+                .List(_, _, _) | .Map(_, _, _) -> true
+                else -> false
+            }
+            if !window && !collection -> sema_ownership_note_pattern_sources(&state, symbol, sources)
             &bindings.push(SemaConditionBinding{symbol: symbol, window: window, sources: sources})
         }
         &facts.push(updated)

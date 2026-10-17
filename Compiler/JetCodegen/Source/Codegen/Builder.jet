@@ -426,6 +426,15 @@ struct JetCodegenBuilder {
     // A checked-TIR pre-scan selects only roots with projected owning moves.
     partial_move_roots: [String:Bool]
     split_drop_roots: [U64:Bool]
+    // Read-window payload places a match binding aliases over an owned root
+    // (no read parameter, element, constant, or aliased window on the way),
+    // and those a checked `^p` (TLocal.payload_take) takes: a taken one is
+    // moved out of the subject, never copied (jet_codegen_unmovable_place).
+    owned_payload_places: [U64:Bool]{[U64:Bool]{}}
+    payload_take_places: [U64:Bool]{[U64:Bool]{}}
+    // Window places derived from a read alias's place: a payload under one
+    // still belongs to the aliased owner.
+    aliased_window_places: [U64:Bool]{[U64:Bool]{}}
     // Every drop-live record the function registered, kept after its frame
     // closes for the last-use pass (jet_codegen_move_last_uses).
     drop_live_all: [JetCodegenDropLive]

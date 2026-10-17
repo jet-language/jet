@@ -407,7 +407,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         if marked_place && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return None
         taken_place := marked_place
         if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        stored :: sema_call_marked_move_value(&state, taken_place, args[index].expr, ^value, scopes, &diagnostics) ?? return None
         &values.push(stored)
         &slots.push(slot)
         &required_types.push(required)
@@ -555,6 +555,19 @@ fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool
         &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take a field out of a collection element", "an element stays owned by its collection together with every field inside it, so this value can only be a copy", "remove `^` and call `.copy()` on the field instead"))
     }
     true
+}
+
+// The stored value of a consuming argument: a `^`-marked exact place
+// (`taken`) is a checked move, and the move of a match payload binding takes
+// the payload out of its subject (sema_ownership_move_pattern_payload).
+// None when the move is rejected.
+fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Expr, value: ^TExpr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !taken -> return Val(^value)
+    start :: expr_span(expr).start
+    payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
+    if payload < 0 -> return None
+    moved :: if payload > 0 -> sema_expression_payload_take(value) else -> ^value
+    Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
 }
 
 fn sema_call_widen_union(required: Type, offered: Type) -> Type? {

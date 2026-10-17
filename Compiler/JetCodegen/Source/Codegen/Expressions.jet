@@ -5752,6 +5752,10 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             if value.kind == {
                 .Local(local) -> {
                     place := jet_codegen_lower_local_place(&builder, program, local)
+                    // A checked `^p` of a match payload aliasing an owned
+                    // subject takes the payload out of the subject (sema
+                    // marked that part of the subject moved).
+                    if local.payload_take && builder.owned_payload_places.get(place.value) != None -> _ := &builder.payload_take_places.add(place.value, true)
                     // A read alias of an element is copied (jet_codegen_emit),
                     // so its place keeps its read access.
                     if !jet_codegen_unmovable_place(builder, program, place) -> jet_codegen_retain_place_access(&builder, program, place, MIRAccess.Move)
@@ -6434,14 +6438,17 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // place below a read alias's place (`JetCodegenBuilder.read_alias_places`
 // with at least one projection, or an access or field place derived from
 // one): its root still owns it. A root's own place is never such a place, so
-// an explicit `^r` or `^r.f` of the root still moves. Neither is any place of
-// a borrowed local (jet_codegen_bind_borrowed_local): its subject owns what
-// it holds.
+// an explicit `^r` or `^r.f` of the root still moves, and neither is a match
+// payload over an owned subject that a checked `^p` takes
+// (JetCodegenBuilder.payload_take_places). No place of a borrowed local
+// (jet_codegen_bind_borrowed_local) ever moves, even under a payload take: its
+// subject owns what it holds.
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    if jet_codegen_borrowed_local_place(builder, program, place) -> return true
+    if builder.payload_take_places.get(place.value) != None -> return false
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
     if row.projections.len() > 0 && builder.read_alias_places.get(place.value) != None -> return true
-    if jet_codegen_borrowed_local_place(builder, program, place) -> return true
     if row.base == .Static(name) {
         if program.owners.constants.in_place_keys.get(name) != None -> return true
     }
@@ -6463,6 +6470,17 @@ fn jet_codegen_borrowed_local_place(builder: JetCodegenBuilder, program: JetCode
     false
 }
 
+// Whether `place` lies under a root whose drop is split into per-field
+// leaves (jet_codegen_register_drop_live): a payload taken below one leaf
+// would leave that leaf neither live nor moved.
+fn jet_codegen_under_split_root(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    if builder.split_drop_roots.len() == 0 -> return false
+    row :: jet_codegen_find_place(builder, program, place) ?? return false
+    loop owner in builder.places {
+        if builder.split_drop_roots.get(owner.id.value) != None && owner.base == row.base -> return true
+    }
+    false
+}
 // #4318 §4: the place a stable loop source names. Like
 // `jet_codegen_read_window_place`, but the root may also be a local or any
 // parameter: sema proved the loop body never mentions the source's root
@@ -6553,6 +6571,9 @@ fn jet_codegen_project_window_place(builder: &JetCodegenBuilder, program: JetCod
     if read {
         _ := &builder.read_windows.add(id.value, true)
     }
+    // A window under a read alias's place (`h :: owner.child`, then a match
+    // on `h`) still names the aliased owner's storage.
+    if builder.read_alias_places.get(base.value) != None || builder.aliased_window_places.get(base.value) != None -> _ := &builder.aliased_window_places.add(id.value, true)
     id
 }
 
@@ -6565,6 +6586,9 @@ fn jet_codegen_payload_window_place(builder: &JetCodegenBuilder, program: JetCod
 fn jet_codegen_bind_window_binding(builder: &JetCodegenBuilder, program: JetCodegenProgram, fact: TPatternBindingFact, place: MIRPlaceID) Never! {
     if fact.name == "" || fact.name == "_" -> return
     mutable :: builder.read_windows.get(place.value) == None
+    // A read-window payload over an owned root is the subject's own
+    // storage: a checked `^name` takes it out (jet_codegen_lower_expr Move).
+    if !mutable && builder.aliased_window_places.get(place.value) == None && !jet_codegen_unmovable_place(builder, program, place) && !jet_codegen_under_split_root(builder, program, place) -> _ := &builder.owned_payload_places.add(place.value, true)
     local := tir_user_local(fact.name, fact.span)
     local.mutable = mutable
     local.symbol_id = fact.symbol_id

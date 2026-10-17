@@ -1,0 +1,15 @@
+// `^p` of a payload of a read parameter has no storage to give up: E0201,
+// never a silent copy.
+enum Slot {
+    Full(items: [Int])
+    Empty
+}
+
+fn keep(items: ^[Int]) -> Int { items.len() }
+
+fn forward(slot: Slot) -> Int {
+    if slot == .Full(items) -> return keep(^items)
+    0
+}
+
+fn run() { print(forward(Slot.Full{items: [Int]{1}})) }

@@ -326,7 +326,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         taken_place := consuming_mark && sema_call_marked_move_place(updated_args[index].expr, value)
         if taken_place && sema_ownership_reject_read_param_move(&state, updated_args[index].expr, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         if taken_place && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: if taken_place -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        stored :: sema_call_marked_move_value(&state, taken_place, updated_args[index].expr, ^value, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         &typed.push(stored)
     }
 
