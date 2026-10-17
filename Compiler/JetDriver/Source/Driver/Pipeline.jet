@@ -203,6 +203,7 @@ use jet_sema.[
     sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
     sema_comptime_modules_with_values,
+    sema_comptime_precheck_items,
     sema_comptime_probe_init,
     sema_comptime_staged_constant_rows,
     sema_comptime_value_sites,
@@ -2459,6 +2460,24 @@ fn jet_driver_comptime_lost_session(values: [SemaComptimeItemValue], functions: 
     result
 }
 
+// The check sema_comptime_precheck_items made of an item ahead of its pass,
+// while `values` held `from` values, if it is the check the run would make
+// now: no value has landed since whose key is one of its dependencies (a
+// check reads only the constants it references, and each referenced constant
+// without a value then is a dependency). Taken once: `precheck` is left None,
+// so a retried item checks again.
+fn jet_driver_comptime_prechecked(precheck: &SemaComptimeItemCheck?, values: [SemaComptimeItemValue], from: Int) -> SemaComptimeItemCheck? {
+    taken := ^precheck
+    precheck = None
+    check := ^taken ?? return None
+    loop index in from..<values.len() {
+        loop dependency in check.dependencies {
+            if values[index].key == dependency -> return None
+        }
+    }
+    Val(^check)
+}
+
 // Applies the values that landed from position `from` on to the run's
 // program graph in place, through the graph's value sites `sites`
 // (sema_comptime_value_sites), recording each typed row on `trail`, and
@@ -3527,7 +3546,23 @@ fn jet_driver_comptime_run(
         next_pending := [SemaComptimeItemSource]{}
         wait_rows := [JetDriverComptimeWaitRow]{}
         made_progress := false
+        // The values that landed last pass join the graph before the pass
+        // (each item's turn applies them first anyway), so the pass's item
+        // checks can be made ahead of it on the compiler threads; an item
+        // takes its check at its turn when no value it depends on has landed
+        // since (jet_driver_comptime_prechecked).
+        if values.len() > resolved_count {
+            if !jet_driver_comptime_apply_landed(&environment, &program, &available, staging.sites, values, resolved_count, &trail) {
+                sema_comptime_body_work_flush(environment.comptime_body_publication, request.trace_sink, "sema.comptime")
+                return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+            }
+            resolved_count = values.len()
+        }
+        prechecks := sema_comptime_precheck_items(&environment, &program, available, pending, values, request.compiler_threads)
+        &prechecks.reverse()
+        prechecked_values :: values.len()
         loop source in pending {
+            precheck := &prechecks.pop() ?? SemaComptimeItemCheck?{None}
             retry := true
             loop retry {
                 retry = false
@@ -3552,7 +3587,7 @@ fn jet_driver_comptime_run(
                         next
                     }
                 }
-                checked_item := sema_check_comptime_item(&environment, &program, &probe, available, source, values)
+                checked_item := jet_driver_comptime_prechecked(&precheck, values, prechecked_values) ?? sema_check_comptime_item(&environment, &program, &probe, available, source, values)
                 counters.items_checked += 1
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
                     flushed := jet_driver_comptime_flush(names, load, request, batch, &values, checked_functions, &trace, program, &available, &staging, &counters, &diagnostics)

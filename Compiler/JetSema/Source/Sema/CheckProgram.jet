@@ -65,6 +65,7 @@ use jet_foundation.[
     ViewSource,
     ViewSourcePath,
     ViewSourceProjection,
+    compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
@@ -5305,6 +5306,197 @@ fn sema_comptime_probe_part_apply(environment: SemaScopeEnvironment, program: Se
         if wanted -> dependencies = sema_comptime_probe_dependencies(environment, program, &probe.table, probe.diagnostics, probe.host_hooks, sources[position].expression, sources[position].expected_type)
         sources[position].dependencies = ^dependencies
     }
+}
+
+// A comptime run pass's item checks, made ahead of the pass on the compiler
+// threads (D-JOBS1). The run checks its pending items one at a time, and a
+// value that lands between two checks types only its own constant; an item
+// check reads only the constants it references, and every referenced
+// constant without a value is one of the check's `dependencies`
+// (sema_comptime_dependencies_from_references). So a check made against the
+// run's state at the start of the pass is the check the run would make at the
+// item's turn as long as no value whose key is one of its dependencies has
+// landed since (the run tests that before it takes one,
+// jet_driver_comptime_prechecked). The checks run per module, in the
+// module's probe scope (sema_comptime_probe_prepare), each thread on its own
+// copy, against the one environment entered in the module, which moves into
+// the threads' shared state with the program tables and back out after.
+// Host callbacks are withheld there; a check that wanted one, a checked-text
+// source (its check reads no expression), and every source of a module whose
+// checks admit one thread have no row (None), and the run checks them at
+// their turn. The result has one row per source.
+fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue], threads: CompilerThreads) -> [SemaComptimeItemCheck?] {
+    checks := [SemaComptimeItemCheck?]{}
+    loop _ in 0..<sources.len() -> &checks.push(None)
+    // The expression sources of each module, in order of first appearance.
+    module_rows := [String:Int]{}
+    module_identities := [String]{}
+    module_positions := [[Int]]{}
+    loop (position, source) in sources {
+        if source.checked_text != None -> next
+        row := module_rows.get(source.module_identity) ?? -1
+        if row < 0 {
+            row = module_positions.len()
+            module_rows[source.module_identity] = row
+            &module_identities.push(source.module_identity)
+            &module_positions.push([Int]{})
+        }
+        &module_positions[row].push(position)
+    }
+    if module_positions.len() == 0 -> return checks
+    total := 0
+    loop row in module_positions {
+        loop position in row -> total += sources[position].span.end - sources[position].span.start
+    }
+    if compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 -> return checks
+    shared_state :: shared SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, values: [[SemaComptimeItemValue]]{values}, probes: [SemaScopeProbe]{}, positions: [[Int]]{}}
+    sema_comptime_precheck_fill(shared_state, ^environment, ^program)
+    loop row in 0..<module_positions.len() {
+        weights := [Int]{}
+        work := 0
+        loop position in module_positions[row] {
+            weight :: sources[position].span.end - sources[position].span.start
+            &weights.push(weight)
+            work += weight
+        }
+        scope_items := 0
+        if !sema_comptime_precheck_enter(shared_state, module_identities[row], available.counted_values, module_positions[row], &scope_items) -> next
+        workers :: compiler_threads_admit(threads, weights.len(), work, SEMA_PROBE_MIN_BYTES_PER_THREAD, scope_items * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
+        if workers <= 1 -> next
+        count := workers * SEMA_PRECHECK_PARTS_PER_THREAD
+        if count > weights.len() -> count = weights.len()
+        bounds :: compiler_threads_partition(weights, count)
+        queue :: shared SemaPrecheckQueue{next: 0}
+        parts := [[SemaComptimeItemCheck?]]{}
+        loop _ in 0..<count -> &parts.push([SemaComptimeItemCheck?]{})
+        sema_comptime_precheck_claimers(shared_state, bounds, queue, 0, workers, &parts)
+        loop part in 0..<count {
+            index := bounds[part + 1]
+            loop parts[part].len() > 0 {
+                index -= 1
+                check := &parts[part].pop() ?? break
+                checks[module_positions[row][index]] = ^check
+            }
+        }
+    }
+    permit :: shared_state.guard_edit()
+    environment = &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    program = &permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    checks
+}
+
+// Parts per admitted precheck thread: a thread that drew cheap checks claims
+// more while another finishes an expensive one.
+SEMA_PRECHECK_PARTS_PER_THREAD :: 4
+
+// What every precheck thread reads: the run's environment (entered in the
+// current module) and program tables, the pass's available constants,
+// sources and values, and the current module's prepared probe scope and
+// source positions; each the one row of its list.
+struct SemaPrecheckShared {
+    environments: [SemaScopeEnvironment]
+    programs: [SemaProgramTables]
+    available: [SemaComptimeAvailableConstants]
+    sources: [[SemaComptimeItemSource]]
+    values: [[SemaComptimeItemValue]]
+    probes: [SemaScopeProbe]
+    positions: [[Int]]
+}
+
+// The next unclaimed part of a module's prechecks.
+struct SemaPrecheckQueue {
+    next: Int
+}
+
+// A part one precheck thread checked: its number and its rows, in order.
+struct SemaPrecheckPart {
+    part: Int
+    checks: [SemaComptimeItemCheck?]
+}
+
+// Moves the run's environment and program tables into the precheck threads'
+// shared state; sema_comptime_precheck_items moves them back.
+fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environment: ^SemaScopeEnvironment, program: ^SemaProgramTables) {
+    permit :: shared_state.guard_edit()
+    &permit.value.environments.push(^environment)
+    &permit.value.programs.push(^program)
+}
+
+// Enters the shared environment in `module_identity`, prepares the module's
+// probe scope and makes it and `positions` the current module's rows. False
+// when the module cannot be entered or its scope not applied (the run then
+// checks its sources at their turn). `scope_items` gets the module's item
+// count.
+fn sema_comptime_precheck_enter(shared_state: Shared<SemaPrecheckShared>, module_identity: String, version: Int, positions: [Int], scope_items: &Int) -> Bool {
+    permit :: shared_state.guard_edit()
+    // The environment moves out of the shared state and back, so entering
+    // never copies it.
+    environment := &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
+    entered :: sema_scope_environment_enter_probe_module(&environment, permit.value.programs[0], module_identity, ^empty)
+    probe := sema_comptime_probe_init(None)
+    if entered -> sema_comptime_probe_prepare(&probe, environment, permit.value.programs[0], version)
+    &permit.value.environments.push(^environment)
+    if !entered || !probe.applied -> return false
+    if permit.value.programs[0].registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, module_identity) ?? return false
+        scope_items = graph.modules[module_index].program.items.len()
+    }
+    permit.value.probes = [SemaScopeProbe]{}
+    &permit.value.probes.push(^probe)
+    permit.value.positions = [[Int]]{positions}
+    true
+}
+
+// Runs claiming threads `from..<workers`, one task each, and moves every
+// part a thread returned into `parts`.
+fn sema_comptime_precheck_claimers(shared_state: Shared<SemaPrecheckShared>, bounds: [Int], queue: Shared<SemaPrecheckQueue>, from: Int, workers: Int, parts: &[[SemaComptimeItemCheck?]]) {
+    if from >= workers -> return
+    task.group sema_precheck_threads {
+        head :: task sema_comptime_precheck_claimed(shared_state, bounds, queue)
+        sema_comptime_precheck_claimers(shared_state, bounds, queue, from + 1, workers, &parts)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            parts[done.part] = compiler_take_rows<SemaComptimeItemCheck?>(&done.checks)
+        }
+    }
+}
+
+// One thread: checks the parts it claims until none is left, on its own copy
+// of the module's probe scope, with host callbacks withheld.
+fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, bounds: [Int], queue: Shared<SemaPrecheckQueue>) -> [SemaPrecheckPart] {
+    inputs :: shared_state.guard_read()
+    wanted :: shared SemaHostHookWanted{wanted: false}
+    // copy: each thread checks on its own scope, while the module's prepared
+    // probe (owner: the shared state, read by every thread) stays as it is.
+    probe := inputs.value.probes[0].copy()
+    probe.host_hooks = Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: None})
+    claimed := [SemaPrecheckPart]{}
+    loop {
+        part :: sema_comptime_precheck_claim(queue)
+        if part >= bounds.len() - 1 -> break
+        checks := [SemaComptimeItemCheck?]{}
+        loop index in bounds[part]..<bounds[part + 1] {
+            sema_host_hook_unwant(wanted)
+            // Passed straight through: a local binding of a guarded row would copy it.
+            check := sema_check_comptime_item_in(inputs.value.environments[0], inputs.value.programs[0], &probe, inputs.value.available[0], inputs.value.sources[0][inputs.value.positions[0][index]], inputs.value.values[0])
+            if sema_host_hook_was_wanted(wanted) {
+                &checks.push(None)
+            } else {
+                &checks.push(Val(^check))
+            }
+        }
+        &claimed.push(SemaPrecheckPart{part: part, checks: ^checks})
+    }
+    claimed
+}
+
+fn sema_comptime_precheck_claim(queue: Shared<SemaPrecheckQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
 }
 
 // The constants `references` name that have no compile-time value yet. A
