@@ -72,6 +72,9 @@ fn sema_repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModu
     scopes.failure_carrier = Val(sema_failure_carrier(Val(return_type)))
     context := sema_check_context_init()
     context.function_name = root.name
+    // copy: a handle copy (Shared facts plus length and frontier ints): the session's check context
+    // and its environment each hold the body publication, and the environment moves into the
+    // session below.
     context.comptime_body_values = environment.comptime_body_values.copy()
     environment.function_name = root.name
     Ok(SemaReplSession{environment: ^environment, program: ^program, scopes: ^scopes, ownership: ^ownership, tails: sema_statement_tail_store_init(), context: ^context, modules: ^modules, source: source, root: root})

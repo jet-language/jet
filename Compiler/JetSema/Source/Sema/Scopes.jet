@@ -914,11 +914,16 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         local_view_provenance: source.local_view_provenance.copy(),
         return_view_receiver_key: source.return_view_receiver_key,
         return_view_parameter_keys: source.return_view_parameter_keys.copy(),
+        // copy: sema_check_context_snapshot builds an independent context: the snapshot is restored
+        // after a speculative check, while `source` (the live context) keeps mutating.
         return_view_provenance: source.return_view_provenance.copy(),
         name_references: source.name_references.copy(),
         comptime_requests: source.comptime_requests.copy(),
         comptime_body_sources: source.comptime_body_sources.copy(),
         // Sharing the publication does not visit, copy, or reindex its rows.
+        // copy: sema_check_context_snapshot builds an independent context: the snapshot's body
+        // values (a handle: Shared facts plus length) outlive the live context's later publication
+        // edits.
         comptime_body_values: source.comptime_body_values.copy(),
         comptime_body_source_modules: [String:Int]{},
         comptime_body_source_rows: [[String:Int]]{},
@@ -1251,13 +1256,12 @@ fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
 // first, rows pushed since the mark are dropped (with their name positions,
 // which are ascending per name), and the small fields are restored.
 fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
-    undo_index := table.binding_undo.len()
-    loop undo_index > mark.undo {
-        undo_index -= 1
-        restored_index :: table.binding_undo[undo_index].index
-        if restored_index < mark.bindings -> table.bindings[restored_index] = table.binding_undo[undo_index].binding.copy()
+    // Newest edit first: each undo row is popped and its saved binding moves
+    // back into place.
+    loop table.binding_undo.len() > mark.undo {
+        undo := &table.binding_undo.pop() ?? panic("a scope rollback lost its undo row")
+        if undo.index < mark.bindings -> table.bindings[undo.index] = ^undo.binding
     }
-    loop table.binding_undo.len() > mark.undo -> _ := &table.binding_undo.pop()
     loop table.bindings.len() > mark.bindings {
         last :: table.bindings.len() - 1
         if table.name_slots.get(table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
@@ -1288,6 +1292,8 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 // point can restore the old row.
 fn sema_scope_note_binding_edit(table: &SemaScopeTable, index: Int) Never! {
     if table.open_marks == 0 -> return
+    // copy: the undo log keeps the binding's old row, and the caller edits the live row in
+    // table.bindings right after. A rollback needs both rows.
     previous :: table.bindings[index].copy()
     &table.binding_undo.push(SemaScopeBindingUndo{index: index, binding: previous})
 }
@@ -1501,6 +1507,8 @@ fn sema_knowledge_gate_allows(plane: SemaKnowledgePlane, gate: SemaKnowledgeGate
 }
 
 fn sema_scope_push_knowledge_gate(table: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaKnowledgeGate? {
+    // copy: the caller gets the previous gate back to reinstall it, while the table's field is
+    // overwritten with `gate`. Jet has no exchange on a field of the write-borrowed `table`.
     previous :: table.knowledge_gate.copy()
     table.knowledge_gate = Val(gate)
     previous
@@ -1712,6 +1720,8 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
                 origin: binding.origin,
             })
         } else {
+            // copy: sema_scope_light_copy returns an independent scope table (a snapshot for a
+            // deferred check), while `source` keeps its bindings and keeps changing.
             &bindings.push(binding.copy())
         }
         &light.push(function_type)
@@ -1779,6 +1789,8 @@ fn sema_scope_binding_symbol(environment: SemaScopeEnvironment, table: SemaScope
 
 // Row `index` with its checked type.
 fn sema_scope_binding_row(environment: SemaScopeEnvironment, table: SemaScopeTable, index: Int) -> SemaScopeBinding {
+    // copy: the returned row may get its checked type filled in, while `table` is the caller's
+    // scope table (a read parameter) and keeps its light row.
     row := table.bindings[index].copy()
     if sema_scope_binding_is_light(table, index) -> row.symbol.ty = sema_scope_binding_type(environment, table, index)
     row

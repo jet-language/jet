@@ -469,12 +469,24 @@ fn sema_ownership_state_restore_path(state: &SemaOwnershipState, saved: SemaOwne
     state.freeze_sites = saved.freeze_sites.copy()
     state.key_slots = saved.key_slots.copy()
     state.key_facts = saved.key_facts.copy()
+    // copy: the restored path takes its own declaration_previous, while `saved` is the caller's
+    // saved state (a read parameter), restored again on every remaining path.
     state.declaration_previous = saved.declaration_previous.copy()
+    // copy: the restored path takes its own active_rows, while `saved` is the caller's saved state
+    // (a read parameter), restored again on every remaining path.
     state.active_rows = saved.active_rows.copy()
+    // copy: the restored path takes its own single_use_rows, while `saved` is the caller's saved
+    // state (a read parameter), restored again on every remaining path.
     state.single_use_rows = saved.single_use_rows.copy()
+    // copy: the restored path takes its own dirty_rows, while `saved` is the caller's saved state
+    // (a read parameter), restored again on every remaining path.
     state.dirty_rows = saved.dirty_rows.copy()
     state.dirty_clean = saved.dirty_clean
+    // copy: the restored path takes its own anchors, while `saved` is the caller's saved state (a
+    // read parameter), restored again on every remaining path.
     state.anchors = saved.anchors.copy()
+    // copy: the restored path takes its own trail, while `saved` is the caller's saved state (a
+    // read parameter), restored again on every remaining path.
     state.trail = saved.trail.copy()
 }
 

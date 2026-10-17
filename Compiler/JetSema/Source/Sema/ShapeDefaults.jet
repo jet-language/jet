@@ -21,6 +21,9 @@ fn sema_checked_shape_defaults(program: ^Program, registered: SemaRegistrationMo
                 if candidate.symbol.name == definition.name -> nominal = Val(candidate)
             }
             owner :: nominal ?? next
+            // copy: `definition` is a read view of updated_program.items[index], and the slot is
+            // rewritten with `updated` only when a default changes. Jet has no writable binding for
+            // an enum payload.
             updated := definition.copy()
             changed := false
             loop field_index in 0..<updated.fields.len() {

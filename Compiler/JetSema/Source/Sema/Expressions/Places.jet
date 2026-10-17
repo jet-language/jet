@@ -268,10 +268,14 @@ fn sema_expression_shared_guard_value(ty: Type) -> SemaCallMemoryGuard? {
 // stay parameters) before the owner's type arguments are substituted.
 fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: String, declared: Type, generic_names: [String]) -> Type Never! {
     if program.registration_graph == .Val(graph) {
+    // copy: the owner type is a new owned Type. Without an owner module it equals `declared`, the
+    // field's declared type (a read parameter), which stays in the nominal.
     if owner_module == "" -> return declared.copy()
     generics :: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
     return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
     }
+    // copy: the owner type is a new owned Type. When nothing applies it equals `declared`, the
+    // field's declared type (a read parameter), which stays in the nominal.
     declared.copy()
 }
 

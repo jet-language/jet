@@ -479,6 +479,8 @@ fn sema_derive_expand_type(expansion: &SemaDeriveExpansion, ty: Type) -> Type Ne
         }
         .Quantity(base, dimension) -> Type.Quantity{base: sema_derive_expand_type(&expansion, base), dimension: dimension}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_derive_expand_type(&expansion, base), lo: lo, hi: hi}
+        // copy: the derive template type is expanded once per deriving declaration, so the template
+        // keeps its node and an unexpanded node is copied into this expansion.
         else -> ty.copy()
     }
 }
@@ -650,6 +652,8 @@ fn sema_derive_expand_pattern(expansion: &SemaDeriveExpansion, pattern: Pattern,
             expanded_variant :: sema_derive_expand_name(&expansion, variant, span)
             Pattern.Variant{variant: expanded_variant, bindings: sema_derive_fill_variant_bindings(expansion, expanded_variant, bindings, span, subject), leading_dot: leading_dot, span: span}
         }
+        // copy: the derive template pattern is expanded once per deriving declaration, so the
+        // template keeps its node and an unexpanded node is copied into this expansion.
         else -> pattern.copy()
     }
 }
@@ -685,10 +689,16 @@ fn sema_derive_coerce_enum_arm(expansion: SemaDeriveExpansion, cond: Expr, subje
     if cond == {
         .EnumLit(_, variant, _, args, _, span) -> sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span)
         .Binary(op, _, right, _) -> {
+            // copy: the derive template condition is expanded once per deriving declaration, so the
+            // template keeps `cond` and a non-equality condition is copied into this expansion.
             if op != BinOp.Eq -> return cond.copy()
             if right == .EnumLit(_, variant, _, args, _, span) -> return sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span)
+            // copy: the derive template condition is expanded once per deriving declaration, so the
+            // template keeps `cond` and an uncoerced condition is copied into this expansion.
             cond.copy()
         }
+        // copy: the derive template condition is expanded once per deriving declaration, so the
+        // template keeps `cond` and a non-binary condition is copied into this expansion.
         else -> cond.copy()
     }
 }
@@ -748,6 +758,8 @@ fn sema_derive_expand_or_fallback(expansion: &SemaDeriveExpansion, fallback: OrF
         .Block(body, value, span) -> OrFallback.Block{body: sema_derive_expand_stmts(&expansion, body), value: sema_derive_expand_optional_expr(&expansion, value), span: span}
         .Return(value, span) -> OrFallback.Return{value: sema_derive_expand_optional_expr(&expansion, value), span: span}
         .Panic(name_span, args) -> OrFallback.Panic{name_span: name_span, args: sema_derive_expand_call_args(&expansion, args)}
+        // copy: the derive template fallback is expanded once per deriving declaration, so the
+        // template keeps its node and an unexpanded fallback is copied into this expansion.
         else -> fallback.copy()
     }
 }
@@ -770,6 +782,8 @@ fn sema_derive_expand_lambda(expansion: &SemaDeriveExpansion, lambda: Lambda) ->
 
 // Children first, then the node itself.
 fn sema_derive_expand_expr(expansion: &SemaDeriveExpansion, expression: Expr) -> Expr Never! {
+    // copy: after a failed expansion the template expression is returned unchanged, but the
+    // template keeps it for the next deriving declaration, so this expansion gets its own copy.
     if expansion.failure != None -> return expression.copy()
     sema_derive_expand_expr_node(&expansion, expression)
 }
@@ -786,8 +800,14 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .Slice(base, start, end, range, span) -> return Expr.Slice{base: sema_derive_expand_expr(&expansion, base), start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), range: sema_derive_expand_optional_expr(&expansion, range), span: span}
         .Range(start, end, exclusive, span) -> return Expr.Range{start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), exclusive: exclusive, span: span}
         .Ident(name, span) -> {
+            // copy: a non-`$` identifier is unchanged, but the derive template keeps it for the
+            // next deriving declaration, so this expansion gets its own copy.
             if !name.starts_with("$") -> return expression.copy()
+            // copy: an unbound `$` name stays as written, but the derive template keeps it for the
+            // next deriving declaration, so this expansion gets its own copy.
             value :: sema_derive_scope_value(expansion, name) ?? return expression.copy()
+            // copy: a value with no literal form stays as written, but the derive template keeps it
+            // for the next deriving declaration, so this expansion gets its own copy.
             return sema_derive_literal_expr(value, span) ?? expression.copy()
         }
         .Call(call) -> {
@@ -838,13 +858,21 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .CallValue(callee, args, span) -> return Expr.CallValue{callee: sema_derive_expand_expr(&expansion, callee), args: sema_derive_expand_call_args(&expansion, args), span: span}
         .PtrFromAddr(alias, alias_span, elem, addr, span) -> return Expr.PtrFromAddr{alias: alias, alias_span: alias_span, elem: sema_derive_expand_type(&expansion, elem), addr: sema_derive_expand_expr(&expansion, addr), span: span}
         .ComptimeName(name, span, value) -> {
+            // copy: a bound name stays as written, but the derive template keeps it for the next
+            // deriving declaration, so this expansion gets its own copy.
             if value != None -> return expression.copy()
+            // copy: an unbound name stays as written, but the derive template keeps it for the next
+            // deriving declaration, so this expansion gets its own copy.
             bound :: sema_derive_scope_value(expansion, name) ?? return expression.copy()
+            // copy: a value with no literal form stays as written, but the derive template keeps it
+            // for the next deriving declaration, so this expansion gets its own copy.
             return sema_derive_literal_expr(bound, span) ?? expression.copy()
         }
         .Paren(value, span) -> return Expr.Paren{value: sema_derive_expand_expr(&expansion, value), span: span}
         else -> {}
     }
+    // copy: every other expression kind is unchanged by expansion, but the derive template keeps it
+    // for the next deriving declaration, so this expansion gets its own copy.
     expression.copy()
 }
 
@@ -870,6 +898,8 @@ fn sema_derive_expand_typed_body(expansion: &SemaDeriveExpansion, body: TypedLit
         .Value(value) -> return TypedLitBody.Value{value: sema_derive_expand_expr(&expansion, value)}
         else -> {}
     }
+    // copy: a typed literal body without template splices is unchanged, but the derive template
+    // keeps it for the next deriving declaration, so this expansion gets its own copy.
     body.copy()
 }
 
@@ -1023,6 +1053,8 @@ fn sema_derive_expand_binding(expansion: &SemaDeriveExpansion, binding: Binding)
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_derive_expand_name(&expansion, type_name, type_span), type_span: type_span, fields: fields, rest: rest, span: span}
             .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: sema_derive_expand_pattern(&expansion, inner, None), fallback: sema_derive_expand_or_fallback(&expansion, fallback), names: names, span: span}
+            // copy: the binding pattern is unchanged by expansion, but it is a payload view in the
+            // derive template, which keeps it for the next deriving declaration.
             else -> pattern.copy()
         })
     }
@@ -1054,6 +1086,8 @@ fn sema_derive_expand_lvalue(expansion: &SemaDeriveExpansion, target: LValue) ->
     if target == {
         .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(&expansion, base), index: sema_derive_expand_expr(&expansion, index), span: span, kind: kind}
         .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(&expansion, base), field: field, span: span}
+        // copy: the assignment target is unchanged by expansion, but the derive template keeps it
+        // for the next deriving declaration, so this expansion gets its own copy.
         else -> target.copy()
     }
 }
@@ -1111,6 +1145,8 @@ fn sema_derive_expand_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt 
         .Yield(value, span) -> Stmt.Yield{value: sema_derive_expand_expr(&expansion, value), span: span}
         .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_derive_expand_exprs(&expansion, args), args_span: args_span, body: sema_derive_expand_stmts(&expansion, body), dsl: dsl, dot_span: dot_span, span: span}
         .DeferClose(close, span) -> Stmt.DeferClose{close: sema_derive_expand_expr(&expansion, close), span: span}
+        // copy: the statement kind is unchanged by expansion, but the derive template keeps it for
+        // the next deriving declaration, so this expansion gets its own copy.
         else -> stmt.copy()
     }
 }
@@ -1271,6 +1307,8 @@ fn sema_derive_expand_item(expansion: &SemaDeriveExpansion, item: Item) -> Item 
             updated.trait_impls = sema_derive_expand_trait_blocks(&expansion, definition.trait_impls)
             Item.Enum{value: updated}
         }
+        // copy: the item kind is unchanged by expansion, but the derive template keeps it for the
+        // next deriving declaration, so this expansion gets its own copy.
         else -> item.copy()
     }
 }
@@ -1598,6 +1636,9 @@ fn sema_derive_distinct_type_info(definition: DistinctDef) -> CtValue {
 
 fn sema_derive_replace_provider_type(ty: Type, type_param: String, owner_type: Type) -> Type Never! {
     if ty == {
+        // copy: the replaced type is a new owned Type. `owner_type` is reused for every matching
+        // node of this provider type, and an unmatched `ty` stays in the provider signature, which
+        // the caller keeps.
         .Named(name) -> if name == type_param -> owner_type.copy() else -> ty.copy()
         .List(inner) -> Type.List{element: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
@@ -1628,6 +1669,8 @@ fn sema_derive_replace_provider_type(ty: Type, type_param: String, owner_type: T
             loop field in fields -> &replaced.push(TypeTupleField{name: field.name, ty: sema_derive_replace_provider_type(field.ty, type_param, owner_type)})
             Type.Tuple{fields: replaced}
         }
+        // copy: other type kinds are unchanged, but `ty` stays in the provider signature (the
+        // caller's read parameter), so the replaced type gets its own copy.
         else -> ty.copy()
     }
 }

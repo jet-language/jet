@@ -1300,7 +1300,11 @@ fn sema_registration_trait_method(method: TraitMethodSig, module_identity: Strin
 
 // Hook callable identity is the operand pair, not the ordinary owner/name key.
 fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
+    // copy: the operator owner is a new owned SymbolID. With no trait it equals `owner`, the
+    // caller's declaring symbol (a read parameter), which the caller keeps.
     trait_value :: trait_name ?? return owner.copy()
+    // copy: the operator owner is a new owned SymbolID. For an unchecked trait it equals `owner`,
+    // the caller's declaring symbol (a read parameter), which the caller keeps.
     if !sema_checked_operator_trait(trait_value) -> return owner.copy()
     right :: rhs ?? left
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
@@ -2165,6 +2169,8 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // copied row would carry its whole source declaration).
     loop nominal_index in 0..<module_row.nominals.len() {
         if module_row.nominals[nominal_index].kind != SemaRegistrationNominalKind.ForeignHandle -> next
+        // copy: `source` is read, then the same nominal slot is rewritten with the updated facts.
+        // Jet has no writable binding for an enum payload in module_row.nominals.
         source :: module_row.nominals[nominal_index].source.copy()
         if source == .ForeignHandle(facts) {
             updated_facts := facts
@@ -2175,6 +2181,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Only impls register here; every other item is skipped without a copy.
     loop index in 0..<module_row.program.items.len() {
         if module_row.program.items[index] == .Impl(_) {
+            // copy: sema_registration_add_impl writes module_row (`&`) and stores the impl rows,
+            // while the item stays in module_row.program.items. A view of that list would be live
+            // across the write.
             item :: module_row.program.items[index].copy()
             sema_registration_add_impl(&module_row, item, &diagnostics)
         }
@@ -2182,6 +2191,8 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Root exports are retained separately so private declarations never become
     // cross-module candidates merely because their name is known.
     loop symbol_index in 0..<module_row.symbols.len() {
+        // copy: the export row stores its own symbol, while the symbol row stays in
+        // module_row.symbols, and module_row is written (exports.push) while it is live.
         symbol :: module_row.symbols[symbol_index].copy()
         if symbol.visibility > 0 {
             declaration :: sema_registration_declaration_for_symbol(module_row, symbol)
@@ -2724,6 +2735,8 @@ fn sema_registration_module_name(graph: SemaRegistrationGraph, identity: String)
 fn sema_registration_push_graph_diagnostic(graph: &SemaRegistrationGraph, module_index: Int, diagnostic: Diagnostic) Never! {
     if {
         module_index >= 0 && module_index < graph.modules.len() -> {
+            // copy: the graph's diagnostics list owns the located row, while `diagnostic` is the
+            // caller's row (a read parameter), still used below.
             &graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
         }
         else -> {

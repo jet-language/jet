@@ -268,6 +268,9 @@ fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource])
 }
 
 fn sema_call_append_rewritten_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) Never! {
+    // copy: the written argument is taken out of `taken` (the slot is set to None on the next
+    // line). Jet has no take on an element of the write-borrowed list, so it is copied, then
+    // cleared.
     written :: taken[original_index].copy() ?? return
     taken[original_index] = None
     &rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))

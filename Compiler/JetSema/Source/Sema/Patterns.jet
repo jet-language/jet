@@ -755,6 +755,8 @@ fn sema_pattern_map_resolve_key(key: TExpr, env: SemaScopeEnvironment, program: 
             }
         }
     }
+    // copy: the resolved key is a new owned TExpr. When nothing resolves it equals `key`, the
+    // pattern's checked key (a read parameter), which stays on the pattern.
     key.copy()
 }
 
@@ -1007,6 +1009,8 @@ fn sema_pattern_normalize_contextual(pattern: Pattern, subject_ty: Type, env: Se
         }
         else -> {}
     }
+    // copy: the normalized pattern is a new owned Pattern. Otherwise it equals `pattern`, the
+    // caller's AST pattern (a read parameter), which the caller keeps.
     pattern.copy()
 }
 

@@ -88,6 +88,8 @@ fn sema_output_fields(args: [EnumLitArg], span: Span, diagnostics: &[Diagnostic]
 
 fn sema_output_field(args: [EnumLitArg], index: Int) -> Expr? Never! {
     arg :: args[index]
+    // copy: the Output field is a new owned Expr, while `value` is a payload view of the caller's
+    // enum literal argument (a read parameter), which stays in the AST.
     if arg == .Named(_, value) -> Val(value.copy()) else -> None
 }
 
@@ -138,6 +140,8 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
             }
             if resolved == None {
                 exported :: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity, [String]{})
+                // copy: the resolved symbol owns its texts, while `found` is a payload view of the
+                // export row in the read-only graph, which keeps them.
                 if exported == .Val(found) -> resolved = Val(SemaRegistrationResolvedSymbol{symbol: found.symbol.copy(), source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
             }
         }
@@ -168,6 +172,8 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                         if imported.declaration.alias != target.module_alias || sema_registration_import_is_unqualified(imported.declaration) -> next
                         target_index :: sema_registration_module_index(graph, imported.target_module_identity) ?? break
                         exported :: sema_registration_resolve_export(graph, target_index, target.member, owner.module_identity, owner.package_identity, [String]{}) ?? break
+                        // copy: the registered symbol owns its texts, while `exported` is a view of
+                        // an export row in the read-only graph, which keeps them.
                         registered = Val(SemaRegistrationResolvedSymbol{symbol: exported.symbol.copy(), source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
                         break
                     }
@@ -239,6 +245,8 @@ fn sema_output_callable_target(graph: SemaRegistrationGraph, declaring_index: In
                 &references.push(sema_output_import_reference(graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                 current = sema_registration_module_index(graph, exported.source_module_identity) ?? return None
             } else {
+                // copy: the resolved symbol owns its texts, while `exported` is a view of an export
+                // row in the read-only graph, which keeps them.
                 resolved = Val(SemaRegistrationResolvedSymbol{symbol: exported.symbol.copy(), source_module_identity: exported.source_module_identity.copy(), target_module_identity: exported.source_module_identity.copy(), visibility: exported.visibility})
             }
         }
@@ -313,9 +321,16 @@ fn sema_output_fact(graph: SemaRegistrationGraph, declaring_index: Int, address:
     kind_name :: sema_output_kind_name(kind)
     if !sema_output_entry_contract(graph, target.module_index, function, target.source_name, kind, expr_span(entry), "change `fn {target.source_name}` to match the {kind_name} contract", &diagnostics) -> return None
     params := [OutputParam]{}
+    // copy: each Output parameter owns its type, while the parameter rows stay in the checked
+    // function in the read-only graph.
     loop parameter in function.parameters -> &params.push(OutputParam{access: parameter.convention, ty: parameter.ty.copy()})
     lowered_name :: if module_row.module_identity == graph.entry_module_identity -> name_mangle(function.declaration.name) else -> "{name_mangle(module_row.module_name)}::{name_mangle(function.declaration.name)}"
+    // copy: the ResolvedOutput fact owns its texts. address/output_name are the caller's read
+    // parameters, and module_path, source_name and the declaration name/return stay in the
+    // read-only graph rows.
     fact :: ResolvedOutput{address: address.copy(), kind: kind, output_name: output_name.copy(), module_id: target.module_index, source_path: module_row.module_path.copy(), source_name: target.source_name.copy(), semantic_name: function.declaration.name.copy(), lowered_name: ^lowered_name, params: ^params, return_type: function.declaration.return_type.copy(), failure_contract: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span), reference: expr_span(entry), definition: function.symbol.span, authority: OutputCallableAuthority.SafeJet, effects: [String]{}, selected: false, selection_reason: "not selected"}
+    // copy: the name reference owns its symbol, while the function row in the read-only graph keeps
+    // it.
     &target.references.push(SemaNameReferenceFact{span: expr_span(entry), symbol: function.symbol.copy(), kind: "function"})
     Val((fact: ^fact, references: ^target.references))
 }
@@ -501,11 +516,17 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
         declaration_span := Span{start: 0, end: 0}
         if graph.modules[row.module_index].program.items[row.item_index] == .Const(definition) {
             declaration_span = definition.name_span
+            // copy: `definition` is a read view of the graph item, and the slot is rewritten with
+            // `updated` on the next lines. Jet has no writable binding for an enum payload.
             updated := definition.copy()
+            // copy: the resolved fact is stored twice: on the program item here and on the matching
+            // registered constant below.
             updated.resolved_output = Val(row.fact.copy())
             graph.modules[row.module_index].program.items[row.item_index] = Item.Const{value: ^updated}
         }
         loop constant_index in 0..<graph.modules[row.module_index].constants.len() {
+            // copy: the resolved fact is stored twice: on the program item above and on this
+            // registered constant.
             if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span -> graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact.copy())
         }
     }
@@ -544,6 +565,8 @@ fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegi
             break
         }
     }
+    // copy: the published Output owns its return type, while the checked function row stays in
+    // `modules` (a read parameter).
     fact.return_type = modules[target].functions[function_index].ret.copy()
     fact.failure_contract = failure_contract_of_function(fact.return_type, declaration_span)
     fact.effects = modules[target].functions[function_index].effects.solved.copy()
@@ -560,13 +583,20 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
     outputs := [ResolvedOutput]{}
     loop module_index in 0..<modules.len() {
         loop constant_index in 0..<modules[module_index].constants.len() {
+            // copy: `output` is a payload view of the constant's resolved output, and the slot is
+            // rewritten with the solved fact on the next lines. Jet has no consuming match to move
+            // it out.
             updated := if modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed) else -> { next }
+            // copy: the solved Output is stored twice: in the returned list here and back on the
+            // constant's declaration on the next line.
             &outputs.push(updated.copy())
             modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
         }
     }
     loop module_index in 0..<graph.modules.len() {
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
+            // copy: `output` is a payload view of the registered constant's resolved output, which
+            // is rewritten with the solved fact next. Jet has no consuming match to move it out.
             updated := if graph.modules[module_index].constants[constant_index].declaration.resolved_output == .Val(output) -> sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed) else -> { next }
             graph.modules[module_index].constants[constant_index].declaration.resolved_output = Val(^updated)
         }
@@ -574,7 +604,12 @@ fn sema_output_publish_solved_effects(graph: &SemaRegistrationGraph, modules: &[
         loop item_index in 0..<graph.modules[module_index].program.items.len() {
             updated_definition := if graph.modules[module_index].program.items[item_index] == .Const(definition) -> {
                 if definition.resolved_output == .Val(output) -> {
+                    // copy: `output` is a payload view inside the program item's definition, and
+                    // that item is rewritten below. Jet has no consuming match to move it out.
                     updated_output := sema_output_fact_with_solved_effects(output.copy(), graph, modules, &rows, &indexed)
+                    // copy: `definition` is a read view of the graph item, and the slot is
+                    // rewritten with the owned definition below. Jet has no writable binding for an
+                    // enum payload.
                     owned_definition := definition.copy()
                     owned_definition.resolved_output = Val(^updated_output)
                     ^owned_definition

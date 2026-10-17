@@ -66,6 +66,9 @@ fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
 }
 
 fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
+    // copy: the observed access is a new owned Option. With nothing observed it equals `access`,
+    // the caller's host-hook access (a read parameter), which the caller keeps for its other body
+    // checks.
     if observed == None -> return access.copy()
     row :: access ?? return None
     Val(if row == {

@@ -1744,6 +1744,8 @@ fn sema_effect_memory_search(nodes: [SemaEffectNode], node_by_key: [String:Int],
         loop event in sema_effect_memory_sorted_events(nodes[index].memory_events) {
             if event.kind == kind -> return Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
         }
+        // copy: the memory finding owns its open site, while the site stays in nodes[index] (the
+        // caller's read-only effect graph), which later searches read.
         if nodes[index].memory_opens.len() > 0 -> return Val(SemaMemoryFinding{event: None, owner: index, open: Val(nodes[index].memory_opens[0].copy()), path: path, used: 0})
         edges := nodes[index].call_edges
         loop edge in edges {
@@ -1790,6 +1792,8 @@ fn sema_effect_arena_bound(nodes: [SemaEffectNode], node_by_key: [String:Int], i
 
 fn sema_effect_arena_bound_inner(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
     node :: nodes[index]
+    // copy: the arena failure owns its open site, while the site stays in `node`, a row of the
+    // caller's read-only effect graph, which later searches read.
     if node.memory_opens.len() > 0 -> return sema_effect_arena_failure(SemaMemoryFinding{event: None, owner: index, open: Val(node.memory_opens[0].copy()), path: path, used: 0})
     total := 0
     witness := SemaMemoryFinding?{None}

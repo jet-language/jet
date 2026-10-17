@@ -35,22 +35,32 @@ fn sema_geometry_nominal_leaf(name: String) -> String Never! {
 }
 
 fn sema_geometry_restore_owner(ty: Type, source: Type) -> Type Never! {
+    // copy: the restored type is a new owned Type. For a non-named source it equals `ty`, the
+    // caller's checked type (a read parameter), which stays on its node.
     name :: if source == { .Named(owner) | .Apply(owner, _) -> owner else -> { return ty.copy() } }
     leaf :: sema_geometry_nominal_leaf(name)
+    // copy: the restored type is a new owned Type. When the leaf already matches it equals `ty`,
+    // the caller's checked type (a read parameter), which stays on its node.
     if leaf == name -> return ty.copy()
     parts := name.split("::").to_list()
     if ty == {
         .Result(ok, error) -> return Type.Result{ok: sema_geometry_restore_owner(ok, source), err: sema_geometry_restore_owner(error, source)}
         .Named(result) -> {
+            // copy: the restored type is a new owned Type. When already qualified it equals `ty`,
+            // the caller's checked type (a read parameter), which stays on its node.
             if result.contains("::") -> return ty.copy()
             parts[parts.len() - 1] = result.copy()
             return Type.Named{name: parts.join("::")}
         }
         .Apply(result, args) -> {
+            // copy: the restored type is a new owned Type. When already qualified it equals `ty`,
+            // the caller's checked type (a read parameter), which stays on its node.
             if result.contains("::") -> return ty.copy()
             parts[parts.len() - 1] = result.copy()
             return Type.Apply{name: parts.join("::"), args: args.copy()}
         }
+        // copy: the restored type is a new owned Type. For other kinds it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on its node.
         else -> return ty.copy()
     }
 }
@@ -179,6 +189,8 @@ fn sema_geometry_diagnostic_type(ty: Type) -> Type Never! {
     if ty == {
         .Named(name) -> Type.Named{name: sema_geometry_nominal_leaf(name)}
         .Apply(name, args) -> Type.Apply{name: sema_geometry_nominal_leaf(name), args: args.copy()}
+        // copy: the diagnostic type is a new owned Type. For other kinds it equals `ty`, the
+        // caller's checked type (a read parameter), which stays on its node.
         else -> ty.copy()
     }
 }

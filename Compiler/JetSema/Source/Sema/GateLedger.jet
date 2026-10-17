@@ -45,6 +45,8 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
         }
     }
     sema_gate_append_structure(&ledger, names)
+    // copy: the ledger owns its entries, while `external` is the caller's read-only gate list,
+    // which it keeps for the next module's ledger.
     loop entry in external -> gate_ledger_push(&ledger, entry.copy())
     if gates.build_flag -> sema_gate_invocation(&ledger, GateKind.BuildFlag, "build")
     if gates.session_flag -> sema_gate_invocation(&ledger, GateKind.SessionFlag, "session")

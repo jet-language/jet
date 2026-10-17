@@ -220,6 +220,8 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
         &diagnostics.push(sema_error("E0115", label_span, "`break value` only works inside a loop", "a loop value needs an active target", "move this inside a loop"))
         return None
     }
+    // copy: `frame` is read after sema_check_expression and loop-value recording, which write
+    // context.loop_value_frames (`&context`). A view would be live across those writes.
     frame :: context.loop_value_frames[frame_index].copy()
     payload_expected := Type?{None}
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) -> payload_expected = Val(expected_type)
@@ -1190,6 +1192,8 @@ fn sema_stmt_for_in_source(expression: Expr, collection: TExpr, method_kind: TFo
             else -> {}
         }
     }
+    // copy: the for-in source is a new owned TExpr. Otherwise it equals `collection`, the caller's
+    // checked iterable (a read parameter), which the caller keeps.
     collection.copy()
 }
 
@@ -2665,6 +2669,8 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         else -> {}
     }
 
+    // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `context`.
     enclosing_err_denial :: context.fallback_err_denial.copy()
     context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
     if fallback == {
@@ -2680,6 +2686,8 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Block(body, value, block_span) -> {
             block_mark :: sema_scope_mark(&scopes)
             sema_scope_enter(&scopes, &state, "refutable.block@{block_span.start}")
+            // copy: `block_return_type` restores scopes.return_type after the fallback block
+            // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`.
             block_return_type :: scopes.return_type.copy()
             block_loop_depth :: scopes.loop_depth
             checked_block := sema_check_statements(body, block_return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, block_loop_depth)
@@ -2715,6 +2723,9 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                             &diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
                         }
                         else -> {
+                            // copy: `fallback_return_type` restores scopes.return_type after the
+                            // fallback overwrites it. Jet has no exchange on a field of the
+                            // write-borrowed `scopes`.
                             fallback_return_type :: scopes.return_type.copy()
                             checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                             if checked != None {
@@ -3110,6 +3121,8 @@ fn sema_stmt_install_binding_loop_label(expr: Expr, name: String, name_span: Spa
         }
         else -> {}
     }
+    // copy: the labeled expression is a new owned Expr. For other kinds it equals `expr`, the
+    // caller's AST node (a read parameter), which the caller keeps.
     expr.copy()
 }
 
@@ -5400,6 +5413,9 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
             }
             .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
+                // copy: sema_stmt_check_binding reads the escapes as they were before the loop,
+                // while the binding, condition and body checks write context.lambda_escapes through
+                // `&context`, so a view would be live across those writes.
                 init_lambda_escapes :: context.lambda_escapes.copy()
                 sema_scope_enter(&scopes, &state, "counted@{span.start}")
                 loop_scope_valid := true

@@ -48,6 +48,8 @@ fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment, program:
     if program.registration_graph == .Val(graph) {
         sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
     } else {
+        // copy: the resolved type is a new owned Type. When nothing resolves it equals `ty`, the
+        // caller's signature type (a read parameter), which stays in the signature.
         return ty.copy()
     }
 }
@@ -217,6 +219,8 @@ fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg]
         loop source_path in entry.value.sources {
             source_expr := Expr?{None}
             if source_path.source == {
+                // copy: each return-view source path builds its own source Expr, and `receiver` is
+                // the caller's call receiver (a read parameter), used once per path in this loop.
                 .Receiver -> source_expr = receiver.copy()
                 .Parameter(parameter) -> source_expr = sema_call_return_view_parameter_expr(parameter, binding, args)
                 .Static(_, _) -> {}
@@ -473,6 +477,9 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         // tail. Its private pin cannot shadow a declaration-slot default.
         pin_slot := slot
         if params[slot].variadic -> pin_slot = -index - 1
+        // copy: the argument's checked value becomes the binder pin's init, and
+        // lowered[index].value is overwritten with the pin local below. Jet has no exchange on an
+        // element of the write-borrowed `lowered`.
         original :: lowered[index].value.copy()
         ty :: original.ty
         init := original
@@ -506,6 +513,8 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
 // Places the binder pins before the call they feed.
 fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) -> TExpr Never! {
     if pins.len() == 0 -> return call_value
+    // copy: `call_value` moves into the block body on the next line, while the block node needs the
+    // call's type as its own.
     ty :: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
@@ -571,6 +580,8 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
     loop index in 0..<lowered.len() {
         slot :: typed.slots[index]
         if !params[slot].variadic -> next
+        // copy: the variadic element value is rewrapped and written back into lowered[index] below.
+        // Jet has no exchange on an element of the write-borrowed `lowered`.
         value := lowered[index].value.copy()
         if lowered[index].widen_to_vec {
             // The boundary copy itself clones the fixed list's elements.

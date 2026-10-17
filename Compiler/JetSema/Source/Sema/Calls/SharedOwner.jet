@@ -69,6 +69,8 @@ fn sema_call_shared_owner_param(name: String, convention: AccessConvention, ty: 
 
 fn sema_call_shared_owner_owned_arg(value: TExpr, argument: CallArg) -> TExpr Never! {
     if argument.flags.implicit_clone || argument.flags.shared_auto_clone -> return sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(argument.flags.shared_auto_clone)}, value.span)
+    // copy: the owned argument is a new TExpr. Otherwise it equals `value`, the caller's checked
+    // argument (a read parameter), which the caller keeps.
     value.copy()
 }
 

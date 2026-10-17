@@ -897,6 +897,8 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 }
 
 fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: Int, value: TExpr, span: Span) -> TExpr Never! {
+    // copy: the materialized argument is a new owned TExpr. Off the authority boundary it equals
+    // `value`, the caller's checked argument (a read parameter), which the caller keeps.
     if !core_call_authority_boundary_at(record, index) -> return value.copy()
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
     sema_tir_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},

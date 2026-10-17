@@ -150,6 +150,8 @@ fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], sp
 
 fn sema_services_apply_access(value: TExpr, access: AccessConvention) -> TExpr Never! {
     if access == AccessConvention.Move -> return sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+    // copy: the converted value is a new owned TExpr. For a plain access it equals `value`, the
+    // caller's checked argument (a read parameter), which the caller keeps.
     value.copy()
 }
 

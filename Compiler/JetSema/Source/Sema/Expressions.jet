@@ -113,6 +113,8 @@ fn sema_expr_unwrap_tag(ty: Type) -> Type Never! {
         .Tagged(_, inner) -> return sema_expr_unwrap_tag(inner)
         else -> {}
     }
+    // copy: the unwrapped type is a new owned Type. For an untagged type it equals `ty`, the
+    // caller's checked type (a read parameter), which stays on its node.
     ty.copy()
 }
 
@@ -149,6 +151,8 @@ fn sema_expr_numeric_base(ty: Type) -> Type Never! {
         .InlineRange(base, _, _) -> return sema_expr_numeric_base(base)
         else -> {}
     }
+    // copy: the numeric base is a new owned Type. For a non-unit type it equals `ty`, the caller's
+    // checked type (a read parameter), which stays on its node.
     ty.copy()
 }
 
@@ -867,6 +871,8 @@ fn sema_expr_byte_text(value: U8) -> String Never! {
 
 fn sema_expr_expected_type(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
     if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_with_generics(graph, value, environment.module_identity, environment.generic_params)
+    // copy: the expected type is a new owned Type. When nothing resolves it equals `value`, the
+    // caller's expectation (a read parameter), which the caller keeps.
     value.copy()
 }
 
@@ -1680,6 +1686,8 @@ fn sema_expr_unit_relative_uncertainty(source: SemaRegistrationUnitFact, destina
 }
 
 fn sema_expr_unit_conversion(value: TExpr, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
+    // copy: the converted value is a new owned TExpr. Between equal units it equals `value`, the
+    // caller's checked operand (a read parameter), which the caller keeps.
     if source.name == destination.name -> return value.copy()
     scale :: sema_expr_unit_ratio_div(source.scale, destination.scale) ?? UnitRatio{numerator: 1, denominator: 1}
     offset := sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source.offset, destination.offset), destination.scale) ?? UnitRatio{numerator: 0, denominator: 1}
@@ -3325,6 +3333,8 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
     // Rust checks the operand under the surrounding expectation; only a
     // Float carrier changes how a decimal literal operand elaborates.
     operand_expected := Type?{None}
+    // copy: `operand_expected` is the operand's own expectation, while `expected` (the caller's
+    // expectation, a read parameter) is still read below for the result.
     if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) -> operand_expected = expected.copy()
     value :: sema_check_expression(operand, operand_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if op == UnOp.Neg {
@@ -3439,6 +3449,8 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
 // and a literal before a measurement (or a unit under `*` or `/`) is Float.
 fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
     if !sema_expr_decimal_literal_operand(left, true) -> return None
+    // copy: the left-hand expectation is a new owned Type equal to `expected`, the caller's
+    // expectation (a read parameter), which the caller keeps for the right side.
     if sema_expr_expects_machine_float(expected) -> return expected.copy()
     if !sema_expr_unit_probe_shape(right) -> return None
     probe_diagnostics := [Diagnostic]{}
@@ -3485,9 +3497,17 @@ fn sema_expr_wants_expected_form(expr: Expr) -> Bool Never! {
 // optional builder (`Val(x)`, `None`) compared with a plain left operand
 // (a flow-refined `x` after `if x == None -> …`) is built at the lifted `T?`.
 fn sema_expr_rhs_hint(op: BinOp, left: Type, right: Expr) -> Type Never! {
+    // copy: the right-hand hint is a new owned Type. For a non-equality it equals `left`, the left
+    // operand's checked type (a read parameter), which stays on that node.
     if op != BinOp.Eq && op != BinOp.Ne -> return left.copy()
+    // copy: the right-hand hint is a new owned Type. For an Option left side it equals `left`, the
+    // left operand's checked type (a read parameter), which stays on that node.
     if sema_expr_unwrap_tag(left) == .Option(_) -> return left.copy()
+    // copy: the right-hand hint is a new owned Type. Without an optional builder it equals `left`,
+    // the left operand's checked type (a read parameter), which stays on that node.
     if !sema_expr_optional_builder(right) -> return left.copy()
+    // copy: the Option hint wraps its own copy of `left`, the left operand's checked type (a read
+    // parameter), which stays on that node.
     Type.Option{inner: left.copy()}
 }
 
@@ -4158,9 +4178,13 @@ fn sema_expr_bare_member_chain_text(expr: Expr) -> String Never! {
 // The chain with its empty receiver named `subject`.
 fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
     if expr == {
+        // copy: the rewritten guard is a new owned Expr. A named identifier stays as written, and
+        // `expr` is the caller's AST node (a read parameter), which the caller keeps.
         .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> expr.copy()
         .Field(base, member, span) -> Expr.Field{base: sema_expr_replace_bare_subject(base, subject), member: member, span: span}
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
+        // copy: the rewritten guard is a new owned Expr. Other kinds stay as written, and `expr` is
+        // the caller's AST node (a read parameter), which the caller keeps.
         else -> expr.copy()
     }
 }

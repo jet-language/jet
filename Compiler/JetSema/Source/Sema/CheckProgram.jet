@@ -645,6 +645,8 @@ fn sema_incremental_replay(query: SemaBodyMemoQuery) -> SemaBodyMemoValue? {
     if !permit.value.rows.has_key(query.key) -> return None
     row :: permit.value.rows[query.key]
     if row.generation != query.module_memo.generation || row.epoch != query.module_memo.epoch || row.input != query.input -> return None
+    // copy: the memo row stays cached under the edit guard for later hits, and the replay returns
+    // an owned value to its caller.
     value := row.value.copy()
     permit.value.hits += 1
     Val(^value)
@@ -948,6 +950,8 @@ fn sema_incremental_module_input(environment: SemaScopeEnvironment, program: Sem
     // A borrowed table cannot hand off its field owner: explicitly clone this
     // Option<String>, then move it back after the normalized ordered snapshot.
     comptime_input :: sema_comptime_body_values_debug(environment.comptime_body_values)
+    // copy: `location` restores scopes.location_function after the edits below overwrite it. Jet
+    // has no exchange on a field of the write-borrowed `scopes`.
     location := scopes.location_function.copy()
     scopes.location_function = None
     input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={program.checked_types:Debug};type_rows={program.checked_type_rows:Debug};type_slots={program.checked_type_name_slots:Debug};type_names={program.checked_type_name_rows:Debug};boxed={program.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
@@ -1178,6 +1182,8 @@ fn sema_function_view_contract_for_slot(map: ViewProvenanceMap, slot: [String]) 
 
 fn sema_function_return_view_provenance(func: Func, inferred: ViewProvenanceMap?, diagnostics: &[Diagnostic], complete: &Bool) -> ViewProvenanceMap? {
     declared_option := func.declared_return_view_provenance
+    // copy: the provenance is a new owned Option. Without a declared map it equals `inferred`, the
+    // caller's inferred map (a read parameter), which the caller keeps.
     if declared_option == None -> return inferred.copy()
     declared :: declared_option ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
     if inferred != None {
@@ -1600,10 +1606,15 @@ fn sema_function_normalize_owner_type(graph: SemaRegistrationGraph, owner_type: 
         .Named(name) -> {
             nominal_row :: sema_type_resolve_nominal_row(graph, owner_type, caller_module_identity) ?? return owner_type
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            // copy: the normalized owner type is a new owned Type. For a non-generic nominal it
+            // equals `owner_type`, the caller's owner type (a read parameter), which the caller
+            // keeps.
             if nominal.generic_params.len() == 0 -> return owner_type.copy()
             args :: loop parameter in nominal.generic_params -> Type.Named{name: parameter.name}
             return Type.Apply{name: name, args: args}
         }
+        // copy: the normalized owner type is a new owned Type. For other kinds it equals
+        // `owner_type`, the caller's owner type (a read parameter), which the caller keeps.
         else -> return owner_type.copy()
     }
 }
@@ -1704,6 +1715,8 @@ fn sema_function_check(func: Func, owner_id: SymbolID, function_kind: TFuncKind,
 fn sema_function_check_shared(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if sema_function_check_unregistered(func, owner_id, function_kind, module_scopes) == .Val(unavailable) -> return unavailable
     generics := sema_function_check_generics(func, environment, program)
+    // copy: `previous_location` restores module_scopes.location_function after this function's
+    // check overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location :: module_scopes.location_function.copy()
     module_scopes.location_function = Val(func.name)
     checked := sema_function_check_passes(func, owner_id, function_kind, raw_protocol_return, environment, program, &module_scopes, generics, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
@@ -1801,6 +1814,8 @@ fn sema_function_static_roots(environment: SemaScopeEnvironment, program: SemaPr
 
 fn sema_function_resolve_declared(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: String, generic_params: [TGenericParam]) -> Type Never! {
     if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_with_generics(graph, ty, module_identity, generic_params)
+    // copy: the resolved declared type is a new owned Type. When nothing resolves it equals `ty`,
+    // the declaration's written type (a read parameter), which stays in the AST.
     ty.copy()
 }
 
@@ -2328,6 +2343,8 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     // Rust interpreter. No `prep fn` or `pure` marker is required.
     // Retarget module-local scope facts while reading the retained graph
     // from its single owner in `program`.
+    // copy: a handle copy (Shared facts plus length and frontier ints): this check reads a frozen
+    // prefix while environment.comptime_body_publication keeps advancing.
     body_values := environment.comptime_body_publication.copy()
     entered :: sema_scope_environment_enter_probe_module(&environment, program, module_identity, ^body_values)
     if !entered -> return unresolved
@@ -2675,6 +2692,8 @@ fn sema_function_check_generics_in_graph(graph: SemaRegistrationGraph, job: Sema
 fn sema_function_check_registered_shared(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if sema_function_check_registered_unregistered(job, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) -> return unavailable
     generics := sema_function_check_registered_generics(job, module_index, memory_plan, memory_position, environment, program)
+    // copy: `previous_location` restores module_scopes.location_function after this function's
+    // check overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location :: module_scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, memory_position, environment, program, &module_scopes)
     checked := sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, &module_scopes, generics, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
@@ -2924,6 +2943,8 @@ fn sema_keep_going_registered_stub(job: SemaBodyJob, module_index: Int, memory_p
 }
 
 fn sema_check_registered_method_stub(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaFunctionResult? {
+    // copy: `previous_location` restores scopes.location_function after the stub check overwrites
+    // it. Jet has no exchange on a field of the write-borrowed table.
     previous_location :: scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, None, environment, program, &scopes)
     stub := sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks)
@@ -3319,6 +3340,8 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     }
     base_generic_params :: environment.generic_params.copy()
     environment.generic_params = owned_input.generic_params.copy()
+    // copy: `previous_location` restores scopes.location_function after this method's check
+    // overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location :: scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, owned_input.memory_position, environment, program, &scopes)
     if checked_result == None {
@@ -3925,6 +3948,8 @@ fn sema_check_module_summary_scope_init(environment: SemaScopeEnvironment, progr
 
 fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, program: &SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaScopeTable {
     scopes := sema_check_module_summary_scope_init(environment, program, module_index)
+    // copy: a handle copy (Shared facts plus length and frontier ints): the summary scopes read a
+    // frozen prefix while environment.comptime_body_publication keeps advancing.
     body_values := environment.comptime_body_publication.copy()
     sema_scope_environment_enter_module(&environment, program, module_index, ^body_values)
     sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
@@ -4101,6 +4126,8 @@ fn sema_check_registration_module(owned_environment: ^SemaScopeEnvironment, owne
     module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
     // The original declaration/header boundary: do not substitute the probe
     // reset, which deliberately clears real else-arm/debug-site source facts.
+    // copy: a handle copy (Shared facts plus length and frontier ints): the module's context reads
+    // a frozen prefix while environment.comptime_body_publication keeps advancing.
     body_values := environment.comptime_body_publication.copy()
     sema_scope_environment_enter_module(&environment, program, module_index, ^body_values)
     items_scanned := 0
@@ -5128,6 +5155,8 @@ fn sema_comptime_probe_parallel(shared_state: Shared<SemaProbeShared>, probe: Se
     parts := [Shared<SemaProbePart>]{}
     loop part in 0..<workers {
         row :: shared SemaProbePart{table: sema_scope_init(""), diagnostics: [Diagnostic]{}, first: bounds[part], last: bounds[part + 1], dependencies: [[String]]{}, wanted: [Bool]{}}
+        // copy: each parallel probe part starts from its own scope table and diagnostics, while
+        // `probe` (a read parameter) seeds every worker part in this loop.
         sema_comptime_probe_part_fill(row, probe.table.copy(), probe.diagnostics.copy())
         &parts.push(row)
     }
@@ -5732,6 +5761,9 @@ fn sema_comptime_modules_with_values(program: SemaProgramTables, values: [SemaCo
     loop module_index in 0..<module_count {
         scopes := sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
         checked := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
+        // copy: a handle copy (Shared facts plus length and frontier ints): each module result
+        // keeps the publication it was checked against, while the environment's publication
+        // advances.
         body_values := environment.comptime_body_publication.copy()
         sema_scope_environment_enter_module(&environment, program, module_index, ^body_values)
         items_scanned := 0

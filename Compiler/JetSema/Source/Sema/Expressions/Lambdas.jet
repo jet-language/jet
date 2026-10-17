@@ -1330,6 +1330,8 @@ fn sema_expression_lambda_is_view_type(ty: Type, string_view: Bool) -> Bool Neve
 }
 
 fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) -> Type Never! {
+    // copy: the block value type is a new owned Type. For an empty block it equals `fallback`, the
+    // lambda's declared type (a read parameter), which the caller keeps.
     if statements.len() == 0 -> return fallback.copy()
     index := statements.len() - 1
     loop index >= 0 {
@@ -1345,6 +1347,8 @@ fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) 
         }
         index -= 1
     }
+    // copy: the block value type is a new owned Type. Without a tail value it equals `fallback`,
+    // the lambda's declared type (a read parameter), which the caller keeps.
     fallback.copy()
 }
 
@@ -1626,7 +1630,11 @@ fn sema_expression_lambda_install_loop_label(lambda: &Lambda, label: NamedSpan) 
 // back, instead of on a copy of the whole table (every module binding) per
 // lambda; no scope state of the lambda flows back to the enclosing table.
 fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
+    // copy: `outer_return_type` restores scopes.return_type after the lambda body, which overwrites
+    // it. Jet has no exchange on a field of the write-borrowed `scopes`.
     outer_return_type :: scopes.return_type.copy()
+    // copy: `outer_failure_carrier` restores scopes.failure_carrier after the lambda body, which
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`.
     outer_failure_carrier :: scopes.failure_carrier.copy()
     lambda_mark :: sema_scope_mark(&scopes)
     checked :: sema_expression_lambda_with_host_in_frame(lambda, expected, environment, program, &scopes, outer_return_type, outer_failure_carrier, &state, &tail_store, &context, &diagnostics, host_callback, host_write, host_stored, open_result)
@@ -2244,11 +2252,17 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
                 rehomed.ty = carrier
                 return rehomed
             }
+            // copy: the lifted value is a new owned TExpr. Here it equals `value`, the lambda's
+            // checked tail (a read parameter), which the caller keeps.
             return value.copy()
         }
+        // copy: the lifted value is a new owned TExpr. A Never tail equals `value`, the lambda's
+        // checked tail (a read parameter), which the caller keeps.
         if value.ty == (Type.Named{name: "Never"}) -> return value.copy()
         return sema_tir_node(carrier, TExprKind.Ok{value: value}, value.span)
     }
+    // copy: the lifted value is a new owned TExpr. Otherwise it equals `value`, the lambda's
+    // checked tail (a read parameter), which the caller keeps.
     value.copy()
 }
 
@@ -2256,6 +2270,8 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
 // `return` of a block body (its tail is one), into the `Result` carrier. A
 // shared block body stays as checked, as Rust reuses it unlifted.
 fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -> TLambdaBody Never! {
+    // copy: the lifted body is a new owned TLambdaBody. For a non-Result carrier it equals
+    // `executable`, the caller's checked body (a read parameter), which the caller keeps.
     if !sema_expression_lambda_type_is_result(carrier) -> return executable.copy()
     if executable == {
         .Expr(value) -> TLambdaBody.Expr{value: sema_expression_lambda_lift_value(value, carrier)}
@@ -2264,6 +2280,8 @@ fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -
             sema_expression_lambda_lift_block(&lifted, carrier)
             TLambdaBody.Block{body: lifted}
         }
+        // copy: the lifted body is a new owned TLambdaBody. A shared block equals `executable`, the
+        // caller's checked body (a read parameter), which the caller keeps.
         .SharedBlock(_) -> executable.copy()
     }
 }

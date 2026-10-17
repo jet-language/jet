@@ -38,8 +38,14 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
             expanding :: loop seen_name in seen {
                 if seen_name == name -> break true
             } ?? false
+            // copy: the substituted type is a new owned Type. During recursive expansion it equals
+            // `ty`, the caller's type (a read parameter), which stays in the signature.
             if expanding -> return ty.copy()
+            // copy: the substituted type is a new owned Type. For an unbound name it equals `ty`,
+            // the caller's type (a read parameter), which stays in the signature.
             value :: sema_inference_binding_type(name, bindings, seen) ?? return ty.copy()
+            // copy: the substituted type is a new owned Type. For a self-binding it equals `ty`,
+            // the caller's type (a read parameter), which stays in the signature.
             if type_identity_equal(value, ty) -> return ty.copy()
             next_seen := seen
             &next_seen.push(name)
