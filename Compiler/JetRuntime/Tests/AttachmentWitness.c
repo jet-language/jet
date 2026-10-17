@@ -15,7 +15,7 @@ extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern int64_t runtime_attachment_u8_stride(void);
-extern Text *jet_rt_string_clone(Text *);
+extern Text *jet_rt_string_from_static(unsigned char *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Attachment *jet_rt_record_new_attachment(Text *,Text *,Bytes *);
 extern Attachment *jet_rt_handle_clone_attachment(Attachment *);
@@ -40,10 +40,18 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     }
     __real_jet_rt_free(ptr,size,align);
 }
-static void text_watch(Text *t) { watch(t,24,8); if(t->cap) watch(t->data,t->cap,1); }
-static void attachment_watch(Attachment *a,bool transferred) {
-    watch(a,40,8); text_watch(a->filename); text_watch(a->mime);
+/* Heap Text headers live at t-8 (count word + 24-byte header); immortal
+ * cap-0 headers (data != 1) have no heap block and must not be watched. */
+static void text_watch(Text *t) {
+    if(t->cap || t->data==(unsigned char *)1) watch((char *)t-8,32,8);
+    if(t->cap) watch(t->data,t->cap,1);
+}
+static void record_watch(Attachment *a,bool transferred) {
+    watch(a,40,8);
     if(!transferred && a->bytes.cap) watch(a->bytes.data,a->bytes.cap*stride,8);
+}
+static void attachment_watch(Attachment *a,bool transferred) {
+    record_watch(a,transferred); text_watch(a->filename); text_watch(a->mime);
 }
 static void text_equal(Text *a,Text *b) { assert(a->len==b->len && !memcmp(a->data,b->data,(size_t)a->len)); }
 static Bytes *list(int64_t len,int64_t spare) {
@@ -60,24 +68,22 @@ int main(void) {
     Text name={name_data,4,4},mime={mime_data,4,4},empty={(unsigned char *)"",0,0};
     for(int64_t len=0;len<3;++len) for(int64_t spare=0;spare<3;++spare) {
         Bytes *b=list(len,spare); unsigned char *data=b->data; size_t shell=count-(b->cap ? 2 : 1);
-        Text *n=jet_rt_string_clone(&name),*m=jet_rt_string_clone(&mime); text_watch(n); text_watch(m);
+        Text *n=jet_rt_string_from_static(name_data,4),*m=jet_rt_string_from_static(mime_data,4);
         Attachment *a=jet_rt_record_new_attachment(n,m,b); attachment_watch(a,true);
-        assert(watched[shell].freed && a->filename!=n && a->mime!=m);
+        assert(watched[shell].freed && a->filename==n && a->mime==m);
         assert(a->bytes.data==data && a->bytes.len==len && a->bytes.cap==len+spare);
         jet_rt_string_drop(n); jet_rt_string_drop(m); text_equal(a->filename,&name); text_equal(a->mime,&mime);
         assert(jet_rt_record_get_attachment_bytes(a)==&a->bytes);
-        Attachment *copy=jet_rt_handle_clone_attachment(a); attachment_watch(copy,false);
-        assert(copy!=a && copy->filename!=a->filename && copy->mime!=a->mime && copy->bytes.cap==len);
+        Attachment *copy=jet_rt_handle_clone_attachment(a); record_watch(copy,false);
+        assert(copy!=a && copy->filename==a->filename && copy->mime==a->mime && copy->bytes.cap==len);
         assert(jet_rt_handle_eq_attachment(a,copy) && jet_rt_handle_eq_attachment(copy,a));
-        copy->filename->data[0]^=1; assert(!jet_rt_handle_eq_attachment(a,copy)); copy->filename->data[0]^=1;
-        copy->mime->data[0]^=1; assert(!jet_rt_handle_eq_attachment(a,copy)); copy->mime->data[0]^=1;
         if(len) {
             assert(copy->bytes.data!=a->bytes.data); copy->bytes.data[0]^=1;
             assert(!jet_rt_handle_eq_attachment(a,copy)); copy->bytes.data[0]^=1;
         }
         copy->bytes.len=len+1; assert(!jet_rt_handle_eq_attachment(a,copy)); copy->bytes.len=len;
         Text *got_name=jet_rt_record_get_attachment_filename(a),*got_mime=jet_rt_record_get_attachment_mime(a);
-        text_watch(got_name); text_watch(got_mime); assert(got_name!=a->filename && got_mime!=a->mime);
+        assert(got_name==a->filename && got_mime==a->mime);
         jet_rt_handle_drop_attachment(a); text_equal(got_name,&name); text_equal(got_mime,&mime);
         text_equal(copy->filename,&name); text_equal(copy->mime,&mime);
         for(int64_t i=0;i<len;++i) assert(copy->bytes.data[i*stride]==(unsigned char)(i ? 255 : 0));

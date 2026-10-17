@@ -45,7 +45,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     }
     __real_jet_rt_free(ptr,size,align);
 }
-static void text_watch(Text *t) { watch(t,24,8); if(t->cap) watch(t->data,t->cap,1); }
+static void text_watch(Text *t) { watch((char *)(t)-8,32,8); if(t->cap) watch(t->data,t->cap,1); }
 static void delivery_watch(Delivery *d) { watch(d,40,8); text_watch(d->id); text_watch(d->store); text_watch(d->authority); }
 static void equal_text(Text *a,Text *b) { assert(a->len==b->len && !memcmp(a->data,b->data,(size_t)a->len)); }
 static void different(Text *a,Text *b) { assert(a!=b && a->data!=b->data); equal_text(a,b); }

@@ -71,7 +71,7 @@ void __wrap_jet_rt_free(void *p,int64_t size,int64_t align) {
 }
 static void watch(void *p,int64_t size,int64_t align) { assert(count<32);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0; }
 static void freed(unsigned before) { assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0; }
-static void watch_text(Text *t) { watch(t,24,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8);if(t->capacity) watch(t->data,t->capacity,1); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void expect_bytes(Text *t,const char *s,int64_t n) { assert(t->length==n);assert(memcmp(t->data,s,(size_t)n)==0);jet_rt_string_drop(t); }
 static void expect(Text *t,const char *s) { expect_bytes(t,s,(int64_t)strlen(s)); }

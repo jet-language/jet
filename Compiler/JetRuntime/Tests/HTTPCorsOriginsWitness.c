@@ -27,7 +27,7 @@ static void watch(void *p,int64_t n,int64_t a) {
 static void watch_origins(Origins *o) {
     watch(o,16,8); if(o->ordinal==0) return;
     List *list=o->payload; watch(list,24,8); if(list->capacity) watch(list->data,list->capacity*8,8);
-    for(int64_t i=0;i<list->length;i++) { Text *t=list->data[i]; watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+    for(int64_t i=0;i<list->length;i++) { Text *t=list->data[i]; watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }

@@ -29,7 +29,7 @@ void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<20); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_proxy(Proxy *p) { watch(p,16,8); if(p->ordinal==2) watch_text(p->payload); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }

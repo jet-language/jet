@@ -32,7 +32,7 @@ void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<40); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_origins_child(Origins *o) {
     if(o->ordinal==0) return;
     List *l=o->payload; watch(l,24,8); if(l->capacity) watch(l->data,l->capacity*8,8);

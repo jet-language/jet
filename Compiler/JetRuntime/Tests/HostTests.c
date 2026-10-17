@@ -109,7 +109,7 @@ int main(void) {
     ResolveError *resolve = jet_rt_record_new_jet_resolve_error(2, INT64_C(0x100), 17, &resolve_message);
     assert(resolve->kind == 2 && resolve->has_os_code == 0 && resolve->os_code == 17);
     ResolveError *resolve_clone = jet_rt_handle_clone_jet_resolve_error(resolve);
-    assert(resolve_clone != resolve && resolve_clone->message != resolve->message);
+    assert(resolve_clone != resolve && resolve_clone->message == resolve->message);
     check_text(resolve_clone->message, "resolver message");
     jet_rt_handle_drop_jet_resolve_error(resolve);
     jet_rt_handle_drop_jet_resolve_error(resolve_clone);
@@ -121,17 +121,17 @@ int main(void) {
     int64_t os_code = 9, os_word = 0;
     IOContext *context = jet_rt_record_new_io_context(0, &resource_pointer, &os_code, &cause_pointer);
     assert(context->operation == 0 && context->has_os_code == 1 && context->os_code == 9);
-    assert(context->resource != &resource && context->cause != &cause);
+    assert(context->resource == &resource && context->cause == &cause);
     assert(jet_rt_record_get_io_context_os_code(context, &os_word) == 1 && os_word == 9);
     IOContext *context_clone = jet_rt_handle_clone_io_context(context);
-    assert(context_clone != context && context_clone->resource != context->resource);
+    assert(context_clone != context && context_clone->resource == context->resource);
     jet_rt_handle_drop_io_context(context_clone);
     // Construction consumes only the context header; its text owners move.
     Text *moved_resource = context->resource;
     IOError *context_error = jet_rt_record_new_io_error_other(context);
     assert(context_error->resource == moved_resource);
     IOContext *projected = jet_rt_record_get_io_error_other(context_error);
-    assert(projected->resource != context_error->resource && projected->os_code == 9);
+    assert(projected->resource == context_error->resource && projected->os_code == 9);
     check_text(projected->resource, "resource");
     check_text(projected->cause, "cause");
     jet_rt_handle_drop_io_context(projected);
@@ -156,7 +156,7 @@ int main(void) {
     check_text(error->resource, "stdout");
     check_text(error->cause, "Bad file descriptor (os error 9)");
     IOError *copy = jet_rt_handle_clone_io_error(error);
-    assert(copy != error && copy->resource != error->resource && copy->cause != error->cause);
+    assert(copy != error && copy->resource == error->resource && copy->cause == error->cause);
     check_text(copy->resource, "stdout");
     check_text(copy->cause, "Bad file descriptor (os error 9)");
     jet_rt_handle_drop_io_error(error);

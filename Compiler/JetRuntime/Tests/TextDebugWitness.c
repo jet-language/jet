@@ -30,7 +30,7 @@ static void watch(void *p,int64_t size,int64_t align) {
     assert(count<8);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
     watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch(t,24,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8);if(t->capacity) watch(t->data,t->capacity,1); }
 int main(void) {
     jet_rt_alloc_init();
     for(size_t i=0;i<sizeof(debug_goldens)/sizeof(debug_goldens[0]);++i) {

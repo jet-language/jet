@@ -39,10 +39,10 @@ int main(void) {
         // Absent replacement must not inspect the poisoned metadata address.
         H a = jet_ui_raw_accessibility_transfer(handle(&input), present ? handle(&new_a) : 1, present ? 255 : 0);
         Node *out = node(a);
-        assert(out != &input && out->label != &label && out->children != &children);
+        assert(out != &input && out->label == &label && out->children != &children);
         assert((out->accessibility != NULL) == (present != 0));
         if (present) {
-            assert(out->accessibility != &new_a && out->accessibility->name != &new_name);
+            assert(out->accessibility != &new_a && out->accessibility->name == &new_name);
             assert(jet_rt_handle_eq_jet_ui_accessibility(handle(out->accessibility), handle(&new_a)));
         }
         assert(out->shortcut != &old_s && jet_rt_handle_eq_jet_ui_shortcut(handle(out->shortcut), handle(&old_s)));
@@ -52,7 +52,7 @@ int main(void) {
         out = node(s);
         assert((out->shortcut != NULL) == (present != 0));
         if (present) {
-            assert(out->shortcut != &new_s && out->shortcut->key != &new_key);
+            assert(out->shortcut != &new_s && out->shortcut->key == &new_key);
             assert(jet_rt_handle_eq_jet_ui_shortcut(handle(out->shortcut), handle(&new_s)));
         }
         assert(out->accessibility != &old_a && jet_rt_handle_eq_jet_ui_accessibility(handle(out->accessibility), handle(&old_a)));

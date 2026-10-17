@@ -7,6 +7,7 @@
 typedef struct { unsigned char *ptr; uint64_t len, cap; } JetCText;
 extern void *jet_rt_alloc(uint64_t, uint64_t);
 extern void jet_rt_free(void *, uint64_t, uint64_t);
+extern void jet_rt_string_drop(void *);
 extern JetCText *jet_rt_i64_to_string(int64_t);
 extern JetCText *jet_rt_u64_to_string(uint64_t);
 extern JetCText *jet_rt_int_to_string(int64_t);
@@ -37,8 +38,7 @@ static void write_all(long fd, const void *bytes, uint64_t count) {
 }
 static void release(JetCText *text) {
     if (text->len > text->cap || (!text->cap && text->ptr != (void *)1)) failed = 1;
-    if (text->cap) jet_rt_free(text->ptr, text->cap, 1);
-    jet_rt_free(text, 24, 8);
+    jet_rt_string_drop(text);
 }
 static void expect(JetCText *text, const unsigned char *expected, uint64_t length) {
     if (text->len != length) failed = 1;

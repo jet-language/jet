@@ -64,7 +64,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     for(size_t i=0;i<count;++i) assert(watched[i].p!=p);
     watched[count].p=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { if(t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); } }
+static void watch_text(Text *t) { if(t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); } }
 static void watch_list(List *list,bool pairs) {
     watch(list,24,8);
     if(list->capacity) watch(list->data,list->capacity*(pairs?16:8),8);

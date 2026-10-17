@@ -68,7 +68,7 @@ static void watch(void *p,int64_t size,int64_t align) {
     for(size_t i=0;i<count;++i) assert(watched[i].p!=p);
     watched[count].p=p; watched[count].size=size; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void freed(unsigned before) {
     assert(intercepted>before);
     for(size_t i=0;i<count;++i) assert(watched[i].frees==1);

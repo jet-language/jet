@@ -54,7 +54,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     __real_jet_rt_free(ptr,size,align);
 }
 static void watch(void *p,int64_t n,int64_t a){assert(count<128);watched[count].ptr=p;watched[count].size=n;watched[count].align=a;watched[count++].frees=0;}
-static void watch_text(Text *t){watch(t,24,8);if(t->cap)watch(t->data,t->cap,1);}
+static void watch_text(Text *t){watch((char *)(t)-8,32,8);if(t->cap)watch(t->data,t->cap,1);}
 static void watch_authority(Authority *a){watch(a,16,8);watch_text(a->scope);watch_text(a->revision);}
 static void watch_source(Source *s){watch(s,32,8);watch_text(s->locator);watch_text(s->member);watch(s->parameters,24,8);if(s->parameters->cap)watch(s->parameters->data,s->parameters->cap*8,8);for(int64_t i=0;i<s->parameters->len;i++)watch_text(s->parameters->data[i]);}
 static void watch_snapshot(Snapshot *s){watch(s,40,8);watch_text(s->id);watch_text(s->source);watch_text(s->content);watch_text(s->schema);}

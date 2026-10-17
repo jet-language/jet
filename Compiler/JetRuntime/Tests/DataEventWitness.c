@@ -70,7 +70,7 @@ static void watch(void *pointer, int64_t size, int64_t align) {
 static void watch_event(Event *event) {
     watch(event,16,8);
     if (event->tag == 4 || event->tag == 5 || event->tag == 10) {
-        Text *text = (Text *)event->payload; watch(text,24,8);
+        Text *text = (Text *)event->payload; watch((char *)(text)-8,32,8);
         if (text->capacity) watch(text->data,text->capacity,1);
     } else if (event->tag == 6) {
         Sequence *seq = (Sequence *)event->payload; watch(seq,24,8);

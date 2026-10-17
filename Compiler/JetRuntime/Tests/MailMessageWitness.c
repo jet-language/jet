@@ -49,7 +49,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     }
     __real_jet_rt_free(ptr,size,align);
 }
-static void text_watch(Text *t) { watch(t,24,8); if(t->cap) watch(t->data,t->cap,1); }
+static void text_watch(Text *t) { watch((char *)(t)-8,32,8); if(t->cap) watch(t->data,t->cap,1); }
 static void address_watch(Address *a) { if(a->display) text_watch(a->display); text_watch(a->mailbox); }
 static void addresses_watch(Addresses *a) {
     if(a->cap) watch(a->data,a->cap*16,8);
