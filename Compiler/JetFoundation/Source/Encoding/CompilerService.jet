@@ -222,22 +222,28 @@ fn compiler_service_array(value: Dyn, name: String) -> [Dyn]? Never! {
     None
 }
 
+// The rows of a JSON array, or None.
+fn compiler_service_rows(value: Dyn) -> [Dyn]? Never! {
+    if value == .Array(rows) -> return Val(rows)
+    None
+}
+
 // The one tag and payload of a `{"Tag": payload}` object.
 struct CompilerServiceTagged {
-    tag: String
+    label: String
     payload: Dyn
 }
 
 fn compiler_service_tagged(value: Dyn) -> CompilerServiceTagged? Never! {
     if value == .Object(fields) {
-        if fields.len() == 1 -> return Val(CompilerServiceTagged{tag: fields[0].key, payload: fields[0].value})
+        if fields.len() == 1 -> return Val(CompilerServiceTagged{label: fields[0].key, payload: fields[0].value})
     }
     None
 }
 
-fn compiler_service_tag(tag: String, payload: Dyn) -> Dyn Never! {
+fn compiler_service_tag(label: String, payload: Dyn) -> Dyn Never! {
     fields := [(key: String, value: Dyn)]{}
-    &fields.push((key: tag, value: payload))
+    &fields.push((key: label, value: payload))
     Dyn.Object(fields)
 }
 
@@ -304,16 +310,37 @@ fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
     }
     tagged :: compiler_service_tagged(value) ?? return None
     payload :: tagged.payload
-    if tagged.tag == {
-        "Int" -> if payload == .Int(number) -> Val(CtValue.Int{value: number}) else -> None
-        "F32" -> if payload == .Int(bits) -> Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(bits)}}) else -> None
-        "F64" -> if payload == .Int(bits) -> Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(bits)}}) else -> None
-        "Bool" -> if payload == .Bool(flag) -> Val(CtValue.Bool{value: flag}) else -> None
-        "Char" -> if payload == .Text(text) -> Val(CtValue.Char{value: compiler_service_char(text) ?? return None}) else -> None
-        "Str" -> if payload == .Text(text) -> Val(CtValue.Str{value: text}) else -> None
-        "BigInt" -> if payload == .Text(text) -> Val(CtValue.BigInt{value: text}) else -> None
+    if tagged.label == {
+        "Int" -> {
+            if payload == .Int(number) -> return Val(CtValue.Int{value: number})
+            return None
+        }
+        "F32" -> {
+            if payload == .Int(bits) -> return Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(bits)}})
+            return None
+        }
+        "F64" -> {
+            if payload == .Int(bits) -> return Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(bits)}})
+            return None
+        }
+        "Bool" -> {
+            if payload == .Bool(flag) -> return Val(CtValue.Bool{value: flag})
+            return None
+        }
+        "Char" -> {
+            if payload == .Text(text) -> return Val(CtValue.Char{value: compiler_service_char(text) ?? return None})
+            return None
+        }
+        "Str" -> {
+            if payload == .Text(text) -> return Val(CtValue.Str{value: text})
+            return None
+        }
+        "BigInt" -> {
+            if payload == .Text(text) -> return Val(CtValue.BigInt{value: text})
+            return None
+        }
         "Bytes" -> {
-            items :: if payload == .Array(rows) -> rows else -> return None
+            items :: compiler_service_rows(payload) ?? return None
             bytes := [U8]{}
             loop item in items {
                 if item == .Int(number) {
@@ -324,13 +351,13 @@ fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
             Val(CtValue.Bytes{value: bytes})
         }
         "List" -> {
-            items :: if payload == .Array(rows) -> rows else -> return None
+            items :: compiler_service_rows(payload) ?? return None
             values := [CtValue]{}
             loop item in items -> &values.push(compiler_service_value_from_wire(item) ?? return None)
             Val(CtValue.List{values: values})
         }
         "Map" -> {
-            items :: if payload == .Array(rows) -> rows else -> return None
+            items :: compiler_service_rows(payload) ?? return None
             entries := [CtMapEntry]{}
             loop item in items {
                 key :: compiler_service_key_from_wire(compiler_service_get(item, "key") ?? return None) ?? return None
@@ -384,7 +411,7 @@ fn compiler_service_key_wire(key: CtKey) -> Dyn Never! {
 }
 
 fn compiler_service_named_keys_from_wire(value: Dyn) -> [NamedCtKey]? Never! {
-    items :: if value == .Array(rows) -> rows else -> return None
+    items :: compiler_service_rows(value) ?? return None
     fields := [NamedCtKey]{}
     loop item in items {
         name :: compiler_service_text(item, "name") ?? return None
@@ -397,12 +424,27 @@ fn compiler_service_named_keys_from_wire(value: Dyn) -> [NamedCtKey]? Never! {
 fn compiler_service_key_from_wire(value: Dyn) -> CtKey? Never! {
     tagged :: compiler_service_tagged(value) ?? return None
     payload :: tagged.payload
-    if tagged.tag == {
-        "Int" -> if payload == .Int(number) -> Val(CtKey.Int{value: number}) else -> None
-        "BigInt" -> if payload == .Text(text) -> Val(CtKey.BigInt{decimal: text}) else -> None
-        "Str" -> if payload == .Text(text) -> Val(CtKey.Str{value: text}) else -> None
-        "Bool" -> if payload == .Bool(flag) -> Val(CtKey.Bool{value: flag}) else -> None
-        "Char" -> if payload == .Text(text) -> Val(CtKey.Char{value: compiler_service_char(text) ?? return None}) else -> None
+    if tagged.label == {
+        "Int" -> {
+            if payload == .Int(number) -> return Val(CtKey.Int{value: number})
+            return None
+        }
+        "BigInt" -> {
+            if payload == .Text(text) -> return Val(CtKey.BigInt{decimal: text})
+            return None
+        }
+        "Str" -> {
+            if payload == .Text(text) -> return Val(CtKey.Str{value: text})
+            return None
+        }
+        "Bool" -> {
+            if payload == .Bool(flag) -> return Val(CtKey.Bool{value: flag})
+            return None
+        }
+        "Char" -> {
+            if payload == .Text(text) -> return Val(CtKey.Char{value: compiler_service_char(text) ?? return None})
+            return None
+        }
         "Tuple" -> Val(CtKey.Tuple{fields: compiler_service_named_keys_from_wire(payload) ?? return None})
         "Struct" -> {
             type_name :: compiler_service_text(payload, "type") ?? return None
