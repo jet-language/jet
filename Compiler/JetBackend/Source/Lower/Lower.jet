@@ -5300,9 +5300,9 @@ fn lower_read_box_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     private :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
     lower_clone_into(p, &m, &f, held, private, ty)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{private})})
-    joined :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
-    lower_start(&f, join, [LIRValueID]{joined})
-    lower_emit(&f, LIRInst.Move{dst: dst, src: joined})
+    // The join binds dst itself (lower_adopt): a jump argument may bind a
+    // parameter of any drop glue, a Move may not change it.
+    lower_start(&f, join, [LIRValueID]{dst})
 }
 
 // A MIR value's site: block position and instruction position (-1 for the
