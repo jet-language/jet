@@ -6,7 +6,8 @@
 // frozen module String carriers currently require this freestanding runtime.
 //
 // Representations, private to this runtime:
-// - memory comes from mmap and returns to munmap (`jet_rt_free` passes the size);
+// - memory comes from mmap and returns to munmap (`jet_rt_free` passes the
+//   size); every block keeps a reference count 24 bytes before its payload;
 // - a String handle points at `[len: word][bytes]`; bit 63 marks frozen static
 //   storage, never freed. Heap strings carry a reference count just before the
 //   handle (`[count][len][bytes]`): clone retains, drop releases;
@@ -35,6 +36,9 @@ struct X64ImageAsm {
 X64_IMAGE_STOP_STATUS :: prep { 70 }
 X64_IMAGE_CURSOR_SIZE :: prep { 40 }
 X64_IMAGE_BUILDER_START :: prep { 64 }
+// Bytes before every jet_rt_alloc payload: [unused][count][unused][unused];
+// the payload stays 32-aligned and its count sits at payload-24.
+X64_IMAGE_BLOCK_HEADER :: prep { 32 }
 
 fn x64_image_asm() -> X64ImageAsm Never! {
     X64ImageAsm{code: [U8]{}, relocs: [X64Reloc]{}, labels: [Int]{}, fixups: [X64ImageFixup]{}, texts: [String]{}, text_labels: [Int]{}}
@@ -479,11 +483,14 @@ fn x64_image_message_stop(name: String, prefix: String) -> X64CompiledFunction N
     x64_image_finish(&a, name)
 }
 
-// jet_rt_alloc(size, align) -> ptr: an anonymous private read+write mapping.
+// jet_rt_alloc(size, align) -> ptr: an anonymous private read+write mapping
+// whose first X64_IMAGE_BLOCK_HEADER bytes hold the block's reference count
+// at ptr-24 (one owner), as the compiled runtime's align-8 blocks do, so
+// lowered List buffers and boxes share through jet_rt_block_*.
 fn x64_image_alloc() -> X64CompiledFunction Never! {
     a := x64_image_asm()
     failed :: x64_image_label(&a)
-    x64_mov_rr(&a.code, X64_RSI, X64_RDI)
+    x64_lea(&a.code, X64_RSI, X64_RDI, X64_IMAGE_BLOCK_HEADER)
     x64_mov_ri(&a.code, X64_RDI, 0)
     x64_mov_ri(&a.code, X64_RDX, 3)
     x64_mov_ri(&a.code, X64_R10, 0x22)
@@ -492,6 +499,9 @@ fn x64_image_alloc() -> X64CompiledFunction Never! {
     x64_image_syscall(&a, 9)
     x64_alu_ri(&a.code, X64Alu.Cmp, X64_RAX, -4096)
     x64_image_jcc(&a, X64Cond.A, failed)
+    x64_mov_ri(&a.code, X64_RDX, 1)
+    x64_store(&a.code, X64_RAX, X64_IMAGE_BLOCK_HEADER - 24, X64_RDX)
+    x64_lea(&a.code, X64_RAX, X64_RAX, X64_IMAGE_BLOCK_HEADER)
     x64_ret(&a.code)
     x64_image_bind(&a, failed)
     x64_image_stop_with(&a, "error[E3001]: out of memory\n")
@@ -501,9 +511,57 @@ fn x64_image_alloc() -> X64CompiledFunction Never! {
 // jet_rt_free(ptr, size, align)
 fn x64_image_free() -> X64CompiledFunction Never! {
     a := x64_image_asm()
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RDI, X64_IMAGE_BLOCK_HEADER)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, X64_IMAGE_BLOCK_HEADER)
     x64_image_syscall(&a, 11)
     x64_ret(&a.code)
     x64_image_finish(&a, "jet_rt_free")
+}
+
+// jet_rt_block_retain(block): one more owner unless the count is immortal.
+fn x64_image_block_retain() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    done :: x64_image_label(&a)
+    x64_load(&a.code, X64_RSI, X64_RDI, -24)
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.L, done)
+    x64_mov_ri(&a.code, X64_RSI, 1)
+    x64_lock_xadd(&a.code, X64_RDI, -24, X64_RSI)
+    x64_image_bind(&a, done)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_block_retain")
+}
+
+// jet_rt_block_release(block) -> Bool: true for the last owner only.
+fn x64_image_block_release() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    done :: x64_image_label(&a)
+    x64_mov_ri(&a.code, X64_RAX, 0)
+    x64_load(&a.code, X64_RSI, X64_RDI, -24)
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.L, done)
+    x64_mov_ri(&a.code, X64_RDX, -1)
+    x64_lock_xadd(&a.code, X64_RDI, -24, X64_RDX)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDX, 1)
+    x64_image_jcc(&a, X64Cond.NE, done)
+    x64_mov_ri(&a.code, X64_RAX, 1)
+    x64_image_bind(&a, done)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_block_release")
+}
+
+// jet_rt_block_unique(block) -> Bool: the caller holds the only reference.
+fn x64_image_block_unique() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    done :: x64_image_label(&a)
+    x64_mov_ri(&a.code, X64_RAX, 0)
+    x64_load(&a.code, X64_RSI, X64_RDI, -24)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RSI, 1)
+    x64_image_jcc(&a, X64Cond.NE, done)
+    x64_mov_ri(&a.code, X64_RAX, 1)
+    x64_image_bind(&a, done)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_block_unique")
 }
 
 // ---------------------------------------------------------------------------
@@ -583,8 +641,8 @@ fn x64_image_string_drop() -> X64CompiledFunction Never! {
     x64_lock_xadd(&a.code, X64_RDI, -8, X64_RDX)
     x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDX, 1)
     x64_image_jcc(&a, X64Cond.NE, done)
-    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 16)
-    x64_alu_ri(&a.code, X64Alu.Sub, X64_RDI, 8)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 16 + X64_IMAGE_BLOCK_HEADER)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RDI, 8 + X64_IMAGE_BLOCK_HEADER)
     x64_image_syscall(&a, 11)
     x64_image_bind(&a, done)
     x64_ret(&a.code)
@@ -1194,7 +1252,7 @@ fn x64_image_range_advance() -> X64CompiledFunction Never! {
 fn x64_image_cursor_drop() -> X64CompiledFunction Never! {
     a := x64_image_asm()
     x64_mov_ri(&a.code, X64_RSI, X64_IMAGE_CURSOR_SIZE)
-    x64_image_syscall(&a, 11)
+    x64_image_call(&a, "jet_rt_free")
     x64_ret(&a.code)
     x64_image_finish(&a, "jet_loop_cursor_drop")
 }
@@ -1231,6 +1289,9 @@ fn x64_image_runtime() -> [X64CompiledFunction] Never! {
         x64_image_message_stop("jet_rt_panic_message", "error[E3001]: "),
         x64_image_alloc(),
         x64_image_free(),
+        x64_image_block_retain(),
+        x64_image_block_release(),
+        x64_image_block_unique(),
         x64_image_string_new(),
         x64_image_string_from_static(),
         x64_image_string_clone(),

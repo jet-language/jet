@@ -41,7 +41,7 @@ fn alloc_test_payload(size: I64, align: I64) {
 fn alloc_test_boundaries(align: I64) {
     slot := I64{32}
     loop slot <= (I64{4096}) {
-        boundary :: wrapping(slot - I64{16} - align + I64{1})
+        boundary :: wrapping(slot - alloc_header(align) - (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
         if {
             boundary > (I64{0}) -> {
                 alloc_test_require(alloc_class(boundary, align) == slot)
@@ -165,6 +165,33 @@ fn alloc_test_nullable() {
     jet_rt_free(aligned, I64{0}, I64{8192})
 }
 
+// #5041 P2: every align >= 8 block (small, large, over-aligned) starts with
+// one owner in the count word 24 bytes before its payload; the block
+// protocol shares it, and byte blocks (align < 8) carry no count.
+fn alloc_test_count(size: I64) {
+    pointer :: jet_rt_alloc(size, I64{8})
+    #Unsafe("the test owns this fresh align-8 block and its count word") {
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})
+    }
+    alloc_test_require(jet_rt_block_unique(pointer))
+    jet_rt_block_retain(pointer)
+    alloc_test_require(!jet_rt_block_unique(pointer))
+    alloc_test_require(!jet_rt_block_release(pointer))
+    alloc_test_require(jet_rt_block_unique(pointer))
+    alloc_test_require(jet_rt_block_release(pointer))
+    jet_rt_free(pointer, size, I64{8})
+}
+
+fn alloc_test_counts() {
+    alloc_test_count(I64{8})
+    alloc_test_count(I64{24})
+    alloc_test_count(I64{4000})
+    alloc_test_count(I64{65537})
+    over :: jet_rt_alloc(I64{40}, I64{64})
+    alloc_test_require(jet_rt_block_unique(over) && over.bit_and(I64{63}) == I64{0})
+    jet_rt_free(over, I64{40}, I64{64})
+}
+
 fn alloc_tests() {
     jet_rt_alloc_init()
     jet_rt_alloc_init()
@@ -188,6 +215,7 @@ fn alloc_tests() {
     alloc_test_large_reuse()
     alloc_test_reuse()
     alloc_test_full_slabs()
+    alloc_test_counts()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {
         _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})
         _ := os_write_word_i64(I64{1}, I64{750815947097601139}, I64{8})

@@ -88,6 +88,8 @@ fn lower_set_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if source_elem != Val(elem) -> return lower_fail(&m, &f, "Set construction source element differs from its checked result")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_set_empty(p, &f, dst, ty)
+    // A consumed List gives up its elements and buffer: it must own them alone.
+    if moved -> lower_list_make_unique(p, &m, &f, input, mir_type_from_kind(MIRTypeKind.List{inner: elem}))
     each :: lower_each_begin(p, &f, input, elem, [LIRValueID]{})
     key :: lower_read_at(p, &f, each.address, 0, elem) ?? return
     owned := key

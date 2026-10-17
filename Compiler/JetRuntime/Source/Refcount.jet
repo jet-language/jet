@@ -47,3 +47,15 @@ fn rc_init(count: I64) { rc_store(count, I64{1}) }
 }
 
 #Export(c) fn jet_rt_rc_unique(count: I64) -> Bool { rc_load(count) == I64{1} }
+
+// Heap blocks allocated with align >= 8 carry their count in the allocator's
+// block header, 24 bytes before the payload (Alloc.jet alloc_count_init), so
+// List-family buffers and Option/Result/enum boxes share through these three
+// entries whatever allocated them. `block` is the payload address an owner
+// holds; callers never pass a static (frozen) buffer: lowering tests cap == 0
+// for lists, and static boxes carry an immortal (negative) word there.
+#Export(c) fn jet_rt_block_retain(block: I64) { jet_rt_rc_retain(wrapping(block - I64{24})) }
+
+#Export(c) fn jet_rt_block_release(block: I64) -> Bool { jet_rt_rc_release(wrapping(block - I64{24})) }
+
+#Export(c) fn jet_rt_block_unique(block: I64) -> Bool { jet_rt_rc_unique(wrapping(block - I64{24})) }

@@ -112,6 +112,54 @@ static void refcount_threads(void) {
     int64_t immortal=INT64_MIN; jet_rt_rc_retain(&immortal); assert(!jet_rt_rc_release(&immortal) && immortal==INT64_MIN && !jet_rt_rc_unique(&immortal));
     puts("refcount ok");
 }
+// P2 (#5041): every align-8 heap block (List-family buffers, boxes) carries
+// its count 24 bytes before the payload, in the allocator's block header.
+// For every small class and a large mapping: 8 threads retain/release one
+// block while allocating and filling private blocks of the same class (the
+// count and the payload never disturb each other); then 9 concurrent final
+// releases see exactly one last owner, which frees the block from its own
+// thread, not the allocating one.
+extern void jet_rt_free(void *,int64_t,int64_t);
+extern void jet_rt_block_retain(void *); extern bool jet_rt_block_release(void *); extern bool jet_rt_block_unique(void *);
+static const int64_t block_sizes[]={8,24,40,104,232,488,1000,2024,4000,70000};
+static void *shared_block;
+static int64_t shared_size;
+static int block_last;
+static void *block_churn(void *unused) {
+    (void)unused;
+    for(int i=0;i<20000;++i) { jet_rt_block_retain(shared_block); assert(!jet_rt_block_release(shared_block)); }
+    jet_rt_block_retain(shared_block);
+    for(int i=0;i<64;++i) {
+        void *own=jet_rt_alloc(shared_size,8);
+        assert(((const int64_t *)own)[-3]==1 && jet_rt_block_unique(own));
+        memset(own,0xA5,(size_t)shared_size);
+        assert(jet_rt_block_unique(own));
+        jet_rt_free(own,shared_size,8);
+    }
+    return NULL;
+}
+static void *block_final(void *unused) {
+    (void)unused;
+    if(jet_rt_block_release(shared_block)) { __atomic_add_fetch(&block_last,1,__ATOMIC_SEQ_CST); jet_rt_free(shared_block,shared_size,8); }
+    return NULL;
+}
+static void block_threads(void) {
+    for(size_t s=0;s<sizeof(block_sizes)/sizeof(block_sizes[0]);++s) {
+        pthread_t threads[9];
+        shared_size=block_sizes[s]; block_last=0;
+        shared_block=jet_rt_alloc(shared_size,8);
+        assert(((const int64_t *)shared_block)[-3]==1 && jet_rt_block_unique(shared_block));
+        memset(shared_block,0x5A,(size_t)shared_size);
+        for(int i=0;i<8;++i) assert(!pthread_create(&threads[i],NULL,block_churn,NULL));
+        for(int i=0;i<8;++i) assert(!pthread_join(threads[i],NULL));
+        assert(((const int64_t *)shared_block)[-3]==9 && !jet_rt_block_unique(shared_block));
+        for(int64_t at=0;at<shared_size;++at) assert(((const unsigned char *)shared_block)[at]==0x5A);
+        for(int i=0;i<9;++i) assert(!pthread_create(&threads[i],NULL,block_final,NULL));
+        for(int i=0;i<9;++i) assert(!pthread_join(threads[i],NULL));
+        assert(block_last==1);
+    }
+    puts("blocks ok");
+}
 static void euclid_by_zero(void) { (void)jet_int_rem_euclid(1,0,file,sizeof(file)-1,6); }
 static void numeric_stop(void) {
     static const char message[]="This addition overflows the value's type (the result is outside its range)";
@@ -135,6 +183,7 @@ int main(int argc,char **argv) {
         else if(!strcmp(argv[1],"text-carriers")) entry=text_carriers;
         else if(!strcmp(argv[1],"shared-text-write")) entry=shared_text_write;
         else if(!strcmp(argv[1],"refcount-threads")) entry=refcount_threads;
+        else if(!strcmp(argv[1],"block-threads")) entry=block_threads;
         else if(!strcmp(argv[1],"euclid-by-zero")) entry=euclid_by_zero;
         else if(!strcmp(argv[1],"numeric-stop")) entry=numeric_stop;
         else if(!strcmp(argv[1],"require")) entry=require;

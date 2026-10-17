@@ -232,6 +232,9 @@ fn lower_parallel_flags(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     if lower_task_stop_body(p, c, m, args[0].value) -> return lower_fail(&m, &f, "parallel predicate with a checked stop across native frames is not lowered at O0 yet")
     result_ty :: lower_checked_type(c, instruction) ?? return
     list :: lower_use(&m, &f, receiver) ?? return
+    // Items are moved out of the consumed List and their slots cleared: its
+    // buffer must not be shared (#5041 P2).
+    lower_list_make_unique(p, &m, &f, list, list_ty)
     closure :: lower_use(&m, &f, args[0].value) ?? return
     length :: lower_list_word(&f, list, 0)
     flags :: lower_list_buffer(&m, &f, length, 8)

@@ -58,8 +58,9 @@ fn lower_payload_info(p: MIRProgram, ty: MIRType, kind: MIRPayloadKind) -> Lower
 // base + offset. Nested inline members add offsets; a box (payload enum,
 // Option, Result, List) or a recursive edge's wrapper is entered by loading
 // its pointer. A checked payload place is entered only after its variant test.
+// This is the write walk: every List/Map buffer it indexes is made unique.
 fn lower_walk_projections(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerFieldAddress? {
-    walked :: lower_walk_place(p, c, &m, &f, root, root_ty, projections) ?? return None
+    walked :: lower_walk_place(p, c, &m, &f, root, root_ty, projections, true) ?? return None
     if walked.borrowed {
         message :: if walked.ty.kind == .String -> "String field write through a runtime handle is not lowered" else -> "writing through a field of runtime handle is not lowered at O0 yet"
         lower_fail(&m, &f, message)
@@ -76,8 +77,11 @@ struct LowerPlaceAddress {
     borrowed: Bool
 }
 
-// lower_walk_projections with the type of the named value.
-fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerPlaceAddress? {
+// lower_walk_projections with the type of the named value. `write`: the
+// caller writes (or moves out of) the place, so each owning buffer the walk
+// passes through (#5041 P2: a List or Map buffer that may be shared) is made
+// unique before the next address is derived from it.
+fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection], write: Bool) -> LowerPlaceAddress? {
     base := root
     ty := root_ty
     offset := -1
@@ -134,6 +138,7 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             }
             .Index(kind, index, _, _, _, _, _) -> {
                 header :: lower_address(&f, base, offset)
+                if write -> lower_list_make_unique(p, &m, &f, header, ty)
                 if kind == .Map {
                     base = lower_map_value_address(p, &m, &f, header, ty, index) ?? return None
                     ty = lower_map_value_type(ty) ?? return None

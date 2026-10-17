@@ -362,7 +362,7 @@ fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_emit(&f, LIRInst.DataAddress{dst: cell, data: object})
         if row.projections.len() == 0 -> return Val(LowerFieldAddress{base: cell, offset: 0})
         root :: lower_read_at(p, &f, cell, 0, definition.ty) ?? return None
-        walked :: lower_walk_place(p, c, &m, &f, root, definition.ty, row.projections) ?? return None
+        walked :: lower_walk_place(p, c, &m, &f, root, definition.ty, row.projections, false) ?? return None
         return Val(walked.address)
     }
     cell :: lower_static_storage(p, &m, &f, definition) ?? return None
@@ -512,8 +512,9 @@ fn lower_core_shared_init(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     lir_builder_finish(f.builder)
 }
 
-// Lists.jet clone already copies into a fresh header/buffer and never frees its
-// source. Drop must skip the entire frozen tree, not just the data-buffer free.
+// A frozen List (cap == 0 over static storage) is immortal: clone shares it
+// (Lists.jet lower_list_clone_glue) and drop must skip the entire frozen
+// tree, not just the data-buffer free.
 fn lower_static_list_drop_guard(f: &LowerFunction, cap: LIRValueID, data: LIRValueID, done: LIRBlockID) Never! {
     zero :: lower_const(&f, 0)
     no_capacity :: lower_flag(&f)

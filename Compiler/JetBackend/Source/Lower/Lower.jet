@@ -4629,14 +4629,15 @@ fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     source :: lower_use(&m, &f, value) ?? return
     ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "copied value {value.value} has no checked type")
     // A View<T> copied into a List (Copy materialize_view, MIRRust.rs
-    // `.to_vec()`) gets a buffer of its own: List clone glue reads only the
-    // window's length and data.
+    // `.to_vec()`) gets a buffer of its own: list.unique copies the window's
+    // elements (List clone glue would share the window header).
     if lower_view_element(ty) != None {
         if lower_checked_type(c, instruction) == .Val(list_ty) {
             if list_ty.kind == .List(_) {
                 dst :: lower_result(p, c, &m, &f, instruction) ?? return
                 lower_storage_into(p, &f, dst, list_ty)
-                return lower_inline_clone(p, &m, &f, source, dst, list_ty)
+                lower_copy_bytes(&f, dst, 0, source, 0, 24)
+                return lower_list_make_unique(p, &m, &f, dst, list_ty)
             }
         }
     }
@@ -4740,7 +4741,8 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 if moving -> lower_clear_slot(p, c, &f, slot)
                 return
             }
-            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+            // A move out of an element detaches the buffers it passes (write walk).
+            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, row.projections, moving) ?? return
             if moving && walked.borrowed {
                 // A runtime handle lends its fields (lower_handle_field_place):
                 // a last-use move out of one copies the field, which the
@@ -7344,6 +7346,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "iter.advance" -> return lower_helper_iter_advance(p, &m, glue)
     if glue.helper == "display" || glue.helper == "show" || glue.helper == "debug" -> return lower_helper_display(p, &m, glue)
     if glue.helper == "equal" -> return lower_helper_equal(p, &m, glue)
+    if glue.helper == "list.unique" -> return lower_helper_list_unique(p, &m, glue)
     if glue.helper == "list.push" -> return lower_helper_list_push(p, &m, glue)
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)

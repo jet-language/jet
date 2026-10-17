@@ -90,11 +90,20 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     // loop does (Lower.jet lower_iter_takes, MIRRust.rs `consumed`).
     taken :: by_value || c.iter_takes.get(collection.value) != None
     if !taken || lower_view_element(ty) != None {
-        // Materialize a View with List clone glue, as lower_copy does. Cloning
-        // a View header would leave Advance/Drop destroying the source owners.
+        // A View's window (cap 0, data inside its owner's buffer) is
+        // materialized element by element (lower_list_make_unique below):
+        // List clone glue would share the window header, leaving
+        // Advance/Drop destroying the source owners. A List shares.
         list = lower_new_storage(p, &f, snapshot_ty)
-        lower_inline_clone(p, &m, &f, source, list, snapshot_ty)
+        if lower_view_element(ty) != None {
+            lower_copy_bytes(&f, list, 0, source, 0, 24)
+        } else {
+            lower_inline_clone(p, &m, &f, source, list, snapshot_ty)
+        }
     }
+    // The cursor moves elements out and frees the buffer: it must own the
+    // buffer alone (#5041 P2), so a shared one is detached here.
+    lower_list_make_unique(p, &m, &f, list, snapshot_ty)
     // Register every typed release while lowering user MIR, before generic glue
     // is generated. Its function ID is a stable dispatch key, not a code pointer.
     release :: lower_helper_id(&m, "iter.release", snapshot_ty)

@@ -24,6 +24,7 @@ const cases = [
     ['values', 0, readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CAbiDriver.stdout'), 'utf8'), '', true],
     ['text-carriers', 0, '', '', true],
     ['refcount-threads', 0, 'refcount ok\n', '', true],
+    ['block-threads', 0, 'blocks ok\n', '', true],
     ['shared-text-write', 70, '', 'Stop [E3001]: `panic: internal: shared text written in place`\n', false],
     ['euclid-by-zero', 70, '', 'Stop [E3010]: `divided by zero`\n  --> main.jet:6\n', false],
     ['numeric-stop', 70, '', "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`\n  --> main.jet:7\n", false],
