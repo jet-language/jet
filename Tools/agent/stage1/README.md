@@ -117,6 +117,8 @@ Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
   --repo /disk/pinned-source
 Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
   --self-rebuild --out /disk/native-fixedpoint
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --release-rebuild --out /disk/native-fixedpoint
 ```
 
 `native-feed.mjs --dry-run` performs only canonical CLI-unit assembly and records
@@ -132,6 +134,15 @@ has stage 2 compile the same unit into stage 3 and writes `self-rebuild.json`
 (`selfRebuild.identical`: stage 2 == stage 3, whole files); it never gates the
 publication and may run beside smoke. Producer/harness hashes are recorded
 separately from the single pinned compiler/runtime source identity.
+
+The O2 compiler is a second follow-up: `--release-rebuild --out <published
+dir>` has stage 2 run `build --release` on the same unit (the `release`
+profile: MIR Release mode and LIR O2) into `release1`, then has `release1`
+rebuild itself with `build --release` into `release2`, and writes
+`release-rebuild.json` (`releaseRebuild.identical`: release 1 == release 2,
+whole files; `jet` = `release1/jet`). `release1/jet` is the compiler that
+compile-speed (LOC/s) measurements use; the self-hosting gate stays the O0
+stage 2 == stage 3 pair.
 
 The factory and every CLI stage run inside the source export's
 `Tools/agent/jet-env` shell entered from the caller's environment (the
