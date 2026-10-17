@@ -507,7 +507,8 @@ fn lower_subst_callee(callee: MIRCallee, bindings: LowerBindings) -> MIRCallee N
         .User(_) | .Core(_) | .Prelude(_) | .Foreign(_) | .Indirect(_) -> callee
         .Associated(function, owner) -> MIRCallee.Associated{function: function, owner: lower_subst_type(owner, bindings)}
         .Method(function, owner) -> MIRCallee.Method{function: function, owner: lower_subst_type(owner, bindings)}
-        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref, receiver: lower_subst_type(receiver, bindings)}
+        // copy: `trait_ref` is a payload of read parameter `callee`, which keeps the original; field `trait_ref` of the new MIRCallee.TraitMethod owns this one
+        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref.copy(), receiver: lower_subst_type(receiver, bindings)}
     }
 }
 

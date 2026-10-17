@@ -324,7 +324,8 @@ fn envmodel_lifecycle_merge(target: &EnvironmentLifecycle, incoming: Environment
                 .Val(existing) -> {
                     if existing != formatter -> return Err(envmodel_error("E1333", "formatter is declared more than once with conflicting packages in module `{module_name}`", "one environment cannot silently choose between different external formatters", "merge the formatter declarations so they agree, or keep one formatter owner", None))
                 }
-                .None -> target.formatter = Val(formatter)
+                // copy: `formatter` is a payload of read parameter `incoming`, which keeps the original; `target.formatter` owns this one
+                .None -> target.formatter = Val(formatter.copy())
             }
         }
         .None -> {}

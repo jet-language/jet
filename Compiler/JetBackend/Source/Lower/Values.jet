@@ -181,7 +181,8 @@ fn lower_variant_members(p: MIRProgram, definition: MIRTypeDef, variant: MIRVari
     rows := [LowerMember]{}
     if variant.payload == {
         .Unit -> {}
-        .Single(inner) -> &rows.push(LowerMember{id: mir_field_id("{definition.key}.{variant.name}"), name: variant.name, offset: 0, ty: inner, boxed: lower_declared_boxed_edge(definition, variant.name)})
+        // copy: `inner` is a payload of read parameter `variant`, which keeps the original; field `ty` of the new LowerMember owns this one
+        .Single(inner) -> &rows.push(LowerMember{id: mir_field_id("{definition.key}.{variant.name}"), name: variant.name, offset: 0, ty: inner.copy(), boxed: lower_declared_boxed_edge(definition, variant.name)})
         .Named(fields) -> {
             loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, "{variant.name}.{row.name}")})
         }

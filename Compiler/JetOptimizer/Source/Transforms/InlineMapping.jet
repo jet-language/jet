@@ -732,7 +732,8 @@ fn mir_pass_inline_callee(callee: MIRCallee, maps: MIRInlineMaps, substitutions:
     if callee == {
         .User(function) -> MIRCallee.User{function: function}
         .Associated(function, owner) -> MIRCallee.Associated{function: function, owner: mir_pass_inline_type(owner, substitutions)}
-        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref, receiver: mir_pass_inline_type(receiver, substitutions)}
+        // copy: `trait_ref` is a payload of read parameter `callee`, which keeps the original; field `trait_ref` of the new MIRCallee.TraitMethod owns this one
+        .TraitMethod(method, trait_ref, receiver) -> MIRCallee.TraitMethod{method: method, trait_ref: trait_ref.copy(), receiver: mir_pass_inline_type(receiver, substitutions)}
         .Method(function, owner) -> MIRCallee.Method{function: function, owner: mir_pass_inline_type(owner, substitutions)}
         .Core(call) -> MIRCallee.Core{call: call}
         .Prelude(call) -> MIRCallee.Prelude{call: call}
@@ -916,7 +917,8 @@ fn mir_pass_inline_capture(capture: MIRCaptureOperand, maps: MIRInlineMaps) -> M
 
 fn mir_pass_inline_test_scope_member(member: MIRTestScopeMember, maps: MIRInlineMaps) -> MIRTestScopeMember Never! {
     if member == {
-        .ExpectFail(code, message) -> MIRTestScopeMember.ExpectFail{expected_code: code, expected_message: message}
+        // copy: `code` and `message` are payloads of read parameter `member`, which keeps the originals; the new MIRTestScopeMember.ExpectFail's fields own `code` and `message`
+        .ExpectFail(code, message) -> MIRTestScopeMember.ExpectFail{expected_code: code.copy(), expected_message: message.copy()}
         .Timeout(duration) -> MIRTestScopeMember.Timeout{duration: mir_pass_inline_value(maps, duration)}
         .Skip(whole_test) -> MIRTestScopeMember.Skip{whole_test: whole_test}
         .Measure -> MIRTestScopeMember.Measure

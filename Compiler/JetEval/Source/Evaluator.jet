@@ -5828,10 +5828,14 @@ fn jet_eval_host_handle_validate(machine: &JetEvalMachine, row: MIRPreludeCall?,
 
 fn jet_eval_host_owner_token_kind(owner: JetEvalHostOwner, machine: &JetEvalMachine, span: Span) -> JetEvalForeignTokenKind? {
     if owner == {
-        .Declared(ty) -> return Val(JetEvalForeignTokenKind.Declared{ty: ty})
-        .Core(core_owner) -> return Val(JetEvalForeignTokenKind.Core{owner: core_owner})
-        .Native(binding) -> return Val(JetEvalForeignTokenKind.Native{binding: binding})
-        .FixedBackingRoot(element_type, length) -> return Val(JetEvalForeignTokenKind.FixedBackingRoot{element_type: element_type, length: length})
+        // copy: `ty` is a payload of read parameter `owner`, which keeps the original; the new token kind owns this one
+        .Declared(ty) -> return Val(JetEvalForeignTokenKind.Declared{ty: ty.copy()})
+        // copy: `core_owner` is a payload of read parameter `owner`, which keeps the original; the new token kind owns this one
+        .Core(core_owner) -> return Val(JetEvalForeignTokenKind.Core{owner: core_owner.copy()})
+        // copy: `binding` is a payload of read parameter `owner`, which keeps the original; the new token kind owns this one
+        .Native(binding) -> return Val(JetEvalForeignTokenKind.Native{binding: binding.copy()})
+        // copy: `element_type` is a payload of read parameter `owner`, which keeps the original; the new token kind owns this one
+        .FixedBackingRoot(element_type, length) -> return Val(JetEvalForeignTokenKind.FixedBackingRoot{element_type: element_type.copy(), length: length})
         .Cursor -> {}
     }
     jet_eval_compiler_fail(&machine, span, "native cursor owner cannot be stored as an ordinary handle token")

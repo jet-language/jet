@@ -221,7 +221,8 @@ fn jet_cli_build_error_json(report: DiagnosticBuildError) -> String Never! {
 // alternatives.
 fn jet_cli_report_edits(diagnostic: Diagnostic) -> [TextEdit] Never! {
     edits := [TextEdit]{}
-    if diagnostic.edit == .Val(edit) -> &edits.push(edit)
+    // copy: `edit` is a payload of read parameter `diagnostic`, which keeps the original; the returned `edits` list owns this one
+    if diagnostic.edit == .Val(edit) -> &edits.push(edit.copy())
     if diagnostic.structured == .Val(structured) {
         if structured == {
             .SuggestedEdits(alternatives) -> {

@@ -4701,7 +4701,8 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     // success value, so the payload never materializes the view.
     if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
         payload := Expr?{None}
-        if value == .Ok(ok_value, _) -> payload = Val(ok_value)
+        // copy: `ok_value` is a payload of read parameter `value`, which keeps the original; the local `payload` owns this one
+        if value == .Ok(ok_value, _) -> payload = Val(ok_value.copy())
         if value == .Call(ok_call) {
             if ok_call.name == "Ok" && ok_call.args.len() == 1 -> payload = Val(ok_call.args[0].expr)
         }
@@ -4716,7 +4717,8 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     // success value, so the payload never materializes the view.
     if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
         payload := Expr?{None}
-        if value == .Ok(ok_value, _) -> payload = Val(ok_value)
+        // copy: `ok_value` is a payload of read parameter `value`, which keeps the original; the local `payload` owns this one
+        if value == .Ok(ok_value, _) -> payload = Val(ok_value.copy())
         if value == .Call(ok_call) {
             if ok_call.name == "Ok" && ok_call.args.len() == 1 -> payload = Val(ok_call.args[0].expr)
         }

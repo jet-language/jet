@@ -16,7 +16,8 @@ fn pkg_to_manifest(facts: PackageFacts, raw: String) -> Manifest ManifestError! 
         spec :: if facts.deps[name] == {
             .Foreign(language, reference) -> DepSpec.Foreign{language: language, reference: reference}
             .Version(version) -> DepSpec.Registry(version)
-            .Git(url, selector) -> DepSpec.Git{url: url, selector: selector}
+            // copy: `selector` is a payload of read parameter `facts`, which keeps the original; field `selector` of the new DepSpec.Git owns this one
+            .Git(url, selector) -> DepSpec.Git{url: url, selector: selector.copy()}
             .Provider(provider, target) -> pkg_provider_dep_spec(name, provider, target)
             .CLib(_) -> {
                 return Err(pkg_bad_dep_error(name, "native C links are not Jet packages"))
