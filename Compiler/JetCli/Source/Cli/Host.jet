@@ -121,12 +121,13 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
                 if result.mir == .Val(program) {
                     if jet_cli_rust_foreign_realize(result.rust_foreign, program) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
-                } else { return jet_cli_ice("the checked Rust foreign declarations finished without their MIR link facts") }
+                } else { jet_cli_finish(jet_cli_ice("the checked Rust foreign declarations finished without their MIR link facts")) }
             }
             output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
             }
+            jet_cli_finish(output)
         }
     }
     output
@@ -172,7 +173,7 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
     compiled :: jet_cli_compile_entry(file, color, true, None, JetDriverCompileMode.Program, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> output = jet_cli_emit_result(file, source, color, json, requires_run, result, snapshot)
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_emit_result(file, source, color, json, requires_run, result, snapshot))
     }
     output
 }
@@ -216,17 +217,19 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     compiled :: jet_cli_compile_file(file, color, false, None, mode)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, ^result, snapshot)
+        .Compiled(result, snapshot) -> jet_cli_eval_result(file, source, color, json, ^result, snapshot)
     }
     output
 }
 
-fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: ^JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+// The result moves in because its MIR moves on into the evaluator, so the
+// process ends here with the output while both are live (jet_cli_finish).
+fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: ^JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> Never {
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
-    if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    program :: ^result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
-    entry :: result.entry_function ?? return jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry")
+    if errors.len() > 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
+    program :: ^result.mir ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without a MIR program"))
+    entry :: result.entry_function ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
     config :: jet_eval_default_config()
     span :: Span{start: 0, end: 0}
     evaluated := jet_eval_function(^program, entry, [TComptimeValue]{}, ^config)
@@ -236,11 +239,11 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     }
     jet_eval_retire_result(&evaluated, span)
     if evaluated.error == .Val(failure) {
-        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
-    if evaluated.internal_problem == .Val(problem) -> return jet_cli_ice(problem.message)
-    checked :: data ?? return jet_cli_ice("evaluating `run` in `{file}` produced no value")
-    value :: sema_user_template_ct_value(checked) ?? return jet_cli_ice("the value of `run` in `{file}` is not compile-time data")
+    if evaluated.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem.message))
+    checked :: data ?? jet_cli_finish(jet_cli_ice("evaluating `run` in `{file}` produced no value"))
+    value :: sema_user_template_ct_value(checked) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` is not compile-time data"))
     if json {
         encoded :: ast_comptime_value_json(value) ?? {
             failure :: jet_cli_status_object([JetCLIStatusField]{
@@ -254,14 +257,14 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
                 jet_cli_status_field("cause", JetCLIStatusValue.Null),
             })
             rendered :: jet_cli_status_render("eval", false, [JetCLIStatusField]{jet_cli_status_field("error", failure)})
-            return JetDriverVerbOutput{stdout: "{rendered}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            jet_cli_finish(JetDriverVerbOutput{stdout: "{rendered}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_USER_ERROR})
         }
-        rendered :: jet_cli_status_value_parse(encoded) ?? return jet_cli_ice("the value of `run` in `{file}` has no JSON form")
-        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("eval", true, [JetCLIStatusField]{jet_cli_status_field("value", rendered)})}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_OK}
+        rendered :: jet_cli_status_value_parse(encoded) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` has no JSON form"))
+        jet_cli_finish(JetDriverVerbOutput{stdout: "{jet_cli_status_render("eval", true, [JetCLIStatusField]{jet_cli_status_field("value", rendered)})}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_OK})
     }
     shown :: jet_cli_eval_shown(value)
     line :: if shown == .Val(text) -> "{text}\n" else -> ""
-    JetDriverVerbOutput{stdout: "{evaluated.stdout}{line}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    jet_cli_finish(JetDriverVerbOutput{stdout: "{evaluated.stdout}{line}", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
 }
 
 // CmdDevTools.rs `render_eval_value`: a present value shows its inner value
@@ -671,10 +674,13 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     jet_cli_finish(output)
 }
 
-// A compile verb ends the process with its output while its compile result
-// is still live: the exit returns the whole program's memory at once, where
-// drop glue would walk every MIR row and fault every swapped-out page back in
-// (minutes after the self-host unit's link).
+// The process's one exit: write a verb's output, then end the process with
+// its status. `jet_cli_main` ends here, and so does every verb that holds a
+// compile result (or a query that compiled), from inside the scope that owns
+// it: the exit returns the whole program's memory at once, where drop glue
+// would walk every MIR row and fault every swapped-out page back in (minutes
+// after the self-host unit's link). A verb with nothing compiled returns its
+// output to `jet_cli_main` instead.
 fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
     jet_cli_write_output(output)
     cli_process.exit(output.exit_code)
@@ -809,7 +815,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
     compiled :: jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Test, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_test_result(file, source, color, verbose, options, result, snapshot))
     }
     output
 }
@@ -971,7 +977,7 @@ fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, ch
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> output = jet_cli_doc_result(file, source, color, json, check, result, snapshot)
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_doc_result(file, source, color, json, check, result, snapshot))
     }
     output
 }
@@ -1012,7 +1018,7 @@ fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverV
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> output = jet_cli_semindex_result(file, color, json, result, snapshot)
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_semindex_result(file, color, json, result, snapshot))
     }
     output
 }
@@ -1713,12 +1719,12 @@ fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: B
 // A compiling verb's compile traces through the process's one sink: the
 // target of `--trace[=FILE]` (which the front door admits only on those
 // verbs), else of JET_TRACE_FILE (Request.jet `jet_cli_trace_sink`).
-fn jet_cli_main(args: [String]) -> Int {
+// A verb that holds a compile result ends the process itself (jet_cli_finish);
+// every other verb's output ends it here.
+fn jet_cli_main(args: [String]) -> Never {
     plan :: jet_cli_front(args)
     trace_sink :: if jet_cli_plan_compiles(plan) -> jet_cli_trace_sink(jet_cli_trace_flag(jet_cli_owned_flags(args))) else -> None
-    output :: jet_cli_execute(^plan, trace_sink)
-    jet_cli_write_output(output)
-    output.exit_code
+    jet_cli_finish(jet_cli_execute(^plan, trace_sink))
 }
 
 // A verb's output, written to the process's stdout and stderr.

@@ -196,17 +196,17 @@ fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDriverVer
             if jet_cli_errors(diagnostics).len() > 0 {
                 source :: cli_files.read(file) ?? ""
                 if json {
-                    return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                    jet_cli_finish(JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR})
                 }
-                return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
             }
-            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
             checked_report :: if jet_cli_fill_report(result, Val(file), line, true, json) == {
                 .Ok(value) -> value
-                .Err(error) -> { return jet_cli_ice(error.message) }
+                .Err(error) -> { jet_cli_finish(jet_cli_ice(error.message)) }
             }
             report :: checked_report ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
-            return JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            jet_cli_finish(JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }
 }

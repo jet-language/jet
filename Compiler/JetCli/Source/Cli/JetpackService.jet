@@ -68,7 +68,7 @@ fn jet_cli_compiler_service_check(file: String, source: String) -> JetDriverVerb
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> &diagnostics.push(diagnostic_from_registry("E2105", None, "the compiler could not finish checking `{file}`: {problem}", jet_cli_why("E2105"), "report this compiler defect with the entry file attached"))
             }
-            return JetDriverVerbOutput{stdout: compiler_service_check_response(diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            jet_cli_finish(JetDriverVerbOutput{stdout: compiler_service_check_response(diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }
 }

@@ -108,7 +108,8 @@ fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 }
 
 // Compilation and ledger failures use inspect.structure, with no human summary.
-fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
+// A checked result ends the process behind `notice` (jet_cli_finish).
+fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> return ^refusal
@@ -141,9 +142,9 @@ fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) 
                         stderr = "{stderr}{diagnostic_render_all(origin, source, [Diagnostic]{error}, color)}"
                     }
                 }
-                return JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                jet_cli_finish(jet_cli_inspect_noticed(notice, JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}))
             }
-            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_ice(problem)))
             if ledger.diagnostic_rows.len() > 0 {
                 reports := [String]{}
                 stderr := ""
@@ -153,9 +154,9 @@ fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) 
                         loop report in jet_cli_reports_json(jet_cli_report_cwd(), row.source, source, [Diagnostic]{row.diagnostic}) -> &reports.push(report)
                     } else { stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}" }
                 }
-                return JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                jet_cli_finish(jet_cli_inspect_noticed(notice, JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}))
             }
-            return JetDriverVerbOutput{stdout: jet_cli_structure_report(facts, ledger, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            jet_cli_finish(jet_cli_inspect_noticed(notice, JetDriverVerbOutput{stdout: jet_cli_structure_report(facts, ledger, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}))
         }
     }
 }

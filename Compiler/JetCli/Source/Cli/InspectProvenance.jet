@@ -577,25 +577,26 @@ fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
-                return jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color)
+                jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color))
             }
         }
     }
+    // `compiled` stays live to the end: the job ends the process (jet_cli_inspect_finish).
     packages := [JetCLILockPackage]{}
     if jet_cli_lock_load(job.root) == {
         .Loaded(loaded) -> packages = loaded
-        else -> return jet_cli_not_ported_output("inspect provenance <lock changed during the check>", job.color)
+        else -> jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect provenance <lock changed during the check>", job.color))
     }
     reports :: jet_cli_provenance_reports(packages, job.subject)
     if job.subject == .Val(target) {
         if reports.len() == 0 {
             what :: "dependency `{target}` is not present in the lockfile"
             fix :: "use `jet inspect provenance` to list locked dependencies"
-            if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, job.color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            if job.json -> jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR})
+            jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, job.color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
         }
     }
     requirement :: "none"
-    if job.json -> return JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    JetDriverVerbOutput{stdout: jet_cli_provenance_text(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if job.json -> jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+    jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: jet_cli_provenance_text(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK})
 }

@@ -529,7 +529,7 @@ fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json
     compiled :: jet_cli_compile_file(path, false, false, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> output = jet_cli_find_result(path, query, mode, json, result, snapshot)
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_find_result(path, query, mode, json, result, snapshot))
     }
     output
 }

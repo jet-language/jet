@@ -18,7 +18,7 @@ function dryRun(extra, inspect) {
         assert.equal(result.status, 0, result.stderr);
         const source = readFileSync(join(out, 'compiler/selfhost.jet'), 'utf8');
         assert.equal((source.match(/^fn run\(/gm) ?? []).length, 1);
-        assert.match(source, /process\.exit\(jet_cli_main\(process\.args\(\)\)\)/);
+        assert.match(source, /^\s*jet_cli_main\(process\.args\(\)\)$/m);
         assert.equal((source.match(/^use core\.process as process$/gm) ?? []).length, 1);
         assert.equal((source.match(/^JET_CLI_BUILT_COMPILER_IDENTITY :: "jet@[^"#\s]+#[0-9a-f]{64}"$/gm) ?? []).length, 1,
             'the assembly embeds the identity of the source it assembled');

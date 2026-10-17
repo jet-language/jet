@@ -29,7 +29,7 @@ mkdir -p "$O/home" "$O/unit"
 B="$O/home/.cache/jet-luna/compiler-bootstrap"
 {
   cat "$B/project/src/compiler.jet"
-  printf '\n// [self-host probe entry: Compiler/JetCli/run.jet]\nuse core.process as selfhost_process\n\nfn run() {\n    selfhost_process.exit(jet_cli_main(selfhost_process.args()))\n}\n'
+  printf '\n// [self-host probe entry: Compiler/JetCli/run.jet]\nuse core.process as selfhost_process\n\nfn run() {\n    jet_cli_main(selfhost_process.args())\n}\n'
 } > "$O/unit/selfhost.jet"
 cp "$B/compiler.map.json" "$O/compiler.map.json"
 printf 'name: "jet_selfhost"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    holds: { allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }\n}\n' > "$O/unit/package.jet"

@@ -1479,10 +1479,11 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
-                return jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+                jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR))
             }
         }
     }
+    // `compiled` stays live to the end: the job ends the process (jet_cli_inspect_finish).
     // Loader.rs `selected_project_root` of the entry's directory.
     directory :: jet_cli_parent(absolute) ?? "."
     root := directory
@@ -1490,21 +1491,21 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     name_fix :: "write `--replay=NAME` with a valid replay name or artifact path"
     path := ""
     if artifact.ends_with(".jetproof-replay") || artifact.contains("/") {
-        if jet_cli_replay_path_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
+        if jet_cli_replay_path_problem(artifact) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE))
         path = if jet_cli_replay_in_project_cache(artifact) -> jet_cli_entry_join(root, artifact) else -> artifact
     } else {
-        if jet_cli_replay_name_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
+        if jet_cli_replay_name_problem(artifact) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE))
         path = jet_cli_entry_join(root, ".jet/replays/{artifact}.jetproof-replay")
     }
     // ProveReplay.rs `prepare_replay`.
     unavailable :: "replay artifact is corrupt or unavailable"
     recapture :: "recapture the target and retry"
-    if jet_cli_replay_path_problem(path) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
+    if jet_cli_replay_path_problem(path) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR))
     resolved :: if jet_cli_replay_in_project_cache(path) -> jet_cli_entry_join(root, path) else -> path
-    if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
-    stat :: cli_files.stat(resolved) ?? return jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR)
-    if stat.is_symlink || !stat.is_file -> return jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_not_ported_output("inspect --replay <replay artifact>", job.color)
+    if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR))
+    stat :: cli_files.stat(resolved) ?? jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR))
+    if stat.is_symlink || !stat.is_file -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR))
+    jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect --replay <replay artifact>", job.color))
 }
 
 // Carry out one inspect job: check the entry as `check_projection` does (a
@@ -1512,9 +1513,20 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 // the checked program. Resolution's notices go out first. Unannotated
 // because the compile verbs are (Request.jet `jet_cli_compile_file`).
 fn jet_cli_inspect_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
-    output := jet_cli_inspect_run_job(job)
-    if job.notice != "" -> output.stderr = "{job.notice}{output.stderr}"
-    output
+    jet_cli_inspect_noticed(job.notice, jet_cli_inspect_run_job(job))
+}
+
+// A job's output behind resolution's notices.
+fn jet_cli_inspect_noticed(notice: String, output: ^JetDriverVerbOutput) -> JetDriverVerbOutput {
+    noticed := ^output
+    if notice != "" -> noticed.stderr = "{notice}{noticed.stderr}"
+    noticed
+}
+
+// A job that holds a compile result ends the process with its noticed
+// output from inside the scope that owns the result (jet_cli_finish).
+fn jet_cli_inspect_finish(job: JetCLIInspectJob, output: ^JetDriverVerbOutput) -> Never {
+    jet_cli_finish(jet_cli_inspect_noticed(job.notice, ^output))
 }
 
 fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
@@ -1522,7 +1534,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "provenance" -> return jet_cli_inspect_provenance_host(job)
     // Structure prints any retained partial facts ahead of failing diagnostics,
     // so it skips the generic check preflight below.
-    if job.action == "structure" -> return jet_cli_structure_host(job.file, job.color, job.json, job.threads)
+    if job.action == "structure" -> return jet_cli_structure_host(job.file, job.color, job.json, job.threads, job.notice)
     if !cli_files.is_file(job.file) {
         missing :: diagnostic_from_registry("E0603", None, "can't find the file `{jet_cli_inspect_absolute(job.file)}`", "a named `.jet` source path must point at an existing file", "check the spelling, or create the missing file")
         return jet_cli_inspect_check_failed(job, "", [Diagnostic]{missing})
@@ -1550,6 +1562,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 else -> panic("inspect action has no canonical provider: {job.action}")
             }
+            jet_cli_inspect_finish(job, ^output)
         }
     }
     output
@@ -1607,15 +1620,15 @@ fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> J
             sources := request.authorized_sources
             query :: jet_driver_optimization_query(^request)
             errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, sources, query.compile.generated_source_files))
-            if errors.len() > 0 -> return jet_cli_inspect_check_failed(job, source, errors)
-            if query.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
+            if query.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
             runtime := [JetCLIAccelerationRuntime]{}
             if job.action == "accel" {
-                runtime = jet_cli_acceleration_runtime_rows(query.profile, job.file, job.scope, job.subject) ?? return jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color)
+                runtime = jet_cli_acceleration_runtime_rows(query.profile, job.file, job.scope, job.subject) ?? jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color))
             }
             process :: cli_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
             routes :: jet_cli_canonical_routes(query.canonical_routes, process)
-            return jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json)
+            jet_cli_inspect_finish(job, jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json))
         }
     }
 }
