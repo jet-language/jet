@@ -3,10 +3,12 @@
 // (Lower.jet lower_release_write_drops / lower_release_slot_deaths): every owned
 // heap kind rebound inside a loop, then written through the rebound place, and
 // nested places (a field of a local, an element or map entry of a field).
-// Each shape is built natively at two round counts; every round rewrites the
-// place 20000 times, so a leaked old value grows the peak RSS by about 1 MB per
-// round. The static LIR check cannot see these leaks: an inline List or Map is a
-// stack aggregate whose buffer pointer only lives in memory.
+// Each shape is built natively at two round counts and run under GNU time; every
+// round rewrites the place 20000 times, so a leaked old value grows the peak RSS
+// by about 1 MB per round. The static LIR check cannot see these leaks: an
+// inline List or Map is a stack aggregate whose buffer pointer only lives in
+// memory. The programs import nothing (no corelib module beyond the prelude),
+// so each build stays small.
 //
 // usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]
 // Exits 1 when any shape fails to build or run, or its peak RSS grows by more
@@ -14,10 +16,12 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { gnuTime, peakRss } from '../../../Tools/agent/stage1/native-factory.mjs';
 
 const [jet, work, smallArg, largeArg] = process.argv.slice(2);
 if (!jet || !work) { console.error('usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]'); process.exit(64); }
 const smallRounds = Number(smallArg ?? 25), largeRounds = Number(largeArg ?? 200);
+const time = gnuTime();
 
 const shapes = {
   // A list local rebound to a literal inside a loop.
@@ -197,9 +201,7 @@ const shapes = {
     total += holder.items.len()`,
 };
 
-const program = (body, rounds) => `use core.files as write_drops_files
-
-struct WriteDropsHolder { items: [Int] }
+const program = (body, rounds) => `struct WriteDropsHolder { items: [Int] }
 struct WriteDropsTables { table: [String:Int], rows: [[Int]] }
 enum WriteDropsWrap {
     Empty
@@ -220,10 +222,7 @@ fn step(count: Int) -> Int {
 fn run() {
     total := 0
     loop round in 0..<${rounds} { total += step(20000 + round % 3) }
-    status :: write_drops_files.read("/proc/self/status") ?? ""
-    loop line in status.split("\\n").to_list() {
-        if line.starts_with("VmHWM:") -> print("{line} {total}")
-    }
+    print("{total}")
 }
 `;
 
@@ -231,16 +230,20 @@ const peak = (name, rounds) => {
   const dir = path.join(work, `${name}-${rounds}`);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'unit.jet'), program(shapes[name], rounds));
-  fs.writeFileSync(path.join(dir, 'package.jet'), 'name: "write_drops"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    holds: { allow: [FS, FS.Read, IO, Mem.Alloc] }\n}\n');
+  // The closure shape's call is effect-generic, so the program holds every effect.
+  fs.writeFileSync(path.join(dir, 'package.jet'), 'name: "write_drops"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] }\n}\n');
   execFileSync(jet, ['build', 'unit.jet'], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] });
-  const out = execFileSync(path.join(dir, '.jet/build/unit'), { cwd: dir, encoding: 'utf8' });
-  const kb = Number(out.match(/VmHWM:\s+(\d+) kB/)?.[1]);
-  if (!Number.isFinite(kb)) throw new Error(`${name}: no VmHWM line in ${JSON.stringify(out)}`);
+  const timing = path.join(dir, 'run.time');
+  execFileSync(time, ['-v', '-o', timing, path.join(dir, '.jet/build/unit')], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] });
+  const kb = peakRss(timing);
+  if (kb === null) throw new Error(`${name}: no peak RSS in ${timing}`);
   return kb;
 };
 
+// WRITE_DROPS_ONLY=<name,name> checks only those shapes.
+const only = new Set((process.env.WRITE_DROPS_ONLY ?? '').split(',').filter(Boolean));
 let failed = 0;
-for (const name of Object.keys(shapes)) {
+for (const name of Object.keys(shapes).filter((name) => only.size === 0 || only.has(name))) {
   let small, large;
   try {
     small = peak(name, smallRounds);
