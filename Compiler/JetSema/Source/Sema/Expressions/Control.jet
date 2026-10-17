@@ -1442,6 +1442,18 @@ fn sema_expression_window_source(subject: Expr, scopes: SemaScopeTable) -> Expr?
     }
 }
 
+// Whether a pattern subject is spelled `^place`: the subject itself moves
+// into the match, so its payload bindings own what they bind and record no
+// subject places (`^name` is an ordinary move of an owned local, never a
+// take out of a subject that stays live).
+fn sema_expression_subject_moved(subject: Expr) -> Bool Never! {
+    return if subject == {
+        .Paren(inner, _) -> sema_expression_subject_moved(inner)
+        .Place(_, access, _) -> access == PlaceAccess.Take
+        else -> false
+    }
+}
+
 // Names `pattern` binds as write windows under a `&place` subject. An
 // or-pattern's alternatives bind plain read-only values: one name cannot
 // alias two different payload slots.
@@ -1565,8 +1577,10 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, &sources, &diagnostics)
             // An explicit `^name` takes this payload out of its subject
-            // (sema_ownership_move_pattern_payload). A list or map pattern
-            // names its whole subject, so its bindings record none.
+            // (sema_ownership_move_pattern_payload) when the subject stays
+            // live. A `^subject` moves into the match, so its bindings own
+            // their payloads; a list or map pattern names its whole subject,
+            // so its bindings record none.
             collection :: if checked.pattern.shape == {
                 .List(_, _, _) | .Map(_, _, _) -> true
                 else -> false
@@ -1574,7 +1588,7 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
             // copy: the ownership state keeps the payload's subject places
             // for a later `^name`, while the condition binding keeps them for
             // its view provenance (sema_ownership_record_pattern_views).
-            if !window && !collection -> sema_ownership_note_pattern_sources(&state, symbol, sources.copy())
+            if !window && !collection && !sema_expression_subject_moved(subject) -> sema_ownership_note_pattern_sources(&state, symbol, sources.copy())
             &bindings.push(SemaConditionBinding{symbol: symbol, window: window, sources: sources})
         }
         &facts.push(updated)

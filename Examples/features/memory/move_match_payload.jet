@@ -1,7 +1,8 @@
 //! An explicit `^p` of a match payload takes the payload out of its subject,
 //! never a copy. The subject keeps (and later closes) its other fields, and
 //! the taken payload closes exactly once, with its new owner: after the
-//! payload moved, in a loop, and through a nested pattern.
+//! payload moved, in a loop, and through a nested pattern. A `^subject`
+//! moves into the match, so its payload binding owns the payload outright.
 struct Secret {
     id: Int
     token: String
@@ -51,8 +52,20 @@ fn nested() {
     }
 }
 
+// The subject itself moves into the match: the binding owns its payload and
+// `^secret` is an ordinary move; the label closes with the match.
+fn moved_subject() {
+    slot := Slot.Full{secret: Secret{id: 6, token: "owned"}, label: "moved"}
+    if ^slot == .Full(secret, label) {
+        taken := ^secret
+        print("label {label}")
+        consume(^taken)
+    }
+}
+
 fn run() {
     remaining()
     looped()
     nested()
+    moved_subject()
 }
