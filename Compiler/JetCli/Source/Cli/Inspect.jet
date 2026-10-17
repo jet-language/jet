@@ -1473,17 +1473,21 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         if part == "" || part == "." || part == ".." -> clean = false
     }
     if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return ^refusal
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
-                jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR))
-            }
+            checked :: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
+            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_replay_artifact(job, artifact, absolute) else -> jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR))
         }
     }
-    // `compiled` stays live to the end: the job ends the process (jet_cli_inspect_finish).
+    output
+}
+
+// The replay artifact named by `artifact` for the checked entry at `absolute`.
+fn jet_cli_inspect_replay_artifact(job: JetCLIInspectJob, artifact: String, absolute: String) -> JetDriverVerbOutput {
     // Loader.rs `selected_project_root` of the entry's directory.
     directory :: jet_cli_parent(absolute) ?? "."
     root := directory
@@ -1491,21 +1495,21 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     name_fix :: "write `--replay=NAME` with a valid replay name or artifact path"
     path := ""
     if artifact.ends_with(".jetproof-replay") || artifact.contains("/") {
-        if jet_cli_replay_path_problem(artifact) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE))
+        if jet_cli_replay_path_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
         path = if jet_cli_replay_in_project_cache(artifact) -> jet_cli_entry_join(root, artifact) else -> artifact
     } else {
-        if jet_cli_replay_name_problem(artifact) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE))
+        if jet_cli_replay_name_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
         path = jet_cli_entry_join(root, ".jet/replays/{artifact}.jetproof-replay")
     }
     // ProveReplay.rs `prepare_replay`.
     unavailable :: "replay artifact is corrupt or unavailable"
     recapture :: "recapture the target and retry"
-    if jet_cli_replay_path_problem(path) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR))
+    if jet_cli_replay_path_problem(path) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
     resolved :: if jet_cli_replay_in_project_cache(path) -> jet_cli_entry_join(root, path) else -> path
-    if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR))
-    stat :: cli_files.stat(resolved) ?? jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR))
-    if stat.is_symlink || !stat.is_file -> jet_cli_inspect_finish(job, jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR))
-    jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect --replay <replay artifact>", job.color))
+    if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
+    stat :: cli_files.stat(resolved) ?? return jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR)
+    if stat.is_symlink || !stat.is_file -> return jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_not_ported_output("inspect --replay <replay artifact>", job.color)
 }
 
 // Carry out one inspect job: check the entry as `check_projection` does (a
@@ -1607,9 +1611,10 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
 // cannot answer (the #4736 comptime read set) refuses the command rather than
 // reporting no runtime rows.
 fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared :: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Doc)
     if prepared == {
-        .Refused(output) -> return output
+        .Refused(refusal) -> output = ^refusal
         .Prepared(value, _) -> {
             request := ^value
             request.profile = job.profile
@@ -1631,6 +1636,7 @@ fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> J
             jet_cli_inspect_finish(job, jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json))
         }
     }
+    output
 }
 
 // jet-impact `ImpactEdge` / `ImpactRef`.

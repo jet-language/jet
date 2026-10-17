@@ -252,26 +252,30 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     checked :: data ?? jet_cli_finish(jet_cli_ice("evaluating `run` in `{file}` produced no value"))
     value :: sema_user_template_ct_value(checked) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` is not compile-time data"))
     if json {
-        encoded :: ast_comptime_value_json(value) ?? {
-            failure :: jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("format", jet_cli_status_text("JSON")),
-                jet_cli_status_field("kind", jet_cli_status_text("Unsupported")),
-                jet_cli_status_field("byte_offset", jet_cli_status_int(err.byte_offset)),
-                jet_cli_status_field("line", JetCLIStatusValue.Null),
-                jet_cli_status_field("column", JetCLIStatusValue.Null),
-                jet_cli_status_field("path", jet_cli_status_text(err.path)),
-                jet_cli_status_field("reason", jet_cli_status_text(err.reason)),
-                jet_cli_status_field("cause", JetCLIStatusValue.Null),
-            })
-            rendered :: jet_cli_status_render("eval", false, [JetCLIStatusField]{jet_cli_status_field("error", failure)})
-            jet_cli_finish(JetDriverVerbOutput{stdout: "{rendered}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_USER_ERROR})
-        }
+        encoded :: ast_comptime_value_json(value) ?? jet_cli_finish(jet_cli_eval_json_unsupported(err.byte_offset, err.path, err.reason, evaluated.stdout))
         rendered :: jet_cli_status_value_parse(encoded) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` has no JSON form"))
         jet_cli_finish(JetDriverVerbOutput{stdout: "{jet_cli_status_render("eval", true, [JetCLIStatusField]{jet_cli_status_field("value", rendered)})}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_OK})
     }
     shown :: jet_cli_eval_shown(value)
     line :: if shown == .Val(text) -> "{text}\n" else -> ""
     jet_cli_finish(JetDriverVerbOutput{stdout: "{evaluated.stdout}{line}", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+}
+
+// `jet eval --json` when the value of `run` has no JSON encoding: the failed
+// `eval` status on stdout, the program's own output on stderr.
+fn jet_cli_eval_json_unsupported(byte_offset: Int, path: String, reason: String, program_stdout: String) -> JetDriverVerbOutput Never! {
+    failure :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("format", jet_cli_status_text("JSON")),
+        jet_cli_status_field("kind", jet_cli_status_text("Unsupported")),
+        jet_cli_status_field("byte_offset", jet_cli_status_int(byte_offset)),
+        jet_cli_status_field("line", JetCLIStatusValue.Null),
+        jet_cli_status_field("column", JetCLIStatusValue.Null),
+        jet_cli_status_field("path", jet_cli_status_text(path)),
+        jet_cli_status_field("reason", jet_cli_status_text(reason)),
+        jet_cli_status_field("cause", JetCLIStatusValue.Null),
+    })
+    rendered :: jet_cli_status_render("eval", false, [JetCLIStatusField]{jet_cli_status_field("error", failure)})
+    JetDriverVerbOutput{stdout: "{rendered}\n", stderr: program_stdout, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
 // CmdDevTools.rs `render_eval_value`: a present value shows its inner value
@@ -682,15 +686,17 @@ fn jet_cli_compiled_snapshot(compiled: JetCLICompiled) -> JetDriverAuthorizedSou
 }
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // The result is matched in place: binding it out of an owned local
     // would copy its whole MIR program for the length of the native route.
     compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> output = jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    jet_cli_finish(output)
+    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot")))
+    // Unreached (a compile is refused or compiled); a value-returning verb
+    // never ends in its Never exit call.
+    output
 }
 
 // The process's one exit: write a verb's output, then end the process with
@@ -699,7 +705,9 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
 // it: the exit returns the whole program's memory at once, where drop glue
 // would walk every MIR row and fault every swapped-out page back in (minutes
 // after the self-host unit's link). A verb with nothing compiled returns its
-// output to `jet_cli_main` instead.
+// output to `jet_cli_main` instead. Callers keep the shapes the seed backends
+// lower: a value-returning function ends in a value, never in this call, and
+// a `??` fallback calls it directly, not from a block of statements.
 fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
     jet_cli_write_output(output)
     cli_process.exit(output.exit_code)
@@ -763,14 +771,15 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
 }
 
 fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // Matched in place, as jet_cli_compile_build does.
     compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    jet_cli_finish(output)
+    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot")))
+    // Unreached, as in jet_cli_compile_build.
+    output
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
     row :: diagnostic_registry_row("E3015") ?? panic("native output-check failure is registered")

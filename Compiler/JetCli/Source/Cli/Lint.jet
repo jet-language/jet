@@ -12,9 +12,10 @@ fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], 
 }
 
 fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return ^refusal
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
@@ -30,6 +31,7 @@ fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) -> J
             jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR})
         }
     }
+    output
 }
 
 fn jet_cli_lint_max(raw: [String], color: Bool) -> JetCLIIntOption Never! {
@@ -86,19 +88,26 @@ fn jet_cli_lint_complexity(file: String, source: String, raw: [String], color: B
         .Value(value) -> budget = value
         .Refused(output) -> return ^output
     }
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return ^refusal
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
             if errors.len() > 0 -> jet_cli_finish(jet_cli_lint_errors(file, source, errors, color, json))
             if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
+            jet_cli_finish(jet_cli_lint_complexity_report(file, source, budget, color, json))
         }
     }
-    // `compiled` stays live to the end: the verb ends the process (jet_cli_finish).
+    output
+}
+
+// The complexity report of a file that checked: each function's score, then
+// the architecture advice when no budget is set.
+fn jet_cli_lint_complexity_report(file: String, source: String, budget: Int?, color: Bool, json: Bool) -> JetDriverVerbOutput {
     parsed :: jet_driver_parse_user_source(source)
-    if parsed.diagnostics.len() > 0 -> jet_cli_finish(jet_cli_lint_errors(file, source, parsed.diagnostics, color, json))
+    if parsed.diagnostics.len() > 0 -> return jet_cli_lint_errors(file, source, parsed.diagnostics, color, json)
     reports :: jet_cli_complexity_reports(parsed.program)
     rows := [JetCLIStatusValue]{}
     exceeded := [Diagnostic]{}
@@ -136,7 +145,7 @@ fn jet_cli_lint_complexity(file: String, source: String, raw: [String], color: B
     } else {
         if json -> stdout = "{jet_cli_status_json(jet_cli_status_array(rows))}\n"
     }
-    jet_cli_finish(JetDriverVerbOutput{stdout: stdout, stderr: if !json && exceeded.len() > 0 -> diagnostic_render_all(file, source, exceeded, color) else -> "", exit_code: if exceeded.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR})
+    JetDriverVerbOutput{stdout: stdout, stderr: if !json && exceeded.len() > 0 -> diagnostic_render_all(file, source, exceeded, color) else -> "", exit_code: if exceeded.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
 }
 
 fn jet_cli_cost_same(left: Diagnostic, right: Diagnostic) -> Bool Never! {
@@ -165,20 +174,24 @@ fn jet_cli_cost_diagnostics(report: TCostReport, sema: [Diagnostic]) -> [Diagnos
     }
     rows
 }
+// The refusal of a cost query that produced no report.
+fn jet_cli_lint_cost_gap(file: String, gaps: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+    detail :: if gaps.len() > 0 -> gaps.join("; ") else -> "the checked TIR projection did not complete"
+    jet_cli_execute(jet_cli_inspect_b_report("E2104", "cost projection for `{file}` failed", detail, "report the missing checked specialization with this source file; its cost cannot be proved until the compiler lowers that specialization", color, json, JET_DRIVER_EXIT_USER_ERROR))
+}
+
 fn jet_cli_lint_cost(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
-        .Refused(output) -> return output
+        .Refused(refusal) -> output = ^refusal
         .Prepared(request, snapshot) -> {
             query :: jet_driver_cost_query(^request)
             diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, snapshot, query.compile.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
             if errors.len() > 0 -> jet_cli_finish(jet_cli_lint_errors(file, source, errors, color, json))
             if query.compile.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
-            report :: query.report ?? {
-                detail :: if query.gaps.len() > 0 -> query.gaps.join("; ") else -> "the checked TIR projection did not complete"
-                jet_cli_finish(jet_cli_execute(jet_cli_inspect_b_report("E2104", "cost projection for `{file}` failed", detail, "report the missing checked specialization with this source file; its cost cannot be proved until the compiler lowers that specialization", color, json, JET_DRIVER_EXIT_USER_ERROR)))
-            }
+            report :: query.report ?? jet_cli_finish(jet_cli_lint_cost_gap(file, query.gaps, color, json))
             lints :: jet_cli_cost_diagnostics(report, diagnostics)
             if lints.len() == 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: if json -> jet_cli_render_all_json(jet_cli_report_cwd(), file, source, [Diagnostic]{}) else -> "ok: `{file}` has no hidden dynamic costs in loops\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
             count :: lints.len()
@@ -186,4 +199,5 @@ fn jet_cli_lint_cost(file: String, source: String, color: Bool, json: Bool) -> J
             jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR})
         }
     }
+    output
 }

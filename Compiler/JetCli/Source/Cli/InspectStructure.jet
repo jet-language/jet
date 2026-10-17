@@ -1,6 +1,6 @@
 // Source/CmdStructure.rs: checked NameLedger and structure slice of GateLedger.
 // Registry/Core views are generated from canonical Facts.jet and Core.jet.
-use jet_driver.[JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[CoreLeafKind, CoreModuleTypeExport, MIRStructureFact, MIRStructureFactKind, MIRNameFacts, GateLedger, GateKind, Span, Diagnostic, diagnostic_render_all, name_ledger_from_facts]
 use jet_sema.sema_gate_append_structure
 
@@ -110,53 +110,57 @@ fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 // Compilation and ledger failures use inspect.structure, with no human summary.
 // A checked result ends the process behind `notice` (jet_cli_finish).
 fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> return ^refusal
-        .Compiled(result, snapshot) -> {
-            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            errors :: jet_cli_errors(diagnostics)
-            facts :: jet_cli_structure_facts(result)
-            ledger := GateLedger{}
-            if jet_cli_gate_ledger(result) == .Val(storage) {
-                permit :: storage.guard_read()
-                // copy: the compile result's shared gate ledger (owner: its storage cell, still
-                // read by the result) seeds this verb's ledger (owner: `ledger`, rebuilt below on
-                // errors); the read guard only lends a view, so there is no value to move.
-                ledger = permit.value.copy()
-            }
-            if errors.len() > 0 {
-                ledger = GateLedger{}
-                names :: name_ledger_from_facts(MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
-                sema_gate_append_structure(&ledger, names)
-                // Rust preserves any published structure facts on frontend failure.
-                stdout := if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, json) else -> ""
-                stderr := ""
-                if json {
-                    source :: jet_cli_inspection_source(result, snapshot, file)
-                    stdout = "{stdout}{jet_cli_status_render_with_reports("inspect.structure", false, jet_cli_reports_json(jet_cli_report_cwd(), file, source, diagnostics), [JetCLIStatusField]{})}"
-                } else {
-                    loop error in diagnostics {
-                        origin :: if error.origin == .Val(value) -> value.display else -> file
-                        source :: if error.origin == .Val(value) -> value.source else -> jet_cli_inspection_source(result, snapshot, origin)
-                        stderr = "{stderr}{diagnostic_render_all(origin, source, [Diagnostic]{error}, color)}"
-                    }
-                }
-                jet_cli_finish(jet_cli_inspect_noticed(notice, JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}))
-            }
-            if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_ice(problem)))
-            if ledger.diagnostic_rows.len() > 0 {
-                reports := [String]{}
-                stderr := ""
-                loop row in ledger.diagnostic_rows {
-                    source :: jet_cli_inspection_source(result, snapshot, row.source)
-                    if json {
-                        loop report in jet_cli_reports_json(jet_cli_report_cwd(), row.source, source, [Diagnostic]{row.diagnostic}) -> &reports.push(report)
-                    } else { stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}" }
-                }
-                jet_cli_finish(jet_cli_inspect_noticed(notice, JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}))
-            }
-            jet_cli_finish(jet_cli_inspect_noticed(notice, JetDriverVerbOutput{stdout: jet_cli_structure_report(facts, ledger, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}))
-        }
+        .Refused(refusal) -> output = ^refusal
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_structure_result(file, color, json, result, snapshot)))
     }
+    output
+}
+
+fn jet_cli_structure_result(file: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    errors :: jet_cli_errors(diagnostics)
+    facts :: jet_cli_structure_facts(result)
+    ledger := GateLedger{}
+    if jet_cli_gate_ledger(result) == .Val(storage) {
+        permit :: storage.guard_read()
+        // copy: the compile result's shared gate ledger (owner: its storage cell, still
+        // read by the result) seeds this verb's ledger (owner: `ledger`, rebuilt below on
+        // errors); the read guard only lends a view, so there is no value to move.
+        ledger = permit.value.copy()
+    }
+    if errors.len() > 0 {
+        ledger = GateLedger{}
+        names :: name_ledger_from_facts(MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
+        sema_gate_append_structure(&ledger, names)
+        // Rust preserves any published structure facts on frontend failure.
+        stdout := if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, json) else -> ""
+        stderr := ""
+        if json {
+            source :: jet_cli_inspection_source(result, snapshot, file)
+            stdout = "{stdout}{jet_cli_status_render_with_reports("inspect.structure", false, jet_cli_reports_json(jet_cli_report_cwd(), file, source, diagnostics), [JetCLIStatusField]{})}"
+        } else {
+            loop error in diagnostics {
+                origin :: if error.origin == .Val(value) -> value.display else -> file
+                source :: if error.origin == .Val(value) -> value.source else -> jet_cli_inspection_source(result, snapshot, origin)
+                stderr = "{stderr}{diagnostic_render_all(origin, source, [Diagnostic]{error}, color)}"
+            }
+        }
+        return JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    if ledger.diagnostic_rows.len() > 0 {
+        reports := [String]{}
+        stderr := ""
+        loop row in ledger.diagnostic_rows {
+            source :: jet_cli_inspection_source(result, snapshot, row.source)
+            if json {
+                loop report in jet_cli_reports_json(jet_cli_report_cwd(), row.source, source, [Diagnostic]{row.diagnostic}) -> &reports.push(report)
+            } else { stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}" }
+        }
+        return JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    JetDriverVerbOutput{stdout: jet_cli_structure_report(facts, ledger, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

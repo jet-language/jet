@@ -60,9 +60,10 @@ fn jet_cli_compiler_service_answer(op: String, text: String) -> JetDriverVerbOut
 // diagnostic is returned in compiler order; a run with no error whose
 // compile still failed internally is one E2105 row.
 fn jet_cli_compiler_service_check(file: String, source: String) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Program, Val(source), None)
     if compiled == {
-        .Refused(refusal) -> return ^refusal
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() == 0 {
@@ -71,4 +72,5 @@ fn jet_cli_compiler_service_check(file: String, source: String) -> JetDriverVerb
             jet_cli_finish(JetDriverVerbOutput{stdout: compiler_service_check_response(diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }
+    output
 }
