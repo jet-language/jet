@@ -35,7 +35,7 @@ impl Tag.Encode {
 
 // Encode-only: `Tag` has no Decode, so `Labelled` derives Encode alone.
 struct Labelled {
-    tag: Tag
+    #Rename("tag") label: Tag
     id: Int
 }
 
@@ -46,15 +46,15 @@ struct Hook {
 }
 
 fn run() [FieldError]! {
-    task :: Task{name: "ship", level: Level.High, steps: [Step.Wait, Step.Pause(3), Step.Move(dx: 1, dy: -2)], note: None}
-    wire :: json.to_string(task) ?? panic("JSON encode")
+    job :: Task{name: "ship", level: Level.High, steps: [Step.Wait, Step.Pause(3), Step.Move(dx: 1, dy: -2)], note: None}
+    wire :: json.to_string(job) ?? panic("JSON encode")
     print(wire)
     back :: json.decode<Task>(wire)
     print(back.steps.len())
     packed :: json.decode<Task>("{{\"name\":\"pack\",\"level\":\"Low\",\"steps\":[],\"note\":\"fragile\"}}")
     print(packed.note ?? "(none)")
     print(packed.level == Level.Low)
-    print(json.to_string(Labelled{tag: Tag{label: "red"}, id: 4}) ?? panic("JSON encode"))
+    print(json.to_string(Labelled{label: Tag{label: "red"}, id: 4}) ?? panic("JSON encode"))
     hook :: Hook{name: "double", apply: (n) -> n * 2}
     print(hook.apply(21))
 }

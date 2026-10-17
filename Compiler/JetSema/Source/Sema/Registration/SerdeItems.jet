@@ -53,6 +53,7 @@ use jet_foundation.[
     TypeParam,
     UnOp,
     Variant,
+    VariantField,
     VariantPayload,
     ast_binding,
     ast_comptime_key_to_value,
@@ -484,7 +485,8 @@ fn sema_serde_items_allowed_keys(definition: StructDef, items: [Item]) -> [Strin
     loop field in definition.fields {
         if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") -> next
         if sema_serde_items_has_marker(field.serde_markers, "Flatten") {
-            name :: if field.ty == .Named(flattened) -> flattened.copy() else -> return None
+            name := ""
+            if field.ty == .Named(flattened) -> name = flattened.copy() else -> return None
             inner := StructDef?{None}
             loop index in 0..<items.len() {
                 if items[index] == .Struct(candidate) && candidate.name == name {
@@ -773,13 +775,13 @@ fn sema_serde_items_payload_bindings(payload: VariantPayload, prefix: String) ->
 }
 
 fn sema_serde_items_enum_encode_body(definition: EnumDef, span: Span) -> [Stmt] Never! {
-    tag :: sema_serde_items_enum_tag(definition.serde_markers)
+    tag_key :: sema_serde_items_enum_tag(definition.serde_markers)
     untagged :: sema_serde_items_has_marker(definition.serde_markers, "Untagged")
     style :: sema_serde_items_rename_all_style(definition.serde_markers)
     arms := [SwitchArm]{}
     loop variant in definition.variants {
         bindings :: sema_serde_items_payload_bindings(variant.payload, "v")
-        value :: sema_serde_items_enum_wire_value(variant, tag, untagged, style, span)
+        value :: sema_serde_items_enum_wire_value(variant, tag_key, untagged, style, span)
         arm_test :: Expr.PatternTest{subject: sema_serde_items_ident("self", span), pattern: sema_serde_items_variant_pattern(variant.name, bindings, span), span: span}
         &arms.push(SwitchArm{cond: arm_test, body: [Stmt]{sema_serde_items_return(value, span)}, span: span})
     }
@@ -794,7 +796,7 @@ fn sema_serde_items_named_payload_entries(variant: Variant, span: Span) -> [Expr
     entries
 }
 
-fn sema_serde_items_enum_wire_value(variant: Variant, tag: String?, untagged: Bool, style: String?, span: Span) -> Expr Never! {
+fn sema_serde_items_enum_wire_value(variant: Variant, tag_key: String?, untagged: Bool, style: String?, span: Span) -> Expr Never! {
     wire :: sema_serde_items_variant_key(variant, style)
     payload :: if variant.payload == {
         .Unit -> sema_serde_items_dyn_variant("Null", [Expr]{}, span)
@@ -802,7 +804,7 @@ fn sema_serde_items_enum_wire_value(variant: Variant, tag: String?, untagged: Bo
         .Named(_) -> sema_serde_items_dyn_object(sema_serde_items_named_payload_entries(variant, span), span)
     }
     if untagged -> return payload
-    if tag == .Val(tag_name) {
+    if tag_key == .Val(tag_name) {
         // Internally tagged: the tag key names the variant beside its fields,
         // or beside `value` for a single payload.
         entries := [ExprPair]{ExprPair{key: sema_serde_items_string(tag_name, span), value: sema_serde_items_dyn_variant("Text", [Expr]{sema_serde_items_string(wire, span)}, span)}}
@@ -831,7 +833,7 @@ fn sema_serde_items_no_matching_enum(span: Span) -> Stmt Never! {
 }
 
 fn sema_serde_items_enum_decode_body(definition: EnumDef, span: Span) -> [Stmt] Never! {
-    tag :: sema_serde_items_enum_tag(definition.serde_markers)
+    tag_key :: sema_serde_items_enum_tag(definition.serde_markers)
     untagged :: sema_serde_items_has_marker(definition.serde_markers, "Untagged")
     style :: sema_serde_items_rename_all_style(definition.serde_markers)
     body := [Stmt]{}
@@ -845,7 +847,7 @@ fn sema_serde_items_enum_decode_body(definition: EnumDef, span: Span) -> [Stmt] 
         &body.push(sema_serde_items_no_matching_enum(span))
         return body
     }
-    if tag == .Val(tag_name) {
+    if tag_key == .Val(tag_name) {
         tag_tree :: Expr.OrFallback{value: sema_serde_items_method_call(sema_serde_items_ident("tree", span), "field", [Expr]{sema_serde_items_string(tag_name, span)}, span), fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: false, span: span}
         tag_decode :: sema_serde_items_under(tag_name, sema_serde_items_decode_call(tag_tree, Type.String, span), span)
         &body.push(sema_serde_items_binding("tag_value", None, Expr.Try{value: tag_decode, span: span, conversion: TryConvert.NoConversion, context: None}, false, span))
@@ -900,7 +902,8 @@ fn sema_serde_items_enum_decode_body(definition: EnumDef, span: Span) -> [Stmt] 
 // Rust `enum_decode_value`: a named-payload variant decodes every field under
 // its name, accumulates the failures, and builds the variant when none failed.
 fn sema_serde_items_enum_decode_value(variant: Variant, source: Expr, type_name: String, span: Span) -> [Stmt] Never! {
-    fields :: if variant.payload == .Named(named) -> named.copy() else -> return [Stmt]{}
+    fields := [VariantField]{}
+    if variant.payload == .Named(named) -> fields = named.copy() else -> return [Stmt]{}
     stem :: sema_serde_items_stem(variant)
     errors_name :: "jet_serde_enum_{stem}_errors"
     body := [Stmt]{sema_serde_items_binding(errors_name, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span}, true, span)}
