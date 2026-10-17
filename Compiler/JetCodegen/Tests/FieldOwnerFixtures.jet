@@ -8,7 +8,7 @@ fn fc_require(ok: Bool, name: String) {
 }
 
 fn fc_field(owner: Type, member: String) -> JetCodegenResolvedField Never! {
-    jet_codegen_resolve_field_by_name([SemaGraphModuleResult]{}, "", [String]{}, owner, member, "field-owner-contract")
+    jet_codegen_resolve_field_by_name([SemaGraphModuleResult]{}, jet_codegen_nominal_index([SemaGraphModuleResult]{}), "", [String]{}, owner, member, "field-owner-contract")
 }
 
 fn fc_tuple_owners() {
@@ -74,7 +74,7 @@ fn fc_embedded_integer_constants() {
         lowered_key :: jet_codegen_lower_comptime_key(typed_key) ?? panic("exact key was not lowered")
         fc_require(lowered_key == (MIRConstKey.BigInt{decimal: decimal}), "native exact key")
         map_value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{TComptimeMapEntry{key: typed_key, value: TComptimeValue.String{value: "found"}}}}
-        lowered_map :: jet_codegen_lower_comptime_value(map_value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact map was not lowered")
+        lowered_map :: jet_codegen_lower_comptime_value(map_value, jet_codegen_nominal_index([SemaGraphModuleResult]{}), "", [String]{}) ?? panic("exact map was not lowered")
         fc_require(lowered_map == (MIRConstant.Map{entries: [MIRConstMapEntry]{MIRConstMapEntry{key: lowered_key, value: MIRConstant.String{value: "found"}}}}), "map retains exact key")
         checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, program, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
         expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
@@ -83,7 +83,7 @@ fn fc_embedded_integer_constants() {
         prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment, program) ?? panic("prepared integer was not checked")
         fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
         if checked.kind == .CtLit(value) {
-            lowered :: jet_codegen_lower_comptime_value(value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact integer was not lowered")
+            lowered :: jet_codegen_lower_comptime_value(value, jet_codegen_nominal_index([SemaGraphModuleResult]{}), "", [String]{}) ?? panic("exact integer was not lowered")
             fc_require(lowered == (MIRConstant.BigInt{decimal: decimal}), "native MIR keeps exact decimal")
         }
     }

@@ -116,7 +116,7 @@ fn jet_codegen_finish_owned_destructure(builder: &JetCodegenBuilder, program: Je
             loop field in fields -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.name, binds, span)
         }
         .Named(name) | .Apply(name, _) -> {
-            identity :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
+            identity :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names)
             if identity == {
                 .Val(nominal_identity) -> {
                     loop semantic_module in program.modules {

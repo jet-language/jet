@@ -82,6 +82,7 @@ use jet_foundation.[
 ]
 use jet_sema.[
     SemaGraphModuleResult,
+    sema_registration_is_compiler_owned_enum,
 ]
 
 struct JetCodegenBinding {
@@ -620,7 +621,7 @@ fn jet_codegen_type_generic_names(definition: TTypeDef) -> [String] Never! {
     names
 }
 
-fn jet_codegen_owner_index(modules: [SemaGraphModuleResult]) -> JetCodegenOwnerIndex Never! {
+fn jet_codegen_owner_index(modules: [SemaGraphModuleResult], nominals: JetCodegenNominalIndex) -> JetCodegenOwnerIndex Never! {
     type_method_generics := [String:[String]]{}
     impl_method_targets := [String:Type]{}
     type_generics_by_name := [String:[String]]{}
@@ -653,7 +654,7 @@ fn jet_codegen_owner_index(modules: [SemaGraphModuleResult]) -> JetCodegenOwnerI
             }
         }
     }
-    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules), closure_only: false, closure_methods: [String:Bool]{}}
+    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules, nominals), closure_only: false, closure_methods: [String:Bool]{}}
 }
 
 struct JetCodegenOwnerTypeBindings {
@@ -849,10 +850,10 @@ fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, own
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::new
 // The program-wide inputs move into the program, which owns them.
-fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex, edition: String) -> JetCodegenProgram Never! {
-    owners := jet_codegen_owner_index(modules)
-    nominals := jet_codegen_nominal_index(modules)
-    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, nominals: ^nominals, source_files: source_files, source_index: source_index, edition: edition, stop_points: false, comptime_budget: false}
+// The nominal index is built over `modules` (jet_codegen_nominal_index).
+fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], nominals: ^JetCodegenNominalIndex, field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex, edition: String) -> JetCodegenProgram Never! {
+    owners := jet_codegen_owner_index(modules, nominals)
+    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, nominals: nominals, source_files: source_files, source_index: source_index, edition: edition, stop_points: false, comptime_budget: false}
 }
 
 // One nominal of `modules`: its module row, its row in that module's
@@ -870,6 +871,18 @@ struct JetCodegenTypeDefRef {
     definition_index: Int
 }
 
+// A checked nominal a spelling resolves to outside the current module, with
+// where a scan of the modules meets it: its module row, then its rank in that
+// module (the Core registry's nominal 0, the exact qualified spelling 1, Core
+// builtin owner `j` 2 + j). Merging candidates from several tables keeps the
+// one that scan met first (jet_codegen_nominal_candidate_first).
+struct JetCodegenNominalCandidate {
+    module_index: Int
+    rank: Int
+    module_name: String
+    identity: JetCodegenNominalIdentity
+}
+
 // Program-wide lookup rows over JetCodegenProgram.modules, built once by
 // jet_codegen_nominal_index. Every list keeps module, then declaration order,
 // so the first row is the one a scan of the modules met first.
@@ -881,6 +894,32 @@ struct JetCodegenNominalIndex {
     type_defs_by_name: [String:[JetCodegenTypeDefRef]]
     // MIR type ID values of the DefaultErr type definitions.
     default_err_ids: [U64:Bool]
+    // Module identity -> its scope row in `scope_nominals` and `scope_owners`.
+    scopes: [String:Int]
+    // Per scope: each declared nominal name -> its identity in the first
+    // module of that identity declaring the name.
+    scope_nominals: [[String:JetCodegenNominalIdentity]]
+    // Per scope: each Core builtin owner name -> the owners of that name the
+    // scope's modules declare, in module and owner order.
+    scope_owners: [[String:[JetCodegenNominalCandidate]]]
+    // Nominal name -> the `<corelib>/` modules' nominals of that name.
+    corelib_nominals: [String:[JetCodegenNominalCandidate]]
+    // Exact qualified key `<module identity>::<leaf>` -> the first module
+    // nominal it names.
+    qualified_nominals: [String:JetCodegenNominalCandidate]
+    // Core builtin owner symbol key -> the first owner carrying it.
+    owner_keys: [String:JetCodegenNominalCandidate]
+    // Core type leaf -> the one Core module exporting it ("" when several do).
+    core_type_modules: [String:String]
+    // The one original Prelude `Err` (jet_codegen_default_err_identity).
+    default_err: JetCodegenNominalIdentity?
+    // Why the default error rows, or a Core builtin owner row, are invalid
+    // ("" for none): a lookup that reaches them panics with it, as the scan
+    // of every module did.
+    default_err_fault: String
+    owner_fault: String
+    // Declared traits by spelling (jet_codegen_trait_names).
+    traits: JetCodegenTraitNames
 }
 
 fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNominalIndex Never! {
@@ -888,10 +927,26 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
     type_defs_by_key := [String:[JetCodegenTypeDefRef]]{}
     type_defs_by_name := [String:[JetCodegenTypeDefRef]]{}
     default_err_ids := [U64:Bool]{}
+    default_err := JetCodegenNominalIdentity?{None}
+    default_err_fault := ""
+    scopes := [String:Int]{}
+    scope_modules := [[Int]]{}
+    corelib_nominals := [String:[JetCodegenNominalCandidate]]{}
+    qualified_nominals := [String:JetCodegenNominalCandidate]{}
+    owner_keys := [String:JetCodegenNominalCandidate]{}
+    owner_fault := ""
     loop module_index in 0..<modules.len() {
+        semantic_module :: modules[module_index]
+        identity :: semantic_module.module_identity
+        if scopes.get(identity) == None {
+            scopes[identity] = scope_modules.len()
+            &scope_modules.push([Int]{})
+        }
+        scope :: scopes.get(identity) ?? panic("nominal index lost a module scope row")
+        &scope_modules[scope].push(module_index)
         last_definition := [String:Int]{}
-        loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
-            definition :: modules[module_index].declarations.type_defs[definition_index]
+        loop definition_index in 0..<semantic_module.declarations.type_defs.len() {
+            definition :: semantic_module.declarations.type_defs[definition_index]
             last_definition[definition.name] = definition_index
             reference :: JetCodegenTypeDefRef{module_index: module_index, definition_index: definition_index}
             by_key := type_defs_by_key.get(definition.key) ?? [JetCodegenTypeDefRef]{}
@@ -900,16 +955,101 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
             by_name := type_defs_by_name.get(definition.name) ?? [JetCodegenTypeDefRef]{}
             &by_name.push(reference)
             type_defs_by_name[definition.name] = by_name
-            if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) -> default_err_ids[mir_type_id(definition.key).value] = true
+            if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
+                default_err_ids[mir_type_id(definition.key).value] = true
+                if default_err_fault == "" {
+                    if semantic_module.nominal_positions.get(definition.name) == .Val(position) {
+                        key :: jet_codegen_nominal_type_key(identity, semantic_module.nominals[position])
+                        if default_err == .Val(existing) {
+                            if existing.key != key -> default_err_fault = "ambiguous checked nominal type identity in Codegen input"
+                        } else {
+                            default_err = Val(JetCodegenNominalIdentity{module_identity: identity, name: semantic_module.nominals[position].symbol.name, key: key, qualified_name: key})
+                        }
+                    } else {
+                        default_err_fault = "the compiler-owned default error has no checked nominal row"
+                    }
+                }
+            }
         }
-        loop nominal_index in 0..<modules[module_index].nominals.len() {
-            nominal :: modules[module_index].nominals[nominal_index]
+        corelib :: identity.starts_with("<corelib>/")
+        loop nominal_index in 0..<semantic_module.nominals.len() {
+            nominal :: semantic_module.nominals[nominal_index]
             found := rows.get(nominal.symbol.id.key) ?? [JetCodegenNominalRow]{}
             &found.push(JetCodegenNominalRow{module_index: module_index, nominal_index: nominal_index, type_def_index: last_definition.get(nominal.symbol.name) ?? -1})
             rows[nominal.symbol.id.key] = found
+            // Spellings resolve to the first nominal of each name only.
+            if semantic_module.nominal_positions.get(nominal.symbol.name) != (Val(nominal_index)) -> next
+            if corelib {
+                key :: jet_codegen_nominal_type_key(identity, nominal)
+                candidates := corelib_nominals.get(nominal.symbol.name) ?? [JetCodegenNominalCandidate]{}
+                &candidates.push(JetCodegenNominalCandidate{module_index: module_index, rank: 0, module_name: semantic_module.module_name, identity: JetCodegenNominalIdentity{module_identity: identity, name: nominal.symbol.name, key: key, qualified_name: key}})
+                corelib_nominals[nominal.symbol.name] = candidates
+            }
+            // The key of a nominal that is not a compiler-owned enum is
+            // exactly `<module identity>::<name>`.
+            if identity != "" && !sema_registration_is_compiler_owned_enum(nominal) {
+                key :: jet_codegen_nominal_type_key(identity, nominal)
+                if qualified_nominals.get(key) == None {
+                    qualified_nominals[key] = JetCodegenNominalCandidate{module_index: module_index, rank: 1, module_name: semantic_module.module_name, identity: JetCodegenNominalIdentity{module_identity: identity, name: nominal.symbol.name, key: key, qualified_name: key}}
+                }
+            }
+        }
+        loop owner_index in 0..<semantic_module.declarations.core_builtin_owners.len() {
+            owner :: semantic_module.declarations.core_builtin_owners[owner_index]
+            fault :: jet_codegen_core_owner_fault(owner, semantic_module)
+            if fault != "" {
+                if owner_fault == "" -> owner_fault = fault
+                next
+            }
+            if owner_keys.get(owner.symbol.key) == None {
+                owner_keys[owner.symbol.key] = JetCodegenNominalCandidate{module_index: module_index, rank: 2 + owner_index, module_name: semantic_module.module_name, identity: jet_codegen_core_owner_identity(owner, semantic_module)}
+            }
         }
     }
-    JetCodegenNominalIndex{rows: rows, type_defs_by_key: type_defs_by_key, type_defs_by_name: type_defs_by_name, default_err_ids: default_err_ids}
+    scope_nominals := [[String:JetCodegenNominalIdentity]]{}
+    scope_owners := [[String:[JetCodegenNominalCandidate]]]{}
+    loop members in scope_modules {
+        names := [String:JetCodegenNominalIdentity]{}
+        owners := [String:[JetCodegenNominalCandidate]]{}
+        loop module_index in members {
+            semantic_module :: modules[module_index]
+            loop nominal_index in 0..<semantic_module.nominals.len() {
+                nominal :: semantic_module.nominals[nominal_index]
+                if names.get(nominal.symbol.name) != None -> next
+                key :: jet_codegen_nominal_type_key(semantic_module.module_identity, nominal)
+                names[nominal.symbol.name] = JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal.symbol.name, key: key, qualified_name: key}
+            }
+            loop owner_index in 0..<semantic_module.declarations.core_builtin_owners.len() {
+                owner :: semantic_module.declarations.core_builtin_owners[owner_index]
+                // An invalid owner panics through `owner_fault` first.
+                if jet_codegen_core_owner_fault(owner, semantic_module) != "" -> next
+                candidates := owners.get(owner.name) ?? [JetCodegenNominalCandidate]{}
+                &candidates.push(JetCodegenNominalCandidate{module_index: module_index, rank: 2 + owner_index, module_name: semantic_module.module_name, identity: jet_codegen_core_owner_identity(owner, semantic_module)})
+                owners[owner.name] = candidates
+            }
+        }
+        &scope_nominals.push(^names)
+        &scope_owners.push(^owners)
+    }
+    JetCodegenNominalIndex{
+        rows: rows,
+        type_defs_by_key: type_defs_by_key,
+        type_defs_by_name: type_defs_by_name,
+        default_err_ids: default_err_ids,
+        scopes: scopes,
+        scope_nominals: scope_nominals,
+        scope_owners: scope_owners,
+        corelib_nominals: corelib_nominals,
+        qualified_nominals: qualified_nominals,
+        owner_keys: owner_keys,
+        // Read only to pick among `corelib_nominals`: no rows, no registry scan
+        // (jet_codegen_lower_type builds an index over no modules per type).
+        core_type_modules: if corelib_nominals.len() == 0 -> [String:String]{} else -> jet_codegen_core_type_modules(),
+        default_err: default_err,
+        default_err_fault: default_err_fault,
+        owner_fault: owner_fault,
+        traits: jet_codegen_trait_names(modules),
+    }
 }
 
 // A builder ready to lower `function` against `program`.
@@ -1862,7 +2002,7 @@ fn jet_codegen_drop_field_names(builder: JetCodegenBuilder, program: JetCodegenP
             return names
         }
         .Named(name) | .Apply(name, _) -> {
-            identity :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) ?? return names
+            identity :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) ?? return names
             row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? return names
             if program.modules[row.module_index].declarations.type_defs[row.definition_index].kind == .Struct(fields, _) {
                 loop field in fields {
@@ -1893,7 +2033,7 @@ fn jet_codegen_is_consuming_close_receiver(builder: JetCodegenBuilder, program: 
 fn jet_codegen_register_drop_leaves(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, initialized: Bool, structural_root: Bool, visiting: [String]) Never! {
     ownership :: jet_codegen_ownership(ty)
     if ownership.drop == MIRDropKind.NoDrop -> return
-    key :: "{jet_codegen_type_instance_id(ty, program.modules, builder.function.module_identity, builder.generic_type_names).value}"
+    key :: "{jet_codegen_type_instance_id(ty, program.nominals, builder.function.module_identity, builder.generic_type_names).value}"
     if !structural_root && (jet_codegen_nominal_close_function(builder, program, ty) != None || visiting.contains(key) || jet_codegen_is_core_file_owner_type(builder, program, ty)) {
         jet_codegen_register_drop_live(&builder, program, place, ty, ownership, initialized)
         return

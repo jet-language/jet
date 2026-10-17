@@ -1388,7 +1388,7 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
     if operation == {
         .DurationNew(unit, _) -> {
             if route.borrow_mask.len() != 2 -> panic("checked Duration constructor route has an invalid closed ABI")
-            type_id := jet_codegen_type_instance_id(Type.Named{name: "DurationUnit"}, program.modules, builder.function.module_identity, builder.generic_type_names)
+            type_id := jet_codegen_type_instance_id(Type.Named{name: "DurationUnit"}, program.nominals, builder.function.module_identity, builder.generic_type_names)
             unit_value := jet_codegen_emit_value(&builder, program, expression.span, Type.Named{name: "DurationUnit"}, MIROperation.Enum{type_id: type_id, variant: unit, args: [MIREnumArg]{}})
             &lowered_args.push(unit_value)
         }

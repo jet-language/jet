@@ -893,7 +893,7 @@ fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, program: Je
             target_inner
         }
         .Named(name) -> {
-            if !jet_codegen_trait_bound_is_declared(program.modules, name, builder.function.module_identity) -> panic("checked Option.zip trait field names an undeclared trait")
+            if !jet_codegen_trait_bound_is_declared(program.nominals, name, builder.function.module_identity) -> panic("checked Option.zip trait field names an undeclared trait")
             Type.TraitObject{bounds: [String]{name}}
         }
         else -> panic("checked Option.zip tuple field has no coercion fact")
@@ -901,7 +901,7 @@ fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, program: Je
     if source_inner == {
         .TraitObject(_) -> panic("checked Option.zip trait field has no canonical upcast")
         .Named(name) -> {
-            if jet_codegen_trait_bound_is_declared(program.modules, name, builder.function.module_identity) -> panic("checked Option.zip trait field has no canonical upcast")
+            if jet_codegen_trait_bound_is_declared(program.nominals, name, builder.function.module_identity) -> panic("checked Option.zip trait field has no canonical upcast")
         }
         else -> {}
     }
@@ -1031,7 +1031,7 @@ fn jet_codegen_lower_builtin_dynamic_remove(builder: &JetCodegenBuilder, program
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, true)
     item := jet_codegen_lower_expr(&builder, program, args[0])
     selector := jet_codegen_lower_expr(&builder, program, args[1])
-    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     by_value := jet_codegen_emit_value(&builder, program, args[1].span, Type.Bool, MIROperation.EnumIs{subject: selector, owner: owner, variant: "Val"})
     value_block := jet_codegen_new_block(&builder, program, expression.span, "list-remove-value")
     slot_block := jet_codegen_new_block(&builder, program, expression.span, "list-remove-slot")
@@ -1064,7 +1064,7 @@ fn jet_codegen_lower_builtin_dynamic_priority_queue_remove(builder: &JetCodegenB
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, true)
     item := jet_codegen_lower_expr(&builder, program, args[0])
     selector := jet_codegen_lower_expr(&builder, program, args[1])
-    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     by_value := jet_codegen_emit_value(&builder, program, args[1].span, Type.Bool, MIROperation.EnumIs{subject: selector, owner: owner, variant: "Val"})
     value_block := jet_codegen_new_block(&builder, program, expression.span, "priority-queue-remove-value")
     slot_block := jet_codegen_new_block(&builder, program, expression.span, "priority-queue-remove-slot")

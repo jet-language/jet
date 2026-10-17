@@ -1028,7 +1028,7 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, program: JetCod
             return mir_field_id("{mir_type_identity_key(tuple_type)}::{member}")
         }
         else -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, untagged, member, builder.function.key)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, untagged, member, builder.function.key)
             return jet_codegen_mir_field_id(resolved)
         }
     }
@@ -1359,7 +1359,7 @@ fn jet_codegen_is_core_file_owner_type(builder: JetCodegenBuilder, program: JetC
             name.ends_with("::TempFile") || name.ends_with("::FileLock")
     }
     if !is_file_owner_name -> return false
-    identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
+    identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names)
     if identity == None -> return false
     owner :: identity ?? return false
     module_index :: program.owners.hooks.module_positions.get(owner.module_identity) ?? return false
@@ -1400,7 +1400,7 @@ fn jet_codegen_lower_index_field_assign(builder: &JetCodegenBuilder, program: Je
     element_type := jet_codegen_index_element_type(assign.base.ty, kind)
     location := jet_codegen_assignment_panic_location(&builder, program, span, assign.is_map)
     base_place := jet_codegen_index_place(&builder, program, assign.base, assign.index, tir_kind, element_type, MIRAccess.Write, location, span)
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, assign.field, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, element_type, assign.field, builder.function.key)
     place := jet_codegen_project_field_place(&builder, program, base_place, span, assign.field_ty, jet_codegen_mir_field_id(resolved))
     assigned := if assign.op == {
         None -> right
@@ -1619,7 +1619,7 @@ fn jet_codegen_index_hook_function(builder: JetCodegenBuilder, program: JetCodeg
     if owner_name_option == None -> return None
     owner_name :: owner_name_option ?? return None
     if builder.generic_type_names.contains(owner_name) -> return None
-    owner_identity_option := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    owner_identity_option := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     if owner_identity_option == None -> return None
     owner_identity :: owner_identity_option ?? return None
     owner_key :: jet_codegen_qualified_function_key(owner_identity.module_identity, owner_identity.name)
@@ -1703,7 +1703,7 @@ fn jet_codegen_index_hook_trait_method(builder: JetCodegenBuilder, program: JetC
 }
 
 fn jet_codegen_index_hook_trait_callee(builder: JetCodegenBuilder, program: JetCodegenProgram, trait_method: JetCodegenIndexHookTraitMethod, owner: MIRType) -> MIRCallee Never! {
-    trait_ref := jet_codegen_mir_trait_ref_for_symbol(program.modules, trait_method.symbol)
+    trait_ref := jet_codegen_mir_trait_ref_for_symbol(program.modules, program.nominals, trait_method.symbol)
     method_id := MIRTraitMethodID{value: stable_id("mir-trait-method", "{trait_method.trait_key}::{trait_method.method.key}")}
     MIRCallee.TraitMethod{method: method_id, trait_ref: trait_ref, receiver: owner}
 }
@@ -2581,7 +2581,7 @@ fn jet_codegen_fallback_join_value(builder: &JetCodegenBuilder, program: JetCode
     if type_identity_key(source_type) == type_identity_key(expression.ty) -> return value.copy()
     // A literal keeps its written nominal name (`Effect`) while a declared
     // slot carries the canonical `module::Effect`; both qualify to one type.
-    if type_identity_key(jet_codegen_qualify_type(source_type, program.modules, builder.function.module_identity, builder.generic_type_names)) == type_identity_key(jet_codegen_qualify_type(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)) -> return value.copy()
+    if type_identity_key(jet_codegen_qualify_type(source_type, program.nominals, builder.function.module_identity, builder.generic_type_names)) == type_identity_key(jet_codegen_qualify_type(expression.ty, program.nominals, builder.function.module_identity, builder.generic_type_names)) -> return value.copy()
     if expression.ty == {
         .TraitObject(_) -> {
             jet_codegen_require_trait_box_target(expression.ty, builder, program)

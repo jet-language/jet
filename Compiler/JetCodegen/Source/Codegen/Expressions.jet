@@ -439,8 +439,8 @@ fn jet_codegen_move_place_root(expression: TExpr) -> Bool Never! {
     }
 }
 
-fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool Never! {
-    jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
+fn jet_codegen_trait_bound_is_declared(nominals: JetCodegenNominalIndex, name: String, preferred_module_identity: String) -> Bool Never! {
+    jet_codegen_resolve_trait_name(nominals.traits, name, preferred_module_identity) != None
 }
 
 // Rust mir.rs call_arg: `box_as_trait` lowers its single-trait target type
@@ -1089,7 +1089,7 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
     }
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))
-    type_id := jet_codegen_type_instance_id(Type.Named{name: type_name}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    type_id := jet_codegen_type_instance_id(Type.Named{name: type_name}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     call := jet_codegen_precise_builtin_route(&builder, program, type_name, function, values.len(), carrier)
     jet_codegen_note_core_module(&builder, program, "core.math")
     jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: values}})
@@ -1634,7 +1634,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
             if field == {
                 None -> return Val(base)
                 Val(name) -> {
-                    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_ty, name, builder.function.key)
+                    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, element_ty, name, builder.function.key)
                     return Val(jet_codegen_project_field_place(&builder, program, base, expression.span, expression.ty, jet_codegen_mir_field_id(resolved)))
                 }
             }
@@ -1772,7 +1772,7 @@ fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, program: JetCo
         .Apply(name, _) -> name
         else -> { return false }
     }
-    found :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    found :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     // A compiler-owned record row (`Range`, a Core record) stores every field.
     identity :: found ?? return jet_codegen_compiler_owned_record_field(owner_name, reference.name) != None
     loop semantic_module in program.modules {
@@ -1844,7 +1844,7 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
     // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
     // nanosecond carrier, not a record. `d.ns` reads that carrier through the
     // canonical scalar projection on every tier, unless a declared row owns it.
-    if reference.name == "ns" && receiver_type == (Type.Named{name: "Duration"}) && jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, "Duration", builder.generic_type_names) == None && !jet_codegen_is_compiler_owned_row("Duration") {
+    if reference.name == "ns" && receiver_type == (Type.Named{name: "Duration"}) && jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, "Duration", builder.generic_type_names) == None && !jet_codegen_is_compiler_owned_row("Duration") {
         carrier :: TExpr{ty: Type.Int, kind: TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.DurationNsValue, args: [TExpr]{}}, span: expression.span, integer_bounds: None, cost: None}
         return jet_codegen_lower_expr(&builder, program, carrier)
     }
@@ -1893,7 +1893,7 @@ fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCod
         .Option(inner) -> inner
         else -> panic("checked optional field base is not optional")
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
     field_id := jet_codegen_mir_field_id(resolved)
     selected_type := if {
         flatten -> expression.ty
@@ -1979,7 +1979,7 @@ fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: 
 
 
 fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?) -> MIRValueID {
-    owner :: jet_codegen_mir_type_id_for_type(program.modules, builder.function.module_identity, builder.generic_type_names, expression.ty)
+    owner :: jet_codegen_mir_type_id_for_type(program.nominals, builder.function.module_identity, builder.generic_type_names, expression.ty)
     lowered_fields := [MIRFieldValue]{}
     boxed_fields := [MIRFieldID]{}
     loop field in fields {
@@ -2027,7 +2027,7 @@ fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
     }
 }
 
-fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MIRConstant? {
+fn jet_codegen_lower_comptime_value(value: TComptimeValue, nominals: JetCodegenNominalIndex, module_identity: String, generic_names: [String]) -> MIRConstant? {
     if value == {
         .Int(number) -> Val(mir_integer_constant(number, None, None))
         .Float(number, bits) -> Val(MIRConstant.Float{value: number, f32: bits == 32, spelling: None})
@@ -2039,7 +2039,7 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
         .List(values) -> {
             lowered := [MIRConstant]{}
             loop item in values {
-                lowered_value :: jet_codegen_lower_comptime_value(item, modules, module_identity, generic_names) ?? return None
+                lowered_value :: jet_codegen_lower_comptime_value(item, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(lowered_value)
             }
             Val(MIRConstant.List{values: lowered})
@@ -2048,7 +2048,7 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
             lowered := [MIRConstMapEntry]{}
             loop entry in entries {
                 key :: jet_codegen_lower_comptime_key(entry.key) ?? return None
-                item :: jet_codegen_lower_comptime_value(entry.value, modules, module_identity, generic_names) ?? return None
+                item :: jet_codegen_lower_comptime_value(entry.value, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(MIRConstMapEntry{key: key, value: item})
             }
             Val(MIRConstant.Map{entries: lowered})
@@ -2056,7 +2056,7 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
         .Struct(type_name, fields) -> {
             lowered := [MIRConstField]{}
             loop field in fields {
-                item :: jet_codegen_lower_comptime_value(field.value, modules, module_identity, generic_names) ?? return None
+                item :: jet_codegen_lower_comptime_value(field.value, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(MIRConstField{name: field.name, value: item})
             }
             Val(MIRConstant.Struct{type_name: type_name, fields: lowered})
@@ -2064,20 +2064,20 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
         .Enum(type_name, variant, args) -> {
             lowered := [MIRConstEnumArg]{}
             loop arg in args {
-                item :: jet_codegen_lower_comptime_value(arg.value, modules, module_identity, generic_names) ?? return None
+                item :: jet_codegen_lower_comptime_value(arg.value, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(MIRConstEnumArg{name: arg.name, value: item})
             }
             Val(MIRConstant.Enum{type_name: type_name, variant: variant, args: lowered})
         }
         .Present(inner) -> {
-            lowered :: jet_codegen_lower_comptime_value(inner, modules, module_identity, generic_names) ?? return None
+            lowered :: jet_codegen_lower_comptime_value(inner, nominals, module_identity, generic_names) ?? return None
             Val(MIRConstant.Present{value: lowered})
         }
         .Failed(report) -> {
             lowered_report := if report == {
-                .Clean(ty) -> MIRConstReport.Clean{ty: jet_codegen_lower_type_with_modules(ty, modules, module_identity, generic_names)}
+                .Clean(ty) -> MIRConstReport.Clean{ty: jet_codegen_lower_type_with_nominals(ty, nominals, module_identity, generic_names)}
                 .Told(inner) -> {
-                    lowered :: jet_codegen_lower_comptime_value(inner, modules, module_identity, generic_names) ?? return None
+                    lowered :: jet_codegen_lower_comptime_value(inner, nominals, module_identity, generic_names) ?? return None
                     MIRConstReport.Told{value: lowered}
                 }
             }
@@ -2418,7 +2418,7 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
 
 fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, operation: String) -> TFunc? Never! {
     head :: jet_codegen_type_head_name(owner_type) ?? return None
-    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, head, builder.generic_type_names) ?? return None
+    owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, head, builder.generic_type_names) ?? return None
     source_module := false
     loop semantic_module in program.modules {
         if semantic_module.module_identity == owner.module_identity && semantic_module.module_name == "core.math" {
@@ -2521,7 +2521,7 @@ struct JetCodegenEnumVariantShape {
 
 fn jet_codegen_enum_variant_shape(builder: JetCodegenBuilder, program: JetCodegenProgram, enum_type: String, variant_name: String, named: Bool) -> JetCodegenEnumVariantShape Never! {
     names := [String]{}
-    identity_option := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, enum_type, builder.generic_type_names)
+    identity_option := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, enum_type, builder.generic_type_names)
     if identity_option == .Val(identity) {
         row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? panic("checked enum literal `{enum_type}` has no declaration facts")
         definition :: program.modules[row.module_index].declarations.type_defs[row.definition_index]
@@ -2624,7 +2624,7 @@ fn jet_codegen_lower_enum_literal(builder: &JetCodegenBuilder, program: JetCodeg
         else -> false
     }
     shape := jet_codegen_enum_variant_shape(builder, program, enum_type, variant, named)
-    type_id := jet_codegen_type_instance_id(Type.Named{name: enum_type}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    type_id := jet_codegen_type_instance_id(Type.Named{name: enum_type}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     args := jet_codegen_lower_enum_payload(&builder, program, shape, variant, payload)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: variant, args: args})
 }
@@ -2707,7 +2707,7 @@ fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, program: JetC
             }
         }
     }
-    type_id := jet_codegen_type_instance_id(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)
+    type_id := jet_codegen_type_instance_id(expression.ty, program.nominals, builder.function.module_identity, builder.generic_type_names)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
 }
 fn jet_codegen_symbol_name(builder: JetCodegenBuilder, program: JetCodegenProgram, symbol: SymbolID) -> String Never! {
@@ -2741,7 +2741,7 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
             loop trait_method in definition.methods {
                 if trait_method.name != method.name -> next
                 if selected != None -> panic("checked trait method identity is ambiguous")
-                selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, symbol), method: trait_method})
+                selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, program.nominals, symbol), method: trait_method})
             }
         }
     }
@@ -2750,7 +2750,7 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
     trait_name :: parts[parts.len() - 1]
     preferred_module := builder.function.module_identity
     if parts.len() >= 4 && parts[1] != "" -> preferred_module = parts[1]
-    trait_ref :: jet_codegen_resolve_trait_ref(program.modules, trait_name, preferred_module) ?? panic("checked call of trait `{trait_name}` method `{method.name}` has no trait declaration to dispatch through")
+    trait_ref :: jet_codegen_resolve_trait_name(program.nominals.traits, trait_name, preferred_module) ?? panic("checked call of trait `{trait_name}` method `{method.name}` has no trait declaration to dispatch through")
     loop semantic_module in program.modules {
         loop definition in semantic_module.declarations.traits {
             if mir_trait_ref(jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)).id != trait_ref.id -> next
@@ -3020,8 +3020,8 @@ fn jet_codegen_is_plain_call_return(builder: JetCodegenBuilder, program: JetCode
     }
     success :: jet_codegen_never_carrier_success(checked) ?? return false
     if jet_codegen_unwrap_pattern_tags(success) == jet_codegen_unwrap_pattern_tags(returned) -> return true
-    qualified_success :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(success), program.modules, builder.function.module_identity, builder.generic_type_names)
-    qualified_returned :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(returned), program.modules, builder.function.module_identity, builder.generic_type_names)
+    qualified_success :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(success), program.nominals, builder.function.module_identity, builder.generic_type_names)
+    qualified_returned :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(returned), program.nominals, builder.function.module_identity, builder.generic_type_names)
     qualified_success == qualified_returned
 }
 
@@ -3943,7 +3943,7 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodege
             return None
         }
     }
-    identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
+    identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names)
     if identity == None -> return None
     owner :: identity ?? return None
     row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(owner.module_identity, owner.name)) ?? return None
@@ -3993,7 +3993,7 @@ fn jet_codegen_is_default_err_type(builder: JetCodegenBuilder, program: JetCodeg
 // The unit's one original Prelude `Err`; its own registered module owns it,
 // so it is not looked up in the converting function's module.
 fn jet_codegen_default_err_type(program: JetCodegenProgram) -> Type {
-    identity :: jet_codegen_default_err_identity(program.modules) ?? panic("checked default-error conversion has no canonical compiler-owned Err")
+    identity :: jet_codegen_default_err_identity(program.nominals) ?? panic("checked default-error conversion has no canonical compiler-owned Err")
     Type.Named{name: identity.key}
 }
 
@@ -4191,9 +4191,9 @@ fn jet_codegen_widen_result_payload(builder: &JetCodegenBuilder, program: JetCod
     }
     source := jet_codegen_builtin_untag(value.ty)
     if source == .Union(_) -> return lowered.copy()
-    source_key := type_identity_key(jet_codegen_qualify_type(source, program.modules, builder.function.module_identity, builder.generic_type_names))
+    source_key := type_identity_key(jet_codegen_qualify_type(source, program.nominals, builder.function.module_identity, builder.generic_type_names))
     loop member in members {
-        if type_identity_key(jet_codegen_qualify_type(member, program.modules, builder.function.module_identity, builder.generic_type_names)) != source_key -> next
+        if type_identity_key(jet_codegen_qualify_type(member, program.nominals, builder.function.module_identity, builder.generic_type_names)) != source_key -> next
         identity :: jet_codegen_lower_type_for_function(target, builder, program).identity ?? panic("checked union result payload has no MIR identity")
         return jet_codegen_emit_value(&builder, program, expression.span, target, MIROperation.Enum{type_id: identity, variant: jet_codegen_union_member_tag(member), args: [MIREnumArg]{MIREnumArg{field: None, value: lowered, boxed: false}}})
     }
@@ -4565,7 +4565,7 @@ fn jet_codegen_lower_pool_slot_value(builder: &JetCodegenBuilder, program: JetCo
             slot
         }
         Val(name) -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, name, builder.function.key)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, element_type, name, builder.function.key)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: slot, field: jet_codegen_mir_field_id(resolved)})
         }
     }
@@ -4914,7 +4914,7 @@ fn jet_codegen_lower_carrier_fact(builder: &JetCodegenBuilder, program: JetCodeg
         .Result(_, error) -> error
         else -> unwrapped_type
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
     value := jet_codegen_lower_expr(&builder, program, receiver)
     carrier := jet_codegen_failure_carrier_for_type(receiver.ty)
     member := if notes -> "notes" else -> "partial"
@@ -5007,7 +5007,7 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
 }
 
 fn jet_codegen_host_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, field_name: String) -> MIRFieldID Never! {
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, owner_type, field_name, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, owner_type, field_name, builder.function.key)
     jet_codegen_mir_field_id(resolved)
 }
 
@@ -5026,7 +5026,7 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, program: JetC
         .Named(name) | .Apply(name, _) -> name
         else -> panic("checked host projection owner is not nominal")
     }
-    identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) != None {
         return jet_codegen_compiler_owned_record_field_type(owner, owner_name, field_name) ?? panic("checked host projection field `{owner_name}.{field_name}` has no registered field")
     }
@@ -5083,7 +5083,7 @@ fn jet_codegen_direct_render_function(builder: JetCodegenBuilder, program: JetCo
             return None
         }
     }
-    value_identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, value_name, builder.generic_type_names)
+    value_identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, value_name, builder.generic_type_names)
     nominal_identity :: value_identity ?? return None
     selected := TFunc?{None}
     row := program.function_index.first_by_name.get(member) ?? -1
@@ -5094,7 +5094,7 @@ fn jet_codegen_direct_render_function(builder: JetCodegenBuilder, program: JetCo
             .TraitMethod(_, convention, owner, trait_symbol, _) -> {
                 if convention == None || jet_codegen_symbol_name(builder, program, trait_symbol) != trait_name -> next
                 owner_name :: jet_codegen_type_head_name(owner) ?? next
-                owner_identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+                owner_identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
                 if owner_identity == None || (owner_identity ?? nominal_identity).key != nominal_identity.key -> next
                 if selected != None -> panic("checked {trait_name} method for a type is ambiguous")
                 selected = Val(function)
@@ -5320,7 +5320,7 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, program: JetCodegenPro
         .Named(value) | .Apply(value, _) -> value
         else -> panic("checked close receiver has no nominal owner")
     }
-    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) ?? panic("checked close receiver has no registered owner")
+    owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) ?? panic("checked close receiver has no registered owner")
     selected := TFunc?{None}
     row := program.function_index.first_by_name.get("close") ?? -1
     loop row >= 0 {
@@ -5328,7 +5328,7 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, program: JetCodegenPro
         row = program.function_index.next_by_name[row]
         function_owner :: jet_codegen_method_owner_type(function.kind) ?? next
         function_owner_name :: jet_codegen_type_head_name(jet_codegen_unwrap_pattern_tags(function_owner)) ?? next
-        identity :: jet_codegen_find_nominal_identity(program.modules, function.module_identity, function_owner_name, [String]{}) ?? next
+        identity :: jet_codegen_find_nominal_identity(program.nominals, function.module_identity, function_owner_name, [String]{}) ?? next
         if identity.key != owner.key -> next
         if selected != None -> panic("checked close method is ambiguous")
         selected = Val(function)
@@ -5344,7 +5344,7 @@ fn jet_codegen_nominal_close_function(builder: JetCodegenBuilder, program: JetCo
         .Named(value) | .Apply(value, _) -> name = value
         else -> return None
     }
-    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) ?? return None
+    owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) ?? return None
     row := program.function_index.first_by_name.get("close") ?? -1
     loop row >= 0 {
         function :: program.function_index.rows[row]
@@ -5355,7 +5355,7 @@ fn jet_codegen_nominal_close_function(builder: JetCodegenBuilder, program: JetCo
         }
         function_owner :: close_owner ?? next
         function_owner_name :: jet_codegen_type_head_name(jet_codegen_unwrap_pattern_tags(function_owner)) ?? next
-        identity :: jet_codegen_find_nominal_identity(program.modules, function.module_identity, function_owner_name, [String]{}) ?? next
+        identity :: jet_codegen_find_nominal_identity(program.nominals, function.module_identity, function_owner_name, [String]{}) ?? next
         if identity.key != owner.key -> next
         return Val(function)
     }
@@ -5501,7 +5501,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
                 name: key,
                 span: program.function_index.rows[row].source_span,
                 visibility: MIRVisibility.Private,
-                ty: jet_codegen_lower_type_with_modules(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names),
+                ty: jet_codegen_lower_type_with_nominals(expression.ty, program.nominals, builder.function.module_identity, builder.generic_type_names),
                 is_storage: false,
                 value: MIRConstant.SharedSite{site: MIRSharedSite{initializer: init_id, lifetime: lifetime}},
             }
@@ -5518,7 +5518,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .InlineBlock(body) -> jet_codegen_lower_inline_block(&builder, program, expression, body)
         .Unit -> jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
         .CtLit(value) -> {
-            constant :: jet_codegen_lower_comptime_value(value, program.modules, builder.function.module_identity, builder.generic_type_names) ?? panic("checked comptime closure cannot lower as a MIR constant")
+            constant :: jet_codegen_lower_comptime_value(value, program.nominals, builder.function.module_identity, builder.generic_type_names) ?? panic("checked comptime closure cannot lower as a MIR constant")
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
         .DistinctCtor(_, argument, _) -> {
@@ -6074,7 +6074,7 @@ fn jet_codegen_compiler_owned_pattern_enum(builder: JetCodegenBuilder, program: 
         .Named(value) | .Apply(value, _) -> value
         else -> { return None }
     }
-    if jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) != None -> return None
+    if jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) != None -> return None
     if jet_codegen_compiler_owned_enum_variants(name) == None -> return None
     Val(name)
 }
@@ -7610,14 +7610,14 @@ fn jet_codegen_lower_index_hook(builder: &JetCodegenBuilder, program: JetCodegen
 
 fn jet_codegen_lower_layout_field_index(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, field_name: String, line: Int) -> MIRValueID {
     field_type := Type.Named{name: "LayoutField"}
-    fields_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type}, builder.function.key)
+    fields_ref :: jet_codegen_field_ref_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type}, builder.function.key)
     fields := TExpr{ty: Type.List{element: field_type}, kind: TExprKind.Field{receiver: base, field: fields_ref}, span: expression.span, integer_bounds: None, cost: None}
     owner_key := "{builder.function.key}::layout-field-select@{expression.span.start}..{expression.span.end}"
     parameter_symbol := symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, "layout_field")
     parameter := tir_symbol_local("layout_field", expression.span, parameter_symbol)
     parameter.deref = true
     parameter_value := TExpr{ty: field_type, kind: TExprKind.Local{local: parameter}, span: expression.span, integer_bounds: None, cost: None}
-    name_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String, builder.function.key)
+    name_ref :: jet_codegen_field_ref_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String, builder.function.key)
     name := TExpr{ty: Type.String, kind: TExprKind.Field{receiver: parameter_value, field: name_ref}, span: expression.span, integer_bounds: None, cost: None}
     expected_name := TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: field_name}}}, span: expression.span, integer_bounds: None, cost: None}
     predicate := TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: line, lhs: name, rhs: expected_name}, span: expression.span, integer_bounds: None, cost: None}
