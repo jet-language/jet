@@ -1,0 +1,77 @@
+//! An explicit move is never a copy. A value moved with `^` into a struct
+//! literal field, a list element, an enum payload, a `shared` cell, a
+//! consuming argument, a return, or an assignment keeps its one identity:
+//! its Close runs exactly once, when its last owner ends.
+struct Secret {
+    id: Int
+    token: String
+}
+
+impl Secret.Close {
+    fn close(^self) { print("close {self.id}") }
+}
+
+struct Holder {
+    inner: Secret
+}
+
+fn consume(item: ^Secret) { print("consume {item.id}") }
+
+fn give(item: ^Secret) -> Secret {
+    print("give {item.id}")
+    return ^item
+}
+
+fn struct_field() {
+    s :: Secret{id: 1, token: "owned"}
+    held :: Holder{inner: ^s}
+    print("struct {held.inner.id}")
+}
+
+fn list_element() {
+    s :: Secret{id: 2, token: "owned"}
+    held :: [Secret]{^s}
+    print("list {held.len()}")
+}
+
+fn enum_payload() {
+    s :: Secret{id: 3, token: "owned"}
+    held :: Val(^s)
+    if held == .Val(inner) -> print("option {inner.id}")
+}
+
+fn shared_operand() {
+    s :: Secret{id: 4, token: "owned"}
+    cell :: shared Holder{inner: ^s}
+    guard :: cell.guard_read()
+    print("shared {guard.value.inner.id}")
+}
+
+fn argument() {
+    s :: Secret{id: 5, token: "owned"}
+    consume(^s)
+    print("argument done")
+}
+
+fn returned() {
+    s :: Secret{id: 6, token: "owned"}
+    back :: give(^s)
+    print("returned {back.id}")
+}
+
+fn assigned() {
+    held := Holder{inner: Secret{id: 7, token: "owned"}}
+    s :: Secret{id: 8, token: "owned"}
+    held.inner = ^s
+    print("assigned {held.inner.id}")
+}
+
+fn run() {
+    struct_field()
+    list_element()
+    enum_payload()
+    shared_operand()
+    argument()
+    returned()
+    assigned()
+}
