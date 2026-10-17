@@ -3565,6 +3565,17 @@ fn jet_codegen_stability_list(state: &JetCodegenLetStability, statements: [TStmt
                     // binding (jet_codegen_stability_read).
                     mentioned :: jet_codegen_stability_pending_mentions(state, init)
                     loop name in mentioned -> jet_codegen_stability_bind(&state, "derived@{span.start}:{span.end}", local.name, name, false, false)
+                    // #5041: a conditional binding lends the places its arms
+                    // copy (jet_codegen_lent_arm_place): it stays stable while
+                    // none of their roots changes and nothing consumes it.
+                    if !local.generated {
+                        roots := [String]{}
+                        jet_codegen_stability_arm_roots(init, &roots)
+                        loop arm_root in roots {
+                            jet_codegen_stability_bind(&state, jet_codegen_element_let_key(local, span), local.name, arm_root, false, true)
+                            if local.mutable -> state.pending[state.pending.len() - 1].mutable = true
+                        }
+                    }
                 }
             }
             .RefutableBind(pattern, init, _, _) -> jet_codegen_stability_pattern(&state, pattern, init, false)
@@ -3586,6 +3597,30 @@ fn jet_codegen_stability_scalar(ty: Type) -> Bool Never! {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char -> true
         .Tagged(_, inner) -> jet_codegen_stability_scalar(inner)
         else -> false
+    }
+}
+
+// #5041: the roots of the places a conditional initializer's arms copy
+// (`n :: if c -> a.f else -> if d -> b[i] else -> f(x)`: `a`, `b`), down its
+// else chain as jet_codegen_lower_if_expression lowers it.
+fn jet_codegen_stability_arm_roots(expression: TExpr, roots: &[String]) Never! {
+    if expression.kind == .IfExpr(_, _, then_value, _, else_value) {
+        jet_codegen_stability_arm_root(then_value, &roots)
+        if else_value.kind == .IfExpr(_, _, _, _, _) {
+            jet_codegen_stability_arm_roots(else_value, &roots)
+        } else {
+            jet_codegen_stability_arm_root(else_value, &roots)
+        }
+    }
+}
+
+// The root of the place one conditional arm copies (a compiler-inserted
+// clone of a jet_codegen_element_place_root chain), if any.
+fn jet_codegen_stability_arm_root(value: TExpr, roots: &[String]) Never! {
+    if value.kind == .Clone(inner, _) {
+        if jet_codegen_element_place_root(inner) == .Val(root) {
+            if !roots.contains(root.name) -> &roots.push(root.name)
+        }
     }
 }
 
