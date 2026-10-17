@@ -1622,33 +1622,30 @@ struct JetDriverComptimeRunIndex {
 
 fn jet_driver_comptime_run_index(checked_functions: [SemaComptimeFunctionResult]) -> JetDriverComptimeRunIndex Never! {
     index := JetDriverComptimeRunIndex{owners: [String:String]{}, ambiguous_owners: [String:Bool]{}, owners_built: false, checked_rows: [String:Int]{}}
-    loop (row, checked) in checked_functions {
-        key :: "{checked.module_identity}\n{checked.function_key}"
-        if index.checked_rows.get(key) == None -> index.checked_rows[key] = row
+    // Sorted once, so every insert appends (JetDriverModuleKeyRow).
+    rows := [JetDriverCheckedKeyRow]{}
+    loop (row, checked) in checked_functions -> &rows.push(JetDriverCheckedKeyRow{key: "{checked.module_identity}\n{checked.function_key}", row: row})
+    &rows.sort_by((left: JetDriverCheckedKeyRow, right: JetDriverCheckedKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
+    loop at in 0..<rows.len() {
+        if at == 0 || rows[at - 1].key != rows[at].key -> index.checked_rows[rows[at].key] = rows[at].row
     }
     index
 }
 
-// The owner maps of `graph`, which never changes during a run.
+// The owner maps of `graph`, which never changes during a run, filled in
+// ascending key order (JetDriverModuleKeyRow); a key's first registration
+// owns it and every later one marks it ambiguous.
 fn jet_driver_comptime_owners_build(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
     index.owners_built = true
-    loop semantic_module in graph.modules {
-        loop function in semantic_module.functions -> jet_driver_comptime_owner_add(&index, function.symbol.id.key, semantic_module.module_identity)
-        loop nominal in semantic_module.nominals {
-            loop function in nominal.methods -> jet_driver_comptime_owner_add(&index, function.symbol.id.key, semantic_module.module_identity)
-        }
-        loop implementation in semantic_module.impls {
-            loop function in implementation.methods -> jet_driver_comptime_owner_add(&index, function.symbol.id.key, semantic_module.module_identity)
+    rows := jet_driver_registration_function_rows(graph)
+    &rows.sort_by((left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
+    loop at in 0..<rows.len() {
+        if at > 0 && rows[at - 1].key == rows[at].key {
+            index.ambiguous_owners[rows[at].key] = true
+        } else {
+            index.owners[rows[at].key] = rows[at].module_identity
         }
     }
-}
-
-fn jet_driver_comptime_owner_add(index: &JetDriverComptimeRunIndex, function_key: String, module_identity: String) Never! {
-    if index.owners.get(function_key) != None {
-        index.ambiguous_owners[function_key] = true
-        return
-    }
-    index.owners[function_key] = module_identity
 }
 
 // The one module that registers `function_key`, or None when no module or
@@ -5411,6 +5408,112 @@ fn jet_driver_compile_stages(request: JetDriverCompileRequest, kg: &JetDriverKee
     result
 }
 
+// A Map is a sorted entry list (Lower/Maps.jet): inserting a key below the
+// largest one shifts every later entry, so a whole-program map filled in
+// source order costs O(N^2) moves. The whole-program function maps (the
+// comptime owner index, the checked-function pass's registered keys and
+// owners) are filled from rows sorted once (a merge sort), so each insert
+// appends.
+struct JetDriverModuleKeyRow {
+    module_identity: String
+    key: String
+    // The row's position in registration order (module, then free
+    // functions, nominal methods, impl methods).
+    row: Int
+}
+
+// One keyed row of a sequence; `row` is its position there, so a sort by
+// (key, row) keeps each key's rows in sequence order.
+struct JetDriverCheckedKeyRow {
+    key: String
+    row: Int
+}
+
+struct JetDriverCheckedFunctionOwners {
+    // Each checked function key's first graph module identity.
+    owners: [String:String]
+    // Per checked row: an earlier row has the same key.
+    repeated: [Bool]
+}
+
+// Every function key a registration module declares (free functions, nominal
+// and impl methods), in registration order.
+fn jet_driver_registration_function_rows(graph: SemaRegistrationGraph) -> [JetDriverModuleKeyRow] Never! {
+    rows := [JetDriverModuleKeyRow]{}
+    loop source_module in graph.modules {
+        loop function in source_module.functions -> jet_driver_push_module_key(&rows, source_module.module_identity, function.symbol.id.key)
+        loop nominal in source_module.nominals {
+            loop function in nominal.methods -> jet_driver_push_module_key(&rows, source_module.module_identity, function.symbol.id.key)
+        }
+        loop implementation in source_module.impls {
+            loop function in implementation.methods -> jet_driver_push_module_key(&rows, source_module.module_identity, function.symbol.id.key)
+        }
+    }
+    rows
+}
+
+fn jet_driver_push_module_key(rows: &[JetDriverModuleKeyRow], module_identity: String, key: String) Never! {
+    row :: rows.len()
+    // copy: the rows are sorted on their own; the graph keeps its declarations.
+    &rows.push(JetDriverModuleKeyRow{module_identity: module_identity.copy(), key: key.copy(), row: row})
+}
+
+// The function keys each registration module declares, by module identity.
+fn jet_driver_registered_function_keys(graph: SemaRegistrationGraph) -> [String:[String:Bool]] Never! {
+    rows := jet_driver_registration_function_rows(graph)
+    &rows.sort_by((left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) -> (left.module_identity <=> right.module_identity).then(left.key <=> right.key))
+    registered := [String:[String:Bool]]{}
+    keys := [String:Bool]{}
+    loop index in 0..<rows.len() {
+        keys[rows[index].key] = true
+        if index + 1 == rows.len() || rows[index + 1].module_identity != rows[index].module_identity {
+            registered[rows[index].module_identity] = ^keys
+            keys = [String:Bool]{}
+        }
+    }
+    registered
+}
+
+// The owner of every checked function key, and which checked rows repeat a
+// key an earlier row (in graph module order, then function order) owns.
+fn jet_driver_checked_function_owners(modules: [SemaGraphModuleResult]) -> JetDriverCheckedFunctionOwners Never! {
+    rows := [JetDriverCheckedKeyRow]{}
+    // Per checked row, its graph module.
+    row_modules := [Int]{}
+    loop module_index in 0..<modules.len() {
+        loop function in modules[module_index].functions {
+            &rows.push(JetDriverCheckedKeyRow{key: function.key, row: row_modules.len()})
+            &row_modules.push(module_index)
+        }
+    }
+    &rows.sort_by((left: JetDriverCheckedKeyRow, right: JetDriverCheckedKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
+    owners := [String:String]{}
+    repeated := (loop _ in rows -> false)
+    loop index in 0..<rows.len() {
+        if index > 0 && rows[index - 1].key == rows[index].key {
+            repeated[rows[index].row] = true
+        } else {
+            owners[rows[index].key] = modules[row_modules[rows[index].row]].module_identity
+        }
+    }
+    JetDriverCheckedFunctionOwners{owners: ^owners, repeated: ^repeated}
+}
+
+// How many loaded modules carry each module identity.
+fn jet_driver_loaded_identity_counts(modules: [JetDriverLoadedModule]) -> [String:Int] Never! {
+    identities := (loop loaded_module in modules -> loaded_module.module_identity)
+    &identities.sort_by((left: String, right: String) -> left <=> right)
+    counts := [String:Int]{}
+    start := 0
+    loop index in 0..<identities.len() {
+        if index + 1 == identities.len() || identities[index + 1] != identities[index] {
+            counts[identities[index]] = index + 1 - start
+            start = index + 1
+        }
+    }
+    counts
+}
+
 // Loading is shared by executable requests and compiler-owned library graphs;
 // both consume the identical checked front-end, TIR and MIR stages below.
 fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, owned_load: ^JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
@@ -5780,19 +5883,14 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     lowering_candidates := [Bool]{}
     // Per graph module, how many rows of `checked_functions` it owns.
     module_function_counts := [Int]{}
-    function_owners := [String:String]{}
-    registered_function_keys := [String:[String:Bool]]{}
-    loop source_module in registration_graph.modules {
-        keys := registered_function_keys.get(source_module.module_identity) ?? [String:Bool]{}
-        loop function in source_module.functions -> keys[function.symbol.id.key] = true
-        loop nominal in source_module.nominals {
-            loop function in nominal.methods -> keys[function.symbol.id.key] = true
-        }
-        loop implementation in source_module.impls {
-            loop function in implementation.methods -> keys[function.symbol.id.key] = true
-        }
-        registered_function_keys[source_module.module_identity] = keys
-    }
+    // Built from sorted rows (jet_driver_registered_function_keys,
+    // jet_driver_checked_function_owners): never a source-order map build.
+    registered_function_keys := jet_driver_registered_function_keys(registration_graph)
+    checked_owners := jet_driver_checked_function_owners(checked_graph.modules)
+    function_owners := ^checked_owners.owners
+    repeated_rows :: ^checked_owners.repeated
+    loaded_identity_counts := jet_driver_loaded_identity_counts(load.modules)
+    checked_row := 0
     failed_stage := JetDriverStage?{None}
     runtime_semantic_modules := [SemaGraphModuleResult]{}
     loop graph_module_index in 0..<checked_graph.modules.len() {
@@ -5801,17 +5899,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         // The module carries no functions now, so the runtime copy below
         // holds only its declarations.
         graph_module :: checked_graph.modules[graph_module_index]
-        registered_keys := registered_function_keys.get(graph_module.module_identity) ?? [String:Bool]{}
-        // D-FAIL-CONV2=A: the Prelude conversions sema injected after the
-        // module's bodies are the module's own items (Rust pushes them into
-        // `module.items`) though registration never saw them.
-        loop key in graph_module.injected_function_keys -> registered_keys[key] = true
+        module_registered :: registered_function_keys.has_key(graph_module.module_identity)
         if graph_module.module_identity != canonical_effect_module_identity {
             &runtime_semantic_modules.push(graph_module)
-            module_matches := 0
-            loop loaded_module in load.modules {
-                if loaded_module.module_identity == graph_module.module_identity -> module_matches += 1
-            }
+            module_matches :: loaded_identity_counts.get(graph_module.module_identity) ?? 0
             if module_matches != 1 {
                 &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a semantic module does not map to exactly one loaded source identity", "source, package, and module identities remain attached across graph registration", "retain the loader's exact module identity in each semantic result"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
@@ -5819,22 +5910,23 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         }
         loop function_index in 0..<module_functions.len() {
             function :: module_functions[function_index]
-            if function.module_identity != graph_module.module_identity || registered_keys.get(function.key) == None {
+            // D-FAIL-CONV2=A: the Prelude conversions sema injected after the
+            // module's bodies are the module's own items (Rust pushes them into
+            // `module.items`) though registration never saw them.
+            registered :: (module_registered && registered_function_keys[graph_module.module_identity].has_key(function.key)) || graph_module.injected_function_keys.contains(function.key)
+            if function.module_identity != graph_module.module_identity || !registered {
                 &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "a checked function lost its canonical module or symbol identity", "cross-module call resolution and MIR IDs use exact declaration identities", "preserve module_identity and the original function SymbolId through Sema"))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
             }
-            if {
-                function_owners.get(function.key) != None -> {
-                    &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "two checked functions share one canonical symbol key", "every lowered function identity names exactly one declaration in the package graph", "report the duplicate Sema function key"))
-                    failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
-                    // JET_KEEP_GOING: the first function of a key lowers.
-                    if kg.enabled {
-                        &lowering_candidates.push(false)
-                        next
-                    }
-                }
-                else -> {
-                    _ := &function_owners.add(function.key, graph_module.module_identity)
+            repeated :: repeated_rows[checked_row]
+            checked_row += 1
+            if repeated {
+                &load.diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, graph_module.module_identity, "E0003", function.source_span, "two checked functions share one canonical symbol key", "every lowered function identity names exactly one declaration in the package graph", "report the duplicate Sema function key"))
+                failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
+                // JET_KEEP_GOING: the first function of a key lowers.
+                if kg.enabled {
+                    &lowering_candidates.push(false)
+                    next
                 }
             }
             &lowering_candidates.push(true)
@@ -5844,6 +5936,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     // Every checked function has its owner now.
     registered_function_keys = [String:[String:Bool]]{}
+    loaded_identity_counts = [String:Int]{}
     // E0601 only when neither named tests nor selected Check Outputs exist.
     if request.mode == JetDriverCompileMode.Test && jet_driver_runnable_test_count(registration_graph) == 0 {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
