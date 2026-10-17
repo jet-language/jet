@@ -1134,13 +1134,19 @@ fn scheduler_panic_check() -> Bool {
         scheduler_delivered_status_unmasked() != I64{0}) -> scheduler_abort_double_panic()
     true
 }
-fn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {
+// `code` is the registered stop row the root report would carry (0 E3001,
+// 1 E3010, 2 E3011; trap_header's numbering). Core.rs jet_runtime_stop
+// records the raw stop on every active expectation frame before it unwinds,
+// so the native catch probe sees the same first stop as the Rust reference.
+// The published record stays the raw message (form 0).
+fn rt_task_panic_publish(message: I64, length: I64, code: I64) -> Bool {
+    test_scope_record_coded_stop(code, message, length)
     if (jet_rt_stop_domain() != I64{2}) -> return false
     if !scheduler_panic_check() -> return false
     text :: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return true
     coll_copy(message, sync_load(text), length)
-    rt_task_panic_publish_owned(text, form)
+    rt_task_panic_publish_owned(text, I64{0})
     true
 }
 // Takes an owned, already checked report (or builder): the same publication

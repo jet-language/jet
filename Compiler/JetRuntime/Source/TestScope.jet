@@ -4,6 +4,11 @@
 // completed=[scope, ownedCode], timeouts=[scope, seconds, nanos, limit, depth].
 // Strings in rows are owned E4; arguments are borrowed; take transfers ownership.
 
+// Five-byte stop codes as little-endian words, compared and written raw.
+TEST_SCOPE_E3001 :: prep { I64{211261862725} }
+TEST_SCOPE_E3010 :: prep { I64{206983672645} }
+TEST_SCOPE_E3011 :: prep { I64{211278639941} }
+
 fn test_scope_clone(text: I64) -> I64 {
     if (text == I64{0}) -> I64{0} else -> test_text_clone(text)
 }
@@ -160,6 +165,35 @@ fn test_scope_state_drop(state: I64) {
         }
         at += I64{5}
     }
+}
+
+// Raw publication paths already own code/message bytes. Copy once into each
+// unstopped frame rather than constructing temporary text just to clone it.
+fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, length: I64) {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    frames :: state + I64{32}
+    at := I64{0}
+    loop at < trap_word(frames) {
+        row :: trap_word(frames + I64{16}) + at * I64{8}
+        if (trap_word(row + I64{24}) == I64{0}) {
+            code :: jet_rt_string_builder_new()
+            rt_text_push_word(code, code_word, code_length)
+            trap_store(row + I64{24}, code)
+            trap_store(row + I64{32}, rt_text_copy(message, length))
+        }
+        at += I64{5}
+    }
+}
+
+// trap_header numbering: 0 E3001, 1 E3010, 2 E3011 (little-endian words).
+fn test_scope_record_coded_stop(code: I64, message: I64, length: I64) {
+    word :: if {
+        (code == I64{0}) -> TEST_SCOPE_E3001
+        (code == I64{1}) -> TEST_SCOPE_E3010
+        else -> TEST_SCOPE_E3011
+    }
+    test_scope_record_raw_stop(word, I64{5}, message, length)
 }
 
 fn test_scope_stopped_index(state: I64) -> I64 {
