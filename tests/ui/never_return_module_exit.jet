@@ -1,0 +1,15 @@
+use core.process as proc
+use core.term as term
+
+// A module-qualified `Never` call keeps the promise: no E2423 here.
+fn stop(code: Int) -> Never {
+    term.print("stopping")
+    proc.exit(code)
+}
+
+// A module-qualified call that returns still reaches the end (E2423).
+fn almost() -> Never {
+    term.print("still here")
+}
+
+fn run() {}

@@ -2033,7 +2033,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     context.value_tail_span = None
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
-    if !sema_check_never_fallthrough(func, updated, scopes, &diagnostics) -> complete = false
+    if !sema_check_never_fallthrough(func, updated, program, scopes, &diagnostics) -> complete = false
     // Rust `check_value_block` over the body (Registration.rs:937-938): a
     // value body reports E0114 when it can reach its end without a value.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false

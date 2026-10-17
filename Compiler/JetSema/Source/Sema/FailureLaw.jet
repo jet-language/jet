@@ -28,6 +28,8 @@ use jet_foundation.[
     TextEdit,
     Type,
     ast_func,
+    core_call_typed_signature,
+    core_module_export,
     core_module_has_type,
     diagnostic_registry_row,
     diagnostic_with_edit_grade,
@@ -811,27 +813,78 @@ fn sema_never_return_is_err(value: Expr) -> Bool {
 }
 
 // D-NEVER2=B (E2423): the declared bottom contract must have no normal exit.
-fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool Never! {
+// Rust `body_flow`: `panic`, and a call whose resolved callee promises `Never`
+// (a direct call, or a member called through a module alias).
+fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
-        .Paren(inner, _) -> return sema_never_expr_diverges(inner, environment, scopes)
+        .Paren(inner, _) -> return sema_never_expr_diverges(inner, environment, program, scopes)
         .Call(call) -> {
             if call.name == "panic" -> return true
             index :: sema_scope_resolve_index(scopes, call.name) ?? return false
-            // `Never Never!` has no failure route, so its call diverges like
-            // `Never`; a fallible `Never E!` call can still return its `Err`.
             if sema_scope_binding_type(environment, scopes, index) == .Val(symbol_type) {
                 if symbol_type == .Fn(_, ret, _, _, _, _) {
-                    if ret == (Val(Type.Named{name: "Never"})) -> return true
-                    return ret == (Val(Type.Result{ok: Type.Named{name: "Never"}, err: Type.Named{name: "Never"}}))
+                    declared :: ret ?? return false
+                    return sema_never_callee_return_diverges(declared)
                 }
             }
             return false
         }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _, _) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
         else -> return sema_stmt_refutable_expr_diverges(expr)
     }
 }
 
-fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+// A callee's declared return: `Never Never!` has no failure route, so its call
+// diverges like `Never`; a fallible `Never E!` call can still return its `Err`.
+fn sema_never_callee_return_diverges(ret: Type) -> Bool Never! {
+    never :: Type.Named{name: "Never"}
+    declared :: sema_expr_unwrap_tag(ret)
+    if declared == {
+        .Result(ok, err) -> ok == never && err == never
+        else -> declared == never
+    }
+}
+
+// Rust `core_call_diverges` / `imported_call_diverges`: `alias.member(...)`
+// (or `alias.leaf.member(...)` into a Core submodule) through a visible,
+// unshadowed Core or source module alias diverges when the member it resolves
+// to promises `Never` (`cli_process.exit(code)`).
+fn sema_never_module_call_diverges(receiver: Expr, method: String, arity: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
+    path :: sema_expr_core_module_receiver_path(receiver) ?? return false
+    if !sema_expr_core_module_alias_visible(path.alias, scopes) -> return false
+    nested :: path.leaves.len() > 0
+    found := sema_call_core_import_target(environment, program, path.alias)
+    if found == None && !nested -> found = sema_call_source_import_target(environment, program, path.alias)
+    imported :: found ?? return false
+    if !sema_call_core_import_is_unshadowed(environment, program, scopes, imported) -> return false
+    member :: sema_call_core_import_member(imported, method) ?? return false
+    module_name := imported.module_name
+    module_identity := imported.module_identity
+    if nested {
+        if imported.item != None -> return false
+        loop leaf in path.leaves {
+            module_name = "{module_name}.{leaf}"
+            if core_module_export(module_name) == None -> return false
+        }
+        module_identity = sema_call_core_module_identity(environment, program, module_name) ?? ""
+    }
+    if core_call_typed_signature(module_name, member, arity) == .Val(signature) {
+        if signature.return_type == .Val(ret) {
+            if sema_never_callee_return_diverges(ret) -> return true
+        }
+    }
+    if module_identity == "" -> return false
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, module_identity) ?? return false
+        export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return false
+        row :: sema_call_export_function_row(environment, program, export) ?? return false
+        declared :: graph.modules[row.module_index].functions[row.row].declaration.return_type ?? return false
+        return sema_never_callee_return_diverges(declared)
+    }
+    false
+}
+
+fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     declared :: func.return_type ?? return true
     never_success :: if declared == {
         .Named(name) -> name == "Never"
@@ -841,7 +894,7 @@ fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, s
     if !never_success -> return true
     loop statement in func.body {
         if statement == .Expr(expr) {
-            if sema_never_expr_diverges(expr, environment, scopes) -> return true
+            if sema_never_expr_diverges(expr, environment, program, scopes) -> return true
         }
         if sema_stmt_refutable_statement_exits(statement) -> return true
     }
