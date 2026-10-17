@@ -528,6 +528,13 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             if literal_start == start && literal.len() == 0 -> literal_start = cursor
         }
         value :: byte_at(source, cursor)
+        // Plain ASCII text bytes copy through inline.
+        if value >= 0 && value < 128 && value != 10 && value != 92 && value != 123 && value != 125 {
+            &literal.push(U8{value})
+            &decoded.push(U8{value})
+            cursor += 1
+            next
+        }
         if value == 10 {
             &literal.push(U8{10})
             &decoded.push(U8{10})
@@ -995,6 +1002,12 @@ fn fact_index_at(facts: [Int], start: Int) -> Int Never! {
 fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) {
     cursor := start
     loop cursor < end {
+        // ASCII whitespace (every ordinary gap byte) advances inline.
+        gap_byte :: byte_at(source, cursor)
+        if gap_byte == 32 || (gap_byte >= 9 && gap_byte <= 13) {
+            cursor += 1
+            next
+        }
         if cursor == 0 && byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
             loop cursor < end && byte_at(source, cursor) != 10 -> cursor += 1
             if cursor < end -> cursor += 1

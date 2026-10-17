@@ -115,9 +115,21 @@ fn previous_is_identifier(source: [U8], index: Int) -> Bool {
     previous >= 0 && is_identifier_continue(source, previous)
 }
 
+// ASCII identifier bytes are tested inline; only a non-ASCII byte takes the
+// scalar path (`is_identifier_continue`, `utf8_width`).
 fn scan_identifier_end(source: [U8], start: Int) -> Int {
+    if start < 0 -> return start
     i := start
-    loop i < source.len() {
+    count :: source.len()
+    loop i < count {
+        value :: Int.from_u8(source[i])
+        if value < 128 {
+            if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) || (value >= 48 && value <= 57) {
+                i += 1
+                next
+            }
+            return i
+        }
         if !is_identifier_continue(source, i) -> return i
         i += utf8_width(source, i)
     }
@@ -125,12 +137,7 @@ fn scan_identifier_end(source: [U8], start: Int) -> Int {
 }
 
 fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
-    i := start
-    loop i < source.len() {
-        if !is_identifier_continue(source, i) -> return i
-        i += utf8_width(source, i)
-    }
-    i
+    scan_identifier_end(source, start)
 }
 
 // BEGIN GENERATED LEXER KEYWORD SPANS
@@ -391,8 +398,14 @@ fn decimal_digits_fit_int(source: [U8], start: Int, end: Int) -> Bool Never! {
 
 fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
     i := start + 1
-    loop i < source.len() {
-        value :: byte_at(source, i)
+    count :: source.len()
+    loop i < count {
+        value :: Int.from_u8(source[i])
+        // Plain ASCII text bytes advance inline.
+        if value < 128 && value != 10 && value != 34 && value != 123 && value != 125 && value != 92 {
+            i += 1
+            next
+        }
         if value == 10 -> return -(i + 1)
         if value == 34 -> return i + 1
         if (value == 123 || value == 125) && byte_at(source, i + 1) == value {
@@ -646,13 +659,28 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
         loop i < source.len() && byte_at(source, i) != 10 -> i += 1
         if i < source.len() -> i += 1
     }
-    loop i < source.len() {
-        if is_whitespace_at(source, i) {
+    count :: source.len()
+    loop i < count {
+        // ASCII whitespace and identifier starts (most bytes and tokens) are
+        // tested inline before the punctuation chain; a non-ASCII byte keeps
+        // the scalar whitespace and identifier tests below.
+        value :: Int.from_u8(source[i])
+        if value == 32 || (value >= 9 && value <= 13) {
+            i += 1
+            next
+        }
+        if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) {
+            end :: scan_identifier_end(source, i)
+            kind :: word_kind(source, i, end, last_code)
+            last_code = push_code(&facts, kind, i, end, kind == K_IDENT && value <= 90 && value >= 65)
+            i = end
+            next
+        }
+        if value >= 128 && is_whitespace_at(source, i) {
             i += utf8_width(source, i)
             next
         }
         start := i
-        value :: byte_at(source, i)
         next1 :: byte_at(source, i + 1)
         next2 :: byte_at(source, i + 2)
         if value == 35 && next1 == 33 && next2 == 47 {
@@ -667,7 +695,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
                 i += 2
                 next
             }
-            loop i < source.len() && byte_at(source, i) != 10 -> i += 1
+            loop i < count && source[i] != 10 -> i += 1
             emit(&facts, K_LINE_COMMENT, start, i, false)
             next
         }
