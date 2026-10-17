@@ -1756,13 +1756,11 @@ fn jet_codegen_field_ref_id(builder: JetCodegenBuilder, program: JetCodegenProgr
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::is_stored_struct_field
 fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, reference: TFieldRef) -> Bool Never! {
     if reference.owner == .Val(owner) {
-        loop semantic_module in program.modules {
-            loop nominal in semantic_module.nominals {
-                if nominal.symbol.id.key != owner.key -> next
-                loop field in nominal.fields {
-                    if field.symbol.id.key == reference.field.key -> return nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed
-                }
-            }
+        // The first field row of that owner in module, nominal and field
+        // order (jet_codegen_field_symbol_index), not a scan of every module.
+        rows :: program.field_symbols.get(reference.field.key) ?? return false
+        loop row in rows {
+            if row.owner_key == owner.key -> return row.stored
         }
         return false
     }
@@ -2636,86 +2634,82 @@ fn jet_codegen_lower_enum_slot(builder: &JetCodegenBuilder, program: JetCodegenP
 }
 
 fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, owner: SymbolID, variant: SymbolID, payload: TEnumPayload) -> MIRValueID {
-    loop module_index in 0..<program.modules.len() {
-        loop nominal_index in 0..<program.modules[module_index].nominals.len() {
-            if program.modules[module_index].nominals[nominal_index].symbol.id.key != owner.key -> next
-            // Lowering mutates builder, so copy out only the matched variant
-            // and the two declaration facts used below. Iterating or copying
-            // the write-borrowed builder's nominal or declaration tables costs
-            // the program's type declarations per constructor.
-            variant_index := -1
-            loop index in 0..<program.modules[module_index].nominals[nominal_index].variants.len() {
-                if program.modules[module_index].nominals[nominal_index].variants[index].symbol.id.key == variant.key {
-                    variant_index = index
-                    break
-                }
-            }
-            if variant_index < 0 -> panic("checked enum constructor variant does not belong to its owner")
-            candidate := program.modules[module_index].nominals[nominal_index].variants[variant_index]
-            definition := -1
-            loop index in 0..<program.modules[module_index].declarations.type_defs.len() {
-                if program.modules[module_index].declarations.type_defs[index].name == program.modules[module_index].nominals[nominal_index].symbol.name -> definition = index
-            }
-            if definition < 0 -> panic("checked enum constructor has no type declaration")
-            declared_key := program.modules[module_index].declarations.type_defs[definition].key
-            boxed_edges := program.modules[module_index].declarations.type_defs[definition].boxed_edges
-            lowered := [MIREnumArg]{}
-            if candidate.payload == {
-                .Unit -> {
-                    if payload == {
-                        .Unit -> {}
-                        else -> panic("checked unit enum constructor carries a payload")
-                    }
-                }
-                .Single(slot_type, _) -> {
-                    argument :: if payload == {
-                        .Positional(args) -> if args.len() == 1 -> args[0] else -> panic("checked enum constructor has the wrong payload arity")
-                        else -> panic("checked single enum constructor has no positional payload")
-                    }
-                    value := jet_codegen_lower_enum_slot(&builder, program, argument, slot_type)
-                    &lowered.push(MIREnumArg{field: None, value: value, boxed: boxed_edges.contains(candidate.symbol.name)})
-                }
-                .Named(fields) -> {
-                    args :: if payload == {
-                        .Named(values) -> values
-                        else -> panic("checked named enum constructor has no named payload")
-                    }
-                    if args.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
-                    // Rust `lower_enum_lit`: every argument is evaluated in
-                    // the order it was written; only then do the values
-                    // take their declared payload slots.
-                    values := [MIRValueID?]{}
-                    loop _ in fields -> &values.push(None)
-                    loop argument in args {
-                        slot := -1
-                        loop (index, field) in fields {
-                            if field.name == argument.name {
-                                slot = index
-                                break
-                            }
-                        }
-                        if slot < 0 -> panic("checked enum constructor payload field is not declared")
-                        if values[slot] != None -> panic("checked enum constructor repeats a payload field")
-                        values[slot] = Val(jet_codegen_lower_enum_slot(&builder, program, argument.value, fields[slot].ty))
-                    }
-                    loop (index, field) in fields {
-                        field_id := mir_field_id("{declared_key}::{candidate.symbol.name}::{field.name}")
-                        value :: values[index] ?? panic("checked enum constructor misses a payload field")
-                        &lowered.push(MIREnumArg{field: Val(field_id), value: value, boxed: boxed_edges.contains("{candidate.symbol.name}.{field.name}")})
-                    }
-                }
-            }
-            type_id := jet_codegen_type_instance_id(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)
-            return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
+    // The first nominal row of the owner key (jet_codegen_nominal_index), not
+    // a scan of every module's nominals per constructor.
+    owner_rows :: program.nominals.rows.get(owner.key) ?? panic("checked enum constructor has no registered nominal owner")
+    if owner_rows.len() == 0 -> panic("checked enum constructor has no registered nominal owner")
+    module_index :: owner_rows[0].module_index
+    nominal_index :: owner_rows[0].nominal_index
+    // Lowering mutates builder, so copy out only the matched variant
+    // and the two declaration facts used below. Iterating or copying
+    // the write-borrowed builder's nominal or declaration tables costs
+    // the program's type declarations per constructor.
+    variant_index := -1
+    loop index in 0..<program.modules[module_index].nominals[nominal_index].variants.len() {
+        if program.modules[module_index].nominals[nominal_index].variants[index].symbol.id.key == variant.key {
+            variant_index = index
+            break
         }
     }
-    panic("checked enum constructor has no registered nominal owner")
+    if variant_index < 0 -> panic("checked enum constructor variant does not belong to its owner")
+    candidate := program.modules[module_index].nominals[nominal_index].variants[variant_index]
+    // The module's last type definition of the nominal's name.
+    definition :: owner_rows[0].type_def_index
+    if definition < 0 -> panic("checked enum constructor has no type declaration")
+    declared_key := program.modules[module_index].declarations.type_defs[definition].key
+    boxed_edges := program.modules[module_index].declarations.type_defs[definition].boxed_edges
+    lowered := [MIREnumArg]{}
+    if candidate.payload == {
+        .Unit -> {
+            if payload == {
+                .Unit -> {}
+                else -> panic("checked unit enum constructor carries a payload")
+            }
+        }
+        .Single(slot_type, _) -> {
+            argument :: if payload == {
+                .Positional(args) -> if args.len() == 1 -> args[0] else -> panic("checked enum constructor has the wrong payload arity")
+                else -> panic("checked single enum constructor has no positional payload")
+            }
+            value := jet_codegen_lower_enum_slot(&builder, program, argument, slot_type)
+            &lowered.push(MIREnumArg{field: None, value: value, boxed: boxed_edges.contains(candidate.symbol.name)})
+        }
+        .Named(fields) -> {
+            args :: if payload == {
+                .Named(values) -> values
+                else -> panic("checked named enum constructor has no named payload")
+            }
+            if args.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
+            // Rust `lower_enum_lit`: every argument is evaluated in
+            // the order it was written; only then do the values
+            // take their declared payload slots.
+            values := [MIRValueID?]{}
+            loop _ in fields -> &values.push(None)
+            loop argument in args {
+                slot := -1
+                loop (index, field) in fields {
+                    if field.name == argument.name {
+                        slot = index
+                        break
+                    }
+                }
+                if slot < 0 -> panic("checked enum constructor payload field is not declared")
+                if values[slot] != None -> panic("checked enum constructor repeats a payload field")
+                values[slot] = Val(jet_codegen_lower_enum_slot(&builder, program, argument.value, fields[slot].ty))
+            }
+            loop (index, field) in fields {
+                field_id := mir_field_id("{declared_key}::{candidate.symbol.name}::{field.name}")
+                value :: values[index] ?? panic("checked enum constructor misses a payload field")
+                &lowered.push(MIREnumArg{field: Val(field_id), value: value, boxed: boxed_edges.contains("{candidate.symbol.name}.{field.name}")})
+            }
+        }
+    }
+    type_id := jet_codegen_type_instance_id(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
 }
 fn jet_codegen_symbol_name(builder: JetCodegenBuilder, program: JetCodegenProgram, symbol: SymbolID) -> String Never! {
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key == symbol.key -> return nominal.symbol.name
-        }
+    if program.nominals.rows.get(symbol.key) == .Val(rows) {
+        if rows.len() > 0 -> return program.modules[rows[0].module_index].nominals[rows[0].nominal_index].symbol.name
     }
     // A builtin trait (Sema `sema_type_builtin_trait_symbol`: an operator hook's
     // `Add`/`Sub`/`Mul`/`Div` owner, or a builtin bound) has no owning module;
@@ -2733,18 +2727,18 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
     symbol :: method.trait_owner ?? panic("checked trait method call has no trait owner")
     selected := JetCodegenTraitMethod?{None}
     owner_found := false
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != symbol.key -> next
-            if nominal.kind != SemaRegistrationNominalKind.Trait -> panic("checked trait method owner is not a trait")
-            owner_found = true
-            loop definition in semantic_module.declarations.traits {
-                if definition.name != nominal.symbol.name -> next
-                loop trait_method in definition.methods {
-                    if trait_method.name != method.name -> next
-                    if selected != None -> panic("checked trait method identity is ambiguous")
-                    selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, symbol), method: trait_method})
-                }
+    owner_rows :: program.nominals.rows.get(symbol.key) ?? [JetCodegenNominalRow]{}
+    loop owner_row in owner_rows {
+        module_index :: owner_row.module_index
+        nominal_index :: owner_row.nominal_index
+        if program.modules[module_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Trait -> panic("checked trait method owner is not a trait")
+        owner_found = true
+        loop definition in program.modules[module_index].declarations.traits {
+            if definition.name != program.modules[module_index].nominals[nominal_index].symbol.name -> next
+            loop trait_method in definition.methods {
+                if trait_method.name != method.name -> next
+                if selected != None -> panic("checked trait method identity is ambiguous")
+                selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, symbol), method: trait_method})
             }
         }
     }
@@ -3956,14 +3950,20 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodege
     }
 }
 fn jet_codegen_find_distinct_definition(builder: JetCodegenBuilder, program: JetCodegenProgram, owner: SymbolID) -> TTypeDef Never! {
+    // Every definition whose key, or whose name, is the owner key
+    // (jet_codegen_nominal_index), each counted once.
+    by_key :: program.nominals.type_defs_by_key.get(owner.key) ?? [JetCodegenTypeDefRef]{}
+    by_name :: program.nominals.type_defs_by_name.get(owner.key) ?? [JetCodegenTypeDefRef]{}
+    matches := by_key.len()
+    loop reference in by_name {
+        if program.modules[reference.module_index].declarations.type_defs[reference.definition_index].key != owner.key -> matches += 1
+    }
+    if matches > 1 -> panic("checked distinct owner resolves to multiple type definitions")
     found := TTypeDef?{None}
-    loop semantic_module in program.modules {
-        loop definition in semantic_module.declarations.type_defs {
-            if definition.key == owner.key || definition.name == owner.key {
-                if found != None -> panic("checked distinct owner resolves to multiple type definitions")
-                found = Val(definition)
-            }
-        }
+    if by_key.len() == 1 {
+        found = Val(program.modules[by_key[0].module_index].declarations.type_defs[by_key[0].definition_index])
+    } else if by_name.len() == 1 {
+        found = Val(program.modules[by_name[0].module_index].declarations.type_defs[by_name[0].definition_index])
     }
     definition :: found ?? panic("checked distinct owner has no registered TTypeDef")
     if definition.kind == {
@@ -3984,12 +3984,7 @@ fn jet_codegen_is_default_err_type(builder: JetCodegenBuilder, program: JetCodeg
     identity := jet_codegen_lower_type_for_function(ty, builder, program).identity
     if identity == None -> return false
     target_id :: identity ?? return false
-    loop semantic_module in program.modules {
-        loop definition in semantic_module.declarations.type_defs {
-            if mir_type_id(definition.key) == target_id && definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) -> return true
-        }
-    }
-    false
+    program.nominals.default_err_ids.get(target_id.value) != None
 }
 
 // The unit's one original Prelude `Err`; its own registered module owns it,
@@ -6061,7 +6056,7 @@ fn jet_codegen_pattern_variant_owner(builder: JetCodegenBuilder, program: JetCod
         return JetCodegenVariantOwner{owner: mir_type_id(name), variant: variant, union_member: None}
     }
     owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
-    JetCodegenVariantOwner{owner: jet_codegen_mir_type_id_for_symbol(program.modules, owner), variant: variant, union_member: None}
+    JetCodegenVariantOwner{owner: jet_codegen_mir_type_id_for_symbol(program, owner), variant: variant, union_member: None}
 }
 
 // A variant pattern on a compiler-owned enum (`IOError`, `ProcessStreamMode`,

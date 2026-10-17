@@ -63,6 +63,7 @@ use jet_foundation.[
 use jet_sema.[
     SemaGraphModuleResult,
     SemaRegistrationNominal,
+    SemaRegistrationNominalKind,
     sema_inference_substitute_type,
     sema_registration_is_compiler_owned_enum,
 ]
@@ -316,7 +317,8 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     // module-qualified key. Never resolve them by a leaf from another module.
     found := JetCodegenNominalIdentity?{None}
     core_owner := String?{None}
-    if !name.contains("::") && !name.contains(".") {
+    qualified :: name.contains("::")
+    if !qualified && !name.contains(".") {
         carrier :: mir_boundary_head_carrier_module(name)
         if carrier != None -> core_owner = carrier
         else if mir_typed_head_kind(Type.Named{name: name}) == None {
@@ -325,23 +327,23 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
         }
     }
     core_owner_name :: core_owner ?? ""
+    // Every `<module>` that `name` spells as `<module>::<leaf>`, found once
+    // per lookup, so no module builds and tests its own "<identity>::" prefix.
+    heads :: if qualified -> jet_codegen_qualified_heads(name) else -> [String]{}
     loop semantic_module in modules {
         // This bare spelling is selected by the Core registry, not by all
         // declarations that happen to share its leaf.
-        if semantic_module.module_identity.starts_with("<corelib>/") && core_owner_name == semantic_module.module_name {
+        if core_owner_name == semantic_module.module_name && semantic_module.module_identity.starts_with("<corelib>/") {
             if semantic_module.nominal_positions.get(name) == .Val(position) {
                 nominal_name :: semantic_module.nominals[position].symbol.name
                 key :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
                 found = jet_codegen_merge_nominal_identity(found, JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal_name, key: key, qualified_name: key})
             }
         }
-        if semantic_module.module_identity != "" {
-            prefix :: "{semantic_module.module_identity}::"
-            if name.starts_with(prefix) {
-                leaf :: jet_codegen_type_key_leaf(name, prefix)
-                if semantic_module.nominal_positions.get(leaf) == .Val(position) {
-                    found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
-                }
+        if qualified && semantic_module.module_identity != "" && heads.contains(semantic_module.module_identity) {
+            leaf :: name.slice(semantic_module.module_identity.bytes().len() + 2, name.bytes().len())
+            if semantic_module.nominal_positions.get(leaf) == .Val(position) {
+                found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
             }
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
@@ -353,6 +355,19 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
         }
     }
     found
+}
+
+// The byte prefixes of `name` that end right before a `::`: the module
+// identities a qualified spelling `<module>::<leaf>` can name.
+fn jet_codegen_qualified_heads(name: String) -> [String] Never! {
+    heads := [String]{}
+    bytes :: name.bytes()
+    index := 1
+    loop index + 1 < bytes.len() {
+        if Int.from_u8(bytes[index]) == 58 && Int.from_u8(bytes[index + 1]) == 58 -> &heads.push(name.slice(0, index))
+        index += 1
+    }
+    heads
 }
 
 // Rust `CheckedNominalFacts::compiler_owned_default_err_identity`: the unit's
@@ -380,12 +395,6 @@ fn jet_codegen_merge_nominal_spelling(found: JetCodegenNominalIdentity?, semanti
     }
     found.copy()
 }
-
-fn jet_codegen_type_key_leaf(name: String, prefix: String) -> String Never! {
-    bytes :: name.bytes()
-    String.from_bytes(bytes[prefix.bytes().len()..<bytes.len()].copy()) ?? ""
-}
-
 
 fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_module_identity: String, name: String, generic_names: [String]) -> String Never! {
     nominal := jet_codegen_find_source_nominal_identity(modules, current_module_identity, name, generic_names)
@@ -695,6 +704,9 @@ struct JetCodegenFieldSymbolRow {
     owner_key: String
     name: String
     resolved: JetCodegenResolvedField
+    // A stored field of a nominal struct (jet_codegen_is_stored_struct_field):
+    // computed fields and enum payload fields are not.
+    stored: Bool
 }
 
 // Built once per lowered program; rows keep module, nominal and field order.
@@ -711,6 +723,7 @@ fn jet_codegen_field_symbol_index(modules: [SemaGraphModuleResult]) -> [String:[
                         owner_key: jet_codegen_nominal_type_key(semantic_module.module_identity, nominal),
                         field_name: field.symbol.name,
                     },
+                    stored: nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed,
                 })
                 index[field.symbol.id.key] = rows
             }
@@ -1411,13 +1424,24 @@ fn jet_codegen_mir_field_id(field: JetCodegenResolvedField) -> MIRFieldID Never!
     mir_field_id("{field.owner_key}::{field.field_name}")
 }
 
-fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolID) -> MIRTypeID Never! {
-    loop semantic_module in modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key == symbol.key -> return mir_type_id(jet_codegen_nominal_type_key(semantic_module.module_identity, nominal))
+// The nominal of the first module (in module order) declaring `symbol`
+// (jet_codegen_nominal_index), unless a Core builtin owner of an earlier
+// module, or of that module, carries the key first.
+fn jet_codegen_mir_type_id_for_symbol(program: JetCodegenProgram, symbol: SymbolID) -> MIRTypeID Never! {
+    nominal_module := program.modules.len()
+    nominal_row := -1
+    if program.nominals.rows.get(symbol.key) == .Val(rows) {
+        if rows.len() > 0 {
+            nominal_module = rows[0].module_index
+            nominal_row = rows[0].nominal_index
         }
-        loop owner in semantic_module.declarations.core_builtin_owners {
-            candidate :: jet_codegen_core_owner_identity(owner, semantic_module)
+    }
+    loop module_index in 0..<program.modules.len() {
+        if module_index == nominal_module {
+            return mir_type_id(jet_codegen_nominal_type_key(program.modules[module_index].module_identity, program.modules[module_index].nominals[nominal_row]))
+        }
+        loop owner in program.modules[module_index].declarations.core_builtin_owners {
+            candidate :: jet_codegen_core_owner_identity(owner, program.modules[module_index])
             if owner.symbol.key == symbol.key -> return mir_type_id(candidate.key)
         }
     }

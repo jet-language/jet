@@ -48,6 +48,7 @@ use jet_foundation.[
     MIRVectorFact,
     Span,
     SymbolID,
+    TCompilerBuiltin,
     TContract,
     TContractResult,
     TExpr,
@@ -67,6 +68,7 @@ use jet_foundation.[
     mir_operation_stop_place,
     mir_copy_fact_for_ownership,
     mir_function_id,
+    mir_type_id,
     mir_owned_ownership,
     mir_ownership_from_access,
     mir_source_file_id,
@@ -349,6 +351,10 @@ struct JetCodegenProgram {
     owners: JetCodegenOwnerIndex
     // Program-wide field symbol index (jet_codegen_field_symbol_index).
     field_symbols: [String:[JetCodegenFieldSymbolRow]]
+    // Program-wide nominal and type-definition rows by key
+    // (jet_codegen_nominal_index): a per-expression lookup reads one map row
+    // instead of scanning every module's nominals or type definitions.
+    nominals: JetCodegenNominalIndex
     source_files: [MIRSourceFile]
     source_index: JetCodegenSourceIndex
     edition: String
@@ -836,7 +842,65 @@ fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, own
 // The program-wide inputs move into the program, which owns them.
 fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex, edition: String) -> JetCodegenProgram Never! {
     owners := jet_codegen_owner_index(modules)
-    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, source_files: source_files, source_index: source_index, edition: edition, stop_points: false, comptime_budget: false}
+    nominals := jet_codegen_nominal_index(modules)
+    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, nominals: ^nominals, source_files: source_files, source_index: source_index, edition: edition, stop_points: false, comptime_budget: false}
+}
+
+// One nominal of `modules`: its module row, its row in that module's
+// `nominals`, and the last type definition of that module with the
+// nominal's name (-1 for none).
+struct JetCodegenNominalRow {
+    module_index: Int
+    nominal_index: Int
+    type_def_index: Int
+}
+
+// One type definition of `modules`, by module and definition row.
+struct JetCodegenTypeDefRef {
+    module_index: Int
+    definition_index: Int
+}
+
+// Program-wide lookup rows over JetCodegenProgram.modules, built once by
+// jet_codegen_nominal_index. Every list keeps module, then declaration order,
+// so the first row is the one a scan of the modules met first.
+struct JetCodegenNominalIndex {
+    // Nominal symbol key -> its rows.
+    rows: [String:[JetCodegenNominalRow]]
+    // Type definition key, and type definition name -> its rows.
+    type_defs_by_key: [String:[JetCodegenTypeDefRef]]
+    type_defs_by_name: [String:[JetCodegenTypeDefRef]]
+    // MIR type ID values of the DefaultErr type definitions.
+    default_err_ids: [U64:Bool]
+}
+
+fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNominalIndex Never! {
+    rows := [String:[JetCodegenNominalRow]]{}
+    type_defs_by_key := [String:[JetCodegenTypeDefRef]]{}
+    type_defs_by_name := [String:[JetCodegenTypeDefRef]]{}
+    default_err_ids := [U64:Bool]{}
+    loop module_index in 0..<modules.len() {
+        last_definition := [String:Int]{}
+        loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
+            definition :: modules[module_index].declarations.type_defs[definition_index]
+            last_definition[definition.name] = definition_index
+            reference :: JetCodegenTypeDefRef{module_index: module_index, definition_index: definition_index}
+            by_key := type_defs_by_key.get(definition.key) ?? [JetCodegenTypeDefRef]{}
+            &by_key.push(reference)
+            type_defs_by_key[definition.key] = by_key
+            by_name := type_defs_by_name.get(definition.name) ?? [JetCodegenTypeDefRef]{}
+            &by_name.push(reference)
+            type_defs_by_name[definition.name] = by_name
+            if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) -> default_err_ids[mir_type_id(definition.key).value] = true
+        }
+        loop nominal_index in 0..<modules[module_index].nominals.len() {
+            nominal :: modules[module_index].nominals[nominal_index]
+            found := rows.get(nominal.symbol.id.key) ?? [JetCodegenNominalRow]{}
+            &found.push(JetCodegenNominalRow{module_index: module_index, nominal_index: nominal_index, type_def_index: last_definition.get(nominal.symbol.name) ?? -1})
+            rows[nominal.symbol.id.key] = found
+        }
+    }
+    JetCodegenNominalIndex{rows: rows, type_defs_by_key: type_defs_by_key, type_defs_by_name: type_defs_by_name, default_err_ids: default_err_ids}
 }
 
 // A builder ready to lower `function` against `program`.
