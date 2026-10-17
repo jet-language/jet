@@ -425,7 +425,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
 
     // Copies: the result of a ReadPlace of a candidate place, with that
-    // place, its block and its index.
+    // place, its block and its index. A ReadBorrow read (a borrowed local's
+    // write, jet_codegen_write_borrowed_binding) is no copy: it is a borrow
+    // origin below, so storing it keeps every read of its place a copy.
     copy_place := [U64:U64]{}
     copy_block := [U64:Int]{}
     copy_index := [U64:Int]{}
@@ -434,7 +436,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         loop (index, instruction) in row.instructions {
             if instruction.operation == .ReadPlace(place) {
                 if instruction.result == .Val(result) {
-                    if touches.get(place.value) != None {
+                    if touches.get(place.value) != None && !jet_codegen_last_use_holds_borrow(builder, program, value_row, result) {
                         _ := &copy_place.add(result.value, place.value)
                         _ := &copy_block.add(result.value, block)
                         _ := &copy_index.add(result.value, index)
@@ -583,7 +585,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                 }
             }
             if observed.len() == 0 -> next
-            if instruction.operation == .ReadPlace(_) -> next
+            if instruction.operation == .ReadPlace(_) && copy_place.get((instruction.result ?? no_value).value) != None -> next
             if instruction.result == .Val(result) {
                 if jet_codegen_last_use_holds_borrow(builder, program, value_row, result) {
                     if borrow_roots.get(result.value) == None -> &borrow_order.push(result.value)
