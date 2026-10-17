@@ -319,7 +319,7 @@ fn decode_key(raw: [U8], platform: Int) -> Key Never! {
 // Raw leaves expose host operations only. Prompt fault probes must both run
 // before the first byte is written, and each caller owns its error projection.
 fn terminal_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
-    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn terminal_invalid(cause: String) -> IOError Never! {

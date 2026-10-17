@@ -827,7 +827,7 @@ fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
 fn files8_u32(value: Int) -> Bool Never! { value >= 0 && value <= 4294967295 }
 
 fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
-    IOError.Other(IOContext{operation: operation.copy(), resource: resource, os_code: None, cause: Val(cause)})
+    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
 fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
@@ -1376,7 +1376,7 @@ fn relative(path: String, start: String) -> String Never! { relative_impl(path, 
 
 
 fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
-    context :: IOContext{operation: operation.copy(), resource: Val(resource), os_code: code, cause: cause}
+    context :: IOContext{operation: operation, resource: Val(resource), os_code: code, cause: cause}
     if kind == {
         1 -> IOError.InvalidInput(context)
         2 -> IOError.NotFound(context)
