@@ -1852,7 +1852,8 @@ struct JetDriverComptimeStaging {
 }
 
 // A2c, one growing comptime program per run. A shareable flush (each of its
-// evaluated entries passed jet_driver_comptime_batchable) evaluates on the
+// evaluated entries passed jet_driver_comptime_shareable: a batch of
+// constants, or one item of any kind evaluated alone) evaluates on the
 // run's live program when the closure functions that program lacks are free
 // functions that no declared row names: they and the flush's item functions
 // join it (jet_driver_comptime_grow), at the cost of their own rows. A
@@ -1861,7 +1862,10 @@ struct JetDriverComptimeStaging {
 // still the one its batch's own program gives, by A2's argument for one batch
 // carried across the run: function IDs are stable per function, the
 // evaluator runs only the item's function and what it calls, and every row it
-// reads is the row the batch's own program would have. `session` holds the
+// reads is the row the batch's own program would have. A flush grows only
+// while the run has reported no error: assembling a program of its own then
+// fails (jet_driver_assemble_mir stops on any error so far), which ends the
+// run, and so does the growth's fallback. `session` holds the
 // retired evaluator session over the program (empty while a flush evaluates
 // on it: a slot, so a growth can move it out of the borrowed record), and
 // `globals_count` the run values its globals already hold; the sets hold the
@@ -1914,7 +1918,7 @@ struct JetDriverComptimeBatch {
     // Whether an evaluated entry names a staged constant or calls a function,
     // so the program needs the rows of the values that landed since staging.
     needs_rows: Bool
-    // Whether every evaluated entry passed jet_driver_comptime_batchable, so
+    // Whether every evaluated entry passed jet_driver_comptime_shareable, so
     // the batch may evaluate on, and become, the run's live program.
     shareable: Bool
     // G: whether no evaluated entry reaches a declaration or has a closure
@@ -2562,26 +2566,34 @@ fn jet_driver_comptime_hardware_empty(hardware: MIRTargetHardwareUse) -> Bool Ne
     hardware.register_accesses.len() == 0 && hardware.interrupt_handlers.len() == 0 && hardware.dma_operations.len() == 0 && hardware.unresolved_references.len() == 0
 }
 
-// Whether a checked item whose check and closure read nothing its batch
-// holds back (jet_driver_comptime_reads_batch) may join the batch's shared
-// temporary program: a constant (not checked text) whose item and checked
-// closure use no hardware, so the program's package facts are each item's
-// own. Its value is then the value its own program gives: function IDs are
-// stable per function (jet_codegen_function_id), the evaluator runs only
-// the item's function and what it calls, and the staging at the batch's
-// first evaluated item already holds every constant row the item reads (its
-// check and closure name only constants that landed before the batch).
-// Package facts other than hardware use differ only in Core usage rows
-// (runtime parts, layer, dossier), which the evaluator never reads (it reads
-// only `facts.edition`).
-fn jet_driver_comptime_batchable(source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: [TFunc], checked_functions: [SemaComptimeFunctionResult], index: JetDriverComptimeRunIndex) -> Bool Never! {
-    if source.kind != SemaComptimeItemKind.Constant || source.checked_text != None -> return false
+// Whether a checked item may be evaluated on a program shared with other
+// items (a batch's program, or the run's live program, A2c): its item and
+// checked closure use no hardware, so the program's package facts are each
+// item's own. Its value is then the value its own program gives: function
+// IDs are stable per function (jet_codegen_function_id), the evaluator runs
+// only the item's function and what it calls, and the staging at the
+// flush's first evaluated item already holds every constant row the item
+// reads. Package facts other than hardware use differ only in Core usage
+// rows (runtime parts, layer, dossier), which the evaluator never reads (it
+// reads only `facts.edition`), and computing them reports nothing that
+// depends on the program (jet_driver_package_facts).
+fn jet_driver_comptime_shareable(request: SemaComptimeItemRequest, functions: [TFunc], checked_functions: [SemaComptimeFunctionResult], index: JetDriverComptimeRunIndex) -> Bool Never! {
     if !jet_driver_comptime_hardware_empty(request.hardware_use) -> return false
     loop function in functions {
         row :: index.checked_rows.get("{function.module_identity}\n{function.key}") ?? return false
         if !jet_driver_comptime_hardware_empty(checked_functions[row].hardware_use) -> return false
     }
     true
+}
+
+// Whether a shareable item (jet_driver_comptime_shareable) whose check and
+// closure read nothing its batch holds back (jet_driver_comptime_reads_batch)
+// may wait in the batch, to be evaluated together with it: a constant, not
+// checked text, whose key a later check names in its waits when it reads it.
+// Any other shareable item is evaluated at its turn, alone, on the run's live
+// program (A2c).
+fn jet_driver_comptime_batchable(source: SemaComptimeItemSource) -> Bool Never! {
+    source.kind == SemaComptimeItemKind.Constant && source.checked_text == None
 }
 
 fn jet_driver_comptime_batch_new() -> JetDriverComptimeBatch Never! {
@@ -2804,7 +2816,7 @@ fn jet_driver_comptime_union_closure(live: [JetDriverComptimeLive], batch: JetDr
 // entry's item function, whose IDs go to `item_ids` in entry order,
 // assembled with the package facts of the first evaluated entry's hardware
 // use and the closure's (a batch of several items, and a live program, uses
-// no hardware: jet_driver_comptime_batchable). The session's closure is this
+// no hardware: jet_driver_comptime_shareable). The session's closure is this
 // program's from now on (`staging.restore`, cleared when it becomes live).
 // None once the program cannot be built, after reporting why.
 fn jet_driver_comptime_program(
@@ -3136,8 +3148,9 @@ fn jet_driver_comptime_machine_eval(owned: ^JetDriverComptimeMachine, function_i
 // Lands or evaluates the entries of `batch` in order, exactly as the run
 // would one item at a time: plain literals land their values; the evaluated
 // entries share one program and one evaluator machine. A batch holds several
-// evaluated entries only when each passed jet_driver_comptime_batchable; such
-// a (shareable) batch grows the run's live program when it can (A2c), else
+// evaluated entries only when each passed jet_driver_comptime_batchable; a
+// shareable batch (jet_driver_comptime_shareable, alone or several) grows
+// the run's live program when it can (A2c), else
 // builds the union of the live closure and its own. If no shared program can
 // be built, its reports are withdrawn and each entry is evaluated on its own
 // program. The registration rows a flush reads (module rows, identities,
@@ -3198,7 +3211,9 @@ fn jet_driver_comptime_flush(
     machines := [JetDriverComptimeMachine]{}
     // A2c: a shareable batch takes the run's live program out of its slot
     // and grows it when it can; otherwise it builds one program for the live
-    // closure and its own, which becomes the live program. The record goes
+    // closure and its own, which becomes the live program. It never grows
+    // once the run has reported an error, as no program of its own could be
+    // assembled then (jet_driver_assemble_mir). The record goes
     // back into the slot when the flush ends; a flush that stops the run, or
     // whose programs could not be built, drops it.
     live := [JetDriverComptimeLive]{}
@@ -3207,7 +3222,7 @@ fn jet_driver_comptime_flush(
             row := &staging.live.pop() ?? { break }
             &live.push(^row)
         }
-        if live.len() > 0 {
+        if live.len() > 0 && !jet_driver_has_errors(diagnostics) {
             _ := jet_driver_comptime_grow(batch, start, &staging, &counters, &live[0], &item_functions, &machines, request.trace_sink)
         }
     }
@@ -3553,7 +3568,8 @@ fn jet_driver_comptime_run(
     // and starts over (`retry`). Either way every check sees exactly the
     // values it would see one item at a time, and a flush leaves the batch
     // empty, so an item starts over at most once. Any other item flushes the
-    // batch before it is evaluated alone.
+    // batch before it is evaluated alone; a shareable one
+    // (jet_driver_comptime_shareable) on the run's live program (A2c).
     batch := jet_driver_comptime_batch_new()
     // The waits of each pending item (`module\nkey`) whose last check, with
     // its closure, reported nothing: until one of those keys has a value or
@@ -3751,7 +3767,8 @@ fn jet_driver_comptime_run(
                     }
                 }
                 scanned_functions = checked_functions.len()
-                if jet_driver_comptime_batchable(source, comptime_request, closure.functions, checked_functions, run_index) {
+                shareable :: jet_driver_comptime_shareable(comptime_request, closure.functions, checked_functions, run_index)
+                if shareable && jet_driver_comptime_batchable(source) {
                     jet_driver_comptime_batch_add(&batch, source, comptime_request, &closure.functions, None)
                     next
                 }
@@ -3765,7 +3782,7 @@ fn jet_driver_comptime_run(
                     }
                 }
                 alone := jet_driver_comptime_batch_new()
-                alone.shareable = false
+                alone.shareable = shareable
                 jet_driver_comptime_batch_add(&alone, source, comptime_request, &closure.functions, None)
                 flushed := jet_driver_comptime_flush(names, load, request, alone, &values, checked_functions, &trace, program, &available, &staging, &counters, &diagnostics)
                 if flushed.progressed -> made_progress = true
