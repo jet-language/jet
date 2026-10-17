@@ -1,7 +1,9 @@
 // Real runtime C-ABI client; no Rust driver/runtime-layout interpretation.
 // Mirrors the retired native_backend_stop_and_euclid_exports contract and
 // retains allocator process modes for run-alloc-parity.mjs.
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -46,15 +48,20 @@ static void values(void) {
     print_owned(jet_rt_int_to_string(jet_int_rem_euclid(-7,2,file,sizeof(file)-1,4)));
     Text raw=text("a\"b\n"); print_owned(jet_rt_require_debug_string(raw)); jet_rt_string_drop(raw);
 }
+static int64_t count_of(Text value) { return ((const int64_t *)(const void *)value)[-1]; }
 static void text_carriers(void) {
     static const unsigned char input[]={ 'h',0xc3,0xa9,0,0xf0,0x9f,0x98,0x80 };
     const uint64_t len=sizeof(input);
-    unsigned char *ptr=jet_rt_alloc((int64_t)len,1); memcpy(ptr,input,(size_t)len);
-    Text carrier=jet_rt_alloc(24,8); *carrier=(TextCarrier){ptr,len,len};
-    assert(jet_rt_string_data(carrier)==ptr && jet_rt_string_byte_len(carrier)==(int64_t)len && jet_char_len(carrier)==4);
-    Text clone=jet_rt_string_clone(carrier); assert(clone!=carrier && clone->ptr!=ptr); jet_rt_string_drop(carrier);
-    assert(clone->len==len && !memcmp(clone->ptr,input,(size_t)len)); jet_rt_string_drop(clone);
-    Text empty=jet_rt_string_builder_new(); assert((uintptr_t)empty->ptr==1 && empty->len==0 && empty->cap==0 && jet_string_is_empty(empty));
+    // P2 (#5041): a heap text is [count][data,len,cap]; clone shares it.
+    Text carrier=jet_rt_string_from_static(input,(int64_t)len); const unsigned char *ptr=carrier->ptr;
+    assert(jet_rt_string_data(carrier)==ptr && jet_rt_string_byte_len(carrier)==(int64_t)len && jet_char_len(carrier)==4 && count_of(carrier)==1);
+    Text clone=jet_rt_string_clone(carrier); assert(clone==carrier && clone->ptr==ptr && count_of(carrier)==2); jet_rt_string_drop(carrier);
+    assert(count_of(clone)==1 && clone->len==len && !memcmp(clone->ptr,input,(size_t)len)); jet_rt_string_drop(clone);
+    // rt_static_text headers (cap 0 over rodata) are immortal: no count word is read or written.
+    static TextCarrier literal={ (unsigned char *)(uintptr_t)input, sizeof(input), 0 };
+    assert(jet_rt_string_clone(&literal)==&literal); jet_rt_string_drop(&literal); jet_rt_string_drop(&literal);
+    assert(literal.ptr==input && literal.len==len && literal.cap==0);
+    Text empty=jet_rt_string_builder_new(); assert((uintptr_t)empty->ptr==1 && empty->len==0 && empty->cap==0 && jet_string_is_empty(empty) && count_of(empty)==1);
     unsigned char seed[2*sizeof(input)]; memcpy(seed,input,(size_t)len); memcpy(seed+len,input,(size_t)len);
     jet_rt_string_builder_push_static(empty,seed,(int64_t)sizeof(seed));
     unsigned char *first=empty->ptr; jet_rt_string_builder_push(empty,empty);
@@ -70,6 +77,41 @@ static void text_carriers(void) {
     for(uint64_t i=0;i<12;++i) assert(!memcmp(finished->ptr+i*len,input,(size_t)len));
     jet_rt_string_drop(finished); jet_rt_string_drop(NULL);
 }
+// A builder must be unique when written: a shared one is a runtime defect stop.
+static void shared_text_write(void) {
+    Text builder=jet_rt_string_builder_new(); Text alias=jet_rt_string_clone(builder);
+    jet_rt_string_builder_push_static(builder,"x",1);
+    jet_rt_string_drop(alias); jet_rt_string_drop(builder);
+}
+// Atomic counts: 8 threads retain and release one block concurrently; then
+// 8 concurrent final releases see exactly one last owner.
+extern void jet_rt_rc_retain(int64_t *); extern bool jet_rt_rc_release(int64_t *); extern bool jet_rt_rc_unique(int64_t *);
+static int64_t shared_count;
+static int last_owners;
+static void *rc_churn(void *unused) {
+    (void)unused;
+    for(int i=0;i<100000;++i) { jet_rt_rc_retain(&shared_count); assert(!jet_rt_rc_release(&shared_count)); }
+    jet_rt_rc_retain(&shared_count);
+    return NULL;
+}
+static void *rc_last(void *unused) {
+    (void)unused;
+    if(jet_rt_rc_release(&shared_count)) __atomic_add_fetch(&last_owners,1,__ATOMIC_SEQ_CST);
+    return NULL;
+}
+static void refcount_threads(void) {
+    pthread_t threads[8];
+    shared_count=1;
+    for(int i=0;i<8;++i) assert(!pthread_create(&threads[i],NULL,rc_churn,NULL));
+    for(int i=0;i<8;++i) assert(!pthread_join(threads[i],NULL));
+    assert(shared_count==9 && !jet_rt_rc_unique(&shared_count));
+    assert(!jet_rt_rc_release(&shared_count) && shared_count==8);
+    for(int i=0;i<8;++i) assert(!pthread_create(&threads[i],NULL,rc_last,NULL));
+    for(int i=0;i<8;++i) assert(!pthread_join(threads[i],NULL));
+    assert(last_owners==1 && shared_count==0);
+    int64_t immortal=INT64_MIN; jet_rt_rc_retain(&immortal); assert(!jet_rt_rc_release(&immortal) && immortal==INT64_MIN && !jet_rt_rc_unique(&immortal));
+    puts("refcount ok");
+}
 static void euclid_by_zero(void) { (void)jet_int_rem_euclid(1,0,file,sizeof(file)-1,6); }
 static void numeric_stop(void) {
     static const char message[]="This addition overflows the value's type (the result is outside its range)";
@@ -81,12 +123,18 @@ static void panic_case(void) { require_stop(2,text("boom"),NULL,NULL,NULL); }
 #endif
 static void alloc_invalid_layout(void) { (void)jet_rt_alloc(1,3); }
 static void alloc_failure(void) { (void)jet_rt_alloc(INT64_MAX-7,8); }
+extern void jet_rt_host_arguments(int64_t,char **,char **);
+extern char **environ;
 int main(int argc,char **argv) {
+    // Startup env/argv capture precedes any runtime entry (HostStartup.jet).
+    jet_rt_host_arguments(argc,argv,environ);
     void (*entry)(void)=NULL;
     if(argc==2) {
 #ifndef C_ABI_ALLOC_ONLY
         if(!strcmp(argv[1],"values")) entry=values;
         else if(!strcmp(argv[1],"text-carriers")) entry=text_carriers;
+        else if(!strcmp(argv[1],"shared-text-write")) entry=shared_text_write;
+        else if(!strcmp(argv[1],"refcount-threads")) entry=refcount_threads;
         else if(!strcmp(argv[1],"euclid-by-zero")) entry=euclid_by_zero;
         else if(!strcmp(argv[1],"numeric-stop")) entry=numeric_stop;
         else if(!strcmp(argv[1],"require")) entry=require;

@@ -4,12 +4,8 @@
 // the seed's canonical entropy panic, never expose this private error signature.
 fn vault_crypto_key_text(key: I64, identity: Bool) -> I64 {
     length :: if identity -> I64{74} else -> I64{62}
-    text :: jet_rt_alloc(I64{24}, I64{8})
-    data :: jet_rt_alloc(length, I64{1})
-    _ := rt_age_key_encode(key, identity, data)
-    rt_text_store(text, data)
-    rt_text_store(text + I64{8}, length)
-    rt_text_store(text + I64{16}, length)
+    text :: rt_text_with_length(length, length)
+    _ := rt_age_key_encode(key, identity, rt_text_data(text))
     text
 }
 // Final native Text buffers are encoded directly; no temporary text/key copies.

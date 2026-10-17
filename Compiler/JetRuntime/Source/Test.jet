@@ -5,14 +5,7 @@
 // property rows are refused by the producer and by this wire consumer.
 // Capture is in TestCapture; unit invocation still needs L8a's stop boundary.
 
-fn test_text_new(length: I64) -> I64 {
-    text :: jet_rt_alloc(I64{24}, I64{8})
-    data :: if (length == I64{0}) -> I64{1} else -> jet_rt_alloc(length, I64{1})
-    trap_store(text, data)
-    trap_store(text + I64{8}, length)
-    trap_store(text + I64{16}, length)
-    text
-}
+fn test_text_new(length: I64) -> I64 { rt_text_with_length(length, length) }
 
 fn test_copy_bytes(destination: I64, source: I64, length: I64) {
     at := I64{0}
@@ -22,21 +15,10 @@ fn test_copy_bytes(destination: I64, source: I64, length: I64) {
     }
 }
 
-fn test_text_clone(text: I64) -> I64 {
-    length :: trap_word(text + I64{8})
-    cloned :: test_text_new(length)
-    test_copy_bytes(trap_word(cloned), trap_word(text), length)
-    cloned
-}
+// A fresh unique copy: capture texts keep growing in place after a snapshot.
+fn test_text_clone(text: I64) -> I64 { rt_text_copy(trap_word(text), trap_word(text + I64{8})) }
 
-fn test_text_drop(text: I64) {
-    if (text == I64{0}) {
-        return
-    }
-    capacity :: trap_word(text + I64{16})
-    if (capacity != I64{0}) { jet_rt_free(trap_word(text), capacity, I64{1}) }
-    jet_rt_free(text, I64{24}, I64{8})
-}
+fn test_text_drop(text: I64) { jet_rt_string_drop(text) }
 
 // name is borrowed. stdout and error are owned; null error denotes success.
 // The remaining task adapter collects capture/skip and transfers these handles.

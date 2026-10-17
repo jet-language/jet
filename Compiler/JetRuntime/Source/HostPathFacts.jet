@@ -41,7 +41,8 @@ fn fs_text_has_nul(path: I64) -> Bool {
 // joins unless base is empty or already ends in one ("a" + "" is "a/").
 #Export(c) fn jet_fs_host_path_join_raw(base: I64, path: I64) -> I64 {
     if jet_fs_host_path_is_absolute_raw(path) -> return jet_rt_string_clone(path)
-    result :: jet_rt_string_clone(base)
+    // A fresh unique copy: the join appends to it in place.
+    result :: rt_text_copy(rt_text_data(base), rt_text_len(base))
     length :: rt_text_len(base)
     if (length != I64{0} && rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
     jet_rt_string_builder_push(result, path)

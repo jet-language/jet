@@ -16,29 +16,14 @@ SCHEDULER_SCOPE_MASK_KIND :: prep { I64{1792} }
 
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 fn scheduler_text_new(length: I64) -> I64 {
-    text :: alloc_required_valid(I64{24}, I64{8})
     capacity :: (length + I64{7}).bit_and(I64{-8})
-    data :: if (capacity == I64{0}) -> I64{1} else -> jet_rt_alloc(capacity, I64{1})
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        alloc_release_valid(text, I64{24}, I64{8})
-        return I64{0}
-    }
-    sync_store(text, data)
-    sync_store(text + I64{8}, length)
-    sync_store(text + I64{16}, capacity)
-    if (capacity != I64{0}) -> coll_zero(data, capacity)
+    text :: rt_text_with_length(length, capacity)
+    if (text == I64{0}) -> return I64{0}
+    if (capacity != I64{0}) -> coll_zero(sync_load(text), capacity)
     text
 }
 
-// The empty owned E4 needs only its known-valid header; address1 is never
-// deallocated because byte capacity is zero, matching Text clone/drop.
-fn scheduler_text_empty() -> I64 {
-    text :: alloc_required_valid(I64{24}, I64{8})
-    sync_store(text, I64{1})
-    sync_store(text + I64{8}, I64{0})
-    sync_store(text + I64{16}, I64{0})
-    text
-}
+fn scheduler_text_empty() -> I64 { rt_text_copy(I64{1}, I64{0}) }
 
 fn scheduler_text_concat(left: I64, right: I64) -> I64 {
     a :: sync_load(left + I64{8})
