@@ -340,15 +340,18 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
 }
 
 // MIRRust.rs:plan_partial_moves (16915), move_projected_place (28734),
-// move_partial_field (17123): only Field-only paths leave a partial owner.
-// Its consuming storage is zeroed (lower_clear_at): glue skips the null
-// owners there, while retaining all unmoved siblings.
+// move_partial_field (17123): a Field path leaves a partial owner, and so does
+// a checked payload path (an explicit `^p` of a match payload, entered only
+// after its variant test). Its consuming storage is zeroed (lower_clear_at):
+// glue skips the null owners there, while retaining all unmoved siblings and
+// the carrier itself; a Close-bearing member gets a partial-drop flag
+// (PartialDrop.jet lower_partial_field_path).
 fn lower_projected_move_supported(m: &LowerModule, f: &LowerFunction, projections: [MIRProjection]) -> Bool Never! {
     loop projection in projections {
         if projection == {
-            .Field(_, _) -> {}
+            .Field(_, _) | .Payload(_, _) -> {}
             else -> {
-                lower_fail(&m, &f, "moving out of a non-Field projection is not lowered at O0 yet")
+                lower_fail(&m, &f, "moving out of a non-Field, non-payload projection is not lowered at O0 yet")
                 return false
             }
         }

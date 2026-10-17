@@ -110,14 +110,23 @@ fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProject
     path := [LowerGlueField]{}
     current := ty
     loop projection in projections {
-        if projection == .Field(id, _) {
-            field :: lower_struct_field(p, current, id) ?? return None
-            storage :: if field.boxed -> lower_option_type(field.ty) else -> field.ty
-            &path.push(LowerGlueField{offset: field.offset, ty: storage})
-            if field.boxed -> &path.push(LowerGlueField{offset: 0, ty: field.ty})
-            current = field.ty
-        } else {
-            return None
+        if projection == {
+            .Field(id, _) -> {
+                field :: lower_struct_field(p, current, id) ?? return None
+                storage :: if field.boxed -> lower_option_type(field.ty) else -> field.ty
+                &path.push(LowerGlueField{offset: field.offset, ty: storage})
+                if field.boxed -> &path.push(LowerGlueField{offset: 0, ty: field.ty})
+                current = field.ty
+            }
+            // A moved match payload (Places.jet lower_payload_info), laid
+            // out as lower_partial_value_path lays out an EnumPayload.
+            .Payload(kind, _) -> {
+                member :: lower_payload_info(p, current, kind) ?? return None
+                &path.push(LowerGlueField{offset: member.offset, ty: if member.boxed -> lower_option_type(member.ty) else -> member.ty})
+                if member.boxed -> &path.push(LowerGlueField{offset: 0, ty: member.ty})
+                current = member.ty
+            }
+            else -> return None
         }
     }
     Val(path)
