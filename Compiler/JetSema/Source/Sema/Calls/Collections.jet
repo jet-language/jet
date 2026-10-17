@@ -69,12 +69,13 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     // Rust `open_ret`: a callback slot whose result type is still open
     // (`fn(T)` with no return) accepts any function value; the method's own
     // shape rules decide its use (a named `fn(T, T) -> Ordering` is the
-    // `sort_by` comparator). Only a lambda is checked against the slot.
+    // `sort_by` comparator). Only a lambda, or the `.member` subject
+    // shorthand that is one (D-SUBJECT-CALL1=A), is checked against the slot.
     open_slot := false
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
         is_lambda := if argument.expr == {
             .Lambda(_) -> true
-            else -> false
+            else -> sema_expr_is_bare_member_chain(argument.expr)
         }
         open_slot = required_ret == None && !is_lambda
     }
