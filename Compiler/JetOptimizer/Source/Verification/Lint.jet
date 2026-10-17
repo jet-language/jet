@@ -316,12 +316,26 @@ fn mir_lint_key(id: U64) -> String Never! {
     "{id}"
 }
 
+// The text after the last `.`, then after the last `:` in that: the bytes
+// are scanned once, with no split lists (both separators are ASCII, so the
+// cut is a character boundary).
 fn mir_lint_leaf(name: String) -> String Never! {
-    dotted := name.split(".").to_list()
-    tail := if dotted.len() == 0 -> name else -> dotted[dotted.len() - 1]
-    coloned := tail.split(":").to_list()
-    if coloned.len() == 0 -> return tail
-    coloned[coloned.len() - 1]
+    bytes :: name.bytes()
+    start := 0
+    loop (at, byte) in bytes {
+        if byte == (U8{46}) || byte == (U8{58}) -> start = at + 1
+    }
+    if start == 0 -> return name.copy()
+    String.from_bytes(bytes.slice(start, bytes.len())) ?? name.copy()
+}
+
+// The text before the first `.`, or None when `name` has none.
+fn mir_lint_dotted_head(name: String) -> String? Never! {
+    bytes :: name.bytes()
+    loop (at, byte) in bytes {
+        if byte == (U8{46}) -> return Val(String.from_bytes(bytes.slice(0, at)) ?? "")
+    }
+    None
 }
 
 // Peel the carriers that share their inner representation.
@@ -341,8 +355,9 @@ fn mir_lint_is_wild(index: MIRLintIndex, ty: MIRType) -> Bool Never! {
         .Apply(name, args) -> {
             if args.len() == 0 {
                 if name.name == "Never" || index.type_vars.get(name.name) != None -> return true
-                dotted :: name.name.split(".").to_list()
-                if dotted.len() > 1 && index.type_vars.get(dotted[0]) != None -> return true
+                if mir_lint_dotted_head(name.name) == .Val(head) {
+                    if index.type_vars.get(head) != None -> return true
+                }
             }
             if index.transparent.get(name.name) != None -> return true
             index.transparent.len() > 0 && index.transparent.get(mir_lint_leaf(name.name)) != None
