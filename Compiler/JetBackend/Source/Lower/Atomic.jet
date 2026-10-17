@@ -59,17 +59,17 @@ fn lower_atomic_clone_assert(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
     false
 }
 
-fn lower_atomic_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_atomic_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(semantic) {
         if semantic == .StaticPreludeCall(call, args, _, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             if row.module_name == "::JetAtomic" {
                 loop arg in args { if arg.access == .Move -> &stored.push(arg.value) }
             }
         }
         if semantic == .BuiltinMethod(call, _, _, args, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             if lower_runtime_symbol(row).starts_with("jet_atomic_") -> stored = args
         }
     }
@@ -92,7 +92,7 @@ fn lower_atomic_taken(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 }
 
 fn lower_atomic_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if row.module_name != "::JetAtomic" -> return false
     result_ty :: lower_checked_type(c, instruction) ?? {
         lower_fail(&m, &f, "Atomic constructor has no checked result")

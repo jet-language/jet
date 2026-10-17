@@ -16,7 +16,7 @@ use jet_foundation.[
 // identity. Only the actual BitSet holder may dispatch to these providers;
 // List.clear and unrelated nominals keep their ordinary lowering.
 fn lower_bits_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if row.family != .StaticPrelude || mir_symbol_name(row.symbol) != "JetBitSet::new" -> return false
     ty :: lower_checked_type(c, instruction) ?? return false
     holder :: lower_runtime_handle_type(p, ty) ?? return false
@@ -331,7 +331,7 @@ fn lower_tls_transport_message() -> String Never! {
 // Explicit MIR Write arguments must match an adapter lending the caller's
 // handle mutably. The pointer stays in the caller's place; no copy or write-back.
 fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIRPreludeCallID, args: [MIRCallArg], what: String) -> [MIRValueID]? {
-    row :: lower_prelude_row(p, call) ?? return None
+    row :: lower_prelude_row(p, m, call) ?? return None
     if lower_tls_transport_route(row) {
         lower_fail(&m, &f, lower_tls_transport_message())
         return None
@@ -375,7 +375,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 // "BuiltinMethod"). A Core record argument crosses as a runtime handle made
 // for the call and dropped after it.
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
     if lower_native_control_call(p, c, &m, &f, instruction, row, args) -> return
     if lower_tls_transport_route(row) -> return lower_fail(&m, &f, lower_tls_transport_message())
     if lower_realtime_deadline(p, c, &m, &f, instruction, row, args) -> return

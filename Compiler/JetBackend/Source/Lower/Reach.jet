@@ -245,7 +245,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         }
         .BuiltinMethod(call, receiver, _, _, _) -> {
             // `list.join` shows every element (Lists.jet lower_helper_list_join).
-            if lower_prelude_row(p, call) == .Val(row) {
+            if lower_prepared_prelude_row(p, q, call) == .Val(row) {
                 if lower_runtime_symbol(row) == "jet_iter_join" {
                     lower_lazy_reach_value(&q, function, facts, receiver, parent)
                 } else if lower_runtime_symbol(row) == "jet_deque_join" {

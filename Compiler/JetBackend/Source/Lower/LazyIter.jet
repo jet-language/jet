@@ -937,7 +937,7 @@ fn lower_lazy_type_can_clone(p: MIRProgram, ty: MIRType) -> Bool Never! {
 }
 
 fn lower_lazy_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if lower_runtime_symbol(row) == "jet_iter_next" && args.len() == 1 && args[0].access == .Write {
         ty :: lower_value_type(c, args[0].value) ?? return false
         if lower_lazy_element(ty) == None -> return false
@@ -965,7 +965,7 @@ fn lower_lazy_reach_value(q: &LowerPrepared, function: MIRFunction, facts: [U64:
 }
 
 fn lower_lazy_reach_call(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], call: MIRPreludeCallID, args: [MIRCallArg], parent: Int) Never! {
-    row :: lower_prelude_row(p, call) ?? return
+    row :: lower_prepared_prelude_row(p, q, call) ?? return
     if lower_runtime_symbol(row) != "jet_iter_join" || args.len() == 0 -> return
     lower_lazy_reach_value(&q, function, facts, args[0].value, parent)
 }
@@ -980,14 +980,14 @@ fn lower_lazy_callback_access(signature: MIRFunctionSignature, index: Int) -> MI
 
 // Borrowed read operands consumed by runtime adapters need independent holders,
 // just like aggregate construction and Map insertion (27b06d2a6).
-fn lower_lazy_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_lazy_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     if operation == {
-        .CoreCall(_, call, args, _, _, _) | .Call(.Prelude(call), args, _) -> return lower_lazy_stored_args(p, call, args)
+        .CoreCall(_, call, args, _, _, _) | .Call(.Prelude(call), args, _) -> return lower_lazy_stored_args(p, m, call, args)
         .Semantic(semantic) -> {
             if semantic == {
-                .StaticPreludeCall(call, args, _, _) -> return lower_lazy_stored_args(p, call, args)
+                .StaticPreludeCall(call, args, _, _) -> return lower_lazy_stored_args(p, m, call, args)
                 .BuiltinMethod(call, receiver, _, args, _) -> {
-                    row :: lower_prelude_row(p, call) ?? return [MIRValueID]{}
+                    row :: lower_prelude_row(p, m, call) ?? return [MIRValueID]{}
                     if !lower_lazy_owns_route(lower_runtime_symbol(row)) -> return [MIRValueID]{}
                     stored := [MIRValueID]{}
                     if row.signature.borrow_mask.len() > 0 && !row.signature.borrow_mask[0] -> &stored.push(receiver)
@@ -997,7 +997,7 @@ fn lower_lazy_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
                     return stored
                 }
                 .ClosureMethod(receiver, args, call) -> {
-                    row :: lower_prelude_row(p, call) ?? return [MIRValueID]{}
+                    row :: lower_prelude_row(p, m, call) ?? return [MIRValueID]{}
                     if !lower_lazy_owns_route(lower_runtime_symbol(row)) -> return [MIRValueID]{}
                     stored := [MIRValueID]{}
                     if row.signature.borrow_mask.len() > 0 && !row.signature.borrow_mask[0] -> &stored.push(receiver)
@@ -1014,8 +1014,8 @@ fn lower_lazy_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
     [MIRValueID]{}
 }
 
-fn lower_lazy_stored_args(p: MIRProgram, call: MIRPreludeCallID, args: [MIRCallArg]) -> [MIRValueID] Never! {
-    row :: lower_prelude_row(p, call) ?? return [MIRValueID]{}
+fn lower_lazy_stored_args(p: MIRProgram, m: LowerModule, call: MIRPreludeCallID, args: [MIRCallArg]) -> [MIRValueID] Never! {
+    row :: lower_prelude_row(p, m, call) ?? return [MIRValueID]{}
     if !lower_lazy_owns_route(lower_runtime_symbol(row)) -> return [MIRValueID]{}
     stored := [MIRValueID]{}
     loop (index, arg) in args {

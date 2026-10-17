@@ -334,7 +334,7 @@ fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // Private Core carrier kernels are not C's public List/String ABI. Their
 // checked inputs are borrowed native headers; only lengths are raw i64.
 fn lower_c_mem_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if row.module_name != "core.mem" -> return false
     symbol :: if row.member == {
         "__string_data" -> "jet_rt_string_data"

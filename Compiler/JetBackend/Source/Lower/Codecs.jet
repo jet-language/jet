@@ -34,7 +34,7 @@ fn lower_codec_method(p: MIRProgram, ty: MIRType, encode: Bool) -> LowerCodecMet
 }
 
 fn lower_codec_reach(p: MIRProgram, q: &LowerPrepared, route: MIRPreludeCallID, types: [MIRType], parent: Int, site: String) Never! {
-    row :: lower_prelude_row(p, route) ?? return
+    row :: lower_prepared_prelude_row(p, q, route) ?? return
     if types.len() != 1 -> return
     encode :: row.module_name == "core.encoding.codec" && row.member == "encode"
     decode :: (row.module_name == "core.encoding.codec" && (row.member == "decode" || row.member == "decode_typed"))
@@ -136,7 +136,7 @@ fn lower_codec_encode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
 
 fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg], types: [MIRType]) -> Bool Never! {
     if lower_native_value_call(p, c, &m, &f, instruction, call, args) -> return true
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if types.len() == 1 && row.module_name == "core.encoding.csv" && row.member == "decode" -> return lower_codec_csv(p, c, &m, &f, instruction, args, types[0])
     if types.len() == 1 && row.module_name == "core.sys" && row.member == "decode" -> return lower_codec_env(p, c, &m, &f, instruction, args, types[0])
     codec :: row.module_name == "core.encoding.codec" && (row.member == "encode" || row.member == "decode" || row.member == "decode_typed")

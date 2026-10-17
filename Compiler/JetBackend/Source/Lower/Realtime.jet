@@ -32,7 +32,7 @@ fn lower_realtime_stream(p: MIRProgram, ty: MIRType) -> Bool Never! {
 }
 
 fn lower_realtime_start(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, values: [MIRValueID], closure: MIRValueID?) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "Realtime has no checked Core route")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "Realtime has no checked Core route")
     if lower_runtime_symbol(row) != "jet_rt_callback" -> return lower_fail(&m, &f, "Realtime has no canonical producer route")
     if values.len() != 2 -> return lower_fail(&m, &f, "Realtime must supply rate and frame count")
     loop value in values {

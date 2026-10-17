@@ -100,7 +100,7 @@ fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, clo
 }
 
 fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], call: MIRPreludeCallID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
     if row.module_name == "core.collections" && row.member == "edit_disjoint" && lower_runtime_symbol(row) == "jet_edit_disjoint" -> return lower_disjoint_edit(p, c, &m, &f, instruction, receiver, args)
     if lower_parallel_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return

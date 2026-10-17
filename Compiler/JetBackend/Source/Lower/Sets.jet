@@ -113,7 +113,7 @@ fn lower_set_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
 fn lower_set_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
     ty :: lower_checked_type(c, instruction) ?? return false
     if lower_set_element(ty) == None -> return false
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_runtime_symbol(row)
     rank :: lower_rank_type(ty)
     if symbol == (if rank -> "jet_sorted_set_from" else -> "jet_set_from") && args.len() == 1 {
@@ -550,7 +550,7 @@ fn lower_tally_map(ty: MIRType) -> MIRType Never! {
 fn lower_tally_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
     ty :: lower_checked_type(c, instruction) ?? return false
     if lower_tally_element(ty) == None -> return false
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if lower_runtime_symbol(row) != "std::collections::HashMap::new" || args.len() != 0 -> return false
     dst :: lower_result(p, c, &m, &f, instruction) ?? return true
     lower_set_empty(p, &f, dst, ty)

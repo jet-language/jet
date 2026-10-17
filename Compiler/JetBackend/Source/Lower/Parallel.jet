@@ -208,10 +208,10 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 
 // These routes consume their receiver and moved callback. Owned reads from a
 // stable place must acquire their own value before an adapter drops it.
-fn lower_parallel_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_parallel_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(.ClosureMethod(receiver, args, call)) {
-        row :: lower_prelude_row(p, call) ?? return stored
+        row :: lower_prelude_row(p, m, call) ?? return stored
         symbol :: lower_runtime_symbol(row)
         if symbol != "jet_list_para_map" && symbol != "jet_list_try_map" && symbol != "jet_list_para_filter" && symbol != "jet_list_para_partition" && symbol != "jet_list_para_fold" -> return stored
         &stored.push(receiver)

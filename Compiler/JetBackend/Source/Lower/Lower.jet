@@ -536,7 +536,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         static_fixups: [LowerStaticFixup]{},
         static_live: None,
         source_rows: [U64:Int]{},
-        prelude_positions: [U64:Int]{},
+        prelude_positions: lower_prelude_positions(program),
         asm_foreign: prepared.asm_foreign.copy(),
         foreign_rows: prepared.foreign_rows.copy(),
         mir_rows: [U64:Int]{},
@@ -561,9 +561,6 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     assert(program.native_pack == m.native_pack)
     loop (index, file) in program.source_files {
         if m.source_rows.get(file.id.value) == None -> &m.source_rows.add(file.id.value, index).drop("checked absent above")
-    }
-    loop (index, call) in program.prelude_calls {
-        if m.prelude_positions.get(call.id.value) == None -> &m.prelude_positions.add(call.id.value, index).drop("checked absent above")
     }
     // Every signature is registered before any body is lowered: calls name them.
     loop (index, descriptor) in prepared.functions {
@@ -1582,11 +1579,28 @@ fn lower_runtime_symbol(row: MIRPreludeCall) -> String Never! {
     parts[parts.len() - 1]
 }
 
-fn lower_prelude_row(p: MIRProgram, id: MIRPreludeCallID) -> MIRPreludeCall? {
-    loop row in p.prelude_calls {
-        if row.id == id -> return Val(row)
+// Prelude call ID value -> its first row in `p.prelude_calls`, built once per
+// lowering (LowerModule.prelude_positions, LowerPrepared.prelude_positions).
+fn lower_prelude_positions(p: MIRProgram) -> [U64:Int] Never! {
+    positions := [U64:Int]{}
+    loop (index, call) in p.prelude_calls {
+        if positions.get(call.id.value) == None -> &positions.add(call.id.value, index).drop("checked absent above")
     }
-    None
+    positions
+}
+
+// The program's Prelude row for `id`: the first row with that ID, found
+// through the module's position index (built once per lowering) instead of a
+// scan of every Prelude row of the program per lookup.
+fn lower_prelude_row(p: MIRProgram, m: LowerModule, id: MIRPreludeCallID) -> MIRPreludeCall? {
+    row :: m.prelude_positions.get(id.value) ?? return None
+    Val(p.prelude_calls[row])
+}
+
+// lower_prelude_row before the module exists: the inventory's own index.
+fn lower_prepared_prelude_row(p: MIRProgram, q: LowerPrepared, id: MIRPreludeCallID) -> MIRPreludeCall? {
+    row :: q.prelude_positions.get(id.value) ?? return None
+    Val(p.prelude_calls[row])
 }
 
 // ---------------------------------------------------------------------------
@@ -2248,7 +2262,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         payload_takes: lower_payload_takes(function, block_index),
         inspect_carriers: inspect_carriers,
         iter_takes: iter_takes,
-        fixed_literals: lower_fixed_literals(p, function),
+        fixed_literals: lower_fixed_literals(p, m, function),
         order: order,
         lir_blocks: lir_blocks,
         ranks: ranks,
@@ -2267,11 +2281,11 @@ fn lower_consumed_operands(p: MIRProgram, m: LowerModule, operation: MIROperatio
     consumed := lower_stored_operands(operation)
     if operation == .WritePlace(_, written) -> &consumed.push(written)
     if operation == .ReplacePlace(_, replaced) -> &consumed.push(replaced)
-    loop stored in lower_map_stored_operands(p, operation) -> &consumed.push(stored)
-    loop stored in lower_lazy_stored_operands(p, operation) -> &consumed.push(stored)
-    loop stored in lower_task_stored_operands(p, operation) -> &consumed.push(stored)
-    loop stored in lower_parallel_stored_operands(p, operation) -> &consumed.push(stored)
-    loop stored in lower_atomic_stored_operands(p, operation) -> &consumed.push(stored)
+    loop stored in lower_map_stored_operands(p, m, operation) -> &consumed.push(stored)
+    loop stored in lower_lazy_stored_operands(p, m, operation) -> &consumed.push(stored)
+    loop stored in lower_task_stored_operands(p, m, operation) -> &consumed.push(stored)
+    loop stored in lower_parallel_stored_operands(p, m, operation) -> &consumed.push(stored)
+    loop stored in lower_atomic_stored_operands(p, m, operation) -> &consumed.push(stored)
     mask := [Bool]{}
     if mir_operation_consumption_route(operation) == .Val(call) {
         if m.prelude_positions.get(call.value) == .Val(row) -> mask = p.prelude_calls[row].signature.borrow_mask.copy()
@@ -3977,11 +3991,11 @@ fn lower_release_return_slots(c: LowerContext, f: &LowerFunction, kept: LIRValue
 fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
     if f.partial_drops.len() != 0 || f.closing != None {
         stored := lower_stored_operands(instruction.operation)
-        loop value in lower_map_stored_operands(p, instruction.operation) -> &stored.push(value)
-        loop value in lower_lazy_stored_operands(p, instruction.operation) -> &stored.push(value)
-        loop value in lower_task_stored_operands(p, instruction.operation) -> &stored.push(value)
-        loop value in lower_parallel_stored_operands(p, instruction.operation) -> &stored.push(value)
-        loop value in lower_atomic_stored_operands(p, instruction.operation) -> &stored.push(value)
+        loop value in lower_map_stored_operands(p, m, instruction.operation) -> &stored.push(value)
+        loop value in lower_lazy_stored_operands(p, m, instruction.operation) -> &stored.push(value)
+        loop value in lower_task_stored_operands(p, m, instruction.operation) -> &stored.push(value)
+        loop value in lower_parallel_stored_operands(p, m, instruction.operation) -> &stored.push(value)
+        loop value in lower_atomic_stored_operands(p, m, instruction.operation) -> &stored.push(value)
         args := [MIRCallArg]{}
         if instruction.operation == {
             .Call(_, call_args, _) | .IndirectCall(_, call_args, _) | .CoreCall(_, _, call_args, _, _, _) -> args = call_args
@@ -4085,7 +4099,7 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
         .PatternCapture(matched, index) -> lower_pattern_capture(p, c, &m, &f, instruction, matched, index)
         .PatternMatched(matched) -> lower_pattern_matched(p, c, &m, &f, instruction, matched)
         .Slice(call, base, start, end, range, location) -> {
-            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "Slice without a checked Prelude route is not lowered at O0 yet")
+            row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "Slice without a checked Prelude route is not lowered at O0 yet")
             lower_slice(p, c, &m, &f, instruction, row, base, start, end, range, location)
         }
         .Call(callee, args, type_args) -> lower_call(p, c, &m, &f, instruction, callee, args, type_args)
@@ -4098,12 +4112,12 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
             if lower_channel_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_atexit_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_codec_call(p, c, &m, &f, instruction, route, args, type_args) -> return
-            if type_args.len() > 0 -> return lower_fail(&m, &f, "generic CoreCall {lower_route_name(p, route)} is not lowered at O0 yet")
+            if type_args.len() > 0 -> return lower_fail(&m, &f, "generic CoreCall {lower_route_name(p, m, route)} is not lowered at O0 yet")
             values :: lower_route_values(p, &m, &f, route, args, "CoreCall") ?? return
             lower_route_call(p, c, &m, &f, instruction, route, values, "CoreCall")
         }
         .LoopRangeInit(call, start, end, step, exclusive) -> {
-            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "range loop names missing Prelude call {call.value}")
+            row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "range loop names missing Prelude call {call.value}")
             first :: lower_use(&m, &f, start) ?? return
             last :: lower_use(&m, &f, end) ?? return
             args := [LIRValueID]{first, last}
@@ -4120,7 +4134,7 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
             lower_call_runtime(&m, &f, lower_runtime_symbol(row), args, Val(dst))
         }
         .LoopRangeHasNext(call, cursor) | .LoopRangeValue(call, cursor) | .LoopRangeAdvance(call, cursor) -> {
-            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "range loop names missing Prelude call {call.value}")
+            row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "range loop names missing Prelude call {call.value}")
             handle :: lower_use(&m, &f, cursor) ?? return
             dst :: lower_result(p, c, &m, &f, instruction)
             lower_call_runtime(&m, &f, lower_runtime_symbol(row), [LIRValueID]{handle}, dst)
@@ -4130,7 +4144,7 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
         .LoopIterValue(call, cursor) -> lower_iter_operation(p, c, &m, &f, instruction, call, cursor, "value")
         .LoopIterAdvance(call, cursor) -> lower_iter_operation(p, c, &m, &f, instruction, call, cursor, "advance")
         .Todo(call, location, _) -> {
-            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "todo names missing Prelude call {call.value}")
+            row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "todo names missing Prelude call {call.value}")
             args :: lower_location(p, &m, &f, location)
             lower_noreturn_call(&m, &f, lower_runtime_symbol(row), args)
         }
@@ -5751,7 +5765,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     // the native checked operator below.
     fixed_trap := false
     if dispatch == .Prelude(call, _) {
-        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
+        row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
         fixed_trap = !exact && lower_fixed_trap_route(lower_runtime_symbol(row))
     }
     if dispatch == .Prelude(call, location) {
@@ -6077,7 +6091,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .ReaderTakePattern(receiver, place, parts) -> return lower_scan_take(p, c, &m, &f, instruction, receiver, place, None, Val(parts))
     if semantic == .DecodeUnder(_, segment, inner) -> return lower_codec_under(p, c, &m, &f, instruction, segment, inner)
     if semantic == .Print(call, value) {
-        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
+        row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
         flush :: lower_const_flag(&f, 1)
         symbol :: if m.test_harness -> "jet_rt_test_print" else -> lower_runtime_symbol(row)
@@ -6093,7 +6107,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .OverflowOption(call, left, right, location) -> return lower_numeric_overflow(p, c, &m, &f, instruction, call, left, right, location)
     if semantic == .ClosureMethod(receiver, args, call) -> return lower_closure_method(p, c, &m, &f, instruction, receiver, args, call)
     if semantic == .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) {
-        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "builtin method names missing Prelude call {call.value}")
+        row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "builtin method names missing Prelude call {call.value}")
         if lower_atomic_method(p, c, &m, &f, instruction, row, receiver, args) -> return
         if lower_value_builtin(p, c, &m, &f, instruction, row, receiver, args) -> return
         if lower_lazy_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
@@ -6130,7 +6144,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if lower_transaction_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if lower_dyn_len(p, c, &m, &f, instruction, call, receiver, args) -> return
-        if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, call)} is not lowered at O0 yet")
+        if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, m, call)} is not lowered at O0 yet")
         values := [MIRValueID]{receiver}
         loop arg in args -> &values.push(arg)
         return lower_route_call(p, c, &m, &f, instruction, call, values, "HandleMethod")
@@ -6143,7 +6157,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         return lower_route_call(p, c, &m, &f, instruction, call, values, "HostCall")
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
-        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "static call names missing Prelude row")
+        row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "static call names missing Prelude row")
         if lower_encoding_list_leaf(p, c, &m, &f, instruction, call, args, type_args) -> return
         if lower_condition_new(p, c, &m, &f, instruction, row, args) -> return
         if lower_atomic_new(p, c, &m, &f, instruction, call, args) -> return
@@ -6157,8 +6171,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_list_concat(p, c, &m, &f, instruction, call, args) -> return
         if lower_codec_call(p, c, &m, &f, instruction, call, args, type_args) -> return
-        if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
-        if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
+        if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, m, call)} is not lowered at O0 yet")
+        if "{row.module_name}.{row.member}" == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
         values :: lower_route_values(p, &m, &f, call, args, "StaticPreludeCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "StaticPreludeCall")
     }
@@ -6166,7 +6180,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // (jet_mem::JetArena::new, ...::with_capacity); an inline-backed Fixed
     // has no route and is reported by lower_route_values.
     if semantic == .AllocNew(call, _, inline_size, args) {
-        if inline_size != None -> return lower_fail(&m, &f, "AllocNew {lower_route_name(p, call)} with inline backing is not lowered at O0 yet")
+        if inline_size != None -> return lower_fail(&m, &f, "AllocNew {lower_route_name(p, m, call)} with inline backing is not lowered at O0 yet")
         values :: lower_route_values(p, &m, &f, call, args, "AllocNew") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "AllocNew")
     }
@@ -6178,7 +6192,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .ReflectOf(type_name, path, display, fields) -> return lower_reflect_of(p, c, &m, &f, instruction, type_name, path, display, fields)
     if semantic == .HostBorrowCallback(callable, _) -> return lower_forward(c, &m, &f, instruction, callable)
     if semantic == .AmbientInput(call, prompt) {
-        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "AmbientInput names a missing route")
+        row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "AmbientInput names a missing route")
         route :: lower_runtime_route(mir_symbol_name(row.symbol)) ?? return lower_fail(&m, &f, "AmbientInput has no runtime C-ABI route")
         input :: lower_pointer(&f)
         if prompt == .Val(value) {
@@ -6189,7 +6203,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         }
         return lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{input}, "AmbientInput", row.member, [String]{})
     }
-    lower_fail(&m, &f, "semantic operation {lower_semantic_name(p, semantic)} is not lowered at O0 yet")
+    lower_fail(&m, &f, "semantic operation {lower_semantic_name(p, m, semantic)} is not lowered at O0 yet")
 }
 
 // Reflection keeps typed field rows in runtime Value records. The checked
@@ -6294,15 +6308,15 @@ fn lower_carrier_fact(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 
 // The variant (and, for Prelude routes, the route) an unlowered semantic
 // operation reports, so a count of first blockers names what is missing.
-fn lower_route_name(p: MIRProgram, call: MIRPreludeCallID) -> String Never! {
-    row :: lower_prelude_row(p, call) ?? return "?"
+fn lower_route_name(p: MIRProgram, m: LowerModule, call: MIRPreludeCallID) -> String Never! {
+    row :: lower_prelude_row(p, m, call) ?? return "?"
     "{row.module_name}.{row.member}"
 }
 
-fn lower_semantic_name(p: MIRProgram, semantic: MIRSemanticOp) -> String Never! {
+fn lower_semantic_name(p: MIRProgram, m: LowerModule, semantic: MIRSemanticOp) -> String Never! {
     if semantic == {
-        .MathBuiltin(_, call, _) -> "MathBuiltin {lower_route_name(p, call)}"
-        .PreciseBuiltin(_, call, _) -> "PreciseBuiltin {lower_route_name(p, call)}"
+        .MathBuiltin(_, call, _) -> "MathBuiltin {lower_route_name(p, m, call)}"
+        .PreciseBuiltin(_, call, _) -> "PreciseBuiltin {lower_route_name(p, m, call)}"
         .Print(_, _) -> "Print"
         .AmbientInput(_, _) -> "AmbientInput"
         .RequireStop(_, _, _, _, _, _, _) -> "RequireStop"
@@ -6315,26 +6329,26 @@ fn lower_semantic_name(p: MIRProgram, semantic: MIRSemanticOp) -> String Never! 
         .SharedGuardSplit(_, _, _, _, _, _) -> "SharedGuardSplit"
         .SharedGuardWait(_, _, _, _) -> "SharedGuardWait"
         .ConditionNotify(_, _, _) -> "ConditionNotify"
-        .AllocNew(call, _, _, _) -> "AllocNew {lower_route_name(p, call)}"
+        .AllocNew(call, _, _, _) -> "AllocNew {lower_route_name(p, m, call)}"
         .ColumnarRead(_, _, _, _, _) -> "ColumnarRead"
-        .StaticPreludeCall(call, _, _, _) -> "StaticPreludeCall {lower_route_name(p, call)}"
+        .StaticPreludeCall(call, _, _, _) -> "StaticPreludeCall {lower_route_name(p, m, call)}"
         .DecodeUnder(_, _, _) -> "DecodeUnder"
-        .HardwareCall(call, _, _, _) -> "HardwareCall {lower_route_name(p, call)}"
-        .BuiltinMethod(call, _, _, _, _) -> "BuiltinMethod {lower_route_name(p, call)}"
-        .OptionLift2(call, _, _, _) -> "OptionLift2 {lower_route_name(p, call)}"
-        .ClosureMethod(_, _, call) -> "ClosureMethod {lower_route_name(p, call)}"
+        .HardwareCall(call, _, _, _) -> "HardwareCall {lower_route_name(p, m, call)}"
+        .BuiltinMethod(call, _, _, _, _) -> "BuiltinMethod {lower_route_name(p, m, call)}"
+        .OptionLift2(call, _, _, _) -> "OptionLift2 {lower_route_name(p, m, call)}"
+        .ClosureMethod(_, _, call) -> "ClosureMethod {lower_route_name(p, m, call)}"
         .HostBorrowCallback(_, _) -> "HostBorrowCallback"
         .TextPatternMatch(_, _, _) -> "TextPatternMatch"
         .BinaryPatternMatch(_, _, _) -> "BinaryPatternMatch"
         .CursorTakePattern(_, _, _) -> "CursorTakePattern"
         .ReaderTakePattern(_, _, _) -> "ReaderTakePattern"
-        .NumericMethod(call, _) -> "NumericMethod {lower_route_name(p, call)}"
-        .NumericBinaryMethod(call, _, _) -> "NumericBinaryMethod {lower_route_name(p, call)}"
-        .OverflowOption(call, _, _, _) -> "OverflowOption {lower_route_name(p, call)}"
-        .HandleMethod(call, _, _, _, _) -> "HandleMethod {lower_route_name(p, call)}"
+        .NumericMethod(call, _) -> "NumericMethod {lower_route_name(p, m, call)}"
+        .NumericBinaryMethod(call, _, _) -> "NumericBinaryMethod {lower_route_name(p, m, call)}"
+        .OverflowOption(call, _, _, _) -> "OverflowOption {lower_route_name(p, m, call)}"
+        .HandleMethod(call, _, _, _, _) -> "HandleMethod {lower_route_name(p, m, call)}"
         .PluginInvoke(_, _, _, _, _) -> "PluginInvoke"
         .HTTPRouterRegister(_, _, _, _, _, _, _, _) -> "HTTPRouterRegister"
-        .CoreClosureCall(call, _, _, _, _, _) -> "CoreClosureCall {lower_route_name(p, call)}"
+        .CoreClosureCall(call, _, _, _, _, _) -> "CoreClosureCall {lower_route_name(p, m, call)}"
         .TaskGroup(_, _, _) -> "TaskGroup"
         .Select(_, _, _) -> "Select"
         .PolicyFunction(_, _) -> "PolicyFunction"
@@ -6343,7 +6357,7 @@ fn lower_semantic_name(p: MIRProgram, semantic: MIRSemanticOp) -> String Never! 
         .GCEdit(_, _, _, _, _, _, _) -> "GCEdit"
         .TypedTextInterp(_, _, _, _, _) -> "TypedTextInterp"
         .CCallback(_, _, _) -> "CCallback"
-        .HostCall(call, _) -> "HostCall {lower_route_name(p, call)}"
+        .HostCall(call, _) -> "HostCall {lower_route_name(p, m, call)}"
     }
 }
 
@@ -6379,7 +6393,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         if lower_shared_guard_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_same(p, c, &m, &f, instruction, call, args) -> return
-        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
+        row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
         if row.module_name == "core.mem" {
             values := [MIRValueID]{}
             loop arg in args -> &values.push(arg.value)

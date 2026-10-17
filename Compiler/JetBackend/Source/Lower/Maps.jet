@@ -349,11 +349,11 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 
 // Owned key operands consumed by Map insertion and Tally add/remove:
 // owned place reads copy before the helper stores or retires the offered key.
-fn lower_map_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_map_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(semantic) {
         if semantic == .BuiltinMethod(call, _, _, args, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             symbol :: lower_runtime_symbol(row)
             if symbol == "jet_map_insert" || symbol == "jet_bag_add" || symbol == "jet_bag_remove" {
                 loop arg in args -> &stored.push(arg)

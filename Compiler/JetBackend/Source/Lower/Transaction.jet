@@ -34,7 +34,7 @@ fn lower_transaction_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 // the front of its list.
 fn lower_transaction_hook(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRCoreClosureKind, values: [MIRValueID], closure: MIRValueID?) Never! {
     member :: if kind == .OnCommit -> "on_commit" else -> "on_rollback"
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "transaction {member} names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "transaction {member} names missing Prelude call {call.value}")
     if lower_runtime_symbol(row) != "jet_transaction_{member}" || values.len() != 1 -> return lower_fail(&m, &f, "transaction {member} of this shape is not lowered at O0 yet")
     handle_ty :: lower_value_type(c, values[0]) ?? return lower_fail(&m, &f, "transaction {member} handle has no checked type")
     if !lower_is_transaction(handle_ty) -> return lower_fail(&m, &f, "transaction {member} on {mir_type_display_name(handle_ty)} is not lowered at O0 yet")
@@ -59,7 +59,7 @@ fn lower_transaction_hook(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 fn lower_transaction_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
     ty :: lower_value_type(c, receiver) ?? return false
     if !lower_is_transaction(ty) -> return false
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if lower_runtime_symbol(row) != "jet_transaction_commit" || args.len() != 0 {
         lower_fail(&m, &f, "Transaction method {row.member} is not lowered at O0 yet")
         return true
@@ -187,7 +187,7 @@ fn lower_shared_guard_repr(ty: MIRType) -> LowerRepr? {
 }
 
 fn lower_shared_guard_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_runtime_symbol(row)
     editable :: symbol == "jet_shared_guard_edit"
     if !editable && symbol != "jet_shared_guard_read" -> return false

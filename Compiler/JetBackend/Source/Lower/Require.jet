@@ -119,7 +119,7 @@ fn lower_require_descriptor(m: &LowerModule, path: String, location: MIRPanicLoc
 }
 
 fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRRequireKind, condition: MIRValueID?, location: MIRPanicLoc, context: MIRPanicContext, values: [MIRValueID], always_stops: Bool) Never! {
-    _ := lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "require stop names missing Prelude call {call.value}")
+    _ := lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "require stop names missing Prelude call {call.value}")
     if kind == .Panic {
         if condition != None || values.len() != 1 -> return lower_fail(&m, &f, "panic requires one message and no condition")
     } else {

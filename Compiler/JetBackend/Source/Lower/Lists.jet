@@ -247,7 +247,7 @@ fn lower_receiver_header(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 
 // Raw allocation leaves operate on this backend's own List header.
 fn lower_encoding_list_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg], type_args: [MIRType]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if row.module_name != "core.mem" || (row.member != "__list_capacity" && row.member != "__list_reserve_exact" && row.member != "__type_size") -> return false
     if type_args.len() != 1 {
         lower_fail(&m, &f, "raw List layout leaf requires its checked element type")
@@ -1564,7 +1564,7 @@ fn lower_list_method_shape(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 // List of copies of left's elements, then right's). A List moved into the
 // call is dropped once its elements are copied out. False when `call` is not it.
 fn lower_list_concat(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if row.module_name != "core.builtin" || row.member != "list_concat" || mir_symbol_name(row.symbol) != "jet_list_concat" -> return false
     unsupported :: "StaticPreludeCall core.builtin.list_concat of this shape is not lowered at O0 yet"
     if args.len() != 2 {

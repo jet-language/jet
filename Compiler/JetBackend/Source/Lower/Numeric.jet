@@ -91,7 +91,7 @@ fn lower_fixed_trap_floor(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 // inline fast path; every other route is called with the operands (and the
 // source location when the row takes one).
 fn lower_binary_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, exact: Bool, call: MIRPreludeCallID, location: MIRPanicLoc?, left_value: LIRValueID, right_value: LIRValueID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
     symbol :: lower_runtime_symbol(row)
     if exact && row.signature.arity == 2 {
         if op == {
@@ -323,7 +323,7 @@ fn lower_numeric_shift_check(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
 }
 
 fn lower_numeric_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "numeric predicate without a Prelude row is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "numeric predicate without a Prelude row is not lowered at O0 yet")
     ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "numeric predicate without a checked receiver type is not lowered at O0 yet")
     symbol :: mir_symbol_name(row.symbol)
     supported :: (row.member == "is_nan" && symbol == "jet_std_math_is_nan") || (row.member == "is_infinite" && symbol == "jet_std_math_is_infinite") || (row.member == "is_finite" && symbol == "jet_std_math_is_finite")
@@ -344,7 +344,7 @@ fn lower_numeric_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 fn lower_numeric_euclid(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, argument: MIRValueID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "Euclidean arithmetic without a Prelude row is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "Euclidean arithmetic without a Prelude row is not lowered at O0 yet")
     remainder :: row.member == "rem_euclid"
     symbol :: if remainder -> "jet_int_rem_euclid" else -> "jet_int_div_euclid"
     left_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "Euclidean arithmetic without a receiver type is not lowered at O0 yet")
@@ -463,7 +463,7 @@ fn lower_numeric_product(p: MIRProgram, c: LowerContext?, m: &LowerModule, f: &L
 }
 
 fn lower_numeric_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, left: MIRValueID, right: MIRValueID, location: MIRPanicLoc?) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "overflow policy without a Prelude row is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "overflow policy without a Prelude row is not lowered at O0 yet")
     ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "overflow policy without a receiver type is not lowered at O0 yet")
     unsigned :: lower_is_unsigned_word(ty)
     if lower_narrow_bits(ty) > 0 -> return lower_narrow_overflow(p, c, &m, &f, instruction, row, ty, left, right, location)

@@ -116,6 +116,8 @@ struct LowerPrepared {
     edges_seen: [Int:Bool]
     ancestors: [LowerMonoAncestor]
     pending: [LowerMonoPending]
+    // Prelude call ID value -> its first row in program.prelude_calls.
+    prelude_positions: [U64:Int]
 }
 
 fn lower_prepared_source(prepared: LowerPrepared, row: Int) -> LowerFunctionSource Never! {
@@ -840,13 +842,14 @@ fn lower_mono_empty() -> LowerPrepared Never! {
         asm_foreign: [U64:MIRFunctionID]{},
         constant_rows: [String:Int]{}, constants_seen: [Int:Bool]{},
         lifecycle: [String:Int]{}, trait_targets: [U64:Int]{}, trait_seen: [U64:Bool]{},
-        edges: [LowerMonoEdge]{}, edges_seen: [Int:Bool]{},
+        edges: [LowerMonoEdge]{}, edges_seen: [Int:Bool]{}, prelude_positions: [U64:Int]{},
         ancestors: [LowerMonoAncestor]{}, pending: [LowerMonoPending]{},
     }
 }
 
 // Indexes the program's tables once; the queue then probes maps only.
 fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
+    q.prelude_positions = lower_prelude_positions(p)
     loop (row, function) in p.functions {
         if q.source_rows.get(function.id.value) != None {
             lower_mono_issue(&q, "function identity collision {function.id.value} in original declarations")
