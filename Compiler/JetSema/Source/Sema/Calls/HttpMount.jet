@@ -126,7 +126,24 @@ fn sema_http_collect_mounted_body(body: [TStmt], graph: SemaRegistrationGraph, i
     tir_each_stmt_list_child(body, (expression: TExpr) -> sema_http_collect_mounted(expression, graph, identity, &mounted))
 }
 
+// Whether any nominal declares a method with a core.http.server route marker.
+fn sema_http_has_route_method(graph: SemaRegistrationGraph) -> Bool {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
+                loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
+                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) != None -> return true
+                }
+            }
+        }
+    }
+    false
+}
+
 fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+    // Only a route method can be unmounted: a program without one skips the
+    // walk of every checked function body for mounts.
+    if !sema_http_has_route_method(graph) -> return [Diagnostic]{}
     mounted := [String]{}
     loop module_row in modules {
         identity :: module_row.module_identity
