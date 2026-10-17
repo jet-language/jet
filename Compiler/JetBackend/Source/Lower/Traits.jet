@@ -9,7 +9,7 @@ fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
         return None
     }
     if ty.kind == .Apply(name, args) {
-        if args.len() != 0 || lower_type_def(p, ty) != None -> return None
+        if args.len() != 0 || lower_type_def_exists(p, ty) -> return None
         loop definition in p.traits {
             if definition.key == name.name || definition.name == name.name -> return Val(MIRTraitRef{id: definition.id, name: definition.name})
         }
@@ -18,9 +18,13 @@ fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
 }
 
 fn lower_trait_impl(p: MIRProgram, ty: MIRType, bound: MIRTraitRef) -> MIRImplDef? {
+    // The receiver's identity key, built once rather than per impl of `bound`.
+    key := String?{None}
     loop implementation in p.impls {
         trait_ref :: implementation.trait_ref ?? next
-        if trait_ref.id == bound.id && mir_type_identity_key(implementation.self_type) == mir_type_identity_key(ty) -> return Val(implementation)
+        if trait_ref.id != bound.id -> next
+        if key == None -> key = Val(mir_type_identity_key(ty))
+        if mir_type_identity_key(implementation.self_type) == (key ?? "") -> return Val(implementation)
     }
     None
 }

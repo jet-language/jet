@@ -983,7 +983,7 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
             &found.push(JetCodegenNominalRow{module_index: module_index, nominal_index: nominal_index, type_def_index: last_definition.get(nominal.symbol.name) ?? -1})
             rows[nominal.symbol.id.key] = found
             // Spellings resolve to the first nominal of each name only.
-            if semantic_module.nominal_positions.get(nominal.symbol.name) != (Val(nominal_index)) -> next
+            if (semantic_module.nominal_positions.get(nominal.symbol.name) ?? -1) != nominal_index -> next
             if corelib {
                 key :: jet_codegen_nominal_type_key(identity, nominal)
                 candidates := corelib_nominals.get(nominal.symbol.name) ?? [JetCodegenNominalCandidate]{}

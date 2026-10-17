@@ -1107,6 +1107,27 @@ fn lower_type_def_by_id(p: MIRProgram, id: MIRTypeID) -> MIRTypeDef? {
     None
 }
 
+// Whether lower_type_def(p, ty) has a definition, without instantiating or
+// copying it: an existence test reads one index row.
+fn lower_type_def_exists(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    if ty.kind == .Union(_) {
+        if ty.identity == .Val(identity) {
+            if p.type_id_rows.len() > 0 -> return p.type_id_rows.get(identity.value) != None
+            loop row in 0..<p.types.len() {
+                if p.types[row].id == identity -> return true
+            }
+        }
+        return false
+    }
+    if ty.kind == .Apply(name, args) {
+        row :: lower_type_row(p, name, ty.identity)
+        if row < 0 -> return false
+        params :: p.types[row].generic_params.len()
+        return params == 0 || params == args.len()
+    }
+    false
+}
+
 // The definition a declaration-ID operand (struct, enum, payload owner)
 // names, instantiated by the operand's checked type when that type applies
 // the declaration.
@@ -1350,7 +1371,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             // A #Transact handle is a native box (Transaction.jet), not the runtime's JetTransaction.
             if lower_is_transaction(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_is_stm(ty) -> return LowerRepr.Handle{drop: "jet_rt_native_stm_rollback", clone: ""}
-            if lower_is_condition(ty) && lower_type_def(p, ty) == None -> return LowerRepr.Handle{drop: "jet_rt_native_condition_drop", clone: "jet_rt_native_condition_clone"}
+            if lower_is_condition(ty) && !lower_type_def_exists(p, ty) -> return LowerRepr.Handle{drop: "jet_rt_native_condition_drop", clone: "jet_rt_native_condition_clone"}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
@@ -5125,8 +5146,8 @@ fn lower_use_index_add(use_rows: &[U64:Int], use_lists: &[[LowerUseSite]], value
         _ := &use_rows.add(value, row)
         &use_lists.push([LowerUseSite]{})
     } else {
-        last :: use_lists[row][use_lists[row].len() - 1]
-        if last.block == at.block && last.position == at.position -> return
+        count :: use_lists[row].len()
+        if use_lists[row][count - 1].block == at.block && use_lists[row][count - 1].position == at.position -> return
     }
     &use_lists[row].push(at)
 }
@@ -5196,7 +5217,7 @@ fn lower_cycle_blocks(index: LowerUseIndex) -> [Bool] Never! {
         visited[root] = true
         stack := [Int]{root}
         loop stack.len() > 0 {
-            at :: stack[stack.len() - 1]
+            at := stack[stack.len() - 1]
             if next_edge[at] < successors[at].len() {
                 target :: successors[at][next_edge[at]]
                 next_edge[at] += 1
