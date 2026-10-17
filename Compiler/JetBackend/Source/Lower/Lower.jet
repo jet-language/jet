@@ -3843,8 +3843,10 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     values_before :: f.builder.values.len()
     sealed_before :: f.builder.blocks.len()
     open_before :: f.builder.open.len()
+    consumed_before :: f.consumed.len()
     lower_instruction_operation(p, c, &m, &f, instruction)
     if f.failed -> return
+    if f.consumed.len() > consumed_before -> lower_forget_planned_consumes(p, m, &f, instruction)
     // A lowering that ended in a terminator (an unsupported operation's
     // Unreachable, a no-return call) left no open block: nothing after it runs,
     // and anything emitted now would be attached to the next block lowered,
@@ -3882,6 +3884,21 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     }
     released :: c.releases.after.get(instruction.id.value) ?? [MIRValueID]{}
     loop value in released -> lower_temp_release(p, c, &m, &f, value)
+}
+
+// A consumption the release plan models (an operand this instruction takes
+// over: lower_consumed_operands) ends the operand on this instruction's path
+// only, and the plan releases it on every other path (a loop cursor MIR drops
+// where the loop ends and the plan releases on each early exit): only a
+// consumption the plan does not know of may stop those releases
+// (LowerFunction.consumed). A Move keeps its record: an inspect Move is no
+// consumption in the plan (lower_is_inspect_move).
+fn lower_forget_planned_consumes(p: MIRProgram, m: LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
+    if instruction.operation == .Move(_) -> return
+    loop operand in lower_consumed_operands(p, m, instruction.operation) {
+        index :: f.values.get(operand.value) ?? next
+        _ := &f.consumed.remove(index)
+    }
 }
 
 // Whether the open block was already sealed: the last block the builder
