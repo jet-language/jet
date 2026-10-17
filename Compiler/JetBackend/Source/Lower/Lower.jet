@@ -3978,9 +3978,9 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             if c.releases.taken.get(defined.value) != None -> lower_mark_releasable(&f, defined, 0, 0)
             else -> lower_mark_releasable(&f, defined, values_before, from)
             // A lowering that branched (a host call building its Result on
-            // both outcomes) may define the value before its first branch:
-            // that block, the first one it sealed, dominates every block the
-            // lowering made, the open one included.
+            // both outcomes, after converting its arguments in branches of
+            // their own) may define the value in a block it sealed: when that
+            // block dominates the open one, so does the definition.
             if f.releasable.get(defined.value) == None && f.builder.blocks.len() > sealed_before {
                 if f.values.get(defined.value) == .Val(index) {
                     if index >= values_before && lower_sealed_defines(f, sealed_before, open_before, index) {
@@ -4026,15 +4026,50 @@ fn lower_open_sealed(f: LowerFunction) -> Bool Never! {
     count > 0 && f.builder.blocks[count - 1].id == f.open
 }
 
-// Whether LIR value `index` is defined by sealed block `block` (the block a
-// lowering started in) at or after its instruction `from`.
-fn lower_sealed_defines(f: LowerFunction, block: Int, from: Int, index: Int) -> Bool Never! {
-    loop at in from..<f.builder.blocks[block].insts.len() {
-        if lir_inst_def(f.builder.blocks[block].insts[at]) == .Val(dst) {
-            if dst.value == index -> return true
+// Whether LIR value `index` is defined by a block sealed since row `first`
+// (the block a lowering started in, at or after its instruction `from`) that
+// dominates the open block.
+fn lower_sealed_defines(f: LowerFunction, first: Int, from: Int, index: Int) -> Bool Never! {
+    row :: lower_sealed_definition_row(f, first, from, index)
+    if row < 0 -> return false
+    row == first || lower_sealed_dominates_open(f, first, row)
+}
+
+// The row of the block sealed since row `first` (from its instruction `from`
+// on, in the first block) that defines LIR value `index`; -1 when none does.
+fn lower_sealed_definition_row(f: LowerFunction, first: Int, from: Int, index: Int) -> Int Never! {
+    loop row in first..<f.builder.blocks.len() {
+        start :: if row == first -> from else -> 0
+        loop at in start..<f.builder.blocks[row].insts.len() {
+            if lir_inst_def(f.builder.blocks[row].insts[at]) == .Val(dst) {
+                if dst.value == index -> return row
+            }
         }
     }
-    false
+    -1
+}
+
+// Whether every path from sealed row `first` (the block a lowering started
+// in) to the open block passes through sealed row `through`: the walk over
+// the blocks sealed since `first` that skips `through` never reaches it.
+fn lower_sealed_dominates_open(f: LowerFunction, first: Int, through: Int) -> Bool Never! {
+    rows := [Int:Int]{}
+    loop row in first..<f.builder.blocks.len() -> _ := &rows.add(f.builder.blocks[row].id.value, row)
+    seen := [Int:Bool]{}
+    pending := [Int]{first}
+    cursor := 0
+    loop cursor < pending.len() {
+        row :: pending[cursor]
+        cursor += 1
+        if row == through || seen.get(row) != None -> next
+        _ := &seen.add(row, true)
+        loop target in lir_terminator_targets(f.builder.blocks[row].terminator) {
+            if target.block.value == f.open.value -> return false
+            reached :: rows.get(target.block.value) ?? next
+            &pending.push(reached)
+        }
+    }
+    true
 }
 
 // A release candidate is releasable when its lowering made a fresh LIR value
