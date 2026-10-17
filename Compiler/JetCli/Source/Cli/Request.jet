@@ -13,6 +13,7 @@ use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
     CORE_SOURCE_OWNED_ROWS,
+    MIRArtifactBuildMode,
     foundation_json_quote,
 ]
 use jet_driver.[
@@ -953,13 +954,16 @@ fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrep
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
 fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
-    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native, trace_sink)
+    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native, false, trace_sink)
 }
 
 // Sandbox and native targets use the same authorized source snapshot. The
 // source walk is the `sources` span; the request carries `trace_sink` into
 // the driver's phases, and its result back to the native backend.
-fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// `release` is Rust CmdCompile `select_native_profile` for `--release` (or
+// `--profile release`): the compile runs under the `release` profile, whose
+// MIR artifact mode is Release (Driver `mir_artifact_build_mode_for`).
+fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, release: Bool, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
         .Refused(output) -> {
@@ -971,6 +975,10 @@ fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOv
             selected := request
             selected.target = target
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            if release {
+                selected.profile = "release"
+                selected.build_mode = MIRArtifactBuildMode.Release
+            }
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()

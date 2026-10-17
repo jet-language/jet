@@ -46,8 +46,8 @@ enum JetCLIPlan {
     // entry resolution wrote. The host compiles it and renders the outcome,
     // as machine reports when `json`.
     Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool)
-    // `jet build <file>`: the entry and its bytes; `release` selects the
-    // rustc/LLVM backend, otherwise the Jet-native backend builds it;
+    // `jet build <file>`: the entry and its bytes; `release` compiles under
+    // the `release` profile (MIR Release mode, LIR O2), otherwise `dev`;
     // `invocation` holds the `--allow`/`--deny` rows.
     Build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
     // `jet build --target=sandbox <file>` (D-PLUGIN1=B): compile the entry
@@ -659,14 +659,14 @@ fn jet_cli_target_flag(jet_argv: [String]) -> JetCLITargetFlag Never! {
 }
 
 enum JetCLIProfile {
-    // `release` selects the rustc/LLVM backend, otherwise the Jet-native one.
+    // `release` selects the `release` profile: MIR Release mode and LIR O2.
     Selected(release: Bool)
     Refused(plan: JetCLIPlan)
 }
 
-// `--release` (or `--profile release`) builds through rustc/LLVM; the default
-// and `--profile debug` build through the Jet-native backend. Other profiles
-// are not ported yet.
+// `--release` (or `--profile release`) compiles under the `release` profile
+// (Rust CmdCompile `select_native_profile`); the default and `--profile debug`
+// compile under `dev`. Other profiles are not ported yet.
 fn jet_cli_profile(jet_argv: [String], command: String, color: Bool) -> JetCLIProfile Never! {
     release := jet_argv.contains("--release")
     loop (index, argument) in jet_argv {

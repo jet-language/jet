@@ -21,6 +21,7 @@ use jet_driver.[
     JetDriverCompileMode,
     JetDriverCompileRequest,
     JetDriverCompileResult,
+    JetDriverCompileTarget,
     JetDriverDocModule,
     JetDriverRustForeignError,
     JetDriverRustForeignFacts,
@@ -666,7 +667,7 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // The result is matched in place: binding it out of an owned local
     // would copy its whole MIR program for the length of the native route.
-    compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
+    compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
@@ -742,7 +743,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
 fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // Matched in place, as jet_cli_compile_build does.
-    compiled := jet_cli_compile_entry(file, color, false, threads, JetDriverCompileMode.Program, None, trace_sink)
+    compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
