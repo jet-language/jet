@@ -2696,9 +2696,10 @@ fn lower_release_producer(operation: MIROperation) -> Bool Never! {
 }
 
 // A runtime route's owned result (lower_route_call) is a fresh owner, as is a
-// Task join's Result box (Tasks.jet lower_task_outcome).
+// Task join's or a task group's Result box (Tasks.jet lower_task_outcome,
+// lower_task_tuple_all).
 fn lower_release_semantic_producer(semantic: MIRSemanticOp) -> Bool Never! {
-    if semantic == .BuiltinMethod(_, _, _, _, _) | .StaticPreludeCall(_, _, _, _) | .StructLiteral(_, _, _, _) | .HostCall(_, _) | .HandleMethod(_, _, _, _, _) -> return true
+    if semantic == .BuiltinMethod(_, _, _, _, _) | .StaticPreludeCall(_, _, _, _) | .StructLiteral(_, _, _, _) | .HostCall(_, _) | .HandleMethod(_, _, _, _, _) | .TaskGroup(_, _, _) -> return true
     false
 }
 
