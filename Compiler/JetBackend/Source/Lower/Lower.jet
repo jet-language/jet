@@ -3851,6 +3851,18 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             // open block or defined in it, and the slot no longer holds it.
             if c.releases.taken.get(defined.value) != None -> lower_mark_releasable(&f, defined, 0, 0)
             else -> lower_mark_releasable(&f, defined, values_before, from)
+            // A lowering that branched (a host call building its Result on
+            // both outcomes) may define the value before its first branch:
+            // that block, the first one it sealed, dominates every block the
+            // lowering made, the open one included.
+            if f.releasable.get(defined.value) == None && f.builder.blocks.len() > sealed_before {
+                if f.values.get(defined.value) == .Val(index) {
+                    if index >= values_before && lower_sealed_defines(f, sealed_before, open_before, index) {
+                        _ := &f.releasable.add(defined.value, true)
+                        _ := &f.releasable_lir.add(index, true)
+                    }
+                }
+            }
             // A moved root names the slot's current value, which dominates
             // here; the move cleared the slot, so the carrier owns it alone.
             // (A moved field is a fresh value its own lowering defined.)
@@ -3871,6 +3883,17 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 fn lower_open_sealed(f: LowerFunction) -> Bool Never! {
     count :: f.builder.blocks.len()
     count > 0 && f.builder.blocks[count - 1].id == f.open
+}
+
+// Whether LIR value `index` is defined by sealed block `block` (the block a
+// lowering started in) at or after its instruction `from`.
+fn lower_sealed_defines(f: LowerFunction, block: Int, from: Int, index: Int) -> Bool Never! {
+    loop at in from..<f.builder.blocks[block].insts.len() {
+        if lir_inst_def(f.builder.blocks[block].insts[at]) == .Val(dst) {
+            if dst.value == index -> return true
+        }
+    }
+    false
 }
 
 // A release candidate is releasable when its lowering made a fresh LIR value
