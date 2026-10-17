@@ -661,6 +661,8 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
 // named relative to that root and any other path keeps its canonical form,
 // so compiler output never depends on where the project is checked out.
 fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
+    // copy: the display path is a new owned String. With no entry root it equals `path`, a read
+    // parameter that the caller keeps (a source-file row), so the result needs its own text.
     if entry_root.len() == 0 -> return path.copy()
     if path == entry_root -> return ""
     prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
@@ -670,7 +672,11 @@ fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
 // The canonical path a display path names (the inverse of
 // `jet_driver_display_path`); authority checks compare physical paths.
 fn jet_driver_physical_path(entry_root: String, display: String) -> String Never! {
+    // copy: the physical path is a new owned String. For an absolute display it equals `display`, a
+    // read parameter that the caller keeps, so the result needs its own text.
     if entry_root.len() == 0 || display.starts_with("/") -> return display.copy()
+    // copy: the physical path is a new owned String. For an empty display it equals `entry_root`, a
+    // read parameter that the caller keeps, so the result needs its own text.
     if display.len() == 0 -> return entry_root.copy()
     if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
 }

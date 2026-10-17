@@ -112,6 +112,8 @@ fn jet_driver_marker_group_replay_item(existing: Item, parsed: Item) -> Item Nev
         module_value.body = jet_driver_marker_group_items(old.body, module_value.body)
         return Item.GenericModule{value: module_value}
     }
+    // copy: `parsed` is a view into the replay map `rows` (or the existing item list) of
+    // jet_driver_marker_group_items, which keeps both. The rebuilt item list owns its own items.
     parsed.copy()
 }
 
@@ -238,10 +240,15 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         // repeats at the same authored span must remain distinct diagnostics.
         prior_count := diagnostics.len()
         loop diagnostic in parsed.diagnostics {
+            // copy: `parsed` keeps its diagnostics for the jet_driver_has_errors check below, and
+            // the module's diagnostics list gets its own replayed copy, re-pathed to the unit.
             replayed :: diagnostic_with_source_path(diagnostic.copy(), unit.path, 0)
             loop index in 0..<prior_count {
                 previous :: diagnostics[index]
                 if previous.source_path == replayed.source_path && previous.severity == replayed.severity && previous.code == replayed.code && previous.span == replayed.span && previous.what == replayed.what && previous.why == replayed.why && previous.fix == replayed.fix && previous.edit == replayed.edit {
+                    // copy: List.remove takes the value to match while `&diagnostics` is being
+                    // written. `previous` is a view into that same list, so it has to be detached
+                    // first.
                     matched :: previous.copy()
                     _ := &diagnostics.remove(matched)
                     prior_count -= 1

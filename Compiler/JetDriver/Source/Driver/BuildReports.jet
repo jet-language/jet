@@ -33,9 +33,13 @@ fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetD
     permit :: plan.storage.guard_read()
     state :: permit.value
     loop target in state.targets {
+        // copy: `subject` is the caller's query argument (a read parameter), and the explanation
+        // owns its label.
         if target.name == subject -> return {label: subject.copy(), provenance: [String]{"kind={build_key_target_kind(target.kind)}", "sources={target.sources.len()}", "deps={target.deps.len()}", "actions={target.actions.len()}"}}
     }
     loop action in state.actions {
+        // copy: `subject` is the caller's query argument (a read parameter), and the explanation
+        // owns its label.
         if action.name == subject -> return {label: subject.copy(), provenance: jet_driver_build_action_provenance(state, action)}
     }
     graph :: build_session_project(state)
@@ -57,6 +61,8 @@ fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> JetD
             break
         }
     }
+    // copy: `subject` is the caller's query argument (a read parameter), and the explanation owns
+    // its label.
     {label: subject.copy(), provenance: ^facts}
 }
 fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> String Never! {
@@ -70,11 +76,11 @@ fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -> St
     actions := [String]{}
     loop action in graph.actions {
         real :: state.actions[action.id]
-        probes :: loop probe in real.probes -> { state.probes[probe].name.copy() }
+        probe_rows :: loop probe in real.probes -> foundation_json_quote(state.probes[probe].name)
         cache :: if real.cache == "cached" -> { "Cached" } else -> { "UncachedPhony" }
         hit :: if action.cache_hit == .Val(value) -> { if value -> { "hit" } else -> { "miss" } } else -> { "unknown" }
         provenance :: jet_driver_build_action_provenance(state, real)
-        &actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(state.toolchains[real.toolchain].name)},\"probes\":{jet_driver_build_strings(probes)},\"cache\":{foundation_json_quote(cache)},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
+        &actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(state.toolchains[real.toolchain].name)},\"probes\":[{probe_rows.join(",")}],\"cache\":{foundation_json_quote(cache)},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
     }
     keys :: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
     hits :: loop action in graph.cache_hits -> "{{\"action\":{foundation_json_quote(action.name)},\"key\":{foundation_json_quote(action.key)}}}"

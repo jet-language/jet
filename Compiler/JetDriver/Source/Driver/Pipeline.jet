@@ -382,6 +382,8 @@ fn jet_driver_source_location_for_mir_function(load: JetDriverLoadResult, owners
     jet_driver_source_location_for_load_module(load, module_identity, site)
 }
 fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph: SemaRegistrationGraph, module_identity: String) -> Diagnostic Never! {
+    // copy: the attached diagnostic is a new owned row. If it already has a location it equals
+    // `diagnostic`, which the caller keeps in its list (a read parameter).
     if diagnostic.source_path != None || diagnostic.span == None -> return diagnostic.copy()
     span :: diagnostic.span ?? return diagnostic
     location :: jet_driver_source_location_for_registration_module(graph, module_identity, span) ?? return diagnostic
@@ -391,6 +393,8 @@ fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph:
 // (a comptime run's tables).
 fn jet_driver_attach_program_source_location(diagnostic: Diagnostic, program: SemaProgramTables, module_identity: String) -> Diagnostic Never! {
     graph_option :: program.registration_graph
+    // copy: the attached diagnostic is a new owned row. Without a registration graph it equals
+    // `diagnostic`, which the caller keeps in its list (a read parameter).
     graph :: graph_option ?? return diagnostic.copy()
     jet_driver_attach_registration_source_location(diagnostic, graph, module_identity)
 }
@@ -904,10 +908,14 @@ fn jet_driver_core_import_module_path(module_alias: String, members: [ImportedIt
     loop member in members {
         module_path :: jet_driver_core_list_module(module_alias, member.original) ?? return None
         if target == .Val(existing) {
+            // copy: the module path is a new owned String. With mixed targets it is `module_alias`,
+            // the caller's written import alias (a read parameter), which the import keeps.
             if existing != module_path -> return Val(module_alias.copy())
         }
         target = Val(module_path)
     }
+    // copy: the module path is a new owned String. With no members it is `module_alias`, the
+    // caller's written import alias (a read parameter), which the import keeps.
     Val(target ?? module_alias.copy())
 }
 
@@ -1133,6 +1141,8 @@ fn jet_driver_compile_result(
 // its separate source index list identifies the actual Review source owners.
 fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, registration: SemaRegistrationGraph, values: [SemaComptimeItemValue], effect_identity: String, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> [JetDriverDocModule] Never! {
     modules := [JetDriverDocModule]{}
+    // copy: the shared name ledger owns its facts for the doc pass, and `graph` is the caller's
+    // checked graph (a read parameter), which keeps its names for emission.
     ledger :: shared name_ledger_from_facts(graph.names.copy())
     memory :: shared SemaCheckedMemoryFacts{declarations: graph.memory_declarations, projections: graph.memory_projections}
     layout_engine :: sema_comptime_reflection_layout_engine(registration)
@@ -3216,6 +3226,8 @@ fn jet_driver_comptime_flush(
             return flushed
         }
         machine := &machines.pop() ?? panic("a comptime flush lost its native MIR program")
+        // copy: each evaluation extends its own globals with the run's values, while
+        // request.eval_config.globals stays the unextended base for the next entry of this loop.
         globals := request.eval_config.globals.copy()
         jet_driver_comptime_globals_add(&globals, values, 0)
         eval_config := jet_driver_comptime_eval_config(request.eval_config, ^globals)
@@ -3437,11 +3449,15 @@ fn jet_driver_comptime_run(
     counters: &JetDriverComptimeCounters,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult {
+    // copy: this run grows its own value list. initial_values is jet_driver_run_comptime's read
+    // parameter, which also seeds the comptime environment and stays with the caller.
     values := initial_values.copy()
     // The memory plan reads only function declarations, which staged values
     // never change, so every on-demand function check shares one, built at
     // the run's first function check (jet_driver_comptime_function_closure).
     memory_plan := [SemaFunctionMemoryPlan]{}
+    // copy: this run grows its own checked-function list. initial_functions is
+    // jet_driver_run_comptime's read parameter, which stays with the caller.
     checked_functions := initial_functions.copy()
     trace := jet_driver_empty_compile_trace()
     pending := sources
@@ -4543,6 +4559,9 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
                 reference := TFunctionRef?{None}
                 loop function in owner.functions {
                     if function.key == function_key {
+                        // copy: the output-check fact owns its function ref, and the function row
+                        // stays in the checked graph (`graph` is borrowed), which emission reads
+                        // next.
                         reference = Val(TFunctionRef{key: function.key.copy(), module_identity: function.module_identity.copy(), name: function.name.copy(), span: function.source_span, visibility: function.visibility})
                         break
                     }
@@ -4554,6 +4573,8 @@ fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: St
                 function_ref :: ^reference ?? next
                 &output_checks.push(TOutputCheckFact{
                     key: "{graph_module.module_identity}::output-check::{output.output_name}@{output.definition.start}..{output.definition.end}",
+                    // copy: the output-check fact owns its name, while `output` is a payload view
+                    // of the constant's resolved output in the checked graph, which keeps it.
                     name: output.output_name.copy(),
                     function: ^function_ref,
                 })
@@ -4914,6 +4935,8 @@ fn jet_driver_trace_lookup_counters(trace_sink: CompilerTraceSink?, phase: Strin
 // would copy every module's AST natively).
 fn jet_driver_stage_lookup_counts(graph: SemaRegistrationGraph?, fallback: SemaLookupCounters) -> SemaLookupCounters {
     if graph == .Val(stage_graph) -> return sema_registration_lookup_counts(stage_graph)
+    // copy: the counters are returned by value. `fallback` is a field of the caller's stage (a read
+    // parameter) and stays there; the type holds only Int fields.
     fallback.copy()
 }
 
@@ -5012,9 +5035,12 @@ fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[
     skip :: jet_driver_keep_going_skip_set(kg.skip)
     loop position in 0..<functions.len() {
         if skip.get("lower:{functions[position].name}@{position}") == None -> next
-        function :: functions[position].copy()
+        // The report and the trap read the row in place; the slot is written
+        // only after the trap row is built, when no view of it is live.
+        function :: functions[position]
         jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", "lowered as a trap: an earlier keep-going run crashed lowering it", "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
-        functions[position] = jet_driver_keep_going_tir_trap(function, "keep-going trap: lowering this function crashed an earlier run")
+        trap :: jet_driver_keep_going_tir_trap(function, "keep-going trap: lowering this function crashed an earlier run")
+        functions[position] = trap
     }
 }
 
@@ -5035,9 +5061,10 @@ fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, funct
     }
     loop position in 0..<functions.len() {
         missing :: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
-        function :: functions[position].copy()
+        function :: functions[position]
         jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
-        functions[position] = jet_driver_keep_going_tir_trap(function, "keep-going trap: this function calls `{missing}`, which did not check")
+        trap :: jet_driver_keep_going_tir_trap(function, "keep-going trap: this function calls `{missing}`, which did not check")
+        functions[position] = trap
     }
 }
 
@@ -5067,9 +5094,10 @@ fn jet_driver_keep_going_trap_emission(kg: &JetDriverKeepGoingLog, program: &MIR
     skip :: jet_driver_keep_going_skip_set(kg.skip)
     loop position in 0..<program.functions.len() {
         if skip.get("emit:{program.functions[position].name}@{position}") == None -> next
-        function :: program.functions[position].copy()
+        function :: program.functions[position]
         jet_driver_keep_going_row(&kg, "emit", "{function.name} [{function.key}]", "TRAPPED", "emitted as a trap: an earlier keep-going run crashed emitting it", jet_driver_keep_going_mir_site(program, function, function.span))
-        program.functions[position] = jet_driver_keep_going_mir_trap(function, "keep-going trap: emitting this function crashed an earlier run")
+        trap :: jet_driver_keep_going_mir_trap(function, "keep-going trap: emitting this function crashed an earlier run")
+        program.functions[position] = trap
     }
 }
 
@@ -5303,10 +5331,16 @@ fn jet_driver_compile_selection_restore(request: &JetDriverCompileRequest, saved
 fn jet_driver_compile_mir_selection(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: ^String?, selected_entry: ^String?, capture_build_program: Bool, capture_build_nodes: Bool) -> JetDriverCompileResult {
     saved := JetDriverCompileSelectionRestore{mode: request.mode, capture_build_program: request.capture_build_program, capture_build_nodes: request.capture_build_nodes, entry_path: None, selected_entry: None, restore_selected_entry: false}
     if ^entry_path == .Val(path) {
+        // copy: `saved` keeps the request's original entry path so it can restore it, and the
+        // request's own field is overwritten with `path` right after. Jet has no exchange on a
+        // field of a write-borrowed (`&`) parameter.
         saved.entry_path = Val(request.authorized_sources.entry_path.copy())
         request.authorized_sources.entry_path = ^path
     }
     if ^selected_entry == .Val(name) {
+        // copy: `saved` keeps the request's original selected entry so it can restore it, and the
+        // request's own field is overwritten right after. Jet has no exchange on a field of a
+        // write-borrowed (`&`) parameter.
         saved.selected_entry = request.selected_entry.copy()
         saved.restore_selected_entry = true
         request.selected_entry = Val(^name)
@@ -5594,22 +5628,23 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         ^registration_graph,
         comptime_stage,
         ^checked_graph,
-        comptime_run.values,
-        comptime_run.functions,
-        trace,
+        ^comptime_run.values,
+        ^comptime_run.functions,
+        ^trace,
         load,
         request,
         &stage_diagnostics,
     )
+    // The body recheck moved the run's values, closures and trace in and
+    // returns them as its own.
+    trace = ^body_run.trace
     if request.trace_sink == .Val(sink) -> sink.end("comptime.bodies", body_run.values.len())
     load.diagnostics = stage_diagnostics
-    // The body recheck returns the run's values and closures as its own.
     comptime_run.values = [SemaComptimeItemValue]{}
     comptime_run.functions = [SemaComptimeFunctionResult]{}
     returned_registration := ^body_run.registration
     body_run.registration = None
     registration_graph = ^returned_registration ?? return jet_driver_compile_internal_result(load, trace, "comptime body rechecking lost the registration graph")
-    trace = body_run.trace
     if body_run.soft_stop {
         return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, false, trace)
     }

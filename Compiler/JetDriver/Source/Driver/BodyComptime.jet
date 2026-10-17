@@ -180,21 +180,22 @@ fn jet_driver_comptime_body_stage(
 }
 
 // The caller moves its registration graph in and takes it back from
-// `registration` of the result (every exit returns it).
+// `registration` of the result (every exit returns it). The run's values,
+// closures and trace move in too; the result hands them back.
 fn jet_driver_orchestrate_comptime_bodies(
     graph: ^SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
     initial_graph: ^SemaGraphResult,
-    initial_values: [SemaComptimeItemValue],
-    initial_functions: [SemaComptimeFunctionResult],
-    initial_trace: JetDriverCompileTrace,
+    initial_values: ^[SemaComptimeItemValue],
+    initial_functions: ^[SemaComptimeFunctionResult],
+    initial_trace: ^JetDriverCompileTrace,
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeBodyResult {
     jet_driver_comptime_body_pass(
-        ^graph, stage, ^initial_graph, initial_values.copy(), initial_functions.copy(),
-        initial_trace.copy(), load, request, &diagnostics, 0,
+        ^graph, stage, ^initial_graph, ^initial_values, ^initial_functions,
+        ^initial_trace, load, request, &diagnostics, 0,
     )
 }
 

@@ -491,6 +491,8 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
     loop (index, byte) in value_bytes {
         if Int.from_u8(byte) == 46 -> dot = index
     }
+    // copy: `digits_text` is trimmed in place to its digits, while `value` is the caller's manifest
+    // field (a read parameter) and stays intact.
     digits_text := value.copy()
     multiplier := 1
     if dot >= 0 {
@@ -933,6 +935,8 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
         block :: jet_driver_inline_package(file.source)
         carrier_path :: jet_driver_display_path(entry_root, file.path)
         if block.error == .Val(failure) {
+            // copy: the caller's diagnostics list owns the re-pathed failure. `failure` is a
+            // payload view inside `block.error`, and Jet has no consuming match to move it out.
             &diagnostics.push(diagnostic_with_source_path(failure.copy(), carrier_path, 0))
             return None
         }
@@ -1965,6 +1969,8 @@ fn jet_driver_cycle_member(source_units: [JetDriverSourceUnit], module_identity:
     loop unit in source_units {
         if jet_driver_unit_module_identity(unit) == module_identity -> return unit.relative_path
     }
+    // copy: the member path is a new owned String. Without a matching unit it is `module_identity`,
+    // a read parameter that the caller keeps in its cycle report.
     module_identity.copy()
 }
 
@@ -2131,6 +2137,8 @@ fn jet_driver_param_default_regions(key: String, params: [Param], last_end: Int,
 
 fn jet_driver_default_key(template: Bool, name: String) -> String Never! {
     if template -> return ""
+    // copy: the default key is a new owned String equal to `name`, the caller's declared name (a
+    // read parameter), which the caller keeps.
     name.copy()
 }
 
@@ -2683,12 +2691,16 @@ fn jet_driver_blank_source_range(source: String, start: Int, end: Int) -> String
     loop offset in start..<end {
         if bytes[offset] != (U8{10}) && bytes[offset] != (U8{13}) -> bytes[offset] = U8{32}
     }
+    // copy: the blanked source is a new owned String. On a UTF-8 failure it falls back to `source`,
+    // the caller's file text (a read parameter), which stays with the caller.
     String.from_bytes(bytes) ?? source.copy()
 }
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
 // `Package::mask_inline_package_source`).
 fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
+    // copy: the masked source is a new owned String. Without an inline carrier it equals `source`,
+    // the caller's file text (a read parameter), which stays with the caller.
     if !carrier.found -> return source.copy()
     jet_driver_blank_source_range(source, carrier.start, carrier.end)
 }
@@ -3349,6 +3361,9 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
     package_policy := [PolicyDeclaration]{}
     loop package in catalog.packages {
         if package.identity == catalog.entry_package_identity {
+            // copy: `catalog` keeps its package rows for the rest of the load (catalog.source_units
+            // and the package walk read them below), while the entry policy is threaded separately
+            // through every loaded unit.
             package_policy = package.policy_declarations.copy()
             break
         }
@@ -3401,7 +3416,9 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         }
         source_unit_index := pending[pending_index]
         pending_index += 1
-        // A copy: loading a Core import appends to `source_units`.
+        // copy: `unit` must stay readable while loading a Core import appends to `source_units`. A
+        // view into the list would dangle when the list grows, so the unit row and this snapshot
+        // are independent.
         unit :: source_units[source_unit_index].copy()
         is_core :: jet_driver_unit_is_core(unit)
         is_runtime_entry :: entry_module != "" && source_unit_index == (entry_index ?? 0)

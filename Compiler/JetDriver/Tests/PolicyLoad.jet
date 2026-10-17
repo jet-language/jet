@@ -127,6 +127,8 @@ fn run() Never! {
     dep_program :: policy_load_program(dependency, "{dep_root}/lib.jet")
     policy_load_require(dep_program.policy_declarations.len() == 2 && dep_program.policy_declarations[0].key == PolicyKey.Copies && dep_program.policy_declarations[0].source == "{root}/package.jet" && dep_program.policy_declarations[1].source == "{dep_root}/lib.jet", "entry package floor and external absolute module display")
 
+    // copy: the refusal variant edits its own request, and `request` is reused unchanged for the
+    // malformed variant below.
     refusal_request := request.copy()
     refusal_request.authorized_sources.roots[0].files[0].source = "name: \"policy_load\"\nversion: \"0.1.0\"\npolicy: {{ sentries: .Off }}\n"
     refusal_request.authorized_sources.roots[0].files[1].source = "#Policy(sentries: .On)\nfn run() {{ undefined_call() }}\n"
@@ -137,13 +139,13 @@ fn run() Never! {
         "fn run() {{}}\n#Policy(sentries: .On) fn selected() {{ undefined_call() }}\n",
         "fn run() {{ #Policy(sentries: .On) {{ undefined_call() }} }}\n",
     ] {
-        targeted := refusal_request.copy()
+        targeted := refusal_request
         targeted.authorized_sources.roots[0].files[1].source = source
         targeted_result :: jet_driver_load(targeted)
         policy_load_require(!targeted_result.complete && policy_load_has_code(targeted_result, "E0355", "Invalid effective `sentries` policy"), "function/block target chains include package floor")
     }
 
-    malformed := request.copy()
+    malformed := request
     malformed.authorized_sources.roots[0].files[0].source = "name: \"policy_load\"\npolicy: {{ copies: false }}\n"
     policy_load_require(!jet_driver_load(malformed).complete, "canonical policy value refusal")
     malformed.authorized_sources.roots[0].files[0].source = "name: \"policy_load\"\npolicy: {{ copies: .Explicit }}\npolicy: {{ gc: true }}\n"

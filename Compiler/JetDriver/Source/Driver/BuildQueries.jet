@@ -22,14 +22,14 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         if unit_index < 0 || unit_index >= load.source_units.len() -> return None
         unit :: load.source_units[unit_index]
         if jet_driver_unit_is_core(unit) -> next
-        physical := ""
-        source := ""
+        subject := ""
+        digest := ""
         if unit.source_origin == SemaSourceOrigin.Snapshot {
-            source = jet_driver_source_unit_text(request, unit) ?? return None
+            digest = mir_sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
             if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
             source_files :: request.authorized_sources.roots[unit.root_index].files
             if unit.file_index < 0 || unit.file_index >= source_files.len() -> return None
-            physical = source_files[unit.file_index].path.copy()
+            subject = jet_driver_display_path(root, source_files[unit.file_index].path).replace("\\", "/")
         } else {
             // Only exact declared build outputs belong to the user's bundle.
             // Foreign adapter/Core/effect synthetic text is not a source node.
@@ -39,15 +39,16 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
             } ?? -1
             if generated_index < 0 -> next
             generated :: request.generated_modules[generated_index]
-            source = generated.source.copy()
+            digest = mir_sha256_hex(generated.source)
             owner :: loop package in load.packages {
                 if package.identity == generated.package_identity -> break package.root_index
             } ?? return None
             if owner < 0 || owner >= request.authorized_sources.roots.len() -> return None
-            physical = jet_driver_physical_path(request.authorized_sources.roots[owner].canonical_path, generated.relative_path)
+            subject = jet_driver_display_path(root, jet_driver_physical_path(request.authorized_sources.roots[owner].canonical_path, generated.relative_path)).replace("\\", "/")
         }
-        subject :: jet_driver_display_path(root, physical).replace("\\", "/")
-        &checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject.copy(), digest: mir_sha256_hex(source)}}))
+        // copy: build_session_compiler_node stores `subject` as the node's subject, and the node's
+        // input digest needs its own copy of the same text for `name`. Both live in one node.
+        &checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject.copy(), digest: digest}}))
     }
     &checks.sort_by((left: BuildGraphNode, right: BuildGraphNode) -> (left.subject <=> right.subject).then(left.key <=> right.key))
     outputs := [String]{}
@@ -56,6 +57,8 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         parts :: request.authorized_sources.entry_path.split("/").to_list()
         file :: parts[parts.len() - 1]
         components := file.split(".").to_list()
+        // copy: `file` is an element of `parts`, which can't be moved out (E0225). `output` is
+        // reassigned and pushed into `outputs`, while `components` still views `file`.
         output := file.copy()
         if components.len() > 1 && !(components.len() == 2 && components[0] == "") {
             _ := &components.pop()
@@ -64,11 +67,15 @@ fn jet_driver_build_compiler_nodes(request: JetDriverCompileRequest, load: JetDr
         &outputs.push(if output == "" -> { "program" } else -> { ^output })
     }
     &outputs.sort()
+    // copy: `checks` keeps every check node (it is the returned graph), so each compile node's
+    // input digest needs its own key text.
     inputs :: loop node in checks -> BuildGraphInputDigest{name: "check:{node.subject}", digest: node.key.copy()}
     compiles := [BuildGraphNode]{}
     links := [BuildGraphNode]{}
     loop output in outputs {
         compiled :: build_session_compiler_node("compile", output, inputs)
+        // copy: `compiled` keeps its key when it moves into `compiles`, and the link node's input
+        // digest needs its own copy of the same key.
         linked :: build_session_compiler_node("link", output, [BuildGraphInputDigest]{{name: "compile:{output}", digest: compiled.key.copy()}})
         &compiles.push(^compiled)
         &links.push(^linked)
@@ -155,6 +162,9 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
                     &errors.push(jet_driver_diagnostic_without_span("E3520", "two build entries for the package", "one package has exactly one checked build authority", "keep one fn build in the package"))
                     return jet_driver_build_query_empty(^request, ^errors, false, None)
                 }
+                // copy: `sources` keeps its module rows: on a duplicate build entry it returns
+                // `sources.diagnostics`. The selected path moves into
+                // jet_driver_compile_mir_selection, which takes ownership of the entry path.
                 selected = Val(loaded_module.physical_path.copy())
                 span = function.span
                 network_declared = jet_driver_build_declared_network(function.declared_effects)
@@ -176,7 +186,9 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
         }
         return result
     }
-    compiled := jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Interpreter, Val(path.copy()), Val("build"), true, false)
+    // Input services resolve paths against the build file's own directory.
+    base_dir :: jet_driver_parent_path(path)
+    compiled := jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true, false)
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
     program :: compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
     entry :: compiled.entry_function ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
@@ -185,17 +197,23 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
     config := jet_eval_runtime_config(request.eval_config)
-    // Input services resolve paths against the build file's own directory.
-    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: jet_driver_parent_path(path)})
+    // copy: the evaluator's build adapter gets a session and the request's input handles of its
+    // own. This query keeps `session` to abort or finish it, and `request` is returned in every
+    // response.
+    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: base_dir})
     evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, ^config)
     returned := jet_eval_comptime_value(&evaluated, span)
     // The value converter retires a value-owning result. A failed invocation
     // can have no value, so still drain its actual machine before expiration.
     retired :: jet_eval_retire_in_place(&evaluated, span) ?? false
     errors := ^compiled.diagnostics
+    // copy: `errors` owns the reported diagnostic, while `evaluated` keeps its error for the
+    // internal_problem/complete checks below. `error` is a payload view, which cannot be moved.
     if evaluated.error == .Val(error) -> &errors.push(error.diagnostic.copy())
     if evaluated.internal_problem != None || !evaluated.complete || !retired || returned == None {
         build_session_abort(&session)
+        // copy: the query result owns the problem text, but `internal` is a payload view of
+        // `evaluated.internal_problem`, and Jet has no consuming match to move it out.
         problem :: if evaluated.internal_problem == .Val(internal) -> { Val(internal.message.copy()) } else -> { None }
         return jet_driver_build_query_empty(^request, ^errors, false, ^problem)
     }
@@ -220,6 +238,9 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     selected_outputs :: request.build_output_names.len() == 0
     if selected_outputs -> request.build_output_names = jet_driver_build_selected_output_names(plan)
     loop generated_row in generated {
+        // copy: the request gets temporary generated-module rows for the checked recompile, popped
+        // right after. `generated` stays whole for the response, so each row needs its own texts
+        // (package is shared by every row).
         &request.generated_modules.push(JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()})
     }
     checked :: jet_driver_compile_mir_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
@@ -228,8 +249,11 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     loop error in checked.diagnostics -> &errors.push(error)
     if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(^request, ^errors, false, ^checked.internal_problem)
     nodes :: checked.build_nodes ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("completed build query lost its compiler node identities"))
+    // copy: the plan installs its own node list, and `nodes` moves into the response's `nodes`
+    // below. These are two independent owners of the same node identities.
     jet_driver_build_install_nodes(plan, nodes.copy())
-    return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(plan.copy()), graph: Val(build_plan_graph(plan)), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None}}
+    graph :: build_plan_graph(plan)
+    return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None}}
 }
 fn jet_driver_query_build_nodes(request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     // Nodes are the checked graph's exact compiler facts, never a projection
