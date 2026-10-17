@@ -806,7 +806,6 @@ function jetAuthority(task, sourcePath) {
   if (source.includes("print(")) allow.add("IO");
   if (fields.get("network") === "loopback-only" || /\bcore\.(?:http|net)\b/.test(source)) allow.add("Net");
   if (/\bcore\.time\b/.test(source)) allow.add("Time");
-  if (/\bpanic\s*\(/.test(source)) allow.add("Panic");
   if (/\b(?:String|struct|loop|use core\.|embed_file|print\s*\()/.test(source)) allow.add("Mem.Alloc");
   if (allow.size === 0) fail("task authority resolved to no Jet effects: " + task.task_id);
   return [...allow].sort().join(", ");

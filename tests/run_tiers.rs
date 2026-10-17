@@ -355,7 +355,7 @@ fn udp_responder_progresses_under_parent_wait() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"run_tiers_udp_responder\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Net, Panic] } }\n",
+        "name: \"run_tiers_udp_responder\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Net] } }\n",
     )
     .unwrap();
     fs::write(

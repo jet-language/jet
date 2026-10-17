@@ -258,6 +258,20 @@ struct JetDriverParsedAuthorityList {
     next_index: Int
 }
 
+// The source span of one list entry, from its first token through its last
+// non-comment token.
+fn jet_driver_manifest_item_span(tokens: [Token], start_index: Int, next_index: Int) -> Span Never! {
+    end := tokens[start_index].span.end
+    loop index in start_index..<next_index {
+        if tokens[index].kind != TOKEN_LINE_COMMENT && tokens[index].kind != TOKEN_BLOCK_COMMENT -> end = tokens[index].span.end
+    }
+    Span{start: tokens[start_index].span.start, end: end}
+}
+
+fn jet_driver_manifest_panic_grant(field: String, span: Span) -> Diagnostic {
+    jet_driver_diagnostic("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from `{field}`; to forbid stops, list it in `authority.holds.deny`")
+}
+
 fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], tables: TokenTables, start_index: Int, close_index: Int, span: Span, field: String, diagnostics: &[Diagnostic]) -> JetDriverParsedAuthorityList {
     list_open_index := start_index
     if list_open_index < close_index && tokens[list_open_index].kind == TOKEN_DOT -> list_open_index += 1
@@ -275,9 +289,11 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
         item :: jet_driver_manifest_field_value(source, tokens, item_index)
         name := item.text.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
         if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) -> name = token_decoded(tables, tokens[item_index])
+        // D-PANICROOT1=A: a positive `Panic` entry is one E0751 at that entry and grants nothing.
         if {
             name.len() == 0 -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
             sema_effect_parse_name(sema_effect_root(name)) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
+            !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> &diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
             name.contains("(") && !field.ends_with("deny") -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.holds.deny` list - use `Mem.Alloc(above: 65536)` there"))
             name.contains("(") && sema_effect_parse_name(name) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> &names.push(name)
@@ -1191,14 +1207,15 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", missing_name, "a package dependency identity requires a declared name", "add `name: \"package_name\"` to package.jet"))
     }
     // A malformed inline body is one E1362 at the body (Rust Loader: the field
-    // failure becomes the diagnostic's why).
+    // failure becomes the diagnostic's why). A Panic grant (E0751) is a rights
+    // finding at its own entry, not a malformed field, so it stays as reported.
     if inline_carrier == .Val(carrier) {
-        if jet_driver_has_errors_since(diagnostics, manifest_diagnostic_start) {
+        if jet_driver_has_field_errors_since(diagnostics, manifest_diagnostic_start) {
             field_failure := ""
             kept := [Diagnostic]{}
             loop diagnostic_index in manifest_diagnostic_start..<diagnostics.len() {
                 if {
-                    diagnostics[diagnostic_index].severity != DIAGNOSTIC_ERROR -> &kept.push(diagnostics[diagnostic_index])
+                    diagnostics[diagnostic_index].severity != DIAGNOSTIC_ERROR || diagnostics[diagnostic_index].code == "E0751" -> &kept.push(diagnostics[diagnostic_index])
                     field_failure.len() == 0 -> field_failure = diagnostics[diagnostic_index].what
                     else -> {}
                 }
@@ -1215,6 +1232,13 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     }
     identity :: jet_driver_package_identity(name, version ?? "")
     JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs}
+}
+
+fn jet_driver_has_field_errors_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
+    loop index in start..<diagnostics.len() {
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR && diagnostics[index].code != "E0751" -> return true
+    }
+    false
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {

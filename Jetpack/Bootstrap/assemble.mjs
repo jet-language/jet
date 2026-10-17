@@ -63,7 +63,7 @@ const packageSource = [
   'edition: "2028"',
   "authority: {",
   "    holds: {",
-  "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Panic, Rand, Time, Time.Wait]",
+  "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]",
   "    }",
   "}",
   "",
