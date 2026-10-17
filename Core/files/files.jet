@@ -651,6 +651,10 @@ fn file_fault(operation_path: String, operation: IOOperation, path: String) IOEr
     Ok()
 }
 
+// Boolean metadata probes answer `false` for any failed probe, so an injected
+// FS.Read fault (the same checkpoint `stat` takes) answers `false` too.
+fn read_probe_fault() -> Bool Never! { core.testing.__fault_should_fail("FS.Read") }
+
 fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
     if core.files.__writer_refusal(path) == {
         .None -> {}
@@ -775,10 +779,14 @@ fn exists_impl(path: String) -> Bool Never! {
 }
 
 
-fn exists(path: String | Path) -[FS]> Bool Never! { exists_impl(path_text(path)) }
+fn exists(path: String | Path) -[FS]> Bool Never! {
+    if read_probe_fault() -> return false
+    exists_impl(path_text(path))
+}
 
 
 fn is_dir(path: String | Path) -[FS.Read]> Bool Never! {
+    if read_probe_fault() -> return false
     text :: path_text(path)
     core.files.__metadata_directory(text) ?? false
 }
@@ -786,7 +794,9 @@ fn is_dir(path: String | Path) -[FS.Read]> Bool Never! {
 
 /// D-CORE-FILESTAT1=A: describe `path` without following a final link.
 fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
-    row :: core.files.__stat_at(-1, path_text(path), false)
+    text :: path_text(path)
+    file_fault("FS.Read", .Read, text)
+    row :: core.files.__stat_at(-1, text, false)
     Ok(stat_from_row(row))
 }
 
@@ -1780,10 +1790,14 @@ fn is_file_impl(path: String) -> Bool Never! {
     row[0] == 0
 }
 
-fn is_file(path: String) -[FS]> Bool Never! { is_file_impl(path) }
+fn is_file(path: String) -[FS]> Bool Never! {
+    if read_probe_fault() -> return false
+    is_file_impl(path)
+}
 
 
 fn is_symlink(path: String) -[FS]> Bool Never! {
+    if read_probe_fault() -> return false
     row :: core.files.__stat_at(-1, path, false) ?? return false
     row[0] == 2
 }
@@ -1995,6 +2009,7 @@ fn getsize(path: String) -[FS]> Int IOError! {
 
 
 fn getmtime(path: String) -[FS]> Int IOError! {
+    file_fault("FS.Read", .Read, path)
     row :: core.files.__stat_at(-1, path, false)
     Ok(row[9] /% 1000000)
 }
@@ -2432,3 +2447,59 @@ fn trim_file_line(bytes: &[U8]) Never! {
         IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
 }
 
+
+// #4750: every path metadata probe takes the FS.Read checkpoint. Setup uses
+// only FS.Write, so each schedule selects exactly the probe under test; the
+// injected branch prints a marker a captured `jet test` run can find.
+fn metadata_fault_fixture(prefix: String) -[FS]> (dir: String, file: String, link: String)? Never! {
+    root :: temp_dir(prefix) ?? return None
+    file :: join(root.path, "file")
+    write(file, "x") ?? return None
+    link :: join(root.path, "link")
+    symlink(file, link) ?? return None
+    Val((dir: root.path.copy(), file: file, link: link))
+}
+
+fn metadata_fault_seen(probe: String, error: IOError) {
+    if error == {
+        .Other(context) -> assert_eq(context.cause, Val("fault injected: FS.Read"))
+        else -> assert(false)
+    }
+    print("files fault observed: {probe}")
+}
+
+#Test(faults: [FS.Read]) fn files_stat_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("stat_fault") ?? return
+    if stat(fixture.file) == {
+        .Ok(info) -> assert_eq(info.size, 1)
+        .Err(error) -> metadata_fault_seen("stat", error)
+    }
+}
+
+#Test(faults: [FS.Read]) fn files_getmtime_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("mtime_fault") ?? return
+    if getmtime(fixture.file) == {
+        .Ok(_) -> {}
+        .Err(error) -> metadata_fault_seen("getmtime", error)
+    }
+}
+
+#Test(faults: [FS.Read]) fn files_exists_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("exists_fault") ?? return
+    if !exists(fixture.file) -> print("files fault observed: exists")
+}
+
+#Test(faults: [FS.Read]) fn files_is_dir_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("is_dir_fault") ?? return
+    if !is_dir(fixture.dir) -> print("files fault observed: is_dir")
+}
+
+#Test(faults: [FS.Read]) fn files_is_file_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("is_file_fault") ?? return
+    if !is_file(fixture.file) -> print("files fault observed: is_file")
+}
+
+#Test(faults: [FS.Read]) fn files_is_symlink_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("is_symlink_fault") ?? return
+    if !is_symlink(fixture.link) -> print("files fault observed: is_symlink")
+}
