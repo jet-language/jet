@@ -5894,6 +5894,14 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     checked :: sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
     condition :: checked ?? return false
+    // A prepared local reads as its value, so a local left in the checked
+    // condition is known only at run time.
+    runtime_local := false
+    sema_stmt_reads_runtime_local(condition, &runtime_local)
+    if runtime_local {
+        &diagnostics.push(sema_error("E0989", cond_span, "this `prep if` condition can't be known at compile time", "a `prep if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments (D-WHEN1)", "prepare the value first: `flag :: prep {{ … }}`, then write `prep if flag {{ … }}`"))
+        return false
+    }
     if sema_expr_unwrap_tag(condition.ty) != Type.Bool {
         &diagnostics.push(sema_stmt_prep_if_not_bool(cond_span))
         return false
@@ -5929,6 +5937,14 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     if !nested.complete -> return false
     &output.push(TStmt.Inline{body: nested.value, span: span})
     true
+}
+
+fn sema_stmt_reads_runtime_local(expression: TExpr, found: &Bool) Never! {
+    if expression.kind == .Local(_) {
+        found = true
+        return
+    }
+    tir_each_expr_child(expression, (child: TExpr) -> sema_stmt_reads_runtime_local(child, &found))
 }
 
 fn sema_stmt_prep_if_not_bool(cond_span: Span) -> Diagnostic {
