@@ -5,6 +5,7 @@ use jet_foundation.[
     CLICommandBinding,
     CallLabel,
     ConstAttr,
+    ContractClause,
     ConstDef,
     CtValue,
     DeriveBodyItem,
@@ -63,6 +64,7 @@ use jet_foundation.[
     ast_func,
     ast_struct,
     diagnostic_from_registry,
+    expr_span,
     diagnostic_with_edit,
 ]
 use jet_lexer.[
@@ -1725,11 +1727,30 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
                     else -> func.is_inline = true
                 }
             }
+            // D-PREPOST1 (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
+            // `#Post(cond, msg)` become the function's contract clauses; both
+            // arguments are required.
+            "Pre" -> parser_project_contract_marker(&state, &func, marker, true)
+            "Post" -> parser_project_contract_marker(&state, &func, marker, false)
             else -> {}
         }
     }
     // D-TASKS-LIST1=A: `#Job` metadata and its `#Every` schedule (E0925).
     _ := parser_project_function_job_markers(&state, &func, markers)
+}
+
+fn parser_project_contract_marker(state: &JetParserState, func: &Func, marker: Marker, pre: Bool) {
+    values :: parser_marker_bindings(marker, [String]{"condition", "message"}) ?? [Expr?]{}
+    if values.len() == 2 && values[0] == .Val(condition) && values[1] == .Val(message) {
+        clause :: ContractClause{cond: condition, message_expr: message, message_span: expr_span(message), span: marker.span}
+        if pre {
+            &func.pre.push(clause)
+        } else {
+            &func.post.push(clause)
+        }
+        return
+    }
+    parser_marker_shape_error(&state, marker)
 }
 
 fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -> StructDef {
