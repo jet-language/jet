@@ -2563,27 +2563,32 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef? {
     }
     parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
     trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
-    parser_expect(&state, TOKEN_LBRACE, "`{{` before derive methods")
-    // Rust `derive_body_items`: template depth covers the whole body.
-    state.derive_template_depth += 1
-    body := [DeriveBodyItem]{}
-    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
-        parser_skip_semicolons(&state)
-        if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        if {
-            parser_template_loop_ahead(&state) -> &body.push(parser_marker_template_loop(&state))
-            parser_current_kind(&state) == TOKEN_KW_FN -> {
-                modifiers := ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
-                parsed :: parser_parse_function(&state, modifiers, true)
-                &body.push(DeriveBodyItem.Item{value: Item.Func{value: parsed.value}})
+    // Rust `derive_body_items`: a derive body is the shared template body —
+    // items, statements and `prep loop` templates (parser_marker_body).
+    body :: parser_marker_body(&state)
+    end :: parser_lookahead(&state, -1).span
+    if parser_derive_nested_impl_span(body) == .Val(span) {
+        parser_add_fatal_code(&state, "E0003", span, "`derive {parser_value(state, type_name)}.{parser_value(state, trait_token)}` already names its implementation", "a derive provider body is the member list; a nested `impl` repeats the target and trait", "remove the `impl` wrapper and keep its members directly in the derive body")
+        return None
+    }
+    Val(DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, end)})
+}
+
+// Rust `derive_nested_impl_span`: the first `impl` or error conversion a
+// derive body (or one of its template loops) wraps its members in.
+fn parser_derive_nested_impl_span(body: [DeriveBodyItem]) -> Span? Never! {
+    loop body_item in body {
+        if body_item == {
+            .Item(item) -> if item == {
+                .Impl(implementation) -> return Val(implementation.span)
+                .ErrorConv(conversion) -> return Val(conversion.from_span)
+                else -> {}
             }
-            else -> {
-                parser_add_error_here(&state, "expected a derive method", "user derive bodies contain method declarations", "write a method with `fn`")
-                parser_recover_statement(&state)
+            .Loop(_, _, _, nested, _) -> {
+                if parser_derive_nested_impl_span(nested) == .Val(span) -> return Val(span)
             }
+            .Stmt(_) -> {}
         }
     }
-    state.derive_template_depth -= 1
-    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after derive methods")
-    Val(DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, close.span)})
+    None
 }
