@@ -661,6 +661,15 @@ struct SemaRegistrationGraph {
     // module's settled program (derived impls, inferred failure contracts) in
     // `SemaGraphResult.programs`.
     retain_programs: Bool{false}
+    // D-META-AUTO1 demand (sema_serde_index_codec_methods): every generated
+    // codec impl registers its header only. `codec_method_rows` maps each
+    // generated codec method key to its impl row; `codec_demand` collects the
+    // Encode/Decode requirements the checks reach (bound checks, codec calls,
+    // nested wire fields), and `codec_wave_rows` ("{module}:{row}") names the
+    // impls whose bodies the current codec wave checks (sema_codec_waves).
+    codec_method_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
+    codec_demand: Shared<SemaCodecDemand>
+    codec_wave_rows: [String:Bool]{[String:Bool]{}}
 }
 
 struct SemaRegistrationRowRef {
@@ -3244,9 +3253,10 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     if package_identity == "" || entry_module_identity == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}
     sema_registration_index_all_nominal_rows(&graph)
     sema_registration_index_source_impls(&graph)
+    sema_serde_index_codec_methods(&graph)
     sema_registration_index_namespaces(&graph)
     if entry_module_identity != "" && sema_registration_module_index(graph, entry_module_identity) == None {
         &graph.diagnostics.push(sema_error_optional("E0003", None, "the declaration graph entry is not loaded", "the entry identity must name one prepared module", "include the entry module in the loader's module inputs"))

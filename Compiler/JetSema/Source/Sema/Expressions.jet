@@ -2274,6 +2274,8 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         discarded: false,
         foreign_effect_root: foreign_effect_root,
     })
+    // D-META-AUTO1 demand: a codec call requires the generated codec it reaches.
+    sema_codec_demand_call(program, callee, checked.value, checked.facts.return_type)
     symbol :: callee ?? return true
     // Every early return here is the same `true`, and the target lookup is
     // pure, so the cheap tests go first and only a `comptime` target builds

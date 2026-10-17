@@ -2836,7 +2836,9 @@ fn sema_checked_trait_nominal_row(graph: SemaRegistrationGraph, module_identity:
 
 fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, implementation: SemaRegistrationImpl, diagnostics: &[Diagnostic]) {
     trait_name :: implementation.trait_name ?? return
-    bound :: sema_type_bound_satisfied(graph, implementation.target_type, trait_name, module_row.module_identity)
+    // A generated codec is its own type's codec: asking the bound would only
+    // demand its body (sema_codec_demand_type) for no use.
+    bound :: if implementation.declaration.is_generated_serde -> Bool?{Val(true)} else -> sema_type_bound_satisfied(graph, implementation.target_type, trait_name, module_row.module_identity)
     if bound == {
         .Val(bound_value) -> {
             if !bound_value {

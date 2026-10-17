@@ -1025,6 +1025,9 @@ fn sema_type_blocks_or_derives_name(blocks: [TraitImplBlock], derives: [NamedSpa
 
 fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_with_generics(graph, actual, caller_module_identity, generic_params)
+    // D-META-AUTO1 demand: a checked codec bound requires the codecs of the
+    // types it is met at, so their generated bodies are checked.
+    if bound_name == "Encode" || bound_name == "Decode" -> sema_codec_demand_type(graph, bound_name, actual_resolved)
     structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller_module_identity, generic_params)

@@ -3781,20 +3781,31 @@ fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, com
 
 // Exactly the original nominal-then-impl order, with impl lookup duplicates
 // omitted once. The same addresses select workers and drive ordered apply.
+// A generated codec impl whose body no demand has filled is skipped; during a
+// codec wave (graph.codec_wave_rows) only that wave's filled codecs are jobs.
 fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, impl_rows_scanned: &Int, count_work: Bool) -> [SemaBodyJob] Never! {
     jobs := [SemaBodyJob]{}
-    loop (nominal_index, nominal) in source_module.nominals {
-        impl_method_keys := [String:Bool]{}
-        loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
-            if count_work -> impl_rows_scanned += 1
-            loop method_index in 0..<graph.modules[impl_row.module_index].impls[impl_row.row].methods.len() -> impl_method_keys[graph.modules[impl_row.module_index].impls[impl_row.row].methods[method_index].symbol.id.key] = true
-        }
-        loop (method_index, method) in nominal.methods {
-            if impl_method_keys.get(method.symbol.id.key) != None -> next
-            &jobs.push(SemaBodyJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
+    codec_wave :: graph.codec_wave_rows.len() > 0
+    if !codec_wave {
+        loop (nominal_index, nominal) in source_module.nominals {
+            impl_method_keys := [String:Bool]{}
+            loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                if count_work -> impl_rows_scanned += 1
+                loop method_index in 0..<graph.modules[impl_row.module_index].impls[impl_row.row].methods.len() -> impl_method_keys[graph.modules[impl_row.module_index].impls[impl_row.row].methods[method_index].symbol.id.key] = true
+            }
+            loop (method_index, method) in nominal.methods {
+                if impl_method_keys.get(method.symbol.id.key) != None -> next
+                &jobs.push(SemaBodyJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
+            }
         }
     }
+    module_index :: graph.module_rows.get(source_module.module_identity) ?? -1
     loop (implementation_index, implementation) in source_module.impls {
+        if codec_wave {
+            if graph.codec_wave_rows.get("{module_index}:{implementation_index}") == None -> next
+        } else if sema_codec_impl_pending(implementation) {
+            next
+        }
         loop (method_index, _) in implementation.methods {
             &jobs.push(SemaBodyJob.ImplMethod{ordinal: jobs.len(), implementation_index: implementation_index, method_index: method_index})
         }
@@ -4677,6 +4688,9 @@ enum SemaGraphUndo {
     ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String)
     NominalIndexes(symbol_rows: [String:SemaRegistrationRowRef], slots: [String:Int], buckets: [[SemaRegistrationRowRef]])
     Counting(old: Bool)
+    // A generated codec body a codec wave filled (sema_codec_fill_demanded);
+    // undo returns the impl to its header.
+    CodecBody(module_index: Int, row: Int)
 }
 
 fn sema_graph_trail_init() -> SemaGraphTrail Never! {
@@ -4759,6 +4773,7 @@ fn sema_graph_trail_undo(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail) 
                 graph.nominal_row_buckets = buckets
             }
             .Counting(old) -> graph.counting = old
+            .CodecBody(module_index, row) -> sema_codec_undo_body(&graph, module_index, row)
         }
     }
     trail.nominal_indexes_saved = false
@@ -6464,6 +6479,9 @@ struct SemaFinalizeChecked {
 // registered rows rather than on a second snapshot.
 fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], selected: [Int], pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
+    // A codec wave (sema_codec_waves) checks only the generated codecs it
+    // filled, into the modules' existing results.
+    codec_wave :: graph.codec_wave_rows.len() > 0
     memory_plan := sema_function_memory_plan_from_graph(graph)
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes :: if work == .Val(_) -> true else -> false
@@ -6491,6 +6509,10 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
     checked_functions := 0
     loop module_index in selected {
+        if codec_wave {
+            checked_functions += sema_check_codec_module_in_shared(shared_state, host_hooks, module_index, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, &modules[module_index])
+            next
+        }
         weights := [Int]{}
         jobs :: sema_check_parallel_jobs_in_shared(shared_state, module_index, comptime_rows, &weights, phase, trace_sink)
         scope_rows :: sema_check_module_scope_rows_in_shared(shared_state, module_index)
@@ -6562,6 +6584,29 @@ fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks
     restored_memory_plan := ^checked.memory_plan
     sema_check_shared_fill(shared_state, ^restored_environment, ^restored_program, ^restored_memory_plan)
     ^checked.module_result
+}
+
+// One codec wave's part of module `module_index`: the generated codec
+// methods the wave filled (graph.codec_wave_rows), checked against the
+// module scope the body pass uses (sema_check_module_summary_scopes) and
+// appended to the module's result from that pass. Returns how many checked
+// functions it appended.
+fn sema_check_codec_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, counter_phase: String, trace_sink: CompilerTraceSink?, result: &SemaGraphModuleResult) -> Int {
+    environment := sema_check_shared_take_environment(shared_state)
+    program := sema_check_shared_take_program(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, counter_phase, trace_sink)
+    keep_going :: sema_check_registered_keep_going(environment, program)
+    scanned := 0
+    jobs :: sema_check_registered_method_jobs(environment, program, module_index, &scanned, false)
+    ready := [SemaPreparedBody]{}
+    queries := [Int:SemaBodyMemoQuery]{}
+    before :: result.functions.len()
+    loop job in jobs {
+        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
+    }
+    sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
+    result.functions.len() - before
 }
 
 // Moves the pass environment back into shared state alone.
@@ -6726,6 +6771,34 @@ fn sema_finalize_registration_graph(graph: ^SemaRegistrationGraph, resolved: ^Se
     result
 }
 
+// D-META-AUTO1 demand: after the body pass, every generated codec an
+// Encode/Decode requirement reached gets its body (sema_codec_fill_demanded)
+// and is checked into its module's result. A wave's checks may require more
+// codecs, so waves repeat until no requirement is new; a program that reaches
+// no generated codec runs none. The counters compare the generated codec
+// impls registered (candidates) with those that got a body.
+fn sema_codec_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+    graph := ^owned
+    candidates :: graph.codec_method_rows.len()
+    generated := 0
+    waves := 0
+    loop {
+        affected :: sema_codec_fill_demanded(&graph, &trail)
+        if affected.len() == 0 -> break
+        generated += graph.codec_wave_rows.len()
+        waves += 1
+        checked := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.codecs", trace_sink, &modules)
+        graph = ^checked
+        graph.codec_wave_rows = [String:Bool]{}
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.sema.codec_candidates", candidates, -1)
+        sink.progress("counters.sema.codec_generated", generated, -1)
+        sink.progress("counters.sema.codec_waves", waves, -1)
+    }
+    ^graph
+}
+
 // sema_finalize_registration_graph on `resolved`, the registration graph
 // with `values` applied, moved in: every edit finalization makes to it is
 // recorded on `trail`, and the graph comes back as the result's
@@ -6752,7 +6825,10 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
     all_modules :: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
-    after_body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules)
+    body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules)
+    // D-META-AUTO1 demand: only the generated codecs a requirement reached
+    // get bodies, checked into their modules' results before the failure solve.
+    after_body_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
     // #3708: every body is checked, so the failure solve finds the
     // unannotated functions that can never fail.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)

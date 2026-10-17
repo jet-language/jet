@@ -156,7 +156,12 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, program: SemaPro
 
 fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     resolved := ty
-    if program.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    if program.registration_graph == .Val(graph) {
+        resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+        // D-META-AUTO1 demand: a data codec call requires the codecs of the
+        // types it encodes or decodes.
+        sema_codec_demand_type(graph, sema_serde_codec_name(direction), resolved)
+    }
     return if resolved == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
         .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_type_is_admissible(environment, program, inner, direction)
