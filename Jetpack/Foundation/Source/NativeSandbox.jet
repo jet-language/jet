@@ -11,6 +11,9 @@ NATIVE_SANDBOX_FAKE_ENV :: prep { "JETPACK_FAKE_SANDBOX" }
 NATIVE_SANDBOX_MAX_OUTPUT_BYTES :: prep { 67108864 }
 NATIVE_SANDBOX_MACOS_EXEC :: prep { "/usr/bin/sandbox-exec" }
 NATIVE_SANDBOX_NOT_ENFORCED :: prep { "not-enforced" }
+// Rust ProcessSandbox `DEFAULT_ACTION_TIMEOUT`: every build action has a
+// finite wall-clock budget in every native backend.
+NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS :: prep { 30000 }
 
 struct NativeSandboxStatus {
     available: Bool
@@ -108,6 +111,13 @@ fn foundation_run_native_sandboxed(executable: String, args: [String], source_di
 // Run one action with additional immutable host directories projected
 // read-only at their declared destinations.
 fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
+    foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, source_dir, output_dir, env, share_network, mounts, None)
+}
+
+// Rust `run_native_sandboxed_with_timeout_and_mounts`: the same boundary with
+// a finite wall-clock budget. A child that outlives `timeout` is killed with
+// its process group and the run fails with the Rust backend's message.
+fn foundation_run_native_sandboxed_with_timeout_and_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
@@ -127,7 +137,12 @@ fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String
     source_writable :: !output_is_separate
 
     spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args)
+    if timeout == .Val(limit) -> spec = spec.timeout(limit)
     receipt :: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.IO("{err}"))
+    if receipt.timed_out {
+        limit :: timeout ?? panic("a timed-out sandbox run had a timeout")
+        return Err(NativeSandboxError.IO("sandbox process timed out after {limit.ns / 1000000}ms"))
+    }
     if receipt.limit_hit == .Val(_) -> return Err(NativeSandboxError.IO("sandbox process output exceeded {NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
     mechanism :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
     Ok(NativeSandboxOutput{receipt, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})

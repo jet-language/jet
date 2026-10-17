@@ -1,0 +1,168 @@
+// Declaration checks of the build graph, ported 1:1 from crates/jet-comptime
+// Build/validation.rs (the plugin and generated-module checks belong to the
+// unported `fn build` surface; see Model.jet).
+
+// Rust `resolve_under`: `rel` joined under `base`; `.` components are
+// dropped and `..`, a root, or a prefix refuses the path.
+fn build_resolve_under(base: String, rel: String) -> String BuildIOError! {
+    if rel.starts_with("/") -> return Err(BuildIOError.new(.InvalidInput, "build output path escapes base directory"))
+    out := base
+    loop part in rel.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err(BuildIOError.new(.InvalidInput, "build output path escapes base directory"))
+        out = files.join(out, part)
+    }
+    Ok(out)
+}
+
+fn build_check_name(name: String, kind: BuildNameKind) -> String HermeticBuildError! {
+    if name.trim() == "" {
+        return Err(if kind == {
+            .Target -> HermeticBuildError.EmptyTargetName
+            .Action -> HermeticBuildError.EmptyActionName
+            .Toolchain -> HermeticBuildError.EmptyToolchainName
+            .SigningIdentity -> HermeticBuildError.EmptySigningIdentityName
+            .Probe -> HermeticBuildError.EmptyProbeName
+        })
+    }
+    Ok(name)
+}
+
+fn build_validate_toolchain(name: String, spec: ToolchainSpec) HermeticBuildError! {
+    if spec.host_triple.trim() == "" || spec.target_triple.trim() == "" -> return Err(HermeticBuildError.EmptyToolchainTriple(name))
+    if spec.sdk == .Val(sdk) {
+        build_validate_identity(name, sdk.name, sdk.provenance)
+        build_validate_identity(name, sdk.version, sdk.provenance)
+    }
+    if spec.linker == .Val(linker) -> build_validate_identity(name, linker.name, linker.provenance)
+    loop tool in spec.tools.keys() {
+        path :: spec.tools[tool]
+        if tool.trim() == "" || path.trim() == "" || build_has_nul(path) -> return Err(HermeticBuildError.EmptyIdentityField(name))
+    }
+    loop mount in spec.mounts {
+        if mount.source.trim() == "" || build_has_nul(mount.source) || mount.destination.trim() == "" || build_has_nul(mount.destination) || !mount.destination.starts_with("/") || build_path_has_parent(mount.destination) {
+            return Err(HermeticBuildError.InvalidPath("toolchain `{name}` has an invalid read-only mount"))
+        }
+    }
+    build_validate_provenance(name, spec.provenance)
+}
+
+fn build_has_nul(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        if Int.from_u8(byte) == 0 -> return true
+    }
+    false
+}
+
+fn build_path_has_parent(path: String) -> Bool Never! {
+    loop part in path.split("/") {
+        if part == ".." -> return true
+    }
+    false
+}
+
+fn build_validate_identity(name: String, field: String, provenance: BuildProvenance) HermeticBuildError! {
+    if field.trim() == "" -> return Err(HermeticBuildError.EmptyIdentityField(name))
+    build_validate_provenance(name, provenance)
+}
+
+fn build_validate_probe(name: String, spec: ProbeSpec) HermeticBuildError! {
+    invalid :: if spec.kind == {
+        .FindProgram(program) -> program.trim() == ""
+        .PkgConfig(package, _) -> package.trim() == ""
+        .HeaderCheck(header) -> header.trim() == "" || !build_valid_header_name(header)
+        .CompileCheck(check, includes, code) -> {
+            bad_include := false
+            loop include in includes {
+                if !build_valid_header_name(include) -> bad_include = true
+            }
+            check.trim() == "" || code.trim() == "" || bad_include
+        }
+    }
+    if invalid -> return Err(HermeticBuildError.EmptyProbeField(name))
+    build_validate_provenance(name, spec.provenance)
+    if spec.reproducibility == ReproducibilityClass.Reproducible && spec.provenance.lock == None {
+        return Err(HermeticBuildError.MissingLockedProvenance(name))
+    }
+}
+
+// A header name: no NUL, newline, quote or angle bracket; relative; every
+// component a plain name.
+fn build_valid_header_name(header: String) -> Bool Never! {
+    if header == "" -> return false
+    loop byte in header.bytes() {
+        // NUL, LF, CR, `"`, `<`, `>`.
+        code :: Int.from_u8(byte)
+        if code == 0 || code == 10 || code == 13 || code == 34 || code == 60 || code == 62 -> return false
+    }
+    if header.starts_with("/") -> return false
+    // `Path::components` keeps only a leading `.` (CurDir); interior `.`
+    // components are dropped, `..` is ParentDir.
+    parts :: header.split("/").to_list()
+    if parts.len() > 0 && parts[0] == "." -> return false
+    loop part in parts {
+        if part == ".." -> return false
+    }
+    true
+}
+
+fn build_validate_provenance(name: String, provenance: BuildProvenance) HermeticBuildError! {
+    blank :: if provenance.source == {
+        .JetpackDependency(dep) -> dep.trim() == ""
+        .AmbientRecord(dep) -> dep.trim() == ""
+        .UserDeclared(dep) -> dep.trim() == ""
+        .InferredHost -> false
+    }
+    if blank -> return Err(HermeticBuildError.EmptyIdentityField(name))
+    if provenance.lock == .Val(lock) {
+        if lock.key.trim() == "" || lock.digest.trim() == "" -> return Err(HermeticBuildError.EmptyIdentityField(name))
+    }
+}
+
+fn build_validate_action(name: String, spec: ActionSpec) HermeticBuildError! {
+    if spec.argv.len() == 0 -> return Err(HermeticBuildError.EmptyActionArgv(name))
+    loop arg in spec.argv {
+        if arg.trim() == "" -> return Err(HermeticBuildError.EmptyActionArgv(name))
+    }
+    build_validate_paths(spec.inputs)
+    build_validate_paths(spec.outputs)
+    loop key in spec.env.keys() {
+        if key.trim() == "" -> return Err(HermeticBuildError.EmptyEnvName(name))
+    }
+    loop key in spec.env_allowlist {
+        if key.trim() == "" -> return Err(HermeticBuildError.EmptyEnvName(name))
+        if spec.env.get(key) == None -> return Err(HermeticBuildError.UndeclaredEnvName{action: name, key})
+    }
+    if spec.cache == {
+        .Cached -> if spec.outputs.len() == 0 -> return Err(HermeticBuildError.CachedActionWithoutOutputs(name))
+        .UncachedPhony -> {
+            if spec.outputs.len() != 0 -> return Err(HermeticBuildError.PhonyActionWithOutputs(name))
+            if spec.caps.len() == 0 -> return Err(HermeticBuildError.PhonyActionWithoutCaps(name))
+        }
+    }
+    seen := [String]{}
+    loop output in spec.outputs {
+        if seen.contains(output) -> return Err(HermeticBuildError.DuplicateActionOutput{action: name, output})
+        &seen.push(output)
+    }
+}
+
+// Rust `validate_action_output_owners`: one owner per declared output.
+fn build_validate_action_output_owners(actions: [HermeticBuildAction]) HermeticBuildError! {
+    owners := [String: String]{}
+    loop action in actions {
+        loop output in action.outputs {
+            if owners.get(output) == .Val(first_action) {
+                return Err(HermeticBuildError.DuplicateBuildOutput{output, first_action, second_action: action.name})
+            }
+            owners[output] = action.name
+        }
+    }
+}
+
+fn build_validate_paths(paths: [String]) HermeticBuildError! {
+    loop path in paths {
+        if path.trim() == "" -> return Err(HermeticBuildError.EmptyPath)
+        if !build_path_is_relative_normal(path) -> return Err(HermeticBuildError.InvalidPath(path))
+    }
+}

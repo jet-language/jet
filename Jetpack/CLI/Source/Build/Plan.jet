@@ -1,0 +1,461 @@
+// The immutable plan snapshot and its execution order, ported 1:1 from
+// crates/jet-comptime Build/{plan_graph,plan_impl,execution_helpers}.rs (the
+// graph/explain/query projections and compiler package layer belong to the
+// unported `fn build` surface; see Model.jet).
+
+struct HermeticBuildPlan {
+    context: Int
+    targets: [HermeticBuildTarget]
+    actions: [HermeticBuildAction]
+    toolchains: [HermeticBuildToolchain]
+    signing_identities: [HermeticBuildSigningIdentity]
+    probes: [HermeticBuildProbe]
+    default: TargetRef?
+
+    fn default_target(self) -> TargetRef? Never! { self.default }
+
+    fn default_host_toolchain(self) -> HermeticBuildToolchain Never! { self.toolchains[0] }
+
+    fn target(self, target: TargetRef) -> HermeticBuildTarget? Never! {
+        if target.context != self.context -> return None
+        self.targets.get(target.id)
+    }
+
+    fn action(self, action: HermeticActionHandle) -> HermeticBuildAction? Never! {
+        if action.context != self.context -> return None
+        self.actions.get(action.id)
+    }
+
+    fn action_handle(self, action: Int) -> HermeticActionHandle? Never! {
+        if action < 0 || action >= self.actions.len() -> return None
+        Val(HermeticActionHandle{id: action, context: self.context})
+    }
+
+    fn toolchain(self, toolchain: ToolchainHandle) -> HermeticBuildToolchain? Never! {
+        if toolchain.context != self.context -> return None
+        self.toolchains.get(toolchain.id)
+    }
+
+    fn signing_identity(self, identity: SigningIdentityHandle) -> HermeticBuildSigningIdentity? Never! {
+        if identity.context != self.context -> return None
+        self.signing_identities.get(identity.id)
+    }
+
+    fn probe(self, probe: ProbeHandle) -> HermeticBuildProbe? Never! {
+        if probe.context != self.context -> return None
+        self.probes.get(probe.id)
+    }
+
+    // Actions reachable from the selected default target, plus their file and
+    // target prerequisites. A plan without a default selects every target.
+    // Ascending ids (Rust `BTreeSet<ActionId>`).
+    fn selected_action_ids(self) -> [Int] HermeticBuildError! {
+        selected := [Int]{}
+        if self.default == {
+            .Val(default) -> build_collect_target_actions(self, default.id, [Int]{}, &selected)
+            .None -> loop target in self.targets -> build_collect_target_actions(self, target.id, [Int]{}, &selected)
+        }
+        prereqs :: self.action_prereqs()
+        pending := selected
+        loop pending.len() > 0 {
+            action :: &pending.pop() ?? break
+            dependencies :: prereqs.get(action) ?? [Int]{}
+            loop dependency in dependencies {
+                if !selected.contains(dependency) {
+                    &selected.push(dependency)
+                    &pending.push(dependency)
+                }
+            }
+        }
+        &selected.sort()
+        Ok(selected)
+    }
+
+    // Probes of the selected actions and of the default target closure.
+    fn selected_probe_ids(self) -> [Int] HermeticBuildError! {
+        actions :: self.selected_action_ids()
+        probes := [Int]{}
+        loop action in self.actions {
+            if !actions.contains(action.id) -> next
+            loop probe in action.probes -> build_insert_sorted_int(&probes, probe.id)
+        }
+        selected_targets := [Int]{}
+        if self.default == {
+            .Val(default) -> build_visit_target_closure(self, default.id, &selected_targets)
+            .None -> loop target in self.targets -> &selected_targets.push(target.id)
+        }
+        loop target in self.targets {
+            if !selected_targets.contains(target.id) -> next
+            loop probe in target.probes -> build_insert_sorted_int(&probes, probe.id)
+        }
+        Ok(probes)
+    }
+
+    // Default pools first, then custom pools (one slot each) by name.
+    fn resource_pools(self) -> [BuildResourcePoolSpec] Never! {
+        pools := build_default_resource_pools()
+        custom := [BuildResourcePoolSpec]{}
+        loop action in self.actions {
+            loop pool in build_action_pools(action) {
+                known := false
+                loop spec in pools {
+                    if spec.pool.as_str() == pool.as_str() -> known = true
+                }
+                if !known -> &custom.push(BuildResourcePoolSpec{pool: pool, slots: 1})
+            }
+        }
+        &custom.sort_by((left: BuildResourcePoolSpec, right: BuildResourcePoolSpec) -> left.pool.as_str() <=> right.pool.as_str())
+        loop spec in custom -> &pools.push(spec)
+        pools
+    }
+
+    fn execution_model(self) -> BuildExecutionModel HermeticBuildError! {
+        selected :: self.selected_action_ids()
+        prereqs :: self.action_prereqs_for(selected)
+        stages :: build_execution_stages(self, prereqs)
+        action_targets :: self.action_targets()
+        nodes := [BuildExecutionNode]{}
+        console_order := [Int]{}
+        selected_actions := [HermeticBuildAction]{}
+        loop action in self.actions {
+            if !selected.contains(action.id) -> next
+            &nodes.push(BuildExecutionNode{action: action.id, name: action.name, target: action_targets.get(action.id), prerequisites: prereqs.get(action.id) ?? [Int]{}, pools: build_action_pools(action)})
+            &console_order.push(action.id)
+            &selected_actions.push(action)
+        }
+        events := [BuildExecutionEvent]{}
+        loop stage in stages {
+            loop action in stage.actions -> &events.push(BuildExecutionEvent.Ready{action, stage: stage.index})
+        }
+        Ok(BuildExecutionModel{pools: self.resource_pools(), nodes, stages, events, console_order, metrics: build_execution_metrics(selected_actions, stages)})
+    }
+
+    // Replay the supplied outcomes over the canonical stages: a failed
+    // prerequisite cancels its dependents, a missing outcome is pending.
+    fn execution_report(self, outcomes: [BuildActionOutcomeRow]) -> BuildExecutionReport HermeticBuildError! {
+        selected :: self.selected_action_ids()
+        prereqs :: self.action_prereqs_for(selected)
+        stages :: build_execution_stages(self, prereqs)
+        supplied := [Int: ActionOutcome]{}
+        loop row in outcomes {
+            if row.action.context != self.context || row.action.id >= self.actions.len() -> return Err(HermeticBuildError.UnknownAction(row.action.id))
+            supplied[row.action.id] = row.outcome
+        }
+        failed := [Int]{}
+        events := [BuildExecutionEvent]{}
+        selected_actions := [HermeticBuildAction]{}
+        loop action in self.actions {
+            if selected.contains(action.id) -> &selected_actions.push(action)
+        }
+        metrics := build_execution_metrics(selected_actions, stages)
+        loop stage in stages {
+            loop action in stage.actions {
+                failed_prereq := Int?{None}
+                deps :: prereqs.get(action) ?? [Int]{}
+                loop dep in deps {
+                    if failed_prereq == None && failed.contains(dep) -> failed_prereq = Val(dep)
+                }
+                if failed_prereq == .Val(prereq) {
+                    &failed.push(action)
+                    metrics.cancelled_actions += 1
+                    &events.push(BuildExecutionEvent.Cancelled{action, failed_prereq: prereq})
+                    next
+                }
+                if supplied.get(action) == {
+                    .Val(outcome) -> {
+                        if outcome == {
+                            .Failed(_) -> {
+                                &failed.push(action)
+                                metrics.failed_actions += 1
+                            }
+                            .RestoredFromCache -> metrics.cache_restored_actions += 1
+                            else -> {}
+                        }
+                        &events.push(BuildExecutionEvent.Finished{action, outcome})
+                    }
+                    .None -> {
+                        metrics.pending_actions += 1
+                        &events.push(BuildExecutionEvent.Pending{action})
+                    }
+                }
+            }
+        }
+        Ok(BuildExecutionReport{events, metrics})
+    }
+
+    // The first target that lists each action owns it.
+    fn action_targets(self) -> [Int: Int] Never! {
+        out := [Int: Int]{}
+        loop target in self.targets {
+            loop action in target.actions {
+                if out.get(action.id) == None -> out[action.id] = target.id
+            }
+        }
+        out
+    }
+
+    // Every action's prerequisites: the actions of its target's dependency
+    // closure, plus the owner of every declared input it consumes. Ascending
+    // and unique per action.
+    fn action_prereqs(self) -> [Int: [Int]] HermeticBuildError! {
+        out := [Int: [Int]]{}
+        loop action in self.actions -> out[action.id] = [Int]{}
+        loop target in self.targets {
+            deps := [Int]{}
+            loop dep in target.deps -> build_collect_target_actions(self, dep.id, [Int]{}, &deps)
+            loop action in target.actions {
+                current := out.get(action.id) ?? [Int]{}
+                loop dep in deps -> build_insert_sorted_int(&current, dep)
+                out[action.id] = current
+            }
+        }
+        owners := [String: Int]{}
+        loop action in self.actions {
+            loop output in action.outputs -> owners[output] = action.id
+        }
+        loop action in self.actions {
+            loop input in action.inputs {
+                owner :: owners.get(input) ?? next
+                if owner == action.id -> next
+                current := out.get(action.id) ?? [Int]{}
+                build_insert_sorted_int(&current, owner)
+                out[action.id] = current
+            }
+        }
+        Ok(out)
+    }
+
+    fn action_prereqs_for(self, selected: [Int]) -> [Int: [Int]] HermeticBuildError! {
+        all :: self.action_prereqs()
+        out := [Int: [Int]]{}
+        loop action in selected {
+            kept := [Int]{}
+            deps :: all.get(action) ?? [Int]{}
+            loop dep in deps {
+                if selected.contains(dep) -> &kept.push(dep)
+            }
+            out[action] = kept
+        }
+        Ok(out)
+    }
+}
+
+// One finished action of an execution, by handle (Rust `(ActionHandle,
+// ActionOutcome)`).
+struct BuildActionOutcomeRow {
+    action: HermeticActionHandle
+    outcome: ActionOutcome
+}
+
+struct BuildExecutionModel {
+    pools: [BuildResourcePoolSpec]
+    nodes: [BuildExecutionNode]
+    stages: [BuildExecutionStage]
+    events: [BuildExecutionEvent]
+    console_order: [Int]
+    metrics: BuildExecutionMetrics
+}
+
+struct BuildExecutionNode {
+    action: Int
+    name: String
+    target: Int?
+    prerequisites: [Int]
+    pools: [BuildResourcePool]
+}
+
+struct BuildExecutionStage {
+    index: Int
+    actions: [Int]
+}
+
+enum BuildExecutionEvent {
+    Ready(action: Int, stage: Int)
+    Finished(action: Int, outcome: ActionOutcome)
+    Cancelled(action: Int, failed_prereq: Int)
+    Pending(action: Int)
+}
+
+struct BuildExecutionMetrics {
+    actions_total: Int
+    parallel_stages: Int
+    max_parallel_actions: Int
+    cacheable_actions: Int
+    phony_actions: Int
+    failed_actions: Int
+    cancelled_actions: Int
+    cache_restored_actions: Int
+    pending_actions: Int
+}
+
+struct BuildExecutionReport {
+    events: [BuildExecutionEvent]
+    metrics: BuildExecutionMetrics
+}
+
+fn build_insert_sorted_int(values: &[Int], value: Int) Never! {
+    if values.contains(value) -> return
+    &values.push(value)
+    &values.sort()
+}
+
+// Rust `default_resource_pools`: CPU and memory have automatic capacity (0);
+// linker, console and GPU serialize.
+fn build_default_resource_pools() -> [BuildResourcePoolSpec] Never! {
+    [BuildResourcePoolSpec]{
+        BuildResourcePoolSpec{pool: BuildResourcePool.CPU, slots: 0},
+        BuildResourcePoolSpec{pool: BuildResourcePool.Memory, slots: 0},
+        BuildResourcePoolSpec{pool: BuildResourcePool.Linker, slots: 1},
+        BuildResourcePoolSpec{pool: BuildResourcePool.Console, slots: 1},
+        BuildResourcePoolSpec{pool: BuildResourcePool.GPU, slots: 1},
+    }
+}
+
+fn build_action_pools(action: HermeticBuildAction) -> [BuildResourcePool] Never! {
+    if action.resource_pools.len() == 0 -> return [BuildResourcePool]{BuildResourcePool.CPU}
+    action.resource_pools
+}
+
+// Rust `collect_target_actions`: the actions of `target` and its dependency
+// closure; revisiting a target on the walk is a target cycle.
+fn build_collect_target_actions(plan: HermeticBuildPlan, target: Int, visiting: [Int], out: &[Int]) HermeticBuildError! {
+    if visiting.contains(target) -> return Err(build_target_cycle_error(plan, visiting, target))
+    node :: plan.targets.get(target) ?? return Err(HermeticBuildError.UnknownTarget(target))
+    walk := visiting
+    &walk.push(target)
+    loop dep in node.deps -> build_collect_target_actions(plan, dep.id, walk, &out)
+    loop action in node.actions -> build_insert_sorted_int(&out, action.id)
+}
+
+fn build_visit_target_closure(plan: HermeticBuildPlan, target: Int, out: &[Int]) Never! {
+    if out.contains(target) -> return
+    &out.push(target)
+    node :: plan.targets.get(target) ?? return
+    loop dep in node.deps -> build_visit_target_closure(plan, dep.id, &out)
+}
+
+// Rust `target_cycle_error` over `closed_cycle`: the walk from the first
+// visit of `repeated` back to it.
+fn build_target_cycle_error(plan: HermeticBuildPlan, stack: [Int], repeated: Int) -> HermeticBuildError Never! {
+    start := 0
+    loop index in 0..<stack.len() {
+        if stack[index] == repeated {
+            start = index
+            break
+        }
+    }
+    names := [String]{}
+    loop index in start..<stack.len() -> &names.push(build_target_name(plan, stack[index]))
+    &names.push(build_target_name(plan, repeated))
+    HermeticBuildError.TargetDependencyCycle(DependencyCycle{nodes: names})
+}
+
+fn build_target_name(plan: HermeticBuildPlan, target: Int) -> String Never! {
+    node :: plan.targets.get(target) ?? return "target#{target}"
+    node.name
+}
+
+fn build_action_name(plan: HermeticBuildPlan, action: Int) -> String Never! {
+    node :: plan.actions.get(action) ?? return "action#{action}"
+    node.name
+}
+
+// Rust `execution_stages`: Kahn layers in ascending id order; a stalled sort
+// reports the cycle left behind.
+fn build_execution_stages(plan: HermeticBuildPlan, prereqs: [Int: [Int]]) -> [BuildExecutionStage] HermeticBuildError! {
+    keys := prereqs.keys().to_list()
+    &keys.sort()
+    remaining := keys
+    indegree := [Int: Int]{}
+    dependents := [Int: [Int]]{}
+    loop action in keys {
+        dependencies :: prereqs.get(action) ?? [Int]{}
+        indegree[action] = dependencies.len()
+        loop dependency in dependencies {
+            list := dependents.get(dependency) ?? [Int]{}
+            &list.push(action)
+            &list.sort()
+            dependents[dependency] = list
+        }
+    }
+    ready := [Int]{}
+    loop action in keys {
+        if (indegree.get(action) ?? 0) == 0 -> &ready.push(action)
+    }
+    stages := [BuildExecutionStage]{}
+    loop ready.len() > 0 {
+        current :: ready
+        kept := [Int]{}
+        loop action in remaining {
+            if !current.contains(action) -> &kept.push(action)
+        }
+        remaining = kept
+        next_ready := [Int]{}
+        loop action in current {
+            waiting :: dependents.get(action) ?? [Int]{}
+            loop dependent in waiting {
+                count :: (indegree.get(dependent) ?? 0) - 1
+                indegree[dependent] = count
+                if count == 0 -> build_insert_sorted_int(&next_ready, dependent)
+            }
+        }
+        &stages.push(BuildExecutionStage{index: stages.len(), actions: current})
+        ready = next_ready
+    }
+    if remaining.len() > 0 -> return Err(build_action_cycle_error(plan, remaining, prereqs))
+    Ok(stages)
+}
+
+// Rust `action_cycle_error` over `stalled_cycle`: walk the residual graph in
+// ascending order, prerequisites sorted, until a node repeats on the stack.
+fn build_action_cycle_error(plan: HermeticBuildPlan, remaining: [Int], prereqs: [Int: [Int]]) -> HermeticBuildError Never! {
+    settled := [Int]{}
+    loop node in remaining {
+        stack := [Int]{}
+        if build_walk_stalled(node, remaining, prereqs, &stack, &settled) == .Val(cycle) {
+            names :: loop action in cycle -> build_action_name(plan, action)
+            return HermeticBuildError.ActionDependencyCycle(DependencyCycle{nodes: names})
+        }
+    }
+    names :: loop action in remaining -> build_action_name(plan, action)
+    HermeticBuildError.ActionDependencyCycle(DependencyCycle{nodes: names})
+}
+
+fn build_walk_stalled(node: Int, remaining: [Int], prereqs: [Int: [Int]], stack: &[Int], settled: &[Int]) -> [Int]? Never! {
+    if settled.contains(node) -> return None
+    loop index in 0..<stack.len() {
+        if stack[index] == node {
+            cycle := [Int]{}
+            loop at in index..<stack.len() -> &cycle.push(stack[at])
+            &cycle.push(node)
+            return Val(cycle)
+        }
+    }
+    &stack.push(node)
+    dependencies := prereqs.get(node) ?? [Int]{}
+    &dependencies.sort()
+    loop prerequisite in dependencies {
+        if !remaining.contains(prerequisite) -> next
+        if build_walk_stalled(prerequisite, remaining, prereqs, &stack, &settled) == .Val(cycle) -> return Val(cycle)
+    }
+    _ := &stack.pop()
+    &settled.push(node)
+    None
+}
+
+fn build_execution_metrics(actions: [HermeticBuildAction], stages: [BuildExecutionStage]) -> BuildExecutionMetrics Never! {
+    widest := 0
+    loop stage in stages {
+        if stage.actions.len() > widest -> widest = stage.actions.len()
+    }
+    cacheable := 0
+    phony := 0
+    loop action in actions {
+        if action.cache == ActionCache.Cached -> cacheable += 1 else -> phony += 1
+    }
+    BuildExecutionMetrics{
+        actions_total: actions.len(), parallel_stages: stages.len(), max_parallel_actions: widest,
+        cacheable_actions: cacheable, phony_actions: phony, failed_actions: 0, cancelled_actions: 0,
+        cache_restored_actions: 0, pending_actions: 0,
+    }
+}
