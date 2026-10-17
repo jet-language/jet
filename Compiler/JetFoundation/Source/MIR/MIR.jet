@@ -3867,7 +3867,8 @@ fn mir_c_void(ty: MIRType) -> Bool Never! {
 fn mir_c_export_result(function: MIRFunction) -> MIRType? {
     if function.failure == {
         .Infallible -> Val(function.return_type)
-        .Result(success, _) -> Val(success)
+        // copy: `success` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Result(success, _) -> Val(success.copy())
         else -> None
     }
 }

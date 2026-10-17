@@ -40,7 +40,8 @@ impl JetCLIReadError -> JetCLITryError { return JetCLITryError.Read{error: self}
 fn jet_cli_try_error_output(error: JetCLITryError) -> JetDriverVerbOutput Never! {
     if error == {
         .Read(problem) -> jet_cli_try_fail(problem.message)
-        .Output(output) -> output
+        // copy: `output` is a payload of read parameter `error`, which keeps the original; the returned value owns this one
+        .Output(output) -> output.copy()
     }
 }
 

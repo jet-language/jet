@@ -35,8 +35,10 @@ fn sema_time_handle_receiver_name(ty: Type) -> String Never! {
 
 fn sema_time_failure_carrier(result: Type) -> TFailureCarrier Never! {
     if result == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(inner) -> TFailureCarrier.Optional{value: inner}
+        // copy: `ok` and `err` are payloads of read parameter `result`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: result} else -> TFailureCarrier.Infallible
         else -> TFailureCarrier.Infallible
     }

@@ -27,7 +27,8 @@ SEMA_SHARED_HOISTED_RHS :: prep { "__jet_shared_rhs" }
 
 fn sema_shared_access_inner(ty: Type) -> Type? {
     if ty == {
-        .Shared(inner) -> Val(inner)
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Shared(inner) -> Val(inner.copy())
         else -> None
     }
 }

@@ -760,7 +760,8 @@ fn jet_codegen_impl_method_matches(function: TFunc, definition: TImplDef, trait_
     if function.module_identity != definition.module_identity || function.name != leaf -> return false
     owner := Type?{None}
     if function.kind == {
-        .Method(_, owner_type) -> owner = Val(owner_type)
+        // copy: `owner_type` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Method(_, owner_type) -> owner = Val(owner_type.copy())
         .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
             expected :: trait_ref ?? return false
             if jet_codegen_mir_trait_ref_for_symbol(modules, nominals, trait_symbol).id != expected.id -> return false
@@ -2226,7 +2227,8 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
     statements := [TStmt]{}
     expression := TExpr?{None}
     if lambda.executable == {
-        .Expr(value) -> expression = Val(value)
+        // copy: `value` is a payload of read parameter `lambda`, which keeps the original; the Val carrier owns this one
+        .Expr(value) -> expression = Val(value.copy())
         .Block(body) | .SharedBlock(body) -> statements = body
     }
     // The nested function lowers on the same builder (no program copy); the

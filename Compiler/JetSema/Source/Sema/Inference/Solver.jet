@@ -292,7 +292,8 @@ fn sema_inference_expected_return_view(declared_return: Type, expected: Type) ->
         else -> {}
     }
     if declared_return == {
-        .Result(success, _) -> success
+        // copy: `success` is a payload of read parameter `declared_return`, which keeps the original; the returned value owns this one
+        .Result(success, _) -> success.copy()
         else -> declared_return
     }
 }

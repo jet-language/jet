@@ -1356,7 +1356,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         }
         .List(elem) -> lower_list_repr(p, ty, elem)
         // `[T#N]` is carried as the List of its N elements (Lists.jet).
-        .FixedList(elem, _) -> lower_list_repr(p, mir_type_from_kind(MIRTypeKind.List{inner: elem}), elem)
+        // copy: `elem` is a payload of read parameter `ty`, which keeps the original; field `inner` of the new MIRTypeKind.List owns this one
+        .FixedList(elem, _) -> lower_list_repr(p, mir_type_from_kind(MIRTypeKind.List{inner: elem.copy()}), elem)
         .Map(key, value) -> lower_map_repr(p, ty, key, value)
         // Shared<T>: an owned runtime JetShared<NativeValue> handle (Tasks.jet).
         .Shared(_) -> LowerRepr.Handle{drop: "jet_rt_native_shared_drop", clone: "jet_rt_native_shared_clone"}
@@ -1804,7 +1805,8 @@ fn lower_forget(f: &LowerFunction, value: LIRValueID, identity: MIRTypeID?) Neve
 
 fn lower_checked_type(c: LowerContext, instruction: MIRInstruction) -> MIRType? {
     result :: instruction.result ?? return None
-    if instruction.ty == .Val(ty) -> return Val(ty)
+    // copy: `ty` is a payload of read parameter `instruction`, which keeps the original; the Val carrier owns this one
+    if instruction.ty == .Val(ty) -> return Val(ty.copy())
     lower_value_type(c, result)
 }
 
@@ -5837,7 +5839,8 @@ fn lower_iter_takes_owning(operation: MIROperation) -> Bool Never! {
 
 fn lower_option_inner(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .Option(inner) -> Val(inner)
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Option(inner) -> Val(inner.copy())
         .Tagged(_, inner) -> lower_option_inner(inner)
         else -> None
     }
@@ -7208,7 +7211,8 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
 fn lower_glue_shapes(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType) -> [LowerGlueShape] Never! {
     shapes := [LowerGlueShape]{}
     if ty.kind == {
-        .Option(inner) -> &shapes.push(LowerGlueShape{selector: -1, fields: [LowerGlueField]{LowerGlueField{offset: 0, ty: inner}}})
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; field `ty` of the new LowerGlueField owns this one
+        .Option(inner) -> &shapes.push(LowerGlueShape{selector: -1, fields: [LowerGlueField]{LowerGlueField{offset: 0, ty: inner.copy()}}})
         .Result(ok, err) -> {
             &shapes.push(LowerGlueShape{selector: lower_result_selector(true), fields: [LowerGlueField]{LowerGlueField{offset: lower_result_payload_offset(), ty: ok}}})
             &shapes.push(LowerGlueShape{selector: lower_result_selector(false), fields: [LowerGlueField]{LowerGlueField{offset: lower_result_payload_offset(), ty: err}}})

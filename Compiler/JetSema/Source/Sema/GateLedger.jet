@@ -355,7 +355,8 @@ fn sema_gate_rounded_conversion(method: String, args: [CallArg]) -> Bool Never! 
 fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
     if position >= marker.args.len() -> return None
     if marker.args[position] == {
-        .Expr(value) -> Val(value)
+        // copy: `value` is a payload of read parameter `marker`, which keeps the original; the Val carrier owns this one
+        .Expr(value) -> Val(value.copy())
         else -> None
     }
 }

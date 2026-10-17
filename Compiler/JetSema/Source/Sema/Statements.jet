@@ -1131,7 +1131,8 @@ fn sema_stmt_for_in_method_kind(expression: Expr, collection: TExpr) -> TForInMe
             if method == "lines" {
                 receiver := TExpr?{None}
                 if collection.kind == {
-                    .MethodCall(value, _, _, _) -> receiver = Val(value)
+                    // copy: `value` is a payload of read parameter `collection`, which keeps the original; the Val carrier owns this one
+                    .MethodCall(value, _, _, _) -> receiver = Val(value.copy())
                     else -> {}
                 }
                 if receiver != None {
@@ -1178,7 +1179,8 @@ fn sema_stmt_for_in_source(expression: Expr, collection: TExpr, method_kind: TFo
             .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> {
                 if method == "chars" || method == "lines" {
                     if collection.kind == {
-                        .MethodCall(receiver, _, _, _) -> return receiver
+                        // copy: `receiver` is a payload of read parameter `collection`, which keeps the original; the returned value owns this one
+                        .MethodCall(receiver, _, _, _) -> return receiver.copy()
                         // `text.chars()` checks as the String builtin; the
                         // loop walks its receiver's scalars, as Rust
                         // lower_forin_collection sources `chars` from it.
@@ -1771,7 +1773,8 @@ fn sema_stmt_for_in_lend_view_item(local: TLocal?, ty: Type, collection: Expr, s
 fn sema_stmt_for_in_pair_types(collection_type: Type, item_type: Type) -> SemaForInPairTypes? {
     if collection_type == {
         .List(_) | .FixedList(_, _) -> return Val(SemaForInPairTypes{first: Type.Int, second: item_type})
-        .Map(key, _, value) -> return Val(SemaForInPairTypes{first: key, second: value})
+        // copy: `key` and `value` are payloads of read parameter `collection_type`, which keeps the originals; the new SemaForInPairTypes's fields own `key` and `value`
+        .Map(key, _, value) -> return Val(SemaForInPairTypes{first: key.copy(), second: value.copy()})
         .Apply(name, args) -> {
             if (name == "View" || name == "ViewMut" || name == "ComputeViewMut") && args.len() == 1 -> return Val(SemaForInPairTypes{first: Type.Int, second: args[0]})
         }
@@ -1807,7 +1810,8 @@ fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: TForInMethod?,
     }
     if collection_type == {
         .List(inner) | .FixedList(inner, _) -> return Val(inner)
-        .Map(key, _, value) -> return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key}, TypeTupleField{name: "value", ty: value}}})
+        // copy: `key` and `value` are payloads of read parameter `collection_type`, which keeps the originals; the new TypeTupleField's fields own `key` and `value`
+        .Map(key, _, value) -> return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key.copy()}, TypeTupleField{name: "value", ty: value.copy()}}})
         .Apply(name, args) -> {
             if (name == "Iter" || name == "ViewIter" || name == "Stream" || name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == "Receiver") && args.len() == 1 -> return Val(args[0])
         }
@@ -4543,7 +4547,8 @@ fn sema_stmt_return_known_type(value: Expr, environment: SemaScopeEnvironment, s
                 else -> {}
             }
         }
-        .MethodCall(_, _, _, _, _, _, _, resolved_ret, _, _, _) -> return resolved_ret
+        // copy: `resolved_ret` is a payload of read parameter `value`, which keeps the original; the returned value owns this one
+        .MethodCall(_, _, _, _, _, _, _, resolved_ret, _, _, _) -> return resolved_ret.copy()
         .CallValue(callee, _, _) -> {
             callee_ty :: sema_stmt_return_known_type(callee, environment, scopes) ?? return None
             if callee_ty == {

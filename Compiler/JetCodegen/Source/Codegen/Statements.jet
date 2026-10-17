@@ -2645,7 +2645,8 @@ fn jet_codegen_lower_fallback_route(builder: &JetCodegenBuilder, program: JetCod
             }
             return Val(jet_codegen_fallback_join_value(&builder, program, expression, value.ty, lowered))
         }
-        .Return(value) -> jet_codegen_lower_statement(&builder, program, TStmt.Return{value: value, span: expression.span})
+        // copy: `value` is a payload of read parameter `fallback`, which keeps the original; field `value` of the new TStmt.Return owns this one
+        .Return(value) -> jet_codegen_lower_statement(&builder, program, TStmt.Return{value: value.copy(), span: expression.span})
         .Panic(message, location) -> jet_codegen_lower_fallback_panic(&builder, program, expression, message, location)
         .Break -> jet_codegen_lower_statement(&builder, program, TStmt.Break{label: None, span: expression.span})
         .Continue -> jet_codegen_lower_statement(&builder, program, TStmt.Continue{label: None, span: expression.span})

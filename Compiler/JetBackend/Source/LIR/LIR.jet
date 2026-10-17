@@ -274,8 +274,10 @@ fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
         .Reown(dst, _) -> Val(dst)
         .Copy(dst, _) -> Val(dst)
         .Bitcast(dst, _) -> Val(dst)
-        .Call(dst, _, _, _) -> dst
-        .InlineAsm(dst, _, _, _, _) -> dst
+        // copy: `dst` is a payload of read parameter `inst`, which keeps the original; the returned value owns this one
+        .Call(dst, _, _, _) -> dst.copy()
+        // copy: `dst` is a payload of read parameter `inst`, which keeps the original; the returned value owns this one
+        .InlineAsm(dst, _, _, _, _) -> dst.copy()
         .Drop(_) -> None
         .Overflows(dst, _, _, _) -> Val(dst)
         .Load(dst, _, _) -> Val(dst)
@@ -329,8 +331,10 @@ fn lir_inst_consumes(inst: LIRInst) -> [LIRValueID] Never! {
 
 fn lir_terminator_targets(terminator: LIRTerminator) -> [LIRJumpTarget] Never! {
     if terminator == {
-        .Jump(target) -> [LIRJumpTarget]{target}
-        .Branch(_, then_target, else_target) -> [LIRJumpTarget]{then_target, else_target}
+        // copy: `target` is a payload of read parameter `terminator`, which keeps the original; the list literal owns this one
+        .Jump(target) -> [LIRJumpTarget]{target.copy()}
+        // copy: `then_target` and `else_target` are payloads of read parameter `terminator`, which keeps the originals; the list literal owns `then_target` and `else_target`
+        .Branch(_, then_target, else_target) -> [LIRJumpTarget]{then_target.copy(), else_target.copy()}
         .Return(_) -> [LIRJumpTarget]{}
         .Unreachable -> [LIRJumpTarget]{}
     }

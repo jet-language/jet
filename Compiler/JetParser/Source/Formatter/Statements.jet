@@ -246,7 +246,8 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
             Val(JetFmtBlockMarker{name: "Context", negated: false, args: args})
         }
         .Live(_, _) -> Val(JetFmtBlockMarker{name: "Live", negated: false, args: [JetFmtMarkerArgument]{}})
-        .AssumeDet(_, reason_expr, _, _) -> Val(JetFmtBlockMarker{name: "Nondeterministic", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Expr{label: None, value: reason_expr}}})
+        // copy: `reason_expr` is a payload of read parameter `stmt`, which keeps the original; field `value` of the new JetFmtMarkerArgument.Expr owns this one
+        .AssumeDet(_, reason_expr, _, _) -> Val(JetFmtBlockMarker{name: "Nondeterministic", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Expr{label: None, value: reason_expr.copy()}}})
         .Transact(name, _, _, _, _) -> {
             args := [JetFmtMarkerArgument]{}
             if name == .Val(handle) -> &args.push(JetFmtMarkerArgument.Ident{value: handle})
@@ -1704,7 +1705,8 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
         .Binary(op, l, r, span) -> Expr.Binary{op: op, left: jfmt_resugar_layout_expr(layout_name, l), right: jfmt_resugar_layout_expr(layout_name, r), span: span}
         .Unary(op, x, span) -> Expr.Unary{op: op, operand: jfmt_resugar_layout_expr(layout_name, x), span: span}
         .Field(base, field, span) -> Expr.Field{base: jfmt_resugar_layout_expr(layout_name, base), member: field, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
+        // copy: `recv_type`, `resolved_ret`, `operator_rhs` and `checked_callee` are payloads of read parameter `e`, which keeps the originals; the new Expr.MethodCall's fields own `recv_type`, `resolved_ret`, `operator_rhs` and `checked_callee`
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), recv_type: recv_type.copy(), resolved_ret: resolved_ret.copy(), operator_rhs: operator_rhs.copy(), checked_widen: checked_widen, checked_callee: checked_callee.copy()}
         .Call(call) -> {
             call2 := call
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)

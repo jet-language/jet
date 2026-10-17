@@ -305,7 +305,8 @@ fn sema_unsafe_mode(value: PolicyValue) -> String Never! {
 }
 
 fn sema_unsafe_assertion(statement: Stmt) -> (names: [String], span: Span)? Never! {
-    expression :: (if statement == .Expr(value) -> Val(value) else -> Expr?{None}) ?? return None
+    // copy: `value` is a payload of read parameter `statement`, which keeps the original; the Val carrier owns this one
+    expression :: (if statement == .Expr(value) -> Val(value.copy()) else -> Expr?{None}) ?? return None
     call :: (if expression == .Call(value) -> Val(value) else -> Call?{None}) ?? return None
     if call.name != "__jet_unsafe_assert" -> return None
     names := [String]{}

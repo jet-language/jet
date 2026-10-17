@@ -232,7 +232,8 @@ fn jet_plugin_write_memory(ptr: String, offset: Int, rust_ty: String, value: Str
 }
 
 fn jet_plugin_result_types(ty: MIRType) -> [MIRType] Never! {
-    if ty.kind == .Result(ok, err) -> return [MIRType]{ok, err}
+    // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the list literal owns `ok` and `err`
+    if ty.kind == .Result(ok, err) -> return [MIRType]{ok.copy(), err.copy()}
     panic("checked Component result has a non-Result MIR carrier")
 }
 

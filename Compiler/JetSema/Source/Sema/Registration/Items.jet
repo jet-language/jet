@@ -900,7 +900,8 @@ fn sema_registration_parameter_label(parameter: Param) -> String? {
 
 fn sema_registration_signature_metadata(signature: Type) -> FunctionCallMetadata? {
     if signature == {
-        .Fn(_, _, _, _, metadata, _) -> metadata
+        // copy: `metadata` is a payload of read parameter `signature`, which keeps the original; the returned value owns this one
+        .Fn(_, _, _, _, metadata, _) -> metadata.copy()
         else -> None
     }
 }
@@ -1236,7 +1237,8 @@ fn sema_registration_nominal_type(name: String, type_params: [TypeParam]) -> Typ
 fn sema_registration_variant_type(payload: VariantPayload) -> Type? {
     if payload == {
         .Unit -> Val(Type.Named{name: "Unit"})
-        .Single(ty, _) -> Val(ty)
+        // copy: `ty` is a payload of read parameter `payload`, which keeps the original; the Val carrier owns this one
+        .Single(ty, _) -> Val(ty.copy())
         .Named(fields) -> {
             rows :: loop field in fields -> TypeTupleField{name: field.name, ty: field.ty}
             Val(Type.Tuple{fields: rows})
@@ -1647,7 +1649,8 @@ fn sema_registration_foreign_handle_nominal(facts: SemaRegistrationForeignHandle
 
 fn sema_registration_nominal_source_item(source: SemaRegistrationNominalSource) -> Item? {
     if source == {
-        .SourceAST(value) -> Val(value)
+        // copy: `value` is a payload of read parameter `source`, which keeps the original; the Val carrier owns this one
+        .SourceAST(value) -> Val(value.copy())
         .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> None
     }
 }

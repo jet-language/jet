@@ -417,7 +417,8 @@ fn jet_codegen_qualify_type(ty: Type, nominals: JetCodegenNominalIndex, module_i
         .String -> Type.String
         .Char -> Type.Char
         .List(inner) -> Type.List{element: jet_codegen_qualify_type(inner, nominals, module_identity, generic_names)}
-        .Map(key, key_span, value) -> Type.Map{key: jet_codegen_qualify_type(key, nominals, module_identity, generic_names), key_span: key_span, value: jet_codegen_qualify_type(value, nominals, module_identity, generic_names)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: jet_codegen_qualify_type(key, nominals, module_identity, generic_names), key_span: key_span.copy(), value: jet_codegen_qualify_type(value, nominals, module_identity, generic_names)}
         .Shared(inner) -> Type.Shared{inner: jet_codegen_qualify_type(inner, nominals, module_identity, generic_names)}
         .Option(inner) -> Type.Option{inner: jet_codegen_qualify_type(inner, nominals, module_identity, generic_names)}
         .Result(ok, err) -> Type.Result{ok: jet_codegen_qualify_type(ok, nominals, module_identity, generic_names), err: jet_codegen_qualify_type(err, nominals, module_identity, generic_names)}
@@ -455,18 +456,22 @@ fn jet_codegen_qualify_type(ty: Type, nominals: JetCodegenNominalIndex, module_i
             loop field in fields -> &lowered_fields.push(TypeTupleField{name: field.name, ty: jet_codegen_qualify_type(field.ty, nominals, module_identity, generic_names)})
             Type.Tuple{fields: lowered_fields}
         }
-        .FixedList(elem, len) -> Type.FixedList{elem: jet_codegen_qualify_type(elem, nominals, module_identity, generic_names), len: len}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(elem, len) -> Type.FixedList{elem: jet_codegen_qualify_type(elem, nominals, module_identity, generic_names), len: len.copy()}
         .IntN(signed, bits) -> Type.IntN{signed: signed, bits: bits}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: jet_codegen_qualify_type(base, nominals, module_identity, generic_names), lo: lo, hi: hi}
         .Float32 -> Type.Float32
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: jet_codegen_qualify_type(inner, nominals, module_identity, generic_names)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: jet_codegen_qualify_type(inner, nominals, module_identity, generic_names)}
         .Union(members) -> {
             lowered_members := [Type]{}
             loop member in members -> &lowered_members.push(jet_codegen_qualify_type(member, nominals, module_identity, generic_names))
             Type.Union{members: lowered_members}
         }
-        .Quantity(base, dimension) -> Type.Quantity{base: jet_codegen_qualify_type(base, nominals, module_identity, generic_names), dimension: dimension}
-        .Measure(measure) -> Type.Measure{measure: measure}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: jet_codegen_qualify_type(base, nominals, module_identity, generic_names), dimension: dimension.copy()}
+        // copy: `measure` is a payload of read parameter `ty`, which keeps the original; field `measure` of the new Type.Measure owns this one
+        .Measure(measure) -> Type.Measure{measure: measure.copy()}
     }
 }
 

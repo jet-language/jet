@@ -1536,7 +1536,8 @@ fn sema_failure_carrier(return_type: Type?) -> TFailureCarrier Never! {
 // success) and not a `Stream` generator (the Rust reference's value_return).
 fn sema_function_returns_value(effective_return: Type) -> Bool Never! {
     success :: if effective_return == {
-        .Result(ok, _) -> ok
+        // copy: `ok` is a payload of read parameter `effective_return`, which keeps the original; the assigned `success` owns this one
+        .Result(ok, _) -> ok.copy()
         else -> effective_return
     }
     if success == (Type.Named{name: "Unit"}) -> return false

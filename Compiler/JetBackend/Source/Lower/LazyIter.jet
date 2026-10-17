@@ -84,7 +84,8 @@ fn lower_lazy_show_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
 // Function conventions, including mutable-cell arguments, come from MIR.
 fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature :: if glue.ty.kind == {
-        .Fn(row) -> row
+        // copy: `row` is a payload of read parameter `glue`, which keeps the original; the assigned `signature` owns this one
+        .Fn(row) -> row.copy()
         else -> panic("lazy callback helper has no function type")
     }
     params := [LIRLayout]{lir_layout_pointer()}

@@ -445,8 +445,10 @@ fn sema_call_collections_list_element(ty: Type) -> Type? Never! {
             .User(_) -> sema_call_collections_list_element(inner)
             else -> None
         }
-        .List(element) -> Val(element)
-        .FixedList(element, _) -> Val(element)
+        // copy: `element` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .List(element) -> Val(element.copy())
+        // copy: `element` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .FixedList(element, _) -> Val(element.copy())
         else -> None
     }
 }

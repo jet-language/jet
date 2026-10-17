@@ -852,8 +852,10 @@ fn sema_ownership_release_dead_views(state: &SemaOwnershipState, statement: Stmt
 fn sema_ownership_release_value_only_views(state: &SemaOwnershipState, target: LValue, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) {
     target_expr :: if target == {
         .Local(name, span) -> Expr.Ident{name: name, span: span}
-        .Field(base, field, span) -> Expr.Field{base: base, member: field, span: span}
-        .Index(base, index, span, kind) -> Expr.Index{base: base, index: index, span: span, kind: kind}
+        // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
+        .Field(base, field, span) -> Expr.Field{base: base.copy(), member: field, span: span}
+        // copy: `base`, `index` and `kind` are payloads of read parameter `target`, which keeps the originals; the new Expr.Index's fields own `base`, `index` and `kind`
+        .Index(base, index, span, kind) -> Expr.Index{base: base.copy(), index: index.copy(), span: span, kind: kind.copy()}
     }
     loop index in 0..<state.views.len() {
         fact :: state.views[index]
@@ -2004,7 +2006,8 @@ fn sema_ownership_report_moved(state: &SemaOwnershipState, place: SemaOwnershipP
         sema_ownership_report_implicit_take_reused(callee, sema_ownership_place_name(moved.place), moved.origin.span, span, &diagnostics)
         return
     }
-    if moved.origin.share_ty == .Val(ty) -> sema_ownership_note_share_found(&state, SemaOwnershipShareSite{span: moved.origin.span, ty: ty})
+    // copy: `ty` is a payload of read parameter `moved`, which keeps the original; field `ty` of the new SemaOwnershipShareSite owns this one
+    if moved.origin.share_ty == .Val(ty) -> sema_ownership_note_share_found(&state, SemaOwnershipShareSite{span: moved.origin.span, ty: ty.copy()})
     &diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(place), moved.origin, span))
 }
 
@@ -4076,8 +4079,10 @@ fn sema_ownership_check_binding(state: &SemaOwnershipState, binding: Binding, sc
 fn sema_ownership_lvalue_expr(target: LValue) -> Expr Never! {
     if target == {
         .Local(name, span) -> Expr.Ident{name: name, span: span}
-        .Field(base, field, span) -> Expr.Field{base: base, member: field, span: span}
-        .Index(base, index, span, kind) -> Expr.Index{base: base, index: index, span: span, kind: kind}
+        // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
+        .Field(base, field, span) -> Expr.Field{base: base.copy(), member: field, span: span}
+        // copy: `base`, `index` and `kind` are payloads of read parameter `target`, which keeps the originals; the new Expr.Index's fields own `base`, `index` and `kind`
+        .Index(base, index, span, kind) -> Expr.Index{base: base.copy(), index: index.copy(), span: span, kind: kind.copy()}
     }
 }
 
@@ -4127,7 +4132,8 @@ fn sema_ownership_check_assignment(state: &SemaOwnershipState, target: LValue, v
 fn sema_ownership_check_lvalue_write(state: &SemaOwnershipState, target: LValue, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if target == {
         .Local(name, span) -> sema_ownership_check_write(&state, Expr.Ident{name: name, span: span}, "be assigned", scopes, &diagnostics)
-        .Field(base, field, span) -> sema_ownership_check_write(&state, Expr.Field{base: base, member: field, span: span}, "be assigned", scopes, &diagnostics)
+        // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
+        .Field(base, field, span) -> sema_ownership_check_write(&state, Expr.Field{base: base.copy(), member: field, span: span}, "be assigned", scopes, &diagnostics)
         .Index(base, index, span, kind) -> {
             if !sema_ownership_check_expression(&state, index, scopes, &diagnostics) -> return false
             sema_ownership_check_write(&state, Expr.Index{base: base, index: index, span: span, kind: kind}, "be assigned", scopes, &diagnostics)

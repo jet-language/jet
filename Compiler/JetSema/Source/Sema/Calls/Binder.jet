@@ -259,7 +259,8 @@ fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource])
     loop source in sources {
         if source == {
             .Default(parameter) -> {
-                if parameter >= 0 && parameter < params.len() && params[parameter].default_ref == .Val(default_ref) -> &refs.push(default_ref)
+                // copy: `default_ref` is a payload of read parameter `params`, which keeps the original; the pushed list `refs` owns this one
+                if parameter >= 0 && parameter < params.len() && params[parameter].default_ref == .Val(default_ref) -> &refs.push(default_ref.copy())
             }
             else -> {}
         }
@@ -311,7 +312,8 @@ fn sema_call_make_default_arg(param: SemaCallParam, parameter: Int, params: [Sem
     flags.binder_site = Val(call_span.start)
     refs := [BinderRef]{}
     loop earlier in 0..<parameter {
-        if params[earlier].ty == .Val(ty) -> &refs.push(BinderRef{name: params[earlier].name, slot: earlier, ty: ty})
+        // copy: `ty` is a payload of read parameter `params`, which keeps the original; field `ty` of the new BinderRef owns this one
+        if params[earlier].ty == .Val(ty) -> &refs.push(BinderRef{name: params[earlier].name, slot: earlier, ty: ty.copy()})
     }
     flags.binder_refs = refs
     Val(CallArg{convention: param.convention, expr: default_expr, span: call_span, flags: flags, label: None, spread: false})

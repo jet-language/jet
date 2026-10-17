@@ -247,7 +247,8 @@ fn lower_task_tuple_all(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // layout is reported instead of reinterpreting runtime bytes.
 fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, export: String, args: [LIRValueID], result_ty: MIRType) Never! {
     err := MIRType?{None}
-    if result_ty.kind == .Result(_, failure) -> err = Val(failure)
+    // copy: `failure` is a payload of read parameter `result_ty`, which keeps the original; the Val carrier owns this one
+    if result_ty.kind == .Result(_, failure) -> err = Val(failure.copy())
     err_ty :: err ?? return lower_fail(&m, &f, "{export} result {mir_type_display_name(result_ty)} is not lowered at O0 yet")
     runtime :: lower_record_handle(p, err_ty)
     if runtime == None {

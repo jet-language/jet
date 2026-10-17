@@ -477,8 +477,10 @@ fn sema_call_builtin_static_shape(row: BuiltinStaticRow, callee: String, owner_t
 
 fn sema_call_builtin_static_carrier(result: Type) -> TFailureCarrier Never! {
     if result == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(inner) -> TFailureCarrier.Optional{value: inner}
+        // copy: `ok` and `err` are payloads of read parameter `result`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
         else -> TFailureCarrier.Infallible
     }
 }
@@ -507,9 +509,11 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
         if index > 0 -> &rest.push(values[index])
     }
     if row.lowering == {
-        .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation, args: rest})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation.copy(), args: rest})
         .IntFromRadix -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: TBuiltinOp.IntFromRadix{line: line}, args: rest})
-        .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation, args: values})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation.copy(), args: values})
         .PreludeStatic(rooted, path, generics) -> {
             owner_args :: loop generic in generics -> if generic == {
                 .Jet(ty) -> TPreludeArg.Jet{ty: sema_inference_substitute_type_bindings(ty, bindings)}
@@ -520,10 +524,12 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
             reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
             Val(TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: rooted, path: path, generics: owner_args}, owner_type: None, method: reference, type_args: [Type]{}, args: call_args})
         }
-        .ArgumentHandle(operation) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: operation, args: rest})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.HandleMethod owns this one
+        .ArgumentHandle(operation) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: operation.copy(), args: rest})
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
-        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.NumericMethod owns this one
+        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation.copy()})
         .Precise(precise_type, function) -> Val(TExprKind.PreciseBuiltin{type_name: precise_type, function: function, args: values})
         .CoreCall(_, _) -> None
     }
@@ -800,7 +806,8 @@ fn sema_call_distinct_numeric_row(base: Type, method: String) -> BuiltinStaticRo
 }
 
 fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow) -> TNumericOp? {
-    if row.lowering == .Numeric(operation) -> return Val(operation)
+    // copy: `operation` is a payload of read parameter `row`, which keeps the original; the Val carrier owns this one
+    if row.lowering == .Numeric(operation) -> return Val(operation.copy())
     None
 }
 

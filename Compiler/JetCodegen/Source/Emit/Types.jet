@@ -1061,8 +1061,10 @@ fn jet_rust_emit_type_application_generic_params(ctx: &JetRustEmitContext, sourc
 
 fn jet_rust_emit_function_owner_generic_params(ctx: &JetRustEmitContext, function: MIRFunction) -> [MIRGenericParam] Never! {
     owner := if function.form == {
-        .Method(ty, _) -> Val(ty)
-        .TraitMethod(ty, _, _, _) -> Val(ty)
+        // copy: `ty` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Method(ty, _) -> Val(ty.copy())
+        // copy: `ty` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .TraitMethod(ty, _, _, _) -> Val(ty.copy())
         else -> MIRType?{None}
     }
     if owner == None -> return [MIRGenericParam]{}

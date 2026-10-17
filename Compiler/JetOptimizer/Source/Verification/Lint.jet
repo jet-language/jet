@@ -463,7 +463,8 @@ fn mir_lint_kind_problem(ty: MIRType) -> String? Never! {
             if mir_lint_kind_callable(key) -> return Val("map key is callable")
             mir_lint_kinds_problem([MIRType]{key, value})
         }
-        .Result(ok, err) -> mir_lint_kinds_problem([MIRType]{ok, err})
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the list literal owns `ok` and `err`
+        .Result(ok, err) -> mir_lint_kinds_problem([MIRType]{ok.copy(), err.copy()})
         .Fn(signature) -> {
             arity :: signature.params.len()
             if signature.call_metadata == .Val(metadata) {

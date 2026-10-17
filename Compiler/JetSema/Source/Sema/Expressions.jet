@@ -1642,7 +1642,8 @@ fn sema_expr_dimension_combine(left: Dimension, right: Dimension, multiply: Bool
 
 fn sema_expr_unit_dimension(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Dimension? {
     if ty == {
-        .Quantity(_, dimension) -> return Val(dimension)
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Quantity(_, dimension) -> return Val(dimension.copy())
         else -> {}
     }
     fact := sema_expr_unit_fact(ty, environment, program) ?? return None
@@ -2091,7 +2092,8 @@ fn sema_expr_format_supported(ty: Type, format: StrFormat) -> Bool Never! {
 
 fn sema_expr_call_callee(value: TExpr) -> SymbolID? {
     if value.kind == {
-        .Call(symbol, _, _) -> return Val(symbol)
+        // copy: `symbol` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+        .Call(symbol, _, _) -> return Val(symbol.copy())
         .MethodCall(_, method, _, _) -> return Val(method.symbol)
         // A call behind its generated argument pins keeps its callee.
         .InlineBlock(body) -> {
@@ -2187,7 +2189,8 @@ fn sema_expr_comptime_value(value: TExpr) -> TComptimeValue? {
         .BoolLit(boolean) -> return Val(TComptimeValue.Bool{value: boolean})
         .CharLit(character) -> return Val(TComptimeValue.Char{value: character})
         .Unit -> return Val(TComptimeValue.Unit)
-        .CtLit(comptime_value) -> return Val(comptime_value)
+        // copy: `comptime_value` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+        .CtLit(comptime_value) -> return Val(comptime_value.copy())
         .StrLit(parts) -> {
             text := ""
             loop part in parts {
@@ -2857,7 +2860,8 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
 }
 fn sema_expr_record_hardware_result(result: SemaHardwareMethodCheck, scopes: &SemaScopeTable, context: &SemaCheckContext) -> SemaMethodSpecialCheck Never! {
     sema_hardware_use_merge(&context.hardware_use, sema_hardware_use_snapshot(result.hardware_use))
-    if result.dma_transfer == .Val(fact) && result.check.value != None -> &scopes.hardware_pending_transfers.push(fact)
+    // copy: `fact` is a payload of read parameter `result`, which keeps the original; the pushed list `scopes.hardware_pending_transfers` owns this one
+    if result.dma_transfer == .Val(fact) && result.check.value != None -> &scopes.hardware_pending_transfers.push(fact.copy())
     result.check
 }
 
@@ -4182,7 +4186,8 @@ fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
         // `expr` is the caller's AST node (a read parameter), which the caller keeps.
         .Ident(name, span) -> if name == "" -> Expr.Ident{name: subject, span: span} else -> expr.copy()
         .Field(base, member, span) -> Expr.Field{base: sema_expr_replace_bare_subject(base, subject), member: member, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
+        // copy: `recv_type`, `resolved_ret`, `operator_rhs` and `checked_callee` are payloads of read parameter `expr`, which keeps the originals; the new Expr.MethodCall's fields own `recv_type`, `resolved_ret`, `operator_rhs` and `checked_callee`
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: sema_expr_replace_bare_subject(receiver, subject), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type.copy(), resolved_ret: resolved_ret.copy(), operator_rhs: operator_rhs.copy(), checked_widen: checked_widen, checked_callee: checked_callee.copy()}
         // copy: the rewritten guard is a new owned Expr. Other kinds stay as written, and `expr` is
         // the caller's AST node (a read parameter), which the caller keeps.
         else -> expr.copy()

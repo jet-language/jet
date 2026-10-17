@@ -191,7 +191,8 @@ fn envmodel_probe_error(what: String, why: String, fix: String, span: Span) -> E
 // `value` is not one and the ordinary `ready:` shell-command path applies.
 fn envmodel_ready_probe_from(value: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> ReadyProbe? EnvModelEvalError! {
     call :: if value == {
-        .Call(call) -> call
+        // copy: `call` is a payload of read parameter `value`, which keeps the original; the assigned `call` owns this one
+        .Call(call) -> call.copy()
         else -> { return Ok(None) }
     }
     leaf :: call.name.cut_last(".")?.after ?? call.name

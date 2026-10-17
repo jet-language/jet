@@ -520,7 +520,8 @@ fn sema_call_trait_dispatch_signature(signature: Type, declared_return: Type?) -
     // `signature`, the trait method's signature (a read parameter), which stays in the trait.
     declared :: declared_return ?? return signature.copy()
     if signature == {
-        .Fn(params, _, effects, contract, metadata, provenance) -> Type.Fn{params: params, ret: Val(declared), effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+        // copy: `metadata` and `provenance` are payloads of read parameter `signature`, which keeps the originals; the new Type.Fn's fields own `metadata` and `provenance`
+        .Fn(params, _, effects, contract, metadata, provenance) -> Type.Fn{params: params, ret: Val(declared), effect_bound: effects, param_contract: contract, call_metadata: metadata.copy(), return_view_provenance: provenance.copy()}
         // copy: the dispatch signature is a new owned Type. For other kinds it equals `signature`,
         // the trait method's signature (a read parameter), which stays in the trait.
         else -> signature.copy()

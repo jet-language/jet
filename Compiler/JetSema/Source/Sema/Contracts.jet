@@ -581,7 +581,8 @@ fn sema_contract_distinct_range(ty: Type, environment: SemaScopeEnvironment, pro
     if local_row == .Val(local) -> row = local
     if qualified_row == .Val(qualified) && (row < 0 || qualified < row) -> row = qualified
     if row < 0 -> return None
-    if program.checked_types[row].kind == .Distinct(_, range) -> return range
+    // copy: `range` is a payload of read parameter `program`, which keeps the original; the returned value owns this one
+    if program.checked_types[row].kind == .Distinct(_, range) -> return range.copy()
     None
 }
 
@@ -722,7 +723,8 @@ fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, program:
     }
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id.key == target.key {
-            if environment.declarations[declaration_index].item == .Func(value) -> return Val(value)
+            // copy: `value` is a payload of read parameter `environment`, which keeps the original; the Val carrier owns this one
+            if environment.declarations[declaration_index].item == .Func(value) -> return Val(value.copy())
         }
         method :: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
         if method != None -> return method

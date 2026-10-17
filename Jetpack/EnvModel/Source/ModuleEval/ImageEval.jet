@@ -318,7 +318,8 @@ fn envmodel_eval_files(expr: Expr, scope: ModuleEvalScope, globals: [String: CtV
 fn envmodel_eval_base(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> String EnvModelEvalError! {
     shape :: envmodel_image_field_shape(IMAGE_FIELD_BASE, "`oci(\"<ref>\")`, e.g. `base: oci(\"debian:12\")`", span)
     call :: if expr == {
-        .Call(call) -> call
+        // copy: `call` is a payload of read parameter `expr`, which keeps the original; the assigned `call` owns this one
+        .Call(call) -> call.copy()
         else -> { return Err(shape) }
     }
     if call.name != IMAGE_BASE_FN || call.args.len() != 1 -> return Err(shape)

@@ -612,10 +612,13 @@ fn type_unqualified_nominals(ty: Type) -> Type Never! {
         .List(inner) -> Type.List{element: type_unqualified_nominals(inner)}
         .Shared(inner) -> Type.Shared{inner: type_unqualified_nominals(inner)}
         .Option(inner) -> Type.Option{inner: type_unqualified_nominals(inner)}
-        .Map(key, key_span, value) -> Type.Map{key: type_unqualified_nominals(key), key_span: key_span, value: type_unqualified_nominals(value)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: type_unqualified_nominals(key), key_span: key_span.copy(), value: type_unqualified_nominals(value)}
         .Result(ok, err) -> Type.Result{ok: type_unqualified_nominals(ok), err: type_unqualified_nominals(err)}
-        .FixedList(elem, len) -> Type.FixedList{elem: type_unqualified_nominals(elem), len: len}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: type_unqualified_nominals(inner)}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(elem, len) -> Type.FixedList{elem: type_unqualified_nominals(elem), len: len.copy()}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: type_unqualified_nominals(inner)}
         .Union(members) -> Type.Union{members: loop member in members -> type_unqualified_nominals(member)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_unqualified_nominals(field.ty)}}
         else -> ty.copy()
@@ -947,7 +950,8 @@ fn dimension_identity_equal(left: Dimension, right: Dimension) -> Bool Never! {
 fn type_with_effective_fn_returns(ty: Type) -> Type Never! {
     if ty == {
         .List(inner) -> Type.List{element: type_with_effective_fn_returns(inner)}
-        .Map(key, key_span, value) -> Type.Map{key: type_with_effective_fn_returns(key), key_span: key_span, value: type_with_effective_fn_returns(value)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: type_with_effective_fn_returns(key), key_span: key_span.copy(), value: type_with_effective_fn_returns(value)}
         .Shared(inner) -> Type.Shared{inner: type_with_effective_fn_returns(inner)}
         .Option(inner) -> Type.Option{inner: type_with_effective_fn_returns(inner)}
         .Result(ok, err) -> Type.Result{ok: type_with_effective_fn_returns(ok), err: type_with_effective_fn_returns(err)}
@@ -967,15 +971,18 @@ fn type_with_effective_fn_returns(ty: Type) -> Type Never! {
             loop field in fields -> &normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
             Type.Tuple{fields: normalized_fields}
         }
-        .FixedList(element, length) -> Type.FixedList{elem: type_with_effective_fn_returns(element), len: length}
+        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(element, length) -> Type.FixedList{elem: type_with_effective_fn_returns(element), len: length.copy()}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: type_with_effective_fn_returns(base), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker, inner: inner} else -> Type.Tagged{marker: marker, inner: type_with_effective_fn_returns(inner)}
+        // copy: `marker`, `inner` and `marker` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker`, `inner` and `marker`
+        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_fn_returns(inner)}
         .Union(members) -> {
             normalized_members := [Type]{}
             loop member in members -> &normalized_members.push(type_with_effective_fn_returns(member))
             Type.Union{members: normalized_members}
         }
-        .Quantity(base, dimension) -> Type.Quantity{base: type_with_effective_fn_returns(base), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: type_with_effective_fn_returns(base), dimension: dimension.copy()}
         else -> ty
     }
 }
@@ -1186,7 +1193,8 @@ fn type_identity_knowledge(ty: Type) -> KnowledgeVector Never! {
             entries = merge_type_knowledge(entries, type_identity_knowledge(elem), [String]{"element"})
             &entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: len}})
         }
-        .Measure(value) -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: value}})
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new KnowledgeFact.Measure owns this one
+        .Measure(value) -> &entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: value.copy()}})
         .Quantity(base, dimension) -> {
             entries = merge_type_knowledge(entries, type_identity_knowledge(base), [String]{"base"})
             &entries.push(KnowledgeEntry{path: [String]{}, plane: "Dimension", fact: KnowledgeFact.Dimension{value: dimension}})

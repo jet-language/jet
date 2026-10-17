@@ -1984,7 +1984,8 @@ fn sema_scope_nominal_enum_declares(graph: SemaRegistrationGraph, module_index: 
 }
 
 fn sema_scope_item_distinct(item: Item) -> DistinctDef? {
-    if item == .Distinct(definition) -> return Val(definition)
+    // copy: `definition` is a payload of read parameter `item`, which keeps the original; the Val carrier owns this one
+    if item == .Distinct(definition) -> return Val(definition.copy())
     None
 }
 

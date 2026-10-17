@@ -43,7 +43,8 @@ fn lower_enum_payload_info(p: MIRProgram, definition: MIRTypeDef, variant: MIRVa
 
 fn lower_payload_info(p: MIRProgram, ty: MIRType, kind: MIRPayloadKind) -> LowerPayloadInfo? {
     if kind == {
-        .Option -> if ty.kind == .Option(inner) -> Val(LowerPayloadInfo{offset: 0, ty: inner, boxed: false}) else -> None
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; field `ty` of the new LowerPayloadInfo owns this one
+        .Option -> if ty.kind == .Option(inner) -> Val(LowerPayloadInfo{offset: 0, ty: inner.copy(), boxed: false}) else -> None
         .Result(ok) -> if ty.kind == .Result(success, failure) -> Val(LowerPayloadInfo{offset: lower_result_payload_offset(), ty: if ok -> success else -> failure, boxed: false}) else -> None
         .Enum(owner, variant, index) -> {
             definition :: lower_owned_def(p, owner, Val(ty)) ?? return None

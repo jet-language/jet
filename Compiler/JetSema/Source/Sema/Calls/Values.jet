@@ -158,7 +158,8 @@ fn sema_call_value_is_parameter(callee: Expr, scopes: SemaScopeTable) -> Bool Ne
 fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     // With no expected value (an unannotated binding), the loop's own result
     // type stands; a written expectation becomes the callable's result.
-    expected_function := if expected == .Val(result) -> Val(Type.Fn{params: [Type]{}, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None
+    // copy: `result` is a payload of read parameter `expected`, which keeps the original; the Val carrier owns this one
+    expected_function := if expected == .Val(result) -> Val(Type.Fn{params: [Type]{}, ret: Val(result.copy()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None
     previous_escapes := context.lambda_escapes
     context.lambda_escapes = Val(false)
     checked_lambda := sema_expression_lambda(lambda, expected_function, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

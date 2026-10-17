@@ -26,8 +26,10 @@ fn jet_codegen_type_definition_types(definition: MIRTypeDef) -> [MIRType] Never!
                 .Named(fields) -> loop field in fields -> &rows.push(field.ty)
             }
         }
-        .Distinct(base, _) -> &rows.push(base)
-        .Alias(target) -> &rows.push(target)
+        // copy: `base` is a payload of read parameter `definition`, which keeps the original; the pushed list `rows` owns this one
+        .Distinct(base, _) -> &rows.push(base.copy())
+        // copy: `target` is a payload of read parameter `definition`, which keeps the original; the pushed list `rows` owns this one
+        .Alias(target) -> &rows.push(target.copy())
         .UnitFamily(_) -> {}
     }
     rows

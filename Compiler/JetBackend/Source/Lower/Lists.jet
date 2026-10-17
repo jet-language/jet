@@ -13,10 +13,12 @@ use jet_foundation.[
 fn lower_list_element(ty: MIRType) -> MIRType? {
     if lower_typed_nominal(ty, "Sh") -> return Val(mir_type_from_kind(MIRTypeKind.String))
     if ty.kind == {
-        .List(elem) -> Val(elem)
+        // copy: `elem` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .List(elem) -> Val(elem.copy())
         // A fixed `[T#N]` (MIRRust.rs `[T; N]`) is carried as a List of N
         // elements: its reads, iteration, display and widening are a List's.
-        .FixedList(elem, _) -> Val(elem)
+        // copy: `elem` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .FixedList(elem, _) -> Val(elem.copy())
         .Tagged(_, inner) -> lower_list_element(inner)
         .InlineRange(inner, _, _) -> lower_list_element(inner)
         else -> lower_view_element(ty)

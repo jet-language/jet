@@ -571,7 +571,8 @@ fn sema_http_route_response_local_type(expression: Expr, environment: SemaScopeE
             return tuple_ty
         }
         .Call(call) -> return call.resolved_ret
-        .MethodCall(_, _, _, _, _, _, _, resolved_ret, _, _, _) -> return resolved_ret
+        // copy: `resolved_ret` is a payload of read parameter `expression`, which keeps the original; the returned value owns this one
+        .MethodCall(_, _, _, _, _, _, _, resolved_ret, _, _, _) -> return resolved_ret.copy()
         .ListLit(items, _) -> {
             if items.len() == 0 -> return None
             item :: sema_http_route_response_local_type(items[0], environment, program, locals, module_identity) ?? return None

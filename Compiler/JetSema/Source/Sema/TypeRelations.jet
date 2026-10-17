@@ -641,12 +641,16 @@ fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, 
         }
         .TraitObject(bounds) -> Type.TraitObject{bounds: loop bound in bounds -> sema_type_graph_resolve_trait_bound(graph, bound, caller_module_identity)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_type_resolve_declared_recursive(graph, field.ty, caller_module_identity, generic_params)}}
-        .FixedList(inner, length) -> Type.FixedList{elem: sema_type_resolve_declared_recursive(graph, inner, caller_module_identity, generic_params), len: length}
+        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(inner, length) -> Type.FixedList{elem: sema_type_resolve_declared_recursive(graph, inner, caller_module_identity, generic_params), len: length.copy()}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_type_resolve_declared_recursive(graph, base, caller_module_identity, generic_params), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_type_resolve_declared_recursive(graph, inner, caller_module_identity, generic_params)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_type_resolve_declared_recursive(graph, inner, caller_module_identity, generic_params)}
         .Union(members) -> Type.Union{members: loop member in members -> sema_type_resolve_declared_recursive(graph, member, caller_module_identity, generic_params)}
-        .Quantity(base, dimension) -> Type.Quantity{base: sema_type_resolve_declared_recursive(graph, base, caller_module_identity, generic_params), dimension: dimension}
-        .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller_module_identity, generic_params), key_span: key_span, value: sema_type_resolve_declared_recursive(graph, value, caller_module_identity, generic_params)}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_type_resolve_declared_recursive(graph, base, caller_module_identity, generic_params), dimension: dimension.copy()}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller_module_identity, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller_module_identity, generic_params)}
         else -> ty
     }
 }
@@ -1116,8 +1120,10 @@ fn sema_type_core_leaf_form(graph: SemaRegistrationGraph, ty: Type, caller_modul
         .Shared(inner) -> Type.Shared{inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
         .Option(inner) -> Type.Option{inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
         .Result(ok, err) -> Type.Result{ok: sema_type_core_leaf_form(graph, ok, caller_module_identity), err: sema_type_core_leaf_form(graph, err, caller_module_identity)}
-        .Map(key, key_span, value) -> Type.Map{key: sema_type_core_leaf_form(graph, key, caller_module_identity), key_span: key_span, value: sema_type_core_leaf_form(graph, value, caller_module_identity)}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_type_core_leaf_form(graph, key, caller_module_identity), key_span: key_span.copy(), value: sema_type_core_leaf_form(graph, value, caller_module_identity)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_type_core_leaf_form(graph, inner, caller_module_identity)}
         else -> ty
     }
 }

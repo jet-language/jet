@@ -742,7 +742,8 @@ fn sema_fact_constant_path_value(value: TExpr) -> TComptimeValue? {
     if value.kind == {
         .IntLit(number, _) -> return Val(TComptimeValue.Int{value: number})
         .BoolLit(flag) -> return Val(TComptimeValue.Bool{value: flag})
-        .CtLit(known) -> return Val(known)
+        // copy: `known` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+        .CtLit(known) -> return Val(known.copy())
         .Field(receiver, field) -> {
             base :: sema_fact_constant_path_value(receiver) ?? return None
             if field.name.starts_with("$") -> return sema_fact_reflected_field(base, field.name)

@@ -70,7 +70,8 @@ fn opt_rename_inst(facts: OptFacts, inst: LIRInst) -> LIRInst Never! {
             }
             LIRInst.Call{dst: dst, signature: signature, callee: renamed, args: opt_ids(facts, args)}
         }
-        .InlineAsm(dst, args, regs, result, code) -> LIRInst.InlineAsm{dst: dst, args: opt_ids(facts, args), regs: regs, result: result, code: code}
+        // copy: `dst` is a payload of read parameter `inst`, which keeps the original; field `dst` of the new LIRInst.InlineAsm owns this one
+        .InlineAsm(dst, args, regs, result, code) -> LIRInst.InlineAsm{dst: dst.copy(), args: opt_ids(facts, args), regs: regs, result: result, code: code}
         .Drop(value) -> LIRInst.Drop{value: opt_id(facts, value)}
         .Overflows(dst, op, left, right) -> LIRInst.Overflows{dst: dst, op: op, left: opt_id(facts, left), right: opt_id(facts, right)}
         .Load(dst, base, offset) -> LIRInst.Load{dst: dst, base: opt_id(facts, base), offset: offset}

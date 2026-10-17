@@ -93,12 +93,14 @@ struct JetFmtPatternTest {
 }
 
 fn jfmt_if_parts(expr: Expr) -> JetFmtIf? Never! {
-    if expr == .If(cond, then_body, then_value, else_body, else_value, span) -> return Val(JetFmtIf{cond: cond, then_body: then_body, then_value: then_value, else_body: else_body, else_value: else_value, span: span})
+    // copy: `cond`, `then_value` and `else_value` are payloads of read parameter `expr`, which keeps the originals; the new JetFmtIf's fields own `cond`, `then_value` and `else_value`
+    if expr == .If(cond, then_body, then_value, else_body, else_value, span) -> return Val(JetFmtIf{cond: cond.copy(), then_body: then_body, then_value: then_value.copy(), else_body: else_body, else_value: else_value.copy(), span: span})
     None
 }
 
 fn jfmt_binary_parts(expr: Expr) -> JetFmtBinary? Never! {
-    if expr == .Binary(op, left, right, span) -> return Val(JetFmtBinary{op: op, left: left, right: right, span: span})
+    // copy: `left` and `right` are payloads of read parameter `expr`, which keeps the originals; the new JetFmtBinary's fields own `left` and `right`
+    if expr == .Binary(op, left, right, span) -> return Val(JetFmtBinary{op: op, left: left.copy(), right: right.copy(), span: span})
     None
 }
 
@@ -212,7 +214,8 @@ fn jfmt_fmt_if_expr(f: &JetFmt, expr: Expr, inline: Bool) {
 }
 
 fn jfmt_pattern_test_parts(expr: Expr) -> JetFmtPatternTest? Never! {
-    if expr == .PatternTest(subject, pattern, span) -> return Val(JetFmtPatternTest{subject: subject, pattern: pattern, span: span})
+    // copy: `subject` and `pattern` are payloads of read parameter `expr`, which keeps the originals; the new JetFmtPatternTest's fields own `subject` and `pattern`
+    if expr == .PatternTest(subject, pattern, span) -> return Val(JetFmtPatternTest{subject: subject.copy(), pattern: pattern.copy(), span: span})
     None
 }
 
@@ -396,23 +399,37 @@ fn jfmt_expr_start(expr: Expr) -> Int Never! {
     own :: expr_span(expr).start
     leftmost := Expr?{None}
     if expr == {
-        .Field(base, _, _) -> leftmost = Val(base)
-        .MemberSpread(base, _, _) -> leftmost = Val(base)
-        .OptField(base, _, _, _, _) -> leftmost = Val(base)
-        .Index(base, _, _, _) -> leftmost = Val(base)
-        .Slice(base, _, _, _, _) -> leftmost = Val(base)
-        .MethodCall(receiver, _, _, _, _, _, _, _, _, _, _) -> leftmost = Val(receiver)
-        .OptMethodCall(receiver, _, _, _, _, _) -> leftmost = Val(receiver)
-        .CallValue(callee, _, _) -> leftmost = Val(callee)
-        .Binary(_, left, _, _) -> leftmost = Val(left)
+        // copy: `base` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Field(base, _, _) -> leftmost = Val(base.copy())
+        // copy: `base` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .MemberSpread(base, _, _) -> leftmost = Val(base.copy())
+        // copy: `base` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .OptField(base, _, _, _, _) -> leftmost = Val(base.copy())
+        // copy: `base` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Index(base, _, _, _) -> leftmost = Val(base.copy())
+        // copy: `base` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Slice(base, _, _, _, _) -> leftmost = Val(base.copy())
+        // copy: `receiver` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _, _) -> leftmost = Val(receiver.copy())
+        // copy: `receiver` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .OptMethodCall(receiver, _, _, _, _, _) -> leftmost = Val(receiver.copy())
+        // copy: `callee` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .CallValue(callee, _, _) -> leftmost = Val(callee.copy())
+        // copy: `left` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Binary(_, left, _, _) -> leftmost = Val(left.copy())
         .CompareChain(operands, _, _, _) -> {
             if operands.len() > 0 -> leftmost = Val(operands[0])
         }
-        .Range(start, _, _, _) -> leftmost = Val(start)
-        .Deref(inner, _) -> leftmost = Val(inner)
-        .Try(inner, _, _, _) -> leftmost = Val(inner)
-        .OrFallback(value, _, _, _) -> leftmost = Val(value)
-        .PatternTest(subject, _, _) -> leftmost = Val(subject)
+        // copy: `start` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Range(start, _, _, _) -> leftmost = Val(start.copy())
+        // copy: `inner` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Deref(inner, _) -> leftmost = Val(inner.copy())
+        // copy: `inner` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .Try(inner, _, _, _) -> leftmost = Val(inner.copy())
+        // copy: `value` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .OrFallback(value, _, _, _) -> leftmost = Val(value.copy())
+        // copy: `subject` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+        .PatternTest(subject, _, _) -> leftmost = Val(subject.copy())
         else -> {}
     }
     if leftmost == .Val(child) {
@@ -2459,7 +2476,8 @@ fn jfmt_str_part_lit(part: StrPart) -> String? Never! {
 }
 
 fn jfmt_lambda_of(expr: Expr) -> Lambda? Never! {
-    if expr == .Lambda(lambda) -> return Val(lambda)
+    // copy: `lambda` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
+    if expr == .Lambda(lambda) -> return Val(lambda.copy())
     None
 }
 

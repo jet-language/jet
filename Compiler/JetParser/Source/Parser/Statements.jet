@@ -1946,8 +1946,10 @@ fn parser_expression_lvalue(state: &JetParserState, expr: Expr, fallback_span: S
     if expr == {
         .Paren(inner, _) -> return parser_expression_lvalue(&state, inner, fallback_span, operator)
         .Ident(name, span) -> return LValue.Local{name: name, name_span: span}
-        .Field(base, member, span) -> return LValue.Field{base: base, field: member, span: span}
-        .Index(base, index, span, kind) -> return LValue.Index{base: base, index: index, span: span, kind: kind}
+        // copy: `base` is a payload of read parameter `expr`, which keeps the original; field `base` of the new LValue.Field owns this one
+        .Field(base, member, span) -> return LValue.Field{base: base.copy(), field: member, span: span}
+        // copy: `base`, `index` and `kind` are payloads of read parameter `expr`, which keeps the originals; the new LValue.Index's fields own `base`, `index` and `kind`
+        .Index(base, index, span, kind) -> return LValue.Index{base: base.copy(), index: index.copy(), span: span, kind: kind.copy()}
         else -> {}
     }
     if operator.kind != TOKEN_EQ {

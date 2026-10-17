@@ -88,7 +88,8 @@ fn sema_value_method_tuple_struct(result: Type) -> String Never! {
 
 fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExprKind {
     if row.lowering == {
-        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: typed}
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation.copy(), args: typed}
         .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
         .StringRangeSlice -> {
             zero_start := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)

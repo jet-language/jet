@@ -248,7 +248,8 @@ fn sema_expression_measurement_source_call(function: String, values: [TExpr], re
     source_index :: sema_registration_module_index(graph, source_identity) ?? return None
     callee :: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
     arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    type_args :: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error} else -> [Type]{}
+    // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
+    type_args :: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
     return Val(sema_tir_node(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: type_args, args: arguments}, span))
     }
     None

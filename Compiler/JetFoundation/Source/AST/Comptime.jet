@@ -125,8 +125,10 @@ fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
         .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
-        .Optional(success) -> Type.Option{inner: success}
-        .Converted(success, _, target) -> Type.Result{ok: success, err: target}
+        // copy: `success` is a payload of read parameter `contract`, which keeps the original; field `inner` of the new Type.Option owns this one
+        .Optional(success) -> Type.Option{inner: success.copy()}
+        // copy: `success` and `target` are payloads of read parameter `contract`, which keeps the originals; the new Type.Result's fields own `success` and `target`
+        .Converted(success, _, target) -> Type.Result{ok: success.copy(), err: target.copy()}
         .ProvenUnreachable(success) | .InferredNever(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
     }
 }

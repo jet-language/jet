@@ -313,7 +313,8 @@ fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable
 
 fn sema_call_memory_guard_ast_projection(expression: Expr) -> [String]? {
     lambda_value :: if expression == {
-        .Lambda(value) -> Val(value)
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Lambda(value) -> Val(value.copy())
         else -> None
     }
     lambda :: lambda_value ?? return None
@@ -344,7 +345,8 @@ fn sema_call_memory_guard_ast_projection(expression: Expr) -> [String]? {
 
 fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> [TFieldRef]? {
     lambda_value :: if value.kind == {
-        .Lambda(found) -> Val(found)
+        // copy: `found` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+        .Lambda(found) -> Val(found.copy())
         else -> None
     }
     lambda :: lambda_value ?? return None

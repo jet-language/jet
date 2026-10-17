@@ -315,8 +315,10 @@ struct SemaPreludeDemandWalk {
 // (sema_effect_walk_expr_children), in the order tir_each_expr_child visits them.
 fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     conversion :: if expression.kind == {
-        .Try(_, value, _) -> Val(value)
-        .TryWithContext(_, _, value, _, _, _) -> Val(value)
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Try(_, value, _) -> Val(value.copy())
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .TryWithContext(_, _, value, _, _, _) -> Val(value.copy())
         else -> None
     }
     if conversion == .Val(value) {

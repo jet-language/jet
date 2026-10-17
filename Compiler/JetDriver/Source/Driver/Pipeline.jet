@@ -3956,7 +3956,8 @@ fn jet_driver_comptime_fold(expression: TExpr, values: [SemaComptimeItemValue]) 
             if expression.ty == .Option(_) -> return Val(TComptimeValue.Present{value: jet_driver_comptime_fold(value, values) ?? return None})
         }
         .Absent -> {
-            if expression.ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}})
+            // copy: `inner` is a payload of read parameter `expression`, which keeps the original; field `ty` of the new TComptimeReport.Clean owns this one
+            if expression.ty == .Option(inner) -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}})
         }
         // `x ?? fallback`: a present value is itself, an absent one takes a
         // folded value fallback. `String.from_bytes([U8]{…})` is the

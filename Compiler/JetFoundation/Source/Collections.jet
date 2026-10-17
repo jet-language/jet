@@ -573,9 +573,12 @@ COLLECTION_OPERATIONS :: prep { [CollectionOperationRow]{
 fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
     if ty == {
         .Tagged(_, inner) -> sema_collection_kind(inner)
-        .List(element) -> Val(SemaCollectionKind.List{element: element})
-        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList{element: element})
-        .Map(key, _, value) -> Val(SemaCollectionKind.Map{key: key, value: value})
+        // copy: `element` is a payload of read parameter `ty`, which keeps the original; field `element` of the new SemaCollectionKind.List owns this one
+        .List(element) -> Val(SemaCollectionKind.List{element: element.copy()})
+        // copy: `element` is a payload of read parameter `ty`, which keeps the original; field `element` of the new SemaCollectionKind.FixedList owns this one
+        .FixedList(element, _) -> Val(SemaCollectionKind.FixedList{element: element.copy()})
+        // copy: `key` and `value` are payloads of read parameter `ty`, which keeps the originals; the new SemaCollectionKind.Map's fields own `key` and `value`
+        .Map(key, _, value) -> Val(SemaCollectionKind.Map{key: key.copy(), value: value.copy()})
         .Apply(name, args) -> {
             if name == "Iter" && args.len() == 1 -> return Val(SemaCollectionKind.Iter{element: args[0]})
             if name == "ViewIter" && args.len() == 1 -> return Val(SemaCollectionKind.ViewIter{element: args[0]})
@@ -913,9 +916,12 @@ fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argu
     fallible := if callback == {.Result(_, error) -> error != Type.Named{name: "Never"} else -> false}
     remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
-        .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op}
-        .Closure(op) -> SemaCollectionOperation.Closure{operation: op}
-        .SetClosure(op) -> SemaCollectionOperation.SetClosure{operation: op}
+        // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.Builtin owns this one
+        .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op.copy()}
+        // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.Closure owns this one
+        .Closure(op) -> SemaCollectionOperation.Closure{operation: op.copy()}
+        // copy: `op` is a payload of read parameter `contract`, which keeps the original; field `operation` of the new SemaCollectionOperation.SetClosure owns this one
+        .SetClosure(op) -> SemaCollectionOperation.SetClosure{operation: op.copy()}
         .SetMinimum -> SemaCollectionOperation.SetMinimum
         .IterToSet -> SemaCollectionOperation.IterToSet
         .ListShuffle -> SemaCollectionOperation.ListShuffle

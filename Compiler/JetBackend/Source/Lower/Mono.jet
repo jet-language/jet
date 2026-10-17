@@ -314,14 +314,17 @@ fn lower_subst_type(ty: MIRType, bindings: LowerBindings) -> MIRType Never! {
             mapped :: loop field in fields -> MIRTupleField{name: field.name, ty: lower_subst_type(field.ty, bindings)}
             MIRTypeKind.Tuple{fields: mapped}
         }
-        .FixedList(elem, len) -> MIRTypeKind.FixedList{elem: lower_subst_type(elem, bindings), len: len}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new MIRTypeKind.FixedList owns this one
+        .FixedList(elem, len) -> MIRTypeKind.FixedList{elem: lower_subst_type(elem, bindings), len: len.copy()}
         .InlineRange(base, lo, hi) -> MIRTypeKind.InlineRange{base: lower_subst_type(base, bindings), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker, inner: lower_subst_type(inner, bindings)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new MIRTypeKind.Tagged owns this one
+        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker.copy(), inner: lower_subst_type(inner, bindings)}
         .Union(members) -> {
             mapped :: loop member in members -> lower_subst_type(member, bindings)
             MIRTypeKind.Union{members: mapped}
         }
-        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: lower_subst_type(base, bindings), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new MIRTypeKind.Quantity owns this one
+        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: lower_subst_type(base, bindings), dimension: dimension.copy()}
     }
     // copy: the substituted type is a new owned MIRType. With nothing bound it equals `ty`, the
     // caller's MIR type (a read parameter), which stays on its MIR node.
@@ -367,7 +370,8 @@ fn lower_subst_definition_kind(kind: MIRTypeDefKind, bindings: LowerBindings) ->
             }
             MIRTypeDefKind.Enum{variants: mapped, methods: methods}
         }
-        .Distinct(base, range) -> MIRTypeDefKind.Distinct{base: lower_subst_type(base, bindings), range: range}
+        // copy: `range` is a payload of read parameter `kind`, which keeps the original; field `range` of the new MIRTypeDefKind.Distinct owns this one
+        .Distinct(base, range) -> MIRTypeDefKind.Distinct{base: lower_subst_type(base, bindings), range: range.copy()}
         .Alias(target) -> MIRTypeDefKind.Alias{target: lower_subst_type(target, bindings)}
         .UnitFamily(members) -> MIRTypeDefKind.UnitFamily{members: members}
     }
@@ -535,7 +539,8 @@ fn lower_subst_semantic(operation: MIRSemanticOp, bindings: LowerBindings, ids: 
     if operation == {
         .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: lower_subst_type_id(type_id, bindings, ids), call: call, args: args}
         .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: lower_subst_type_id(type_id, bindings, ids), call: call, args: args}
-        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: fields, extra: extra, boxed_fields: boxed_fields}
+        // copy: `extra` is a payload of read parameter `operation`, which keeps the original; field `extra` of the new MIRSemanticOp.StructLiteral owns this one
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: fields, extra: extra.copy(), boxed_fields: boxed_fields}
         .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
             owners :: loop arg in owner_type_args -> if arg == {
                 .Type(ty) -> MIRPreludeTypeArg.Type{ty: lower_subst_type(ty, bindings)}
@@ -551,7 +556,8 @@ fn lower_subst_semantic(operation: MIRSemanticOp, bindings: LowerBindings, ids: 
             }
             MIRSemanticOp.HardwareCall{call: call, op: hardware, receiver: receiver, args: lower_subst_args(args, bindings, ids)}
         }
-        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: lower_subst_args(args, bindings, ids)}
+        // copy: `inline_size` is a payload of read parameter `operation`, which keeps the original; field `inline_size` of the new MIRSemanticOp.AllocNew owns this one
+        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size.copy(), args: lower_subst_args(args, bindings, ids)}
         .ClosureMethod(receiver, args, call) -> MIRSemanticOp.ClosureMethod{receiver: receiver, args: lower_subst_args(args, bindings, ids), call: call}
         .HostCall(call, args) -> MIRSemanticOp.HostCall{call: call, args: lower_subst_args(args, bindings, ids)}
         .HostBorrowCallback(callable, params) -> MIRSemanticOp.HostBorrowCallback{callable: callable, params: lower_subst_types(params, bindings)}
@@ -616,8 +622,10 @@ fn lower_subst_vector(fact: MIRVectorFact, bindings: LowerBindings) -> MIRVector
 fn lower_mono_materialize(source: MIRFunction, id: MIRFunctionID, name: String, bindings: LowerBindings, ids: LowerTypeIndex) -> MIRFunction Never! {
     form :: if source.form == {
         .TopLevel -> MIRFunctionForm.TopLevel
-        .Method(owner, self_access) -> MIRFunctionForm.Method{owner: lower_subst_type(owner, bindings), self_access: self_access}
-        .TraitMethod(owner, trait_ref, self_access, serde) -> MIRFunctionForm.TraitMethod{owner: lower_subst_type(owner, bindings), trait_ref: trait_ref, self_access: self_access, serde: serde}
+        // copy: `self_access` is a payload of read parameter `source`, which keeps the original; field `self_access` of the new MIRFunctionForm.Method owns this one
+        .Method(owner, self_access) -> MIRFunctionForm.Method{owner: lower_subst_type(owner, bindings), self_access: self_access.copy()}
+        // copy: `trait_ref`, `self_access` and `serde` are payloads of read parameter `source`, which keeps the originals; the new MIRFunctionForm.TraitMethod's fields own `trait_ref`, `self_access` and `serde`
+        .TraitMethod(owner, trait_ref, self_access, serde) -> MIRFunctionForm.TraitMethod{owner: lower_subst_type(owner, bindings), trait_ref: trait_ref.copy(), self_access: self_access.copy(), serde: serde.copy()}
     }
     params :: loop param in source.params -> MIRParam{index: param.index, name: param.name, span: param.span, ty: lower_subst_type(param.ty, bindings), access: param.access, ownership: param.ownership, public_label: param.public_label, variadic: param.variadic, default_present: param.default_present}
     captures :: loop param in source.capture_params -> MIRCaptureParam{slot: param.slot, name: param.name, span: param.span, ty: lower_subst_type(param.ty, bindings), access: param.access, ownership: param.ownership, place_only: param.place_only}

@@ -44,7 +44,8 @@ fn jet_codegen_collection_default_value(ty: Type) -> TComptimeValue Never! {
         .List(_) | .FixedList(_, _) -> TComptimeValue.List{values: [TComptimeValue]{}}
         .Map(_, _, _) -> TComptimeValue.Map{entries: [TComptimeMapEntry]{}}
         .Shared(inner) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> jet_codegen_collection_default_value(inner)
-        .Option(inner) -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}}
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; field `ty` of the new TComptimeReport.Clean owns this one
+        .Option(inner) -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner.copy()}}
         .Result(ok, _) -> TComptimeValue.Present{value: jet_codegen_collection_default_value(ok)}
         .Tuple(fields) -> {
             values := [TComptimeField]{}

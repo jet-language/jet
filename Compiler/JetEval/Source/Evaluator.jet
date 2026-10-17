@@ -2159,7 +2159,8 @@ fn jet_eval_constant_instruction(machine: &JetEvalMachine, constant: MIRConstant
 }
 
 fn jet_eval_option_element(ty: MIRType) -> MIRType Never! {
-    if ty.kind == .Option(inner) -> return inner
+    // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the returned value owns this one
+    if ty.kind == .Option(inner) -> return inner.copy()
     ty.copy()
 }
 
@@ -2226,7 +2227,8 @@ fn jet_eval_route_prelude_dispatch(machine: &JetEvalMachine, call: MIRPreludeCal
 fn jet_eval_native_binding_callable(machine: &JetEvalMachine, frame_index: Int, callee: MIRValueID, identity: JetEvalNativeBindingIdentity, span: Span) -> JetEvalNativeCallBinding? {
     binding := JetEvalNativeCallableBinding?{None}
     if identity == {
-        .Callable(callable) -> binding = Val(callable)
+        // copy: `callable` is a payload of read parameter `identity`, which keeps the original; the Val carrier owns this one
+        .Callable(callable) -> binding = Val(callable.copy())
         .Interface(_) -> {
             jet_eval_compiler_fail(&machine, span, "MIR native interface carrier is not an indirect Fn value")
             return None
@@ -3681,7 +3683,8 @@ fn jet_eval_host_value_is_unit(value: JetEvalHostValue) -> Bool Never! {
 
 fn jet_eval_host_value_adopt_mode(machine: &JetEvalMachine, row: MIRPreludeCall?, result_ty: MIRType?, value: JetEvalHostValue, allow_cursor: Bool, cleanup: Bool, span: Span) -> JetEvalRuntimeValue? {
     if value == {
-        .Data(data) -> return Val(JetEvalRuntimeValue.Data{value: data})
+        // copy: `data` is a payload of read parameter `value`, which keeps the original; field `value` of the new JetEvalRuntimeValue.Data owns this one
+        .Data(data) -> return Val(JetEvalRuntimeValue.Data{value: data.copy()})
         .Handle(handle, raw, owner, payload) -> {
             if cleanup {
                 if owner == JetEvalHostOwner.Cursor {
@@ -3744,7 +3747,8 @@ fn jet_eval_host_value_adopt_mode(machine: &JetEvalMachine, row: MIRPreludeCall?
             }
             return jet_eval_host_handle_new(&machine, row, result_ty, owner, handle, raw, payload, span)
         }
-        .Absent(element) -> return Val(JetEvalRuntimeValue.Absent{element: element})
+        // copy: `element` is a payload of read parameter `value`, which keeps the original; field `element` of the new JetEvalRuntimeValue.Absent owns this one
+        .Absent(element) -> return Val(JetEvalRuntimeValue.Absent{element: element.copy()})
         .Present(inner) -> {
             child_ty := MIRType?{None}
             if result_ty != None -> child_ty = Val(jet_eval_host_option_child_type(&machine, result_ty, true, span) ?? return None)
@@ -5512,15 +5516,18 @@ fn jet_eval_host_substitute_type(ty: MIRType, params: [MIRGenericParam], args: [
             }
             return jet_eval_host_retype(ty, MIRTypeKind.Tuple{fields: output})
         }
-        .FixedList(inner, length) -> return jet_eval_host_retype(ty, MIRTypeKind.FixedList{elem: jet_eval_host_substitute_type(inner, params, args), len: length})
+        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new MIRTypeKind.FixedList owns this one
+        .FixedList(inner, length) -> return jet_eval_host_retype(ty, MIRTypeKind.FixedList{elem: jet_eval_host_substitute_type(inner, params, args), len: length.copy()})
         .InlineRange(inner, lo, hi) -> return jet_eval_host_retype(ty, MIRTypeKind.InlineRange{base: jet_eval_host_substitute_type(inner, params, args), lo: lo, hi: hi})
-        .Tagged(marker, inner) -> return jet_eval_host_retype(ty, MIRTypeKind.Tagged{marker: marker, inner: jet_eval_host_substitute_type(inner, params, args)})
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new MIRTypeKind.Tagged owns this one
+        .Tagged(marker, inner) -> return jet_eval_host_retype(ty, MIRTypeKind.Tagged{marker: marker.copy(), inner: jet_eval_host_substitute_type(inner, params, args)})
         .Union(types) -> {
             output := [MIRType]{}
             loop item in types -> &output.push(jet_eval_host_substitute_type(item, params, args))
             return jet_eval_host_retype(ty, MIRTypeKind.Union{members: output})
         }
-        .Quantity(inner, dimension) -> return jet_eval_host_retype(ty, MIRTypeKind.Quantity{base: jet_eval_host_substitute_type(inner, params, args), dimension: dimension})
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new MIRTypeKind.Quantity owns this one
+        .Quantity(inner, dimension) -> return jet_eval_host_retype(ty, MIRTypeKind.Quantity{base: jet_eval_host_substitute_type(inner, params, args), dimension: dimension.copy()})
         else -> return ty.copy()
     }
 }
@@ -5625,7 +5632,8 @@ fn jet_eval_host_enum_arg_type(machine: &JetEvalMachine, ty: MIRType?, variant_n
 
 fn jet_eval_core_owner_check(program: MIRProgram, rows: JetEvalProgramRows, ty: MIRType) -> JetEvalHostCoreOwnerCheck Never! {
     nominal :: if ty.kind == {
-        .Apply(name, _) -> Val(name)
+        // copy: `name` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Apply(name, _) -> Val(name.copy())
         else -> None
     }
     name :: nominal ?? return JetEvalHostCoreOwnerCheck.Missing
@@ -5926,8 +5934,10 @@ fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeValue
             jet_eval_ownership_fail(&machine, span, "native host argument contains a moved Source value")
             return None
         }
-        .Data(data) -> return Val(JetEvalHostValue.Data{value: data})
-        .Absent(element) -> return Val(JetEvalHostValue.Absent{element: element})
+        // copy: `data` is a payload of read parameter `value`, which keeps the original; field `value` of the new JetEvalHostValue.Data owns this one
+        .Data(data) -> return Val(JetEvalHostValue.Data{value: data.copy()})
+        // copy: `element` is a payload of read parameter `value`, which keeps the original; field `element` of the new JetEvalHostValue.Absent owns this one
+        .Absent(element) -> return Val(JetEvalHostValue.Absent{element: element.copy()})
         .Result(ok, nested) -> {
             child :: jet_eval_host_projection(&machine, nested, span) ?? return None
             if ok -> return Val(JetEvalHostValue.Present{value: child})
@@ -6064,7 +6074,8 @@ fn jet_eval_task_host_projection(machine: &JetEvalMachine, value: JetEvalRuntime
             }
             return Val(JetEvalHostValue.Data{value: data})
         }
-        .Absent(element) -> return Val(JetEvalHostValue.Absent{element: element})
+        // copy: `element` is a payload of read parameter `value`, which keeps the original; field `element` of the new JetEvalHostValue.Absent owns this one
+        .Absent(element) -> return Val(JetEvalHostValue.Absent{element: element.copy()})
         .Result(ok, nested) -> {
             projected :: jet_eval_task_host_projection(&machine, nested, span) ?? return None
             if ok -> return Val(JetEvalHostValue.Present{value: projected})
@@ -6266,7 +6277,8 @@ fn jet_eval_host_target_exchange(machine: &JetEvalMachine, target: JetEvalHostCa
         return None
     }
     route := MIRPreludeCall?{None}
-    if target == .Prelude(row) -> route = Val(row)
+    // copy: `row` is a payload of read parameter `target`, which keeps the original; the Val carrier owns this one
+    if target == .Prelude(row) -> route = Val(row.copy())
     jet_eval_apply_host_reply(&machine, reply, route, args, move_permissions, result_ty, span)
 }
 fn jet_eval_host_row_exchange(machine: &JetEvalMachine, row: MIRPreludeCall, args: [JetEvalRuntimeValue], result_ty: MIRType?, arg_shapes: [JetEvalHostTypeShape], move_permissions: [Bool], static_operand: JetEvalHostStaticOperand?, span: Span) -> JetEvalRuntimeValue? {

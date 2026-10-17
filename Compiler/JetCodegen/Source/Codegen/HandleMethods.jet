@@ -69,7 +69,8 @@ fn jet_codegen_handle_task_route(receiver: Type, carrier: TFailureCarrier) -> Je
         .Apply(name, args) -> {
             if name != "Task" || args.len() != 1 -> panic("checked task join has an unsupported receiver type")
             success := if carrier == {
-                .Result(value, _) -> value
+                // copy: `value` is a payload of read parameter `carrier`, which keeps the original; the assigned `success` owns this one
+                .Result(value, _) -> value.copy()
                 else -> panic("checked task join has no result carrier")
             }
             if success != args[0] -> panic("checked task join result disagrees with its task element")

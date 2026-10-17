@@ -82,8 +82,10 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: Se
 
 fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {
     if ty == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(value) -> TFailureCarrier.Optional{value: value}
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Infallible
         else -> TFailureCarrier.Infallible
     }
@@ -910,7 +912,8 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
             }
             return Val(Stmt.BreakLabelValue{name: root.name, name_span: root.span, value: value, span: expr_span(value)})
         }
-        .Return(value, span) -> return Val(Stmt.Return{value: value, span: span})
+        // copy: `value` is a payload of read parameter `fallback`, which keeps the original; field `value` of the new Stmt.Return owns this one
+        .Return(value, span) -> return Val(Stmt.Return{value: value.copy(), span: span})
         .Panic(name_span, args) -> {
             call := Call{name: "panic", name_span: name_span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
             return Val(Stmt.Expr{expr: Expr.Call{call: call}})
@@ -1285,7 +1288,8 @@ fn sema_expression_if_dispatch_subject(condition: Expr, else_value: Expr) -> Exp
 
 fn sema_expression_if_condition_subject(condition: Expr) -> Expr? {
     return if condition == {
-        .PatternTest(subject, _, _) -> Val(subject)
+        // copy: `subject` is a payload of read parameter `condition`, which keeps the original; the Val carrier owns this one
+        .PatternTest(subject, _, _) -> Val(subject.copy())
         .Binary(op, left, right, _) -> if {
             op == BinOp.And || op == BinOp.Or -> {
                 left_subject :: sema_expression_if_condition_subject(left)
@@ -1325,7 +1329,8 @@ fn sema_expression_if_condition_consumes_carrier(condition: Expr) -> Bool {
 
 fn sema_expression_if_replace_subject(condition: Expr, subject_span: Span, local: Expr) -> Expr {
     return if condition == {
-        .PatternTest(subject, pattern, span) -> if expr_span(subject) == subject_span -> Expr.PatternTest{subject: local, pattern: pattern, span: span} else -> condition
+        // copy: `pattern` is a payload of read parameter `condition`, which keeps the original; field `pattern` of the new Expr.PatternTest owns this one
+        .PatternTest(subject, pattern, span) -> if expr_span(subject) == subject_span -> Expr.PatternTest{subject: local, pattern: pattern.copy(), span: span} else -> condition
         .Binary(op, left, right, span) -> if {
             op == BinOp.And || op == BinOp.Or -> Expr.Binary{op: op, left: sema_expression_if_replace_subject(left, subject_span, local), right: sema_expression_if_replace_subject(right, subject_span, local), span: span}
             sema_expression_if_dispatch_comparison(op) && expr_span(left) == subject_span -> Expr.Binary{op: op, left: local, right: right, span: span}
@@ -1426,7 +1431,8 @@ fn sema_expression_condition_binds(condition: Expr) -> Bool Never! {
 fn sema_expression_window_source(subject: Expr, scopes: SemaScopeTable) -> Expr? {
     return if subject == {
         .Paren(inner, _) -> sema_expression_window_source(inner, scopes)
-        .Place(value, access, _) -> if access == PlaceAccess.Write -> Val(value) else -> None
+        // copy: `value` is a payload of read parameter `subject`, which keeps the original; the Val carrier owns this one
+        .Place(value, access, _) -> if access == PlaceAccess.Write -> Val(value.copy()) else -> None
         .Ident(name, _) -> {
             if !name.starts_with("__jet_switch_subject_") -> return None
             index :: sema_scope_resolve_index(scopes, name) ?? return None

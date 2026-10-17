@@ -227,8 +227,10 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             Type.Apply{name: name, args: out}
         }
         .List(inner) -> Type.List{element: jfmt_substitute_type(inner, params, args)}
-        .FixedList(elem, len) -> Type.FixedList{elem: jfmt_substitute_type(elem, params, args), len: len}
-        .Map(key, key_span, value) -> Type.Map{key: jfmt_substitute_type(key, params, args), key_span: key_span, value: jfmt_substitute_type(value, params, args)}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(elem, len) -> Type.FixedList{elem: jfmt_substitute_type(elem, params, args), len: len.copy()}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: jfmt_substitute_type(key, params, args), key_span: key_span.copy(), value: jfmt_substitute_type(value, params, args)}
         .Shared(inner) -> Type.Shared{inner: jfmt_substitute_type(inner, params, args)}
         .Option(inner) -> Type.Option{inner: jfmt_substitute_type(inner, params, args)}
         .Result(ok, err) -> Type.Result{ok: jfmt_substitute_type(ok, params, args), err: jfmt_substitute_type(err, params, args)}
@@ -237,7 +239,8 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             loop field in fields -> &out.push(TypeTupleField{name: field.name, ty: jfmt_substitute_type(field.ty, params, args)})
             Type.Tuple{fields: out}
         }
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: jfmt_substitute_type(inner, params, args)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: jfmt_substitute_type(inner, params, args)}
         .Union(members) -> {
             out := [Type]{}
             loop member in members -> &out.push(jfmt_substitute_type(member, params, args))
@@ -1099,7 +1102,8 @@ fn jfmt_fmt_c_module(f: &JetFmt, c_module: CModule) {
 }
 
 fn jfmt_perf_lit(value: ContribValue) -> PerfLit? Never! {
-    if value == .Perf(perf) -> return Val(perf)
+    // copy: `perf` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+    if value == .Perf(perf) -> return Val(perf.copy())
     None
 }
 

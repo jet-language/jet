@@ -665,7 +665,8 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 return None
             }
             payload_expr :: if args[0] == {
-                .Positional(value) -> value
+                // copy: `value` is a payload of read parameter `args`, which keeps the original; the assigned `payload_expr` owns this one
+                .Positional(value) -> value.copy()
                 else -> {
                     &diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "single-payload variants do not have field labels", "pass the value without a label"))
                     return None
@@ -1026,7 +1027,8 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
     target :: sema_expression_checked_text_target(head, environment, program, &scopes) ?? return SemaExpressionCheckedTextLiteral{handled: false, value: None}
     type_name := if head == {.Named(name) -> name else -> panic("checked text target lost its named owner")}
     body_value :: if body == {
-        .Value(value) -> value
+        // copy: `value` is a payload of read parameter `body`, which keeps the original; the assigned `body_value` owns this one
+        .Value(value) -> value.copy()
         else -> {
             &diagnostics.push(sema_error("E0112", span, "`{type_name}{{ … }}` needs a string recipe body", "a checked text type is constructed from a quoted template, not another expression shape", "write `{type_name}{{\"…\"}}` with interpolation holes as needed"))
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}

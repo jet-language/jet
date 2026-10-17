@@ -893,7 +893,8 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCode
     }
     if record.module_name == "core.net.tls" && record.member == "client" && index > 0 && place == None {
         source :: if argument.kind == {
-            .Clone(value, _) -> value
+            // copy: `value` is a payload of read parameter `argument`, which keeps the original; the assigned `source` owns this one
+            .Clone(value, _) -> value.copy()
             else -> argument
         }
         place = jet_codegen_lower_expression_place(&builder, program, source, MIRAccess.Read)
@@ -1118,8 +1119,10 @@ fn jet_codegen_lower_registered_math_constructor(builder: &JetCodegenBuilder, pr
 
 fn jet_codegen_failure_carrier_for_type(ty: Type) -> TFailureCarrier Never! {
     if ty == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(value) -> TFailureCarrier.Optional{value: value}
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
         else -> TFailureCarrier.Infallible
     }
 }
@@ -1898,7 +1901,8 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
 
 fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, member: String, flatten: Bool) -> MIRValueID {
     inner_type := if base.ty == {
-        .Option(inner) -> inner
+        // copy: `inner` is a payload of read parameter `base`, which keeps the original; the assigned `inner_type` owns this one
+        .Option(inner) -> inner.copy()
         else -> panic("checked optional field base is not optional")
     }
     resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
@@ -1950,7 +1954,8 @@ fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCod
 // the call never takes ownership of it and no extra drop is registered.
 fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, binding: TLocal, call: TExpr, flatten: Bool) -> MIRValueID {
     inner_type := if base.ty == {
-        .Option(inner) -> inner
+        // copy: `inner` is a payload of read parameter `base`, which keeps the original; the assigned `inner_type` owns this one
+        .Option(inner) -> inner.copy()
         else -> panic("checked optional method receiver is not optional")
     }
     subject := jet_codegen_lower_expr(&builder, program, base)
@@ -3987,7 +3992,8 @@ fn jet_codegen_find_distinct_definition(builder: JetCodegenBuilder, program: Jet
 
 fn jet_codegen_distinct_success_type(ty: Type) -> Type Never! {
     if ty == {
-        .Result(ok, _) -> ok
+        // copy: `ok` is a payload of read parameter `ty`, which keeps the original; the returned value owns this one
+        .Result(ok, _) -> ok.copy()
         else -> ty
     }
 }
@@ -4009,10 +4015,12 @@ fn jet_codegen_default_err_type(program: JetCodegenProgram) -> Type {
 fn jet_codegen_try_output_error_type(builder: JetCodegenBuilder, program: JetCodegenProgram, source_error: Type, conversion: TTryConvert, carrier: TFailureCarrier) -> Type {
     if conversion == {
         .DefaultErr -> return jet_codegen_default_err_type(program)
-        .Typed(_, _, target) -> return target
+        // copy: `target` is a payload of read parameter `conversion`, which keeps the original; the returned value owns this one
+        .Typed(_, _, target) -> return target.copy()
         .WidenUnion(_, _) -> {
             if carrier == {
-                .Result(_, error) -> return error
+                // copy: `error` is a payload of read parameter `carrier`, which keeps the original; the returned value owns this one
+                .Result(_, error) -> return error.copy()
                 else -> panic("checked union error widening has no Result failure carrier")
             }
         }
@@ -4162,7 +4170,8 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
         }
         .WidenUnion(_, _) -> {
             target := if carrier == {
-                .Result(_, error_type) -> error_type
+                // copy: `error_type` is a payload of read parameter `carrier`, which keeps the original; the assigned `target` owns this one
+                .Result(_, error_type) -> error_type.copy()
                 else -> panic("checked error union widening has no Result failure carrier")
             }
             variant := ""
@@ -4324,7 +4333,8 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
     jet_codegen_switch_block(&builder, program, failure_block)
     carrier := builder.function.failure_carrier
     source_error := if input_type == {
-        .Result(_, error) -> error
+        // copy: `error` is a payload of read parameter `input_type`, which keeps the original; the assigned `source_error` owns this one
+        .Result(_, error) -> error.copy()
         else -> Type.Named{name: "Unit"}
     }
     if convert == {
@@ -4719,7 +4729,8 @@ fn jet_codegen_lower_slice(builder: &JetCodegenBuilder, program: JetCodegenProgr
     if base.kind == .Clone(inner, _) -> receiver = inner
     if jet_codegen_builtin_untag(receiver.ty) == .Apply(name, view_args) {
         if (name == "View" || name == "ViewMut") && view_args.len() == 1 {
-            args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}
+            // copy: `range_expr` is a payload of read parameter `range`, which keeps the original; the list literal owns this one
+            args := if range == .Val(range_expr) -> [TExpr]{range_expr.copy()} else -> [TExpr]{start, end}
             view_type := Type.Apply{name: "View", args: [Type]{view_args[0]}}
             view := TExpr{ty: view_type, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: checked_location.line}, args: args}, span: expression.span, integer_bounds: None, cost: None}
             return jet_codegen_lower_expr(&builder, program, view)
@@ -4760,7 +4771,8 @@ fn jet_codegen_list_read_view(expression: TExpr, value: TExpr, access: AccessCon
             }
             else -> return None
         }
-        args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}
+        // copy: `start` and `end` are payloads of read parameter `value`, which keeps the originals; the list literal owns `start` and `end`
+        args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start.copy(), end.copy()}
         return Val(TExpr{ty: expression.ty, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: location.line}, args: args}, span: expression.span, integer_bounds: None, cost: None})
     }
     None
@@ -6378,7 +6390,8 @@ fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCo
 // The local a jet_codegen_is_element_place_chain chain is rooted at.
 fn jet_codegen_element_place_root(expression: TExpr) -> TLocal? {
     if expression.kind == {
-        .Local(local) -> Val(local)
+        // copy: `local` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Local(local) -> Val(local.copy())
         .Field(receiver, _) -> jet_codegen_element_place_root(receiver)
         .Index(base, _, _, _, _, _) -> {
             if base.kind == .Clone(inner, _) -> return jet_codegen_element_place_root(inner)
@@ -6538,7 +6551,8 @@ fn jet_codegen_stable_source_place(builder: &JetCodegenBuilder, program: JetCode
 // The local a `Local` or stored-field chain expression is rooted at.
 fn jet_codegen_field_chain_root_local(expression: TExpr) -> TLocal? Never! {
     if expression.kind == {
-        .Local(local) -> return Val(local)
+        // copy: `local` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Local(local) -> return Val(local.copy())
         .Field(receiver, _) -> return jet_codegen_field_chain_root_local(receiver)
         else -> return None
     }

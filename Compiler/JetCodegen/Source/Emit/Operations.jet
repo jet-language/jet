@@ -1605,8 +1605,10 @@ fn jet_rust_emit_call_borrow_mask(ctx: &JetRustEmitContext, callee: MIRCallee, f
 
 fn jet_rust_emit_return_fallibility(ty: MIRType) -> MIRCallFallibility Never! {
     if ty.kind == {
-        .Result(success, error) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: success, error: error}}
-        .Option(value) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: value}}
+        // copy: `success` and `error` are payloads of read parameter `ty`, which keeps the originals; the new MIRFailureCarrier.Result's fields own `success` and `error`
+        .Result(success, error) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: success.copy(), error: error.copy()}}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new MIRFailureCarrier.Optional owns this one
+        .Option(value) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: value.copy()}}
         else -> return MIRCallFallibility.Infallible
     }
 }

@@ -453,9 +453,12 @@ fn sema_derive_expand_type(expansion: &SemaDeriveExpansion, ty: Type) -> Type Ne
         .List(inner) -> Type.List{element: sema_derive_expand_type(&expansion, inner)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_expand_type(&expansion, inner)}
         .Option(inner) -> Type.Option{inner: sema_derive_expand_type(&expansion, inner)}
-        .FixedList(inner, len) -> Type.FixedList{elem: sema_derive_expand_type(&expansion, inner), len: len}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_derive_expand_type(&expansion, inner)}
-        .Map(key, key_span, value) -> Type.Map{key: sema_derive_expand_type(&expansion, key), key_span: key_span, value: sema_derive_expand_type(&expansion, value)}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(inner, len) -> Type.FixedList{elem: sema_derive_expand_type(&expansion, inner), len: len.copy()}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_derive_expand_type(&expansion, inner)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_derive_expand_type(&expansion, key), key_span: key_span.copy(), value: sema_derive_expand_type(&expansion, value)}
         .Result(ok, err) -> Type.Result{ok: sema_derive_expand_type(&expansion, ok), err: sema_derive_expand_type(&expansion, err)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             expanded := [Type]{}
@@ -477,7 +480,8 @@ fn sema_derive_expand_type(expansion: &SemaDeriveExpansion, ty: Type) -> Type Ne
             loop member in members -> &expanded.push(sema_derive_expand_type(&expansion, member))
             Type.Union{members: expanded}
         }
-        .Quantity(base, dimension) -> Type.Quantity{base: sema_derive_expand_type(&expansion, base), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_derive_expand_type(&expansion, base), dimension: dimension.copy()}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_derive_expand_type(&expansion, base), lo: lo, hi: hi}
         // copy: the derive template type is expanded once per deriving declaration, so the template
         // keeps its node and an unexpanded node is copied into this expansion.
@@ -796,7 +800,8 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         .MemberSpread(base, members, span) -> return Expr.MemberSpread{base: sema_derive_expand_expr(&expansion, base), members: members, span: span}
         .Spread(value, span) -> return Expr.Spread{value: sema_derive_expand_expr(&expansion, value), span: span}
         .MapLit(entries, span) -> return Expr.MapLit{entries: sema_derive_expand_pairs(&expansion, entries), span: span}
-        .Index(base, index, span, kind) -> return Expr.Index{base: sema_derive_expand_expr(&expansion, base), index: sema_derive_expand_expr(&expansion, index), span: span, kind: kind}
+        // copy: `kind` is a payload of read parameter `expression`, which keeps the original; field `kind` of the new Expr.Index owns this one
+        .Index(base, index, span, kind) -> return Expr.Index{base: sema_derive_expand_expr(&expansion, base), index: sema_derive_expand_expr(&expansion, index), span: span, kind: kind.copy()}
         .Slice(base, start, end, range, span) -> return Expr.Slice{base: sema_derive_expand_expr(&expansion, base), start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), range: sema_derive_expand_optional_expr(&expansion, range), span: span}
         .Range(start, end, exclusive, span) -> return Expr.Range{start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), exclusive: exclusive, span: span}
         .Ident(name, span) -> {
@@ -835,10 +840,12 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
             return Expr.MethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, owner_type_args: sema_derive_expand_types(&expansion, owner_type_args), type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: None}
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, span) -> return Expr.OptMethodCall{receiver: sema_derive_expand_expr(&expansion, receiver), method: sema_derive_expand_name(&expansion, method, method_span), method_span: method_span, type_args: sema_derive_expand_types(&expansion, type_args), args: sema_derive_expand_call_args(&expansion, args), span: span}
-        .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> return Expr.StructLit{type_name: sema_derive_expand_name(&expansion, type_name, span), type_args: sema_derive_expand_types(&expansion, type_args), import_ns: import_ns, as_trait: as_trait, fields: sema_derive_expand_fields(&expansion, fields), inferred: inferred, span: span}
+        // copy: `import_ns` and `as_trait` are payloads of read parameter `expression`, which keeps the originals; the new Expr.StructLit's fields own `import_ns` and `as_trait`
+        .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> return Expr.StructLit{type_name: sema_derive_expand_name(&expansion, type_name, span), type_args: sema_derive_expand_types(&expansion, type_args), import_ns: import_ns.copy(), as_trait: as_trait.copy(), fields: sema_derive_expand_fields(&expansion, fields), inferred: inferred, span: span}
         .TypedLit(head, body, span) -> return Expr.TypedLit{head: head.map((value) -> sema_derive_expand_type(&expansion, value)), body: sema_derive_expand_typed_body(&expansion, body), span: span}
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> return sema_derive_expand_enum_lit(&expansion, type_name, variant, variant_span, args, leading_dot, span)
-        .Tainted(value, tainted_tag, span) -> return Expr.Tainted{value: sema_derive_expand_expr(&expansion, value), tag: tainted_tag, span: span}
+        // copy: `tainted_tag` is a payload of read parameter `expression`, which keeps the original; field `tag` of the new Expr.Tainted owns this one
+        .Tainted(value, tainted_tag, span) -> return Expr.Tainted{value: sema_derive_expand_expr(&expansion, value), tag: tainted_tag.copy(), span: span}
         .Present(value, span) -> return Expr.Present{value: sema_derive_expand_expr(&expansion, value), span: span}
         .PatternTest(subject, pattern, span) -> {
             expanded_subject :: sema_derive_expand_expr(&expansion, subject)
@@ -846,7 +853,8 @@ fn sema_derive_expand_expr_node(expansion: &SemaDeriveExpansion, expression: Exp
         }
         .Ok(value, span) -> return Expr.Ok{value: sema_derive_expand_expr(&expansion, value), span: span}
         .Err(value, span) -> return Expr.Err{value: sema_derive_expand_expr(&expansion, value), span: span}
-        .Try(value, span, conversion, context) -> return Expr.Try{value: sema_derive_expand_expr(&expansion, value), span: span, conversion: conversion, context: sema_derive_expand_optional_expr(&expansion, context)}
+        // copy: `conversion` is a payload of read parameter `expression`, which keeps the original; field `conversion` of the new Expr.Try owns this one
+        .Try(value, span, conversion, context) -> return Expr.Try{value: sema_derive_expand_expr(&expansion, value), span: span, conversion: conversion.copy(), context: sema_derive_expand_optional_expr(&expansion, context)}
         .OrFallback(value, fallback, is_option, span) -> return Expr.OrFallback{value: sema_derive_expand_expr(&expansion, value), fallback: sema_derive_expand_or_fallback(&expansion, fallback), is_option: is_option, span: span}
         .If(cond, then_body, then_value, else_body, else_value, span) -> return Expr.If{cond: sema_derive_expand_expr(&expansion, cond), then_body: sema_derive_expand_stmts(&expansion, then_body), then_value: sema_derive_expand_expr(&expansion, then_value), else_body: sema_derive_expand_stmts(&expansion, else_body), else_value: sema_derive_expand_expr(&expansion, else_value), span: span}
         .TupleLit(fields, span, ty) -> {
@@ -1084,7 +1092,8 @@ fn sema_derive_expand_optional_body(expansion: &SemaDeriveExpansion, body: [Stmt
 
 fn sema_derive_expand_lvalue(expansion: &SemaDeriveExpansion, target: LValue) -> LValue Never! {
     if target == {
-        .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(&expansion, base), index: sema_derive_expand_expr(&expansion, index), span: span, kind: kind}
+        // copy: `kind` is a payload of read parameter `target`, which keeps the original; field `kind` of the new LValue.Index owns this one
+        .Index(base, index, span, kind) -> LValue.Index{base: sema_derive_expand_expr(&expansion, base), index: sema_derive_expand_expr(&expansion, index), span: span, kind: kind.copy()}
         .Field(base, field, span) -> LValue.Field{base: sema_derive_expand_expr(&expansion, base), field: field, span: span}
         // copy: the assignment target is unchanged by expansion, but the derive template keeps it
         // for the next deriving declaration, so this expansion gets its own copy.
@@ -1096,9 +1105,11 @@ fn sema_derive_expand_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt 
     if stmt == {
         .Expr(value) -> Stmt.Expr{expr: sema_derive_expand_expr(&expansion, value)}
         .Val(binding) -> Stmt.Val{binding: sema_derive_expand_binding(&expansion, binding)}
-        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_derive_expand_lvalue(&expansion, target), op: op, op_span: op_span, value: sema_derive_expand_expr(&expansion, value)}
+        // copy: `op` is a payload of read parameter `stmt`, which keeps the original; field `op` of the new Stmt.Assign owns this one
+        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_derive_expand_lvalue(&expansion, target), op: op.copy(), op_span: op_span, value: sema_derive_expand_expr(&expansion, value)}
         .Return(value, span) -> Stmt.Return{value: sema_derive_expand_optional_expr(&expansion, value), span: span}
-        .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_derive_expand_expr(&expansion, cond), body: sema_derive_expand_stmts(&expansion, body), span: span, arrow_body: arrow_body, label: label}
+        // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.While owns this one
+        .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_derive_expand_expr(&expansion, cond), body: sema_derive_expand_stmts(&expansion, body), span: span, arrow_body: arrow_body, label: label.copy()}
         .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
             expanded_kind :: if kind == {
                 .Range(start, end, step, exclusive) -> ForKind.Range{start: sema_derive_expand_expr(&expansion, start), end: sema_derive_expand_expr(&expansion, end), step: sema_derive_expand_optional_expr(&expansion, step), exclusive: exclusive}
@@ -1116,23 +1127,29 @@ fn sema_derive_expand_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt 
         }
         .BreakValue(value, span) -> Stmt.BreakValue{value: sema_derive_expand_expr(&expansion, value), span: span}
         .BreakLabelValue(name, name_span, value, span) -> Stmt.BreakLabelValue{name: name, name_span: name_span, value: sema_derive_expand_expr(&expansion, value), span: span}
-        .Loop(body, span, arrow_body, label) -> Stmt.Loop{body: sema_derive_expand_stmts(&expansion, body), span: span, arrow_body: arrow_body, label: label}
+        // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.Loop owns this one
+        .Loop(body, span, arrow_body, label) -> Stmt.Loop{body: sema_derive_expand_stmts(&expansion, body), span: span, arrow_body: arrow_body, label: label.copy()}
         .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
             expanded_step := Stmt?{None}
             if step == .Val(value) -> expanded_step = Val(sema_derive_expand_stmt(&expansion, value))
             Stmt.CountedLoop{init: sema_derive_expand_binding(&expansion, init), cond: sema_derive_expand_expr(&expansion, cond), step: expanded_step, body: sema_derive_expand_stmts(&expansion, body), span: span, arrow_body: arrow_body, label: label}
         }
-        .Unsafe(audit, audit_expr, body, span) -> Stmt.Unsafe{audit: audit, audit_expr: sema_derive_expand_optional_expr(&expansion, audit_expr), body: sema_derive_expand_stmts(&expansion, body), span: span}
-        .Impure(reason, reason_expr, body, span) -> Stmt.Impure{reason: reason, reason_expr: sema_derive_expand_optional_expr(&expansion, reason_expr), body: sema_derive_expand_stmts(&expansion, body), span: span}
+        // copy: `audit` is a payload of read parameter `stmt`, which keeps the original; field `audit` of the new Stmt.Unsafe owns this one
+        .Unsafe(audit, audit_expr, body, span) -> Stmt.Unsafe{audit: audit.copy(), audit_expr: sema_derive_expand_optional_expr(&expansion, audit_expr), body: sema_derive_expand_stmts(&expansion, body), span: span}
+        // copy: `reason` is a payload of read parameter `stmt`, which keeps the original; field `reason` of the new Stmt.Impure owns this one
+        .Impure(reason, reason_expr, body, span) -> Stmt.Impure{reason: reason.copy(), reason_expr: sema_derive_expand_optional_expr(&expansion, reason_expr), body: sema_derive_expand_stmts(&expansion, body), span: span}
         .Reactive(body, span) -> Stmt.Reactive{body: sema_derive_expand_stmts(&expansion, body), span: span}
         .Shield(body, span) -> Stmt.Shield{body: sema_derive_expand_stmts(&expansion, body), span: span}
-        .Switched(marker, body, span) -> Stmt.Switched{marker: marker, body: sema_derive_expand_stmts(&expansion, body), span: span}
+        // copy: `marker` is a payload of read parameter `stmt`, which keeps the original; field `marker` of the new Stmt.Switched owns this one
+        .Switched(marker, body, span) -> Stmt.Switched{marker: marker.copy(), body: sema_derive_expand_stmts(&expansion, body), span: span}
         .Region(name, name_span, body, span) -> Stmt.Region{name: name, name_span: name_span, body: sema_derive_expand_stmts(&expansion, body), span: span}
         .Policy(declarations, body, span) -> Stmt.Policy{declarations: declarations, body: sema_derive_expand_stmts(&expansion, body), span: span}
         .TaskGroup(name, name_span, limit, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, limit: sema_derive_expand_optional_expr(&expansion, limit), body: sema_derive_expand_stmts(&expansion, body), span: span}
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_derive_expand_stmts(&expansion, body), span: span}
-        .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: sema_derive_expand_stmts(&expansion, body), span: span}
-        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: cond, cond_span: cond_span, then_body: sema_derive_expand_stmts(&expansion, then_body), else_body: sema_derive_expand_optional_body(&expansion, else_body), span: span, selected_then: selected_then}
+        // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
+        .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_derive_expand_stmts(&expansion, body), span: span}
+        // copy: `cond` and `selected_then` are payloads of read parameter `stmt`, which keeps the originals; the new Stmt.ComptimeIf's fields own `cond` and `selected_then`
+        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: cond.copy(), cond_span: cond_span, then_body: sema_derive_expand_stmts(&expansion, then_body), else_body: sema_derive_expand_optional_body(&expansion, else_body), span: span, selected_then: selected_then.copy()}
         .ComptimeBlock(body, is_template_loop, span) -> Stmt.ComptimeBlock{body: sema_derive_expand_stmts(&expansion, body), is_template_loop: is_template_loop, span: span}
         .ContextBlock(fields, body, span) -> {
             expanded := [ContextField]{}
@@ -1141,9 +1158,11 @@ fn sema_derive_expand_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) -> Stmt 
         }
         .Live(body, span) -> Stmt.Live{body: sema_derive_expand_stmts(&expansion, body), span: span}
         .AssumeDet(reason, reason_expr, body, span) -> Stmt.AssumeDet{reason: reason, reason_expr: sema_derive_expand_expr(&expansion, reason_expr), body: sema_derive_expand_stmts(&expansion, body), span: span}
-        .Transact(name, name_span, body, implicit, span) -> Stmt.Transact{name: name, name_span: name_span, body: sema_derive_expand_stmts(&expansion, body), implicit: implicit, span: span}
+        // copy: `name` and `name_span` are payloads of read parameter `stmt`, which keeps the originals; the new Stmt.Transact's fields own `name` and `name_span`
+        .Transact(name, name_span, body, implicit, span) -> Stmt.Transact{name: name.copy(), name_span: name_span.copy(), body: sema_derive_expand_stmts(&expansion, body), implicit: implicit, span: span}
         .Yield(value, span) -> Stmt.Yield{value: sema_derive_expand_expr(&expansion, value), span: span}
-        .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_derive_expand_exprs(&expansion, args), args_span: args_span, body: sema_derive_expand_stmts(&expansion, body), dsl: dsl, dot_span: dot_span, span: span}
+        // copy: `args_span` is a payload of read parameter `stmt`, which keeps the original; field `args_span` of the new Stmt.ScopeMember owns this one
+        .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_derive_expand_exprs(&expansion, args), args_span: args_span.copy(), body: sema_derive_expand_stmts(&expansion, body), dsl: dsl, dot_span: dot_span, span: span}
         .DeferClose(close, span) -> Stmt.DeferClose{close: sema_derive_expand_expr(&expansion, close), span: span}
         // copy: the statement kind is unchanged by expansion, but the derive template keeps it for
         // the next deriving declaration, so this expansion gets its own copy.
@@ -1643,11 +1662,15 @@ fn sema_derive_replace_provider_type(ty: Type, type_param: String, owner_type: T
         .List(inner) -> Type.List{element: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         .Option(inner) -> Type.Option{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
-        .FixedList(inner, len) -> Type.FixedList{elem: sema_derive_replace_provider_type(inner, type_param, owner_type), len: len}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(inner, len) -> Type.FixedList{elem: sema_derive_replace_provider_type(inner, type_param, owner_type), len: len.copy()}
         .InlineRange(inner, lo, hi) -> Type.InlineRange{base: sema_derive_replace_provider_type(inner, type_param, owner_type), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
-        .Quantity(inner, dimension) -> Type.Quantity{base: sema_derive_replace_provider_type(inner, type_param, owner_type), dimension: dimension}
-        .Map(key, key_span, value) -> Type.Map{key: sema_derive_replace_provider_type(key, type_param, owner_type), key_span: key_span, value: sema_derive_replace_provider_type(value, type_param, owner_type)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(inner, dimension) -> Type.Quantity{base: sema_derive_replace_provider_type(inner, type_param, owner_type), dimension: dimension.copy()}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_derive_replace_provider_type(key, type_param, owner_type), key_span: key_span.copy(), value: sema_derive_replace_provider_type(value, type_param, owner_type)}
         .Result(ok, err) -> Type.Result{ok: sema_derive_replace_provider_type(ok, type_param, owner_type), err: sema_derive_replace_provider_type(err, type_param, owner_type)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             replaced := [Type]{}

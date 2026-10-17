@@ -501,9 +501,11 @@ fn mir_pass_inline_argument_place_base(caller: MIRFunction, value: MIRValueID) -
 fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) -> MIRProjection Never! {
     if projection == {
         .Field(field, span) -> MIRProjection.Field{field: field, span: span}
-        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: mir_pass_inline_value(maps, index), call: call, write_call: write_call, location: location, context: mir_pass_inline_optional_panic_context(context, maps), span: span}
+        // copy: `write_call` is a payload of read parameter `projection`, which keeps the original; field `write_call` of the new MIRProjection.Index owns this one
+        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: mir_pass_inline_value(maps, index), call: call, write_call: write_call.copy(), location: location, context: mir_pass_inline_optional_panic_context(context, maps), span: span}
         .Deref(span) -> MIRProjection.Deref{span: span}
-        .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
+        // copy: `kind` is a payload of read parameter `projection`, which keeps the original; field `kind` of the new MIRProjection.Payload owns this one
+        .Payload(kind, span) -> MIRProjection.Payload{kind: kind.copy(), span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: mir_pass_inline_value(maps, range), location: location, span: span}
         .MapLookup(lookup, optional, span) -> MIRProjection.MapLookup{lookup: mir_pass_inline_value(maps, lookup), optional: optional, span: span}
     }
@@ -567,14 +569,17 @@ fn mir_pass_inline_type(ty: MIRType, substitutions: [MIRInlineTypeSubstitution])
             mapped :: loop field in fields -> MIRTupleField{name: field.name, ty: mir_pass_inline_type(field.ty, substitutions)}
             MIRTypeKind.Tuple{fields: mapped}
         }
-        .FixedList(element, length) -> MIRTypeKind.FixedList{elem: mir_pass_inline_type(element, substitutions), len: length}
+        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new MIRTypeKind.FixedList owns this one
+        .FixedList(element, length) -> MIRTypeKind.FixedList{elem: mir_pass_inline_type(element, substitutions), len: length.copy()}
         .InlineRange(base, low, high) -> MIRTypeKind.InlineRange{base: mir_pass_inline_type(base, substitutions), lo: low, hi: high}
-        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker, inner: mir_pass_inline_type(inner, substitutions)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new MIRTypeKind.Tagged owns this one
+        .Tagged(marker, inner) -> MIRTypeKind.Tagged{marker: marker.copy(), inner: mir_pass_inline_type(inner, substitutions)}
         .Union(members) -> {
             mapped :: loop member in members -> mir_pass_inline_type(member, substitutions)
             MIRTypeKind.Union{members: mapped}
         }
-        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: mir_pass_inline_type(base, substitutions), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new MIRTypeKind.Quantity owns this one
+        .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: mir_pass_inline_type(base, substitutions), dimension: dimension.copy()}
         else -> ty.kind
     }
     mapped :: mir_type_from_kind(kind)
@@ -800,9 +805,11 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
         .InitializeUninit(place) -> Val(MIROperation.InitializeUninit{place: mir_pass_inline_place(maps, place)})
         .Copy(value, fact) -> Val(MIROperation.Copy{value: mir_pass_inline_value(maps, value), fact: fact})
         .Move(value) -> Val(MIROperation.Move{value: mir_pass_inline_value(maps, value)})
-        .Constant(value) -> Val(MIROperation.Constant{value: value})
+        // copy: `value` is a payload of read parameter `operation`, which keeps the original; field `value` of the new MIROperation.Constant owns this one
+        .Constant(value) -> Val(MIROperation.Constant{value: value.copy()})
         .Unary(op, value) -> Val(MIROperation.Unary{op: op, value: mir_pass_inline_value(maps, value)})
-        .Binary(op, dispatch, overflow, left, right) -> Val(MIROperation.Binary{op: op, dispatch: dispatch, overflow: overflow, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)})
+        // copy: `dispatch` is a payload of read parameter `operation`, which keeps the original; field `dispatch` of the new MIROperation.Binary owns this one
+        .Binary(op, dispatch, overflow, left, right) -> Val(MIROperation.Binary{op: op, dispatch: dispatch.copy(), overflow: overflow, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)})
         .BuildString(parts) -> {
             mapped :: loop part in parts -> MIRStringPart{kind: mir_pass_inline_string_part(part.kind, maps)}
             Val(MIROperation.BuildString{parts: mapped})
@@ -867,7 +874,8 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
             mapped_types :: loop ty in type_args -> mir_pass_inline_type(ty, substitutions)
             Val(MIROperation.CoreCall{call: call, route: route, args: mapped_args, type_args: mapped_types, fallibility: mir_pass_inline_fallibility(fallibility, substitutions), data_plan: mir_pass_inline_data_plan(plan, substitutions)})
         }
-        .AttachTag(value, tag_name) -> Val(MIROperation.AttachTag{value: mir_pass_inline_value(maps, value), tag: tag_name})
+        // copy: `tag_name` is a payload of read parameter `operation`, which keeps the original; field `tag` of the new MIROperation.AttachTag owns this one
+        .AttachTag(value, tag_name) -> Val(MIROperation.AttachTag{value: mir_pass_inline_value(maps, value), tag: tag_name.copy()})
         .Todo(call, location, expected_type) -> Val(MIROperation.Todo{call: call, location: location, expected_type: mir_pass_inline_optional_type(expected_type, substitutions)})
         .Never(reason) -> Val(MIROperation.Never{reason: reason})
         .Semantic(semantic) -> Val(MIROperation.Semantic{operation: mir_pass_inline_semantic(semantic, maps, substitutions)})
@@ -875,7 +883,8 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
         .LoopRangeHasNext(call, cursor) -> Val(MIROperation.LoopRangeHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
         .LoopRangeValue(call, cursor) -> Val(MIROperation.LoopRangeValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
         .LoopRangeAdvance(call, cursor) -> Val(MIROperation.LoopRangeAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .LoopIterInit(call, collection, step, by_value, source_kind) -> Val(MIROperation.LoopIterInit{call: call, collection: mir_pass_inline_value(maps, collection), step: mir_pass_inline_optional_value(maps, step), by_value: by_value, source_kind: source_kind})
+        // copy: `source_kind` is a payload of read parameter `operation`, which keeps the original; field `source_kind` of the new MIROperation.LoopIterInit owns this one
+        .LoopIterInit(call, collection, step, by_value, source_kind) -> Val(MIROperation.LoopIterInit{call: call, collection: mir_pass_inline_value(maps, collection), step: mir_pass_inline_optional_value(maps, step), by_value: by_value, source_kind: source_kind.copy()})
         .LoopIterHasNext(call, cursor) -> Val(MIROperation.LoopIterHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
         .LoopIterValue(call, cursor) -> Val(MIROperation.LoopIterValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
         .LoopIterAdvance(call, cursor) -> Val(MIROperation.LoopIterAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
@@ -888,7 +897,8 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
 fn mir_pass_inline_string_part(part: MIRStringPartKind, maps: MIRInlineMaps) -> MIRStringPartKind Never! {
     if part == {
         .Literal(text) -> MIRStringPartKind.Literal{text: text}
-        .Interpolation(value, format) -> MIRStringPartKind.Interpolation{value: mir_pass_inline_value(maps, value), format: format}
+        // copy: `format` is a payload of read parameter `part`, which keeps the original; field `format` of the new MIRStringPartKind.Interpolation owns this one
+        .Interpolation(value, format) -> MIRStringPartKind.Interpolation{value: mir_pass_inline_value(maps, value), format: format.copy()}
     }
 }
 
@@ -931,13 +941,16 @@ fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, subst
             MIRSemanticOp.ReflectOf{type_name: type_name, path: path, display: mir_pass_inline_value(maps, display), fields: mapped}
         }
         .LayoutLiteral(inner) -> MIRSemanticOp.LayoutLiteral{inner: mir_pass_inline_value(maps, inner)}
-        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, boxed_fields: boxed_fields}
-        .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: mir_pass_inline_value(maps, guard), paths: paths, editable: editable, edit_paths_disjoint: disjoint}
+        // copy: `extra` is a payload of read parameter `operation`, which keeps the original; field `extra` of the new MIRSemanticOp.StructLiteral owns this one
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra.copy(), boxed_fields: boxed_fields}
+        // copy: `split_call` is a payload of read parameter `operation`, which keeps the original; field `split_call` of the new MIRSemanticOp.CellGuardProject owns this one
+        .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call.copy(), guard: mir_pass_inline_value(maps, guard), paths: paths, editable: editable, edit_paths_disjoint: disjoint}
         .SharedGuardMap(call, guard, path, editable) -> MIRSemanticOp.SharedGuardMap{call: call, guard: mir_pass_inline_value(maps, guard), path: path, editable: editable}
         .SharedGuardSplit(call, map_call, guard, first, second, editable) -> MIRSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: mir_pass_inline_value(maps, guard), first: first, second: second, editable: editable}
         .SharedGuardWait(call, guard, condition, predicate) -> MIRSemanticOp.SharedGuardWait{call: call, guard: mir_pass_inline_value(maps, guard), condition: mir_pass_inline_value(maps, condition), predicate: mir_pass_inline_value(maps, predicate)}
         .ConditionNotify(call, condition, all) -> MIRSemanticOp.ConditionNotify{call: call, condition: mir_pass_inline_value(maps, condition), all: all}
-        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size, args: mir_pass_inline_call_args(args, maps, substitutions)}
+        // copy: `inline_size` is a payload of read parameter `operation`, which keeps the original; field `inline_size` of the new MIRSemanticOp.AllocNew owns this one
+        .AllocNew(call, kind, inline_size, args) -> MIRSemanticOp.AllocNew{call: call, kind: kind, inline_size: inline_size.copy(), args: mir_pass_inline_call_args(args, maps, substitutions)}
         .ColumnarRead(base, index, column, column_index, accessor) -> MIRSemanticOp.ColumnarRead{base: mir_pass_inline_value(maps, base), index: mir_pass_inline_value(maps, index), column: column, column_index: column_index, accessor: accessor}
         .StaticPreludeCall(call, args, owner_type_args, type_args) -> {
             owner_args :: loop argument in owner_type_args -> mir_pass_inline_prelude_type_arg(argument, substitutions)
@@ -959,11 +972,15 @@ fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, subst
         .ReaderTakePattern(receiver, place, parts) -> MIRSemanticOp.ReaderTakePattern{receiver: mir_pass_inline_value(maps, receiver), receiver_place: mir_pass_inline_place(maps, place), parts: parts}
         .NumericMethod(call, receiver) -> MIRSemanticOp.NumericMethod{call: call, receiver: mir_pass_inline_value(maps, receiver)}
         .NumericBinaryMethod(call, receiver, argument) -> MIRSemanticOp.NumericBinaryMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), argument: mir_pass_inline_value(maps, argument)}
-        .OverflowOption(call, left, right, location) -> MIRSemanticOp.OverflowOption{call: call, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right), location: location}
-        .HandleMethod(call, receiver, args, schedule, derivation) -> MIRSemanticOp.HandleMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_values(args, maps), frame_schedule: schedule, frame_schedule_derivation: derivation}
-        .PluginInvoke(call, handle, export_name, signature, args) -> MIRSemanticOp.PluginInvoke{call: call, handle: mir_pass_inline_value(maps, handle), export_name: export_name, signature: signature, args: mir_pass_inline_values(args, maps)}
+        // copy: `location` is a payload of read parameter `operation`, which keeps the original; field `location` of the new MIRSemanticOp.OverflowOption owns this one
+        .OverflowOption(call, left, right, location) -> MIRSemanticOp.OverflowOption{call: call, left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right), location: location.copy()}
+        // copy: `schedule` and `derivation` are payloads of read parameter `operation`, which keeps the originals; the new MIRSemanticOp.HandleMethod's fields own `schedule` and `derivation`
+        .HandleMethod(call, receiver, args, schedule, derivation) -> MIRSemanticOp.HandleMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_values(args, maps), frame_schedule: schedule.copy(), frame_schedule_derivation: derivation.copy()}
+        // copy: `signature` is a payload of read parameter `operation`, which keeps the original; field `signature` of the new MIRSemanticOp.PluginInvoke owns this one
+        .PluginInvoke(call, handle, export_name, signature, args) -> MIRSemanticOp.PluginInvoke{call: call, handle: mir_pass_inline_value(maps, handle), export_name: export_name, signature: signature.copy(), args: mir_pass_inline_values(args, maps)}
         .HTTPRouterRegister(call, receiver, path, handler, method, names, contract, location) -> MIRSemanticOp.HTTPRouterRegister{call: call, receiver: mir_pass_inline_value(maps, receiver), path: mir_pass_inline_value(maps, path), handler: mir_pass_inline_value(maps, handler), method: method, handler_param_names: names, contract_json: contract, location: location}
-        .CoreClosureCall(call, kind, values, closure, site, label) -> MIRSemanticOp.CoreClosureCall{call: call, kind: kind, values: mir_pass_inline_values(values, maps), closure: mir_pass_inline_optional_value(maps, closure), site: site, label: label}
+        // copy: `kind` is a payload of read parameter `operation`, which keeps the original; field `kind` of the new MIRSemanticOp.CoreClosureCall owns this one
+        .CoreClosureCall(call, kind, values, closure, site, label) -> MIRSemanticOp.CoreClosureCall{call: call, kind: kind.copy(), values: mir_pass_inline_values(values, maps), closure: mir_pass_inline_optional_value(maps, closure), site: site, label: label}
         .TaskGroup(call, kind, tasks) -> MIRSemanticOp.TaskGroup{call: call, kind: kind, tasks: mir_pass_inline_values(tasks, maps)}
         .Select(call, kind, values) -> MIRSemanticOp.Select{call: call, kind: kind, values: mir_pass_inline_values(values, maps)}
         .PolicyFunction(policy, values) -> MIRSemanticOp.PolicyFunction{policy: mir_pass_inline_value(maps, policy), values: mir_pass_inline_values(values, maps)}

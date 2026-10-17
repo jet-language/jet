@@ -2479,17 +2479,21 @@ fn jet_rust_emit_trait_impl_type(ty: MIRType, implementation: MIRImplDef) -> MIR
             if ret == .Val(value) -> substituted_ret = Val(jet_rust_emit_trait_impl_type(value, implementation))
             normalized.kind = MIRTypeKind.SendFn{params: substituted_params, ret: substituted_ret, conventions: conventions}
         }
-        .Apply(name, args) -> normalized.kind = MIRTypeKind.Apply{name: name, args: loop argument in args -> jet_rust_emit_trait_impl_type(argument, implementation)}
+        // copy: `name` is a payload of read parameter `ty`, which keeps the original; field `name` of the new MIRTypeKind.Apply owns this one
+        .Apply(name, args) -> normalized.kind = MIRTypeKind.Apply{name: name.copy(), args: loop argument in args -> jet_rust_emit_trait_impl_type(argument, implementation)}
         .Tuple(fields) -> {
             substituted := fields
             loop index in 0..<fields.len() -> substituted[index].ty = jet_rust_emit_trait_impl_type(fields[index].ty, implementation)
             normalized.kind = MIRTypeKind.Tuple{fields: substituted}
         }
-        .FixedList(elem, len) -> normalized.kind = MIRTypeKind.FixedList{elem: jet_rust_emit_trait_impl_type(elem, implementation), len: len}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new MIRTypeKind.FixedList owns this one
+        .FixedList(elem, len) -> normalized.kind = MIRTypeKind.FixedList{elem: jet_rust_emit_trait_impl_type(elem, implementation), len: len.copy()}
         .InlineRange(base, lo, hi) -> normalized.kind = MIRTypeKind.InlineRange{base: jet_rust_emit_trait_impl_type(base, implementation), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> normalized.kind = MIRTypeKind.Tagged{marker: marker, inner: jet_rust_emit_trait_impl_type(inner, implementation)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new MIRTypeKind.Tagged owns this one
+        .Tagged(marker, inner) -> normalized.kind = MIRTypeKind.Tagged{marker: marker.copy(), inner: jet_rust_emit_trait_impl_type(inner, implementation)}
         .Union(members) -> normalized.kind = MIRTypeKind.Union{members: loop member in members -> jet_rust_emit_trait_impl_type(member, implementation)}
-        .Quantity(base, dimension) -> normalized.kind = MIRTypeKind.Quantity{base: jet_rust_emit_trait_impl_type(base, implementation), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new MIRTypeKind.Quantity owns this one
+        .Quantity(base, dimension) -> normalized.kind = MIRTypeKind.Quantity{base: jet_rust_emit_trait_impl_type(base, implementation), dimension: dimension.copy()}
         else -> {}
     }
     normalized.identity = None

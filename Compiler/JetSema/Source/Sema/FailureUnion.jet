@@ -355,7 +355,8 @@ fn sema_failure_union_unqualified(name: String) -> String Never! {
 
 // The success side of an unwritten contract.
 fn sema_failure_union_success(function: Func) -> Type Never! {
-    if function.return_type == .Val(written) -> return written
+    // copy: `written` is a payload of read parameter `function`, which keeps the original; the returned value owns this one
+    if function.return_type == .Val(written) -> return written.copy()
     Type.Named{name: "Unit"}
 }
 

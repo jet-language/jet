@@ -13,7 +13,8 @@ use jet_foundation.[
 // The entry tuple of a Map type, None for any other type.
 fn lower_map_entry(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .Map(key, value) -> Val(mir_type_from_kind(MIRTypeKind.Tuple{fields: [MIRTupleField]{MIRTupleField{name: "key", ty: key}, MIRTupleField{name: "value", ty: value}}}))
+        // copy: `key` and `value` are payloads of read parameter `ty`, which keeps the originals; the new MIRTupleField's fields own `key` and `value`
+        .Map(key, value) -> Val(mir_type_from_kind(MIRTypeKind.Tuple{fields: [MIRTupleField]{MIRTupleField{name: "key", ty: key.copy()}, MIRTupleField{name: "value", ty: value.copy()}}}))
         .Tagged(_, inner) -> lower_map_entry(inner)
         else -> None
     }
@@ -21,7 +22,8 @@ fn lower_map_entry(ty: MIRType) -> MIRType? {
 
 fn lower_map_value_type(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .Map(_, value) -> Val(value)
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Map(_, value) -> Val(value.copy())
         .Tagged(_, inner) -> lower_map_value_type(inner)
         else -> None
     }
