@@ -204,7 +204,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop (index, arg) in args { if index > 0 -> &rest.push(arg) }
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := [LIRValueID]{}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, shells: [LowerCallShell]{}}
     if !lower_call_args(p, c, &m, &f, rest, &lowered, &writebacks, &temporaries) -> return
     dst :: lower_result(p, c, &m, &f, instruction)
     result_ty :: lower_checked_type(c, instruction) ?? checked.return_type
@@ -263,7 +263,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     lower_start(&f, done, params)
     if dst == None && result_storage == .Val(storage) -> lower_map_drop_value(p, &m, &f, storage, result_ty)
     loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
-    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
+    lower_release_call_temps(p, c, &m, &f, temporaries)
 }
 
 fn lower_reach_trait_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, target: MIRTypeID, parent: Int) Never! {

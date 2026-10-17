@@ -6504,7 +6504,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if index < 0 -> return lower_fail(&m, &f, "call to missing function {target.value}")
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := [LIRValueID]{}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, shells: [LowerCallShell]{}}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
     signature :: m.mir_signatures[index].copy()
     result_bytes :: m.mir_results[index].copy()
@@ -6516,7 +6516,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         loop value in lowered -> &call_args.push(value)
         lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: call_args})
         loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
-        loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
+        lower_release_call_temps(p, c, &m, &f, temporaries)
         return
     }
     dst := lower_result(p, c, &m, &f, instruction)
@@ -6526,19 +6526,40 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     }
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: lowered})
     loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
-    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
+    lower_release_call_temps(p, c, &m, &f, temporaries)
+}
+
+// What a call's argument lowering made for that call alone, released right
+// after it (the callee only borrows them).
+struct LowerCallTemps {
+    // Owned trait boxes.
+    drops: [LIRValueID]
+    // Union wrappers of arguments the callee only reads (lower_call_args).
+    shells: [LowerCallShell]
+}
+
+// A union wrapper of `bytes`; `taken` is the argument whose payload it took
+// over, dropped with it, else the caller still owns the payload.
+struct LowerCallShell { boxed: LIRValueID, bytes: Int, taken: MIRValueID? }
+
+fn lower_release_call_temps(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, temporaries: LowerCallTemps) Never! {
+    loop temporary in temporaries.drops -> lower_emit(&f, LIRInst.Drop{value: temporary})
+    loop shell in temporaries.shells {
+        if shell.taken == .Val(payload) -> lower_drop_value(p, c, &m, &f, payload)
+        lower_free_shell(&m, &f, shell.boxed, shell.bytes)
+    }
 }
 
 // A call's argument values in order: a Write argument lends its place's
 // cell, an absent (Unit) argument passes nothing. False when lowering failed.
-fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, args: [MIRCallArg], lowered: &[LIRValueID], writebacks: &[LowerWriteBack], temporaries: &[LIRValueID]) -> Bool Never! {
+fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, args: [MIRCallArg], lowered: &[LIRValueID], writebacks: &[LowerWriteBack], temporaries: &LowerCallTemps) -> Bool Never! {
     loop arg in args {
         if arg.access != .Write && arg.box_as_trait == .Val(target) {
             ty :: lower_value_type(c, arg.value) ?? return false
             if lower_trait_ref(p, ty) == None {
                 boxed :: lower_trait_arg(p, c, &m, &f, arg, target) ?? return false
                 &lowered.push(boxed)
-                if arg.access == .Read -> &temporaries.push(boxed)
+                if arg.access == .Read -> &temporaries.drops.push(boxed)
                 next
             }
         }
@@ -6550,8 +6571,13 @@ fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         }
         if lower_is_absent(f, arg.value) -> next
         value :: lower_use(&m, &f, arg.value) ?? return false
-        // MIRRust call_arg `Union::Variant(value)`: the member value moves
-        // into a box of the union's structural enum.
+        // MIRRust call_arg `Union::Variant(value)`: the member value lands
+        // in a box of the union's structural enum. A callee that takes the
+        // union over owns the box. One that only reads it leaves the box to
+        // the caller, released after the call: the payload with it when the
+        // argument handed it over (codegen owned_last_use: a temporary at its
+        // last use), else only the box's own bytes (a borrowed place or Copy
+        // payload, which its owner still releases; the box never copies it).
         if arg.widen_to_union == .Val(coercion) {
             definition :: lower_type_def_by_id(p, coercion.union) ?? {
                 lower_fail(&m, &f, "union widening to missing type {coercion.union.value}")
@@ -6565,11 +6591,17 @@ fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
                 lower_fail(&m, &f, "{definition.name}.{coercion.variant} has no stored payload")
                 return false
             }
+            bytes :: lower_enum_box_size(p, definition)
             boxed :: lower_pointer(&f)
-            lower_alloc(&m, &f, boxed, lower_enum_box_size(p, definition))
+            lower_alloc(&m, &f, boxed, bytes)
             lower_store_word(&f, boxed, 0, lower_discriminant(found.index))
             lower_store_value(p, &m, &f, boxed, info.offset, arg.value, info.ty)
             &lowered.push(boxed)
+            if arg.access == .Read {
+                taken := MIRValueID?{None}
+                if mir_call_arg_consumes(arg) -> taken = Val(arg.value)
+                &temporaries.shells.push(LowerCallShell{boxed: boxed, bytes: bytes, taken: taken})
+            }
             next
         }
         // A `[T#N]` widened into a `[T]` parameter is the List it is carried

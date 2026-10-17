@@ -343,7 +343,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     closure :: lower_use(&m, &f, callee) ?? return
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := [LIRValueID]{}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, shells: [LowerCallShell]{}}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
     code :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: code, base: closure, offset: 8})
@@ -366,7 +366,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     signature :: lower_signature(&m, params, result)
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Value{value: code}, args: call_args})
     loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
-    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
+    lower_release_call_temps(p, c, &m, &f, temporaries)
 }
 
 // ---------------------------------------------------------------------------
