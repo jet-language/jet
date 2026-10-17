@@ -36,6 +36,28 @@ test("census lists each registered code with its fronts and snapshot", () => {
   }
 });
 
+test("a code comparison is no emitter, and #[cfg(test)] skips only its own item", () => {
+  const { root, put, run } = fixture();
+  try {
+    put("Compiler/JetSema/Source/Emit.jet", 'fn b() { if d.code == "E9002" -> keep(d) }\n');
+    put("crates/front/src/lib.rs", [
+      "#[cfg(test)]",
+      "mod early { fn t() { e(\"E9002\"); let s = \"{\"; } }",
+      "#[cfg(test)] fn helper() -> bool {",
+      "    e(\"E9003\")",
+      "}",
+      "fn emit() { if d.code != \"E9002\" { return } e(\"E9001\") }",
+      "",
+    ].join("\n"));
+    const rows = run("--census").stdout.trim().split("\n").map((line) => line.split("\t"));
+    assert.deepEqual(rows[1].slice(0, 4), ["E9001", "Active", "crates/front/src/lib.rs:6", "MISSING"], "code after a test-only item is still scanned");
+    assert.deepEqual(rows[2].slice(0, 4), ["E9002", "Active", "-", "MISSING"], "comparisons and test modules are not emitters");
+    assert.equal(rows[3][2], "-", "a test-only fn is skipped");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a new Rust-only code fails until the ratchet records it", () => {
   const { root, run, ratchet } = fixture();
   try {

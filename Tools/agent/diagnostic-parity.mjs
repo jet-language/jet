@@ -97,16 +97,30 @@ function codeText(line) {
   return line;
 }
 
+// Braces that open (+1) or close (-1) on a code line, outside string and
+// character literals.
+function braceDelta(text) {
+  const bare = text.replace(/"(?:[^"\\]|\\.)*"/g, "\"\"").replace(/'(?:[^'\\]|\\.)'/g, "''");
+  let delta = 0;
+  for (const char of bare) {
+    if (char === "{") delta += 1;
+    else if (char === "}") delta -= 1;
+  }
+  return delta;
+}
+
 // First reference of each registered code as a quoted literal in `paths`.
 function references(root, paths, codes, { rustTests }) {
   const found = new Map();
   for (const path of paths) {
     const lines = readFileSync(join(root, path), "utf8").split("\n");
     let block = false;
+    // Rust items marked `#[cfg(test)]` (a test module or a test-only fn)
+    // exercise diagnostics rather than emit them; skip exactly that item.
+    let testItem = false;
+    let testDepth = 0;
     for (let index = 0; index < lines.length; index += 1) {
       let line = lines[index];
-      // Rust unit-test modules sit after `#[cfg(test)]`; they exercise, not emit.
-      if (rustTests && /^\s*#\[cfg\(test\)\]/.test(line)) break;
       if (block) {
         const close = line.indexOf("*/");
         if (close < 0) continue;
@@ -118,7 +132,22 @@ function references(root, paths, codes, { rustTests }) {
         line = line.slice(0, open);
         block = true;
       }
-      for (const match of codeText(line).matchAll(/"([A-Z][A-Z0-9-]*[0-9A-Z])"/g)) {
+      let text = codeText(line);
+      const marker = rustTests && !testItem ? text.match(/^\s*#\[cfg\(test\)\]/) : null;
+      if (marker) {
+        testItem = true;
+        testDepth = 0;
+        text = text.slice(marker[0].length);
+      }
+      if (testItem) {
+        const opened = testDepth > 0 || text.includes("{");
+        testDepth += braceDelta(text);
+        if ((opened && testDepth <= 0) || (!opened && text.includes(";"))) testItem = false;
+        continue;
+      }
+      for (const match of text.matchAll(/"([A-Z][A-Z0-9-]*[0-9A-Z])"/g)) {
+        // `code == "E…"` inspects a diagnostic someone else emitted.
+        if (/[=!]=\s*$/.test(text.slice(0, match.index))) continue;
         if (codes.has(match[1]) && !found.has(match[1])) found.set(match[1], `${path}:${index + 1}`);
       }
     }
