@@ -3543,10 +3543,9 @@ fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], sourc
             program = jet_codegen_program_slot_take(slot)
         }
         workers > 1 -> {
-            bounds :: compiler_threads_partition(weights, workers)
             slot :: shared JetCodegenProgramSlot{programs: [JetCodegenProgram]{}}
             jet_codegen_program_slot_fill(slot, ^program)
-            lowered_rows = jet_codegen_lower_in_parts(slot, bounds, workers)
+            lowered_rows = jet_codegen_lower_in_parts(slot, weights, workers)
             program = jet_codegen_program_slot_take(slot)
         }
         else -> {
@@ -3606,27 +3605,45 @@ fn jet_codegen_program_slot_take(slot: Shared<JetCodegenProgramSlot>) -> JetCode
     &permit.value.programs.pop() ?? panic("the lowering program left the threads' shared slot")
 }
 
-// One thread's consecutive function rows [first, last) and their lowerings.
+// One claimable part's consecutive function rows [first, last) and their
+// lowerings.
 struct JetCodegenLowerPart {
     first: Int
     last: Int
     rows: [JetCodegenLoweredFunction]
 }
 
-// Lowers the program in `slot` on `workers` threads: the consecutive parts of
-// its function rows `bounds` cuts (compiler_threads_partition), each on its
-// own builder, joined in part order. A function's lowering reads only the
-// program and its own builder state (jet_codegen_begin_function resets every
-// per-function field), so the rows are those one builder lowers in order.
-fn jet_codegen_lower_in_parts(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], workers: Int) -> [JetCodegenLoweredFunction] {
+// The next unclaimed part of a dynamically scheduled lowering.
+struct JetCodegenPartQueue {
+    next: Int
+}
+
+// Parts per admitted thread: enough that a thread which drew light parts
+// claims more while another finishes a heavy one, few enough that each
+// part's builder is set up rarely.
+JET_CODEGEN_LOWER_PARTS_PER_THREAD :: 8
+
+// Lowers the program in `slot` on `workers` threads with dynamic scheduling:
+// the function rows are cut into consecutive parts of about equal source
+// weight (compiler_threads_partition), and each thread claims the next
+// unclaimed part until none is left, so no thread idles while parts remain.
+// Each part lowers on its own builder and the parts join in part order. A
+// function's lowering reads only the program and its own builder state
+// (jet_codegen_begin_function resets every per-function field), so the rows
+// are those one builder lowers in order, whichever thread lowers a part.
+fn jet_codegen_lower_in_parts(slot: Shared<JetCodegenProgramSlot>, weights: [Int], workers: Int) -> [JetCodegenLoweredFunction] {
+    count := workers * JET_CODEGEN_LOWER_PARTS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    bounds :: compiler_threads_partition(weights, count)
     parts := [Shared<JetCodegenLowerPart>]{}
-    loop part in 0..<workers {
+    loop part in 0..<count {
         row :: shared JetCodegenLowerPart{first: bounds[part], last: bounds[part + 1], rows: [JetCodegenLoweredFunction]{}}
         &parts.push(row)
     }
-    _ := jet_codegen_lower_parts(slot, parts, 0)
+    queue :: shared JetCodegenPartQueue{next: 0}
+    _ := jet_codegen_lower_parts(slot, parts, queue, workers, 1)
     reversed := [JetCodegenLoweredFunction]{}
-    part := workers
+    part := count
     loop part > 0 {
         part -= 1
         jet_codegen_lower_part_drain(parts[part], &reversed)
@@ -3648,17 +3665,35 @@ fn jet_codegen_lower_part_drain(part: Shared<JetCodegenLowerPart>, reversed: &[J
     }
 }
 
-// Lowers `parts[from..]`, one task per part and the last part on this thread;
-// returns how many functions they lowered.
-fn jet_codegen_lower_parts(slot: Shared<JetCodegenProgramSlot>, parts: [Shared<JetCodegenLowerPart>], from: Int) -> Int {
-    if from >= parts.len() - 1 -> return jet_codegen_lower_part(slot, parts[from])
+// Runs claiming threads `from..<workers`, one task each and the last on this
+// thread; returns how many functions they lowered.
+fn jet_codegen_lower_parts(slot: Shared<JetCodegenProgramSlot>, parts: [Shared<JetCodegenLowerPart>], queue: Shared<JetCodegenPartQueue>, workers: Int, from: Int) -> Int {
+    if from >= workers -> return jet_codegen_lower_claimed(slot, parts, queue)
     lowered := 0
     task.group lower_threads {
-        head :: task jet_codegen_lower_part(slot, parts[from])
-        lowered = jet_codegen_lower_parts(slot, parts, from + 1)
+        head :: task jet_codegen_lower_claimed(slot, parts, queue)
+        lowered = jet_codegen_lower_parts(slot, parts, queue, workers, from + 1)
         lowered += head.join() ?? panic(compiler_threads_failure_text(err))
     }
     lowered
+}
+
+// One thread: lowers the parts it claims until none is left.
+fn jet_codegen_lower_claimed(slot: Shared<JetCodegenProgramSlot>, parts: [Shared<JetCodegenLowerPart>], queue: Shared<JetCodegenPartQueue>) -> Int {
+    lowered := 0
+    loop {
+        index :: jet_codegen_lower_claim(queue)
+        if index >= parts.len() -> break
+        lowered += jet_codegen_lower_part(slot, parts[index])
+    }
+    lowered
+}
+
+fn jet_codegen_lower_claim(queue: Shared<JetCodegenPartQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
 }
 
 // One thread: lowers its part's rows in order on its own builder.
