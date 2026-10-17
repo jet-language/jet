@@ -2966,6 +2966,8 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
 
     reactive := sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reactive.handled -> return reactive
+    event_handle := sema_call_try_event_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if event_handle.handled -> return event_handle
     int_abs := sema_call_try_int_abs_source(receiver, receiver_value, method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if int_abs.handled -> return int_abs
     // D-TRAIT-OVERLOAD1=A: Complex is not Numeric; its magnitude is its own
