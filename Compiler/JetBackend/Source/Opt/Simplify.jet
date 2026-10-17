@@ -81,6 +81,7 @@ fn opt_rename_inst(facts: OptFacts, inst: LIRInst) -> LIRInst Never! {
         .FunctionAddress(_, _) -> inst
         .Convert(dst, src) -> LIRInst.Convert{dst: dst, src: opt_id(facts, src)}
         .StackSlot(_, _, _) -> inst
+        .ThreadWord(_, _) -> inst
     }
 }
 
@@ -774,6 +775,7 @@ fn opt_renumber_inst(map: [Int], inst: LIRInst) -> LIRInst Never! {
         .FunctionAddress(dst, target) -> LIRInst.FunctionAddress{dst: opt_n(map, dst), function: target}
         .Convert(dst, src) -> LIRInst.Convert{dst: opt_n(map, dst), src: opt_n(map, src)}
         .StackSlot(dst, size, align) -> LIRInst.StackSlot{dst: opt_n(map, dst), size: size, align: align}
+        .ThreadWord(dst, offset) -> LIRInst.ThreadWord{dst: opt_n(map, dst), offset: offset}
     }
 }
 

@@ -1070,6 +1070,11 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Function{id: target}})
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
+        .ThreadWord(dst, offset) -> {
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            x64_load_gs(&emitter.code, reg, offset)
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
     }
 }
 

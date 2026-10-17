@@ -4054,22 +4054,68 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // reads only the stop the preceding can-stop operation already delivered
 // (jet_rt_session_propagate, Shield-masked). A nonzero status word takes the
 // stop edge, whose canonical cleanup ends in Stopped; zero resumes.
+//
+// With the runtime pack (m.native_pack) GS points at the attached thread's
+// TCB, whose word 16 is the current control (JetRuntime Scheduler.jet,
+// scheduler_control_current), so both kinds test the control inline and call
+// only when the runtime could answer nonzero: no control resumes; Propagate
+// calls only for a nonzero status@32; Check calls only for status@32,
+// pending@48 or pauseMode@24 == 1 (jet_scheduler_native_poll's work). The
+// freestanding image has no TCB and keeps the call (its rail answers 0).
 fn lower_poll(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, kind: MIRPollKind, resume: MIRBlockID, stop: MIRBlockID) Never! {
-    symbol :: if kind == {
-        .Check -> "jet_rt_session_poll"
-        .Propagate -> "jet_rt_session_propagate"
-    }
-    status :: lower_word(&f)
-    lower_call_runtime(&m, &f, symbol, [LIRValueID]{}, Val(status))
-    zero :: lower_const(&f, 0)
-    stopped :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: stopped, condition: LIRCondition.Ne, left: status, right: zero})
     pending := [LIRBlockID]{}
     pending_targets := [MIRBlockID]{}
     stop_edge :: lower_branch_target(p, c, &m, &f, stop, &pending, &pending_targets) ?? return
     resume_edge :: lower_branch_target(p, c, &m, &f, resume, &pending, &pending_targets) ?? return
-    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: stop_edge, else_target: resume_edge})
+    lower_session_branch(&m, &f, kind, stop_edge, resume_edge)
     lower_fill_pending(p, c, &m, &f, pending, pending_targets)
+}
+
+// Seals the open block with lower_poll's test of `kind`: `stop` when the
+// session status is nonzero, else `resume`.
+fn lower_session_branch(m: &LowerModule, f: &LowerFunction, kind: MIRPollKind, stop_edge: LIRJumpTarget, resume_edge: LIRJumpTarget) Never! {
+    symbol :: if kind == {
+        .Check -> "jet_rt_session_poll"
+        .Propagate -> "jet_rt_session_propagate"
+    }
+    zero :: lower_const(&f, 0)
+    if m.native_pack {
+        control :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.ThreadWord{dst: control, offset: 16})
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        attached :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: attached, condition: LIRCondition.Ne, left: control, right: null})
+        test_status :: lower_new_block(&f)
+        slow :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: attached, then_target: lower_target(test_status, [LIRValueID]{}), else_target: resume_edge})
+        lower_start(&f, test_status, [LIRValueID]{})
+        status_word :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: status_word, base: control, offset: 32})
+        if kind == .Check {
+            pending_word :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: pending_word, base: control, offset: 48})
+            either :: lower_word(&f)
+            lower_emit(&f, LIRInst.Binary{dst: either, op: LIRBinaryOp.Or, left: status_word, right: pending_word})
+            raised :: lower_numeric_compare(&f, LIRCondition.Ne, either, zero)
+            test_pause :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: raised, then_target: lower_target(slow, [LIRValueID]{}), else_target: lower_target(test_pause, [LIRValueID]{})})
+            lower_start(&f, test_pause, [LIRValueID]{})
+            mode :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: mode, base: control, offset: 24})
+            one :: lower_const(&f, 1)
+            paused :: lower_numeric_compare(&f, LIRCondition.Eq, mode, one)
+            lower_seal(&f, LIRTerminator.Branch{condition: paused, then_target: lower_target(slow, [LIRValueID]{}), else_target: resume_edge})
+        } else {
+            raised :: lower_numeric_compare(&f, LIRCondition.Ne, status_word, zero)
+            lower_seal(&f, LIRTerminator.Branch{condition: raised, then_target: lower_target(slow, [LIRValueID]{}), else_target: resume_edge})
+        }
+        lower_start(&f, slow, [LIRValueID]{})
+    }
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, symbol, [LIRValueID]{}, Val(status))
+    stopped :: lower_numeric_compare(&f, LIRCondition.Ne, status, zero)
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: stop_edge, else_target: resume_edge})
 }
 
 // Stopped leaves the function with the stop still delivered on the session

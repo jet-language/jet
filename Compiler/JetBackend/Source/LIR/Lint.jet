@@ -382,6 +382,12 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             if size <= 0 -> &messages.push("stack slot v{dst.value} has size {size}")
             if align != 1 && align != 2 && align != 4 && align != 8 && align != 16 -> &messages.push("stack slot v{dst.value} has alignment {align}")
         }
+        .ThreadWord(dst, offset) -> {
+            layout :: function.values[dst.value].layout
+            if layout != lir_layout_pointer() && layout != lir_layout_word() -> &messages.push("thread word v{dst.value} is not a word or pointer")
+            if function.values[dst.value].drop != .Trivial -> &messages.push("thread word v{dst.value} has drop glue")
+            if offset < 0 || offset % 8 != 0 -> &messages.push("thread word v{dst.value} reads misaligned offset {offset}")
+        }
     }
     messages
 }

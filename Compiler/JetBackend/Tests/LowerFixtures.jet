@@ -1083,6 +1083,12 @@ fn run() {
     if !fx_report_runtime("try-capacity-unit", fx_try_capacity_unit()) -> clean = false
     if !fx_report_runtime("try-capacity-unit-fault", fx_try_capacity_unit_fault()) -> clean = false
     if !fx_report("stop-points", fx_stop_points()) -> clean = false
+    if !fx_report_stop_points_pack("stop-points-pack") -> clean = false
+    if !fx_report("stop-points-map", fx_stop_points_map()) -> clean = false
+    if !fx_stop_points_map_check() {
+        print("issue stop-points-map: the inline map loop is not guarded after its callback")
+        clean = false
+    }
     if !fx_sentry_scopes_check() {
         print("issue sentry-scopes: save/restore cleanup checks failed")
         clean = false

@@ -234,6 +234,17 @@ fn x64_load(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_modrm_mem(&code, dst, base, disp)
 }
 
+// mov dst, qword gs:[disp32] (65 REX.W 8B /r; ModRM rm=100 with SIB 25: no
+// base, no index, absolute disp32 in the GS segment).
+fn x64_load_gs(code: &[U8], dst: Int, disp: Int) Never! {
+    x64_byte(&code, 0x65)
+    x64_rex(&code, true, dst, 0)
+    x64_byte(&code, 0x8b)
+    x64_byte(&code, ((dst.bit_and(7)) << 3).bit_or(4))
+    x64_byte(&code, 0x25)
+    x64_u32(&code, disp)
+}
+
 // mov [base + disp], src (REX.W 89 /r)
 fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_rex(&code, true, src, base)
