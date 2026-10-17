@@ -250,13 +250,32 @@ fn test_scope_code_word(code: I64) -> I64 {
     word :: test_scope_code_word(trap_word(row + I64{24}))
     if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 &&
         word != TEST_SCOPE_R0801 && word != TEST_SCOPE_R0802 && word != TEST_SCOPE_R0803) -> return false
-    // Clear before matching: a mismatch must replace the original stop with
-    // E3001, rather than lose to scheduler first-stop-wins publication.
-    scheduler_control_discard_stop(control)
+    // The original stop stays pending while deeper frames unwind; only a
+    // mismatch replaces it (test_scope_catch native) with E3001 at once.
     saved :: jet_rt_poll_call_enter()
-    caught :: jet_rt_test_expect_fail_catch_scope(I64{0})
+    caught :: test_scope_catch(I64{0}, true)
     jet_rt_poll_call_leave(saved)
     caught
+}
+
+// The compiler enters the canonical expectation exit after deeper frames
+// unwind. Its own cleanup is outside the caught closure (MIRRust.rs:15056),
+// so the caught stop is cleared here, before that frame's own cleanup.
+#Export(c) fn jet_rt_test_catch_boundary(scope: I64) {
+    control :: scheduler_control_current()
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    completed :: state + I64{56}
+    at := trap_word(completed)
+    loop at > (I64{0}) {
+        at -= I64{2}
+        row :: trap_word(completed + I64{16}) + at * I64{8}
+        if (trap_word(row) == scope) {
+            scheduler_control_discard_stop(control)
+            return
+        }
+    }
 }
 
 fn test_scope_quoted(builder: I64, text: I64) {
