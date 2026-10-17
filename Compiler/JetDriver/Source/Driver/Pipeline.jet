@@ -5403,14 +5403,14 @@ fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: Jet
     capture := JetDriverCheckedProjectionCapture{}
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
     result := jet_driver_compile_stages(request, &kg, emit_rust, false, &capture, &journal)
-    if request.trace_sink == .Val(sink) -> sink.begin("keepgoing.final", "", -1, -1)
+    jet_driver_trace_keep_going_begin(request.trace_sink)
     result.canonical_routes = canonical_pass_take(&journal)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
     kg.diagnostic_mark = 0
     jet_driver_keep_going_diagnostics(&kg, "final", result.diagnostics)
     result.keep_going_rows = kg.rows
-    if request.trace_sink == .Val(sink) -> sink.end("keepgoing.final", result.keep_going_rows.len())
+    jet_driver_trace_keep_going_end(request.trace_sink, result.keep_going_rows.len())
     result
 }
 
@@ -6385,6 +6385,20 @@ fn jet_driver_trace_released(trace_sink: CompilerTraceSink?) {
         sink.end("driver.release", -1)
         sink.end("driver.result", -1)
     }
+}
+
+// `keepgoing.final` (jet_driver_compile_keep_going's rows past the stages)
+// opens and closes through these parameters, not a match on the request
+// inline: that request is an owned (`^`) parameter, a local to the Rust
+// tier (stage 0), which reads a pattern payload of a local's field by copy
+// (in place only under a parameter, D-MEM-COPYSEM1), and a trace sink, a
+// trait object, has no copy (E0599).
+fn jet_driver_trace_keep_going_begin(trace_sink: CompilerTraceSink?) {
+    if trace_sink == .Val(sink) -> sink.begin("keepgoing.final", "", -1, -1)
+}
+
+fn jet_driver_trace_keep_going_end(trace_sink: CompilerTraceSink?, rows: Int) {
+    if trace_sink == .Val(sink) -> sink.end("keepgoing.final", rows)
 }
 
 fn jet_driver_core_source_alias(unit: JetDriverSourceUnit, loaded_module: JetDriverLoadedModule, core_sources: [JetDriverCoreSource]) -> String Never! {
