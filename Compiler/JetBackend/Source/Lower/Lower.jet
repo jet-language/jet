@@ -3344,7 +3344,8 @@ fn lower_release_cross_read(function: MIRFunction, uses: [U64:[LowerReleaseUse]]
     // up to the read's block (-1: no use of its own).
     cursor := 0
     loop cursor < pending.len() {
-        block :: pending[cursor]
+        // copy: plain Int block index; the loop below pushes onto `pending`.
+        block :: pending[cursor].copy()
         cursor += 1
         loop from in predecessors[block] {
             if from == row.block || !reachable[from] || last.get(from) != None -> next
