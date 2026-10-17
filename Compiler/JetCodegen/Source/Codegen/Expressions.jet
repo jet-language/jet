@@ -906,14 +906,7 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCode
     // argument is lowered as a value, and its last use becomes a move later
     // (LastUse.jet).
     value := if place == {
-        None -> {
-            move_place := MIRPlaceID?{None}
-            if access == MIRAccess.Move && jet_codegen_for_in_iter_element(argument.ty) != None -> move_place = jet_codegen_lower_expression_place(&builder, program, argument, MIRAccess.Move)
-            if move_place == {
-                None -> jet_codegen_lower_expr(&builder, program, argument)
-                Val(id) -> jet_codegen_emit_value(&builder, program, argument.span, argument.ty, MIROperation.MovePlace{place: id})
-            }
-        }
+        None -> if access == MIRAccess.Move && jet_codegen_for_in_iter_element(argument.ty) != None -> jet_codegen_lower_consuming_value(&builder, program, argument) else -> jet_codegen_lower_expr(&builder, program, argument)
         Val(place_id) -> jet_codegen_emit_value(&builder, program, argument.span, argument.ty, MIROperation.ReadPlace{place: place_id})
     }
     return MIRCallArg{
@@ -1581,6 +1574,15 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
     if expression.kind == {
         .Local(local) -> {
             local_place :: jet_codegen_lower_local_place(&builder, program, local)
+            // Rust `place_for_local(local, Move)`: a consuming use moves the
+            // local's own place row, which retains Move access, so the
+            // MovePlace clears the local's drop flag and scope exit does not
+            // move it a second time. A place no consuming use may move keeps
+            // its access (jet_codegen_emit copies it instead).
+            if access == MIRAccess.Move {
+                if !jet_codegen_unmovable_place(builder, program, local_place) -> jet_codegen_retain_place_access(&builder, program, local_place, MIRAccess.Move)
+                return Val(local_place)
+            }
             return Val(jet_codegen_place_access(&builder, program, local_place, access))
         }
         .Field(receiver, reference) -> {
@@ -7580,14 +7582,10 @@ fn jet_codegen_lower_pattern_condition(builder: &JetCodegenBuilder, program: Jet
     jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, pattern.shape, bind_success, false)
 }
 
-// Rust `lower_consuming_value`: an owned handle moves from its own place row,
-// so its drop flag clears and scope exit does not move it a second time.
+// Rust `lower_consuming_value`: an owned value moves from its own place row
+// (jet_codegen_lower_expression_place with Move access), so its drop flag
+// clears and scope exit does not move it a second time.
 fn jet_codegen_lower_consuming_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
-    if value.kind == .Local(local) {
-        place := jet_codegen_lower_local_place(&builder, program, local)
-        if !jet_codegen_unmovable_place(builder, program, place) -> jet_codegen_retain_place_access(&builder, program, place, MIRAccess.Move)
-        return jet_codegen_emit_value(&builder, program, value.span, value.ty, MIROperation.MovePlace{place: place})
-    }
     if jet_codegen_lower_expression_place(&builder, program, value, MIRAccess.Move) == .Val(place) {
         return jet_codegen_emit_value(&builder, program, value.span, value.ty, MIROperation.MovePlace{place: place})
     }

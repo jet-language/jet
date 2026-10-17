@@ -732,10 +732,8 @@ fn jet_codegen_byte_buffer_native_int_operand(method: String) -> Bool Never! {
 
 fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, receiver: TExpr, mutating: Bool) -> (value: MIRValueID, place: MIRPlaceID?) {
     if !mutating {
-        if jet_codegen_builtin_iter_receiver(receiver.ty) {
-            place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Move)
-            if place != None -> return (value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.MovePlace{place: place ?? panic("checked iterator receiver place disappeared")}), place: None)
-        }
+        // An owned iterator receiver is consumed by the builtin.
+        if jet_codegen_builtin_iter_receiver(receiver.ty) -> return (value: jet_codegen_lower_consuming_value(&builder, program, receiver), place: None)
         return (value: jet_codegen_lower_expr(&builder, program, receiver), place: None)
     }
     place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Write)

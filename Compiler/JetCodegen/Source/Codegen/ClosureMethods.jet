@@ -205,10 +205,8 @@ fn jet_codegen_closure_method_mutates_receiver(operation: TClosureOp) -> Bool Ne
 
 fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, receiver: TExpr, mutating: Bool) -> MIRValueID {
     if !mutating {
-        if jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter")) {
-            place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Move)
-            if place != None -> return jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.MovePlace{place: place ?? panic("checked owned closure receiver place disappeared")})
-        }
+        // An owned iterator receiver is consumed by the closure method.
+        if jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter")) -> return jet_codegen_lower_consuming_value(&builder, program, receiver)
         return jet_codegen_lower_expr(&builder, program, receiver)
     }
     place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Write)
