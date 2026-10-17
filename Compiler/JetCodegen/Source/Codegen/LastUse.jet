@@ -1062,8 +1062,8 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                 instruction.operation = MIROperation.EnumPayload{subject: taken, owner: owner, variant: variant, index: field}
             }
             if moved_reads.get(key) == .Val(read_place) -> instruction.operation = MIROperation.MovePlace{place: read_place}
-            if iter_takes.get(key) != None && original.operation == .LoopIterInit(call, collection, step, _, source_kind) {
-                instruction.operation = MIROperation.LoopIterInit{call: call, collection: collection, step: step, by_value: true, source_kind: source_kind}
+            if iter_takes.get(key) != None && original.operation == .LoopIterInit(call, collection, iter_step, _, source_kind) {
+                instruction.operation = MIROperation.LoopIterInit{call: call, collection: collection, step: iter_step, by_value: true, source_kind: source_kind}
             }
             &rewritten.push(instruction)
             if clears.get(key) == .Val(extra) {
