@@ -2176,7 +2176,7 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     jet_codegen_enter_lexical(&builder, program)
     jet_codegen_lower_statements(&builder, program, then_body)
     then_result := MIRValueID?{None}
-    if jet_codegen_current_is_open(builder, program) -> then_result = Val(jet_codegen_lower_if_arm(&builder, program, then_value, lend))
+    if jet_codegen_current_is_open(builder, program) -> then_result = Val(jet_codegen_lower_if_arm(&builder, program, then_value, lend, condition, true))
     jet_codegen_leave_lexical(&builder, program)
     jet_codegen_close_if_arm(&builder, program, then_value, then_result, join_block, &incoming)
     builder.scope_depth = outer_depth
@@ -2188,7 +2188,7 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
         if else_value.kind == .IfExpr(next_condition, next_then_body, next_then_value, next_else_body, next_else_value) {
             else_result = Val(jet_codegen_lower_if_expression(&builder, program, else_value, next_condition, next_then_body, next_then_value, next_else_body, next_else_value, lend))
         } else {
-            else_result = Val(jet_codegen_lower_if_arm(&builder, program, else_value, lend))
+            else_result = Val(jet_codegen_lower_if_arm(&builder, program, else_value, lend, condition, false))
         }
     }
     jet_codegen_leave_lexical(&builder, program)
@@ -2209,10 +2209,11 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
 // a conditional binding's `lend` a ReadBorrow read of the place the arm would
 // copy (jet_codegen_lent_arm_place) or, for any other arm, of the lend's
 // holder once the arm's value is moved there. A diverging arm lowers as is.
-fn jet_codegen_lower_if_arm(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, lend: JetCodegenConditionalLend?) -> MIRValueID {
+// `guarded`: the arm runs under `condition` (its pattern bindings in scope).
+fn jet_codegen_lower_if_arm(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, lend: JetCodegenConditionalLend?, condition: TIfCond, guarded: Bool) -> MIRValueID {
     lending :: lend ?? return jet_codegen_lower_expr(&builder, program, value)
     if value.ty == (Type.Named{name: "Never"}) -> return jet_codegen_lower_expr(&builder, program, value)
-    place := jet_codegen_lent_arm_place(&builder, program, value, lending.depth)
+    place := jet_codegen_lent_arm_place(&builder, program, value, lending.depth, condition, guarded)
     if place == None {
         owned :: jet_codegen_lower_expr(&builder, program, value)
         if !jet_codegen_current_is_open(builder, program) -> return owned
@@ -2230,22 +2231,61 @@ fn jet_codegen_lower_if_arm(builder: &JetCodegenBuilder, program: JetCodegenProg
 // chain, or the whole, of a root the binding's scope leaves alone
 // (jet_codegen_stable_root; jet_codegen_stable_element_lets proved it for
 // every arm's root). The root must be bound at or above the binding's scope
-// `depth`: a root bound inside the arm (a pattern binding, an arm-body local)
-// dies at the arm's end, so its places are never lent past it.
-fn jet_codegen_lent_arm_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, depth: Int) -> MIRPlaceID? {
+// `depth`: a root bound inside the arm (an arm-body local, a pattern binding
+// holding its own copy) dies at the arm's end, so its places are never lent
+// past it; a payload binding of the arm's own guard that aliases a slot of
+// the guard's subject lends that slot (jet_codegen_lent_payload_place).
+fn jet_codegen_lent_arm_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, depth: Int, condition: TIfCond, guarded: Bool) -> MIRPlaceID? {
     if value.kind == .Clone(inner, _) {
         frozen :: jet_codegen_read_binding_place(&builder, program, value, false)
         if frozen != None -> return frozen
-        if !jet_codegen_is_element_place_chain(builder, program, inner) -> return None
-        root :: jet_codegen_element_place_root(inner) ?? return None
-        binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
-        if binding.depth > depth -> return None
-        local_place :: jet_codegen_lower_local_place(&builder, program, root)
-        if !jet_codegen_stable_root(builder, program, root, local_place) -> return None
-        if inner.kind == .Local(_) -> return Val(local_place)
-        return jet_codegen_lower_expression_place(&builder, program, inner, MIRAccess.Read)
+        return jet_codegen_lent_chain_place(&builder, program, inner, depth, condition, guarded, true)
     }
-    None
+    // An uncopied place is a move out of an outer root, which costs nothing;
+    // only a payload alias of the guard (whose read copies) is lent.
+    if !guarded -> return None
+    jet_codegen_lent_chain_place(&builder, program, value, depth, condition, guarded, false)
+}
+
+// The jet_codegen_lent_arm_place of a stored-field / List element chain
+// `inner`; `copied`: the arm copies it (a compiler-inserted clone).
+fn jet_codegen_lent_chain_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, inner: TExpr, depth: Int, condition: TIfCond, guarded: Bool, copied: Bool) -> MIRPlaceID? {
+    if !jet_codegen_is_element_place_chain(builder, program, inner) -> return None
+    root :: jet_codegen_element_place_root(inner) ?? return None
+    binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
+    if binding.depth > depth {
+        if !guarded -> return None
+        return jet_codegen_lent_payload_place(&builder, program, inner, root, binding.place, condition, depth)
+    }
+    if !copied -> return None
+    local_place :: jet_codegen_lower_local_place(&builder, program, root)
+    if !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+    if inner.kind == .Local(_) -> return Val(local_place)
+    jet_codegen_lower_expression_place(&builder, program, inner, MIRAccess.Read)
+}
+
+// #5041: `n :: if s.kind == .V(p) -> p else -> …`: the payload binding `p`
+// (`root`, bound at `alias`) dies at the arm's end, but when it aliases a
+// read-window slot of its guard's subject (a read alias rooted at the
+// subject root's own storage, or an or-pattern's borrowed local), that slot
+// outlives the arm. It is lent when the subject's root is bound at or above
+// `n`'s scope `depth` and stays put: a read parameter, or a stable root
+// (jet_codegen_stable_root; the proof covers it through the arm-root walk,
+// jet_codegen_arm_subject_root).
+fn jet_codegen_lent_payload_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, inner: TExpr, root: TLocal, alias: MIRPlaceID, condition: TIfCond, depth: Int) -> MIRPlaceID? {
+    subject_root :: jet_codegen_arm_subject_root(condition, root.name) ?? return None
+    owner :: jet_codegen_find_binding_for_local(builder, program, subject_root) ?? return None
+    if owner.depth > depth -> return None
+    owner_place :: jet_codegen_lower_local_place(&builder, program, subject_root)
+    if !jet_codegen_read_parameter_place(builder, program, owner_place) && !jet_codegen_stable_root(builder, program, subject_root, owner_place) -> return None
+    if !jet_codegen_borrowed_local_place(builder, program, alias) {
+        if builder.read_alias_places.get(alias.value) == None || builder.read_windows.get(alias.value) == None -> return None
+        slot :: jet_codegen_find_place(builder, program, alias) ?? return None
+        held :: jet_codegen_find_place(builder, program, owner_place) ?? return None
+        if slot.base != held.base -> return None
+    }
+    if inner.kind == .Local(_) -> return Val(alias)
+    jet_codegen_lower_expression_place(&builder, program, inner, MIRAccess.Read)
 }
 
 // #5041: `n :: if c -> a.f else -> g(x)`, or a `:=` of it nothing writes,
