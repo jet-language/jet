@@ -468,8 +468,11 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         }
         .LenString -> return jet_codegen_builtin_route("len_string", "jet_char_len", 1, [Bool]{true}, None)
         .LenList | .IsEmpty | .GetMap | .GetList | .First | .Last | .Contains | .ContainsKey | .DequeCapacity | .SetCapacity | .MapFromKeys | .SetShuffle | .ListUnion | .ListIntersection | .ListDifference | .ListRandom -> return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
-        .Max(fixed) -> {
-            if !fixed -> return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
+        // D-FLOATSORT1: Float extrema use the collection sort order, so a NaN
+        // item is the greatest value and never the least.
+        .Max(float) -> {
+            if float -> return jet_codegen_builtin_route("max_float", "jet_list_max_float", 1, [Bool]{false}, None)
+            return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
         }
         .Push -> {
             is_priority_queue := if jet_codegen_builtin_untag(receiver) == {
@@ -526,8 +529,9 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .Product(fixed) -> {
             if !fixed -> return jet_codegen_builtin_route("product", "jet_list_product", 1, [Bool]{false}, None)
         }
-        .Min(fixed) -> {
-            if !fixed -> return jet_codegen_builtin_route("min", "jet_list_min", 1, [Bool]{false}, None)
+        .Min(float) -> {
+            if float -> return jet_codegen_builtin_route("min_float", "jet_list_min_float", 1, [Bool]{false}, None)
+            return jet_codegen_builtin_route("min", "jet_list_min", 1, [Bool]{false}, None)
         }
         .Flatten -> {
             if jet_codegen_builtin_iter_receiver(receiver) -> return jet_codegen_builtin_route("iter_flatten", "jet_iter_flatten", 1, [Bool]{false}, None)
