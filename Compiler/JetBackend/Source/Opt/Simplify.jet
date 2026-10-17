@@ -502,7 +502,11 @@ fn opt_thread(function: &LIRFunction) -> Bool Never! {
 }
 
 // A block that jumps to a block with no other predecessor absorbs it: the
-// successor's parameters become aliases of the jump's arguments.
+// successor's parameters become aliases of the jump's arguments. An edge that
+// adopts an argument into a parameter with other drop glue (lower_adopt: a
+// trivial word or pointer into an owner) is the only spelling of that
+// adoption, so it is never merged; aliasing would drop the obligation
+// (inline_alias_safe refuses the same change at call entries).
 fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
     changed := false
     loop {
@@ -513,7 +517,7 @@ fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
             if merged -> break
             if block.terminator == .Jump(target) {
                 row :: rows.get(target.block.value) ?? -1
-                if row > 0 && row != index && counts[row] == 1 {
+                if row > 0 && row != index && counts[row] == 1 && opt_merge_keeps_drops(function, facts, function.blocks[row], target) {
                     successor :: function.blocks[row]
                     loop (position, param) in successor.params -> facts.alias[param.value] = opt_root(facts, target.args[position].value)
                     insts := block.insts
@@ -535,6 +539,14 @@ fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
         changed = true
     }
     changed
+}
+
+// Every parameter of `successor` has the drop glue of its argument's root.
+fn opt_merge_keeps_drops(function: LIRFunction, facts: OptFacts, successor: LIRBlock, target: LIRJumpTarget) -> Bool Never! {
+    loop (position, param) in successor.params {
+        if function.values[param.value].drop != function.values[opt_root(facts, target.args[position].value)].drop -> return false
+    }
+    true
 }
 
 fn opt_inst_has_effect(inst: LIRInst) -> Bool Never! {
