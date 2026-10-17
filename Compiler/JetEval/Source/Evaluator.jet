@@ -886,7 +886,9 @@ fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID]) 
         if index > 0 -> jet_eval_reset_session(&machine, jet_eval_default_config())
         &values.push(jet_eval_pure_session_value(&machine, function_id, span))
     }
-    (program: machine.program, values: ^values)
+    // The program moves back out of the machine: a field read would copy it
+    // and the machine's drop would then release the original.
+    (program: ^machine.program, values: ^values)
 }
 
 // A fresh evaluation session on `machine`'s program: every field

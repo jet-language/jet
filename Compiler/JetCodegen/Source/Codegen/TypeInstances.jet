@@ -35,37 +35,36 @@ fn jet_codegen_type_definition_types(definition: MIRTypeDef) -> [MIRType] Never!
     rows
 }
 
-fn jet_codegen_function_type_rows(function: MIRFunction) -> [MIRType] Never! {
-    rows := [MIRType]{}
-    loop parameter in function.params -> &rows.push(parameter.ty)
-    if function.declared_return != None -> &rows.push(function.declared_return ?? function.return_type)
-    &rows.push(function.return_type)
+// Merge every type a function row carries, in row order: parameters, the
+// declared and lowered returns, the failure carrier, locals, values, places,
+// Web reconstructions, captures, the generator item, then instruction
+// results. The types are read in place; no per-function list of copies.
+fn jet_codegen_merge_function_types(instances: &JetCodegenTypeInstances, function: MIRFunction) Never! {
+    loop parameter in function.params -> jet_codegen_merge_type_instance(&instances, parameter.ty)
+    if function.declared_return == .Val(declared) -> jet_codegen_merge_type_instance(&instances, declared)
+    jet_codegen_merge_type_instance(&instances, function.return_type)
     if function.failure == {
         .Result(success, error) -> {
-            &rows.push(success)
-            &rows.push(error)
+            jet_codegen_merge_type_instance(&instances, success)
+            jet_codegen_merge_type_instance(&instances, error)
         }
-        .Optional(value) | .Diverges(value) -> &rows.push(value)
+        .Optional(value) | .Diverges(value) -> jet_codegen_merge_type_instance(&instances, value)
         .Infallible -> {}
     }
-    loop local in function.locals -> &rows.push(local.ty)
-    loop value in function.values -> &rows.push(value.ty)
-    loop place in function.places -> &rows.push(place.ty)
+    loop local in function.locals -> jet_codegen_merge_type_instance(&instances, local.ty)
+    loop value in function.values -> jet_codegen_merge_type_instance(&instances, value.ty)
+    loop place in function.places -> jet_codegen_merge_type_instance(&instances, place.ty)
     loop reconstruction in function.web_param_reconstructions {
-        &rows.push(reconstruction.ty)
-        loop field in reconstruction.fields -> &rows.push(field.ty)
+        jet_codegen_merge_type_instance(&instances, reconstruction.ty)
+        loop field in reconstruction.fields -> jet_codegen_merge_type_instance(&instances, field.ty)
     }
-    loop capture in function.capture_params -> &rows.push(capture.ty)
-    if function.generator != None {
-        generator :: function.generator ?? panic("checked MIR generator facts disappeared during type-instance collection")
-        &rows.push(generator.item)
-    }
+    loop capture in function.capture_params -> jet_codegen_merge_type_instance(&instances, capture.ty)
+    if function.generator == .Val(generator) -> jet_codegen_merge_type_instance(&instances, generator.item)
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.ty != None -> &rows.push(instruction.ty ?? function.return_type)
+            if instruction.ty == .Val(ty) -> jet_codegen_merge_type_instance(&instances, ty)
         }
     }
-    rows
 }
 
 fn jet_codegen_trait_method_type_rows(method: MIRTraitMethod) -> [MIRType] Never! {
@@ -163,12 +162,8 @@ fn jet_codegen_collect_type_instances(types: [MIRTypeDef], functions: [MIRFuncti
     loop definition in types {
         loop ty in jet_codegen_type_definition_types(definition) -> jet_codegen_merge_type_instance(&instances, ty)
     }
-    loop function in functions {
-        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_merge_type_instance(&instances, ty)
-    }
-    loop function in nested_functions {
-        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_merge_type_instance(&instances, ty)
-    }
+    loop function in functions -> jet_codegen_merge_function_types(&instances, function)
+    loop function in nested_functions -> jet_codegen_merge_function_types(&instances, function)
     loop function in foreign {
         loop parameter in function.params -> jet_codegen_merge_type_instance(&instances, parameter.ty)
         if function.return_type != None {
@@ -190,21 +185,9 @@ fn jet_codegen_collect_type_instances(types: [MIRTypeDef], functions: [MIRFuncti
         }
     }
     loop constant in constants -> jet_codegen_merge_type_instance(&instances, constant.ty)
-
-    loop function in functions {
-        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_ensure_type_instance(&instances, ty)
-    }
-    loop function in nested_functions {
-        loop ty in jet_codegen_function_type_rows(function) -> jet_codegen_ensure_type_instance(&instances, ty)
-    }
-    loop definition in types {
-        loop ty in jet_codegen_type_definition_types(definition) -> jet_codegen_ensure_type_instance(&instances, ty)
-    }
-    loop trait_def in traits {
-        loop method in trait_def.methods {
-            loop ty in jet_codegen_trait_method_type_rows(method) -> jet_codegen_ensure_type_instance(&instances, ty)
-        }
-    }
+    // Every function, definition and trait-method type was merged above, and
+    // a merge inserts each identity it meets, so a second (ensure) pass over
+    // those rows could add nothing.
     loop definition in types {
         if instances.positions.get(definition.id.value) == None -> panic("missing canonical MIR type instance for `{definition.key}` ({definition.id.value})")
     }
