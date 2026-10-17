@@ -1131,7 +1131,7 @@ fn jet_codegen_loop_owned_local(builder: JetCodegenBuilder, program: JetCodegenP
 // Whether `body` may consume the loop item `name`: a value or write use of
 // the bare name (jet_codegen_stability_expr's `consumed`).
 fn jet_codegen_loop_body_consumes(body: [TStmt], name: String) -> Bool Never! {
-    state := JetCodegenLetStability{tick: 0, last: [String:Int]{}, read_at: [String:Int]{}, pinned: [String:Bool]{}, uses: 0, consumed: [String:Int]{}, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
+    state := JetCodegenLetStability{tick: 0, last: [String:Int]{}, read_at: [String:Int]{}, pinned: [String:Bool]{}, uses: 0, consumed: [String:Int]{}, writes: 0, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
     jet_codegen_stability_list(&state, body, false)
     state.consumed.get(name) != None
 }
@@ -3356,7 +3356,8 @@ fn jet_codegen_lower_split_view(builder: &JetCodegenBuilder, program: JetCodegen
 // latest change and `read_at` its latest read, so a binding recorded at tick
 // `start` breaks when one of its reads finds its root changed after `start`,
 // or when a loop entered after `start` both reads it and changes its root;
-// `uses` and `consumed` count consuming uses the same way. The name `*`
+// `uses` and `consumed` count consuming uses the same way, and `writes`
+// counts changes (jet_codegen_stability_call). The name `*`
 // stands for every root. The body of an inline block, an `Inline`
 // statement, a setup member or an `if` prelude lowers without a scope of its
 // own, so its bindings answer at the end of the enclosing scope; a pattern's
@@ -3370,6 +3371,7 @@ struct JetCodegenLetStability {
     pinned: [String:Bool]
     uses: Int
     consumed: [String:Int]
+    writes: Int
     pending: [JetCodegenLetCandidate]
     stable: [String:Bool]
 }
@@ -3421,7 +3423,7 @@ fn jet_codegen_loop_source_key(collection: TExpr) -> String Never! {
 }
 
 fn jet_codegen_stable_element_lets(statements: [TStmt], expression: TExpr?) -> [String:Bool] Never! {
-    state := JetCodegenLetStability{tick: 0, last: [String:Int]{}, read_at: [String:Int]{}, pinned: [String:Bool]{}, uses: 0, consumed: [String:Int]{}, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
+    state := JetCodegenLetStability{tick: 0, last: [String:Int]{}, read_at: [String:Int]{}, pinned: [String:Bool]{}, uses: 0, consumed: [String:Int]{}, writes: 0, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
     jet_codegen_stability_list(&state, statements, false)
     if expression == .Val(value) -> jet_codegen_stability_expr(&state, value, JetCodegenStabilityUse.Value)
     jet_codegen_stability_settle(&state, 0)
@@ -3430,6 +3432,7 @@ fn jet_codegen_stable_element_lets(statements: [TStmt], expression: TExpr?) -> [
 
 fn jet_codegen_stability_disturb(state: &JetCodegenLetStability, name: String) Never! {
     state.tick += 1
+    state.writes += 1
     state.last[name] = state.tick
 }
 
@@ -4073,6 +4076,21 @@ fn jet_codegen_stability_call_args(state: &JetCodegenLetStability, args: [TCallA
     }
 }
 
+// The operands of one call are all live when it runs: a write borrow or a
+// mutating receiver among them changes its root while every other operand is
+// read, whatever order the walk visits them in (MIR Lint alias.exclusive: a
+// place written while an alias of its storage is read in the same
+// operation). Once the operands are walked, a change among them
+// (`state.writes` moved past `writes`) reads every local the call names once
+// more, so a binding read there over the written root breaks.
+fn jet_codegen_stability_call(state: &JetCodegenLetStability, expression: TExpr, writes: Int) Never! {
+    if state.writes == writes || state.pending.len() == 0 -> return
+    names := [String]{}
+    jet_codegen_stability_collect_locals(expression, &names)
+    seen := [String]{}
+    loop name in names -> jet_codegen_stability_read(&state, name, &seen)
+}
+
 // How the receiver of a route that `mutates` uses its local.
 fn jet_codegen_stability_receiver(mutates: Bool) -> JetCodegenStabilityUse Never! {
     if mutates -> return JetCodegenStabilityUse.Write
@@ -4152,18 +4170,26 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
             jet_codegen_stability_disturb(&state, local.name)
         }
         // A mutating route writes through its receiver; an owned iterator
-        // receiver is moved (jet_codegen_lower_builtin_receiver).
+        // receiver is moved (jet_codegen_lower_builtin_receiver). Every call
+        // form ends with jet_codegen_stability_call: its operands are live
+        // together.
         .BuiltinMethod(receiver, operation, args) -> {
+            writes :: state.writes
             jet_codegen_stability_values(&state, args)
             jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(tir_builtin_mutates_receiver(operation) || jet_codegen_builtin_iter_receiver(receiver.ty)))
+            jet_codegen_stability_call(&state, expression, writes)
         }
         .ClosureMethod(receiver, operation, args) -> {
+            writes :: state.writes
             jet_codegen_stability_values(&state, args)
             jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_closure_method_mutates_receiver(operation) || jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter"))))
+            jet_codegen_stability_call(&state, expression, writes)
         }
         .HandleMethod(receiver, operation, args) -> {
+            writes :: state.writes
             jet_codegen_stability_values(&state, args)
             jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_handle_receiver_is_mutating(operation)))
+            jet_codegen_stability_call(&state, expression, writes)
         }
         .Binary(_, _, _, lhs, rhs) -> {
             jet_codegen_stability_expr(&state, lhs, value)
@@ -4176,16 +4202,26 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         .StrLit(parts) -> loop part in parts {
             if part == .Interpolation(hole, _) -> jet_codegen_stability_expr(&state, hole, value)
         }
-        .Call(_, _, args) | .ModuleCall(_, _, _, _, args) | .StaticCall(_, _, _, _, args) | .AllocNew(_, args) -> jet_codegen_stability_call_args(&state, args)
+        .Call(_, _, args) | .ModuleCall(_, _, _, _, args) | .StaticCall(_, _, _, _, args) | .AllocNew(_, args) -> {
+            writes :: state.writes
+            jet_codegen_stability_call_args(&state, args)
+            jet_codegen_stability_call(&state, expression, writes)
+        }
         // A method receiver may be written through: its convention is the
         // method's.
         .MethodCall(receiver, _, _, args) -> {
+            writes :: state.writes
             jet_codegen_stability_call_args(&state, args)
             jet_codegen_stability_expr(&state, receiver, write)
+            jet_codegen_stability_call(&state, expression, writes)
         }
-        .ExternCall(_, _, args) -> loop argument in args {
-            use_kind_arg :: if argument.mut_borrow -> write else -> value
-            jet_codegen_stability_expr(&state, argument.value, use_kind_arg)
+        .ExternCall(_, _, args) -> {
+            writes :: state.writes
+            loop argument in args {
+                use_kind_arg :: if argument.mut_borrow -> write else -> value
+                jet_codegen_stability_expr(&state, argument.value, use_kind_arg)
+            }
+            jet_codegen_stability_call(&state, expression, writes)
         }
         .PatternMatches(subject, pattern) -> {
             jet_codegen_stability_pattern_children(&state, pattern)

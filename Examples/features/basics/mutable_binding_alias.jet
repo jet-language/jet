@@ -1,6 +1,8 @@
 // A `:=` binding of a place that nothing ever writes reads the place in
 // place like a `::` binding (#5041); one that is written, or whose root
-// changes while it is still read, keeps its own copy.
+// changes while it is still read, keeps its own copy. So does one read in
+// the same call that borrows its root for writing: the call's operands are
+// live together, so the callee may change the root under the binding.
 struct Blob {
     data: [Int]
     text: String
@@ -9,6 +11,28 @@ struct Blob {
 fn pick(rows: [Blob], i: Int) -> Int {
     row := rows[i]
     row.data.len() + row.text.len()
+}
+
+struct Machine {
+    frames: [[String]]
+    log: [String]
+}
+
+// Drops every frame, including the one `value` was read from, then reads
+// `value`.
+fn record(value: String, machine: &Machine) -> Int {
+    &machine.frames.clear()
+    &machine.log.push(value)
+    machine.log.len()
+}
+
+fn parameter(machine: &Machine, frame: Int, index: Int) -> Int {
+    value := machine.frames[frame][index]
+    record(value, &machine)
+}
+
+fn validate(name: String, module_identity: String, seen: &[String]) {
+    &seen.push("{module_identity}:{name}")
 }
 
 fn run() {
@@ -29,4 +53,11 @@ fn run() {
         print("cur {cur.text}")
         cur = rows[1]
     }
+    machine := Machine{frames: [[String]]{[String]{"a", "b"}, [String]{"c"}}, log: [String]{}}
+    print("record {parameter(&machine, 0, 1)} {machine.log[0]} {machine.frames.len()}")
+    // A `:=` field binding passed beside `&seen` of the same root.
+    seen := [String]{"m"}
+    module_identity := seen[0]
+    validate("x", module_identity, &seen)
+    print("seen {seen[1]}")
 }
