@@ -4806,6 +4806,14 @@ fn mir_program_bytes_internal(program: MIRProgram) -> [U8] {
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
 fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
+    mir_program_write_head(&writer, program)
+    mir_digest_len(&writer, program.functions.len())
+    loop position in mir_digest_sort_functions(program.functions) -> mir_digest_function(&writer, program.functions[position])
+    mir_program_write_tail(&writer, program)
+}
+
+// The program's rows before its functions.
+fn mir_program_write_head(writer: &MIRCanonicalWriter, program: MIRProgram) {
     mir_digest_tag(&writer, "mir")
     mir_digest_u16(&writer, program.schema_version)
     mir_digest_bool(&writer, program.native_pack)
@@ -4869,8 +4877,10 @@ fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
         mir_digest_string(&writer, program.source_files[position].path)
         mir_digest_string(&writer, program.source_files[position].source)
     }
-    mir_digest_len(&writer, program.functions.len())
-    loop position in mir_digest_sort_functions(program.functions) -> mir_digest_function(&writer, program.functions[position])
+}
+
+// The program's rows after its functions.
+fn mir_program_write_tail(writer: &MIRCanonicalWriter, program: MIRProgram) {
     mir_digest_len(&writer, program.foreign.len())
     loop position in mir_digest_sort_foreign(program.foreign) -> mir_digest_foreign(&writer, program.foreign[position])
     mir_digest_len(&writer, program.links.len())
@@ -4918,6 +4928,11 @@ fn mir_program_bytes(program: MIRProgram) -> [U8] {
 fn mir_program_digest(program: MIRProgram) -> String {
     writer := mir_digest_hash_writer()
     mir_program_write(&writer, program)
+    mir_digest_finish(writer)
+}
+
+// The digest text of a hashing writer: its four lanes, little-endian, in hex.
+fn mir_digest_finish(writer: MIRCanonicalWriter) -> String Never! {
     output := [U8]{}
     lanes :: [U64]{writer.lane0, writer.lane1, writer.lane2, writer.lane3}
     loop lane in lanes {
@@ -4927,6 +4942,92 @@ fn mir_program_digest(program: MIRProgram) -> String {
         }
     }
     mir_digest_hex(output)
+}
+
+// A compiler thread is admitted for at least this many MIR instructions of
+// function bodies, so a small program digests on the calling thread.
+MIR_DIGEST_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+
+// Parts per admitted thread. One round encodes one part per thread, so a
+// round holds about this fraction of the program's function bytes.
+MIR_DIGEST_PARTS_PER_THREAD :: 16
+
+// The functions a threaded digest encodes, moved out of the program, and
+// their digest order (mir_digest_sort_functions). Every thread reads them.
+struct MIRDigestFunctions {
+    functions: [MIRFunction]
+    order: [Int]
+}
+
+// mir_program_digest with the functions' canonical bytes encoded on up to
+// `threads` compiler threads (D-JOBS1, compiler_threads_admit). The
+// functions, in digest order, are cut into consecutive parts of about equal
+// instruction count. Each round encodes one part per thread into its own
+// byte list (mir_digest_writer), and the caller hashes the lists in part
+// order. Hashing a byte list advances the lanes exactly as hashing the same
+// bytes while they are written, so the digest equals mir_program_digest for
+// any thread count. The functions move out of `program` into one slot that
+// the threads read, and back before the rows after them are hashed.
+fn mir_program_digest_threads(program: &MIRProgram, threads: CompilerThreads) -> String {
+    order :: mir_digest_sort_functions(program.functions)
+    weights := [Int]{}
+    total := 0
+    loop position in order {
+        size := 0
+        loop block_index in 0..<program.functions[position].blocks.len() -> size += program.functions[position].blocks[block_index].instructions.len()
+        &weights.push(size)
+        total += size
+    }
+    workers :: compiler_threads_admit(threads, order.len(), total, MIR_DIGEST_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers <= 1 -> return mir_program_digest(program)
+    writer := mir_digest_hash_writer()
+    mir_program_write_head(&writer, program)
+    mir_digest_len(&writer, program.functions.len())
+    count := workers * MIR_DIGEST_PARTS_PER_THREAD
+    if count > order.len() -> count = order.len()
+    bounds :: compiler_threads_partition(weights, count)
+    slot :: shared MIRDigestFunctions{functions: compiler_take_rows<MIRFunction>(&program.functions), order: order}
+    first := 0
+    loop first < count {
+        last := first + workers
+        if last > count -> last = count
+        encoded :: mir_digest_encode_parts(slot, bounds, first, last)
+        loop index in 0..<encoded.len() -> mir_digest_raw_bytes(&writer, encoded[index])
+        first = last
+    }
+    mir_digest_functions_restore(&program, slot)
+    mir_program_write_tail(&writer, program)
+    mir_digest_finish(writer)
+}
+
+// Encodes parts `from..<last` of `bounds`, one task each and the last on
+// this thread; returns their bytes in part order.
+fn mir_digest_encode_parts(slot: Shared<MIRDigestFunctions>, bounds: [Int], from: Int, last: Int) -> [[U8]] {
+    if from >= last - 1 -> return [[U8]]{mir_digest_encode_part(slot, bounds[from], bounds[from + 1])}
+    encoded := [[U8]]{}
+    task.group digest_threads {
+        head :: task mir_digest_encode_part(slot, bounds[from], bounds[from + 1])
+        rest := mir_digest_encode_parts(slot, bounds, from + 1, last)
+        &encoded.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        &encoded.extend(compiler_take_rows<[U8]>(&rest))
+    }
+    encoded
+}
+
+// One thread: the canonical bytes of the functions at digest positions
+// `first..<last`.
+fn mir_digest_encode_part(slot: Shared<MIRDigestFunctions>, first: Int, last: Int) -> [U8] {
+    inputs :: slot.guard_read()
+    writer := mir_digest_writer()
+    // Passed straight through: a local binding of a guarded function would copy it.
+    loop index in first..<last -> mir_digest_function(&writer, inputs.value.functions[inputs.value.order[index]])
+    writer.bytes
+}
+
+// Moves the functions back into the program, in their original order.
+fn mir_digest_functions_restore(program: &MIRProgram, slot: Shared<MIRDigestFunctions>) {
+    permit :: slot.guard_edit()
+    program.functions = compiler_take_rows<MIRFunction>(&permit.value.functions)
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::encode_module

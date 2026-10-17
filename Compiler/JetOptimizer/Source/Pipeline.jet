@@ -27,6 +27,7 @@ use jet_foundation.[
     compiler_threads_part_of,
     compiler_threads_partition,
     mir_program_digest,
+    mir_program_digest_threads,
 ]
 
 enum MIROptimizationErrorKind {
@@ -126,8 +127,9 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // `--verify`) also lints the input and re-verifies legality and lints the
 // program every pass produces; an ordinary compile trusts the passes after the
 // entry check (Rust MIROptimization `validate_after`). The per-function
-// passes run in waves on up to `threads` compiler threads (mir_pass_wave);
-// the result is the same for every thread count.
+// passes run in waves on up to `threads` compiler threads (mir_pass_wave),
+// and the seal digest encodes the functions on them
+// (mir_program_digest_threads); the result is the same for every thread count.
 fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     pipeline_before :: mir_pass_journal_before(program, journal, "mir.optimize-pipeline")
@@ -236,7 +238,7 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&program)
     mir_pass_sort_decision_rows_for_program(&program)
-    digest :: mir_program_digest(program)
+    digest :: mir_program_digest_threads(&program, threads)
     loop index in 0..<program.functions.len() -> program.functions[index].optimization.derived_from_digest = Val(digest)
     mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
     mir_optimizer_succeeded(report)
