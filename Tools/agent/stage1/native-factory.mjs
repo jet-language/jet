@@ -1,12 +1,45 @@
 // Admit the retained, source-bound bootstrap factory before feeding real Jet
 // library/native requests. A factory is not an argv CLI or a native candidate.
 import { createHash } from 'node:crypto';
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { assertPinnedSource } from '../proof-source.mjs';
 const digest = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+// Compiler/Bootstrap/BuildIdentity.rs `compiler_source_id` over the same
+// COMPILER_SOURCES roots and framing (domain NUL, then per file big-endian u64
+// path length, path, u64 byte length, bytes; byte-sorted rooted paths;
+// symlinks and the skipped directory names never enter), spelled
+// `name@version#<source id>` as a factory receipt's compiler_source_identity.
+// A native seed has no factory receipt: its stages name the candidate source
+// this way without a Rust build.
+const compilerSources = ['Cargo.toml', 'Compiler', 'build.rs', 'Core', 'Source', 'crates/jet-foundation', 'crates/jet-unicode', 'crates/jet-lexer', 'crates/jet-parser', 'crates/jet-net', 'crates/jet-comptime', 'crates/jet-sema', 'crates/jet-codegen', 'crates/jet-driver', 'crates/jet-pkg-model', 'crates/jet-env-model', 'crates/jet-nix-eval', 'crates/jetpack', 'crates/jet-queries', 'crates/jet-semindex', 'crates/jet-impact', 'crates/jet-evalhost', 'crates/jet-rt', 'crates/jet-repl', 'crates/jet-debug', 'crates/jet-cli', 'crates/jet-canvas', 'crates/jet-devserver', 'Docs/spec/reference/core-library.md', 'Docs/spec/diagnostics.md', 'Examples/features/collections/wordcount.jet', 'tests/fixtures/nix-compat/oracle.json'];
+const skippedSourceDirectories = new Set(['.git', 'target', 'tests', 'test', 'testdata', 'fixtures', 'examples', 'benches', 'expected']);
+export function compilerSourceIdentity(repo) {
+  const root = resolve(repo);
+  const rootedSources = readFileSync(join(root, 'Compiler/Bootstrap/BuildIdentity.rs'), 'utf8');
+  const listed = /pub const COMPILER_SOURCES: &\[&str\] = &\[([^\]]*)\];/.exec(rootedSources)?.[1].match(/"[^"]*"/g)?.map(item => JSON.parse(item));
+  if (JSON.stringify(listed) !== JSON.stringify(compilerSources)) throw Error('BuildIdentity.rs COMPILER_SOURCES changed; update compilerSourceIdentity');
+  const files = [];
+  const walk = path => {
+    const stat = lstatSync(path);
+    if (stat.isFile()) files.push(path.slice(root.length + 1));
+    else if (stat.isDirectory() && !skippedSourceDirectories.has(basename(path))) for (const name of readdirSync(path).sort()) walk(join(path, name));
+  };
+  for (const source of compilerSources) walk(join(root, source));
+  const paths = [...new Set(files)].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  const hash = createHash('sha256').update('jet.compiler-source.v1\0');
+  const length = value => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64BE(BigInt(value)); return bytes; };
+  for (const path of paths) {
+    const bytes = readFileSync(join(root, path));
+    hash.update(length(Buffer.byteLength(path))).update(path).update(length(bytes.length)).update(bytes);
+  }
+  const name = /pub const BINARY_NAME: &str = "([^"]+)";/.exec(readFileSync(join(root, 'crates/jet-foundation/src/Syntax/core_surface.rs'), 'utf8'))?.[1];
+  const version = /^version\s*=\s*"([^"]+)"/m.exec(readFileSync(join(root, 'crates/jet-pkg-model/Cargo.toml'), 'utf8'))?.[1];
+  if (!name || !version) throw Error('cannot read the compiler binary name (core_surface.rs BINARY_NAME) or version (jet-pkg-model Cargo.toml)');
+  return `${name}@${version}#${hash.digest('hex')}`;
+}
 // Owner-allowed census rows (phase, item, code, message; span ignored): a file
 // named by NATIVE_FEED_ALLOWED_ROWS, one tab-separated row per line. Only a
 // census whose every row is listed passes; each such row is a trapped item
