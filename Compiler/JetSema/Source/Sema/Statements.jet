@@ -7,6 +7,7 @@ use jet_foundation.[
     BindPattern,
     Binding,
     CallArg,
+    ContextField,
     Diagnostic,
     EffectRowEntry,
     Expr,
@@ -28,6 +29,7 @@ use jet_foundation.[
     TBinaryOp,
     TCallArg,
     TComptimeValue,
+    TContextGuard,
     TContract,
     TCoreClosureKind,
     TDestructureBinding,
@@ -5643,7 +5645,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
                 }
             }
-            .Layout(_, _, _, span) | .ContextBlock(_, _, span) | .AssumeDet(_, _, _, span) -> {
+            .ContextBlock(fields, body, span) -> {
+                if !sema_stmt_check_context_block(fields, body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
+            }
+            .Layout(_, _, _, span) | .AssumeDet(_, _, _, span) -> {
                 complete = false
                 sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
             }
@@ -5824,8 +5829,50 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
     complete
 }
 
+// Rust CheckerCore `Stmt::ContextBlock` (D-CTX1, D-DEADLINE1): each field
+// value is checked once in the enclosing scope (`deadline` is an Int
+// epoch-millis instant, `allocator` an `Arena`, `Bump`, `Pool` or `Fixed`
+// handle, `logger` any value; the parser already rejected unknown fields,
+// E0761), then the body is an ordinary nested block. Lowering installs the
+// guards around the body (jet_codegen_lower_context_block).
+fn sema_stmt_check_context_block(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    complete := true
+    guards := [TContextGuard]{}
+    loop field in fields {
+        checked :: sema_check_expression(field.value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        if field.name == "deadline" && !sema_stmt_context_deadline_type(checked.ty) {
+            &diagnostics.push(sema_error("E0762", field.span, "`deadline` needs an Int epoch-millis instant, got {type_name(checked.ty)}", "the `deadline` field carries an absolute time budget in milliseconds", "pass an Int, e.g. `time.now() + 200`"))
+            complete = false
+        }
+        if field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
+            &diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {type_name(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value", "pass an allocator, e.g. `mem.Arena.new()`"))
+            complete = false
+        }
+        &guards.push(TContextGuard{field: field.name, value: checked})
+    }
+    nested :: sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "context@{span.start}", loop_depth)
+    if !nested.complete -> return false
+    if !complete -> return false
+    &output.push(TStmt.ContextBlock{guards: guards, body: nested.value, span: span})
+    true
+}
 
+fn sema_stmt_context_deadline_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .InlineRange(_, _, _) -> true
+        else -> false
+    }
+}
 
+fn sema_stmt_context_allocator_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed"
+        else -> false
+    }
+}
 
 // sema_check_statements's block-scoped statements (unsafe, impure, reactive,
 // shield, region, scope members, switched, transactions, policies, authority
