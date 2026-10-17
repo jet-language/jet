@@ -887,7 +887,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
             }
         }
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
             constructor_name := sema_core_generated_receiver_key(receiver)
             if method == "new" && !sema_core_generated_shadowed(registered, constructor_name) && sema_core_generated_constructor_marked(registered, constructor_name) -> sema_core_note_usage(&used, &spans, "core.mem::pool_shared", None)
             if receiver == {

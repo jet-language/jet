@@ -1843,7 +1843,7 @@ fn parser_starts_expression(kind: Int) -> Bool Never! {
 // on an `OptField`.
 fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never! {
     works :: if expr == {
-        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+        .Call(_) | .Field(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .ComptimeName(_, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
         .CallValue(callee, _, _) -> callee == .OptField(_, _, _, _, _)
         .If(_, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
         else -> false
@@ -1856,7 +1856,7 @@ fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never
 fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: Int) -> Bool Never! {
     if start_kind == TOKEN_AMP || start_kind == TOKEN_CARET {
         call :: if expr == {
-            .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
+            .Call(_) | .MethodCall(_, _, _, _, _, _, _, _) | .Try(_, _, _, _) | .OrFallback(_, _, _, _) -> true
             else -> false
         }
         if call -> return true

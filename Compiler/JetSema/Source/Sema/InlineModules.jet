@@ -435,7 +435,7 @@ fn sema_inline_value_at(value: Expr, span: Span) -> Expr Never! {
 
 // `limits.f(...)`: a call through a module's own `use limits.[f]`.
 fn sema_inline_qualified_call(rewrite: &SemaInlineRewrite, target: SemaInlineTarget, span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: target.module_alias, span: span}, method: target.member, method_span: span, owner_type_args: [Type]{}, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+    Expr.MethodCall{receiver: Expr.Ident{name: target.module_alias, span: span}, method: target.member, method_span: span, owner_type_args: [Type]{}, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: None, resolved_ret: None}
 }
 
 fn sema_inline_rewrite_types(rewrite: SemaInlineRewrite, types: [Type]) -> [Type] Never! {
@@ -635,12 +635,12 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .Place(value, access, span) -> return Expr.Place{value: sema_inline_rewrite_expr(&rewrite, value), access: access, span: span}
         .Field(base, member, span) -> return Expr.Field{base: sema_inline_rewrite_expr(&rewrite, base), member: member, span: span}
         .OptField(base, member, member_span, flatten, span) -> return Expr.OptField{base: sema_inline_rewrite_expr(&rewrite, base), member: member, member_span: member_span, flatten: flatten, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, _) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
             if receiver == .Ident(alias, alias_span) {
                 if sema_inline_surface(rewrite, alias) == .Val(surface) {
                     rewritten :: sema_inline_rewrite_module_call(&rewrite, surface, alias_span, method, method_span, type_args, args)
                     if rewritten == .Val(value) -> return value
-                    return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: None}
+                    return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: recv_type, resolved_ret: resolved_ret}
                 }
             }
             mapped_receiver := receiver
@@ -655,7 +655,7 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
                     else -> {}
                 }
             }
-            return Expr.MethodCall{receiver: sema_inline_rewrite_expr(&rewrite, mapped_receiver), method: method, method_span: method_span, owner_type_args: sema_inline_rewrite_types(rewrite, owner_type_args), type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: mapped_recv_type, resolved_ret: sema_inline_rewrite_optional_type(rewrite, resolved_ret), operator_rhs: sema_inline_rewrite_optional_type(rewrite, operator_rhs), checked_widen: checked_widen, checked_callee: None}
+            return Expr.MethodCall{receiver: sema_inline_rewrite_expr(&rewrite, mapped_receiver), method: method, method_span: method_span, owner_type_args: sema_inline_rewrite_types(rewrite, owner_type_args), type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: mapped_recv_type, resolved_ret: sema_inline_rewrite_optional_type(rewrite, resolved_ret)}
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, span) -> return Expr.OptMethodCall{receiver: sema_inline_rewrite_expr(&rewrite, receiver), method: method, method_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), span: span}
         .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> {

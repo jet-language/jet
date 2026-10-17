@@ -679,7 +679,7 @@ fn sema_taint_type_of_expr(state: SemaTaintFlowState, expression: Expr) -> Strin
             fact :: sema_taint_find_callable(state.catalog, state.module_identity, "", call.name) ?? return None
             return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
         }
-        .MethodCall(_, method, _, _, _, _, recv_type, resolved_ret, _, _, _) -> {
+        .MethodCall(_, method, _, _, _, _, recv_type, resolved_ret) -> {
             if resolved_ret == {
                 .Val(ty) -> return sema_taint_type_name(ty)
                 .None -> {}
@@ -740,7 +740,7 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
  
             return tags
         }
-        .MethodCall(receiver, method, _, _, _, args, recv_type, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, recv_type, _) -> {
             tags := sema_taint_tags_of(&state, receiver)
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
             destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
@@ -907,7 +907,7 @@ fn sema_taint_e0721(tag_value: String, api: String, destinations: [String], span
 
 fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, expression: Expr) {
     if expression == {
-        .MethodCall(receiver, method, method_span, _, _, args, recv_type, _, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, recv_type, _) -> {
             destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
             loop argument in args {
                 tags := sema_taint_tags_of(&state, argument.expr)

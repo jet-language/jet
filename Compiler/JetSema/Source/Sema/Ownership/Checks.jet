@@ -1323,7 +1323,7 @@ fn sema_ownership_view_producer(expr: Expr) -> SemaOwnershipViewProducer? {
 fn sema_ownership_arena_view_source(binding: Binding) -> Expr? {
     if !binding.arena_view -> return None
     if binding.init == {
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
             if method != "alloc" && method != "try_alloc" -> return None
             Val(receiver)
         }
@@ -3423,7 +3423,7 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
             }
             valid
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) -> {
             valid := true
             receiver_places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
             // A receiver that names no binding (`String.from_bytes(..)`,

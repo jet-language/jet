@@ -113,7 +113,7 @@ fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
                 loop arg in call.args -> semindex_collect_expr(&db, &ctx, names, program, source, arg.expr, mp)
             })
         }
-        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, _, _) -> {
             semindex_expr_child(&db, &ctx, names, program, source, receiver, mp, "receiver")
             semindex_record_call(&db, ctx, mp, method, method_span)
             &db.refs.push(semindex_scoped_ref(&db, ctx, names, method, method_span, mp))

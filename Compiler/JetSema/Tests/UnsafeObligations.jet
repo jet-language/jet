@@ -47,7 +47,7 @@ fn run() Never! {
     sema_unsafe_expr_operations(Expr.PtrFromAddr{alias: "mem", alias_span: span, elem: Type.Int, addr: pointer, span: span}, &operations)
     methods :: [String]{"volatile_read", "volatile_write", "cast_ptr"}
     loop method in methods {
-        sema_unsafe_expr_operations(Expr.MethodCall{receiver: pointer, method: method, method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}, &operations)
+        sema_unsafe_expr_operations(Expr.MethodCall{receiver: pointer, method: method, method_span: span, owner_type_args: [], type_args: [], args: [], recv_type: None, resolved_ret: None}, &operations)
     }
     unsafe_test_require(operations.len() == 4, "pointer, volatile reads/writes, cast collection")
     unsafe_test_require(operations[0].kind == "pointer_from_address" && operations[3].kind == "pointer_cast", "pointer operation names")

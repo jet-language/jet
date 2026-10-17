@@ -682,7 +682,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         flags.shared_operand = true
         argument :: CallArg{convention: AccessConvention.Move, expr: operand.expr, span: operand.span, flags: flags, label: None, spread: false}
         return ParsedExpr{
-            expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: token.span}, method: "new", method_span: token.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
+            expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: token.span}, method: "new", method_span: token.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None},
             span: span,
         }
     }
@@ -788,7 +788,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         args :: if parser_current_kind(&state) == TOKEN_LPAREN -> parser_parse_call_args(&state, depth + 1, false) else -> [CallArg]{}
         span :: parser_cover(token.span, parser_lookahead(&state, -1).span)
         return ParsedExpr{
-            expr: Expr.MethodCall{receiver: Expr.Ident{name: "", span: token.span}, method: "new", method_span: method.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
+            expr: Expr.MethodCall{receiver: Expr.Ident{name: "", span: token.span}, method: "new", method_span: method.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, recv_type: None, resolved_ret: None},
             span: span,
         }
     }
@@ -1421,7 +1421,7 @@ fn parser_task_internal(name: String) -> String Never! {
 }
 
 fn parser_task_call(head: Span, method: String, method_span: Span, argument: Expr, argument_span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: parser_task_internal("task"), span: head}, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+    Expr.MethodCall{receiver: Expr.Ident{name: parser_task_internal("task"), span: head}, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, recv_type: None, resolved_ret: None}
 }
 
 fn parser_task_spawn(head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
@@ -1595,7 +1595,7 @@ fn parser_literal_head_path(expr: Expr) -> String Never! {
 fn parser_is_adjacent_call_result(expr: Expr) -> Bool Never! {
     if expr == {
         .Paren(inner, _) -> parser_is_adjacent_call_result(inner)
-        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> true
+        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -1682,7 +1682,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     // `new` (Rust `member_span`) and keep the method call.
                     if method == "new" && parser_literal_head_path(receiver) == "Shared" -> parser_add_error_code(&state, "E1115", Span{start: method_span.end - method.len(), end: method_span.end}, "`Shared.new(…)` is the retired shared-cell constructor.", "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page.", "Write `shared <value>` instead of `Shared.new(<value>)`.")
                     expression = ParsedExpr{
-                        expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
+                        expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None},
                         span: span,
                     }
                 }
@@ -1937,7 +1937,7 @@ fn parser_retired_step_place(operand: Expr) -> String? {
 // receives rather than to the chain.
 fn parser_contains_method_call(expr: Expr) -> Bool Never! {
     if expr == {
-        .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> return true
+        .MethodCall(_, _, _, _, _, _, _, _) -> return true
         .Field(base, _, _) -> return parser_contains_method_call(base)
         .Index(base, _, _, _) -> return parser_contains_method_call(base)
         .Slice(base, _, _, _, _) -> return parser_contains_method_call(base)
@@ -1950,8 +1950,8 @@ fn parser_contains_method_call(expr: Expr) -> Bool Never! {
 // `buf` for `grow`, and `&values[0..1]` marks the whole range place.
 fn parser_mark_maximal_place(expr: Expr, access: PlaceAccess, mark: Span) -> Expr {
     if expr == {
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> {
-            return Expr.MethodCall{receiver: parser_mark_maximal_place(receiver, access, mark), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
+            return Expr.MethodCall{receiver: parser_mark_maximal_place(receiver, access, mark), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret}
         }
         .Field(base, member, span) -> {
             if parser_contains_method_call(base) -> return Expr.Field{base: parser_mark_maximal_place(base, access, mark), member: member, span: span}

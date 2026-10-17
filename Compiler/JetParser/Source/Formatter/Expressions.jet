@@ -413,7 +413,7 @@ fn jfmt_expr_start(expr: Expr) -> Int Never! {
         // copy: `base` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
         .Slice(base, _, _, _, _) -> leftmost = Val(base.copy())
         // copy: `receiver` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
-        .MethodCall(receiver, _, _, _, _, _, _, _, _, _, _) -> leftmost = Val(receiver.copy())
+        .MethodCall(receiver, _, _, _, _, _, _, _) -> leftmost = Val(receiver.copy())
         // copy: `receiver` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
         .OptMethodCall(receiver, _, _, _, _, _) -> leftmost = Val(receiver.copy())
         // copy: `callee` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
@@ -1536,7 +1536,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(&f, "?.")
             jfmt_write_postfix_member(&f, member)
         }
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _, _, _, _) -> jfmt_fmt_method_call(&f, receiver, method, method_span, owner_type_args, type_args, args)
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _) -> jfmt_fmt_method_call(&f, receiver, method, method_span, owner_type_args, type_args, args)
         // S71 / D-SUGAR6: `receiver?.method(args)`.
         .OptMethodCall(receiver, method, method_span, type_args, args, _) -> {
             jfmt_fmt_expr(&f, receiver, JFMT_PREC_POSTFIX)
@@ -2285,7 +2285,7 @@ fn jfmt_fmt_task_surface_method(f: &JetFmt, method: String, args: [CallArg]) -> 
             jfmt_write(&f, names[index])
             jfmt_write(&f, ": ")
         }
-        if branch == .MethodCall(receiver, spawn_method, _, _, _, spawn_args, _, _, _, _, _) {
+        if branch == .MethodCall(receiver, spawn_method, _, _, _, spawn_args, _, _) {
             if receiver == .Ident(receiver_name, _) {
                 if receiver_name == jfmt_internal_name("jet.task") && spawn_method == jfmt_internal_name("jet.task.spawn") && spawn_args.len() == 1 {
                     if spawn_args[0].expr == .Lambda(lambda) {

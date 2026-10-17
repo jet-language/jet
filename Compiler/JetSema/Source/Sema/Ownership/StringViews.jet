@@ -84,7 +84,7 @@ fn sema_string_view_push_copies_policy(table: &SemaScopeTable, declarations: [Po
 fn sema_string_view_call_sources(init: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _, _) -> {
             arity_ok :: (method == "trim" && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1)
             if !arity_ok -> return none
             if receiver == {

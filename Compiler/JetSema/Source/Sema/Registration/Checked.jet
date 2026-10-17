@@ -3512,7 +3512,7 @@ fn sema_checked_module_literal(value: Expr) -> Bool Never! {
             true
         }
         .Field(_, _, _) -> sema_checked_module_type_path(value)
-        .MethodCall(receiver, method, _, _, type_args, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, type_args, args, _, _) -> {
             if type_args.len() != 0 || !sema_checked_module_uppercase(method) || !sema_checked_module_type_path(receiver) -> return false
             loop argument in args {
                 if !sema_checked_module_literal(argument.expr) -> return false
