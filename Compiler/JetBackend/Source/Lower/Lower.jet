@@ -5197,9 +5197,14 @@ fn lower_use_index(function: MIRFunction, block_index: [U64:Int]) -> LowerUseInd
 
 // Whether each block lies on a cycle of terminator edges (reaches itself
 // along one edge or more): a self edge, or a strongly connected component of
-// two blocks or more. One Kosaraju pass per function, so each query is a
-// lookup instead of a walk from the block.
-fn lower_cycle_blocks(index: LowerUseIndex) -> [Bool] Never! {
+// two blocks or more; and each block's component. Kosaraju numbers the
+// components in topological order of the condensation, so an edge runs from
+// a component to itself or a higher one: a block reaches only blocks of its
+// own component or a higher one. One pass per function, so each cycle query
+// is a lookup and each reachability walk skips the blocks it cannot reach.
+struct LowerBlockCycles { on_cycle: [Bool], component: [Int] }
+
+fn lower_cycle_blocks(index: LowerUseIndex) -> LowerBlockCycles Never! {
     count :: index.predecessors.len()
     successors := [[Int]]{}
     on_cycle := [Bool]{}
@@ -5262,7 +5267,7 @@ fn lower_cycle_blocks(index: LowerUseIndex) -> [Bool] Never! {
     loop block in 0..<count {
         if sizes[component[block]] > 1 -> on_cycle[block] = true
     }
-    on_cycle
+    LowerBlockCycles{on_cycle: ^on_cycle, component: ^component}
 }
 
 // The test a branch condition names: a trivial phi (every incoming value
@@ -5289,8 +5294,11 @@ fn lower_use_then_condition(function: MIRFunction, index: LowerUseIndex, block_i
 
 // The test every entry into `block` branched true on, while no path from
 // `block` re-runs its definition (a path re-running the carrier's own
-// definition carries a fresh carrier and stops there).
-fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], block: Int, definition_block: Int) -> MIRValueID? Never! {
+// definition carries a fresh carrier and stops there). A path to the test's
+// block passes only blocks of its component or a lower one (`cycles`), so
+// the walk skips every other block, and none is needed when the test's
+// component precedes the block's.
+fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], cycles: LowerBlockCycles, block: Int, definition_block: Int) -> MIRValueID? Never! {
     entries :: index.predecessors[block]
     if entries.len() == 0 -> return None
     known :: lower_use_then_condition(function, index, block_index, entries[0], block) ?? return None
@@ -5299,6 +5307,8 @@ fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_
         if condition != known -> return None
     }
     site :: index.definitions.get(known.value) ?? return None
+    test_component :: cycles.component[site.block]
+    if test_component < cycles.component[block] -> return Val(known)
     reached := [Int:Bool]{}
     pending := [Int]{block}
     cursor := 0
@@ -5309,6 +5319,7 @@ fn lower_use_known_condition(function: MIRFunction, index: LowerUseIndex, block_
             position :: block_index.get(target.value) ?? next
             if position == definition_block -> next
             if position == site.block -> return None
+            if cycles.component[position] > test_component -> next
             if reached.get(position) == None {
                 _ := &reached.add(position, true)
                 &pending.push(position)
@@ -5331,9 +5342,10 @@ fn lower_use_infeasible(function: MIRFunction, index: LowerUseIndex, block_index
 // only at its last reachable use. A match arm is entered only on the true
 // edge of its test and the arm chain re-branches on that same test, so a
 // later arm's probe of the carrier is no later use of this arm's payload.
-// `uses` are the carrier's use sites (in any order), `on_cycle` the
-// function's lower_cycle_blocks.
-fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], on_cycle: [Bool], subject: MIRValueID, uses: [LowerUseSite], projection: MIRValueID) -> Bool Never! {
+// `uses` are the carrier's use sites (in any order), `cycles` the
+// function's lower_cycle_blocks. The walk back from the uses skips blocks of
+// a component below the projection's: `block` reaches none of them.
+fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, block_index: [U64:Int], cycles: LowerBlockCycles, subject: MIRValueID, uses: [LowerUseSite], projection: MIRValueID) -> Bool Never! {
     site :: index.definitions.get(projection.value) ?? return true
     block :: site.block
     if uses.len() == 0 -> return false
@@ -5348,14 +5360,15 @@ fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, bloc
     }
     // A carrier defined outside the loop the projection runs in is read
     // again by the next iteration: never its last use.
-    if on_cycle[block] && (definition_block < 0 || !lower_block_reaches(index, block, definition_block)) -> return true
+    if cycles.on_cycle[block] && (definition_block < 0 || !lower_block_reaches(index, cycles, block, definition_block)) -> return true
     if local -> return false
-    known :: lower_use_known_condition(function, index, block_index, block, definition_block)
+    known :: lower_use_known_condition(function, index, block_index, cycles, block, definition_block)
+    block_component :: cycles.component[block]
     // Visited blocks by map: a query costs what it walks, not the block count.
     seen := [Int:Bool]{}
     pending := [Int]{}
     loop used in uses {
-        if used.block != block && seen.get(used.block) == None {
+        if used.block != block && cycles.component[used.block] >= block_component && seen.get(used.block) == None {
             _ := &seen.add(used.block, true)
             &pending.push(used.block)
         }
@@ -5368,6 +5381,7 @@ fn lower_carrier_has_later_use(function: MIRFunction, index: LowerUseIndex, bloc
         loop predecessor in index.predecessors[used_block] {
             if lower_use_infeasible(function, index, block_index, known, predecessor, used_block) -> next
             if predecessor == block -> return true
+            if cycles.component[predecessor] < block_component -> next
             if seen.get(predecessor) == None {
                 _ := &seen.add(predecessor, true)
                 &pending.push(predecessor)
@@ -5407,7 +5421,7 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
     }
     if !candidate -> return takes
     index :: lower_use_index(function, block_index)
-    on_cycle :: lower_cycle_blocks(index)
+    cycles :: lower_cycle_blocks(index)
     // Built on the first place-read carrier, once per function.
     facts := lower_payload_local_facts_none()
     facts_built := false
@@ -5424,11 +5438,11 @@ fn lower_payload_takes(function: MIRFunction, block_index: [U64:Int]) -> [U64:Bo
                         facts_built = true
                     }
                     local_uses :: lower_payload_local_uses(function, index, facts, subject) ?? next
-                    if !lower_carrier_has_later_use(function, index, block_index, on_cycle, subject, local_uses, result) -> _ := &takes.add(result.value, true)
+                    if !lower_carrier_has_later_use(function, index, block_index, cycles, subject, local_uses, result) -> _ := &takes.add(result.value, true)
                     next
                 }
                 row :: index.use_rows.get(subject.value) ?? -1
-                later :: if row < 0 -> lower_carrier_has_later_use(function, index, block_index, on_cycle, subject, no_uses, result) else -> lower_carrier_has_later_use(function, index, block_index, on_cycle, subject, index.use_lists[row], result)
+                later :: if row < 0 -> lower_carrier_has_later_use(function, index, block_index, cycles, subject, no_uses, result) else -> lower_carrier_has_later_use(function, index, block_index, cycles, subject, index.use_lists[row], result)
                 if !later -> _ := &takes.add(result.value, true)
             }
         }
@@ -5526,13 +5540,18 @@ fn lower_inspect_carriers(function: MIRFunction, inspect_moves: [U64:Bool]) -> [
     lower_inspected_only(function, moved, inspect_moves)
 }
 
-// Whether a path of one edge or more leads from block `from` to block `to`
-// (walked backwards from `to` over predecessors).
-fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! {
+// Whether a path of one edge or more leads from block `from` to block `to`.
+// By component (`cycles`): none to a lower one; within one, exactly when
+// `from` lies on a cycle; to a higher one, walked backwards from `to` over
+// the predecessors `from` can reach (no lower component than its own).
+fn lower_block_reaches(index: LowerUseIndex, cycles: LowerBlockCycles, from: Int, to: Int) -> Bool Never! {
+    from_component :: cycles.component[from]
+    if cycles.component[to] < from_component -> return false
+    if cycles.component[to] == from_component -> return cycles.on_cycle[from]
     seen := [Int:Bool]{}
     pending := [Int]{}
     loop predecessor in index.predecessors[to] {
-        if seen.get(predecessor) == None {
+        if cycles.component[predecessor] >= from_component && seen.get(predecessor) == None {
             _ := &seen.add(predecessor, true)
             &pending.push(predecessor)
         }
@@ -5543,7 +5562,7 @@ fn lower_block_reaches(index: LowerUseIndex, from: Int, to: Int) -> Bool Never! 
         cursor += 1
         if at == from -> return true
         loop predecessor in index.predecessors[at] {
-            if seen.get(predecessor) == None {
+            if cycles.component[predecessor] >= from_component && seen.get(predecessor) == None {
                 _ := &seen.add(predecessor, true)
                 &pending.push(predecessor)
             }
