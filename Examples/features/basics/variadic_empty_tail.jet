@@ -1,0 +1,18 @@
+// D-VARIADIC1 / #4680: the tail's element type is declared, so a call that
+// omits every tail argument passes an empty `[Int]`; it needs no annotation.
+fn largest(first: Int, rest: ...Int) -> Int {
+    best := first
+    loop value in rest {
+        if value > best -> best = value
+    }
+    best
+}
+
+fn count(rest: ...String) -> Int { rest.len() }
+
+fn run() {
+    print(largest(5))
+    print(largest(5, 9, 2))
+    print(count())
+    print(count("a", "b"))
+}
