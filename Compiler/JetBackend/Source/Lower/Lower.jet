@@ -65,8 +65,10 @@ use jet_foundation.[
     MIRValueID,
     MIRVariant,
     MIRVariantPayload,
+    CompilerThreads,
     compiler_take_rows,
     compiler_threads_failure_text,
+    compiler_threads_single,
     core_source_owns_type,
     mir_operation_can_stop,
     mir_operation_consumption_route,
@@ -298,6 +300,13 @@ struct LowerModule {
     // without reading a stopped result.
     stop_points: Bool
     task_stop_points: Bool
+    // Parallel body lowering (Workers.jet): set in each thread's copy of the
+    // module, which then records the extent of every keyed registration that
+    // creates other rows, and every constant carrying a function ID, so the
+    // merge can drop and renumber them.
+    parted: Bool{false}
+    extents: [LowerExtent]{[LowerExtent]{}}
+    function_keys: [LowerFunctionKey]{[LowerFunctionKey]{}}
 }
 
 // Read-only facts about the MIR function being lowered.
@@ -428,11 +437,12 @@ fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Nev
 
 // lir_lower_entry over the caller's program in place: the type index is
 // attached to `program` for the lowering and detached after, so the native
-// route never copies the whole program (it is left exactly as it came).
-fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+// route never copies the whole program (it is left exactly as it came). The
+// function bodies lower on the threads `threads` admits (Workers.jet).
+fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     native_pack :: program.native_pack
-    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true)
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, false, false, true, threads)
 }
 
 // JET_KEEP_GOING (the bootstrap native feed): lir_lower_entry_in_place,
@@ -440,10 +450,10 @@ fn lir_lower_entry_in_place(program: &MIRProgram, entry: MIRFunctionID) -> LIRLo
 // signature (lower_keep_going_functions), and the issues leave the entry and
 // the module in place, so every later phase still runs and reports. The
 // module is never shipped: the caller turns every issue into a census row.
-fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
+fn lir_lower_entry_keep_going_in_place(program: &MIRProgram, entry: MIRFunctionID, threads: CompilerThreads) -> LIRLowering Never! {
     intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     native_pack :: program.native_pack
-    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true)
+    lower_selected_in_place(&program, [MIRFunctionID]{entry}, true, true, native_pack, [String]{}, false, None, [MIROutputCheck]{}, ^intrinsics, true, false, true, threads)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
@@ -491,14 +501,16 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     // rewrite rows), while these read-parameter entry points leave the caller's MIR intact. Callers
     // that hand theirs over use the *_in_place entry points.
     lowered_program := program.copy()
-    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry)
+    lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry, compiler_threads_single())
 }
 
 // lower_selected over `program` in place: preparation and body lowering
 // resolve type definitions through the type index attached to `program`
 // (lower_attach_type_index); every other read sees the program as the
-// caller handed it, and the caller gets it back unchanged.
-fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool) -> LIRLowering Never! {
+// caller handed it, and the caller gets it back unchanged. The function
+// bodies lower on the threads `threads` admits for their size
+// (lower_workers_lower); the result is the same for any thread count.
+fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool, threads: CompilerThreads) -> LIRLowering Never! {
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
     if test_serial != None {
@@ -594,7 +606,20 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     // Keep-going: the indexed program copy the body tasks hand back, which
     // the glue tasks then read (lower_keep_going_glue).
     glue_programs := [MIRProgram]{}
-    if keep_going {
+    weights :: lower_workers_weights(program, prepared.functions, prepared.instances)
+    workers :: lower_workers_admit(threads, weights)
+    if workers > 1 {
+        // copy: the threads read an indexed program of their own, handed back for the keep-going
+        // glue tasks, while `program` (write-borrowed) still feeds the glue phase and the caller.
+        // Its rows are shared buffers, not copies of the whole program.
+        parted := lower_workers_lower(program.copy(), ^m, ^prepared.functions, ^prepared.instances, ^failed_functions, weights, workers, keep_going) ?? panic("the native lowering threads failed")
+        prepared.functions = ^parted.inventory
+        prepared.instances = ^parted.instances
+        m = ^parted.state
+        failed_functions = ^parted.failed
+        functions = ^parted.functions
+        if keep_going -> glue_programs = ^parted.programs
+    } else if keep_going {
         // copy: keep-going lowering hands an indexed program to its body tasks, which return it for
         // the glue tasks, while `program` (write-borrowed) still feeds the in-place path and the
         // caller.

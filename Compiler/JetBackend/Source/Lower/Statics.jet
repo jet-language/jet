@@ -410,6 +410,7 @@ fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction
         if m.static_rows.get("box:{definition.key}") == .Val(addend) -> cached.addend = addend
         return Val(cached)
     }
+    start :: lower_marks(m)
     value := lower_static_tree(p, &m, &f, definition.ty, definition.value) ?? return None
     if value.text != None {
         cell :: lower_static_object(&m, 8)
@@ -417,6 +418,7 @@ fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction
         value = lower_static_pointer(cell)
     }
     if value.data == .Val(data) {
+        lower_extent_record(&m, true, definition.key, data.value, value.addend, start)
         &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
         if value.addend != 0 -> &m.static_rows.add("box:{definition.key}", value.addend).drop("cached with its row")
     }
@@ -430,6 +432,7 @@ fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction
 fn lower_static_constant_object(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LIRDataID? {
     key :: "place:{definition.key}"
     if m.static_rows.get(key) == .Val(index) -> return Val(LIRDataID{value: index})
+    start :: lower_marks(m)
     value :: lower_static_constant_value(p, &m, &f, definition) ?? return None
     repr :: lower_repr(p, definition.ty)
     object := LIRDataID{value: -1}
@@ -444,6 +447,7 @@ fn lower_static_constant_object(p: MIRProgram, m: &LowerModule, f: &LowerFunctio
         size :: lower_size(p, definition.ty).size
         lower_static_store_sized(&m, object, 0, value, if size > 0 && size < 8 -> size else -> 8)
     }
+    lower_extent_record(&m, true, key, object.value, 0, start)
     &m.static_rows.add(key, object.value).drop("checked absent above")
     Val(object)
 }
@@ -464,11 +468,13 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
     if m.static_rows.get(key) == .Val(index) {
         object = LIRDataID{value: index}
     } else {
+        start :: lower_marks(m)
         object = lower_static_object(&m, 8)
         if !shared_site {
             lower_static_child(p, &m, &f, object, 0, definition.ty, definition.value)
         }
         if f.failed -> return None
+        lower_extent_record(&m, true, key, object.value, 0, start)
         &m.static_rows.add(key, object.value).drop("checked absent above")
     }
     cell :: lower_pointer(&f)

@@ -410,8 +410,8 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 }
 
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
-// trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR),
-// `native.foreign` (the C closure, the last reader
+// trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR, on the
+// threads `threads` admits), `native.foreign` (the C closure, the last reader
 // of the MIR), `native.object` (x64 selection, encoding and the object; at
 // O1/O2 it holds `native.optimize`, the LIR passes of `level`) and
 // `native.link`; before them `native.sources` (the C sources the snapshot
@@ -429,7 +429,7 @@ fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTrac
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
-    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id) else -> lir_lower_entry_in_place(&unpruned, entry_id)
+    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id, threads) else -> lir_lower_entry_in_place(&unpruned, entry_id, threads)
     function_count :: lowered.lir.functions.len()
     if trace_sink == .Val(sink) -> sink.end("native.lower", function_count)
     if lowered.issues.len() > 0 {

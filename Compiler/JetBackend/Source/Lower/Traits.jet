@@ -82,7 +82,7 @@ fn lower_trait_box_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, sour
     }
     key :: lower_helper_id(&m, "trait.drop", ty)
     lower_alloc(&m, &f, dst, lower_trait_size(p, ty))
-    lower_store_word(&f, dst, 0, key.value)
+    lower_store_function_key(&m, &f, dst, 0, key)
     if source == .Val(value) -> lower_write_at(p, &f, dst, 8, value, ty)
 }
 
@@ -263,7 +263,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             function :: lower_row_source(p, m, row)
             if function.name != name -> next
             payload :: lower_helper_id(&m, "trait.drop", concrete)
-            expected :: lower_const(&f, payload.value)
+            expected :: lower_function_key(&m, &f, payload)
             selected :: lower_flag(&f)
             lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: key, right: expected})
             body :: lower_new_block(&f)

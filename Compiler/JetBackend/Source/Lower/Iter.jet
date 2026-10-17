@@ -112,7 +112,7 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: stride})
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
 }
@@ -146,7 +146,7 @@ fn lower_chars_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     lower_store_word(&f, dst, 16, 1)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
 }
@@ -182,7 +182,7 @@ fn lower_line_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: handle})
     lower_store_word(&f, dst, 8, -1)
     lower_store_word(&f, dst, 16, 0)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
     true
@@ -436,7 +436,7 @@ fn lower_range_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_emit(&f, LIRInst.Binary{dst: marker, op: LIRBinaryOp.Sub, left: minus_one, right: stride})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: marker})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: end})
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
 }
