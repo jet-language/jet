@@ -910,6 +910,10 @@ function sourceErrors(key, source) {
     )
     : new RegExp(`(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\(`, "g");
   const calls = Array.from(code.matchAll(call));
+  if (calls.length !== 1) {
+    errors.push(`expected one ${module}.${name} call, found ${calls.length}`);
+    return errors;
+  }
 
   const callStart = calls[0].index;
   const callOpen = callStart + calls[0][0].lastIndexOf("(");
