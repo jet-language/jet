@@ -7915,6 +7915,8 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.reverse" -> return lower_helper_list_reverse(p, &m, glue)
     if glue.helper == "list.extend" -> return lower_helper_list_extend(p, &m, glue)
     if glue.helper == "list.try_reserve" -> return lower_helper_list_try_reserve(p, &m, glue)
+    if glue.helper == "list.union" || glue.helper == "list.intersection" || glue.helper == "list.difference" -> return lower_helper_list_combine(p, &m, glue)
+    if glue.helper == "list.rank_entries" -> return lower_helper_list_rank_entries(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "set.take" || glue.helper == "set.remove" -> return lower_helper_set_take(p, &m, glue)
     if glue.helper == "set.first" || glue.helper == "set.last" -> return lower_helper_set_edge(p, &m, glue)
