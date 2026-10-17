@@ -13,7 +13,9 @@ fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
     // inlinable itself, so wrapper chains collapse into their callers.
     state := lir_inline_start(program)
     loop position in 0..<state.order.len() {
-        id :: state.order[position]
+        // copy: plain Int function id; lir_inline_finish writes `state`, so the id
+        // cannot stay a view into `state.order`.
+        id :: state.order[position].copy()
         inlined :: lir_inline_step(state, id)
         optimized :: opt_function_passes(inlined, level)
         lir_inline_finish(&state, id, ^optimized)

@@ -794,7 +794,8 @@ fn jet_codegen_lower_borrowed_fallback(builder: &JetCodegenBuilder, program: Jet
     borrowed :: mir_ownership_from_access(MIRAccess.Read)
     value_type :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
     subject_place :: jet_codegen_lower_expression_place(&builder, program, subject, MIRAccess.Read) ?? panic("checked borrowed fallback subject has no place")
-    option :: jet_codegen_emit_mir_type(&builder, program, subject.span, jet_codegen_lower_type_for_function(subject.ty, builder, program), borrowed, MIROperation.ReadPlace{place: subject_place})
+    subject_type :: jet_codegen_lower_type_for_function(subject.ty, builder, program)
+    option :: jet_codegen_emit_mir_type(&builder, program, subject.span, subject_type, borrowed, MIROperation.ReadPlace{place: subject_place})
     condition :: jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.OptionIsSome{subject: option})
     success_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-success")
     failure_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-failure")
@@ -850,8 +851,10 @@ fn jet_codegen_operand_holds_root(expression: TExpr, alias: Bool) -> Bool Never!
 fn jet_codegen_emit_borrowed_carrier(builder: &JetCodegenBuilder, program: JetCodegenProgram, carrier: TExpr, payload: TExpr) -> MIRValueID Never! {
     place :: jet_codegen_lower_expression_place(&builder, program, payload, MIRAccess.Read) ?? panic("checked borrowed carrier payload has no place")
     borrowed :: mir_ownership_from_access(MIRAccess.Read)
-    read :: jet_codegen_emit_mir_type(&builder, program, payload.span, jet_codegen_lower_type_for_function(payload.ty, builder, program), borrowed, MIROperation.ReadPlace{place: place})
-    jet_codegen_emit_mir_type(&builder, program, carrier.span, jet_codegen_lower_type_for_function(carrier.ty, builder, program), borrowed, MIROperation.Present{value: read})
+    payload_type :: jet_codegen_lower_type_for_function(payload.ty, builder, program)
+    read :: jet_codegen_emit_mir_type(&builder, program, payload.span, payload_type, borrowed, MIROperation.ReadPlace{place: place})
+    carrier_type :: jet_codegen_lower_type_for_function(carrier.ty, builder, program)
+    jet_codegen_emit_mir_type(&builder, program, carrier.span, carrier_type, borrowed, MIROperation.Present{value: read})
 }
 
 // #5041 (plan M5): an `==`/`!=` operand `Val(place)` compares a borrowed
@@ -7089,7 +7092,10 @@ fn jet_codegen_write_borrowed_binding(builder: &JetCodegenBuilder, program: JetC
         else -> jet_codegen_bind_local(&builder, program, local, fact.ty, false, None, None, false)
     }
     value :: if {
-        borrowed -> jet_codegen_emit_mir_type(&builder, program, fact.span, jet_codegen_lower_type_for_function(fact.ty, builder, program), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: slot})
+        borrowed -> {
+            fact_type :: jet_codegen_lower_type_for_function(fact.ty, builder, program)
+            jet_codegen_emit_mir_type(&builder, program, fact.span, fact_type, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: slot})
+        }
         else -> jet_codegen_emit_value(&builder, program, fact.span, fact.ty, MIROperation.ReadPlace{place: slot})
     }
     _ := jet_codegen_emit(&builder, program, fact.span, None, MIROperation.WritePlace{place: place, value: value})

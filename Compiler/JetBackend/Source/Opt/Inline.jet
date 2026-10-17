@@ -302,7 +302,9 @@ fn lir_inline_result(state: ^LIRInlineState) -> LIRModule Never! {
 fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
     state := lir_inline_start(program)
     loop position in 0..<state.order.len() {
-        id :: state.order[position]
+        // copy: plain Int function id; lir_inline_finish writes `state`, so the id
+        // cannot stay a view into `state.order`.
+        id :: state.order[position].copy()
         inlined :: lir_inline_step(state, id)
         lir_inline_finish(&state, id, ^inlined)
     }

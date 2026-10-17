@@ -5035,11 +5035,17 @@ fn jet_driver_keep_going_trap_lowering(kg: &JetDriverKeepGoingLog, functions: &[
         if skip.get("lower:{functions[position].name}@{position}") == None -> next
         // The report and the trap read the row in place; the slot is written
         // only after the trap row is built, when no view of it is live.
-        function :: functions[position]
-        jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", "lowered as a trap: an earlier keep-going run crashed lowering it", "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
-        trap :: jet_driver_keep_going_tir_trap(function, "keep-going trap: lowering this function crashed an earlier run")
+        trap :: jet_driver_keep_going_tir_trap_row(&kg, functions[position], "lowered as a trap: an earlier keep-going run crashed lowering it", "keep-going trap: lowering this function crashed an earlier run")
         functions[position] = trap
     }
+}
+
+// Records the census row for a function that lowers as a trap and builds the
+// trap. The caller writes the trap into the slot after this returns, when no
+// view of the row is live.
+fn jet_driver_keep_going_tir_trap_row(kg: &JetDriverKeepGoingLog, function: TFunc, reason: String, trap_text: String) -> TFunc {
+    jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", reason, "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
+    jet_driver_keep_going_tir_trap(function, trap_text)
 }
 
 // Codegen lowers a checked direct call to its callee's checked function or
@@ -5059,9 +5065,7 @@ fn jet_driver_keep_going_trap_unresolved_calls(kg: &JetDriverKeepGoingLog, funct
     }
     loop position in 0..<functions.len() {
         missing :: jet_driver_unresolved_direct_call(functions[position], targets) ?? next
-        function :: functions[position]
-        jet_driver_keep_going_row(&kg, "lower", "{function.name} [{function.key}]", "TRAPPED", "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "{function.source_file}:{function.source_span.start}..{function.source_span.end}")
-        trap :: jet_driver_keep_going_tir_trap(function, "keep-going trap: this function calls `{missing}`, which did not check")
+        trap :: jet_driver_keep_going_tir_trap_row(&kg, functions[position], "lowered as a trap: it calls `{missing}`, which has no checked function or foreign row", "keep-going trap: this function calls `{missing}`, which did not check")
         functions[position] = trap
     }
 }
@@ -5092,11 +5096,16 @@ fn jet_driver_keep_going_trap_emission(kg: &JetDriverKeepGoingLog, program: &MIR
     skip :: jet_driver_keep_going_skip_set(kg.skip)
     loop position in 0..<program.functions.len() {
         if skip.get("emit:{program.functions[position].name}@{position}") == None -> next
-        function :: program.functions[position]
-        jet_driver_keep_going_row(&kg, "emit", "{function.name} [{function.key}]", "TRAPPED", "emitted as a trap: an earlier keep-going run crashed emitting it", jet_driver_keep_going_mir_site(program, function, function.span))
-        trap :: jet_driver_keep_going_mir_trap(function, "keep-going trap: emitting this function crashed an earlier run")
+        trap :: jet_driver_keep_going_mir_trap_row(&kg, program, position)
         program.functions[position] = trap
     }
+}
+
+// The emission counterpart of jet_driver_keep_going_tir_trap_row.
+fn jet_driver_keep_going_mir_trap_row(kg: &JetDriverKeepGoingLog, program: MIRProgram, position: Int) -> MIRFunction {
+    function :: program.functions[position]
+    jet_driver_keep_going_row(&kg, "emit", "{function.name} [{function.key}]", "TRAPPED", "emitted as a trap: an earlier keep-going run crashed emitting it", jet_driver_keep_going_mir_site(program, function, function.span))
+    jet_driver_keep_going_mir_trap(function, "keep-going trap: emitting this function crashed an earlier run")
 }
 
 // Each optimizer failure is a row. The failing check then names every other
