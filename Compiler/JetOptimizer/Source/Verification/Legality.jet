@@ -1,6 +1,4 @@
-// Structural and semantic legality checks for canonical MIR: the first half
-// of the optimizer's one MIR checker (Pipeline mir_pass_check_wave runs these
-// rules, then the MIR Lint rules, per function, once on the final MIR).
+// Structural and semantic legality checks for canonical MIR.
 use jet_foundation.[
     CoreCallSymbol,
     MIRAccess,
@@ -180,13 +178,21 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
     }
 }
 
-// The program-level legality rules: the schema version, then the Core
-// publication sites among the constants. The one MIR checker
-// (Pipeline mir_pass_check_wave) runs them on the calling thread before any
-// function is checked; a failure here names no function and ends the check.
-fn mir_pass_validate_program_rows(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
+fn mir_pass_validate_program(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimizationError? {
+    failures :: mir_pass_validate_program_scan(program, pass, false)
+    if failures.len() == 0 -> return None
+    Val(failures[0])
+}
+
+// Function legality failures in program order, one per rejected function. A
+// program-level failure ends the scan; without `all` the first failure does.
+// `all` serves the keep-going driver, which traps every rejected function
+// before one rerun.
+fn mir_pass_validate_program_scan(program: MIRProgram, pass: MIROptimizationPassID, all: Bool) -> [MIROptimizationError] {
+    failures := [MIROptimizationError]{}
     if program.schema_version != MIR_SCHEMA_VERSION {
-        return Val(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
+        &failures.push(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
+        return failures
     }
     site_initializers := [U64:Bool]{}
     loop constant in program.constants {
@@ -228,9 +234,22 @@ fn mir_pass_validate_program_rows(program: MIRProgram, pass: MIROptimizationPass
             }
             else -> if mir_pass_nested_shared_site(constant.value) -> problem = Val("publication site nested in constant value")
         }
-        if problem == .Val(message) -> return Val(mir_pass_error(pass, .InvalidSchema, None, constant.span, message))
+        if problem == .Val(message) {
+            &failures.push(mir_pass_error(pass, .InvalidSchema, None, constant.span, message))
+            return failures
+        }
     }
-    None
+    tables :: mir_pass_legality_tables(program)
+    identities :: mir_pass_identity_failures(program, pass)
+    loop (position, function) in program.functions {
+        failure := identities[position]
+        if failure == None -> failure = mir_pass_validate_function(function, pass, tables)
+        if failure == .Val(error) {
+            &failures.push(error)
+            if !all -> return failures
+        }
+    }
+    failures
 }
 
 // Per function, in program order: the error that stands in for its

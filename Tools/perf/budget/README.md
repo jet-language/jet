@@ -26,9 +26,9 @@ What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request
   `.reparse` (D10b), `comptime.lower` (detail `program` or `grow`, D12) with
   the overlap counter, `mir.digest` (detail: the consumer, `web.semantic`; D5;
   traces written before the D5 cutover also carry `optimize.seal_check` and
-  `optimize.seal`), and `optimize.check`, the one MIR checker (P9; traces
-  written before the D3 cutover carry `optimize.legality` and `optimize.lint`
-  instead). The one LIR check (P11, D6) runs per function inside
+  `optimize.seal`), and the MIR checks `optimize.legality` (on the lowered
+  input) and `optimize.lint` (on the final MIR) (P9; the D3 single-checker
+  cutover is deferred to round 5). The one LIR check (P11, D6) runs per function inside
   `native.object` and has no span of its own: its allowance is in the
   P11+P12+P13 row (traces written before the D6 cutover carry
   `native.lir_lint` spans, which that row and P10 then include).

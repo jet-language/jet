@@ -42,12 +42,10 @@ reject that component rather than reading invalid references. With `JET_DUMP_MIR
 also set, the checked lowering pipeline saves the pre-verification program at
 `<dump-path>.before-legality`; the usual post-optimization dump remains unchanged.
 
-The native compiler checks MIR once: the optimizer's one MIR checker (every
-legality rule, then every MIR Lint rule, per function) runs on the final MIR of
-every compile. Its `JET_MIR_LINT_EVERY_PASS=1` (the bootstrap host's
-`JET_BOOTSTRAP_MIR_LINT_EVERY_PASS`) turns on full verification: the same
-checker also runs on the entry program and after every optimizer pass. A
-failure then names the pass whose output was rejected and carries the rejected
+The native compiler's `JET_MIR_LINT_EVERY_PASS=1` (the bootstrap host's
+`JET_BOOTSTRAP_MIR_LINT_EVERY_PASS`) turns on full verification: legality and
+MIR Lint run on the entry program and after every optimizer pass. A failure
+then names the pass whose output was rejected and carries the rejected
 function's MIR as text (locals, place rows, blocks, operations and their
 value and place operands). A rejected move names the moved root and both move
 positions in every mode.
