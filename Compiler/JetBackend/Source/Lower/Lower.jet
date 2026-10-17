@@ -4741,8 +4741,10 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 if moving -> lower_clear_slot(p, c, &f, slot)
                 return
             }
-            // A move out of an element detaches the buffers it passes (write walk).
-            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, row.projections, moving) ?? return
+            // A move out of an element or payload detaches the buffers and
+            // boxes it passes (write walk), the slot's own box included.
+            walk_root :: if moving -> (lower_slot_root_for_write(p, c, &m, &f, slot) ?? return) else -> root
+            walked :: lower_walk_place(p, c, &m, &f, walk_root, c.slots[slot].ty, row.projections, moving) ?? return
             if moving && walked.borrowed {
                 // A runtime handle lends its fields (lower_handle_field_place):
                 // a last-use move out of one copies the field, which the
@@ -4915,7 +4917,8 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_partial_assign(&f, "slot.{slot}", lower_partial_owner(c, value))
         return
     }
-    root :: held ?? return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
+    if held == None -> return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
+    root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? return
     walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
     if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
@@ -5018,7 +5021,10 @@ fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     if lower_repr(p, found.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     address :: lower_struct_storage_address(&f, aggregate, found)
-    lower_read_member(p, c, &m, &f, instruction, base, dst, address.base, address.offset, found.ty)
+    // A boxed edge's member lives in its wrapper box; a borrowed aggregate
+    // may itself live in boxes (lower_read_box_member checks them all).
+    holders :: if found.boxed -> [LIRValueID]{address.base} else -> [LIRValueID]{}
+    lower_read_box_member(p, c, &m, &f, instruction, base, dst, holders, address.base, address.offset, found.ty)
 }
 
 // ---------------------------------------------------------------------------
@@ -5081,7 +5087,20 @@ fn lower_load_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     boxed :: lower_use(&m, &f, subject) ?? return
     ty :: lower_checked_type(c, instruction) ?? return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_read_member(p, c, &m, &f, instruction, subject, dst, boxed, offset, ty)
+    lower_read_box_member(p, c, &m, &f, instruction, subject, dst, [LIRValueID]{boxed}, boxed, offset, ty)
+}
+
+// Whether reading `owner`'s member moves it out (the owner is moved, or an
+// owned carrier with no later use surrenders its payload, as the MIRRust.rs
+// payload arm moves it out, a non-Clone handle included).
+fn lower_member_moves(c: LowerContext, instruction: MIRInstruction, owner: MIRValueID) -> Bool Never! {
+    if c.fact_index.get(lower_partial_root_value(c, owner).value) == .Val(index) {
+        if c.mir.values[index].ownership.mode == MIROwnershipMode.Move -> return true
+    }
+    if instruction.result == .Val(taken) {
+        if c.payload_takes.get(taken.value) != None && lower_value_owned(c, owner) -> return true
+    }
+    false
 }
 
 // Reads the member of type `ty` at base + offset of the value `owner` (a
@@ -5098,13 +5117,7 @@ fn lower_load_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 // other fields, so its drop releases only the remaining owners.
 fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, owner: MIRValueID, dst: LIRValueID, base: LIRValueID, offset: Int, ty: MIRType) Never! {
     if !lower_atomic_check_offset(p, &m, &f, ty, offset) -> return
-    moved := false
-    if c.fact_index.get(lower_partial_root_value(c, owner).value) == .Val(index) -> moved = c.mir.values[index].ownership.mode == MIROwnershipMode.Move
-    // An owned carrier with no later use surrenders its payload, as the
-    // MIRRust.rs payload arm moves it out (a non-Clone handle included).
-    if !moved && instruction.result == .Val(taken) {
-        if c.payload_takes.get(taken.value) != None && lower_value_owned(c, owner) -> moved = true
-    }
+    moved :: lower_member_moves(c, instruction, owner)
     owned_result :: if instruction.result == .Val(value) -> lower_value_owned(c, value) && lower_needs_drop_of(p, m, &f, ty) else -> false
     if !moved && owned_result {
         layout :: lower_repr_layout(lower_repr_of(p, &f, ty)) ?? return
@@ -5126,6 +5139,151 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         return
     }
     lower_read_into(p, &f, dst, base, offset, ty)
+}
+
+// The boxes holding the storage of `value` when it is a borrowed projection
+// (lower_partial_root_value's chain): each OptionValue/ResultValue/
+// EnumPayload subject box and each boxed field's wrapper between `value`
+// and its owned root. Empty for a value with storage of its own.
+fn lower_borrowed_box_hops(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> [LIRValueID] Never! {
+    hops := [LIRValueID]{}
+    root := lower_move_root(c, value)
+    loop !lower_value_owned(c, root) {
+        next_root := MIRValueID?{None}
+        loop block in c.mir.blocks {
+            loop instruction in block.instructions {
+                if instruction.result != Val(root) -> next
+                if instruction.operation == {
+                    .OptionValue(base) | .ResultValue(base, _) | .EnumPayload(base, _, _, _) -> {
+                        ty :: lower_value_type(c, base) ?? return hops
+                        if lower_repr(p, ty) == .Boxed(_) {
+                            holder :: lower_use(&m, &f, base) ?? return hops
+                            &hops.push(holder)
+                        }
+                        next_root = Val(base)
+                    }
+                    .Field(base, field) -> {
+                        ty :: lower_value_type(c, base) ?? return hops
+                        found :: lower_struct_field_of(p, &f, ty, field) ?? return hops
+                        if found.boxed {
+                            aggregate :: lower_use(&m, &f, base) ?? return hops
+                            wrapper :: lower_pointer(&f)
+                            lower_emit(&f, LIRInst.Load{dst: wrapper, base: aggregate, offset: found.offset})
+                            &hops.push(wrapper)
+                        }
+                        next_root = Val(base)
+                    }
+                    else -> return hops
+                }
+            }
+        }
+        parent :: next_root ?? return hops
+        root = lower_move_root(c, parent)
+    }
+    hops
+}
+
+// Whether `ty` reaches a member no owner can copy: a Close owner, a runtime
+// handle without clone, or an atomic (cycles cut by `seen`, as
+// lower_contains_close walks).
+fn lower_contains_uncopyable(p: MIRProgram, m: LowerModule, ty: MIRType, seen: &[String:Bool]) -> Bool Never! {
+    key :: mir_type_identity_key(ty)
+    if seen.get(key) != None -> return false
+    &seen.add(key, true).drop("first visit")
+    if lower_close_method(p, m.close_methods, ty) != None -> return true
+    if lower_atomic_scalar(p, ty) != None -> return true
+    if lower_repr(p, ty) == .Handle(_, clone) {
+        if clone == "" -> return true
+    }
+    if ty.kind == {
+        .Tagged(_, inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) -> {
+            if lower_contains_uncopyable(p, m, inner, &seen) -> return true
+        }
+        .Result(ok, err) | .Map(ok, err) -> {
+            if lower_contains_uncopyable(p, m, ok, &seen) || lower_contains_uncopyable(p, m, err, &seen) -> return true
+        }
+        else -> {}
+    }
+    if lower_is_inline(p, ty) {
+        loop member in lower_inline_members(p, ty) {
+            if lower_contains_uncopyable(p, m, member.ty, &seen) -> return true
+        }
+    } else if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == .Enum(variants, _) {
+            loop variant in variants {
+                loop member in lower_variant_members(p, definition, variant) {
+                    if lower_contains_uncopyable(p, m, member.ty, &seen) -> return true
+                }
+            }
+        }
+    }
+    false
+}
+
+// lower_read_member for a member stored at base + offset where `holders`
+// are the boxes containing that storage directly (a payload's box, a boxed
+// edge's wrapper), to which the boxes of a borrowed owner's projection chain
+// are added (lower_borrowed_box_hops). A move takes the member's bytes and
+// clears its slot only when this owner holds every one of those boxes alone
+// (#5041 P2); out of a box another owner shares (or an immortal static or
+// frame box), the move copies the member and leaves the box intact: the box
+// still owns that member (no partial transfer), and its last release drops it.
+fn lower_read_box_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, owner: MIRValueID, dst: LIRValueID, holders: [LIRValueID], box: LIRValueID, offset: Int, ty: MIRType) Never! {
+    result :: instruction.result ?? return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
+    if !lower_member_moves(c, instruction, owner) || !lower_value_owned(c, result) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
+    // A member Sema never lets anyone copy (a Close owner, a handle without
+    // clone, an atomic) never sits in a box another owner holds: taken.
+    seen := [String:Bool]{}
+    if lower_contains_uncopyable(p, m, ty, &seen) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
+    boxes := lower_borrowed_box_hops(p, c, &m, &f, owner)
+    loop holder in holders -> &boxes.push(holder)
+    if boxes.len() == 0 -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
+    if !lower_atomic_check_offset(p, &m, &f, ty, offset) -> return
+    sole := lower_list_sole_owner(&f, boxes[0])
+    loop (index, hop) in boxes {
+        if index == 0 -> next
+        alone :: lower_list_sole_owner(&f, hop)
+        both :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Binary{dst: both, op: .And, left: sole, right: alone})
+        sole = both
+    }
+    alone_block :: lower_new_block(&f)
+    shared_block :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    if lower_inline_of(p, &f, ty) {
+        // Both arms fill the result's own storage.
+        size :: lower_size_of(p, &f, ty).size
+        lower_storage_into(p, &f, dst, ty)
+        lower_seal(&f, LIRTerminator.Branch{condition: sole, then_target: lower_target(alone_block, [LIRValueID]{}), else_target: lower_target(shared_block, [LIRValueID]{})})
+        lower_start(&f, alone_block, [LIRValueID]{})
+        lower_copy_bytes(&f, dst, 0, box, offset, size)
+        lower_partial_transfer(&f, instruction)
+        lower_clear_at(p, &f, box, offset, ty)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+        lower_start(&f, shared_block, [LIRValueID]{})
+        member :: lower_address(&f, box, offset)
+        lower_inline_clone(p, &m, &f, member, dst, ty)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+        lower_start(&f, join, [LIRValueID]{})
+        return
+    }
+    lower_seal(&f, LIRTerminator.Branch{condition: sole, then_target: lower_target(alone_block, [LIRValueID]{}), else_target: lower_target(shared_block, [LIRValueID]{})})
+    layout :: lower_repr_layout(lower_repr_of(p, &f, ty)) ?? return
+    lower_start(&f, alone_block, [LIRValueID]{})
+    taken :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_read_into(p, &f, taken, box, offset, ty)
+    lower_partial_transfer(&f, instruction)
+    lower_clear_at(p, &f, box, offset, ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{taken})})
+    lower_start(&f, shared_block, [LIRValueID]{})
+    held :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_read_into(p, &f, held, box, offset, ty)
+    private :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_clone_into(p, &m, &f, held, private, ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{private})})
+    joined :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_start(&f, join, [LIRValueID]{joined})
+    lower_emit(&f, LIRInst.Move{dst: dst, src: joined})
 }
 
 // A MIR value's site: block position and instruction position (-1 for the
@@ -5874,7 +6032,9 @@ fn lower_option_inner(ty: MIRType) -> MIRType? {
 // borrowed carrier (a ReadBorrow Present, #5041
 // jet_codegen_emit_borrowed_carrier) lends a place's bytes to a read
 // parameter or a comparison only: its box is a stack slot of this frame,
-// filled with those bytes and never dropped or freed.
+// filled with those bytes and never dropped or freed. Its count word (#5041
+// P2) is immortal like a static box's, so a callee's clone copies it
+// (lower_clone_glue_function) instead of sharing frame storage.
 fn lower_present(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
     option :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "Present without a checked type")
     inner :: lower_option_inner(option) ?? return lower_fail(&m, &f, "Present of {mir_type_display_name(option)} is not an Option")
@@ -5882,8 +6042,12 @@ fn lower_present(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     borrowed := false
     if c.fact_index.get(result.value) == .Val(index) -> borrowed = c.mir.values[index].ownership.mode == MIROwnershipMode.ReadBorrow
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    if borrowed -> lower_emit(&f, LIRInst.StackSlot{dst: dst, size: lower_option_box_size(p, inner), align: 8})
-    else -> lower_alloc(&m, &f, dst, lower_option_box_size(p, inner))
+    if borrowed {
+        view :: lower_frame_box(&f, lower_option_box_size(p, inner))
+        lower_emit(&f, LIRInst.Move{dst: dst, src: view})
+    } else {
+        lower_alloc(&m, &f, dst, lower_option_box_size(p, inner))
+    }
     lower_store_value(p, &m, &f, dst, 0, value, inner)
 }
 
@@ -6819,7 +6983,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if index < 0 -> return lower_fail(&m, &f, "call to missing function {target.value}")
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := LowerCallTemps{drops: [LIRValueID]{}, shells: [LowerCallShell]{}}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, taken: [MIRValueID]{}}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
     signature :: m.mir_signatures[index].copy()
     result_bytes :: m.mir_results[index].copy()
@@ -6849,20 +7013,14 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
 struct LowerCallTemps {
     // Owned trait boxes.
     drops: [LIRValueID]
-    // Union wrappers of arguments the callee only reads (lower_call_args).
-    shells: [LowerCallShell]
+    // Arguments a union wrapper the callee only reads took over
+    // (lower_call_args): dropped after the call.
+    taken: [MIRValueID]
 }
-
-// A union wrapper of `bytes`; `taken` is the argument whose payload it took
-// over, dropped with it, else the caller still owns the payload.
-struct LowerCallShell { boxed: LIRValueID, bytes: Int, taken: MIRValueID? }
 
 fn lower_release_call_temps(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, temporaries: LowerCallTemps) Never! {
     loop temporary in temporaries.drops -> lower_emit(&f, LIRInst.Drop{value: temporary})
-    loop shell in temporaries.shells {
-        if shell.taken == .Val(payload) -> lower_drop_value(p, c, &m, &f, payload)
-        lower_free_shell(&m, &f, shell.boxed, shell.bytes)
-    }
+    loop payload in temporaries.taken -> lower_drop_value(p, c, &m, &f, payload)
 }
 
 // A call's argument values in order: a Write argument lends its place's
@@ -6888,11 +7046,12 @@ fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         value :: lower_use(&m, &f, arg.value) ?? return false
         // MIRRust call_arg `Union::Variant(value)`: the member value lands
         // in a box of the union's structural enum. A callee that takes the
-        // union over owns the box. One that only reads it leaves the box to
-        // the caller, released after the call: the payload with it when the
-        // argument handed it over (codegen owned_last_use: a temporary at its
-        // last use), else only the box's own bytes (a borrowed place or Copy
-        // payload, which its owner still releases; the box never copies it).
+        // union over owns the box. One that only reads it gets a box in this
+        // frame, borrowing the payload: the argument is dropped after the
+        // call when it handed the payload over (codegen owned_last_use: a
+        // temporary at its last use), else its owner still releases it. The
+        // frame box's count is immortal (#5041 P2, as lower_present's), so a
+        // callee's clone copies it rather than sharing this frame's storage.
         if arg.widen_to_union == .Val(coercion) {
             definition :: lower_type_def_by_id(p, coercion.union) ?? {
                 lower_fail(&m, &f, "union widening to missing type {coercion.union.value}")
@@ -6907,16 +7066,17 @@ fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
                 return false
             }
             bytes :: lower_enum_box_size(p, definition)
-            boxed :: lower_pointer(&f)
-            lower_alloc(&m, &f, boxed, bytes)
+            boxed := LIRValueID{value: -1}
+            if arg.access == .Read {
+                boxed = lower_frame_box(&f, bytes)
+                if mir_call_arg_consumes(arg) -> &temporaries.taken.push(arg.value)
+            } else {
+                boxed = lower_pointer(&f)
+                lower_alloc(&m, &f, boxed, bytes)
+            }
             lower_store_word(&f, boxed, 0, lower_discriminant(found.index))
             lower_store_value(p, &m, &f, boxed, info.offset, arg.value, info.ty)
             &lowered.push(boxed)
-            if arg.access == .Read {
-                taken := MIRValueID?{None}
-                if mir_call_arg_consumes(arg) -> taken = Val(arg.value)
-                &temporaries.shells.push(LowerCallShell{boxed: boxed, bytes: bytes, taken: taken})
-            }
             next
         }
         // A `[T#N]` widened into a `[T]` parameter is the List it is carried
@@ -6994,12 +7154,14 @@ fn lower_write_place_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         // The callee updates an inline aggregate in place: its storage is
         // the cell, and nothing is written back.
         if row.projections.len() == 0 -> return Val(LowerWriteBack{place: place, slot: slot, cell: root})
-        walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
+        write_root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? return None
+        walk :: lower_walk_projections(p, c, &m, &f, write_root, c.slots[slot].ty, row.projections) ?? return None
         return Val(LowerWriteBack{place: place, slot: slot, cell: lower_address(&f, walk.base, walk.offset)})
     }
     current := root
     if row.projections.len() > 0 {
-        walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
+        write_root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? return None
+        walk :: lower_walk_projections(p, c, &m, &f, write_root, c.slots[slot].ty, row.projections) ?? return None
         layout :: lower_repr_layout(lower_repr(p, row.ty)) ?? return None
         current = lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, current, walk.base, walk.offset, row.ty)
@@ -7056,7 +7218,7 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     } else {
         // copy: the root value is read while the write-back emits into `&f` and rebinds f.current,
         // so a view of that slot would be live across those writes.
-        root :: (f.current[writeback.slot].copy()) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
+        root :: lower_slot_root_for_write(p, c, &m, &f, writeback.slot) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
         walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)
@@ -7125,6 +7287,17 @@ fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
         lower_seal(&f, LIRTerminator.Return{value: None})
         lower_start(&f, present, [LIRValueID]{})
     }
+    // #5041 P2: drop gives up one owner of the box; only the last owner
+    // drops the active shape's contents and frees it. A static box carries
+    // an immortal count, so its release is never the last.
+    owner :: lower_new_block(&f)
+    last :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{boxed}, Val(last))
+    shared :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(owner, [LIRValueID]{}), else_target: lower_target(shared, [LIRValueID]{})})
+    lower_start(&f, shared, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lower_start(&f, owner, [LIRValueID]{})
     release :: lower_new_block(&f)
     if shapes.len() == 1 && shapes[0].selector < 0 {
         lower_glue_drop_fields(p, &m, &f, boxed, shapes[0].fields)
@@ -7161,9 +7334,11 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
     lower_emit(&f, LIRInst.Call{dst: Val(dst), signature: signature, callee: LIRCallee.Function{id: id}, args: [LIRValueID]{source}})
 }
 
-// Clone glue: a new box with every word of the borrowed source copied, then
-// the owned contents of the active shape replaced by their own copies
-// (runtime clone for handles, clone glue for nested boxes and inline members).
+// Box clone glue (#5041 P2): one more owner of the same box; writers detach
+// a shared box first (box.unique), so it is never written while shared.
+// An absent Option is null, and so is its copy. A box with an immortal count
+// (a frozen static or a borrowed carrier's frame slot, lower_present) is not
+// heap storage an owner can share: its clone is a private copy.
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if lower_trait_ref(p, glue.ty) != None -> return lower_trait_glue(p, &m, glue)
     if lower_is_transaction(glue.ty) -> return lower_transaction_clone_glue(&m, glue)
@@ -7188,10 +7363,7 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     source :: lower_pointer(&f)
     entry :: lower_new_block(&f)
     lower_start(&f, entry, [LIRValueID]{source})
-    shapes :: lower_glue_shapes(p, &m, &f, glue.ty)
-    bytes :: lower_box_size(p, glue.ty)
     if glue.ty.kind == .Option(_) {
-        // An absent Option is null, and so is its copy.
         null :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Const{dst: null, value: 0})
         is_null :: lower_flag(&f)
@@ -7203,6 +7375,29 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
         lower_seal(&f, LIRTerminator.Return{value: Val(null)})
         lower_start(&f, present, [LIRValueID]{})
     }
+    count :: lower_box_count(&f, source)
+    zero :: lower_const(&f, 0)
+    immortal :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: immortal, condition: LIRCondition.Lt, left: count, right: zero})
+    copy_block :: lower_new_block(&f)
+    shared_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: immortal, then_target: lower_target(copy_block, [LIRValueID]{}), else_target: lower_target(shared_block, [LIRValueID]{})})
+    lower_start(&f, copy_block, [LIRValueID]{})
+    duplicate :: lower_box_copy(p, &m, &f, source, glue.ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(duplicate)})
+    lower_start(&f, shared_block, [LIRValueID]{})
+    lower_call_runtime(&m, &f, "jet_rt_block_retain", [LIRValueID]{source}, None)
+    lower_seal(&f, LIRTerminator.Return{value: Val(source)})
+    lir_builder_finish(f.builder)
+}
+
+// A private copy of the present box `source` of `ty`: a new box with every
+// word copied, then the owned contents of the active shape replaced by their
+// own copies (retains for shared kinds). box.unique and the clone of an
+// immortal box copy a box; nothing else does.
+fn lower_box_copy(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, ty: MIRType) -> LIRValueID Never! {
+    shapes :: lower_glue_shapes(p, &m, &f, ty)
+    bytes :: lower_box_size(p, ty)
     target :: lower_pointer(&f)
     lower_alloc(&m, &f, target, bytes)
     lower_copy_bytes(&f, target, 0, source, 0, if bytes < 8 -> 8 else -> bytes)
@@ -7228,7 +7423,44 @@ fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
-    lower_seal(&f, LIRTerminator.Return{value: Val(target)})
+    target
+}
+
+// box.unique(slot): before a write into the box the pointer at `slot` names
+// (or into anything reached through it), the slot must hold the box's only
+// reference. A null slot (absent Option) or a sole owner is left as is; a
+// shared or static box is replaced by a private copy (lower_box_copy) and the
+// slot's reference to the old box is released through its drop glue. A box
+// of a type no owner can copy (lower_contains_uncopyable) is never shared,
+// and its helper does nothing.
+fn lower_helper_box_unique(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    seen := [String:Bool]{}
+    if lower_contains_uncopyable(p, m, glue.ty, &seen) {
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
+    slot :: f.open_params[0].copy()
+    boxed :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: boxed, base: slot, offset: 0})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: boxed, right: null})
+    present :: lower_new_block(&f)
+    detach :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+    lower_start(&f, present, [LIRValueID]{})
+    sole :: lower_list_sole_owner(&f, boxed)
+    lower_seal(&f, LIRTerminator.Branch{condition: sole, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(detach, [LIRValueID]{})})
+    lower_start(&f, detach, [LIRValueID]{})
+    private :: lower_box_copy(p, &m, &f, boxed, glue.ty)
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: private})
+    lower_map_drop_value(p, &m, &f, boxed, glue.ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }
 
@@ -7347,6 +7579,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "display" || glue.helper == "show" || glue.helper == "debug" -> return lower_helper_display(p, &m, glue)
     if glue.helper == "equal" -> return lower_helper_equal(p, &m, glue)
     if glue.helper == "list.unique" -> return lower_helper_list_unique(p, &m, glue)
+    if glue.helper == "box.unique" -> return lower_helper_box_unique(p, &m, glue)
     if glue.helper == "list.push" -> return lower_helper_list_push(p, &m, glue)
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)

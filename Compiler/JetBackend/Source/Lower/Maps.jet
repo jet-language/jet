@@ -310,15 +310,7 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     if count == 0 -> return false
     if row.projections[count - 1] == .Index(kind, index, _, _, _, _, _) {
         if kind != .Map -> return false
-        held := LIRValueID?{None}
-        if c.slots[slot].cell {
-            held = lower_slot_root(p, c, &m, &f, slot)
-        } else {
-            // copy: the held value is read while the index write emits into `&f` and replaces
-            // f.current[slot], so a view of that slot would be live across the write.
-            held = f.current[slot].copy()
-        }
-        root :: held ?? {
+        root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? {
             lower_fail(&m, &f, "Map entry of place {row.id.value} is written before the place has a value")
             return true
         }

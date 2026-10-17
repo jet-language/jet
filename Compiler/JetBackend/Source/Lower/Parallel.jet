@@ -175,7 +175,9 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     merge :: lower_new_block(&f)
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return lower_fail(&m, &f, "try_map input has no stored value")
-    outcome :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, callback_result) ?? return
+    // The output or error moves out of the callback's Result by bytes.
+    called :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, callback_result) ?? return
+    outcome :: lower_box_owned(p, &m, &f, called, callback_result)
     selector :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: selector, base: outcome, offset: 0})
     succeeded :: lower_flag(&f)

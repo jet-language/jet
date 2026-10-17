@@ -89,7 +89,12 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop projection in projections {
         if offset >= 0 && !lower_inline_of(p, &f, ty) {
             // Enter the box (or wrapper) whose pointer the location holds;
-            // nested inline members stay in the same storage.
+            // nested inline members stay in the same storage. A write first
+            // makes the location hold the box's only reference.
+            if write {
+                slot :: lower_address(&f, base, offset)
+                lower_box_make_unique(p, &m, &f, slot, ty)
+            }
             next_base :: lower_pointer(&f)
             lower_emit(&f, LIRInst.Load{dst: next_base, base: base, offset: offset})
             base = next_base
@@ -113,6 +118,10 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                     return None
                 }
                 found :: lower_struct_field_of(p, &f, ty, id) ?? return None
+                if write && found.boxed {
+                    slot :: lower_address(&f, base, offset + found.offset)
+                    lower_box_make_unique(p, &m, &f, slot, lower_option_type(found.ty))
+                }
                 address :: lower_struct_storage_address(&f, base, LowerFieldInfo{offset: offset + found.offset, ty: found.ty, boxed: found.boxed})
                 base = address.base
                 offset = address.offset
@@ -130,6 +139,10 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 offset = found.offset
                 ty = found.ty
                 if found.boxed {
+                    if write {
+                        slot :: lower_address(&f, base, offset)
+                        lower_box_make_unique(p, &m, &f, slot, lower_option_type(found.ty))
+                    }
                     wrapper :: lower_pointer(&f)
                     lower_emit(&f, LIRInst.Load{dst: wrapper, base: base, offset: offset})
                     base = wrapper
@@ -177,13 +190,18 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                     lower_start(&f, hit, [LIRValueID]{})
                     payload :: lower_pointer(&f)
                     lower_emit(&f, LIRInst.Load{dst: payload, base: selected, offset: 0})
-                    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{payload})})
+                    // A borrowed Option<V> of the map's V: a frame box
+                    // holding V's bytes (lower_frame_box), so an owning
+                    // ReadPlace's Option glue copies it and never counts
+                    // map storage (#5041 P2).
+                    size :: lower_size(p, value_ty).size
+                    bytes :: if size < 8 -> 8 else -> lower_align_up(size, 8)
+                    view :: lower_frame_box(&f, bytes)
+                    lower_copy_bytes(&f, view, 0, payload, 0, bytes)
+                    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{view})})
                     lower_start(&f, miss, [LIRValueID]{})
                     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{zero})})
                     lower_start(&f, done, [LIRValueID]{address})
-                    // A borrowed Option<V> points directly at the map's V
-                    // storage. An owning ReadPlace clones it through normal
-                    // Option glue; the map's storage is never transferred.
                     base = lower_pointer(&f)
                     lower_emit(&f, LIRInst.StackSlot{dst: base, size: 8, align: 8})
                     lower_emit(&f, LIRInst.Store{base: base, offset: 0, value: address})
@@ -215,6 +233,88 @@ fn lower_walk_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if offset < 0 -> offset = 0
     if !lower_atomic_check_offset(p, &m, &f, ty, offset) -> return None
     Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty, borrowed: borrowed})
+}
+
+// #5041 P2: before a write into the box (Option/Result/payload enum, or a
+// boxed edge's Option-shaped wrapper) whose pointer `slot` holds, the slot
+// must hold the box's only reference: box.unique replaces a shared or static
+// box by a private copy. Other carriers need nothing.
+fn lower_box_make_unique(p: MIRProgram, m: &LowerModule, f: &LowerFunction, slot: LIRValueID, ty: MIRType) Never! {
+    if lower_repr(p, ty) == .Boxed(box_ty) -> lower_call_helper(&m, &f, "box.unique", box_ty, [LIRValueID]{slot}, None)
+}
+
+// A box of `bytes` in this frame (#5041 P2): the address after a 24-byte
+// prefix whose count word is immortal, so it is never released or freed and
+// its clone is a private copy (lower_clone_glue_function). Borrowed carriers
+// (lower_present), Read-argument union wrappers and borrowed Option views of
+// foreign storage use it.
+fn lower_frame_box(f: &LowerFunction, bytes: Int) -> LIRValueID Never! {
+    header :: lower_static_box_header()
+    frame :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: frame, size: header + (if bytes < 8 -> 8 else -> bytes), align: 8})
+    immortal :: lower_const(&f, -9223372036854775807 - 1)
+    lower_emit(&f, LIRInst.Store{base: frame, offset: 0, value: immortal})
+    past :: lower_const(&f, header)
+    view :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: view, base: frame, offset: past})
+    view
+}
+
+// The count word of the present box `boxed` (24 bytes before it: Alloc.jet
+// allocator header, or the immortal prefix of a static or frame box).
+fn lower_box_count(f: &LowerFunction, boxed: LIRValueID) -> LIRValueID Never! {
+    back :: lower_const(&f, -24)
+    count_at :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: count_at, base: boxed, offset: back})
+    lower_list_word(&f, count_at, 0)
+}
+
+// The box of `ty` (null for an absent Option) the caller is about to take
+// apart — move its payload out by bytes and free its shell — as one this
+// owner holds alone: `boxed` itself when it is, else a private copy (and
+// `boxed` loses this owner). A box any callee returns may be shared (#5041
+// P2: clone retains), so a bytewise take out of it must go through here.
+fn lower_box_owned(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, ty: MIRType) -> LIRValueID Never! {
+    if lower_repr(p, ty) == .Boxed(box_ty) {
+        cell :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
+        lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: boxed})
+        lower_call_helper(&m, &f, "box.unique", box_ty, [LIRValueID]{cell}, None)
+        owned :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: owned, base: cell, offset: 0})
+        return owned
+    }
+    // copy: a carrier that is not a box is already the caller's own; its id is returned as is.
+    boxed.copy()
+}
+
+// The root a write through `slot`'s place projections starts from (as
+// lower_slot_root). A boxed root is first made the slot's only reference
+// (box.unique on the cell holding it); a slot without a cell is rebound to
+// the possibly new box, as a Write argument's write-back rebinds it.
+fn lower_slot_root_for_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slot: Int) -> LIRValueID? {
+    ty :: c.slots[slot].ty
+    repr :: lower_repr(p, ty)
+    if repr == .Boxed(box_ty) {
+        if c.slots[slot].cell {
+            // copy: the cell pointer is read while the detach emits into `&f`.
+            cell :: (f.cells[slot].copy()) ?? return lower_slot_root(p, c, &m, &f, slot)
+            lower_call_helper(&m, &f, "box.unique", box_ty, [LIRValueID]{cell}, None)
+            return lower_slot_root(p, c, &m, &f, slot)
+        }
+        // copy: the slot's current value is read while the detach emits into `&f`.
+        held :: (f.current[slot].copy()) ?? return None
+        cell :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
+        lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: held})
+        lower_call_helper(&m, &f, "box.unique", box_ty, [LIRValueID]{cell}, None)
+        layout :: lower_repr_layout(repr) ?? return None
+        updated :: lower_new_value(&f, layout, lower_drop(&m, repr, lower_is_owned(c.slots[slot].ownership)), ty.identity)
+        lower_read_into(p, &f, updated, cell, 0, ty)
+        lower_set_slot(&f, slot, Val(updated))
+        return Val(updated)
+    }
+    lower_slot_root(p, c, &m, &f, slot)
 }
 
 // ProcessReceipt144/ProcessPlan72 are Jet-owned carriers, never hosted Rust
@@ -405,9 +505,9 @@ fn lower_enum_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if info.boxed {
         wrapper :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: wrapper, base: boxed, offset: info.offset})
-        lower_read_member(p, c, &m, &f, instruction, subject, dst, wrapper, 0, info.ty)
+        lower_read_box_member(p, c, &m, &f, instruction, subject, dst, [LIRValueID]{boxed, wrapper}, wrapper, 0, info.ty)
     } else {
-        lower_read_member(p, c, &m, &f, instruction, subject, dst, boxed, info.offset, info.ty)
+        lower_read_box_member(p, c, &m, &f, instruction, subject, dst, [LIRValueID]{boxed}, boxed, info.offset, info.ty)
     }
 }
 

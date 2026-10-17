@@ -318,6 +318,15 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
         body :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
         lower_start(&f, body, [LIRValueID]{})
+        if lower_repr(p, ty) == .Boxed(_) {
+            // #5041 P2: only the box's last owner drops what is left in it;
+            // a move out of a shared box copied instead of taking.
+            last :: lower_flag(&f)
+            lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{base}, Val(last))
+            owner :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(owner, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, owner, [LIRValueID]{})
+        }
         shapes :: if lower_is_inline(p, ty) -> [LowerGlueShape]{LowerGlueShape{selector: -1, fields: lower_inline_glue_fields(p, ty)}} else -> lower_glue_shapes(p, &m, &f, ty)
         released :: lower_new_block(&f)
         loop shape in shapes {
@@ -365,7 +374,7 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
         }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
         lower_start(&f, released, [LIRValueID]{})
-        if lower_repr(p, ty) == .Boxed(_) -> lower_free_shell(&m, &f, base, lower_box_size(p, ty))
+        if lower_repr(p, ty) == .Boxed(_) -> lower_free_box_bytes(&m, &f, base, lower_box_size(p, ty))
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})

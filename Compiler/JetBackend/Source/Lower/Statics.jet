@@ -14,7 +14,9 @@ use jet_foundation.[
 use core.math as math
 
 // `text`: constructor input for a runtime-owned word filled at startup.
-struct LowerStaticValue { word: Int, data: LIRDataID?, text: LIRDataID?, constructor: String }
+// `addend`: bytes past `data`'s start the pointer names (a static box's
+// payload follows its count word, lower_static_box).
+struct LowerStaticValue { word: Int, data: LIRDataID?, text: LIRDataID?, constructor: String, addend: Int }
 
 // A frozen slot either receives a runtime scalar or a constructed Map.
 enum LowerStaticConstructor {
@@ -24,7 +26,7 @@ enum LowerStaticConstructor {
 struct LowerStaticFixup { object: LIRDataID, offset: Int, constructor: LowerStaticConstructor }
 
 fn lower_static_word(value: Int) -> LowerStaticValue Never! {
-    LowerStaticValue{word: value, data: None, text: None, constructor: ""}
+    LowerStaticValue{word: value, data: None, text: None, constructor: "", addend: 0}
 }
 
 fn lower_static_object(m: &LowerModule, bytes: Int) -> LIRDataID Never! {
@@ -37,11 +39,29 @@ fn lower_static_object(m: &LowerModule, bytes: Int) -> LIRDataID Never! {
 }
 
 fn lower_static_pointer(id: LIRDataID) -> LowerStaticValue Never! {
-    LowerStaticValue{word: 0, data: Val(id), text: None, constructor: ""}
+    LowerStaticValue{word: 0, data: Val(id), text: None, constructor: "", addend: 0}
+}
+
+// #5041 P2: owners of an Option/Result/enum box (and of a boxed edge's
+// wrapper) share it through the count word 24 bytes before the address they
+// hold (Refcount.jet jet_rt_block_retain/release/unique). A frozen box has
+// the same prefix with an immortal (negative) count: retain and release never
+// write it, and box.unique copies it before any write. Its payload starts at
+// lower_static_box_header() in the object.
+fn lower_static_box_header() -> Int Never! { 24 }
+
+fn lower_static_box(m: &LowerModule, bytes: Int) -> LIRDataID Never! {
+    id :: lower_static_object(&m, lower_static_box_header() + (if bytes > 8 -> lower_align_up(bytes, 8) else -> 8))
+    lower_static_store(&m, id, 0, lower_static_word(-9223372036854775807 - 1))
+    id
+}
+
+fn lower_static_box_pointer(id: LIRDataID) -> LowerStaticValue Never! {
+    LowerStaticValue{word: 0, data: Val(id), text: None, constructor: "", addend: lower_static_box_header()}
 }
 
 fn lower_static_runtime(m: &LowerModule, value: String, constructor: String) -> LowerStaticValue Never! {
-    LowerStaticValue{word: 0, data: None, text: Val(lower_data(&m, value)), constructor: constructor}
+    LowerStaticValue{word: 0, data: None, text: Val(lower_data(&m, value)), constructor: constructor, addend: 0}
 }
 
 // Writes the low `size` bytes of a word, a pointer relocation, or a runtime
@@ -50,7 +70,7 @@ fn lower_static_store_sized(m: &LowerModule, object: LIRDataID, offset: Int, val
     if value.text == .Val(text) {
         &m.static_fixups.push(LowerStaticFixup{object: object, offset: offset, constructor: LowerStaticConstructor.Runtime{text: text, symbol: value.constructor}})
     } else if value.data == .Val(target) {
-        &m.data[object.value].relocs.push(LIRDataReloc{offset: offset, target: target, addend: 0})
+        &m.data[object.value].relocs.push(LIRDataReloc{offset: offset, target: target, addend: value.addend})
     } else {
         loop byte in 0..<size -> m.data[object.value].bytes[offset + byte] = U8{(value.word >> (8 * byte)).bit_and(255)}
     }
@@ -71,9 +91,9 @@ fn lower_static_child(p: MIRProgram, m: &LowerModule, f: &LowerFunction, object:
 
 fn lower_static_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, object: LIRDataID, info: LowerPayloadInfo, constant: MIRConstant) Never! {
     if info.boxed {
-        wrapper :: lower_static_object(&m, lower_option_box_size(p, info.ty))
-        lower_static_child(p, &m, &f, wrapper, 0, info.ty, constant)
-        lower_static_store(&m, object, info.offset, lower_static_pointer(wrapper))
+        wrapper :: lower_static_box(&m, lower_option_box_size(p, info.ty))
+        lower_static_child(p, &m, &f, wrapper, lower_static_box_header(), info.ty, constant)
+        lower_static_store(&m, object, info.offset, lower_static_box_pointer(wrapper))
     } else {
         lower_static_child(p, &m, &f, object, info.offset, info.ty, constant)
     }
@@ -201,8 +221,9 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
             }
             selector :: lower_discriminant(found.index)
             if repr == .Discriminant -> return Val(lower_static_word(selector))
-            id :: lower_static_object(&m, lower_enum_box_size(p, definition))
-            lower_static_store(&m, id, 0, lower_static_word(selector))
+            id :: lower_static_box(&m, lower_enum_box_size(p, definition))
+            at :: lower_static_box_header()
+            lower_static_store(&m, id, at, lower_static_word(selector))
             if found.variant.payload == {
                 .Unit -> {}
                 .Single(_) -> {
@@ -211,7 +232,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
                         return None
                     }
                     info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? return None
-                    lower_static_payload(p, &m, &f, id, info, args[0].value)
+                    lower_static_payload(p, &m, &f, id, LowerPayloadInfo{offset: at + info.offset, ty: info.ty, boxed: info.boxed}, args[0].value)
                 }
                 .Named(fields) -> {
                     loop (index, field) in fields {
@@ -221,28 +242,29 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
                             return None
                         }
                         info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return None
-                        lower_static_payload(p, &m, &f, id, info, value)
+                        lower_static_payload(p, &m, &f, id, LowerPayloadInfo{offset: at + info.offset, ty: info.ty, boxed: info.boxed}, value)
                         if f.failed -> return None
                     }
                 }
             }
             if f.failed -> return None
-            return Val(lower_static_pointer(id))
+            return Val(lower_static_box_pointer(id))
         }
         .Present(value) -> {
             if ty.kind == {
                 .Option(inner) -> {
-                    id :: lower_static_object(&m, lower_option_box_size(p, inner))
-                    lower_static_child(p, &m, &f, id, 0, inner, value)
+                    id :: lower_static_box(&m, lower_option_box_size(p, inner))
+                    lower_static_child(p, &m, &f, id, lower_static_box_header(), inner, value)
                     if f.failed -> return None
-                    return Val(lower_static_pointer(id))
+                    return Val(lower_static_box_pointer(id))
                 }
                 .Result(ok, err) -> {
-                    id :: lower_static_object(&m, lower_result_box_size(p, ok, err))
-                    lower_static_store(&m, id, 0, lower_static_word(lower_result_selector(true)))
-                    lower_static_child(p, &m, &f, id, lower_result_payload_offset(), ok, value)
+                    id :: lower_static_box(&m, lower_result_box_size(p, ok, err))
+                    at :: lower_static_box_header()
+                    lower_static_store(&m, id, at, lower_static_word(lower_result_selector(true)))
+                    lower_static_child(p, &m, &f, id, at + lower_result_payload_offset(), ok, value)
                     if f.failed -> return None
-                    return Val(lower_static_pointer(id))
+                    return Val(lower_static_box_pointer(id))
                 }
                 else -> {
                     lower_fail(&m, &f, "Present constant without an Option or Result type is not lowered at O0 yet")
@@ -252,11 +274,12 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
         }
         .Failed(report) -> {
             if ty.kind == .Result(ok, err) && report == .Told(value) {
-                id :: lower_static_object(&m, lower_result_box_size(p, ok, err))
-                lower_static_store(&m, id, 0, lower_static_word(lower_result_selector(false)))
-                lower_static_child(p, &m, &f, id, lower_result_payload_offset(), err, value)
+                id :: lower_static_box(&m, lower_result_box_size(p, ok, err))
+                at :: lower_static_box_header()
+                lower_static_store(&m, id, at, lower_static_word(lower_result_selector(false)))
+                lower_static_child(p, &m, &f, id, at + lower_result_payload_offset(), err, value)
                 if f.failed -> return None
-                return Val(lower_static_pointer(id))
+                return Val(lower_static_box_pointer(id))
             }
             // A clean failure of an Option is None (MIRRust.rs constant_for_type).
             if lower_option_inner(ty) != None && report == .Clean(_) -> return Val(lower_static_word(0))
@@ -322,6 +345,12 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             cell :: lower_pointer(&f)
             lower_emit(&f, LIRInst.DataAddress{dst: cell, data: data})
             lower_emit(&f, LIRInst.Load{dst: source, base: cell, offset: 0})
+        } else if value.addend != 0 {
+            // A frozen box: its owners hold the payload address past the count word.
+            object :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.DataAddress{dst: object, data: data})
+            past :: lower_const(&f, value.addend)
+            lower_emit(&f, LIRInst.PointerAdd{dst: source, base: object, offset: past})
         } else {
             lower_emit(&f, LIRInst.DataAddress{dst: source, data: data})
         }
@@ -373,16 +402,24 @@ fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 
 // The frozen value of module constant `definition`, built once and shared by
 // every `Global` read and `Static` place (`static_rows`): a word, or the data
-// object holding it (a runtime-owned word's cell filled at startup).
+// object holding it (a runtime-owned word's cell filled at startup). A frozen
+// box's payload offset is cached beside it ("box:" key, lower_static_box).
 fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LowerStaticValue? {
-    if m.static_rows.get(definition.key) == .Val(index) -> return Val(lower_static_pointer(LIRDataID{value: index}))
+    if m.static_rows.get(definition.key) == .Val(index) {
+        cached := lower_static_pointer(LIRDataID{value: index})
+        if m.static_rows.get("box:{definition.key}") == .Val(addend) -> cached.addend = addend
+        return Val(cached)
+    }
     value := lower_static_tree(p, &m, &f, definition.ty, definition.value) ?? return None
     if value.text != None {
         cell :: lower_static_object(&m, 8)
         lower_static_store(&m, cell, 0, value)
         value = lower_static_pointer(cell)
     }
-    if value.data == .Val(data) -> &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
+    if value.data == .Val(data) {
+        &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
+        if value.addend != 0 -> &m.static_rows.add("box:{definition.key}", value.addend).drop("cached with its row")
+    }
     Val(value)
 }
 

@@ -160,6 +160,55 @@ static void block_threads(void) {
     }
     puts("blocks ok");
 }
+// P2 A3 (#5041): Option/Result/enum boxes share through the same block
+// count, with the lowered protocol: clone = retain; a writer or a move out
+// of a shared box detaches (box.unique: a private copy that retains the
+// nested box, then the old box loses this owner); drop = release, and only
+// the last owner drops the nested box and frees. 8 threads detach and drop
+// private copies of one shared outer box (an Option holding a Result box),
+// then 9 owners release concurrently: exactly one sees the outer box last
+// and that one releases the nested box last. A static or frame box carries
+// an immortal count: retain/release never write it and it is never unique.
+static void *outer_box;
+static int outer_last, nested_last;
+static bool box_drop(void *outer) {
+    if(!jet_rt_block_release(outer)) return false;
+    void *nested=((void **)outer)[0];
+    if(jet_rt_block_release(nested)) { assert(((const int64_t *)nested)[1]==42); __atomic_add_fetch(&nested_last,1,__ATOMIC_SEQ_CST); jet_rt_free(nested,16,8); }
+    jet_rt_free(outer,8,8);
+    return true;
+}
+static void *box_churn(void *unused) {
+    (void)unused;
+    for(int i=0;i<20000;++i) {
+        void *slot=outer_box; jet_rt_block_retain(slot);
+        assert(!jet_rt_block_unique(slot));
+        void *copy=jet_rt_alloc(8,8); void *nested=((void **)slot)[0];
+        jet_rt_block_retain(nested); ((void **)copy)[0]=nested;
+        assert(!jet_rt_block_release(slot));
+        assert(jet_rt_block_unique(copy) && ((const int64_t *)nested)[1]==42);
+        assert(box_drop(copy));
+    }
+    jet_rt_block_retain(outer_box);
+    return NULL;
+}
+static void *box_final(void *unused) { (void)unused; if(box_drop(outer_box)) __atomic_add_fetch(&outer_last,1,__ATOMIC_SEQ_CST); return NULL; }
+static void box_threads(void) {
+    void *nested=jet_rt_alloc(16,8); ((int64_t *)nested)[0]=1; ((int64_t *)nested)[1]=42;
+    outer_box=jet_rt_alloc(8,8); ((void **)outer_box)[0]=nested;
+    assert(jet_rt_block_unique(outer_box) && jet_rt_block_unique(nested));
+    pthread_t threads[9];
+    for(int i=0;i<8;++i) assert(!pthread_create(&threads[i],NULL,box_churn,NULL));
+    for(int i=0;i<8;++i) assert(!pthread_join(threads[i],NULL));
+    assert(((const int64_t *)outer_box)[-3]==9 && ((const int64_t *)nested)[-3]==1 && outer_last==0 && nested_last==0);
+    for(int i=0;i<9;++i) assert(!pthread_create(&threads[i],NULL,box_final,NULL));
+    for(int i=0;i<9;++i) assert(!pthread_join(threads[i],NULL));
+    assert(outer_last==1 && nested_last==1);
+    static int64_t frozen[4]={INT64_MIN,1,42,0};
+    void *immortal=&frozen[3];
+    jet_rt_block_retain(immortal); assert(!jet_rt_block_release(immortal) && !jet_rt_block_unique(immortal) && frozen[0]==INT64_MIN);
+    puts("boxes ok");
+}
 static void euclid_by_zero(void) { (void)jet_int_rem_euclid(1,0,file,sizeof(file)-1,6); }
 static void numeric_stop(void) {
     static const char message[]="This addition overflows the value's type (the result is outside its range)";
@@ -184,6 +233,7 @@ int main(int argc,char **argv) {
         else if(!strcmp(argv[1],"shared-text-write")) entry=shared_text_write;
         else if(!strcmp(argv[1],"refcount-threads")) entry=refcount_threads;
         else if(!strcmp(argv[1],"block-threads")) entry=block_threads;
+        else if(!strcmp(argv[1],"box-threads")) entry=box_threads;
         else if(!strcmp(argv[1],"euclid-by-zero")) entry=euclid_by_zero;
         else if(!strcmp(argv[1],"numeric-stop")) entry=numeric_stop;
         else if(!strcmp(argv[1],"require")) entry=require;

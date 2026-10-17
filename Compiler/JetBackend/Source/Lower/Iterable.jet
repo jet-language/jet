@@ -109,7 +109,8 @@ fn lower_iterable_next_problem(p: MIRProgram, m: LowerModule, next: MIRFunction,
 }
 
 // One `next` call on the iterator at `cell`: the Option box it returns (null
-// for None), owned by the caller.
+// for None), owned by the caller alone (lower_box_owned: the loop takes the
+// item out of it by bytes and frees the shell, lower_iterable_value).
 fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: MIRFunction, cell: LIRValueID) -> LIRValueID Never! {
     index :: lower_function_index(m, next.id)
     signature :: m.mir_signatures[index].copy()
@@ -120,8 +121,9 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
             return cell.copy()
         }
     }
-    item :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Call{dst: Val(item), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{receiver}})
+    called :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Call{dst: Val(called), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{receiver}})
+    item :: lower_box_owned(p, &m, &f, called, next.return_type)
     if next.return_type.kind == .Result(ok, err) {
         outcome_tag :: lower_list_word(&f, item, 0)
         zero :: lower_const(&f, lower_result_selector(false))
@@ -155,7 +157,7 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
             return item
         }
         lower_free_shell(&m, &f, item, lower_result_box_size(p, ok, err))
-        return optional
+        return lower_box_owned(p, &m, &f, optional, ok)
     }
     item
 }

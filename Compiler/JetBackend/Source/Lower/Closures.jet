@@ -246,7 +246,7 @@ fn lower_cell_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         }
         return Val(LowerFieldAddress{base: cell, offset: 0})
     }
-    root :: lower_slot_root(p, c, &m, &f, slot) ?? return None
+    root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? return None
     lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections)
 }
 
@@ -359,7 +359,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     closure :: lower_use(&m, &f, callee) ?? return
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := LowerCallTemps{drops: [LIRValueID]{}, shells: [LowerCallShell]{}}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, taken: [MIRValueID]{}}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
     code :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: code, base: closure, offset: 8})

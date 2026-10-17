@@ -884,7 +884,9 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if by_key {
         item_address :: lower_list_address(&f, data, fill.at, stride)
         item :: lower_read_at(p, &f, item_address, 0, elem) ?? return
-        computed :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        called :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        // The key moves out of the callback's Result by bytes (lower_box_owned).
+        computed :: if key_err != None -> lower_box_owned(p, &m, &f, called, ret) else -> called
         lower_sort_callback_guard(p, c, &m, &f, order, keys, None, length, fill.at, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
         key_slot :: lower_list_address(&f, keys, fill.at, key_stride)
         if key_err == .Val(err_ty) {
@@ -1092,8 +1094,31 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_start(&f, finish, [LIRValueID]{dst})
 }
 
-// Frees a box's own `bytes` (its payload already moved out).
+// Gives up one owner of a box whose payload already moved out (#5041 P2):
+// the last owner frees the box's own `bytes`; a box other owners still hold
+// stays theirs (a move out of a shared box copied the payload instead,
+// Lower.jet lower_read_box_member). A null box (an absent Option) is none.
 fn lower_free_shell(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, bytes: Int) Never! {
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: boxed, right: null})
+    held :: lower_new_block(&f)
+    free :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(held, [LIRValueID]{})})
+    lower_start(&f, held, [LIRValueID]{})
+    last :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{boxed}, Val(last))
+    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(free, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, free, [LIRValueID]{})
+    lower_free_box_bytes(&m, &f, boxed, bytes)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// Frees the box `boxed` of `bytes` whose last owner this already is.
+fn lower_free_box_bytes(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, bytes: Int) Never! {
     size :: lower_const(&f, if bytes < 8 -> 8 else -> bytes)
     align :: lower_const(&f, 8)
     lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{boxed, size, align}, None)

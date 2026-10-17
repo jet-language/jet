@@ -239,7 +239,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop (index, arg) in args { if index > 0 -> &rest.push(arg) }
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := LowerCallTemps{drops: [LIRValueID]{}, shells: [LowerCallShell]{}}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, taken: [MIRValueID]{}}
     if !lower_call_args(p, c, &m, &f, rest, &lowered, &writebacks, &temporaries) -> return
     dst :: lower_result(p, c, &m, &f, instruction)
     result_ty :: lower_checked_type(c, instruction) ?? checked.return_type

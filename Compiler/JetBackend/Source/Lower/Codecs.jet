@@ -91,7 +91,14 @@ fn lower_codec_method_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, me
 }
 
 fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, target: MIRType, result: MIRType, tree: MIRType, source: LIRValueID, dst: LIRValueID) Never! {
-    if lower_codec_method(p, target, false) == .Val(method) -> return lower_codec_method_call(p, &m, &f, method, source, dst)
+    if lower_codec_method(p, target, false) == .Val(method) {
+        // Callers take the decoded value out of this Result by bytes and free
+        // its shell: a user method's Result may be shared (lower_box_owned).
+        called :: lower_pointer(&f)
+        lower_codec_method_call(p, &m, &f, method, source, called)
+        owned :: lower_box_owned(p, &m, &f, called, result)
+        return lower_emit(&f, LIRInst.Move{dst: dst, src: owned})
+    }
     if lower_codec_container(p, target) -> return lower_call_helper(&m, &f, "codec.decode", result, [LIRValueID]{source}, Val(dst))
     scalar :: lower_codec_scalar(target) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(target)}> has no reachable selected method or canonical scalar carrier")
     route :: lower_runtime_route("jet_rt_codec_decode_{runtime_abi_atom(scalar)}") ?? return lower_fail(&m, &f, "canonical scalar Decode adapter is missing")
