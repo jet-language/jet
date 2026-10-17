@@ -622,39 +622,6 @@ fn sql_compare(left: JetSQLValue, operator: String, right: JetSQLValue) -> Bool 
         else -> false
     }
 }
-// Rust select_sql_indices:1047–1077. DESC reverses BOTH value ordering and
-// position tie-break, unlike projected-row ordering above.
-fn select_sql_indices(row_count: U64, query: JetSQLQuery, cell: fn(U64, String) -> String?) -> [U64] Never! {
-    selected := [U64]{}
-    index := U64{0}
-    loop index < row_count {
-        keep := true
-        if query.filter == .Val(filter) {
-            keep = false
-            if cell(index, filter.field) == .Val(left) -> keep = compare_sql_cell(left, filter.operator, filter.value)
-        }
-        if keep -> &selected.push(index)
-        index += U64{1}
-    }
-    if query.order == .Val(clause) {
-        &selected.sort_by((left: U64, right: U64) -> {
-            a :: cell(left, clause.field) ?? ""
-            b :: cell(right, clause.field) ?? ""
-            order :: compare_sql_order_values(a, b).then(left <=> right)
-            if clause.descending -> reverse_order(order) else -> order
-        })
-    }
-    if query.limit == .Val(limit) {
-        loop limit < (U64.from_int(selected.len()) ?? panic("SQL selection length")) -> _ :: &selected.pop()
-    }
-    selected
-}
-fn compare_sql_order_values(left: String, right: String) -> Ordering Never! {
-    if parse_float(left) == .Val(a) {
-        if parse_float(right) == .Val(b) -> return float_compare(a, b)
-    }
-    left <=> right
-}
 // Rust sql_error:176–178 is identity; each caller uses the canonical Err rail.
 fn sql_error(message: ^String) -> String Never! { message }
 
