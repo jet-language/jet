@@ -96,7 +96,7 @@ fn provider_collect_one_canonical_package(path: String, requested: String, seen:
 // The toolchain part of a cache identity. The host-specific cargo path never
 // enters it: a pinned executable is hashed, a PATH-resolved dev cargo is
 // identified by its version output.
-fn provider_toolchain_facts(toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String Never! {
+fn provider_toolchain_facts(toolchain: CargoToolchain?) -[FS, Env, Exec, Time.Wait]> String Never! {
     tool :: toolchain ?? return "missing"
     cargo_digest :: if files.read_bytes(tool.cargo) == {
         .Ok(bytes) -> pkg_sha256_hex(bytes)
@@ -166,7 +166,7 @@ fn provider_collect_core_files(root: String, relative: String, out: &[(relative:
 // The core recipe identity: the semantic build identity, not only the
 // manifest and tool name. The complete source closure is included so the same
 // manifest with a changed nested tree cannot reuse a stale realization.
-fn provider_core_recipe_identity(src_dir: String, package: String, manifest: PackageFacts?, kind: PackageKind, canonical: PackageFacts?, toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String ProviderReason! {
+fn provider_core_recipe_identity(src_dir: String, package: String, manifest: PackageFacts?, kind: PackageKind, canonical: PackageFacts?, toolchain: CargoToolchain?) -[FS, Env, Exec, Time.Wait]> String ProviderReason! {
     source_tree :: provider_core_tree_fingerprint(src_dir)
     has_cargo :: files.is_file(files.join(src_dir, "Cargo.toml"))
     artifact :: if {

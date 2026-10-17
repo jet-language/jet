@@ -59,7 +59,7 @@ struct CoreProvider {
         // Content-address the materialized package so identical sources share
         // a store entry and changes get a fresh one.
         fingerprint :: provider_core_tree_fingerprint(src_dir) ?? return Err(ProviderError.CoreBuild(err.message))
-        toolchain :: BuildToolchain.resolve_for_core(ctx.offline)
+        toolchain :: CargoToolchain.resolve_for_core(ctx.offline)
         out_dir :: files.join(ctx.store_dir, "{spec.package}-{provider_prefix(fingerprint, 12)}")
         // Reuse is owned by Store verification. Reaching the provider with an
         // existing object means no verified record leased it.
@@ -129,7 +129,7 @@ struct CoreArtifact {
 // An executable stages its prebuilt `bin/`; a library stages source for
 // import and contributes no PATH entry, building its rlib through the
 // resolved toolchain when it ships `Cargo.toml` (D-JPK-BUILDTOOL1=A).
-fn provider_core_artifact(kind: PackageKind, out_dir: String, toolchain: BuildToolchain?, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> CoreArtifact ProviderError! {
+fn provider_core_artifact(kind: PackageKind, out_dir: String, toolchain: CargoToolchain?, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> CoreArtifact ProviderError! {
     if kind == PackageKind.Executable {
         return Ok(CoreArtifact{bin: files.join(out_dir, "bin"), rlib: "", recipe_id: "core-source", sandbox_class: "non-executing", sandbox_policy: "no child launched"})
     }
@@ -170,7 +170,7 @@ fn provider_manifest_kind(manifest: PackageFacts?, package: String) -> PackageKi
 // carry, derived from current source; any doubt yields no early cache path.
 fn provider_core_cache_expectation(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
     resolved :: provider_core_resolve_source(spec, table, ctx) ?? return None
-    toolchain :: BuildToolchain.resolve_for_core(ctx.offline)
+    toolchain :: CargoToolchain.resolve_for_core(ctx.offline)
     if ctx.offline && files.is_file(files.join(resolved.src_dir, "Cargo.toml")) && !provider_toolchain_pinned(toolchain) -> return None
     fingerprint :: provider_core_tree_fingerprint(resolved.src_dir) ?? return None
     recipe :: provider_core_recipe_identity(resolved.src_dir, spec.package, resolved.manifest, resolved.kind, resolved.canonical, toolchain) ?? return None
@@ -181,7 +181,7 @@ fn provider_core_cache_expectation(spec: RefSpec, table: SourceTable, ctx: Provi
     })
 }
 
-fn provider_toolchain_pinned(toolchain: BuildToolchain?) -> Bool Never! {
+fn provider_toolchain_pinned(toolchain: CargoToolchain?) -> Bool Never! {
     if toolchain == {
         .Val(tool) -> tool.pinned
         .None -> false
@@ -228,7 +228,7 @@ fn provider_core_approval_facts(spec: RefSpec, table: SourceTable, ctx: Provider
     resolved :: provider_core_resolve_source(spec, table, ctx)
     source_digest :: provider_core_tree_fingerprint(resolved.src_dir)
     if resolved.kind != PackageKind.Library || !files.is_file(files.join(resolved.src_dir, "Cargo.toml")) -> return Ok(None)
-    toolchain :: BuildToolchain.resolve_for_core(ctx.offline)
+    toolchain :: CargoToolchain.resolve_for_core(ctx.offline)
     if ctx.offline && !provider_toolchain_pinned(toolchain) -> return Ok(None)
     recipe :: provider_core_recipe_identity(resolved.src_dir, spec.package, resolved.manifest, resolved.kind, resolved.canonical, toolchain)
     authority :: "jet-core-build-hook.v1\npackage={spec.package}\nprovider={resolved.upstream}\nsource={spec.raw}\nsource_digest={source_digest}\nplatform={pkg_host_platform()}\nrecipe={recipe}\ncapabilities=exec:cargo\n"
@@ -318,7 +318,7 @@ fn provider_core_manifest_facts(repo: String) -[FS, Env]> PackageFacts? Provider
 // missing rlib is a failure, never an empty artifact that would make the
 // package look built. The build runs the resolved toolchain's cargo inside
 // the native sandbox; a pinned cargo must live in the immutable tool closure.
-fn provider_build_rlib_from_cargo(pkg_dir: String, hangar_dir: String, toolchain: BuildToolchain, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> CargoBuildReceipt CargoBuildError! {
+fn provider_build_rlib_from_cargo(pkg_dir: String, hangar_dir: String, toolchain: CargoToolchain, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> CargoBuildReceipt CargoBuildError! {
     if offline && !toolchain.pinned -> return Err(CargoBuildError.Failed("offline Core builds require a pinned realized toolchain"))
     if offline {
         lock_regular :: if files.stat(files.join(pkg_dir, "Cargo.lock")) == {
@@ -352,7 +352,7 @@ fn provider_build_rlib_from_cargo(pkg_dir: String, hangar_dir: String, toolchain
 
 // Run the sandboxed cargo build in `scratch` and copy the produced rlib into
 // the object; the caller removes the scratch whatever the outcome.
-fn provider_build_rlib_in_scratch(pkg_dir: String, scratch: CargoBuildScratch, toolchain: BuildToolchain, offline: Bool) -[FS, Env, Exec, Time.Wait]> CargoBuildReceipt CargoBuildError! {
+fn provider_build_rlib_in_scratch(pkg_dir: String, scratch: CargoBuildScratch, toolchain: CargoToolchain, offline: Bool) -[FS, Env, Exec, Time.Wait]> CargoBuildReceipt CargoBuildError! {
     args := [String]{"build", "--lib", "--release", "--manifest-path", "/work/source/Cargo.toml", "--locked"}
     if offline -> &args.push("--offline")
     files.create_dir_all(files.join(scratch.path, "home")) ?? return Err(CargoBuildError.Failed("could not create Cargo home: {err}"))
