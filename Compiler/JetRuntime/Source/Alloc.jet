@@ -2,20 +2,32 @@
 // No Core allocation API, libc, Rust allocator, sentry, or exact-Int operation
 // participates. The ABI is three machine words, matching the lowering's calls.
 //
-// State layout: [lock][8 available-slab heads][8 retained-empty-slab addresses].
+// State layout: arena 0 [lock][8 available-slab heads][8 retained-empty-slab
+// addresses] at 0..136; word 208 holds the table of arenas 1..31 (136 bytes
+// each, same layout); the large-block cache owns lock 216, cached bytes 224
+// and 59 class heads from 256.
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
-// Each 64 KiB slab belongs to one
-// power-of-two class (32..4096). Slab layout: [next][prev][free][live][head-cell]
+// Each 64 KiB slab belongs to one arena and one power-of-two class
+// (32..4096). Slab layout: [next][prev][free][live][head-cell][arena]
 // followed by padding to max(64, class-size), then intrusive free blocks.
 // A live block stores [slab][block-start] immediately before its aligned payload.
 // Large/over-aligned mappings instead store [mapping-base][mapping-length].
-// Only slabs with free blocks are linked. All slab metadata is protected by the
-// one CAS spin lock; payloads belong exclusively to their callers. At most one
-// empty slab per class is retained to avoid mmap/munmap on every temporary;
-// additional empty slabs and all direct allocations are unmapped immediately.
-// The state page and at most eight empty slabs are bounded allocator-owned
-// process-lifetime metadata/cache, not live payload allocations.
+// Only slabs with free blocks are linked. A thread allocates from the arena its
+// stack band selects (alloc_arena) and a block returns to its slab's arena;
+// each arena's slab metadata is protected by that arena's futex lock
+// (alloc_lock: a short spin, then a kernel sleep), so threads on different
+// stacks rarely contend and a waiter never burns a core. Payloads belong exclusively to
+// their callers. At most one empty slab per class and arena is retained to
+// avoid mmap/munmap on every temporary; additional empty slabs are unmapped
+// immediately. Large mappings are rounded to a size class (at most 25% over
+// the page-rounded need) and a freed one is kept on its class list while the
+// cache holds at most 64 MiB in all (resident pages a compiler keeps, so the
+// bound stays small), for the next allocation of that class instead of
+// munmap + mmap; reused large blocks are not zeroed, as small blocks never
+// are. The state page, the arena table, the retained empty slabs and the
+// cached large mappings are bounded allocator-owned process-lifetime
+// metadata/cache, not live payload allocations.
 // ProgramAllocator.rs169-202/242-256/416-445 policy shares this heap: independent
 // lock136, mode144 (0 system/1 counting), cap152, allocations160, requested168,
 // live176, high-water184. Counters saturate; successful reservations count even
@@ -40,24 +52,31 @@ fn alloc_layout_valid(size: I64, align: I64) -> Bool Never! {
 
 // Returns the block class, or zero for a direct mapping. The conservative
 // alignment slack includes both metadata words, so payload alignment never
-// consumes a byte belonging to a neighbouring block.
+// consumes a byte belonging to a neighbouring block. The power-of-two class
+// is chosen by at most four comparisons: this runs on every allocation and
+// every free.
 fn alloc_class(size: I64, align: I64) -> I64 Never! {
     effective :: if (size == I64{0}) -> I64{1} else -> size
     if (effective > I64{4096} || align > I64{4096}) { return I64{0} }
     needed :: wrapping(effective + I64{16} + align - I64{1})
-    slot := I64{32}
-    loop slot < needed && slot < (I64{4096}) -> slot = wrapping(slot * I64{2})
-    if slot < needed -> I64{0} else -> slot
+    if (needed <= I64{256}) {
+        if (needed <= I64{64}) { return if (needed <= I64{32}) -> I64{32} else -> I64{64} }
+        return if (needed <= I64{128}) -> I64{128} else -> I64{256}
+    }
+    if (needed <= I64{1024}) { return if (needed <= I64{512}) -> I64{512} else -> I64{1024} }
+    if (needed <= I64{2048}) { return I64{2048} }
+    if (needed <= I64{4096}) -> I64{4096} else -> I64{0}
 }
 
+// The class's available-slab head word in an arena: classes 32..4096 are
+// words 8..64 of the arena row; their retained-empty cells follow 64 bytes on.
 fn alloc_head(root: I64, slot: I64) -> I64 Never! {
-    head := wrapping(root + I64{8})
-    width := I64{32}
-    loop width < slot {
-        width = wrapping(width * I64{2})
-        head = wrapping(head + I64{8})
+    if (slot <= I64{256}) {
+        if (slot <= I64{64}) { return wrapping(root + (if (slot == I64{32}) -> I64{8} else -> I64{16})) }
+        return wrapping(root + (if (slot == I64{128}) -> I64{24} else -> I64{32}))
     }
-    head
+    if (slot <= I64{1024}) { return wrapping(root + (if (slot == I64{512}) -> I64{40} else -> I64{48})) }
+    wrapping(root + (if (slot == I64{2048}) -> I64{56} else -> I64{64}))
 }
 
 fn alloc_align(address: I64, align: I64) -> I64 Never! {
@@ -90,19 +109,81 @@ fn alloc_unmap(address: I64, bytes: I64) {
     if (alloc_root != I64{0}) {
         return
     }
-    // mmap is zero-filled: the lock and every free-list head start at zero.
+    // mmap is zero-filled: the locks, every free-list head and the large
+    // cache start at zero.
     alloc_root = alloc_map(I64{4096}, I64{4096})
+    // Arenas 1..31: 31 * 136 bytes in one zero-filled mapping.
+    table :: alloc_map(I64{8192}, I64{8192})
+    #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
+        os_store_i64(wrapping(alloc_root + I64{208}), table)
+    }
 }
 
+// The arena roots: 0 is the state page's own arena, 1..31 rows of the table.
+fn alloc_arena_root(index: I64) -> I64 {
+    if (index == I64{0}) { return alloc_root }
+    #Unsafe("initialization wrote the arena table word once, before any allocation") {
+        return wrapping(os_load_i64(wrapping(alloc_root + I64{208})) + wrapping(wrapping(index - I64{1}) * I64{136}))
+    }
+}
+
+// The calling thread's arena. Thread stacks are disjoint mappings of at least
+// 192 MiB (Thread.jet thread_stack_bytes), so threads running at the same time
+// sit in different 128 MiB stack bands; the band's hash picks one of the 32
+// arenas. Any arena is correct for any thread: the choice only spreads lock
+// traffic, and a block always returns to the arena of its slab.
+fn alloc_arena() -> I64 {
+    band := I64{0}
+    #Unsafe("reads the stack pointer register only; nothing is dereferenced") {
+        band = os_stack_address_i64() >> I64{27}
+    }
+    alloc_arena_root((wrapping(band * I64{-7046029254386353131}) >> I64{59}).bit_and(I64{31}))
+}
+
+// Live payloads in the available slabs of class `width` across every arena;
+// isolated single-threaded fixtures use it as their leak witness.
+fn alloc_available_live(width: I64) -> I64 {
+    total := I64{0}
+    index := I64{0}
+    loop index < (I64{32}) {
+        #Unsafe("the caller is quiescent: no thread mutates the slab lists it walks") {
+            slab := os_load_i64(alloc_head(alloc_arena_root(index), width))
+            loop slab != (I64{0}) {
+                total = wrapping(total + os_load_i64(wrapping(slab + I64{24})))
+                slab = os_load_i64(slab)
+            }
+        }
+        index = wrapping(index + I64{1})
+    }
+    total
+}
+
+// Every allocator lock is one futex word: 0 free, 1 held, 2 held with
+// sleepers. An acquirer spins briefly (test before each CAS, so waiters read
+// a shared cache line), then sleeps in FUTEX_WAIT_PRIVATE instead of burning
+// its core: when compiler threads outnumber the CPUs, a preempted holder no
+// longer stalls every spinner for a whole time slice. No TCB, allocation or
+// Sync state is involved, so the lock works before any thread is attached.
 fn alloc_lock(root: I64) {
-    #Unsafe("root is the aligned lock word in the process-lifetime state mapping; CAS acquires all protected slab metadata") {
-        loop os_cas_i64(root, I64{0}, I64{1}) != (I64{0}) -> os_spin_pause()
+    #Unsafe("root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word") {
+        if (os_cas_i64(root, I64{0}, I64{1}) == I64{0}) -> return
+        spins := I64{0}
+        loop spins < (I64{128}) {
+            os_spin_pause()
+            if (os_load_i64(root) == I64{0} && os_cas_i64(root, I64{0}, I64{1}) == I64{0}) -> return
+            spins = wrapping(spins + I64{1})
+        }
+        loop os_swap_i64(root, I64{2}) != (I64{0}) {
+            _ := os_syscall_i64(I64{202}, root, I64{128}, I64{2}, I64{0}, I64{0}, I64{0})
+        }
     }
 }
 
 fn alloc_unlock(root: I64) {
-    #Unsafe("the calling thread holds the heap lock; x86 release store publishes its completed metadata updates") {
-        os_store_i64(root, I64{0})
+    #Unsafe("the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word") {
+        if (os_swap_i64(root, I64{0}) == I64{2}) {
+            _ := os_syscall_i64(I64{202}, root, I64{129}, I64{1}, I64{0}, I64{0}, I64{0})
+        }
     }
 }
 
@@ -135,7 +216,7 @@ fn alloc_link(slab: I64, head: I64) {
     }
 }
 
-fn alloc_new_slab(head: I64, slot: I64) -> I64 {
+fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
     slab :: alloc_map_try(I64{65536})
     if (slab == I64{0}) { return I64{0} }
     first :: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
@@ -150,6 +231,7 @@ fn alloc_new_slab(head: I64, slot: I64) -> I64 {
         }
         os_store_i64(wrapping(slab + I64{16}), free)
         os_store_i64(wrapping(slab + I64{32}), head)
+        os_store_i64(wrapping(slab + I64{40}), root)
     }
     alloc_link(slab, head)
     slab
@@ -161,7 +243,7 @@ fn alloc_small(root: I64, size: I64, align: I64, slot: I64) -> I64 {
     pointer := I64{0}
     #Unsafe("the held heap lock protects the class list, block links and slab live count; the chosen block has at least size+16+align-1 bytes") {
         slab := os_load_i64(head)
-        if (slab == I64{0}) { slab = alloc_new_slab(head, slot) }
+        if (slab == I64{0}) { slab = alloc_new_slab(root, head, slot) }
         if (slab == I64{0}) {
             alloc_unlock(root)
             return I64{0}
@@ -181,6 +263,74 @@ fn alloc_small(root: I64, size: I64, align: I64, slot: I64) -> I64 {
     pointer
 }
 
+// Large size classes in pages: 2, 3, then four steps per doubling from 4
+// (4, 5, 6, 7, 8, 10, 12, 14, 16, 20, ...) up to class 58, 65536 pages
+// (256 MiB). A class is at most 25% above any need it serves.
+fn alloc_large_class_pages(class: I64) -> I64 Never! {
+    if (class < I64{2}) { return wrapping(class + I64{2}) }
+    step :: wrapping(class - I64{2})
+    pages := wrapping(I64{4} + step.bit_and(I64{3}))
+    group := step /% I64{4}
+    loop group > (I64{0}) {
+        pages = wrapping(pages * I64{2})
+        group = wrapping(group - I64{1})
+    }
+    pages
+}
+
+// The smallest large class holding `bytes` (page-rounded, above one page),
+// or -1 above the largest class.
+fn alloc_large_class(bytes: I64) -> I64 Never! {
+    pages :: bytes /% I64{4096}
+    if (pages > I64{65536}) { return I64{-1} }
+    class := I64{0}
+    loop alloc_large_class_pages(class) < pages -> class = wrapping(class + I64{1})
+    class
+}
+
+// A cached mapping of `class`, unlinked from its list, or zero.
+fn alloc_large_cached(class: I64) -> I64 {
+    lock :: wrapping(alloc_root + I64{216})
+    head :: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
+    alloc_lock(lock)
+    mapping := I64{0}
+    #Unsafe("the large-cache lock owns every class list, its link words and the cached byte count") {
+        mapping = os_load_i64(head)
+        if (mapping != I64{0}) {
+            os_store_i64(head, os_load_i64(mapping))
+            total :: wrapping(alloc_root + I64{224})
+            os_store_i64(total, wrapping(os_load_i64(total) - wrapping(alloc_large_class_pages(class) * I64{4096})))
+        }
+    }
+    alloc_unlock(lock)
+    mapping
+}
+
+// Returns a freed large mapping to its class list while the cache holds at
+// most 64 MiB, else unmaps it. Mappings above the largest class are unmapped.
+fn alloc_large_free(mapping: I64, bytes: I64) {
+    class :: alloc_large_class(bytes)
+    if (class >= I64{0} && wrapping(alloc_large_class_pages(class) * I64{4096}) == bytes) {
+        lock :: wrapping(alloc_root + I64{216})
+        alloc_lock(lock)
+        cached := false
+        #Unsafe("the large-cache lock owns every class list and the cached byte count; the mapping's first word is no live payload once it is freed") {
+            total :: wrapping(alloc_root + I64{224})
+            held :: os_load_i64(total)
+            if (held <= wrapping(I64{67108864} - bytes)) {
+                head :: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
+                os_store_i64(mapping, os_load_i64(head))
+                os_store_i64(head, mapping)
+                os_store_i64(total, wrapping(held + bytes))
+                cached = true
+            }
+        }
+        alloc_unlock(lock)
+        if cached -> return
+    }
+    alloc_unmap(mapping, bytes)
+}
+
 fn alloc_large(size: I64, align: I64) -> I64 {
     effective :: if (size == I64{0}) -> I64{1} else -> size
     // Extra header/alignment/page padding is internal overhead, not a caller
@@ -188,11 +338,14 @@ fn alloc_large(size: I64, align: I64) -> I64 {
     overhead :: wrapping(align - I64{1})
     limit :: wrapping(I64{9223372036854775807} - I64{4111})
     if overhead > limit || effective > wrapping(limit - overhead) -> return I64{0}
-    bytes :: alloc_align(wrapping(effective + I64{16} + overhead), I64{4096})
-    mapping :: alloc_map_try(bytes)
+    needed :: alloc_align(wrapping(effective + I64{16} + overhead), I64{4096})
+    class :: alloc_large_class(needed)
+    bytes :: if (class < I64{0}) -> needed else -> wrapping(alloc_large_class_pages(class) * I64{4096})
+    mapping := if (class < I64{0}) -> I64{0} else -> alloc_large_cached(class)
+    if (mapping == I64{0}) { mapping = alloc_map_try(bytes) }
     if (mapping == I64{0}) { return I64{0} }
     pointer :: alloc_align(wrapping(mapping + I64{16}), align)
-    #Unsafe("pointer's two header words and the aligned payload are wholly within this fresh page-rounded mapping") {
+    #Unsafe("pointer's two header words and the aligned payload are wholly within this page-rounded class mapping") {
         os_store_i64(wrapping(pointer - I64{16}), mapping)
         os_store_i64(wrapping(pointer - I64{8}), bytes)
     }
@@ -204,7 +357,7 @@ fn alloc_large(size: I64, align: I64) -> I64 {
 fn alloc_try_validated(size: I64, align: I64) -> I64 {
     slot :: alloc_class(size, align)
     if (slot == I64{0}) { alloc_large(size, align) } else {
-        alloc_small(alloc_root, size, align, slot)
+        alloc_small(alloc_arena(), size, align, slot)
     }
 }
 
@@ -426,14 +579,18 @@ fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
         #Unsafe("the lowering returns this still-live direct allocation with exactly its original size and alignment") {
             mapping :: os_load_i64(wrapping(pointer - I64{16}))
             bytes :: os_load_i64(wrapping(pointer - I64{8}))
-            alloc_unmap(mapping, bytes)
+            alloc_large_free(mapping, bytes)
         }
         return
     }
-    root :: alloc_root
+    slab := I64{0}
+    root := I64{0}
+    #Unsafe("the caller's live payload header names its slab, whose arena word is fixed when the slab is created") {
+        slab = os_load_i64(wrapping(pointer - I64{16}))
+        root = os_load_i64(wrapping(slab + I64{40}))
+    }
     alloc_lock(root)
-    #Unsafe("the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under the heap lock") {
-        slab :: os_load_i64(wrapping(pointer - I64{16}))
+    #Unsafe("the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock") {
         block :: os_load_i64(wrapping(pointer - I64{8}))
         free :: os_load_i64(wrapping(slab + I64{16}))
         live :: wrapping(os_load_i64(wrapping(slab + I64{24})) - I64{1})

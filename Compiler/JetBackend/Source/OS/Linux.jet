@@ -389,6 +389,22 @@ fn os_spin_pause() {
     """
 }
 
+// The calling thread's stack pointer. Thread stacks are disjoint mappings, so
+// its high bits tell threads running at the same time apart (the runtime
+// heap's arena choice, Alloc.jet alloc_arena). An rsp read needs a
+// template-owned pushed word, which is popped back; nothing is dereferenced.
+#[Unsafe("reads the stack pointer register after one balanced push; no memory is read"), FFI(asm)]
+fn os_stack_address_i64() -> I64 {
+    """
+    mov rcx, 0
+    push rcx
+    mov rax, rsp
+    pop rcx
+    mov rax, rax ; -> return
+    ; clobbers rcx
+    """
+}
+
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 fn os_load_u8(address: I64) -> I64 {
     """
