@@ -7176,6 +7176,16 @@ fn jet_codegen_or_borrow_window(builder: JetCodegenBuilder, program: JetCodegenP
     if builder.retained_root && builder.scope_depth == 0 -> return None
     place :: window ?? return None
     if builder.read_windows.get(place.value) == None -> return None
+    // The borrowed local is one MIR local for the whole function, and the
+    // or-join that enters the arm also merges the unmatched edge, on which
+    // the local still holds the borrow an earlier loop iteration made. In a
+    // loop the window must therefore be a place that never changes while the
+    // function runs (a read parameter's, or a constant read in place). A
+    // stable local root (a table's `it`, a `::` binding in the loop body) is
+    // proven unchanged only inside the arm: re-bound or dropped by the next
+    // iteration, it leaves that older borrow stale (MIR Lint view.valid), so
+    // such a subject keeps the copying lowerer inside a loop.
+    if builder.loops.len() > 0 && !jet_codegen_read_parameter_place(builder, program, place) -> return None
     loop fact in pattern.bindings {
         if fact.mutable -> return None
     }

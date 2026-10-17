@@ -1,0 +1,69 @@
+// An or-pattern in a loop whose subject is read through a root the loop
+// re-binds each iteration (a table's `it` over a list element, a `::` binding
+// made in the loop body) binds copies: a borrowed binding would still hold
+// the previous iteration's borrow on the path where no alternative matches.
+// A subject read in place through a read parameter keeps borrowing.
+struct Shape {
+    name: String
+}
+
+enum Kind {
+    List(value: Shape)
+    Fixed(value: Shape, size: Int)
+    Plain
+}
+
+struct Ty {
+    kind: Kind
+}
+
+fn type_of(k: Int) -> Ty? {
+    if k % 3 == 0 -> return Val(Ty{kind: Kind.List{value: Shape{name: "l{k}"}}})
+    if k % 3 == 1 -> return Val(Ty{kind: Kind.Fixed{value: Shape{name: "f{k}"}, size: k}})
+    Val(Ty{kind: Kind.Plain})
+}
+
+fn element_names(count: Int) -> [String]? {
+    out := [String]{}
+    loop index in 0..<count {
+        ty :: type_of(index) ?? return None
+        inner := if ty.kind == {
+            .List(value) | .Fixed(value, _) -> value
+            else -> {
+                return None
+            }
+        }
+        &out.push(inner.name)
+    }
+    Val(out)
+}
+
+fn name_lengths(tys: [Ty], positions: [Int]) -> Int {
+    total := 0
+    loop position in positions {
+        if tys[position].kind == {
+            .List(value) | .Fixed(value, _) -> total += value.name.len()
+            else -> {}
+        }
+    }
+    total
+}
+
+fn walked_names(tys: [Ty]) -> String {
+    out := ""
+    loop ty in tys {
+        if ty.kind == {
+            .List(value) | .Fixed(value, _) -> out = "{out}{value.name};"
+            else -> out = "{out}-;"
+        }
+    }
+    out
+}
+
+fn run() {
+    print((element_names(2) ?? [String]{}).join(","))
+    print((element_names(3) ?? [String]{"none"}).join(","))
+    tys :: [Ty]{Ty{kind: Kind.List{value: Shape{name: "a"}}}, Ty{kind: Kind.Plain}, Ty{kind: Kind.Fixed{value: Shape{name: "bbb"}, size: 2}}}
+    print(name_lengths(tys, [Int]{0, 1, 2, 2}))
+    print(walked_names(tys))
+}
