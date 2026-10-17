@@ -6753,41 +6753,13 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         complete = false
     }
 
-    authority_reach :: sema_authority_entry_reach(final_graph, modules)
-    loop module_index in 0..<modules.len() {
-        module_result :: modules[module_index]
-        source_index :: sema_registration_module_index(final_graph, module_result.module_identity) ?? next
-        source_module :: final_graph.modules[source_index]
-        diagnostic_start := diagnostics.len()
-        policy :: sema_comptime_policy_for_package(stage.package_policies, module_result.package_identity) ?? next
-        loop function_index in 0..<module_result.functions.len() {
-            function :: module_result.functions[function_index]
-            if authority_reach.get(function.key) == None -> next
-            if policy.authority_allow != None {
-                allowed :: policy.authority_allow ?? [String]{}
-                if !sema_effect_check_scope_caps("authority.holds.allow", allowed, function.effects.solved, function.source_span, &diagnostics) -> complete = false
-            }
-            if policy.authority_deny != None {
-                denied :: policy.authority_deny ?? [String]{}
-                covered := sema_effect_authority_deny_covered(denied, function.effects.solved)
-                if covered.len() > 0 {
-                    &diagnostics.push(sema_comptime_policy_deny_diagnostic(module_result.package_identity, covered, function.source_span))
-                    complete = false
-                }
-            }
-        }
-    }
+    if !sema_finalize_authority(final_graph, modules, stage.package_policies, &diagnostics) -> complete = false
 
+    if trace_sink == .Val(sink) -> sink.begin("sema.core", "", -1, -1)
     core_modules := [SemaCoreModuleUsageResult]{}
-    core_module_index := 0
-    loop core_module_index < final_graph.modules.len() {
-        graph_module :: final_graph.modules[core_module_index]
-        checked_module :: modules[core_module_index]
-        unshared := sema_core_source_unshared_functions(graph_module, checked_module.call_facts)
-        &core_modules.push(sema_core_module_usage_from_registration(final_graph, graph_module, unshared, checked_module.exact_int_reachable))
-        core_module_index += 1
-    }
+    final_graph = sema_finalize_core_usage(^final_graph, modules, threads, &core_modules)
     core_usage := sema_core_combine_module_usage(core_modules)
+    if trace_sink == .Val(sink) -> sink.end("sema.core", core_modules.len())
     if !sema_web_host_check_core_usage(final_graph.target_machine.name, core_usage.used_core, &diagnostics) -> complete = false
     if !sema_target_check_socket_surfaces(final_graph, core_usage.used_core, &diagnostics) -> complete = false
     loop module_usage in core_usage.modules {
@@ -6807,6 +6779,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         }
     }
 
+    if trace_sink == .Val(sink) -> sink.begin("sema.facts", "", -1, -1)
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
     comptime_requests := [SemaComptimeRequest]{}
@@ -6820,6 +6793,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         loop source in module_result.comptime_body_sources -> &comptime_body_sources.push(source)
         loop facts in module_result.compute_facts -> &compute_facts.push(facts)
     }
+    if trace_sink == .Val(sink) -> sink.end("sema.facts", call_facts.len())
     // Only an error makes the graph incomplete: warning-only bodies (L0103
     // unused imports and the like) still lower and emit.
     if stage.diagnostics.len() == 0 {
@@ -6833,17 +6807,23 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop diagnostic in sema_http_unmounted_warnings(final_graph, modules) -> &diagnostics.push(diagnostic)
     // Bundle-owned structure verdicts share the same checked references on
     // success and failure; consumers never reconstruct them from source text.
+    if trace_sink == .Val(sink) -> sink.begin("sema.liveness", "", -1, -1)
     liveness :: sema_liveness_structure(final_graph, modules)
+    if trace_sink == .Val(sink) -> sink.end("sema.liveness", liveness.facts.len())
+    if trace_sink == .Val(sink) -> sink.begin("sema.lifecycle", "", -1, -1)
     lifecycle :: sema_lifecycle_structure(final_graph, modules, stage.package_policies)
+    if trace_sink == .Val(sink) -> sink.end("sema.lifecycle", lifecycle.facts.len())
     loop diagnostic in liveness.diagnostics -> &diagnostics.push(diagnostic)
     loop diagnostic in lifecycle.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
         &diagnostics.push(diagnostic)
     }
+    if trace_sink == .Val(sink) -> sink.begin("sema.names", "", -1, -1)
     structure_facts := sema_name_structure_facts(final_graph)
     loop fact in lifecycle.facts -> &structure_facts.push(fact)
     loop fact in liveness.facts -> &structure_facts.push(fact)
     names :: sema_name_build_facts(final_graph, modules, structure_facts)
+    if trace_sink == .Val(sink) -> sink.end("sema.names", names.references.len())
     programs := [Program]{}
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> &programs.push(source_module.program)
@@ -6873,124 +6853,219 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     ^result
 }
 
-// Module-local finalization results, joined in module order by both the
-// serial and the parallel path.
-struct SemaFinalizeModulesResult {
-    cores: [SemaCoreModuleUsageResult]
-    diagnostics: [Diagnostic]
-    complete: Bool
+// A compiler thread is admitted for at least this many bytes of item source,
+// so a small program walks its Core usage on the calling thread.
+SEMA_CORE_MIN_BYTES_PER_THREAD :: 65536
+// Jobs per admitted thread, claimed dynamically.
+SEMA_CORE_JOBS_PER_THREAD :: 8
+
+// Whether any package policy constrains authority: only then does
+// sema_finalize_authority emit anything, so only then is the entry reach
+// (sema_authority_entry_reach, a walk of every function's call edges) built.
+fn sema_finalize_authority_constrained(policies: [SemaRegistrationPackagePolicy]) -> Bool Never! {
+    loop policy in policies {
+        if policy.authority_allow != None || policy.authority_deny != None -> return true
+    }
+    false
 }
 
-fn sema_finalize_result_empty() -> SemaFinalizeModulesResult Never! {
-    SemaFinalizeModulesResult{cores: [SemaCoreModuleUsageResult]{}, diagnostics: [Diagnostic]{}, complete: true}
-}
-
-// The package authority checks of checked module `module_index`, then the
-// Core usage of registered module `module_index`, read in place.
-fn sema_finalize_module(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], module_index: Int, checked: &SemaFinalizeModulesResult) {
-    if module_index < modules.len() {
-        diagnostic_start :: checked.diagnostics.len()
-        if sema_registration_module_index(graph, modules[module_index].module_identity) == .Val(source_index) {
-            if sema_comptime_policy_for_package(policies, modules[module_index].package_identity) == .Val(policy) {
-                loop function_index in 0..<modules[module_index].functions.len() {
-                    if policy.authority_allow != None {
-                        allowed :: policy.authority_allow ?? [String]{}
-                        if !sema_effect_check_scope_caps("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &checked.diagnostics) -> checked.complete = false
-                    }
-                    if policy.authority_deny != None {
-                        denied :: policy.authority_deny ?? [String]{}
-                        covered :: sema_effect_authority_deny_covered(denied, modules[module_index].functions[function_index].effects.solved)
-                        if covered.len() > 0 {
-                            &checked.diagnostics.push(sema_comptime_policy_deny_diagnostic(modules[module_index].package_identity, covered, modules[module_index].functions[function_index].source_span))
-                            checked.complete = false
-                        }
-                    }
+// Rust `program_effects` (D-EFFECT-AUTHORITY1): each checked function the
+// entry reaches is judged against its package's `authority.holds` policy,
+// module by module (registered modules only), function by function. Returns
+// false when a check failed.
+fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], diagnostics: &[Diagnostic]) -> Bool {
+    if !sema_finalize_authority_constrained(policies) -> return true
+    complete := true
+    authority_reach :: sema_authority_entry_reach(graph, modules)
+    loop module_index in 0..<modules.len() {
+        if sema_registration_module_index(graph, modules[module_index].module_identity) == None -> next
+        policy :: sema_comptime_policy_for_package(policies, modules[module_index].package_identity) ?? next
+        loop function_index in 0..<modules[module_index].functions.len() {
+            if authority_reach.get(modules[module_index].functions[function_index].key) == None -> next
+            if policy.authority_allow != None {
+                allowed :: policy.authority_allow ?? [String]{}
+                if !sema_effect_check_scope_caps("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) -> complete = false
+            }
+            if policy.authority_deny != None {
+                denied :: policy.authority_deny ?? [String]{}
+                covered :: sema_effect_authority_deny_covered(denied, modules[module_index].functions[function_index].effects.solved)
+                if covered.len() > 0 {
+                    &diagnostics.push(sema_comptime_policy_deny_diagnostic(modules[module_index].package_identity, covered, modules[module_index].functions[function_index].source_span))
+                    complete = false
                 }
-                sema_attach_diagnostic_source_locations(&checked.diagnostics, diagnostic_start, graph.modules[source_index].source_segments)
             }
         }
     }
-    if module_index < graph.modules.len() {
-        unshared :: sema_core_source_unshared_functions(graph.modules[module_index], modules[module_index].call_facts)
-        &checked.cores.push(sema_core_module_usage_from_registration(graph, graph.modules[module_index], unshared, modules[module_index].exact_int_reachable))
+    complete
+}
+
+// The Core usage of every registered module, in module order, on up to
+// `threads` compiler threads (D-JOBS1). The walk of a module's items is the
+// only part that grows with the program, so the jobs are consecutive item
+// ranges (one module each, about equal source bytes, every module's ranges
+// consecutive), claimed dynamically; each thread walks its claimed ranges
+// into their own rows, and the caller joins the rows in job order
+// (sema_core_collected_append) before the per-module prefix and script-body
+// usages, so the usage sets, the first span of each usage and the callback
+// keys read exactly as one thread's walk of every module in order. The
+// graph and the module contexts move into the threads' shared state and
+// back; the graph is returned. A program whose work admits one thread walks
+// on the calling thread.
+fn sema_finalize_core_usage(graph: ^SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads, cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
+    owned := ^graph
+    contexts := [SemaCoreModuleContext]{}
+    weights := [Int]{}
+    owners := [Int]{}
+    work := 0
+    loop module_index in 0..<owned.modules.len() {
+        &contexts.push(sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts))
+        loop item_index in 0..<owned.modules[module_index].program.items.len() {
+            span :: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
+            weight :: span.end - span.start
+            &weights.push(weight)
+            &owners.push(module_index)
+            work += weight
+        }
     }
+    workers :: compiler_threads_admit(threads, weights.len(), work, SEMA_CORE_MIN_BYTES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop module_index in 0..<owned.modules.len() {
+            collected := sema_core_collected_empty()
+            sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), contexts[module_index], &collected)
+            &cores.push(sema_core_module_usage_assemble(owned.modules[module_index], contexts[module_index], modules[module_index].exact_int_reachable, collected))
+        }
+        return owned
+    }
+    count := workers * SEMA_CORE_JOBS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    jobs :: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)
+    shared_state :: shared SemaFinalizeCoreShared{graphs: [SemaRegistrationGraph]{}, contexts: [SemaCoreModuleContext]{}, jobs: jobs}
+    sema_finalize_core_fill(shared_state, ^owned, &contexts)
+    queue :: shared SemaFinalizeCoreQueue{next: 0}
+    results := [SemaCoreCollected]{}
+    loop _ in 0..<jobs.len() -> &results.push(sema_core_collected_empty())
+    sema_finalize_core_claimers(shared_state, queue, 0, workers, &results)
+    returned := sema_finalize_core_take(shared_state, &contexts)
+    // Each module's item ranges, joined in job order (jobs are in module and
+    // item order, so a module's rows arrive consecutively).
+    joined := [SemaCoreCollected]{}
+    loop _ in 0..<returned.modules.len() -> &joined.push(sema_core_collected_empty())
+    &results.reverse()
+    job := 0
+    loop results.len() > 0 {
+        collected := &results.pop() ?? break
+        sema_core_collected_append(&joined[jobs[job].module_index], collected)
+        job += 1
+    }
+    &joined.reverse()
+    joined_index := 0
+    loop joined.len() > 0 {
+        collected := &joined.pop() ?? break
+        &cores.push(sema_core_module_usage_assemble(returned.modules[joined_index], contexts[joined_index], modules[joined_index].exact_int_reachable, collected))
+        joined_index += 1
+    }
+    returned
 }
 
-// Inputs move into one slot and stay immutable while the workers run.
-struct SemaFinalizeShared {
-    graphs: [SemaRegistrationGraph]
-    modules: [[SemaGraphModuleResult]]
-    policies: [[SemaRegistrationPackagePolicy]]
-}
-
-struct SemaFinalizePart {
+// One module's consecutive item range, walked for Core usage on one thread.
+struct SemaFinalizeCoreJob {
+    module_index: Int
     first: Int
     last: Int
-    checked: SemaFinalizeModulesResult
 }
 
-fn sema_finalize_shared_fill(shared_state: Shared<SemaFinalizeShared>, graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], policies: ^[SemaRegistrationPackagePolicy]) {
+// The jobs of the parts `bounds` cuts over every module's items (flattened
+// in module and item order; `owners[position]` is the module of a position),
+// each part cut again at its module boundaries, so a job never spans two
+// modules and the jobs stay in module and item order.
+fn sema_finalize_core_jobs(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJob] Never! {
+    jobs := [SemaFinalizeCoreJob]{}
+    starts := [Int]{}
+    loop position in 0..<owners.len() {
+        loop starts.len() <= owners[position] -> &starts.push(position)
+    }
+    parts :: bounds.len() - 1
+    loop part in 0..<parts {
+        position := bounds[part]
+        loop position < bounds[part + 1] {
+            module_index :: owners[position]
+            start :: starts[module_index]
+            end := bounds[part + 1]
+            if module_index + 1 < starts.len() && starts[module_index + 1] < end -> end = starts[module_index + 1]
+            &jobs.push(SemaFinalizeCoreJob{module_index: module_index, first: position - start, last: end - start})
+            position = end
+        }
+    }
+    jobs
+}
+
+// What every walking thread reads: the registration graph (the one row of
+// its list, moved in and back out; its modules' items are read in place),
+// each module's walk context and the jobs.
+struct SemaFinalizeCoreShared {
+    graphs: [SemaRegistrationGraph]
+    contexts: [SemaCoreModuleContext]
+    jobs: [SemaFinalizeCoreJob]
+}
+
+// The next unclaimed job.
+struct SemaFinalizeCoreQueue {
+    next: Int
+}
+
+// One job's rows, walked by one thread.
+struct SemaFinalizeCoreCollected {
+    job: Int
+    collected: SemaCoreCollected
+}
+
+fn sema_finalize_core_fill(shared_state: Shared<SemaFinalizeCoreShared>, graph: ^SemaRegistrationGraph, contexts: &[SemaCoreModuleContext]) {
     permit :: shared_state.guard_edit()
     &permit.value.graphs.push(^graph)
-    &permit.value.modules.push(^modules)
-    &permit.value.policies.push(^policies)
+    compiler_transfer_rows<SemaCoreModuleContext>(&permit.value.contexts, &contexts)
 }
 
-fn sema_finalize_shared_take_graph(shared_state: Shared<SemaFinalizeShared>) -> SemaRegistrationGraph {
+// Moves the contexts back and returns the graph.
+fn sema_finalize_core_take(shared_state: Shared<SemaFinalizeCoreShared>, contexts: &[SemaCoreModuleContext]) -> SemaRegistrationGraph {
     permit :: shared_state.guard_edit()
+    compiler_transfer_rows<SemaCoreModuleContext>(&contexts, &permit.value.contexts)
     &permit.value.graphs.pop() ?? panic("the finalization graph left the threads' shared state")
 }
 
-fn sema_finalize_shared_take_modules(shared_state: Shared<SemaFinalizeShared>) -> [SemaGraphModuleResult] {
-    permit :: shared_state.guard_edit()
-    &permit.value.modules.pop() ?? panic("the finalization modules left the threads' shared state")
-}
-
-fn sema_finalize_modules_parallel(shared_state: Shared<SemaFinalizeShared>, weights: [Int], workers: Int) -> SemaFinalizeModulesResult {
-    bounds :: compiler_threads_partition(weights, workers)
-    parts := [Shared<SemaFinalizePart>]{}
-    loop part in 0..<workers -> &parts.push(shared SemaFinalizePart{first: bounds[part], last: bounds[part + 1], checked: sema_finalize_result_empty()})
-    _ := sema_finalize_parts(shared_state, parts, 0)
-    checked := sema_finalize_result_empty()
-    loop part in parts -> sema_finalize_part_drain(part, &checked)
-    checked
-}
-
-fn sema_finalize_parts(shared_state: Shared<SemaFinalizeShared>, parts: [Shared<SemaFinalizePart>], from: Int) -> Int {
-    if from >= parts.len() - 1 -> return sema_finalize_part(shared_state, parts[from])
-    checked := 0
-    task.group sema_finalize_threads {
-        head :: task sema_finalize_part(shared_state, parts[from])
-        checked = sema_finalize_parts(shared_state, parts, from + 1)
-        checked += head.join() ?? panic(compiler_threads_failure_text(err))
+// Runs walking threads `from..<workers`, one task each, and moves every job
+// row a thread returned into its slot of `results`.
+fn sema_finalize_core_claimers(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, results: &[SemaCoreCollected]) {
+    if from >= workers -> return
+    task.group sema_finalize_core_threads {
+        head :: task sema_finalize_core_claimed(shared_state, queue)
+        sema_finalize_core_claimers(shared_state, queue, from + 1, workers, &results)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            results[done.job] = ^done.collected
+        }
     }
-    checked
 }
 
-fn sema_finalize_part(shared_state: Shared<SemaFinalizeShared>, slot: Shared<SemaFinalizePart>) -> Int {
+// One thread: walks the jobs it claims, in order, each into its own rows.
+fn sema_finalize_core_claimed(shared_state: Shared<SemaFinalizeCoreShared>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaFinalizeCoreCollected] {
     inputs :: shared_state.guard_read()
-    permit := slot.guard_edit()
-    // Passed straight through: a local binding of a guarded row would copy it.
-    sema_finalize_part_in(inputs.value.graphs[0], inputs.value.modules[0], inputs.value.policies[0], &permit.value)
+    claimed := [SemaFinalizeCoreCollected]{}
+    loop {
+        job :: sema_finalize_core_claim(queue)
+        if job >= inputs.value.jobs.len() -> break
+        module_index :: inputs.value.jobs[job].module_index
+        collected := sema_core_collected_empty()
+        // Passed straight through: a local binding of a guarded row would copy it.
+        sema_core_collect_item_range(inputs.value.graphs[0].modules[module_index].program.items, inputs.value.jobs[job].first, inputs.value.jobs[job].last, inputs.value.contexts[module_index], &collected)
+        &claimed.push(SemaFinalizeCoreCollected{job: job, collected: ^collected})
+    }
+    claimed
 }
 
-fn sema_finalize_part_in(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], part: &SemaFinalizePart) -> Int {
-    loop module_index in part.first..<part.last -> sema_finalize_module(graph, modules, policies, module_index, &part.checked)
-    part.last - part.first
-}
-
-// Moves a part's rows onto `checked` in module order.
-fn sema_finalize_part_drain(slot: Shared<SemaFinalizePart>, checked: &SemaFinalizeModulesResult) {
-    permit :: slot.guard_edit()
-    &permit.value.checked.cores.reverse()
-    loop permit.value.checked.cores.len() > 0 {
-        core :: &permit.value.checked.cores.pop() ?? break
-        &checked.cores.push(core)
-    }
-    &permit.value.checked.diagnostics.reverse()
-    loop permit.value.checked.diagnostics.len() > 0 {
-        diagnostic :: &permit.value.checked.diagnostics.pop() ?? break
-        &checked.diagnostics.push(diagnostic)
-    }
-    if !permit.value.checked.complete -> checked.complete = false
+fn sema_finalize_core_claim(queue: Shared<SemaFinalizeCoreQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
 }
