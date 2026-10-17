@@ -712,34 +712,51 @@ fn jet_codegen_lower_call_carrier(builder: &JetCodegenBuilder, program: JetCodeg
         }
         return Val(jet_codegen_emit_borrowed_carrier(&builder, program, argument.value, payload))
     }
+    if argument.value.kind == .OrFallback(subject, fallback, _) {
+        if fallback == .Value(fallback_value) {
+            hold :: jet_codegen_fallback_hold(builder, program, argument.value, subject, fallback_value) ?? return None
+            if hold != JET_CODEGEN_CARRIER_FROZEN {
+                loop (at, other) in args {
+                    if at != index && !jet_codegen_operand_holds_root(other.value, hold == JET_CODEGEN_CARRIER_ALIAS) -> return None
+                }
+            }
+            return Val(jet_codegen_lower_borrowed_fallback(&builder, program, argument.value, subject, fallback_value))
+        }
+    }
     None
 }
 
-// What keeps a borrowed carrier's root still (jet_codegen_carrier_root_hold).
-// FROZEN: a read parameter's place, unchanged for the whole call. OWNED: the
-// own storage of an immutable local, which only a move changes. ALIAS: a
-// read alias whose root the binding's scope proved stable
-// (jet_codegen_stable_element_lets), which a write or a move made between
-// the carrier and the call could still change.
+// What keeps a borrowed place still until its read-only use
+// (jet_codegen_place_hold). FROZEN: a read parameter's place, unchanged for
+// the whole call. OWNED: the own storage of an immutable local, which only a
+// move changes. ALIAS: a read alias whose root the binding's scope proved
+// stable (jet_codegen_stable_element_lets), which a write or a move made
+// before the use could still change.
 JET_CODEGEN_CARRIER_FROZEN :: 0
 JET_CODEGEN_CARRIER_OWNED :: 1
 JET_CODEGEN_CARRIER_ALIAS :: 2
 
 // #5041 (plan M5): whether `Val(payload)` of type `carrier_ty` may be a
-// borrowed carrier, and what holds its root still (JET_CODEGEN_CARRIER_*).
-// The payload is a stored-field chain of a non-Copy type. A mutable local,
-// a capture, a pointer local, a string view or a persistent cell is
-// reachable another way: None.
+// borrowed carrier, and what holds its place still (jet_codegen_place_hold).
 fn jet_codegen_carrier_root_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, carrier_ty: Type, payload: TExpr) -> Int? {
     item_matches :: if carrier_ty == {
         .Option(item) -> item == payload.ty
         else -> false
     }
     if !item_matches || jet_codegen_ownership(payload.ty).mode == MIROwnershipMode.Copy -> return None
-    if !jet_codegen_is_stored_field_chain(builder, program, payload) -> return None
-    root :: jet_codegen_element_place_root(payload) ?? return None
+    jet_codegen_place_hold(builder, program, payload)
+}
+
+// #5041: what holds the place `expression` names still while a borrow of it
+// is read (JET_CODEGEN_CARRIER_*): a stored-field chain rooted at a read
+// parameter, at the own storage of an immutable local, or at a read alias.
+// A mutable local, a capture, a pointer local, a string view or a
+// persistent cell is reachable another way: None.
+fn jet_codegen_place_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Int? {
+    if !jet_codegen_is_stored_field_chain(builder, program, expression) -> return None
+    root :: jet_codegen_element_place_root(expression) ?? return None
     if root.persist_key != None || root.deref -> return None
-    if payload.kind == .Local(_) && jet_codegen_is_string_view_local(builder, program, root) -> return None
+    if expression.kind == .Local(_) && jet_codegen_is_string_view_local(builder, program, root) -> return None
     binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
     if jet_codegen_read_parameter_place(builder, program, binding.place) -> return Val(JET_CODEGEN_CARRIER_FROZEN)
     if builder.read_alias_places.get(binding.place.value) != None -> return Val(JET_CODEGEN_CARRIER_ALIAS)
@@ -751,6 +768,50 @@ fn jet_codegen_carrier_root_hold(builder: JetCodegenBuilder, program: JetCodegen
     }
     if !own_storage -> return None
     Val(JET_CODEGEN_CARRIER_OWNED)
+}
+
+// #5041: whether `subject ?? fallback` (an Option place and a place of its
+// payload type, typed `expression.ty`) may be read in place, and the weaker
+// of the two places' holds (jet_codegen_place_hold).
+fn jet_codegen_fallback_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, fallback: TExpr) -> Int? {
+    payload_matches :: if subject.ty == {
+        .Option(item) -> item == expression.ty
+        else -> false
+    }
+    if !payload_matches || fallback.ty != expression.ty || jet_codegen_ownership(expression.ty).mode == MIROwnershipMode.Copy -> return None
+    subject_hold :: jet_codegen_place_hold(builder, program, subject) ?? return None
+    fallback_hold :: jet_codegen_place_hold(builder, program, fallback) ?? return None
+    if subject_hold > fallback_hold -> return Val(subject_hold)
+    Val(fallback_hold)
+}
+
+// #5041: `subject ?? fallback` lent to a read-only use without copying
+// either side: the success route reads the subject's payload in place and
+// the failure route reads the fallback's place, both as ReadBorrow values a
+// ReadBorrow phi joins. Nothing is copied or dropped; the fallback is still
+// evaluated only on its route.
+fn jet_codegen_lower_borrowed_fallback(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, fallback: TExpr) -> MIRValueID Never! {
+    borrowed :: mir_ownership_from_access(MIRAccess.Read)
+    value_type :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
+    subject_place :: jet_codegen_lower_expression_place(&builder, program, subject, MIRAccess.Read) ?? panic("checked borrowed fallback subject has no place")
+    option :: jet_codegen_emit_mir_type(&builder, program, subject.span, jet_codegen_lower_type_for_function(subject.ty, builder, program), borrowed, MIROperation.ReadPlace{place: subject_place})
+    condition :: jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.OptionIsSome{subject: option})
+    success_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-success")
+    failure_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-failure")
+    join_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-join")
+    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: condition, then_target: success_block, else_target: failure_block})
+    incoming := [MIRPhiIncoming]{}
+    jet_codegen_switch_block(&builder, program, success_block)
+    payload :: jet_codegen_emit_mir_type(&builder, program, expression.span, value_type, borrowed, MIROperation.OptionValue{subject: option})
+    &incoming.push(MIRPhiIncoming{block: builder.current, value: payload})
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
+    jet_codegen_switch_block(&builder, program, failure_block)
+    fallback_place :: jet_codegen_lower_expression_place(&builder, program, fallback, MIRAccess.Read) ?? panic("checked borrowed fallback value has no place")
+    lent :: jet_codegen_emit_mir_type(&builder, program, fallback.span, value_type, borrowed, MIROperation.ReadPlace{place: fallback_place})
+    &incoming.push(MIRPhiIncoming{block: builder.current, value: lent})
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
+    jet_codegen_switch_block(&builder, program, join_block)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
 
 // #5041 (plan M5): whether evaluating `expression` surely leaves a borrowed
