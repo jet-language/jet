@@ -5378,15 +5378,20 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             valid = false
                         }
                         pair_types := sema_stmt_for_in_pair_types(collection.ty, item_type)
+                        // #4604: a rejected two-name form already reported why; both
+                        // names stay in scope untyped so body reads add no E0107.
+                        pair_rejected := false
                         if var2 != None && collection_value != None {
                             if {
                                 range_source -> {
                                     &diagnostics.push(sema_error("E0109", expr_span(collection_expr), "a Range loop has one value per step", "Range values yield whole numbers, not key-value pairs", "use one loop name"))
                                     valid = false
+                                    pair_rejected = true
                                 }
                                 !sema_stmt_for_in_method_pair_is_supported(method_kind) || pair_types == None -> {
                                     &diagnostics.push(sema_error("E0109", expr_span(collection_expr), "`loop (x, y) in` on `{type_name(collection.ty)}` needs one loop name, not two", "this iterator yields one item per step; only maps and indexed sequences yield a pair", "use one loop name for this source"))
                                     valid = false
+                                    pair_rejected = true
                                 }
                             }
                         }
@@ -5416,14 +5421,14 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         source_checked := collection_value != None
                         first_local_type := Type?{None}
                         second_local_type := Type?{None}
-                        if source_checked {
+                        if source_checked && !pair_rejected {
                             first_local_type = Val(first_type)
                             second_local_type = Val(second_type ?? item_type)
                         }
                         first_local :: sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, environment, program, &scopes, &state, &diagnostics)
                         if first_local == None -> valid = false
                         variable_two := TLocal?{None}
-                        if var2 != None && (second_type != None || !source_checked) {
+                        if var2 != None && (second_type != None || !source_checked || pair_rejected) {
                             variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, environment, program, &scopes, &state, &diagnostics)
                             if variable_two == None -> valid = false
                         }
