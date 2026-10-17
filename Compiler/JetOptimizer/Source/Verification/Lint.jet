@@ -45,6 +45,7 @@ use jet_foundation.[
     mir_operation_value_uses,
     mir_operation_call_args,
     mir_value_consumption_requires_owner,
+    mir_remainder_drop_results,
     mir_runtime_owned_ownership,
     mir_terminator_targets,
     mir_terminator_value_uses,
@@ -1661,6 +1662,12 @@ struct MIRLintOwnership {
     ancestors: [[Int]]
     reinitialized: [[Int]]
     moved: [Int]
+    // The MovePlace results that are an owner's remainder drop (its
+    // scope-end cleanup: every user a releasing Drop, Foundation
+    // mir_remainder_drop_results). Such a move releases only the fields still
+    // in place, so it is invalid only while the owner itself or a prefix of
+    // it is moved, never while one of its fields is.
+    remainder: [U64:Bool]
     // Per place row: the Bool guard slot of an unborrowed whole local, or -1.
     slots: [Int]
     slot_count: Int
@@ -1822,6 +1829,7 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext, defs: ^MIRLintDefs) -> MIRLint
         ancestors: ancestors,
         reinitialized: reinitialized,
         moved: moved,
+        remainder: mir_lint_remainder_drops(ctx),
         slots: slots,
         slot_count: slot_count,
         crossing: crossing,
@@ -1830,6 +1838,22 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext, defs: ^MIRLintDefs) -> MIRLint
         safety_base: value_count + path_keys.len() + 2 * slot_count + 2 * crossing_count,
         defs: ^defs,
     })
+}
+
+// The remainder drops of the function: the results of whole-owner
+// MovePlaces (a root with no projection) that only feed a releasing Drop.
+fn mir_lint_remainder_drops(ctx: MIRLintContext) -> [U64:Bool] Never! {
+    candidates := [U64]{}
+    loop block in ctx.function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .MovePlace(place_id) {
+                result :: instruction.result ?? next
+                place :: mir_lint_place(ctx, place_id) ?? next
+                if place.projections.len() == 0 -> &candidates.push(result.value)
+            }
+        }
+    }
+    mir_remainder_drop_results(ctx.function.blocks, candidates)
 }
 
 // One block's effect on the state, and the successors its known guards allow.
@@ -1993,6 +2017,14 @@ fn mir_lint_moved_failure(ctx: MIRLintContext, layout: MIRLintOwnership, state: 
     None
 }
 
+// Whether any of the moved-path `bits` is set in `state`.
+fn mir_lint_any_moved(layout: MIRLintOwnership, state: MIRLintState, bits: [Int]) -> Bool Never! {
+    loop bit in bits {
+        if mir_lint_state_has(state, layout.value_count + bit) -> return true
+    }
+    false
+}
+
 fn mir_lint_is_phi(operation: MIROperation) -> Bool Never! {
     if operation == {
         .Phi(_) -> true
@@ -2082,12 +2114,20 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
         }
         place_rows :: mir_lint_place_uses(ctx, layout.defs, operation)
         if check {
+            // An owner's remainder drop (layout.remainder) is blocked only by
+            // a move of the owner itself or of a prefix: the fields moved out
+            // of it are exactly what it does not release.
+            remainder_drop :: if instruction.result == .Val(result) -> layout.remainder.get(result.value) != None else -> false
             loop row in place_rows {
                 position :: ctx.places.get(row.place.value) ?? next
-                blocked :: if row.usage == .Reinitialize -> layout.ancestors[position] else -> layout.overlapping[position]
-                loop bit in blocked {
-                    if mir_lint_state_has(state, layout.value_count + bit) -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "place {row.place.value} is used after it was moved")}
+                blocked := false
+                if row.usage == .Move && remainder_drop {
+                    own :: layout.moved[position]
+                    blocked = mir_lint_any_moved(layout, state, layout.ancestors[position]) || (own >= 0 && mir_lint_state_has(state, layout.value_count + own))
+                } else {
+                    blocked = mir_lint_any_moved(layout, state, if row.usage == .Reinitialize -> layout.ancestors[position] else -> layout.overlapping[position])
                 }
+                if blocked -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "place {row.place.value} is used after it was moved")}
             }
         }
         // A definition starts the value's life, even on a loop's next turn.

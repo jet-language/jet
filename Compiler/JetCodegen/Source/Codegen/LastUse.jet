@@ -28,7 +28,7 @@
 //
 // One backward liveness pass over the function's blocks decides all of it.
 
-use jet_foundation.[MIRValueConsumption, mir_operation_consumption_route, mir_operation_value_consumption, mir_terminator_value_consumption]
+use jet_foundation.[MIRValueConsumption, mir_operation_consumption_route, mir_operation_value_consumption, mir_remainder_drop_results, mir_terminator_value_consumption]
 
 struct JetCodegenLastUseCandidate {
     // An owned local (whole place and drop flag), a field path of the owned
@@ -296,49 +296,22 @@ fn jet_codegen_last_use_new_candidate(local: Bool, field: Bool, copied: Bool, pl
 
 // The results of whole-root MovePlaces that only feed releasing Drops: an
 // owner's remainder drop (its scope-end cleanup), which releases only the
-// fields still in place (Legality.jet mir_pass_remainder_drops).
+// fields still in place (Foundation mir_remainder_drop_results, the
+// classification Legality and MIR Lint read too).
 fn jet_codegen_last_use_remainder_moves(builder: JetCodegenBuilder, place_row: [U64:Int]) -> [U64:Bool] Never! {
-    // 0: no user yet; 1: every user so far is a releasing Drop; 2: another user.
-    states := [U64:Int]{}
-    order := [U64]{}
+    candidates := [U64]{}
     loop row in builder.blocks {
         loop instruction in row.instructions {
             if instruction.operation == .MovePlace(place) {
                 if instruction.result == .Val(result) {
                     if place_row.get(place.value) == .Val(place_index) {
-                        if builder.places[place_index].projections.len() == 0 {
-                            _ := &states.add(result.value, 0)
-                            &order.push(result.value)
-                        }
+                        if builder.places[place_index].projections.len() == 0 -> &candidates.push(result.value)
                     }
                 }
             }
         }
     }
-    remainder := [U64:Bool]{}
-    if order.len() == 0 -> return remainder
-    loop row in builder.blocks {
-        loop instruction in row.instructions {
-            released := MIRValueID?{None}
-            if instruction.operation == .Drop(dropped, kind) {
-                if kind != MIRDropKind.NoDrop -> released = Val(dropped)
-            }
-            loop value in mir_operation_value_uses(instruction.operation) {
-                state :: states.get(value.value) ?? next
-                drop_only :: if released == .Val(dropped_value) -> dropped_value == value else -> false
-                if state != 2 -> _ := &states.add(value.value, if drop_only -> 1 else -> 2)
-            }
-        }
-        loop value in mir_terminator_value_uses(row.terminator) {
-            if states.get(value.value) != None -> _ := &states.add(value.value, 2)
-        }
-    }
-    loop value in order {
-        if states.get(value) == .Val(state) {
-            if state == 1 -> _ := &remainder.add(value, true)
-        }
-    }
-    remainder
+    mir_remainder_drop_results(builder.blocks, candidates)
 }
 
 // The key of the borrowed plain list walk (LoopIterInit, not by value) that
