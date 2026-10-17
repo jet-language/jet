@@ -2402,6 +2402,8 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                         }
                         if read_alias == .Val(read_place) {
                             _ := jet_codegen_bind_local_alias(&builder, program, local, init.ty, read_place, false)
+                        } else if stable_root && binds_init_type && !local.generated && !gc_root_requested && !string_view && jet_codegen_lends_conditional(builder, program, init) {
+                            jet_codegen_lower_lent_conditional(&builder, program, local, init, span)
                         } else {
                             value := jet_codegen_lower_expr(&builder, program, init)
                             place := jet_codegen_bind_local(&builder, program, local, init.ty, local.mutable, None, None, string_view)

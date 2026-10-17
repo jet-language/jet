@@ -2162,7 +2162,9 @@ fn jet_codegen_lower_compare_chain(builder: &JetCodegenBuilder, program: JetCode
 // is read in place through read parameters, so no level is copied. Each level
 // emits its condition, branch, then arm, else arm and the phi of the arm
 // values that reach its join, in the order nested `lower_expr` calls would.
-fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, condition: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr) -> MIRValueID {
+// Under a conditional binding's `lend` (jet_codegen_lower_lent_conditional)
+// every arm hands the join a ReadBorrow read instead (jet_codegen_lower_if_arm).
+fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, condition: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr, lend: JetCodegenConditionalLend?) -> MIRValueID {
     outer_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder, program)
     condition_value := jet_codegen_lower_condition(&builder, program, condition)
@@ -2175,7 +2177,7 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     jet_codegen_enter_lexical(&builder, program)
     jet_codegen_lower_statements(&builder, program, then_body)
     then_result := MIRValueID?{None}
-    if jet_codegen_current_is_open(builder, program) -> then_result = Val(jet_codegen_lower_expr(&builder, program, then_value))
+    if jet_codegen_current_is_open(builder, program) -> then_result = Val(jet_codegen_lower_if_arm(&builder, program, then_value, lend))
     jet_codegen_leave_lexical(&builder, program)
     jet_codegen_close_if_arm(&builder, program, then_value, then_result, join_block, &incoming)
     builder.scope_depth = outer_depth
@@ -2185,9 +2187,9 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     else_result := MIRValueID?{None}
     if jet_codegen_current_is_open(builder, program) {
         if else_value.kind == .IfExpr(next_condition, next_then_body, next_then_value, next_else_body, next_else_value) {
-            else_result = Val(jet_codegen_lower_if_expression(&builder, program, else_value, next_condition, next_then_body, next_then_value, next_else_body, next_else_value))
+            else_result = Val(jet_codegen_lower_if_expression(&builder, program, else_value, next_condition, next_then_body, next_then_value, next_else_body, next_else_value, lend))
         } else {
-            else_result = Val(jet_codegen_lower_expr(&builder, program, else_value))
+            else_result = Val(jet_codegen_lower_if_arm(&builder, program, else_value, lend))
         }
     }
     jet_codegen_leave_lexical(&builder, program)
@@ -2202,6 +2204,81 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     result := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
     jet_codegen_leave_lexical(&builder, program)
     result
+}
+
+// The value one arm of a value `if` hands its join: its own value, or under
+// a conditional binding's `lend` a ReadBorrow read of the place the arm would
+// copy (jet_codegen_lent_arm_place) or, for any other arm, of the lend's
+// holder once the arm's value is moved there. A diverging arm lowers as is.
+fn jet_codegen_lower_if_arm(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, lend: JetCodegenConditionalLend?) -> MIRValueID {
+    lending :: lend ?? return jet_codegen_lower_expr(&builder, program, value)
+    if value.ty == (Type.Named{name: "Never"}) -> return jet_codegen_lower_expr(&builder, program, value)
+    place := jet_codegen_lent_arm_place(&builder, program, value, lending.depth)
+    if place == None {
+        owned :: jet_codegen_lower_expr(&builder, program, value)
+        if !jet_codegen_current_is_open(builder, program) -> return owned
+        _ := jet_codegen_emit(&builder, program, value.span, None, MIROperation.WritePlace{place: lending.holder, value: owned})
+        place = Val(lending.holder)
+    }
+    lent :: place ?? panic("checked lent conditional arm has no place")
+    jet_codegen_emit_mir_type(&builder, program, value.span, lending.ty, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: lent})
+}
+
+// #5041: the place a conditional binding's arm lends instead of copying: the
+// arm is a compiler-inserted copy of a place a `::` binding aliases without
+// any proof (below a read parameter or a constant,
+// jet_codegen_read_binding_place), or of a stored-field or List element
+// chain, or the whole, of a root the binding's scope leaves alone
+// (jet_codegen_stable_root; jet_codegen_stable_element_lets proved it for
+// every arm's root). The root must be bound at or above the binding's scope
+// `depth`: a root bound inside the arm (a pattern binding, an arm-body local)
+// dies at the arm's end, so its places are never lent past it.
+fn jet_codegen_lent_arm_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, depth: Int) -> MIRPlaceID? {
+    if value.kind == .Clone(inner, _) {
+        frozen :: jet_codegen_read_binding_place(&builder, program, value, false)
+        if frozen != None -> return frozen
+        if !jet_codegen_is_element_place_chain(builder, program, inner) -> return None
+        root :: jet_codegen_element_place_root(inner) ?? return None
+        binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
+        if binding.depth > depth -> return None
+        local_place :: jet_codegen_lower_local_place(&builder, program, root)
+        if !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+        if inner.kind == .Local(_) -> return Val(local_place)
+        return jet_codegen_lower_expression_place(&builder, program, inner, MIRAccess.Read)
+    }
+    None
+}
+
+// #5041: `n :: if c -> a.f else -> g(x)`, or a `:=` of it nothing writes,
+// whose scope leaves every arm's root alone and never consumes `n`
+// (jet_codegen_stable_element_lets): `n` is a borrowed local
+// (jet_codegen_bind_borrowed_local) holding the ReadBorrow phi of its arms.
+// An arm that would copy a stable place lends that place; any other arm moves
+// its value into the holder, an owned local of `n`'s scope whose live flag
+// drops it at scope end, and lends the holder. No arm copies, and a
+// consuming use of `n` copies its place (jet_codegen_unmovable_place).
+fn jet_codegen_lower_lent_conditional(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, init: TExpr, span: Span) {
+    holder_local :: tir_generated_local("conditional_lend_{span.start}", span)
+    holder :: jet_codegen_bind_local(&builder, program, holder_local, init.ty, false, None, None, false)
+    lend_ty :: jet_codegen_lower_type_for_function(init.ty, builder, program)
+    lend :: JetCodegenConditionalLend{holder: holder, ty: lend_ty, depth: builder.scope_depth}
+    value :: if init.kind == {
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, init, condition, then_body, then_value, else_body, else_value, Val(lend))
+        else -> panic("checked lent conditional binding is not a value `if`")
+    }
+    place :: jet_codegen_bind_borrowed_local(&builder, program, local, init.ty)
+    if jet_codegen_current_is_open(builder, program) -> _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: value})
+}
+
+// Whether a stable binding of `init` lends its arms
+// (jet_codegen_lower_lent_conditional): a value `if` of an owned type,
+// outside a retained root's top level (whose bindings are cells).
+fn jet_codegen_lends_conditional(builder: JetCodegenBuilder, program: JetCodegenProgram, init: TExpr) -> Bool Never! {
+    if builder.retained_root && builder.scope_depth == 0 -> return false
+    if init.kind == {
+        .IfExpr(_, _, _, _, _) -> jet_codegen_ownership(init.ty).mode == MIROwnershipMode.Owned
+        else -> false
+    }
 }
 
 // Close one value-`if` arm at its join. An arm whose checked value is
@@ -5860,7 +5937,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .HandleMethod(receiver, operation, args) -> jet_codegen_lower_handle_method(&builder, program, expression, receiver, operation, args)
         .ClosureMethod(receiver, operation, args) -> jet_codegen_lower_closure_method(&builder, program, expression, receiver, operation, args)
         .HostCall(call) -> jet_codegen_lower_host_call(&builder, program, expression, call)
-        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, expression, condition, then_body, then_value, else_body, else_value)
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, expression, condition, then_body, then_value, else_body, else_value, None)
         .StaticCall(owner, owner_type, method, type_args, args) -> jet_codegen_lower_static_call(&builder, program, expression, owner, owner_type, method, type_args, args)
         .ModuleCall(target, form, target_return, type_args, args) -> jet_codegen_lower_module_call(&builder, program, expression, target, form, target_return, type_args, args)
         .DefaultLit | .ListLit(_) | .ColumnarListLit(_, _) | .TupleLit(_, _) | .IndexRead(_, _, _, _, _) | .SliceOwned(_, _, _, _, _) | .MapLit(_) | .LayoutLit(_) -> jet_codegen_lower_collection_expression(&builder, program, expression)
