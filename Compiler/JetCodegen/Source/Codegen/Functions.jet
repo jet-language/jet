@@ -756,26 +756,58 @@ fn jet_codegen_impl_owner_name(ty: Type) -> String Never! {
 // same-module method with that leaf on the same owner. A trait-block method
 // in a struct or enum body (derived ones included) is checked as an owner
 // method; a trait method must name the row's trait.
-fn jet_codegen_impl_method_matches(function: TFunc, definition: TImplDef, trait_ref: MIRTraitRef?, modules: [SemaGraphModuleResult], nominals: JetCodegenNominalIndex, leaf: String) -> Bool Never! {
-    if function.module_identity != definition.module_identity || function.name != leaf -> return false
-    owner := Type?{None}
-    if function.kind == {
-        // copy: `owner_type` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
-        .Method(_, owner_type) -> owner = Val(owner_type.copy())
-        .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
-            expected :: trait_ref ?? return false
-            if jet_codegen_mir_trait_ref_for_symbol(modules, nominals, trait_symbol).id != expected.id -> return false
-            owner = Val(owner_type)
+//
+// The owner methods of the program keyed `{module}\n{leaf}\n{canonical owner}`,
+// each key's function rows in row order (the `first_by_name` chain order).
+// Built once per program: an impl method then reads its own candidates
+// instead of testing every same-named function of the program, which made
+// impl lowering quadratic in the impls of a common method name.
+struct JetCodegenImplMethodRows {
+    slots: [String:Int]
+    rows: [[Int]]
+}
+
+fn jet_codegen_impl_method_rows(functions: JetCodegenFunctionIndex) -> JetCodegenImplMethodRows Never! {
+    index := JetCodegenImplMethodRows{slots: [String:Int]{}, rows: [[Int]]{}}
+    loop row in 0..<functions.rows.len() {
+        owner_name := ""
+        if functions.rows[row].kind == {
+            .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> owner_name = jet_codegen_impl_owner_name(owner_type)
+            .TopLevel -> next
         }
-        .TopLevel -> return false
+        key :: jet_codegen_impl_method_key(functions.rows[row].module_identity, functions.rows[row].name, jet_codegen_canonical_target_type(functions.rows[row].module_identity, owner_name))
+        slot := index.slots.get(key) ?? -1
+        if slot < 0 {
+            slot = index.rows.len()
+            index.slots[key] = slot
+            &index.rows.push([Int]{})
+        }
+        &index.rows[slot].push(row)
     }
-    actual :: owner ?? return false
-    jet_codegen_canonical_target_type(definition.module_identity, jet_codegen_impl_owner_name(definition.self_type)) == jet_codegen_canonical_target_type(function.module_identity, jet_codegen_impl_owner_name(actual))
+    index
+}
+
+fn jet_codegen_impl_method_key(module_identity: String, leaf: String, owner: String) -> String Never! {
+    "{module_identity}\n{leaf}\n{owner}"
+}
+
+// A candidate row of jet_codegen_impl_method_rows (same module, leaf and
+// owner) is the row's method unless it is a trait method of another trait.
+fn jet_codegen_impl_method_matches(function: TFunc, trait_ref: MIRTraitRef?, modules: [SemaGraphModuleResult], nominals: JetCodegenNominalIndex) -> Bool Never! {
+    if function.kind == {
+        .Method(_, _) -> true
+        .TraitMethod(_, _, _, trait_symbol, _) -> {
+            expected :: trait_ref ?? return false
+            jet_codegen_mir_trait_ref_for_symbol(modules, nominals, trait_symbol).id == expected.id
+        }
+        .TopLevel -> false
+    }
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows. Only a
 // lowered function (`lowered_ids`) is an executable impl method.
-fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], nominals: JetCodegenNominalIndex, fields_by_name: [String:MIRFieldID], lowered_ids: [U64:Bool]) -> MIRImplDef? {
+// `impl_methods` is jet_codegen_impl_method_rows(functions).
+fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, impl_methods: JetCodegenImplMethodRows, modules: [SemaGraphModuleResult], nominals: JetCodegenNominalIndex, fields_by_name: [String:MIRFieldID], lowered_ids: [U64:Bool]) -> MIRImplDef? {
     trait_name := if definition.trait_ref == {
         Val(name) -> Val(name)
         None -> definition.trait_name
@@ -784,17 +816,18 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
         None -> None
         Val(name) -> if jet_codegen_is_literal_capability_trait(name) -> None else -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(nominals.traits, name, definition.module_identity))
     }
+    owner :: jet_codegen_canonical_target_type(definition.module_identity, jet_codegen_impl_owner_name(definition.self_type))
     method_ids := [MIRFunctionID]{}
     seen_methods := [U64:Bool]{}
     loop key in definition.methods {
         candidates := [MIRFunctionID]{}
         function := jet_codegen_find_function_by_key(functions, key, definition.module_identity)
         if function == .Val(found) -> &candidates.push(jet_codegen_function_id(found))
-        leaf :: jet_codegen_impl_method_leaf(key)
-        row := functions.first_by_name.get(leaf) ?? -1
-        loop row >= 0 {
-            if jet_codegen_impl_method_matches(functions.rows[row], definition, trait_ref, modules, nominals, leaf) -> &candidates.push(jet_codegen_function_id(functions.rows[row]))
-            row = functions.next_by_name[row]
+        slot :: impl_methods.slots.get(jet_codegen_impl_method_key(definition.module_identity, jet_codegen_impl_method_leaf(key), owner)) ?? -1
+        if slot >= 0 {
+            loop row in impl_methods.rows[slot] {
+                if jet_codegen_impl_method_matches(functions.rows[row], trait_ref, modules, nominals) -> &candidates.push(jet_codegen_function_id(functions.rows[row]))
+            }
         }
         loop id in candidates {
             if lowered_ids.get(id.value) == None || seen_methods.get(id.value) != None -> next
@@ -4100,9 +4133,10 @@ fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], f
     // Impl keys are unique in `impls` (a repeated key merges into its row), so
     // a key -> row map finds the one row a later definition merges into.
     impl_index_by_key := [String:Int]{}
+    impl_methods :: jet_codegen_impl_method_rows(function_index)
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.impls {
-            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, nominals, fields_by_name, top_ids) ?? next
+            lowered :: jet_codegen_lower_impl_definition(definition, function_index, impl_methods, modules, nominals, fields_by_name, top_ids) ?? next
             if impl_index_by_key.get(lowered.key) == .Val(index) {
                 loop method in lowered.methods {
                     method_key := jet_codegen_qualified_function_key(lowered.key, "{method.value}")
