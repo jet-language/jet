@@ -20,6 +20,8 @@ function dryRun(extra, inspect) {
         assert.equal((source.match(/^fn run\(/gm) ?? []).length, 1);
         assert.match(source, /process\.exit\(jet_cli_main\(process\.args\(\)\)\)/);
         assert.equal((source.match(/^use core\.process as process$/gm) ?? []).length, 1);
+        assert.equal((source.match(/^JET_CLI_BUILT_COMPILER_IDENTITY :: "jet@[^"#\s]+#[0-9a-f]{64}"$/gm) ?? []).length, 1,
+            'the assembly embeds the identity of the source it assembled');
         const manifest = readFileSync(join(out, 'compiler/package.jet'), 'utf8');
         assert.doesNotMatch(manifest, /^deps:/m);
         const budget = manifest.match(/holds:\s*\{\s*allow:\s*\[([^\]]*)\]/)?.[1];
