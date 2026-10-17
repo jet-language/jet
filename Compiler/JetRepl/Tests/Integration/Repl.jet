@@ -1,0 +1,91 @@
+// Rust: tests/repl.rs:1
+// E2-M18 / D-REPL20=A: transcript inputs `> `, expected output and `# ` comments.
+use jet.REPL.[run_transcript_with_flags]
+use std.[fs, env, thread]
+use std.io.[Write]
+use std.process.[Command, Stdio, Output, Child]
+use std.time.[Instant, Duration]
+// GATE #4494: native child-process pipes, filesystem, clock and sleep.
+
+// Rust: tests/repl.rs:13
+fn run_repl_process(state: OSPath, input: [U8], limit: String?) -> Output {
+    command := Command.new(OSPath.from(env.binary_path("jet")))
+    command.arg("repl").env("XDG_STATE_HOME", state).env_remove("JET_REPL_HISTORY").env("NO_COLOR", "1")
+        .stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
+    if value :: limit { command.env("JET_REPL_HISTORY_LIMIT", value) }
+    child := command.spawn().expect("start repl")
+    child.stdin.as_mut().unwrap().write_all(input).unwrap()
+    child.wait_with_output().expect("finish repl")
+}
+
+// Rust: tests/repl.rs:38
+fn spawn_repl_process(state: OSPath) -> Child {
+    Command.new(OSPath.from(env.binary_path("jet"))).arg("repl").env("XDG_STATE_HOME", state).env_remove("JET_REPL_HISTORY")
+        .env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start repl")
+}
+
+// Rust: tests/repl.rs:52
+fn wait_for_history_dir(state: &OSPath) {
+    deadline :: Instant.now() + Duration.from_secs(2)
+    loop !state.join("jet").is_dir() {
+        assert(Instant.now() < deadline, "history directory was not opened")
+        thread.sleep(Duration.from_millis(10))
+    }
+    thread.sleep(Duration.from_millis(50))
+}
+
+// Rust: tests/repl.rs:344
+// GATE #4483: caller retains cfg(unix) via selected_family.
+fn run_raw_multiline_pty(writer: String) -> Output {
+    shell :: "{{ sleep 0.2; {writer}; sleep 0.2; printf ':quit\\r'; }} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl' /dev/null"
+    Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet"))
+        .env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").output().expect("run raw multiline REPL under PTY")
+}
+
+// Rust: tests/repl.rs:509
+// Preserve blank expected lines; runner skips them as transcript spacing.
+fn parse_transcript(txt: String) -> ([String], [String]) {
+    inputs := [String]()
+    expected := [String]()
+    loop line in txt.lines() {
+        if line.starts_with("# ") || line == "#" {
+            // Comment.
+        } else if input :: line.strip_prefix("> ") {
+            inputs.push(input.to_string())
+        } else {
+            expected.push(line.to_string())
+        }
+    }
+    (_0: ^inputs, _1: ^expected)
+}
+
+// Rust: tests/repl.rs:525
+fn run_transcript_file(txt: &String) { run_transcript_file_with_trailing_policy(txt, true) }
+// Rust: tests/repl.rs:529
+fn run_transcript_file_strict(txt: &String) { run_transcript_file_with_trailing_policy(txt, false) }
+// Rust: tests/repl.rs:533
+fn run_transcript_file_with_trailing_policy(txt: &String, allow_trailing: Bool) {
+    run_transcript_file_with_trailing_policy_and_flags(txt, allow_trailing, [], [])
+}
+// Rust: tests/repl.rs:537
+fn run_transcript_file_strict_with_flags(txt: &String, allow: &[String]) {
+    run_transcript_file_with_trailing_policy_and_flags(txt, false, allow, [])
+}
+// Rust: tests/repl.rs:541
+fn run_transcript_file_with_trailing_policy_and_flags(txt: &String, allow_trailing: Bool, allow: &[String], deny: &[String]) {
+    (inputs, expected_lines) :: parse_transcript(txt)
+    input_refs :: inputs.iter().map(input -> &input).collect<[&String]>()
+    actual :: run_transcript_with_flags(input_refs, none, allow, deny)
+    actual_lines :: actual.lines().collect<[String]>()
+    ai := 0
+    loop (i, exp) in expected_lines.iter().enumerate() {
+        if exp.is_empty() -> next
+        got :: actual_lines.get(ai).unwrap_or("<no output>")
+        assert_eq(got, exp, "transcript line {i + 1}: expected {exp} but got {got}\nfull actual output:\n{actual}")
+        ai += 1
+    }
+    if !allow_trailing {
+        remaining := actual_lines[ai..<actual_lines.len()] // #4303
+        assert_eq(ai, actual_lines.len(), "unexpected trailing transcript output: {remaining}\nfull actual output:\n{actual}")
+    }
+}

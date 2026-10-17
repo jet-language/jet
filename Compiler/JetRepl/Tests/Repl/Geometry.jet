@@ -1,0 +1,162 @@
+use core.text as repl_geometry_test_text
+
+// Interactive.rs:1094–1120, with the same inputs and every original assertion.
+#Test("geometry_counts_wide_and_combining_cells_across_soft_wrap") {
+    buf :: repl_geometry_test_text.scalars("界界é") // e followed by U+0301
+    geometry :: repl_display_geometry("> ", "· ", buf, 2, None, 6)
+    assert_eq(geometry.rows, 2)
+    assert_eq(geometry.cursor.row, 0)
+    assert_eq(geometry.cursor.column, 5)
+    assert(geometry.cursor.pending_wrap)
+    assert_eq(geometry.end.row, 1)
+    assert_eq(geometry.end.column, 1)
+}
+
+#Test("geometry_combines_explicit_newlines_and_soft_wraps") {
+    buf :: repl_geometry_test_text.scalars("abcd\n界x")
+    geometry :: repl_display_geometry("> ", "· ", buf, buf.len(), None, 6)
+    assert_eq(geometry.rows, 2)
+    assert_eq(geometry.cursor.row, 1)
+    assert_eq(geometry.cursor.column, 5)
+}
+
+#Test("geometry_wraps_prompt_cells_at_narrow_width") {
+    geometry :: repl_display_geometry("1234", "· ", [String]{}, 0, None, 3)
+    assert_eq(geometry.rows, 2)
+    assert_eq(geometry.cursor.row, 1)
+    assert_eq(geometry.cursor.column, 1)
+}
+
+#Test("display_position_defers_wrap_skips_zero_cells_and_resets_on_newline") {
+    position := ReplDisplayPosition.default()
+    &position.write_cells(3, 3)
+    assert_eq(position, ReplDisplayPosition{row: 0, column: 2, pending_wrap: true})
+    &position.write_cells(0, 3)
+    assert_eq(position, ReplDisplayPosition{row: 0, column: 2, pending_wrap: true})
+    &position.newline()
+    assert_eq(position, ReplDisplayPosition{row: 1, column: 0, pending_wrap: false})
+    &position.write_cells(2, 3)
+    assert_eq(position, ReplDisplayPosition{row: 1, column: 2, pending_wrap: false})
+    &position.write_cells(2, 3)
+    assert_eq(position, ReplDisplayPosition{row: 2, column: 2, pending_wrap: false})
+    &position.write_cells(1, 3)
+    &position.write_cells(1, 3)
+    assert_eq(position, ReplDisplayPosition{row: 3, column: 1, pending_wrap: false})
+}
+
+#Test("display_position_floors_width_and_clamps_a_wide_scalar_as_a_unit") {
+    zero := ReplDisplayPosition.default()
+    &zero.write_cells(1, 0)
+    assert_eq(zero, ReplDisplayPosition{row: 0, column: 0, pending_wrap: true})
+    narrow := ReplDisplayPosition.default()
+    &narrow.write_cells(2, 1)
+    assert_eq(narrow, ReplDisplayPosition{row: 1, column: 0, pending_wrap: true})
+    &narrow.write_cells(2, 1)
+    assert_eq(narrow, ReplDisplayPosition{row: 3, column: 0, pending_wrap: true})
+    geometry :: repl_display_geometry("ab", "", repl_geometry_test_text.scalars("界"), 1, None, 3)
+    assert_eq(geometry.end, ReplDisplayPosition{row: 1, column: 2, pending_wrap: false})
+}
+
+#Test("geometry_ghost_changes_only_end_and_only_when_cursor_is_at_buffer_end") {
+    buf :: repl_geometry_test_text.scalars("ab")
+    geometry :: repl_display_geometry("> ", "· ", buf, 2, Val("界x"), 4)
+    assert_eq(geometry.cursor, ReplDisplayPosition{row: 0, column: 3, pending_wrap: true})
+    assert_eq(geometry.end, ReplDisplayPosition{row: 1, column: 3, pending_wrap: false})
+    assert_eq(geometry.rows, 2)
+    middle :: repl_display_geometry("> ", "· ", buf, 1, Val("界x"), 4)
+    assert_eq(middle.cursor, ReplDisplayPosition{row: 0, column: 3, pending_wrap: false})
+    assert_eq(middle.end, ReplDisplayPosition{row: 0, column: 3, pending_wrap: true})
+    fallback :: repl_display_geometry("> ", "· ", buf, 99, Val("界x"), 4)
+    assert_eq(fallback.cursor, fallback.end)
+    assert_eq(fallback.rows, 1)
+    empty :: repl_display_geometry("", "", [String]{}, 0, Val("界\nx"), 4)
+    assert_eq(empty.cursor, ReplDisplayPosition.default())
+    assert_eq(empty.end, ReplDisplayPosition{row: 0, column: 3, pending_wrap: false})
+}
+
+#Test("geometry_ansi_prompt_continuation_and_zero_width_pending_wrap") {
+    esc :: String.from_bytes([U8]{27}) ?? panic("ESC fixture")
+    buf :: repl_geometry_test_text.scalars("a\n界")
+    geometry :: repl_display_geometry("{esc}[31m> {esc}[0m", "{esc}[2m· {esc}[0m", buf, buf.len(), None, 4)
+    assert_eq(geometry.cursor, ReplDisplayPosition{row: 1, column: 3, pending_wrap: true})
+    assert_eq(geometry.rows, 2)
+    position := ReplDisplayPosition.default()
+    repl_write_display_text(&position, "abc{esc}[31ḿ{esc}[0m", 3)
+    assert_eq(position, ReplDisplayPosition{row: 0, column: 2, pending_wrap: true})
+    repl_write_display_text(&position, "x", 3)
+    assert_eq(position, ReplDisplayPosition{row: 1, column: 1, pending_wrap: false})
+    unterminated := ReplDisplayPosition.default()
+    repl_write_display_text(&unterminated, "a{esc}[123界", 5)
+    assert_eq(unterminated.column, 1)
+    repl_write_display_text(&unterminated, "\n", 5)
+    assert_eq(unterminated.row, 0)
+    assert_eq(unterminated.column, 1)
+}
+
+#Test("geometry_width_is_scalar_not_a_joined_emoji_grapheme") {
+    // Rust calls display_char_width separately, even for emoji joined by ZWJ.
+    buf :: repl_geometry_test_text.scalars("👩‍💻")
+    geometry :: repl_display_geometry("", "", buf, buf.len(), None, 10)
+    assert_eq(geometry.end.column, 4)
+    assert_eq(geometry.rows, 1)
+}
+
+#Test("editor_vertical_cursor_uses_scalar_columns_and_clamps_shorter_lines") {
+    buf :: repl_geometry_test_text.scalars("é界abc\nx\n😀z\n")
+    assert_eq(repl_line_start(buf, 5), 0)
+    assert_eq(repl_line_end(buf, 5), 5)
+    assert_eq(repl_line_start(buf, 6), 6)
+    assert_eq(repl_line_end(buf, 6), 7)
+    assert_eq(repl_vertical_cursor(buf, 4, true), 7)
+    assert_eq(repl_vertical_cursor(buf, 7, true), 9)
+    assert_eq(repl_vertical_cursor(buf, 10, false), 7)
+    assert_eq(repl_vertical_cursor(buf, 4, false), 4)
+    assert_eq(repl_vertical_cursor(buf, 11, true), 11)
+    assert_eq(repl_vertical_cursor(buf, 11, false), 8)
+    assert_eq(repl_line_start([String]{}, 0), 0)
+    assert_eq(repl_line_end([String]{}, 0), 0)
+    assert_eq(repl_vertical_cursor([String]{}, 0, false), 0)
+    assert_eq(repl_vertical_cursor([String]{}, 0, true), 0)
+}
+
+#Test("ghost_preserves_supplied_history_order_and_scalar_suffixes") {
+    prefix :: repl_geometry_test_text.scalars("é")
+    assert_eq(repl_ghost_for(prefix, [String]{"é", "é\nignored", "é界", "élonger"}), Val("界"))
+    assert_eq(repl_ghost_for([String]{}, [String]{"anything"}), None)
+    assert_eq(repl_ghost_for(repl_geometry_test_text.scalars("é\n"), [String]{"é\nnext"}), None)
+    assert_eq(repl_ghost_for(prefix, [String]{"other", "é"}), None)
+}
+
+#Test("collection_rows_keep_nested_and_escaped_quoted_commas") {
+    rows :: repl_collection_rows(`result: [ "a,b", [1, 2], {x: (3, 4)}, "a\"b,c", "a\\", 9 ] : List[String]`)
+    assert_eq(rows, [String]{`"a,b"`, "[1, 2]", `{x: (3, 4)}`, `"a\"b,c"`, `"a\\"`, "9"})
+    assert_eq(repl_collection_rows("é [ 界 , é] : List[String]"), [String]{"界", "é"})
+}
+
+#Test("collection_rows_preserve_first_opening_empty_fields_and_saturating_depth") {
+    assert_eq(repl_collection_rows("plain"), [String]{"plain"})
+    assert_eq(repl_collection_rows("[not a rendered list]"), [String]{"[not a rendered list]"})
+    assert_eq(repl_collection_rows("[] : List[Int]"), [String]{})
+    assert_eq(repl_collection_rows("[ , , ] : List[Int]"), [String]{"", ""})
+    assert_eq(repl_collection_rows("[), 2] : List[Int]"), [String]{")", "2"})
+    assert_eq(repl_collection_rows(`[ "a] : List, b", 3 ] : List[String]`), [String]{`"a] : List, b"`, "3"})
+}
+
+#Test("collection_rows_ignore_quoted_and_escaped_closing_markers") {
+    rows :: repl_collection_rows(`[ "a\" ] : List, b", "a\\", 3 ] : List[String]`)
+    assert_eq(rows, [String]{`"a\" ] : List, b"`, `"a\\"`, "3"})
+    full :: `[ "a\" ] : List, b", 3 ]`
+    assert_eq(repl_collection_rows(full), [String]{full})
+}
+
+#Test("collection_rows_ignore_nested_closing_markers") {
+    rows :: repl_collection_rows(`[ [1] : List[Int], {x: [2] : List[Int]}, (3] : List[Int]), 4 ] : List[Value]`)
+    assert_eq(rows, [String]{"[1] : List[Int]", `{x: [2] : List[Int]}`, "(3] : List[Int])", "4"})
+    full :: "[ [1] : List[Int], 2 ]"
+    assert_eq(repl_collection_rows(full), [String]{full})
+}
+
+#Test("collection_rows_scan_multibyte_rows_without_splitting_scalars") {
+    rows :: repl_collection_rows(`界[ "é,\"界]", (é, 界), 　ü　 ] : List[String] tail`)
+    assert_eq(rows, [String]{`"é,\"界]"`, "(é, 界)", "ü"})
+}

@@ -1,0 +1,987 @@
+use jet_ast.[Stmt, Expr, Item, Func, StructDef, CtValue, CtReport, PlaceAccess, Program, ProgramBundle, LoadedModule, DevtoolsRegistry, CFfi, NameLedger]
+use jet_foundation.[Diagnostic, Span, Severity]
+use jet_lexer as Lexer
+use jet_parser as Parser
+use jet_sema as Sema
+use jet_loader as Loader
+use jet_comptime as Comptime
+use jet_comptime.[DevSink, REPL_FUEL_BUDGET]
+use core.files.runtime.kernel_path_components as repl_turn_paths
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.host.retained_descriptor as repl_turn_files
+use core.term.host.stdio as repl_turn_stdio
+use core.term.host.stdio.[Write]
+use core.sys.target as repl_turn_target
+use jet_driver.[boot_mir_eval]
+use jetpack_foundation.[ColorChoice]
+use core.term.host.stdio.[BufRead] // GATE #4494: retained buffered input ABI.
+use core.text.runtime.kernel_unicode_string.[from_utf8_lossy]
+use jet_foundation as Diagnostics
+use jet_foundation as Syntax
+use jet_driver as Manifest
+
+// Rust: crates/jet-repl/src/lib.rs:1805
+fn repl_completeness_probe(prefix: String, input: String, suffix: String) -> Bool {
+    cutoff :: prefix.bytes().len() + input.bytes().len()
+    source :: "{prefix}{input}{suffix}"
+    (tokens, lex_diags) :: if prefix.is_empty() -> Lexer.lex(source) else -> Lexer.lex_generated(source)
+    if !lex_diags.is_empty() {
+        return !lex_diags.any((diag) -> diag.code == "E0002" && if diag.span == {
+            .Val(span) -> span.end >= cutoff
+            .None -> false
+        })
+    }
+    if Parser.parse_for_check_with_source(tokens, source) == {
+        .Ok(_) -> true
+        .Err(diags) -> !diags.any((diag) -> if diag.span == {
+            .Val(span) -> span.start >= cutoff
+            .None -> false
+        })
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:1795
+fn raw_input_is_complete(text: String) -> Bool {
+    trimmed := text.trim() // #4303
+    if trimmed.is_empty() || trimmed.starts_with(":") || trimmed.starts_with("?") || reject_feature(trimmed) != None -> return true
+    if looks_like_item(trimmed) || looks_like_import(trimmed) -> return repl_completeness_probe("", trimmed, "")
+    if starts_with_stmt_keyword(trimmed) || trimmed.ends_with(";") -> repl_completeness_probe("fn __repl__() {{\n", trimmed, "\n}}\n")
+    else -> repl_completeness_probe("fn __repl__() {{\n__repl_echo__ :: ", trimmed, "\n}}\n")
+}
+
+// Rust: crates/jet-repl/src/lib.rs:1840
+fn classify(text: String, step: Int) -> InputKind [Diagnostic]! {
+    trimmed := text.trim() // #4303
+    if trimmed.is_empty() -> return InputKind.Empty
+    if trimmed.strip_prefix(":") == .Val(rest) {
+        pieces :: rest.splitn(2, " ")
+        cmd :: pieces[0]
+        arg := String?{None}
+        if pieces.len() > 1 {
+            value := pieces[1].trim() // #4303
+            if !value.is_empty() -> arg = Val(value)
+        }
+        return InputKind.Meta(cmd, ^arg)
+    }
+    if trimmed.strip_prefix("?") == .Val(rest) {
+        name := rest.trim() // #4303
+        return InputKind.Meta("?", if name.is_empty() -> None else -> Val(name))
+    }
+    if reject_feature(trimmed) == .Val(feature) -> return InputKind.Reject(feature)
+    if looks_like_import(trimmed) {
+        normalized := trimmed.trim_end() // #4303
+        full :: "// repl:{step}\n{normalized}\n"
+        (toks, lex_diags) :: Lexer.lex(full)
+        if !lex_diags.is_empty() -> return Err(lex_diags)
+        prog :: Parser.parse_with_source(toks, full) ?? return Err(err)
+        if prog.items.is_empty() && !prog.imports.is_empty() -> return InputKind.Import("{normalized}\n")
+    }
+    suppress :: trimmed.ends_with(";") && !looks_like_item(trimmed) && !trimmed.ends_with("}};")
+    if looks_like_item(trimmed) {
+        src :: "{trimmed}\n"
+        full :: "// repl:{step}\n{src}"
+        (toks, lex_diags) :: Lexer.lex(full)
+        if !lex_diags.is_empty() -> return Err(lex_diags)
+        _ :: Parser.parse_with_source(toks, full) ?? return Err(err)
+        return InputKind.Item(src)
+    }
+    (_, user_lex_diags) :: Lexer.lex(trimmed)
+    if !user_lex_diags.is_empty() -> return Err(user_lex_diags)
+    try_stmt_first :: starts_with_stmt_keyword(trimmed) || suppress
+    plain_input := trimmed.trim_end() // #4303
+    plain_src :: "// repl:{step}\nfn __repl__() {{\n{plain_input}\n}}\n"
+    echo_stmt :: "__repl_echo__ :: {trimmed}"
+    echo_src :: "// repl:{step}\nfn __repl__() {{\n{echo_stmt}\n}}\n"
+    if try_stmt_first {
+        (toks, lex_diags) :: Lexer.lex_generated(plain_src)
+        if lex_diags.is_empty() {
+            if Parser.parse_with_source(toks, plain_src) == .Ok(prog) {
+                if !prog.items.is_empty() {
+                    if prog.items[0] == .Func(f) {
+                        if !f.body.is_empty() -> return InputKind.Stmts(^f.body, suppress, plain_input)
+                    }
+                }
+            }
+        }
+    }
+    (echo_toks, echo_diags) :: Lexer.lex_generated(echo_src)
+    if echo_diags.is_empty() {
+        if Parser.parse_with_source(echo_toks, echo_src) == .Ok(prog) {
+            if !prog.items.is_empty() {
+                if prog.items[0] == .Func(f) {
+                    if !f.body.is_empty() -> return InputKind.Stmts(^f.body, suppress, echo_stmt)
+                }
+            }
+        }
+    }
+    (toks, lex_diags) :: Lexer.lex_generated(plain_src)
+    if !lex_diags.is_empty() -> return Err(lex_diags)
+    prog :: Parser.parse_with_source(toks, plain_src) ?? return Err(err)
+    if !prog.items.is_empty() {
+        if prog.items[0] == .Func(f) -> return InputKind.Stmts(^f.body, suppress, plain_input)
+    }
+    InputKind.Empty
+}
+
+// Rust: crates/jet-repl/src/lib.rs:2007
+PRELOAD_SRC :: ""
+// Rust: crates/jet-repl/src/lib.rs:2019
+fn type_check_stmts(session: Session, stmts: [Stmt], step: Int, check_src: String) -> ([Stmt], [String:String]) [Diagnostic]! {
+    base_src :: "{PRELOAD_SRC}{session.import_src()}{session.accumulated_src()}"
+    prog_src :: "{base_src}\nfn __repl_check_{step}__() {{\n{check_src}\n}}\n"
+    body := session.sema_stmts.copy()
+    loop stmt in stmts -> &body.push(stmt.copy())
+    run_sema_with_body(prog_src, base_src, "__repl_check_{step}__", ^body, stmts.len())
+}
+// Rust: crates/jet-repl/src/lib.rs:2043
+fn run_sema_with_body(src: String, base_src: String, fn_name: String, body: [Stmt], current_len: Int) -> ([Stmt], [String:String]) [Diagnostic]! {
+    (_, base_lex_diags) :: Lexer.lex(base_src)
+    if !base_lex_diags.is_empty() -> return Err(base_lex_diags)
+    (toks, lex_diags) :: Lexer.lex_generated(src)
+    if !lex_diags.is_empty() -> return Err(lex_diags)
+    prog := Parser.parse_with_source(toks, src) ?? return Err(err)
+    loop i in 0..prog.items.len() {
+        if prog.items[i] == .Func(f) {
+            if f.name == fn_name {
+                prog.items[i].Func.body = ^body
+                break
+            }
+        }
+    }
+    bundle := ProgramBundle.default()
+    diags := [Diagnostic]{}
+    if prog.imports.is_empty() {
+        bundle = program_bundle(src, ^prog)
+        diags = Sema.check_bundle(&bundle, Sema.CompileMode.Check)
+    } else {
+        tmp_path :: write_unique_temp_file("check_ast", base_src) ?? return (_0: current_stmts(&prog.items, fn_name, current_len), _1: [String:String]{})
+        loaded :: Loader.load_entry(tmp_path.to_string_lossy())
+        if loaded == {
+            .Ok(checked) -> {
+                bundle = ^checked
+                entry :: bundle.entry
+                bundle.modules[entry].source = src
+                bundle.modules[entry].items = ^prog.items
+                bundle.modules[entry].block_spans = ^prog.block_spans
+                diags = Sema.check_bundle(&bundle, Sema.CompileMode.Check)
+            }
+            .Err(errors) -> {
+                _ :: repl_turn_files.remove_file(tmp_path) // GATE #4494
+                return Err(errors)
+            }
+        }
+        _ :: repl_turn_files.remove_file(tmp_path) // GATE #4494
+    }
+    errors :: diags.filter((d) -> d.severity == Severity.Error).collect()
+    if !errors.is_empty() -> return Err(errors)
+    core_imports := [String:String]{}
+    update_core_imports_from_ledger(bundle, &core_imports)
+    (_0: current_stmts(&bundle.modules[bundle.entry].items, fn_name, current_len), _1: ^core_imports)
+}
+// Rust: crates/jet-repl/src/lib.rs:2117
+fn current_stmts(items: [Item], fn_name: String, current_len: Int) -> [Stmt] {
+    loop i in 0..items.len() {
+        if items[i] == .Func(f) {
+            if f.name == fn_name -> return &items[i].Func.body.split_off(f.body.len() - current_len)
+        }
+    }
+    panic("REPL check function survives sema")
+}
+// Rust: crates/jet-repl/src/lib.rs:2128
+fn repl_executable_stmts(stmts: [Stmt]) -> [Stmt] {
+    executable := ^stmts
+    loop i in 0..executable.len() {
+        if executable[i] == .Val(binding) {
+            if binding.init == .Place(inner, PlaceAccess.Read, _) -> executable[i].Val.init = inner.copy()
+        }
+    }
+    ^executable
+}
+// Rust: crates/jet-repl/src/lib.rs:2141
+fn restore_move_diagnostic(d: Diagnostic, moved_names: Set<String>) -> Diagnostic {
+    if d.code == "E0956" {
+        loop name in moved_names.values() {
+            if d.what.contains("the name `{name}`") {
+                return Diagnostic.error("E0121", "`{name}` was given away earlier, so it can't be used here",
+                    "after a value moves somewhere else, the old name no longer holds it",
+                    "give away a copy instead (`~{name}`) where it moved", d.span)
+            }
+        }
+    }
+    ^d
+}
+// Rust: crates/jet-repl/src/lib.rs:2161
+fn type_check_item(session: Session, new_item_src: String) -> ProgramBundle [Diagnostic]! {
+    checked_program("{PRELOAD_SRC}{session.import_src()}{session.accumulated_src()}\n{new_item_src}\n")
+}
+// Rust: crates/jet-repl/src/lib.rs:2175
+fn checked_top_level_funcs(bundle: ProgramBundle) -> [String:Func] {
+    funcs := [String:Func]{}
+    loop item in bundle.modules[bundle.entry].items {
+        if item == .Func(function) -> funcs[function.name] = function.copy()
+    }
+    ^funcs
+}
+// Rust: crates/jet-repl/src/lib.rs:2186
+fn checked_top_level_structs(bundle: ProgramBundle) -> [String:StructDef] {
+    structs := [String:StructDef]{}
+    loop item in bundle.modules[bundle.entry].items {
+        if item == .Struct(s) -> structs[s.name] = s.copy()
+    }
+    ^structs
+}
+// Rust: crates/jet-repl/src/lib.rs:2199
+fn checked_program(src: String) -> ProgramBundle [Diagnostic]! {
+    (toks, lex_diags) :: Lexer.lex(src)
+    if !lex_diags.is_empty() -> return Err(lex_diags.filter((d) -> d.severity == Severity.Error).collect())
+    prog :: Parser.parse_with_source(toks, src) ?? return Err(err)
+    bundle := if prog.imports.is_empty() -> program_bundle(src, ^prog) else {
+        if write_unique_temp_file("check", src) == {
+            .Err(_) -> program_bundle(src, ^prog)
+            .Ok(tmp_path) -> {
+                loaded :: Loader.load_entry(tmp_path.to_string_lossy())
+                _ :: repl_turn_files.remove_file(tmp_path) // GATE #4494
+                loaded ?? return Err(err)
+            }
+        }
+    }
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Check).filter((d) -> d.severity == Severity.Error).collect()
+    if errors.is_empty() -> ^bundle else -> Err(errors)
+}
+// Rust: crates/jet-repl/src/lib.rs:2236
+fn program_bundle(src: String, prog: Program) -> ProgramBundle {
+    ProgramBundle{
+        entry: 0, project_root: native_path("."),
+        modules: [LoadedModule]{LoadedModule{
+            path: native_path("<repl>"), display: "<repl>", source: src, alias: "main",
+            imports: ^prog.imports, items: ^prog.items, script_body: ^prog.script_body,
+            web_target_ceiling: prog.web_target_ceiling, pub_file: prog.pub_file,
+            no_prelude: prog.no_prelude, default_target: prog.default_target, html_path: ^prog.html_path,
+            policy_declarations: ^prog.policy_declarations, user_policy_declarations: ^prog.user_policy_declarations,
+            block_spans: ^prog.block_spans, rule_facts: ^prog.rule_facts,
+        }},
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: Set<String>.new(),
+        ffi_callback_fns: Set<String>.new(), cffi: CFfi.default(), comptime_inputs: [],
+        name_ledger: NameLedger.default(), layer_ceiling: None, inferred_layer: Syntax.RuntimeLayer.Core,
+        web_partitions: {}, web_partition_enforced: false, web_partition_report: None,
+        dep_roots: {}, package_guarantees: .default(), program_allocator: .default(),
+        active_os: Syntax.OSTarget.selected(), // GATE #4483: compilation target, never host.
+        build_facts: .default(), edition: Manifest.latest_edition(),
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:2281
+fn rebuild_funcs(session: &Session) {
+    src :: "{PRELOAD_SRC}{session.import_src()}{session.accumulated_src()}"
+    if checked_program(src) == .Ok(bundle) {
+        session.func_defs = checked_top_level_funcs(bundle)
+        session.struct_defs = checked_top_level_structs(bundle)
+        return
+    }
+    &session.func_defs.clear()
+    &session.struct_defs.clear()
+    (toks, _) :: Lexer.lex(src)
+    if Parser.parse_with_source(toks, src) == .Ok(prog) {
+        loop item in prog.items {
+            if item == {
+                .Func(f) -> session.func_defs[f.name] = ^f
+                .Struct(s) -> session.struct_defs[s.name] = ^s
+                else -> {}
+            }
+        }
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:2313
+fn display_value(v: CtValue) -> String {
+    val_str :: Comptime.display_core_pure_value(v) ?? v.jet_show()
+    ty :: type_name(v)
+    if v == .Str(_) -> "\"{val_str}\" : {ty}" else -> "{val_str} : {ty}"
+}
+// Rust: crates/jet-repl/src/lib.rs:2323
+fn type_name(v: CtValue) -> String {
+    if v == {
+        .Int(_) | .BigInt(_) -> "Int"
+        .Float(_) -> "Float"
+        .Bool(_) -> "Bool"
+        .Char(_) -> "Char"
+        .Str(_) -> "String"
+        .Bytes(_) -> "[U8]"
+        .List(_) -> "List"
+        .Map(_) -> "Map"
+        .Struct(type_name, _) | .Enum(type_name, _, _) -> type_name
+        .Present(_) | .Failed(.Clean(_)) -> "Option"
+        .Failed(.Told(_)) -> "Result"
+        .Unit -> "()"
+        .Closure(_) -> "Fn"
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:2237 (native path ingress used below).
+fn native_path(text: String) -> OSPath {
+    repl_turn_paths.from_text(text, repl_native_path_platform())
+}
+// Rust: crates/jet-repl/src/lib.rs:2352
+fn cmd_load(path_str: String, session: &Session, base_dir: OSPath, _color: Bool, run_entry: Bool, out_sink: &Write) {
+    src :: repl_turn_files.read_to_string(native_path(path_str)) ?? {
+        _ :: &out_sink.write_all("error: couldn't read `{path_str}`: {err}\n".bytes())
+        return
+    }
+    (toks, lex_diags) :: Lexer.lex(src)
+    if !lex_diags.is_empty() {
+        _ :: &out_sink.write_all("{lex_diags.len()} parse error(s) in `{path_str}`\n".bytes())
+        return
+    }
+    prog :: Parser.parse_with_source(toks, src) ?? {
+        _ :: &out_sink.write_all("{err.len()} parse error(s) in `{path_str}`\n".bytes())
+        return
+    }
+    item_count :: prog.items.len()
+    has_run :: prog.items.any((i) -> if i == {
+        .Func(f) -> f.name == "run"
+        else -> false
+    })
+    &session.item_srcs.push(src)
+    rebuild_funcs(&session)
+    _ :: &out_sink.write_all("loaded {item_count} items from `{path_str}`\n".bytes())
+    if has_run && run_entry {
+        if session.func_defs.get("run") == .Val(main) {
+            sink := DevSink.new()
+            _ :: Comptime.run_main_with_fuel(main, session.func_defs, base_dir, &sink, REPL_FUEL_BUDGET)
+            if !sink.stdout.is_empty() -> _ :: &out_sink.write_all(sink.stdout.bytes())
+        }
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:2419
+fn cmd_type(name: String, session: Session, color: Bool) {
+    if session.scope.get(name) == .Val(v) {
+        ty :: if session.binding_types.get(name) == {
+            .Val(t) -> t.name()
+            .None -> type_name(v)
+        }
+        repl_turn_stdio.println("{name} : {ty}")
+    } else if session.func_defs.has_key(name) {
+        repl_turn_stdio.println("{name} : fn")
+    } else {
+        repl_turn_stdio.println("{yellow("note", color)}: `{name}` isn't defined in this session")
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:2440
+fn render_diags(file: String, src: String, diags: [Diagnostic], color: Bool) {
+    repl_turn_stdio.eprint(Diagnostics.render_all_colored(file, src, diags, color))
+    n :: diags.len()
+    suffix :: if n == 1 -> "" else -> "s"
+    repl_turn_stdio.eprintln("{n} problem{suffix} found")
+}
+// Rust: crates/jet-repl/src/lib.rs:2452
+fn reanchor_repl_diagnostic(diagnostic: &Diagnostic, input_start: Int) {
+    span :: diagnostic.span ?? return
+    start :: if span.start >= input_start -> span.start - input_start else -> 0
+    end :: if span.end >= input_start -> span.end - input_start else -> start
+    diagnostic.span = Val(Span.new(start, end.max(start)))
+}
+// Rust: crates/jet-repl/src/lib.rs:2471
+fn run(project_dir: String?, flags: ReplFlags) -> I32 {
+    color :: flags.color.resolve(repl_turn_stdio.stdout().is_terminal()) // GATE #4494
+    raw_guard :: Terminal.RawGuard.enable()
+    repl_turn_stdio.println(Render.render_banner(JET_REPL_VERSION, color))
+    repl_turn_stdio.println("")
+    repl_turn_stdio.eprintln(Render.render_discovery_hint(raw_guard != None, color))
+    if raw_guard == {
+        .Val(guard) -> Interactive.run_interactive(project_dir, color, ^guard, ^flags)
+        .None -> run_cooked(project_dir, color, ^flags)
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:2496
+fn run_cooked(project_dir: String?, color: Bool, flags: ReplFlags) -> I32 {
+    base_dir :: if project_dir == {
+        .Val(dir) -> native_path(dir)
+        .None -> repl_turn_files.current_dir() ?? native_path(".")
+    }
+    session := Session.new()
+    &session.enable_persistent_history()
+    preload :: flags.preload.copy()
+    policy := ReplPolicy.new(^flags, base_dir)
+    if project_dir == .Val(dir) {
+        stdout := repl_turn_stdio.stdout()
+        load_project_items(native_path(dir), &session, &stdout)
+        &session.preserve_project_baseline()
+    }
+    if preload == .Val(file) {
+        stdout := repl_turn_stdio.stdout()
+        cmd_load(file, &session, base_dir, color, false, &stdout)
+    }
+    stdin := repl_turn_stdio.stdin()
+    stdin_lock := &stdin.lock() // GATE #4494: native retained stdin lock.
+    loop {
+        prompt :: Render.render_prompt(session.turns.len() + 1, color)
+        text :: read_input(&stdin_lock, color, prompt) ?? { repl_turn_stdio.println(""); break }
+        trimmed := text.trim() // #4303
+        if trimmed.is_empty() -> next
+        if trimmed.strip_prefix(":rerun ") == .Val(arg) {
+            authorizer := &policy.authorizer(None)
+            rerun_cooked(arg, &stdin_lock, &session, base_dir, color, &authorizer)
+            next
+        }
+        authorizer := &policy.authorizer(None)
+        if execute_line(trimmed, &session, base_dir, color, false, false, &authorizer) -> break
+    }
+    I32{0}
+}
+// Rust: crates/jet-repl/src/lib.rs:2573
+fn rerun_cooked(id_text: String, input: &BufRead, session: &Session, base_dir: OSPath, color: Bool, authorizer: &Comptime.ReplAuthorizer) {
+    trimmed_id := id_text.trim() // #4303
+    id :: trimmed_id.parse<Int>() ?? { repl_turn_stdio.eprintln("turn #{trimmed_id} does not exist"); return }
+    if !session.turns.any((turn) -> turn.id == id) {
+        repl_turn_stdio.eprintln("turn #{trimmed_id} does not exist")
+        return
+    }
+    original :: session.turns.find((turn) -> turn.id == id).unwrap().input
+    repl_turn_stdio.print("Edit turn {id} [{original}]: ")
+    stdout := repl_turn_stdio.stdout()
+    _ :: &stdout.flush()
+    edited := ""
+    count :: &input.read_line(&edited) ?? { repl_turn_stdio.eprintln("rerun cancelled at end of input"); return }
+    if count == 0 { repl_turn_stdio.eprintln("rerun cancelled at end of input"); return }
+    replacement_text := edited.trim() // #4303
+    replacement :: if !replacement_text.is_empty() && replacement_text != original -> Val(replacement_text) else -> None
+    plan :: build_replay_plan(session.turns, id, replacement) ?? { repl_turn_stdio.eprintln(err.message); return }
+    repl_turn_stdio.println(render_replay_plan(plan, color))
+    stale_from := Int?{None}
+    loop step in plan.steps {
+        if step.kind != StepKind.ConfirmEffect -> next
+        repl_turn_stdio.print("Replay effect turn {step.turn_id}? [y] replay  [s] skip and mark stale: ")
+        _ :: &stdout.flush()
+        answer := ""
+        read :: &input.read_line(&answer)
+        trimmed_answer := answer.trim() // #4303
+        if read.is_err() || !trimmed_answer.eq_ignore_ascii_case("y") {
+            stale_from = Val(step.turn_id)
+            break
+        }
+    }
+    apply_replay_plan_with_stale(&session, plan, stale_from, base_dir, color, &authorizer)
+}
+// Rust: crates/jet-repl/src/lib.rs:2650
+fn execute_line(trimmed: String, session: &Session, base_dir: OSPath, color: Bool, fold_long_output: Bool, quiet: Bool, authorizer: &Comptime.ReplAuthorizer) -> Bool {
+    session.step = session.step + 1
+    step_src :: "<repl:{session.step}>"
+    if !session.shown_preload_note && (trimmed.contains("print(") || trimmed.contains("eprint(") || trimmed.contains("input(")) {
+        if !quiet -> repl_turn_stdio.println(dim("note: `print` is from `use core.term` — imported automatically in the REPL", color))
+        session.shown_preload_note = true
+    }
+    kind :: classify(trimmed, session.step) ?? {
+        if !quiet -> render_diags(step_src, trimmed, err, color)
+        &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+        return false
+    }
+    if kind == {
+        .Empty -> {}
+        .Meta(cmd, arg) -> {
+            if quiet -> return false
+            return handle_meta(cmd, arg, &session, base_dir, color, &authorizer)
+        }
+        .Reject(feature) -> {
+            d :: e1802(feature)
+            if !quiet -> render_diags(step_src, trimmed, [Diagnostic]{d}, color)
+            &session.record_turn(trimmed, ReplTurnStatus.Error, "E1802")
+        }
+        .Item(src) -> {
+            bundle :: type_check_item(session, src) ?? {
+                if !quiet -> render_diags(step_src, trimmed, err, color)
+                &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+                return false
+            }
+            &session.item_srcs.push(^src)
+            rebuild_funcs(&session)
+            update_core_imports_from_ledger(bundle, &session.core_imports)
+            if !quiet -> repl_turn_stdio.println(green("ok", color))
+            &session.record_turn(trimmed, ReplTurnStatus.Ok, "ok")
+            if !quiet -> &session.remember_success(trimmed)
+        }
+        .Import(src) -> {
+            &session.import_srcs.push(^src)
+            bundle :: type_check_item(session, "") ?? {
+                _ :: &session.import_srcs.pop()
+                if !quiet -> render_diags(step_src, trimmed, err, color)
+                &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+                return false
+            }
+            rebuild_funcs(&session)
+            update_core_imports_from_ledger(bundle, &session.core_imports)
+            if !quiet -> repl_turn_stdio.println(green("ok", color))
+            &session.record_turn(trimmed, ReplTurnStatus.Ok, "ok")
+            if !quiet -> &session.remember_success(trimmed)
+        }
+        .Stmts(parsed, suppress, check_src) -> {
+            body_start :: if parsed.is_empty() -> 0 else -> parsed[0].span().start
+            input_start :: body_start.saturating_add(check_src.find(trimmed) ?? 0)
+            (checked_stmts, checked_core_imports) :: type_check_stmts(session, parsed, session.step, check_src) ?? {
+                errors := ^err
+                loop i in 0..errors.len() -> reanchor_repl_diagnostic(&errors[i], input_start)
+                if !quiet -> render_diags(step_src, trimmed, errors, color)
+                &session.record_turn(trimmed, ReplTurnStatus.Error, errors.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+                return false
+            }
+            before_keys := Set<String>.new()
+            loop name in session.scope.keys() -> _ :: &before_keys.insert(name)
+            newly_moved :: collect_moved_names(parsed, before_keys, session.scope)
+            stmts :: repl_executable_stmts(checked_stmts.copy())
+            core_imports := session.core_imports.copy()
+            loop name in checked_core_imports.keys() -> core_imports[name] = checked_core_imports[name]
+            sink := DevSink.new()
+            tracking_authorizer := TrackingAuthorizer{inner: &authorizer, observed: false}
+            trial_scope := session.scope.copy()
+            result :: if Comptime.repl_interruptible_turn_active() {
+                Comptime.run_repl_step_interruptible(stmts, session.func_defs, base_dir, &sink, &trial_scope,
+                    REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking_authorizer)
+            } else {
+                if Comptime.run_repl_step(stmts, session.func_defs, base_dir, &sink, &trial_scope,
+                    REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking_authorizer) == {
+                    .Ok(value) -> Ok(value)
+                    .Err(diagnostic) -> Err(Comptime.ReplStepError.Diagnostic(diagnostic))
+                }
+            }
+            if result == {
+                .Ok(echo_val) -> {
+                    loop name in newly_moved.values() -> _ :: &trial_scope.remove(name)
+                    session.scope = ^trial_scope
+                    summary := ""
+                    loop name in newly_moved.values() -> _ :: &session.moved_names.insert(name)
+                    raw := trimmed.trim_end_matches(";").trim() // #4303
+                    if !raw.is_empty() && !raw.starts_with("__repl_echo__") -> &session.stmt_srcs.push("{raw};")
+                    new_names := [String]{}
+                    loop name in session.scope.keys() {
+                        if !before_keys.contains(name) && name != "__repl_echo__" -> &new_names.push(name)
+                    }
+                    &session.record_stmts(checked_stmts)
+                    if !sink.stdout.is_empty() {
+                        if !quiet -> repl_turn_stdio.print(sink.stdout)
+                        &summary.push_str(sink.stdout)
+                    }
+                    if !sink.stderr.is_empty() {
+                        if !quiet -> repl_turn_stdio.eprint(sink.stderr)
+                        &summary.push_str(sink.stderr)
+                    }
+                    pending_unfold := String?{None}
+                    if echo_val == .Val(v) {
+                        if v != CtValue.Unit {
+                            shown :: display_value(v)
+                            fold :: if fold_long_output -> Render.fold_decision_for_value(v) else -> None
+                            if fold == {
+                                .Val((count, elem_ty)) -> {
+                                    if !quiet -> repl_turn_stdio.println(Render.render_fold_marker(count, elem_ty, color))
+                                    &summary.push_str(Render.render_fold_marker(count, elem_ty, false))
+                                    pending_unfold = Val(shown)
+                                }
+                                .None -> {
+                                    if !quiet -> repl_turn_stdio.println(shown)
+                                    &summary.push_str(shown)
+                                }
+                            }
+                        }
+                    }
+                    had_effect :: tracking_authorizer.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty()
+                    bound_name :: if new_names.len() == 1 -> Val(new_names[0]) else -> None
+                    &session.record_turn_ex(trimmed, ReplTurnStatus.Ok, ^summary, had_effect, bound_name)
+                    if !quiet -> &session.remember_success(trimmed)
+                    if pending_unfold == .Val(full) {
+                        if !session.turns.is_empty() {
+                            last :: session.turns.len() - 1
+                            session.turns[last].folded = true
+                            session.turns[last].pending_unfold = Val(full)
+                        }
+                    }
+                }
+                .Err(error) -> if error == {
+                    .Interrupted -> {
+                        if !quiet -> repl_turn_stdio.println("Interrupted. External effects already performed were not rolled back.")
+                        &session.record_turn_ex(trimmed, ReplTurnStatus.Interrupted, "Interrupted",
+                            tracking_authorizer.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty(), None)
+                    }
+                    .Diagnostic(diagnostic) -> {
+                        restored :: restore_move_diagnostic(^diagnostic, session.moved_names)
+                        d := if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored
+                        reanchor_repl_diagnostic(&d, input_start)
+                        if !quiet -> render_diags(step_src, trimmed, [Diagnostic]{d}, color)
+                        &session.record_turn(trimmed, ReplTurnStatus.Error, "{d.code}: {d.what}")
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+// Rust: crates/jet-repl/src/lib.rs:3010
+fn handle_meta(cmd: String, arg: String?, session: &Session, base_dir: OSPath, color: Bool, authorizer: &Comptime.ReplAuthorizer) -> Bool {
+    if cmd == {
+        "quit" | "q" | "exit" -> { repl_turn_stdio.println("bye"); return true }
+        "reset" -> {
+            &session.reset()
+            &authorizer.reset_session()
+            repl_turn_stdio.println("session reset")
+        }
+        "load" -> {
+            path :: arg ?? { repl_turn_stdio.eprintln("usage: :load <file.jet>"); return false }
+            stdout := repl_turn_stdio.stdout()
+            cmd_load(path, &session, base_dir, color, true, &stdout)
+        }
+        "type" -> {
+            name :: arg ?? { repl_turn_stdio.eprintln("usage: :type <name>"); return false }
+            cmd_type(name, session, color)
+        }
+        "run" -> {
+            stdout := repl_turn_stdio.stdout()
+            cmd_run_native(session, color, &stdout)
+        }
+        "turns" -> render_turns(session, color)
+        "fold" -> {
+            id :: parse_turn_id(arg) ?? { repl_turn_stdio.eprintln(err); return false }
+            set_turn_flag(&session, id, "folded", true) ?? { repl_turn_stdio.eprintln(err); return false }
+            repl_turn_stdio.println("turn folded")
+        }
+        "unfold" -> {
+            id :: parse_turn_id(arg) ?? { repl_turn_stdio.eprintln(err); return false }
+            full :: unfold_turn(&session, id) ?? { repl_turn_stdio.eprintln(err); return false }
+            repl_turn_stdio.println("turn unfolded")
+            if full == .Val(text) -> repl_turn_stdio.println(text)
+        }
+        "pin" | "unpin" -> {
+            id :: parse_turn_id(arg) ?? { repl_turn_stdio.eprintln(err); return false }
+            set_turn_flag(&session, id, "pinned", cmd == "pin") ?? { repl_turn_stdio.eprintln(err); return false }
+            repl_turn_stdio.println(if cmd == "pin" -> "turn pinned" else -> "turn unpinned")
+        }
+        "rerun" -> {
+            id :: parse_turn_id(arg) ?? { repl_turn_stdio.eprintln(err); return false }
+            plan :: build_replay_plan(session.turns, id, None) ?? { repl_turn_stdio.eprintln(err.message); return false }
+            if plan_needs_confirmation(plan) {
+                repl_turn_stdio.println(render_replay_plan(plan, color))
+                repl_turn_stdio.println("note: this plan includes effectful turns — use the interactive `^R` to confirm/skip them")
+            } else {
+                apply_replay_plan(&session, plan, base_dir, color, &authorizer)
+            }
+        }
+        "history" -> handle_history(arg, &session.history)
+        "?" -> if arg == {
+            .Val(name) -> if Docs.lookup(session, name) == {
+                .Val(text) -> repl_turn_stdio.print(text)
+                .None -> repl_turn_stdio.println("{yellow("note", color)}: `{name}` isn't defined in this session")
+            }
+            .None -> print_help(color)
+        }
+        "help" -> print_help(color)
+        else -> repl_turn_stdio.eprintln("unknown meta-command `:{cmd}`; type {bold(":help", color)} to see available commands")
+    }
+    false
+}
+// Rust: crates/jet-repl/src/lib.rs:3139
+fn apply_replay_plan(session: &Session, plan: ReplayPlan, base_dir: OSPath, color: Bool, authorizer: &Comptime.ReplAuthorizer) {
+    apply_replay_plan_with_stale(&session, plan, None, base_dir, color, &authorizer)
+}
+// Rust: crates/jet-repl/src/lib.rs:3152
+fn apply_replay_plan_with_stale(session: &Session, plan: ReplayPlan, stale_from: Int?, base_dir: OSPath, color: Bool, authorizer: &Comptime.ReplAuthorizer) {
+    apply_replay_plan_with_stale_mode(&session, plan, stale_from, base_dir, color, &authorizer, true)
+}
+// Rust: crates/jet-repl/src/lib.rs:3165
+fn apply_replay_plan_with_stale_quiet(session: &Session, plan: ReplayPlan, stale_from: Int?, base_dir: OSPath, color: Bool, authorizer: &Comptime.ReplAuthorizer) {
+    apply_replay_plan_with_stale_mode(&session, plan, stale_from, base_dir, color, &authorizer, false)
+}
+// Rust: crates/jet-repl/src/lib.rs:3178
+fn apply_replay_plan_with_stale_mode(session: &Session, plan: ReplayPlan, stale_from: Int?, base_dir: OSPath, color: Bool, authorizer: &Comptime.ReplAuthorizer, announce: Bool) {
+    prior :: session.turns.filter((t) -> t.id < plan.from_id).map((t) -> t.input).collect()
+    &session.reset()
+    loop input in prior -> _ :: execute_line(input, &session, base_dir, color, false, true, &authorizer)
+    loop step in plan.steps {
+        stale :: if stale_from == {
+            .Val(from) -> step.turn_id >= from
+            .None -> false
+        }
+        if stale {
+            &session.turns.push(ReplTurn{
+                id: session.turns.len() + 1, input: step.input, summary: "not replayed",
+                status: ReplTurnStatus.Ok, folded: false, pinned: false, stale: true,
+                had_effect: step.kind == StepKind.ConfirmEffect, bound_name: None, pending_unfold: None,
+            })
+            if announce -> repl_turn_stdio.println(dim("turn {step.turn_id} stale: not replayed", color))
+            next
+        }
+        if announce -> repl_turn_stdio.println(dim("rerun #{step.turn_id}: {step.input}", color))
+        _ :: execute_line(step.input, &session, base_dir, color, false, false, &authorizer)
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:3239
+fn help_text(color: Bool) -> String {
+    out := "{bold("REPL Meta-Commands", color)}\n"
+    &out.push_str("  {bold(":quit", color)}          end the session\n")
+    &out.push_str("  {bold(":reset", color)}         clear all bindings and start fresh\n")
+    &out.push_str("  {bold(":load <file.jet>", color)}  load a Jet file into the session\n")
+    &out.push_str("  {bold(":type <name>", color)}      show the type of a binding\n")
+    &out.push_str("  {bold(":run", color)}           compile + run the session (bypasses fuel cap)\n")
+    &out.push_str("  {bold(":turns", color)}         list notebook turns, status, pins, and folds\n")
+    &out.push_str("  {bold(":history search <text> | clear", color)} search or erase successful submission history\n")
+    &out.push_str("  {bold(":rerun <id>", color)}       rerun a prior turn as a preview\n")
+    &out.push_str("  {bold(":fold <id>", color)}        fold or unfold a turn's output summary\n")
+    &out.push_str("  {bold(":pin <id>", color)}         pin or unpin a turn in the notebook rail\n")
+    &out.push_str("  {bold("?name", color)}           show docs/type info for a name\n")
+    &out.push_str("  {bold(":? <name>", color)}         alias for {bold("?name", color)}\n")
+    &out.push_str("  {bold(":help", color)}          show this message\n\n")
+    &out.push_str("{bold("Interactive terminal only", color)}\n")
+    &out.push_str("  {bold("Tab", color)}             complete the current name\n")
+    &out.push_str("  {bold("F1", color)}              docs for the name under the cursor\n")
+    &out.push_str("  {bold("F3", color)}              search successful submission history\n")
+    &out.push_str("  {bold("^P", color)}              pin or unpin the latest turn\n")
+    &out.push_str("  {bold("^F", color)}              fold or unfold the latest turn\n")
+    &out.push_str("  {bold("^R", color)}              edit and rerun a prior turn\n")
+    &out.push_str("  {bold("^B", color)}              open or close live bindings\n\n")
+    &out.push_str("  Tip: end a line with {bold(";", color)} to suppress echo of its value.\n")
+    &out.push_str("  Tip: {bold("core.term", color)} is auto-imported — type `print(\"hello\")` to try it.\n")
+    &out.push_str("  Tip: a `{bold("use core.math as math", color)}` line is kept for the whole session — import once, use it on any later line.\n")
+    ^out
+}
+// Rust: crates/jet-repl/src/lib.rs:3379
+fn print_help(color: Bool) { repl_turn_stdio.print(help_text(color)) }
+// Rust: crates/jet-repl/src/lib.rs:3383
+fn handle_history(arg: String?, history: &ReplHistory) {
+    command :: arg ?? { repl_turn_stdio.eprintln("usage: :history search <text> | :history clear"); return }
+    if command == "clear" {
+        if &history.clear() == {
+            .Ok(_) -> repl_turn_stdio.println("History cleared.")
+            .Err(error) -> repl_turn_stdio.eprintln("warning: history could not be cleared: {error}")
+        }
+        return
+    }
+    if command.strip_prefix("search ") == .Val(needle) {
+        matches :: history.search(needle)
+        if matches.is_empty() -> repl_turn_stdio.println("No history matches.")
+        else -> loop entry in matches -> repl_turn_stdio.println(entry)
+        return
+    }
+    repl_turn_stdio.eprintln("usage: :history search <text> | :history clear")
+}
+// Rust: crates/jet-repl/src/lib.rs:3412
+struct EvalOnce { value: CtValue?, stdout: String, stderr: String }
+// Rust: crates/jet-repl/src/lib.rs:3433
+fn eval_once(src: String, base_dir: OSPath, flags: ReplFlags) -> EvalOnce [Diagnostic]! {
+    boot_mir_eval()
+    policy := ReplPolicy.new(^flags, base_dir)
+    session :: Session.new()
+    trimmed := src.trim() // #4303
+    kind :: classify(trimmed, 1) ?? return Err(err)
+    (stmts, suppress, check_src) :: if kind == {
+        .Stmts(stmts, suppress, check_src) -> (_0: ^stmts, _1: suppress, _2: ^check_src)
+        .Reject(feature) -> { return Err([Diagnostic]{e1802(feature)}) }
+        .Meta(_, _) | .Item(_) | .Import(_) | .Empty -> { return EvalOnce{value: None, stdout: "", stderr: ""} }
+    }
+    (checked_stmts, core_imports) :: type_check_stmts(session, stmts, 1, check_src) ?? return Err(err)
+    executable :: repl_executable_stmts(^checked_stmts)
+    funcs :: [String:Func]{}
+    structs :: [String:StructDef]{}
+    sink := DevSink.new()
+    scope := [String:CtValue]{}
+    authorizer := &policy.authorizer(None)
+    value :: Comptime.run_repl_step(executable, funcs, base_dir, &sink, &scope,
+        REPL_FUEL_BUDGET, suppress, core_imports, structs, session.binding_types, &authorizer) ?? return Err([Diagnostic]{err})
+    EvalOnce{value: ^value, stdout: ^sink.stdout, stderr: ^sink.stderr}
+}
+// Rust: crates/jet-repl/src/lib.rs:3496
+fn run_transcript(inputs: [String], project_dir: String?) -> String {
+    run_transcript_with_flags(inputs, project_dir, [], [])
+}
+// Rust: crates/jet-repl/src/lib.rs:3502
+fn run_transcript_with_flags(inputs: [String], project_dir: String?, allow: [String], deny: [String]) -> String {
+    run_transcript_with(inputs, project_dir, ReplFlags{
+        allow: Set<String>.from(allow.map((s) -> s.to_ascii_lowercase()).collect()),
+        deny: Set<String>.from(deny.map((s) -> s.to_ascii_lowercase()).collect()),
+        color: ColorChoice.Never, preload: None,
+    })
+}
+// Rust: crates/jet-repl/src/lib.rs:3522
+fn run_transcript_with_preload(inputs: [String], project_dir: String?, preload: String) -> String {
+    flags := ReplFlags.default()
+    flags.color = ColorChoice.Never
+    flags.preload = Val(preload)
+    run_transcript_with(inputs, project_dir, ^flags)
+}
+// Rust: crates/jet-repl/src/lib.rs:3538
+fn run_transcript_with(inputs: [String], project_dir: String?, flags: ReplFlags) -> String {
+    boot_mir_eval()
+    base_dir :: if project_dir == {
+        .Val(dir) -> native_path(dir)
+        .None -> native_path(".")
+    }
+    session := Session.new()
+    preload :: flags.preload.copy()
+    policy := ReplPolicy.new(^flags, base_dir)
+    out := ""
+    if project_dir == .Val(dir) {
+        buf := [U8]{}
+        load_project_items(native_path(dir), &session, &buf)
+        &out.push_str(from_utf8_lossy(buf))
+    }
+    if preload == .Val(file) {
+        buf := [U8]{}
+        cmd_load(file, &session, base_dir, false, false, &buf)
+        &out.push_str(from_utf8_lossy(buf))
+    }
+    loop input in inputs {
+        normalized :: normalize_repl_input(input)
+        trimmed := normalized.trim() // #4303
+        if trimmed.is_empty() -> next
+        session.step = session.step + 1
+        kind :: classify(trimmed, session.step) ?? {
+            loop d in err -> &out.push_str("error [{d.code}]: {d.what}\n")
+            &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+            next
+        }
+        if kind == {
+            .Empty -> {}
+            .Meta(cmd, arg) -> if cmd == {
+                "quit" | "q" | "exit" -> { &out.push_str("bye\n"); return ^out }
+                "reset" -> { &session.reset(); &policy.session.clear(); &out.push_str("session reset\n") }
+                "load" -> {
+                    path :: arg ?? { &out.push_str("error: :load needs a file path\n"); next }
+                    buf := [U8]{}
+                    cmd_load(path, &session, base_dir, false, true, &buf)
+                    &out.push_str(from_utf8_lossy(buf))
+                }
+                "type" -> {
+                    name :: arg ?? { &out.push_str("error: :type needs a name\n"); next }
+                    if session.scope.get(name) == .Val(v) {
+                        ty :: if session.binding_types.get(name) == {
+                            .Val(t) -> t.name()
+                            .None -> type_name(v)
+                        }
+                        &out.push_str("{name} : {ty}\n")
+                    } else if session.func_defs.has_key(name) -> &out.push_str("{name} : fn\n")
+                    else -> &out.push_str("note: `{name}` isn't defined in this session\n")
+                }
+                "run" -> &out.push_str(cmd_run_transcript(session))
+                "turns" -> &out.push_str(render_turns_text(session))
+                "fold" | "unfold" | "pin" | "unpin" -> {
+                    id :: parse_turn_id(arg) ?? { &out.push_str("{err}\n"); next }
+                    flag :: if cmd == "fold" || cmd == "unfold" -> "folded" else -> "pinned"
+                    enabled :: cmd == "fold" || cmd == "pin"
+                    set_turn_flag(&session, id, flag, enabled) ?? { &out.push_str("{err}\n"); next }
+                    message :: if cmd == {
+                        "fold" -> "turn folded\n"
+                        "unfold" -> "turn unfolded\n"
+                        "pin" -> "turn pinned\n"
+                        else -> "turn unpinned\n"
+                    }
+                    &out.push_str(message)
+                }
+                "rerun" -> {
+                    id :: parse_turn_id(arg) ?? { &out.push_str("{err}\n"); next }
+                    if session.turns.find((t) -> t.id == id) == .Val(turn) {
+                        &out.push_str("rerun #{id}: {turn.input}\n")
+                        &out.push_str(run_transcript([String]{turn.input}, project_dir))
+                    } else { &out.push_str("turn #{id} does not exist\n") }
+                }
+                "history" -> {
+                    if arg == .Val("clear") {
+                        _ :: &session.history.clear()
+                        &out.push_str("History cleared.\n")
+                    } else if arg == .Val(command) {
+                        if command.strip_prefix("search ") == .Val(needle) {
+                            matches :: session.history.search(needle)
+                            if matches.is_empty() -> &out.push_str("No history matches.\n")
+                            else -> loop entry in matches -> &out.push_str("{entry}\n")
+                        } else { &out.push_str("usage: :history search <text> | :history clear\n") }
+                    } else { &out.push_str("usage: :history search <text> | :history clear\n") }
+                }
+                "?" -> {
+                    if arg == .Val(name) {
+                        if Docs.lookup(session, name) == {
+                            .Val(text) -> &out.push_str(text)
+                            .None -> &out.push_str("note: `{name}` isn't defined in this session\n")
+                        }
+                    } else { &out.push_str("REPL Meta-Commands\n") }
+                }
+                "help" -> &out.push_str("REPL Meta-Commands\n")
+                else -> &out.push_str("unknown meta-command `:{cmd}`\n")
+            }
+            .Reject(feature) -> {
+                d :: e1802(feature)
+                &out.push_str("error [E1802]: {d.what}\n")
+                &session.record_turn(trimmed, ReplTurnStatus.Error, "E1802")
+            }
+            .Item(src) -> {
+                bundle :: type_check_item(session, src) ?? {
+                    loop d in err -> &out.push_str("error [{d.code}]: {d.what}\n")
+                    &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+                    next
+                }
+                &session.item_srcs.push(^src)
+                rebuild_funcs(&session)
+                update_core_imports_from_ledger(bundle, &session.core_imports)
+                &out.push_str("ok\n")
+                &session.record_turn(trimmed, ReplTurnStatus.Ok, "ok")
+                &session.remember_success(trimmed)
+            }
+            .Import(src) -> {
+                &session.import_srcs.push(^src)
+                bundle :: type_check_item(session, "") ?? {
+                    _ :: &session.import_srcs.pop()
+                    loop d in err -> &out.push_str("error [{d.code}]: {d.what}\n")
+                    &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+                    next
+                }
+                rebuild_funcs(&session)
+                update_core_imports_from_ledger(bundle, &session.core_imports)
+                &out.push_str("ok\n")
+                &session.record_turn(trimmed, ReplTurnStatus.Ok, "ok")
+                &session.remember_success(trimmed)
+            }
+            .Stmts(parsed, suppress, check_src) -> {
+                (checked_stmts, checked_core_imports) :: type_check_stmts(session, parsed, session.step, check_src) ?? {
+                    loop d in err -> &out.push_str("error [{d.code}]: {d.what}\n")
+                    &session.record_turn(trimmed, ReplTurnStatus.Error, err.map((d) -> "{d.code}: {d.what}").collect().join("; "))
+                    next
+                }
+                before_keys := Set<String>.new()
+                loop name in session.scope.keys() -> _ :: &before_keys.insert(name)
+                newly_moved :: collect_moved_names(parsed, before_keys, session.scope)
+                stmts :: repl_executable_stmts(checked_stmts.copy())
+                core_imports := session.core_imports.copy()
+                loop name in checked_core_imports.keys() -> core_imports[name] = checked_core_imports[name]
+                sink := DevSink.new()
+                authorizer := &policy.authorizer(None)
+                trial_scope := session.scope.copy()
+                result :: Comptime.run_repl_step(stmts, session.func_defs, base_dir, &sink, &trial_scope,
+                    REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &authorizer)
+                if result == {
+                    .Ok(echo_val) -> {
+                        loop name in newly_moved.values() -> _ :: &trial_scope.remove(name)
+                        session.scope = ^trial_scope
+                        summary := ""
+                        loop name in newly_moved.values() -> _ :: &session.moved_names.insert(name)
+                        raw := trimmed.trim_end_matches(";").trim() // #4303
+                        if !raw.is_empty() && !raw.starts_with("__repl_echo__") -> &session.stmt_srcs.push("{raw};")
+                        new_names := [String]{}
+                        loop name in session.scope.keys() {
+                            if !before_keys.contains(name) && name != "__repl_echo__" -> &new_names.push(name)
+                        }
+                        &session.record_stmts(checked_stmts)
+                        if !sink.stdout.is_empty() { &out.push_str(sink.stdout); &summary.push_str(sink.stdout) }
+                        if !sink.stderr.is_empty() { &out.push_str(sink.stderr); &summary.push_str(sink.stderr) }
+                        if echo_val == .Val(v) {
+                            if v != CtValue.Unit {
+                                shown :: display_value(v)
+                                &out.push_str("{shown}\n")
+                                &summary.push_str(shown)
+                            }
+                        }
+                        had_effect :: looks_effectful(trimmed) || !sink.stdout.is_empty() || !sink.stderr.is_empty()
+                        bound_name :: if new_names.len() == 1 -> Val(new_names[0]) else -> None
+                        &session.record_turn_ex(trimmed, ReplTurnStatus.Ok, ^summary, had_effect, bound_name)
+                        &session.remember_success(trimmed)
+                    }
+                    .Err(diagnostic) -> {
+                        restored :: restore_move_diagnostic(^diagnostic, session.moved_names)
+                        d :: if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored
+                        if d.code == "E1801" -> &out.push_str(d.render("", ""))
+                        else -> &out.push_str("error [{d.code}]: {d.what}\n")
+                        &session.record_turn(trimmed, ReplTurnStatus.Error, "{d.code}: {d.what}")
+                    }
+                }
+            }
+        }
+    }
+    ^out
+}
