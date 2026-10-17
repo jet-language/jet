@@ -545,6 +545,8 @@ fn lower_shared_site_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
             return lir_builder_finish(f.builder)
         }
     }
+    // copy: the shared-site export row stores the helper's symbol, while the builder keeps its own
+    // name to finish the function (lir_builder_finish below).
     &m.shared_sites.push(LIRSharedSiteExport{initializer: site.initializer, site_key: definition.key, function: glue.id, symbol: f.builder.name.copy(), lifetime: site.lifetime, ty: definition.ty})
     cell :: lower_static_storage(p, &m, &f, definition) ?? return lir_builder_finish(f.builder)
     tls :: site.lifetime == MIRSharedLifetime.Thread || site.lifetime == MIRSharedLifetime.Attempt

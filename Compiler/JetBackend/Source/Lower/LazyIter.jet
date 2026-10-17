@@ -235,6 +235,8 @@ fn lower_lazy_meta_facts(p: MIRProgram, m: &LowerModule, ty: MIRType) -> LowerLa
     key :: lower_repr_key(ty) ?? return lower_lazy_meta_compute(p, m, ty)
     if m.lazy_meta_facts.get(key) == .Val(known) -> return known
     facts :: lower_lazy_meta_compute(p, m, ty)
+    // copy: the computed facts are stored in the module's lazy-meta cache and also returned to the
+    // caller on the next line.
     &m.lazy_meta_facts.add(key, facts.copy()).drop("checked absent above")
     facts
 }
@@ -883,6 +885,8 @@ fn lower_lazy_storage_type(p: MIRProgram, ty: MIRType) -> MIRType Never! {
             else -> {}
         }
     }
+    // copy: the storage type is a new owned MIRType. Otherwise it equals `ty`, the caller's MIR
+    // type (a read parameter), which stays on its MIR node.
     ty.copy()
 }
 

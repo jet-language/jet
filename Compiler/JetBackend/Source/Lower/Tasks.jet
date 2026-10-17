@@ -70,6 +70,8 @@ fn lower_task_stop_program(p: MIRProgram, prepared: [LowerPreparedFunction]) -> 
 
 fn lower_task_template_source(p: MIRProgram, function: MIRFunctionID) -> MIRFunction? {
     loop source in p.functions {
+        // copy: the task template is returned as an owned MIRFunction, while `p` is the caller's
+        // MIR program (a read parameter), which keeps its function rows.
         if source.id == function -> return Val(source.copy())
     }
     None

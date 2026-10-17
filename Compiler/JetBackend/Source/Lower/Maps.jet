@@ -312,6 +312,8 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         if c.slots[slot].cell {
             held = lower_slot_root(p, c, &m, &f, slot)
         } else {
+            // copy: the held value is read while the index write emits into `&f` and replaces
+            // f.current[slot], so a view of that slot would be live across the write.
             held = f.current[slot].copy()
         }
         root :: held ?? {

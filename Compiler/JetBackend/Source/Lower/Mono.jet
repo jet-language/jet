@@ -323,6 +323,8 @@ fn lower_subst_type(ty: MIRType, bindings: LowerBindings) -> MIRType Never! {
         }
         .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: lower_subst_type(base, bindings), dimension: dimension}
     }
+    // copy: the substituted type is a new owned MIRType. With nothing bound it equals `ty`, the
+    // caller's MIR type (a read parameter), which stays on its MIR node.
     if kind == ty.kind -> return ty.copy()
     changed :: mir_type_from_kind(kind)
     if kind == .Tuple(_) {
@@ -933,6 +935,8 @@ fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
 fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
     cursor := 0
     loop cursor < q.pending.len() {
+        // copy: `work` is read while reach and materialization append to q.pending and the function
+        // and type tables (`&q`). A view of the pending row would be live across those writes.
         work :: q.pending[cursor].copy()
         cursor += 1
         if work == {
@@ -943,7 +947,12 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
                     lower_reach_body(p, &q, p.functions[source_row], lower_bindings_empty(), parent)
                 } else {
                     id :: q.functions[row].id
+                    // copy: the instance's bindings feed materialization and the reach walk, which
+                    // writes `&q` (instance_row and instances are set right after). A view into
+                    // q.functions would be live across those writes.
                     bindings :: q.functions[row].bindings.copy()
+                    // copy: the materialized instance owns its name, while the function row keeps
+                    // its own (q.functions is the reach inventory, written right after).
                     name :: q.functions[row].name.copy()
                     function :: lower_mono_materialize(p.functions[source_row], id, name, bindings, q.checked_types)
                     lower_reach_body(p, &q, function, bindings, parent)
@@ -952,11 +961,15 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
                 }
             }
             .Type(row) -> {
+                // copy: `ty` is read while lower_reach_concrete_type writes `&q` (type_work grows
+                // as types are reached). A view into q.type_work would be live across those writes.
                 ty :: q.type_work[row].ty.copy()
                 parent :: q.type_work[row].parent
                 lower_reach_concrete_type(p, &q, ty, parent)
             }
             .Render(row, show) -> {
+                // copy: `ty` is read while lower_reach_render_type writes `&q` (type_work grows as
+                // types are reached). A view into q.type_work would be live across those writes.
                 ty :: q.type_work[row].ty.copy()
                 parent :: q.type_work[row].parent
                 lower_reach_render_type(p, &q, ty, show, parent)

@@ -67,6 +67,8 @@ fn lower_trait_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         lower_fail(&m, &f, "trait argument target {target.value} has no checked type")
         return None
     }
+    // copy: the target type is read while the trait argument lowering registers types and glue in
+    // `m` (`&m`), so a view into m.checked_types would be live across those writes.
     target_ty :: m.checked_types.types[row].copy()
     ty :: lower_value_type(c, arg.value) ?? return None
     source := if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, arg.value)
@@ -118,6 +120,8 @@ fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
     key :: lower_list_word(&f, boxed, 0)
     count :: m.glue.len()
     loop index in 0..<count {
+        // copy: the payload glue row is read while lowering it pushes glue into `m` (`&m`). A view
+        // into m.glue would dangle when that list grows.
         payload :: m.glue[index].copy()
         if payload.helper != "trait.drop" -> next
         expected :: lower_const(&f, payload.id.value)
@@ -268,6 +272,8 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 
 fn lower_reach_trait_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, target: MIRTypeID, parent: Int) Never! {
     row :: q.checked_types.rows.get(target.value) ?? return
+    // copy: the target type is read while lower_reach_* writes the prepared tables (`&q`), so a
+    // view into q.checked_types would be live across those writes.
     target_ty :: q.checked_types.types[row].copy()
     bound :: lower_trait_ref(p, target_ty) ?? return
     if lower_trait_ref(p, ty) != None -> return
@@ -293,6 +299,8 @@ fn lower_helper_trait_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
     count :: m.glue.len()
     loop index in 0..<count {
+        // copy: the payload glue row is read while rendering it pushes glue into `m` (`&m`). A view
+        // into m.glue would dangle when that list grows.
         payload :: m.glue[index].copy()
         if payload.helper != "trait.drop" -> next
         expected :: lower_const(&f, payload.id.value)

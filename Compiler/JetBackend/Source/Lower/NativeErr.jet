@@ -45,7 +45,8 @@ fn lower_native_err_type(p: MIRProgram, ty: MIRType) -> Bool {
 fn lower_native_err_member(p: MIRProgram, ty: MIRType, id: MIRFieldID) -> MIRField? {
     definition :: lower_type_def(p, ty) ?? return None
     if definition.kind == .Struct(fields, _) {
-        loop field in lower_stored_fields(fields) { if field.id == id -> return Val(field.copy()) }
+        stored := lower_stored_fields(fields)
+        loop field in ^stored { if field.id == id -> return Val(^field) }
     }
     None
 }

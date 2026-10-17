@@ -424,12 +424,23 @@ fn opt_predecessor_counts(function: LIRFunction, rows: [Int:Int]) -> [Int] Never
 // block reads directly (the empty block dominates the reader) refuses the
 // bypass: that read would lose its definition (`outside`, opt_outside_uses).
 fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    // copy: the threaded target is a new owned jump target. With no row it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     row :: rows.get(target.block.value) ?? return target.copy()
+    // copy: the threaded target is a new owned jump target. For the entry row it equals `target`,
+    // the caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     if row == 0 -> return target.copy()
     hop :: function.blocks[row]
+    // copy: the threaded target is a new owned jump target. For a non-empty hop it equals `target`,
+    // the caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     if hop.insts.len() != 0 -> return target.copy()
+    // copy: the threaded target is a new owned jump target. When a hop parameter escapes it equals
+    // `target`, the caller's terminator edge (a read parameter), which stays in the block being
+    // rebuilt.
     loop param in hop.params { if outside[param.value] -> return target.copy() }
     if hop.terminator == .Jump(onward) {
+        // copy: the threaded target is a new owned jump target. For a self-loop it equals `target`,
+        // the caller's terminator edge (a read parameter), which stays in the block being rebuilt.
         if onward.block == hop.id -> return target.copy()
         args := [LIRValueID]{}
         loop arg in onward.args {
@@ -441,6 +452,8 @@ fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], ta
         }
         return LIRJumpTarget{block: onward.block, args: args}
     }
+    // copy: the threaded target is a new owned jump target. Otherwise it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     target.copy()
 }
 
@@ -660,7 +673,11 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
 // `target` without the arguments of its block's dead parameters; `function`
 // still holds the parameter lists from before the removal.
 fn opt_live_args(function: LIRFunction, rows: [Int:Int], live: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    // copy: the pruned target is a new owned jump target. With no row it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     row :: rows.get(target.block.value) ?? return target.copy()
+    // copy: the pruned target is a new owned jump target. For the entry row it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     if row == 0 -> return target.copy()
     args := [LIRValueID]{}
     loop (position, param) in function.blocks[row].params {

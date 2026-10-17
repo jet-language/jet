@@ -126,6 +126,8 @@ fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
         function.blocks[row].insts = insts
         function.blocks[row].terminator = opt_rename_terminator(aliases, function.blocks[row].terminator)
     }
+    // copy: the CSE result is a new owned LIRFunction. Unchanged, it equals `original`, the
+    // caller's function (a read parameter; the optimizer chain and the CSE fixtures still read it).
     if !changed -> return original.copy()
     // Storage order need not match dominance order. Rename every edge/use,
     // including unreachable storage rows, before removing undefined aliases.

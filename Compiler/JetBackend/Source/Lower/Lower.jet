@@ -473,6 +473,9 @@ fn lir_lower_native_imports(program: MIRProgram, roots: [MIRFunctionID], imports
 // sentry hooks and is never instrumented, else jet_rt_sentry_scope_enter ->
 // sentry_save -> thread_base (#Unsafe) re-enters itself.
 fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool) -> LIRLowering Never! {
+    // copy: lowering edits its program in place (the type index is attached, keep-going traps
+    // rewrite rows), while these read-parameter entry points leave the caller's MIR intact. Callers
+    // that hand theirs over use the *_in_place entry points.
     lowered_program := program.copy()
     lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry)
 }
@@ -539,11 +542,11 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         static_live: None,
         source_rows: [U64:Int]{},
         prelude_positions: lower_prelude_positions(program),
-        asm_foreign: prepared.asm_foreign.copy(),
-        foreign_rows: prepared.foreign_rows.copy(),
+        asm_foreign: ^prepared.asm_foreign,
+        foreign_rows: ^prepared.foreign_rows,
         mir_rows: [U64:Int]{},
-        checked_types: prepared.checked_types.copy(),
-        close_methods: prepared.close_methods.copy(),
+        checked_types: ^prepared.checked_types,
+        close_methods: ^prepared.close_methods,
         mir_sources: [Int]{},
         comptime_budget: comptime_budget,
         sentry: sentry,
@@ -577,6 +580,9 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     // the glue tasks then read (lower_keep_going_glue).
     glue_programs := [MIRProgram]{}
     if keep_going {
+        // copy: keep-going lowering hands an indexed program to its body tasks, which return it for
+        // the glue tasks, while `program` (write-borrowed) still feeds the in-place path and the
+        // caller.
         kept := lower_keep_going_lower(program.copy(), ^m, ^prepared.functions, ^prepared.instances, ^failed_functions) ?? panic("the keep-going native lowering tasks failed")
         prepared.functions = ^kept.inventory
         prepared.instances = ^kept.instances
@@ -657,6 +663,8 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     inventory :: lower_trait_key_count(m)
     loop {
         loop cursor < m.glue.len() {
+            // copy: the glue row is read while lowering it pushes more glue and signatures into `m`
+            // (`&m`). A view into m.glue would dangle when that list grows.
             glue :: m.glue[cursor].copy()
             if lower_trait_dispatcher(program, glue) {
                 &dispatchers.push(cursor)
@@ -674,6 +682,8 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
             cursor += 1
         }
         if emitted == dispatchers.len() -> break
+        // copy: the dispatcher glue row is read while lowering it pushes into `m` (`&m`). A view
+        // into m.glue would dangle when that list grows.
         glue :: m.glue[dispatchers[emitted]].copy()
         function := LIRFunction?{None}
         if keep_going {
@@ -701,6 +711,8 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         // Getters are published only after the host runs this noarg Unit
         // startup. Emit it last so helper bodies have discovered every fixup.
         startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
+        // copy: the startup glue row is read while lowering it pushes into `m` (`&m`). A view into
+        // m.glue would dangle when that list grows.
         startup_glue :: m.glue[startup.value - m.glue_base].copy()
         if keep_going {
             outcome := lower_keep_going_glue(glue_inputs, ^m, startup_glue, functions, glue_functions) ?? panic("the keep-going native glue task failed")
@@ -914,6 +926,8 @@ fn lower_keep_going_glue(inputs: Shared<LowerGlueInputs>, m: ^LowerModule, glue:
     state :: shared LowerGlueState{modules: [LowerModule]{^m}, functions: [LIRFunction]{}}
     stopped := ""
     task.group lower_glue {
+        // copy: the spawned task captures its own glue row, while `glue` (a read parameter) is
+        // still used by this function after the task group.
         head :: task lower_keep_going_glue_part(inputs, state, glue.copy())
         stopped = head.join() ?? compiler_threads_failure_text(err)
     }
@@ -1069,6 +1083,8 @@ fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
     if ty.kind == .Apply(name, args) {
         row :: lower_type_row(p, name, ty.identity)
         if row < 0 -> return None
+        // copy: the type definition is returned as an owned MIRTypeDef, while `p` is the caller's
+        // MIR program (a read parameter), which keeps its type rows.
         if p.types[row].generic_params.len() == 0 -> return Val(p.types[row].copy())
         if p.types[row].generic_params.len() != args.len() -> return None
         return Val(lower_instantiate_definition(p.types[row], args))
@@ -1079,9 +1095,13 @@ fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
 fn lower_type_def_by_id(p: MIRProgram, id: MIRTypeID) -> MIRTypeDef? {
     if p.type_id_rows.len() > 0 {
         row :: p.type_id_rows.get(id.value) ?? return None
+        // copy: the type definition is returned as an owned MIRTypeDef, while `p` is the caller's
+        // MIR program (a read parameter), which keeps its type rows.
         return Val(p.types[row].copy())
     }
     loop row in 0..<p.types.len() {
+        // copy: the type definition is returned as an owned MIRTypeDef, while `p` is the caller's
+        // MIR program (a read parameter), which keeps its type rows.
         if p.types[row].id == id -> return Val(p.types[row].copy())
     }
     None
@@ -1245,6 +1265,8 @@ fn lower_repr_of(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> LowerRepr Nev
     key :: lower_repr_key(ty) ?? return lower_repr(p, ty)
     if f.types[0].reprs.get(key) == .Val(known) -> return known
     repr :: lower_repr(p, ty)
+    // copy: the computed repr is stored in the function's repr cache and also returned to the
+    // caller on the next line.
     &f.types[0].reprs.add(key, repr.copy()).drop("checked absent above")
     repr
 }
@@ -1509,6 +1531,8 @@ fn lower_glue_register(m: &LowerModule, role: String, ty: MIRType, clone: Bool, 
     if m.glue_rows.get(row_key) == .Val(row) -> return m.glue[row].id
     row :: m.glue.len()
     id :: LIRFunctionID{value: m.glue_base + row}
+    // copy: the glue registry row owns its type, while `ty` is the caller's MIR type (a read
+    // parameter), which stays on its MIR node.
     &m.glue.push(LowerGlue{key: key, ty: ty.copy(), id: id, clone: clone, helper: helper, function: -1})
     &m.glue_rows.add(row_key, row).drop("checked absent above")
     id
@@ -1540,6 +1564,8 @@ fn lower_signature(m: &LowerModule, params: [LIRLayout], result: LIRLayout?) -> 
     key :: lower_signature_key(params, result)
     if m.signature_rows.get(key) == .Val(row) -> return LIRSignatureID{value: row}
     id :: LIRSignatureID{value: m.signatures.len()}
+    // copy: the signature row owns its layouts, while `params`/`result` are the caller's layout
+    // lists (read parameters), often reused for the call that follows.
     &m.signatures.push(LIRSignature{id: id, convention: LIRCallConv.SystemV, params: params.copy(), result: result.copy()})
     &m.signature_rows.add(key, id.value).drop("checked absent above")
     id
@@ -1800,6 +1826,8 @@ fn lower_call_runtime(m: &LowerModule, f: &LowerFunction, symbol: String, args: 
     loop arg in args -> &params.push(lower_value_layout(f, arg))
     result :: if dst == .Val(value) -> Val(lower_value_layout(f, value)) else -> None
     signature :: lower_signature(&m, params, result)
+    // copy: the emitted Call owns its argument list, while `args` is the caller's list (a read
+    // parameter; some callers reuse it for a following release).
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: args.copy()})
 }
 
@@ -2172,8 +2200,8 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             loop place in addressed {
                 if place_slots.get(place.value) == .Val(slot) {
                     if lower_repr_layout(lower_repr(p, slots[slot].ty)) != None {
-                        row :: slots[slot].copy()
-                        slots[slot] = LowerSlot{base: row.base, ty: row.ty, ownership: row.ownership, carried: false, write_param: row.write_param, cell: true}
+                        slots[slot].carried = false
+                        slots[slot].cell = true
                     }
                 }
             }
@@ -2249,6 +2277,9 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     iter_takes :: lower_iter_takes(function)
     releases :: lower_release_plan(p, m, function, fact_index, dead, sunk, block_index, successors, order, iter_takes, inspect_moves, inspect_carriers, slots, place_slots, live)
     Val(LowerContext{
+        // copy: the lowering context owns its MIR function for the whole body lowering, while
+        // `function` is the program's row (a read parameter), which stays in `p` and is read below
+        // for the static text facts.
         mir: function.copy(),
         result: result,
         fact_index: fact_index,
@@ -3348,6 +3379,8 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     // a Write parameter's entry value is the caller's place, not the value.
     loop (index, param) in c.mir.params {
         if param.access == .Write -> next
+        // copy: the parameter value is read while `&f` is written (slot initialization and
+        // lower_emit), so a view into f.params would be live across those writes.
         param_value :: f.params[index].copy()
         if param_value == .Val(value) -> lower_debug_bind_variable(&f, index, value)
     }
@@ -3555,11 +3588,15 @@ fn lower_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     }
     loop slot in c.live[position] {
         row :: c.slots[slot]
+        // copy: the slot's current value is read while the edge writes `&f` (lower_fail and edge
+        // copies), so a view into f.current would be live across those writes.
         held :: f.current[slot].copy()
         value :: held ?? {
             lower_fail(&m, &f, "local slot {slot} has no value on the edge b{source.value} -> b{target.value}")
             return None
         }
+        // copy: the matched storage is used while the edge writes `&f` (f.current and f.storage are
+        // updated below), so a payload view into f.storage would be live across those writes.
         if back && (f.storage[slot].copy()) == .Val(storage) {
             &copy_args.push(args.len())
             &copy_targets.push(storage)
@@ -3718,6 +3755,8 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 lower_close_transfer(c, &f, returned)
             }
             lower_sentry_function_leave(&m, &f)
+            // copy: the result storage is read while the terminator emits into `&f`, so a view into
+            // f.result_storage would be live across those writes.
             result_storage :: f.result_storage.copy()
             if result_storage == .Val(storage) {
                 // An inline aggregate result moves into the caller's storage.
@@ -4014,6 +4053,8 @@ fn lower_temp_release(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 fn lower_release_bound(p: MIRProgram, c: LowerContext, f: &LowerFunction, value: MIRValueID, index: Int) Never! {
     target := LIRValueID{value: index}
     if lower_slot_of_value(c, value) == .Val(slot) {
+        // copy: the held value is read while the release writes `&f` (f.current is cleared below),
+        // so a view into f.current would be live across that write.
         held :: f.current[slot].copy()
         if held == .Val(holding) {
             if lower_value_drop(f, holding) != .Trivial -> target = holding
@@ -4059,6 +4100,8 @@ fn lower_release_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 // it is released only behind a null test.
 fn lower_release_slots(f: &LowerFunction, slots: [Int], kept: LIRValueID?) Never! {
     loop slot in slots {
+        // copy: the held value is read while the release writes `&f` (f.current is cleared below),
+        // so a view into f.current would be live across that write.
         held :: f.current[slot].copy() ?? next
         if kept == .Val(returned) {
             if returned == held -> next
@@ -4118,6 +4161,8 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
     if instruction.operation == {
         .Parameter(index, name) -> {
             if index < 0 || index >= f.params.len() -> return lower_fail(&m, &f, "parameter {name} has index {index} outside the signature")
+            // copy: the parameter value is read while the operation writes `&f` (lower_emit and the
+            // f.current update), so a view into f.params would be live across those writes.
             param :: f.params[index].copy()
             if param == .Val(value) {
                 if c.mir.params[index].access != .Write -> return lower_alias(c, &f, instruction, value)
@@ -4327,6 +4372,8 @@ fn lower_map_lookup(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     result :: lower_pointer(&f)
     lower_start(&f, done, [LIRValueID]{result, cache})
     if c.slots[slot].cell {
+        // copy: the cache cell is read while the lookup emits into `&f`, so a view into f.cells
+        // would be live across those writes.
         cell :: (f.cells[slot].copy()) ?? return lower_fail(&m, &f, "MapLookup cache cell has no storage")
         lower_write_at(p, &f, cell, 0, cache, cache_row.ty)
     } else {
@@ -4605,6 +4652,8 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if c.slots[slot].cell {
             cell_slot = slot
         } else {
+            // copy: the held value is read while the drop writes `&f` (f.current is cleared below),
+            // so a view into f.current would be live across that write.
             held :: f.current[slot].copy()
             if held == .Val(holding) {
                 if holding == lowered -> lower_clear_slot(p, c, &f, slot)
@@ -4652,6 +4701,8 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if c.slots[slot].cell {
             walk = lower_cell_walk(p, c, &m, &f, slot, row) ?? return
         } else {
+            // copy: the held value is read while the place read writes `&f` (a move clears
+            // f.current), so a view into f.current would be live across that write.
             held :: f.current[slot].copy()
             root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
             if row.projections.len() == 0 {
@@ -4789,10 +4840,14 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         else -> lower_partial_reset(&f, "slot.{slot}", prefix)
         return
     }
+    // copy: the previous value is read while the write replaces f.current[slot] and emits into
+    // `&f`, so a view of that slot would be live across the write.
     held :: f.current[slot].copy()
     if row.projections.len() == 0 {
         if c.slots[slot].write_param >= 0 {
             // Publish both physical and local ownership before Close re-entry.
+            // copy: the write parameter's pointer is read while the store emits into `&f`, so a
+            // view into f.params would be live across those writes.
             address :: (f.params[c.slots[slot].write_param].copy()) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
             receiver :: lower_close_receiver_slot(c, f, slot)
             if replace -> lower_partial_drop_stored(p, &m, &f, "slot.{slot}", [LowerGlueField]{}, address, 0, row.ty, receiver)
@@ -4859,8 +4914,12 @@ fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     header := LIRValueID?{None}
     if c.slots[slot].cell {
+        // copy: the cell header is read while initialization emits into `&f`, so a view into
+        // f.cells would be live across those writes.
         header = f.cells[slot].copy()
     } else if c.slots[slot].write_param >= 0 {
+        // copy: the write parameter's pointer is read while initialization emits into `&f`, so a
+        // view into f.params would be live across those writes.
         header = f.params[c.slots[slot].write_param].copy()
     } else {
         header = Val(lower_new_storage(p, &f, row.ty))
@@ -6721,11 +6780,15 @@ fn lower_write_place_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return None
         return Val(LowerWriteBack{place: place, slot: slot, cell: lower_address(&f, walk.base, walk.offset)})
     }
+    // copy: the root value is read while the write-back setup emits into `&f`, so a view into
+    // f.current would be live across those writes.
     root :: (f.current[slot].copy()) ?? {
         lower_fail(&m, &f, "place {place.value} has no value")
         return None
     }
     if row.projections.len() == 0 && c.slots[slot].write_param >= 0 {
+        // copy: the write parameter's pointer is read while the write-back setup emits into `&f`,
+        // so a view into f.params would be live across those writes.
         address :: (f.params[c.slots[slot].write_param].copy()) ?? {
             lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
             return None
@@ -6796,6 +6859,8 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_set_slot(&f, writeback.slot, Val(updated))
         if rebound == .Val(value) -> lower_define(c, &f, value, updated)
     } else {
+        // copy: the root value is read while the write-back emits into `&f` and rebinds f.current,
+        // so a view of that slot would be live across those writes.
         root :: (f.current[writeback.slot].copy()) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
         walk :: lower_walk_projections(p, c, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
@@ -7015,6 +7080,8 @@ fn lower_call_helper(m: &LowerModule, f: &LowerFunction, name: String, ty: MIRTy
     result :: if dst == .Val(value) -> Val(lower_value_layout(f, value)) else -> None
     signature :: lower_signature(&m, params, result)
     id :: lower_helper_id(&m, name, ty)
+    // copy: the emitted Call owns its argument list, while `args` is the caller's list (a read
+    // parameter), which the helper caller still reads.
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: id}, args: args.copy()})
 }
 
@@ -7034,6 +7101,8 @@ fn lower_helper_start_taking(m: &LowerModule, glue: LowerGlue, params: [LIRLayou
     f := lower_new_function(glue.id, "helper.{glue.helper}.{glue.key}", signature, MIRBlockID{value: U64.MAX})
     entry_params := [LIRValueID]{}
     loop (position, layout) in params {
+        // copy: the helper builder owns each parameter's drop rule, while `taken` is the caller's
+        // drop list (a read parameter), which stays with the glue row.
         drop :: if position < taken.len() -> taken[position].copy() else -> LIRDrop.Trivial
         &entry_params.push(lower_new_value(&f, layout, drop, None))
     }

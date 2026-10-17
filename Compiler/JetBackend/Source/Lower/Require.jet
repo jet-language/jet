@@ -65,6 +65,8 @@ fn lower_require_locals(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
             return None
         }
         if slot.write_param >= 0 && !lower_is_inline(p, slot.ty) {
+            // copy: the write parameter's pointer is read while the require check emits into `&f`,
+            // so a view into f.params would be live across those writes.
             parameter :: f.params[slot.write_param].copy()
             address :: parameter ?? return None
             layout :: lower_value_layout(f, value)

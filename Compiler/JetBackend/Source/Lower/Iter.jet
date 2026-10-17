@@ -307,6 +307,8 @@ fn lower_iter_dispatch(p: MIRProgram, m: &LowerModule, f: &LowerFunction, cursor
     done :: lower_new_block(&f)
     count :: m.glue.len()
     loop index in 0..<count {
+        // copy: the glue row is read while the dispatch emits into `&f` and registers helpers in
+        // `m`. A view into m.glue would dangle when that list grows.
         row :: m.glue[index].copy()
         if row.helper != "iter.release" -> next
         expected :: lower_const(&f, row.id.value)

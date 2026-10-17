@@ -48,6 +48,8 @@ fn lower_reach_constant(q: &LowerPrepared, value: MIRConstant, parent: Int) Neve
 
 fn lower_reach_id(q: &LowerPrepared, id: U64, parent: Int) Never! {
     row :: q.checked_types.rows.get(id) ?? return
+    // copy: `ty` is read while lower_reach_* writes the prepared tables (`&q`, which appends
+    // checked types), so a view into q.checked_types would be live across those writes.
     ty :: q.checked_types.types[row].copy()
     lower_mono_intern_type(&q, ty, parent)
 }
@@ -462,6 +464,8 @@ fn lower_reach_edges(p: MIRProgram, q: &LowerPrepared, first: Int, parent: Int, 
         cursor += 1
         if edge < 0 || q.edges_seen.get(edge) != None -> next
         &q.edges_seen.add(edge, true).drop("checked absent above")
+        // copy: the edge's function id is read while lower_reach_* writes `q` (the edge list grows
+        // as reach walks). A view into q.edges would be live across those writes.
         function :: q.edges[edge].function.copy()
         branch :: q.edges[edge].branch
         following :: q.edges[edge].next

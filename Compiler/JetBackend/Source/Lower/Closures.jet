@@ -126,6 +126,8 @@ fn lower_capture_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         lower_fail(&m, &f, "capture slot {slot} has no capture parameter")
         return None
     }
+    // copy: the env pointer is read while the capture address emits into `&f`, so a view into f.env
+    // would be live across those writes.
     env :: (f.env.copy()) ?? {
         lower_fail(&m, &f, "capture slot {slot} outside a closure body")
         return None
@@ -177,10 +179,16 @@ fn lower_frame_cells(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             }
             .Parameter(value) -> {
                 if row.write_param >= 0 {
+                    // copy: the write parameter's pointer becomes the cell while the frame setup
+                    // writes f.cells and emits into `&f`, so a view into f.params would be live
+                    // across those writes.
                     cell = f.params[row.write_param].copy()
                 } else {
                     index :: lower_param_index(c.mir, value)
                     if index >= 0 && index < f.params.len() {
+                        // copy: the parameter value is stored into its new cell while the frame
+                        // setup writes `&f`, so a view into f.params would be live across those
+                        // writes.
                         param_value :: f.params[index].copy()
                         if param_value == .Val(param) {
                             if lower_is_inline(p, row.ty) {
@@ -210,7 +218,11 @@ fn lower_frame_cells(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // aggregate is the cell, any other cell value is loaded (borrowed); other
 // slots hold their current value.
 fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slot: Int) -> LIRValueID? {
+    // copy: the slot root is returned as an owned value, while f.current keeps the slot's value for
+    // later reads.
     if !c.slots[slot].cell -> return f.current[slot].copy()
+    // copy: the cell pointer is read while the root load emits into `&f`, so a view into f.cells
+    // would be live across those writes.
     cell :: (f.cells[slot].copy()) ?? {
         lower_fail(&m, &f, "captured slot {slot} has no storage")
         return None
@@ -226,6 +238,8 @@ fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 // projections from the cell's root.
 fn lower_cell_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slot: Int, row: MIRPlace) -> LowerFieldAddress? {
     if row.projections.len() == 0 {
+        // copy: the cell pointer is read while the field walk emits into `&f`, so a view into
+        // f.cells would be live across those writes.
         cell :: (f.cells[slot].copy()) ?? {
             lower_fail(&m, &f, "captured place {row.id.value} has no storage")
             return None
@@ -240,6 +254,8 @@ fn lower_cell_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 // it is cleared when it still holds that value (an inline aggregate's value
 // is the cell's own storage).
 fn lower_cell_dropped(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int, value: LIRValueID) Never! {
+    // copy: the cell pointer is read while the drop emits into `&f`, so a view into f.cells would
+    // be live across those writes.
     cell :: (f.cells[slot].copy()) ?? return
     ty :: c.slots[slot].ty
     if lower_is_inline(p, ty) -> return lower_clear_at(p, &f, cell, 0, ty)
@@ -389,6 +405,8 @@ fn lower_closure_helper_id(m: &LowerModule, helper: String, index: Int, source: 
 // calls the function with the rest of its arguments.
 fn lower_closure_thunk(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     target_signature :: m.mir_signatures[glue.function].copy()
+    // copy: the target signature is read while the thunk registers signatures and glue in `m`
+    // (`&m`), so a view into m.signatures would be live across those writes.
     target :: m.signatures[target_signature.value].copy()
     params := [LIRLayout]{lir_layout_pointer()}
     loop layout in target.params -> &params.push(layout)

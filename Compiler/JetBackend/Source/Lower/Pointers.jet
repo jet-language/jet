@@ -164,8 +164,12 @@ fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never
 }
 
 fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    // copy: the sentry frame is read while leaving the function emits into `&f` and clears
+    // f.sentry_stack_frame, so a view would be live across that write.
     stack_frame :: f.sentry_stack_frame.copy()
     if stack_frame == .Val(frame) -> lower_call_runtime(&m, &f, "jet_rt_sentry_frame_leave", [LIRValueID]{frame}, None)
+    // copy: the saved sentry function is read while leaving emits into `&f` and clears
+    // f.sentry_function, so a view would be live across that write.
     function_save :: f.sentry_function.copy()
     if function_save == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
 }
