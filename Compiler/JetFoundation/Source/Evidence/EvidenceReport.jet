@@ -265,6 +265,9 @@ fn evidence_completeness_reason(value: EvidenceCompleteness) -> String? Never! {
 }
 
 fn evidence_completeness_merge(value: &EvidenceCompleteness, other: EvidenceCompleteness) Never! {
+    // copy: the merged completeness (owner: `value`, the merged report) takes the more severe state
+    // while `other` stays with its record (owner: the caller's record or report, read again
+    // afterwards).
     if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = other.copy()
 }
 

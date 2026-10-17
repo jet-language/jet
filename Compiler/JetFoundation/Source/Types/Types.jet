@@ -59,17 +59,7 @@ struct TypeTupleField {
 // so positional members keep their written order.
 fn type_tuple_fields_canonical(fields: [TypeTupleField]) -> [TypeTupleField] Never! {
     sorted := fields
-    index := 1
-    loop index < sorted.len() {
-        current :: sorted[index].copy()
-        position := index
-        loop position > 0 && current.name < sorted[position - 1].name {
-            sorted[position] = sorted[position - 1]
-            position -= 1
-        }
-        sorted[position] = current
-        index += 1
-    }
+    &sorted.sort_by((left: TypeTupleField, right: TypeTupleField) -> left.name <=> right.name)
     sorted
 }
 
@@ -621,6 +611,10 @@ fn type_unqualified_nominals(ty: Type) -> Type Never! {
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: type_unqualified_nominals(inner)}
         .Union(members) -> Type.Union{members: loop member in members -> type_unqualified_nominals(member)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_unqualified_nominals(field.ty)}}
+        // copy: a read-parameter rewriter returns a type with no nominal to unqualify unchanged as
+        // a new tree (owner: the result) while the caller keeps the input (owner: the read
+        // parameter, a payload view of the caller's tree); taking the input would need a consuming
+        // match of every rebuilt variant (children arrive as payload views).
         else -> ty.copy()
     }
 }
