@@ -58,6 +58,21 @@ const shapes = {
   self: `acc := [Int]{0}
     loop v in 0..<count { acc = [Int]{acc.len() % 7, v} }
     total += acc.len()`,
+  // A list local rebound on either arm of a branch.
+  branch: `kept := [Int]{0}
+    loop v in 0..<count {
+        if v % 2 == 0 { kept = [Int]{v} } else { kept = [Int]{v, v} }
+    }
+    total += kept.len()`,
+  // A Write parameter rebound by the callee (its caller's storage owns the value).
+  write_param: `rows := [Int]{}
+    loop v in 0..<count { write_drops_rebind(&rows, v) }
+    total += rows.len()`,
+  // A captured String local rebound inside the closure body.
+  capture: `label := "start"
+    rename :: (n: Int) -> { label = "v{n}" }
+    loop v in 0..<count { rename(v) }
+    total += label.len()`,
   // A String local rebound; rebound, then appended to.
   text: `text := "start"
     loop v in 0..<count { text = "value {v}" }
@@ -211,6 +226,10 @@ enum WriteDropsWrap {
 fn write_drops_dims(n: Int) -> [Int]? {
     if n % 2 == 0 -> return Val([Int]{n})
     None
+}
+
+fn write_drops_rebind(rows: &[Int], v: Int) {
+    rows = [Int]{v, v + 1}
 }
 
 fn step(count: Int) -> Int {
