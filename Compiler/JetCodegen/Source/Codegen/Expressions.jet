@@ -613,7 +613,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         place_ty := argument.value.ty
         if place != None && argument.mut_borrow && place_expr.kind == .Slice(_, _, _, _, _) -> place_ty = place_expr.ty
         value := if place == {
-            None -> jet_codegen_emit_expr(&builder, program, argument.value)
+            None -> jet_codegen_lower_call_carrier(&builder, program, argument, access, variadic, args, index) ?? jet_codegen_emit_expr(&builder, program, argument.value)
             Val(place_id) -> {
                 operation := MIROperation.ReadPlace{place: place_id}
                 if access == MIRAccess.Move && !materialize_view_clone && !argument.clone && !argument.arc_clone -> operation = MIROperation.MovePlace{place: place_id}
@@ -692,6 +692,122 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
     }
     lowered
 }
+
+// #5041 (plan M5): a `Val(place)` argument of a `T?` read parameter lends a
+// borrowed carrier (jet_codegen_emit_borrowed_carrier) instead of an owned
+// Option around a copy of the place. The place must hold still until the
+// call returns (jet_codegen_carrier_root_hold): beyond a read parameter's
+// place, every other argument must leave the root alone
+// (jet_codegen_operand_holds_root).
+fn jet_codegen_lower_call_carrier(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TCallArg, access: MIRAccess, variadic: [Bool], args: [TCallArg], index: Int) -> MIRValueID? {
+    if access != MIRAccess.Read || argument.borrow || argument.mut_borrow || argument.clone || argument.arc_clone || argument.widen_to_vec -> return None
+    if argument.fn_coerce != None || argument.widen_to_union != None || argument.box_as_trait != None -> return None
+    if index < variadic.len() && variadic[index] -> return None
+    if argument.value.kind == .Present(payload) {
+        hold :: jet_codegen_carrier_root_hold(builder, program, argument.value.ty, payload) ?? return None
+        if hold != JET_CODEGEN_CARRIER_FROZEN {
+            loop (at, other) in args {
+                if at != index && !jet_codegen_operand_holds_root(other.value, hold == JET_CODEGEN_CARRIER_ALIAS) -> return None
+            }
+        }
+        return Val(jet_codegen_emit_borrowed_carrier(&builder, program, argument.value, payload))
+    }
+    None
+}
+
+// What keeps a borrowed carrier's root still (jet_codegen_carrier_root_hold).
+// FROZEN: a read parameter's place, unchanged for the whole call. OWNED: the
+// own storage of an immutable local, which only a move changes. ALIAS: a
+// read alias whose root the binding's scope proved stable
+// (jet_codegen_stable_element_lets), which a write or a move made between
+// the carrier and the call could still change.
+JET_CODEGEN_CARRIER_FROZEN :: 0
+JET_CODEGEN_CARRIER_OWNED :: 1
+JET_CODEGEN_CARRIER_ALIAS :: 2
+
+// #5041 (plan M5): whether `Val(payload)` of type `carrier_ty` may be a
+// borrowed carrier, and what holds its root still (JET_CODEGEN_CARRIER_*).
+// The payload is a stored-field chain of a non-Copy type. A mutable local,
+// a capture, a pointer local, a string view or a persistent cell is
+// reachable another way: None.
+fn jet_codegen_carrier_root_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, carrier_ty: Type, payload: TExpr) -> Int? {
+    item_matches :: if carrier_ty == {
+        .Option(item) -> item == payload.ty
+        else -> false
+    }
+    if !item_matches || jet_codegen_ownership(payload.ty).mode == MIROwnershipMode.Copy -> return None
+    if !jet_codegen_is_stored_field_chain(builder, program, payload) -> return None
+    root :: jet_codegen_element_place_root(payload) ?? return None
+    if root.persist_key != None || root.deref -> return None
+    if payload.kind == .Local(_) && jet_codegen_is_string_view_local(builder, program, root) -> return None
+    binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
+    if jet_codegen_read_parameter_place(builder, program, binding.place) -> return Val(JET_CODEGEN_CARRIER_FROZEN)
+    if builder.read_alias_places.get(binding.place.value) != None -> return Val(JET_CODEGEN_CARRIER_ALIAS)
+    row :: jet_codegen_find_place(builder, program, binding.place) ?? return None
+    if row.access != MIRAccess.Read || row.projections.len() > 0 -> return None
+    own_storage :: if row.base == {
+        .Local(id) -> id == binding.local
+        else -> false
+    }
+    if !own_storage -> return None
+    Val(JET_CODEGEN_CARRIER_OWNED)
+}
+
+// #5041 (plan M5): whether evaluating `expression` surely leaves a borrowed
+// carrier's root alone: a literal, a local, a field or element read, a
+// borrow, or an Option or List literal of those moves nothing, which is all
+// an immutable local needs. An `alias` root (JET_CODEGEN_CARRIER_ALIAS)
+// also needs no write borrow among them. Any other shape may change it.
+fn jet_codegen_operand_holds_root(expression: TExpr, alias: Bool) -> Bool Never! {
+    if expression.kind == {
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Unit | .DefaultLit | .Absent | .ConstRef(_) | .Local(_) -> true
+        .StrLit(parts) -> {
+            loop part in parts {
+                if part == .Interpolation(_, _) -> return false
+            }
+            true
+        }
+        .Field(receiver, _) -> jet_codegen_operand_holds_root(receiver, alias)
+        .Index(base, position, _, access, _, _) -> (!alias || access == AccessConvention.Read) && jet_codegen_operand_holds_root(base, alias) && jet_codegen_operand_holds_root(position, alias)
+        .Borrow(inner, access) -> (!alias || access == AccessConvention.Read) && jet_codegen_operand_holds_root(inner, alias)
+        .Present(inner) -> jet_codegen_operand_holds_root(inner, alias)
+        .List(values, _) | .ListLit(values) -> {
+            loop value in values {
+                if !jet_codegen_operand_holds_root(value, alias) -> return false
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+// #5041 (plan M5): the borrowed carrier of `Val(payload)`: a ReadBorrow read
+// of the payload's place under a ReadBorrow Present. The backend builds it
+// in a stack slot holding the place's bytes (lower_present); nothing copies
+// or drops them, the last-use pass never turns the read into a move, and
+// MIR lint holds the place still while the carrier lives.
+fn jet_codegen_emit_borrowed_carrier(builder: &JetCodegenBuilder, program: JetCodegenProgram, carrier: TExpr, payload: TExpr) -> MIRValueID Never! {
+    place :: jet_codegen_lower_expression_place(&builder, program, payload, MIRAccess.Read) ?? panic("checked borrowed carrier payload has no place")
+    borrowed :: mir_ownership_from_access(MIRAccess.Read)
+    read :: jet_codegen_emit_mir_type(&builder, program, payload.span, jet_codegen_lower_type_for_function(payload.ty, builder, program), borrowed, MIROperation.ReadPlace{place: place})
+    jet_codegen_emit_mir_type(&builder, program, carrier.span, jet_codegen_lower_type_for_function(carrier.ty, builder, program), borrowed, MIROperation.Present{value: read})
+}
+
+// #5041 (plan M5): an `==`/`!=` operand `Val(place)` compares a borrowed
+// carrier of the place, not an owned Option around its copy. A left carrier
+// is made before the right operand is evaluated, so beyond a read
+// parameter's place that operand must leave the root alone
+// (jet_codegen_operand_holds_root).
+fn jet_codegen_lower_compare_operand(builder: &JetCodegenBuilder, program: JetCodegenProgram, op: TBinaryOp, operand: TExpr, other: TExpr, first: Bool) -> MIRValueID {
+    if op == TBinaryOp.Eq || op == TBinaryOp.Ne {
+        if operand.kind == .Present(payload) {
+            hold :: jet_codegen_carrier_root_hold(builder, program, operand.ty, payload) ?? return jet_codegen_lower_expr(&builder, program, operand)
+            if hold == JET_CODEGEN_CARRIER_FROZEN || !first || jet_codegen_operand_holds_root(other, hold == JET_CODEGEN_CARRIER_ALIAS) -> return jet_codegen_emit_borrowed_carrier(&builder, program, operand, payload)
+        }
+    }
+    jet_codegen_lower_expr(&builder, program, operand)
+}
+
 fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TExpr, index: Int, record: CoreCallRecord, widen_to_vec: Bool) -> MIRCallArg {
     access := MIRAccess.Read
     place := MIRPlaceID?{None}
@@ -5482,8 +5598,8 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             }
             folded :: jet_codegen_fold_fact_enum_equality(&builder, program, expression, op, lhs, rhs)
             if folded == .Val(value) -> return value
-            left := jet_codegen_lower_expr(&builder, program, lhs)
-            right := jet_codegen_lower_expr(&builder, program, rhs)
+            left := jet_codegen_lower_compare_operand(&builder, program, op, lhs, rhs, true)
+            right := jet_codegen_lower_compare_operand(&builder, program, op, rhs, lhs, false)
             dispatch := jet_codegen_binary_dispatch(&builder, program, op, overflow, lhs.ty, expression.span, line)
             mir_overflow := MIRBinaryOverflow.Unchecked
             if overflow && jet_codegen_fixed_width(lhs.ty) != None -> mir_overflow = MIRBinaryOverflow.Trap

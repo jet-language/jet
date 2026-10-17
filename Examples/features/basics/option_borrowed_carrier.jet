@@ -1,0 +1,45 @@
+// `Val(place)` handed to a `T?` read parameter or compared with `==`/`!=`
+// lends the place's bytes in a borrowed carrier: nothing is copied, nothing
+// is freed twice, and the place is still whole afterwards (#5041). A carrier
+// whose root a later argument of the same call moves stays an owned Option.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+fn size_of(blob: Blob?) -> Int {
+    if blob == .Val(present) -> return present.data.len() + present.text.len()
+    0
+}
+
+fn label_of(text: String?) -> String { text ?? "none" }
+
+fn total(first: Blob?, second: Blob) -> Int { size_of(first) + second.data.len() }
+
+fn pair(first: Blob?, second: ^Blob) -> Int { size_of(first) + second.data.len() }
+
+fn from_param(blob: Blob) -> Int {
+    // Rooted at a read parameter: frozen for the whole call.
+    size_of(Val(blob)) + size_of(Val(blob))
+}
+
+fn run() {
+    blob :: Blob{data: [Int]{1, 2, 3}, text: "four"}
+    sum := 0
+    loop _ in 0..<3 -> sum += size_of(Val(blob))
+    print("loop {sum}")
+    print("field {label_of(Val(blob.text))}")
+    print("param {from_param(blob)}")
+    print("mixed {total(Val(blob), blob)}")
+    other :: Blob{data: [Int]{9}, text: "x"}
+    stored :: Val(other)
+    same :: stored == .Val(other)
+    differ :: Val(blob) != stored
+    print("same {same} differ {differ}")
+    moved :: Blob{data: [Int]{5, 6}, text: "ab"}
+    print("moved {pair(Val(moved), ^moved)}")
+    rows :: [Blob]{Blob{data: [Int]{7}, text: "row"}}
+    row :: rows[0]
+    print("alias {size_of(Val(row))} {label_of(Val(row.text))} {rows[0].text}")
+    print("after {blob.text} {blob.data.len()} {other.text}")
+}

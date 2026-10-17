@@ -920,7 +920,11 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                     // reads the field before a refill or its owner's
                     // remainder drop (MIR legality admits both).
                     root := target
+                    // #5041: a ReadBorrow read (a borrowed carrier's payload,
+                    // jet_codegen_emit_borrowed_carrier) lends the place and
+                    // never takes it, even at the place's last use.
                     worth := true
+                    if value_row.get(result.value) == .Val(read_row) -> worth = !jet_codegen_last_use_borrowed(builder.values[read_row].ownership.mode)
                     if candidates[target].field {
                         root = candidates[target].root
                         worth = false

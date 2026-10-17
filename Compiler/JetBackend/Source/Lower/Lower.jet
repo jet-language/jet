@@ -5490,12 +5490,20 @@ fn lower_option_inner(ty: MIRType) -> MIRType? {
     }
 }
 
-// Option: null is absent; a present value is a box holding its bytes.
+// Option: null is absent; a present value is a box holding its bytes. A
+// borrowed carrier (a ReadBorrow Present, #5041
+// jet_codegen_emit_borrowed_carrier) lends a place's bytes to a read
+// parameter or a comparison only: its box is a stack slot of this frame,
+// filled with those bytes and never dropped or freed.
 fn lower_present(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
     option :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "Present without a checked type")
     inner :: lower_option_inner(option) ?? return lower_fail(&m, &f, "Present of {mir_type_display_name(option)} is not an Option")
+    result :: instruction.result ?? return
+    borrowed := false
+    if c.fact_index.get(result.value) == .Val(index) -> borrowed = c.mir.values[index].ownership.mode == MIROwnershipMode.ReadBorrow
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_alloc(&m, &f, dst, lower_option_box_size(p, inner))
+    if borrowed -> lower_emit(&f, LIRInst.StackSlot{dst: dst, size: lower_option_box_size(p, inner), align: 8})
+    else -> lower_alloc(&m, &f, dst, lower_option_box_size(p, inner))
     lower_store_value(p, &m, &f, dst, 0, value, inner)
 }
 
