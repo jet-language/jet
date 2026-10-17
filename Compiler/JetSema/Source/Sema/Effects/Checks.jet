@@ -11,6 +11,7 @@
 // for denial/reachability facts but are deny-only and never become positive
 // grants.
 use jet_foundation.[
+    CompilerThreads,
     Diagnostic,
     EffectRowEntry,
     Func,
@@ -37,6 +38,10 @@ use jet_foundation.[
     TRequireKind,
     TStmt,
     Type,
+    compiler_take_rows,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
     compiler_transfer_rows,
     diagnostic_with_rights,
     diagnostic_with_source_derived_suggestion,
@@ -2021,8 +2026,11 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
 
 // `modules` are the checked modules; each input names its module, whose
 // functions and call facts are read in place. The solved effect row of every
-// input module's function is stamped onto `modules` at the end.
-fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], package_memory_denials: [String]) -> SemaEffectGraphResult {
+// input module's function is stamped onto `modules` at the end. The effect
+// sites of each module's functions are collected on up to `threads` compiler
+// threads (sema_effect_collect_module_threads); the result is the same for any
+// thread count.
+fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], package_memory_denials: [String], threads: CompilerThreads) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
     memory_facts := SemaMemoryProjectionFacts{declarations: [], projections: []}
@@ -2072,7 +2080,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
 
     loop module_index in 0..<inputs.len() {
         calls.current_module = module_index
-        sema_effect_collect_module(modules[inputs[module_index].module_index].functions, inputs[module_index], calls, any_unsafe, &nodes, &diagnostics)
+        calls = sema_effect_collect_module_threads(&modules[inputs[module_index].module_index].functions, inputs[module_index], ^calls, any_unsafe, &nodes, &diagnostics, threads)
     }
     solved :: sema_effect_solve(nodes, calls.node_by_key)
     loop module_index in 0..<inputs.len() {
@@ -2190,15 +2198,178 @@ fn sema_effect_collect_module(functions: [TFunc], module_row: SemaEffectModuleIn
     loop function in functions {
         node_index :: sema_effect_node_index(calls.node_by_key, function.key) ?? next
         function_diagnostics := [Diagnostic]{}
-        sema_effect_collect_function(&nodes, node_index, function, calls, &function_diagnostics)
-        // A call needs an audited region only when its callee is an
-        // `#Unsafe` function; with none in the graph the walk finds nothing.
-        if any_unsafe {
-            audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-            sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, function.key), function.body, audited, &function_diagnostics)
-        }
+        sema_effect_collect_one(&nodes, node_index, function, calls, any_unsafe, &function_diagnostics)
         sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^function_diagnostics)
     }
+}
+
+// One function's effect sites into its node `node_index`, and its unsafe calls.
+fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: TFunc, calls: SemaEffectCallIndex, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
+    sema_effect_collect_function(&nodes, node_index, function, calls, &diagnostics)
+    // A call needs an audited region only when its callee is an
+    // `#Unsafe` function; with none in the graph the walk finds nothing.
+    if any_unsafe {
+        audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
+        sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, function.key), function.body, audited, &diagnostics)
+    }
+}
+
+// A compiler thread is admitted for at least this many bytes of function
+// source, so a small module collects on the calling thread.
+SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD :: 65536
+// Estimated bytes of one collecting thread's copy of one graph node.
+SEMA_EFFECT_NODE_BYTES :: 1024
+// Parts per admitted thread, claimed dynamically.
+SEMA_EFFECT_COLLECT_PARTS_PER_THREAD :: 8
+
+// sema_effect_collect_module on up to `threads` compiler threads (D-JOBS1).
+// A function's collection writes only its own node (`node_by_key` of its
+// key) and reads of the other nodes only what node construction set
+// (`is_unsafe`, `name`), so with no two functions of the module on one node,
+// each thread collects its claimed consecutive parts of the functions into
+// its own copy of the graph's nodes, and the caller moves each function's
+// node row back and publishes its reports in function order, exactly as one
+// thread does. The module's functions, the call index and the nodes move into
+// the threads' shared state and back; the call index moves in and is
+// returned. A module whose functions share a node, or whose work admits one
+// thread, collects on the calling thread.
+fn sema_effect_collect_module_threads(functions: &[TFunc], module_row: SemaEffectModuleInput, calls: ^SemaEffectCallIndex, any_unsafe: Bool, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic], threads: CompilerThreads) -> SemaEffectCallIndex {
+    index := ^calls
+    rows := [Int]{}
+    weights := [Int]{}
+    work := 0
+    claimed := [Int:Bool]{}
+    shared_node := false
+    loop function in functions {
+        node_index :: sema_effect_node_index(index.node_by_key, function.key) ?? -1
+        if node_index >= 0 {
+            if claimed.get(node_index) != None -> shared_node = true
+            claimed[node_index] = true
+        }
+        &rows.push(node_index)
+        weight :: function.source_span.end - function.source_span.start
+        &weights.push(weight)
+        work += weight
+    }
+    workers :: if shared_node -> 1 else -> compiler_threads_admit(threads, functions.len(), work, SEMA_EFFECT_COLLECT_MIN_BYTES_PER_THREAD, nodes.len() * SEMA_EFFECT_NODE_BYTES, 0)
+    if workers <= 1 {
+        sema_effect_collect_module(functions, module_row, index, any_unsafe, &nodes, &diagnostics)
+        return index
+    }
+    count := workers * SEMA_EFFECT_COLLECT_PARTS_PER_THREAD
+    if count > functions.len() -> count = functions.len()
+    bounds :: compiler_threads_partition(weights, count)
+    shared_state :: shared SemaEffectCollectShared{functions: [TFunc]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, rows: rows, any_unsafe: any_unsafe}
+    sema_effect_collect_fill(shared_state, &functions, ^index, &nodes)
+    queue :: shared SemaEffectCollectQueue{next: 0}
+    parts := [[SemaEffectCollected]]{}
+    loop _ in 0..<count -> &parts.push([SemaEffectCollected]{})
+    sema_effect_collect_claimers(shared_state, bounds, queue, 0, workers, &parts)
+    returned := sema_effect_collect_take(shared_state, &functions, &nodes)
+    loop part in 0..<count {
+        loop position in bounds[part]..<bounds[part + 1] {
+            if rows[position] < 0 -> next
+            collected := &parts[part].pop() ?? panic("a collected effect node left its part")
+            nodes[rows[position]] = ^collected.node
+            sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, ^collected.diagnostics)
+        }
+    }
+    returned
+}
+
+// What every collecting thread reads: the module's functions, the call index
+// and the graph's nodes (each the one row of its list, moved in and back
+// out), each function's node (-1 for none) and whether the graph has an
+// `#Unsafe` function.
+struct SemaEffectCollectShared {
+    functions: [TFunc]
+    calls: [SemaEffectCallIndex]
+    nodes: [SemaEffectNode]
+    rows: [Int]
+    any_unsafe: Bool
+}
+
+// The next unclaimed part of a module's collection.
+struct SemaEffectCollectQueue {
+    next: Int
+}
+
+// One function's collected node row and its reports, not yet located.
+struct SemaEffectCollected {
+    node: SemaEffectNode
+    diagnostics: [Diagnostic]
+}
+
+// A part one thread collected: its number and, last first, its functions'
+// rows (functions without a node have none).
+struct SemaEffectCollectedPart {
+    part: Int
+    collected: [SemaEffectCollected]
+}
+
+fn sema_effect_collect_fill(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], calls: ^SemaEffectCallIndex, nodes: &[SemaEffectNode]) {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<TFunc>(&permit.value.functions, &functions)
+    compiler_transfer_rows<SemaEffectNode>(&permit.value.nodes, &nodes)
+    &permit.value.calls.push(^calls)
+}
+
+// Moves the functions and nodes back and returns the call index.
+fn sema_effect_collect_take(shared_state: Shared<SemaEffectCollectShared>, functions: &[TFunc], nodes: &[SemaEffectNode]) -> SemaEffectCallIndex {
+    permit :: shared_state.guard_edit()
+    compiler_transfer_rows<TFunc>(&functions, &permit.value.functions)
+    compiler_transfer_rows<SemaEffectNode>(&nodes, &permit.value.nodes)
+    &permit.value.calls.pop() ?? panic("the effect call index left the threads' shared state")
+}
+
+// Runs collecting threads `from..<workers`, one task each, and moves every
+// part a thread returned into `parts`.
+fn sema_effect_collect_claimers(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
+    if from >= workers -> return
+    task.group sema_effect_threads {
+        head :: task sema_effect_collect_claimed(shared_state, bounds, queue)
+        sema_effect_collect_claimers(shared_state, bounds, queue, from + 1, workers, &parts)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done := &claimed.pop() ?? break
+            parts[done.part] = compiler_take_rows<SemaEffectCollected>(&done.collected)
+        }
+    }
+}
+
+// One thread: collects the parts it claims, in order, into its own copy of
+// the nodes.
+fn sema_effect_collect_claimed(shared_state: Shared<SemaEffectCollectShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
+    inputs :: shared_state.guard_read()
+    // copy: each thread writes its functions' rows into its own nodes, while
+    // the graph's nodes (owner: the shared state) stay as every thread reads them.
+    own := inputs.value.nodes.copy()
+    claimed := [SemaEffectCollectedPart]{}
+    loop {
+        part :: sema_effect_collect_claim(queue)
+        if part >= bounds.len() - 1 -> break
+        collected := [SemaEffectCollected]{}
+        loop position in bounds[part]..<bounds[part + 1] {
+            node_index :: inputs.value.rows[position]
+            if node_index < 0 -> next
+            function_diagnostics := [Diagnostic]{}
+            // Passed straight through: a local binding of a guarded row would copy it.
+            sema_effect_collect_one(&own, node_index, inputs.value.functions[position], inputs.value.calls[0], inputs.value.any_unsafe, &function_diagnostics)
+            // copy: the row leaves this thread's nodes for the graph's; the
+            // thread's list keeps its slot.
+            &collected.push(SemaEffectCollected{node: own[node_index].copy(), diagnostics: ^function_diagnostics})
+        }
+        &collected.reverse()
+        &claimed.push(SemaEffectCollectedPart{part: part, collected: ^collected})
+    }
+    claimed
+}
+
+fn sema_effect_collect_claim(queue: Shared<SemaEffectCollectQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
 }
 
 // The module's Core publication obligations (facts with a shared lifetime).

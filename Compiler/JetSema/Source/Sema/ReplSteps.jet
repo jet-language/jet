@@ -1,6 +1,6 @@
 // Persistent statement checking: the file checker owns every rule. Checkpoints
 // restore all compiler facts after a refused input; no successful empty TIR.
-use jet_foundation.[Binding, Diagnostic, Func, Span, Stmt, TExpr, TFunc, TStmt, TTypeDef, Type]
+use jet_foundation.[Binding, Diagnostic, Func, Span, Stmt, TExpr, TFunc, TStmt, TTypeDef, Type, compiler_threads_single]
 
 struct SemaReplSession {
     environment: SemaScopeEnvironment
@@ -147,7 +147,7 @@ fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt], sou
             &modules.push(^checked_module)
         }
         // The session holds no package policy, so no package memory denials.
-        effects :: sema_effects_check_modules(&modules, inputs, [String]{})
+        effects :: sema_effects_check_modules(&modules, inputs, [String]{}, compiler_threads_single())
         complete = complete && effects.complete
         loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
         loop module_row in modules {

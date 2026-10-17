@@ -99,7 +99,7 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         })
     }
     &effect_inputs.reverse()
-    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"})
+    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"}, compiler_threads_single())
     if republished.memory_declarations.len() != 2 -> &failures.push("in-place effect publication: manifest memory declarations duplicated")
     function_count := 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()
