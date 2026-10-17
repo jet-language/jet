@@ -7,6 +7,8 @@ use core.sys as cli_sys
 use core.term as cli_term
 use core.time as cli_time
 use jet_backend.[
+    LIRFunctionID,
+    LIRLowering,
     LIRModule,
     x64_execution_service,
     lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place, lir_optimize_module,
@@ -373,17 +375,25 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
     // attached copy.
     entry_function :: result.entry_function
     rust_foreign :: result.rust_foreign
+    fronts := [JetCLINativeFront]{}
     if &result.mir == {
         None -> {}
         .Val(program) -> {
             if result.trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
             attached := jet_cli_rust_foreign_attached(rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
             if result.trace_sink == .Val(sink) -> sink.end("native.rust_foreign", attached.len())
-            if attached.len() == 1 -> return jet_cli_native_program_executable(entry_function, result.trace_sink, result.compiler_threads, &attached[0], sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
-            return jet_cli_native_program_executable(entry_function, result.trace_sink, result.compiler_threads, &program, sources, level, runtime_dir, object_path, executable_path, keep_going, &census)
+            stopped :: if attached.len() == 1 -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &attached[0], sources, runtime_dir, keep_going, &fronts, &census) else -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &program, sources, runtime_dir, keep_going, &fronts, &census)
+            if stopped != None -> return stopped
         }
     }
-    Val(JetCLINativeFailure.NoEntry)
+    front := &fronts.pop() ?? return Val(JetCLINativeFailure.NoEntry)
+    // Nothing reads the checked MIR after the lowering and the C inputs
+    // (jet_cli_native_front), and no caller reads it after the route: the
+    // whole program is released before the object compile instead of
+    // staying resident through native.object and native.link (about 9 GB of
+    // the self-host unit's 34 GB peak).
+    result.mir = None
+    jet_cli_native_back(^front, result.trace_sink, result.compiler_threads, level, runtime_dir, object_path, executable_path, keep_going, &census)
 }
 
 // jet_cli_rust_foreign_prepare without taking the program: none, or the one
@@ -401,14 +411,21 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
 // trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR),
-// `native.object` (x64 selection, encoding and the object; at O1/O2 it
-// holds `native.optimize`, the LIR passes of `level`), `native.foreign` (the C
-// closure) and `native.link`; before them `native.sources` (the C sources
-// the snapshot declares) and `native.rust_foreign` (a Rust foreign helper's
-// realization). A span a failure returns from stays open. The lowered module
-// moves through the LIR passes into the object, so no phase holds two copies
-// of it, and the object's functions compile on the threads `threads` admits.
-fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, threads: CompilerThreads, unpruned: &MIRProgram, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+// `native.foreign` (the C closure, the last reader
+// of the MIR), `native.object` (x64 selection, encoding and the object; at
+// O1/O2 it holds `native.optimize`, the LIR passes of `level`) and
+// `native.link`; before them `native.sources` (the C sources the snapshot
+// declares) and `native.rust_foreign` (a Rust foreign helper's realization).
+// A span a failure returns from stays open. The lowered module moves through
+// the LIR passes into the object, so no phase holds two copies of it, and the
+// object's functions compile on the threads `threads` admits.
+//
+// The MIR half of the route: lowers the entry's functions and realizes the C
+// inputs, then pushes both onto `fronts` for jet_cli_native_back, so the
+// caller can release the MIR before the object compile. A C closure that
+// fails is kept as its message and reported where the route reaches it
+// (after the object is written), so the reports keep their order.
+fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, threads: CompilerThreads, unpruned: &MIRProgram, sources: JetCLIForeignSources, runtime_dir: String, keep_going: Bool, fronts: &[JetCLINativeFront], census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
@@ -425,7 +442,34 @@ fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink:
             return Val(JetCLINativeFailure.Lowering{functions: functions, messages: messages})
         }
     }
-    entry :: lowered.entry ?? return Val(JetCLINativeFailure.LostEntry)
+    found :: lowered.entry ?? return Val(JetCLINativeFailure.LostEntry)
+    // A fresh ID: `lowered` moves into the front below, and `found` views it.
+    entry :: LIRFunctionID{value: found.value}
+    if trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
+    foreign := JetCLIForeignInputs?{None}
+    foreign_error := ""
+    if jet_cli_native_c_inputs(unpruned, sources, runtime_dir) == {
+        .Ok(inputs) -> foreign = Val(inputs)
+        .Err(error) -> foreign_error = error.message
+    }
+    if trace_sink == .Val(sink) -> sink.end("native.foreign", if foreign == .Val(inputs) -> inputs.names.len() else -> 0)
+    &fronts.push(JetCLINativeFront{entry: entry, function_count: function_count, foreign: ^foreign, foreign_error: foreign_error, lowered: ^lowered})
+    None
+}
+
+// What the MIR half of the native route hands the object half: the lowered
+// module, its entry, and the C inputs (or the message of their failure).
+struct JetCLINativeFront {
+    entry: LIRFunctionID
+    function_count: Int
+    foreign: JetCLIForeignInputs?
+    foreign_error: String
+    lowered: LIRLowering
+}
+
+// The object half of the native route: the object, the runtime and the C
+// inputs linked into the executable.
+fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?, threads: CompilerThreads, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     // No absolute source root enters DWARF: comp_dir stays "." on every
     // route, so the output never depends on the checkout path. O0 (`run`, comptime)
     // leaves the lowered module unchanged, so its object compile reuses the
@@ -433,8 +477,8 @@ fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink:
     if trace_sink == .Val(sink) -> sink.begin("native.object", "", -1, -1)
     // The memory term is read now: the compile before this holds most of it.
     object_threads :: CompilerThreads{cap: threads.cap, cores: threads.cores, memory_available: jet_cli_memory_available()}
-    object :: if level > 0 -> x64_relocatable_object_owned(jet_cli_native_optimize(^lowered.lir, level, trace_sink), entry, object_threads, keep_going, None) else -> x64_relocatable_object_owned(^lowered.lir, entry, object_threads, keep_going, ^lowered.lint)
-    if trace_sink == .Val(sink) -> sink.end("native.object", function_count)
+    object :: if level > 0 -> x64_relocatable_object_owned(jet_cli_native_optimize(^front.lowered.lir, level, trace_sink), front.entry, object_threads, keep_going, None) else -> x64_relocatable_object_owned(^front.lowered.lir, front.entry, object_threads, keep_going, ^front.lowered.lint)
+    if trace_sink == .Val(sink) -> sink.end("native.object", front.function_count)
     if object.errors.len() > 0 {
         if keep_going {
             loop error in object.errors -> &census.push(jet_cli_keep_going_row("native.object", "-", error))
@@ -443,9 +487,7 @@ fn jet_cli_native_program_executable(entry_function: MIRFunctionID?, trace_sink:
     }
     cli_files.write_bytes(object_path, object.bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {object_path}: {err}"})
     key :: jet_cli_runtime_key(runtime_dir) ?? return Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})
-    if trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
-    foreign :: jet_cli_native_c_inputs(unpruned, sources, runtime_dir) ?? return Val(JetCLINativeFailure.Foreign{message: err.message})
-    if trace_sink == .Val(sink) -> sink.end("native.foreign", foreign.names.len())
+    foreign :: front.foreign ?? return Val(JetCLINativeFailure.Foreign{message: front.foreign_error})
     runtime_file :: if foreign.platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
     runtime_path :: "{runtime_dir}/{key}/{runtime_file}"
     runtime :: cli_files.read_bytes(runtime_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"})
