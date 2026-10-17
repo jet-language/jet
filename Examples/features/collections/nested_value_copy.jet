@@ -1,0 +1,41 @@
+//! #4709: `.copy()` is a deep value copy at every nesting level. A later
+//! write through the source never shows up in the copy, and a write through
+//! the copy never shows up in the source: nested lists, maps of lists, lists
+//! of structs holding lists, and structs holding lists of structs.
+struct Board {
+    cells: [Int]
+}
+
+struct Game {
+    boards: [Board]
+}
+
+fn run() {
+    xs := [[1], [2]]
+    ys := xs.copy()
+    &xs[0].push(9)
+    print("nested list: copy {ys[0]} source {xs[0]}")
+    &ys[1].push(7)
+    print("nested list back: copy {ys[1]} source {xs[1]}")
+
+    deep := [[[1]], [[2]]]
+    deep_copy :: deep.copy()
+    &deep[0][0].push(5)
+    print("three levels: copy {deep_copy[0][0]} source {deep[0][0]}")
+
+    table := [String:[Int]]{"a": [1, 2]}
+    snapshot :: table.copy()
+    key :: "a"
+    &table[key].push(3)
+    print("map of lists: copy {snapshot[key]} source {table[key]}")
+
+    rows := [Board{cells: [4]}, Board{cells: [5]}]
+    saved :: rows.copy()
+    &rows[0].cells.push(6)
+    print("list of structs: copy {saved[0].cells} source {rows[0].cells}")
+
+    game := Game{boards: [Board{cells: [3, 1]}]}
+    snap :: game.copy()
+    &game.boards[0].cells.push(2)
+    print("struct of lists: copy {snap.boards[0].cells} source {game.boards[0].cells}")
+}

@@ -1,0 +1,31 @@
+//! #4712: a record holding a nested list field ([[Int]]) builds, reads and
+//! compares through its derived equality and ordering: lists compare element
+//! by element, and a shorter list that is a prefix orders first.
+#Comparable
+struct Game {
+    boards: [[Int]]
+}
+
+fn show(ordering: Ordering) -> String {
+    if ordering == {
+        .Less -> return "less"
+        .Greater -> return "greater"
+        .Equal -> return "equal"
+    }
+}
+
+fn run() {
+    game := Game{boards: [[1, 2]]}
+    print("{game.boards[0].len()}")
+    low :: Game{boards: [[1, 2], [3]]}
+    high :: Game{boards: [[1, 3]]}
+    prefix :: Game{boards: [[1, 2]]}
+    same :: Game{boards: [[1, 2], [3]]}
+    print(low == same)
+    print(low == high)
+    print(show(low.compare(high)))
+    print(show(high.compare(low)))
+    print(show(prefix.compare(low)))
+    print(show(low.compare(same)))
+    print(low < high)
+}

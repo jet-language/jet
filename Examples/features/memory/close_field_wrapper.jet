@@ -1,0 +1,40 @@
+//! #4703: a struct that only holds a Close value releases that field when the
+//! wrapper is dropped, and a generic take forwards a Close value to the place
+//! that drops it. Each release prints once, where the owner's scope ends.
+struct Lock {
+    name: String
+}
+
+impl Lock.Close {
+    fn close(^self) { print("release {self.name}") }
+}
+
+struct Session {
+    lock: Lock
+    user: String
+}
+
+fn hand_off(s: ^Session) { print("got {s.user}") }
+
+fn sink<T>(x: ^T) { print("sunk") }
+
+fn forward<T>(x: ^T) {
+    sink(^x)
+    print("forwarded")
+}
+
+fn wrapper_scope() {
+    held :: Session{lock: Lock{name: "scope"}, user: "bo"}
+    print("scope {held.user}")
+}
+
+fn run() {
+    held :: Session{lock: Lock{name: "db"}, user: "ada"}
+    hand_off(^held)
+    print("after hand_off")
+    wrapper_scope()
+    print("after scope")
+    lock :: Lock{name: "generic"}
+    forward(^lock)
+    print("after forward")
+}
