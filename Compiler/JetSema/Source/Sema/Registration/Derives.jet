@@ -1794,7 +1794,20 @@ struct SemaDeriveReadiness {
     relied_on: [Int]
 }
 
+// D-META-AUTO1=A: the codec traits are structural auto-derives too.
+fn sema_derive_codec_trait(trait_name: String) -> Bool Never! {
+    trait_name == "Encode" || trait_name == "Decode"
+}
+
 fn sema_derive_builtin_supports(name: String, trait_name: String) -> Bool {
+    // Rust `implements_trait` for a codec: the scalars, the sealed dynamic
+    // tree (`is_data_type_name`, the identity bridge), and the Core value
+    // carriers whose Core source declares their codec (`sema_serde_type_is_admissible`).
+    if sema_derive_codec_trait(trait_name) {
+        if name == "Int" || name == "Float" || name == "Bool" || name == "String" || name == "Char" || name == "U8" -> return true
+        if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return true
+        return name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" || name == "ZonedDateTime"
+    }
     if name == "Int" || name == "Bool" || name == "String" || name == "Char" || name == "U8" || name == "Ordering" -> return true
     if name == "Float" || name == "Float32" -> return trait_name != "Comparable"
     // D-TIME-ORDER1=A / D-DECIMAL1 / D-RANGE-VALUE1=A / D-CORESURF-SMALL1 /
@@ -1840,11 +1853,19 @@ fn sema_derive_native_ordering_ready(ty: Type) -> Bool {
 
 fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, items: [Item], ty: Type, type_params: [TypeParam]) -> Bool {
     comparable :: readiness.trait_name == "Comparable"
+    // Rust `auto_derive_type_ready`: a codec has no wire form for a Result,
+    // a tuple, a tagged or quantity carrier, a compile-time measure, or a map
+    // keyed by anything but `String`.
+    codec :: sema_derive_codec_trait(readiness.trait_name)
     if ty == {
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, inner, type_params)
-        .Result(ok, err) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, ok, type_params) && sema_derive_type_ready(&readiness, items, err, type_params)
-        .Map(key, _, value) -> !comparable && sema_derive_type_ready(&readiness, items, key, type_params) && sema_derive_type_ready(&readiness, items, value, type_params)
+        .Result(ok, err) -> {
+            if codec -> return false
+            if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, ok, type_params) && sema_derive_type_ready(&readiness, items, err, type_params)
+        }
+        .Map(key, _, value) -> !comparable && (!codec || key == Type.String) && sema_derive_type_ready(&readiness, items, key, type_params) && sema_derive_type_ready(&readiness, items, value, type_params)
         .Tuple(fields) -> {
+            if codec -> return false
             if comparable -> return sema_derive_native_ordering_ready(ty)
             loop field in fields {
                 if !sema_derive_type_ready(&readiness, items, field.ty, type_params) -> return false
@@ -1866,8 +1887,12 @@ fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, items: [Item], ty: Ty
             }
             true
         }
-        .Tagged(_, inner) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, inner, type_params)
-        .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_derive_type_ready(&readiness, items, inner, type_params)
+        .Tagged(_, inner) -> {
+            if codec -> return false
+            if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, inner, type_params)
+        }
+        .InlineRange(inner, _, _) -> sema_derive_type_ready(&readiness, items, inner, type_params)
+        .Quantity(inner, _) -> !codec && sema_derive_type_ready(&readiness, items, inner, type_params)
         .Named(name) -> {
             loop param in type_params {
                 if param.name == name -> return param.bounds.contains(readiness.trait_name)
@@ -1875,7 +1900,8 @@ fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, items: [Item], ty: Ty
             sema_derive_implements(&readiness, items, name)
         }
         .Float | .Float32 -> !comparable
-        .Int | .Bool | .String | .Char | .IntN(_, _) | .Measure(_) -> true
+        .Int | .Bool | .String | .Char | .IntN(_, _) -> true
+        .Measure(_) -> !codec
         .Shared(_) | .TraitObject(_) | .Fn(_, _, _, _, _, _) -> false
     }
 }

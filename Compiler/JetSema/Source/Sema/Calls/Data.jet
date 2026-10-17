@@ -22,6 +22,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     core_receiver_method,
     core_source_owns_type,
+    expr_span,
     type_name,
 ]
 
@@ -215,6 +216,28 @@ fn sema_data_check_encode(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// D-VALIDATE-DECODE1=B (Rust method_calls.rs `FieldError.under`): one shared
+// transform frames every error of a child Result under a path segment while
+// keeping its success type. Generated codecs use it at each field boundary;
+// it is an error-list helper, not another decode API.
+fn sema_data_check_field_error_under(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if args.len() != 2 {
+        sema_data_arity_diagnostic("FieldError.under", 2, args.len(), span, &diagnostics)
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    segment := sema_data_check_argument("FieldError.under", 0, args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    inner :: sema_check_expression(args[1].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    segment_value :: segment ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    framed := false
+    if inner.ty == .Result(_, failure) -> framed = failure == sema_data_decode_error()
+    if !framed {
+        &diagnostics.push(sema_error("E0905", expr_span(args[1].expr), "`FieldError.under` expects a result with `[FieldError]` errors", "the framing helper preserves the child result and prefixes every accumulated decode failure", "pass a typed decode/accessor result, such as `tree.field(\"name\")?.decode<T>()`"))
+    }
+    value := sema_tir_node(inner.ty, TExprKind.DecodeUnder{segment: segment_value, inner: inner}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 

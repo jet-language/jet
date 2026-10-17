@@ -2857,6 +2857,9 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
     }
 
     owner :: if receiver == {.Ident(name, _) -> name else -> ""}
+    // D-VALIDATE-DECODE1=B: the Prelude `FieldError.under` framing helper
+    // (Rust checks it by owner name before any user lookup).
+    if owner == "FieldError" && method == "under" -> return sema_data_check_field_error_under(args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     // Rust `core_type_known`: a prelude core type (`Reader`, `Dyn`, …)
     // needs no `use`, so an unbound owner reaches the reserved constructors
     // too; each route matches only its own owner names.

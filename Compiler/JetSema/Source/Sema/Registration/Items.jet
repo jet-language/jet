@@ -2220,6 +2220,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // derive templates into compiler-generated trait blocks before any
     // declaration, impl, or known-time value is registered.
     sema_derive_expand_builtin_items(&module_row.program.items, &diagnostics)
+    // D-SERDE2=A / D-META-AUTO1=A: explicit and structurally selected codecs
+    // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
+    sema_serde_expand_builtin_items(&module_row.program.items)
     row_source_file :: module_row.source_file.copy()
     row_source_origin :: module_row.source_origin.copy()
     row_source_segments :: module_row.source_segments.copy()
@@ -2573,11 +2576,14 @@ fn sema_registration_cli_marker_string(marker: Marker) -> String? {
     None
 }
 
-// D-SERDE (Rust `validate_serde_items`): `#Flatten` needs a struct-typed field
-// (E2408), and every decoded anonymous union needs one distinct outer wire
-// shape per member (E2415, or E2411 for a member with no known shape). The
-// remaining Rust serde marker checks (E2409/E2411 field codability) are not
-// part of this pass.
+// D-SERDE (Rust `validate_serde_items`): on every type that derives a codec
+// explicitly, `#Flatten` needs a struct-typed field (E2408), every encoded or
+// decoded field or payload needs a wire form (E2411), and every decoded
+// anonymous union needs one distinct outer wire shape per member (E2415, or
+// E2411 for a member with no known shape). Automatic codecs are selected
+// only for declarations whose fields already qualify. The E2409 casing menu
+// is not part of this pass (an enum reports it while its checked declaration
+// is built).
 fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Struct(definition) {
@@ -2596,19 +2602,40 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
                     next
                 }
                 if skip || flatten -> next
+                sema_registration_serde_wire_form(items, field.ty, encode, decode, field.name_span, &diagnostics)
                 if decode -> sema_registration_serde_union_shapes(items, field.ty, field.name_span, &diagnostics)
             }
         }
         if item == .Enum(definition) {
-            if !sema_registration_serde_derives(definition.derives, "Decode") -> next
+            encode :: sema_registration_serde_derives(definition.derives, "Encode")
+            decode :: sema_registration_serde_derives(definition.derives, "Decode")
+            if !encode && !decode -> next
             loop variant in definition.variants {
                 if variant.payload == {
                     .Unit -> {}
-                    .Single(ty, _) -> sema_registration_serde_union_shapes(items, ty, variant.name_span, &diagnostics)
-                    .Named(fields) -> loop field in fields -> sema_registration_serde_union_shapes(items, field.ty, variant.name_span, &diagnostics)
+                    .Single(ty, _) -> {
+                        sema_registration_serde_wire_form(items, ty, encode, decode, variant.name_span, &diagnostics)
+                        if decode -> sema_registration_serde_union_shapes(items, ty, variant.name_span, &diagnostics)
+                    }
+                    .Named(fields) -> loop field in fields {
+                        sema_registration_serde_wire_form(items, field.ty, encode, decode, variant.name_span, &diagnostics)
+                        if decode -> sema_registration_serde_union_shapes(items, field.ty, variant.name_span, &diagnostics)
+                    }
                 }
             }
         }
+    }
+}
+
+// Rust `e2411` over `is_encodable_ty`/`is_decodable_ty`: the generated and
+// written codecs are already items here, so no automatic set is needed.
+fn sema_registration_serde_wire_form(items: [Item], ty: Type, encode: Bool, decode: Bool, span: Span, diagnostics: &[Diagnostic]) {
+    shown :: sema_type_show(ty)
+    if encode && !sema_serde_items_codable(items, ty, "Encode", [String:Bool]{}) {
+        &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be serialized", "only types that opt in (and their fields) have a wire form; `{shown}` does not", "add `#[Codable]` or `#[Encode]` to `{shown}`, or remove it from the encoded value"))
+    }
+    if decode && !sema_serde_items_codable(items, ty, "Decode", [String:Bool]{}) {
+        &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be decoded", "only types that opt in (and their fields) have a wire form; `{shown}` does not", "add `#[Codable]` or `#[Decode]` to `{shown}`, or remove it from the decoded value"))
     }
 }
 
