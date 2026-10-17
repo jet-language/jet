@@ -119,13 +119,18 @@ fn sema_http_collect_mounted(expression: TExpr, graph: SemaRegistrationGraph, mo
     tir_each_expr_child(expression, (child: TExpr) -> sema_http_collect_mounted(child, graph, module_identity, &mounted))
 }
 
+// One function body's mounts. Its own function so the visitor closure lends
+// the `mounted` write parameter: the stage-0 Rust tier then lends `graph` to the
+// closure instead of copying the whole registration graph per function.
+fn sema_http_collect_mounted_body(body: [TStmt], graph: SemaRegistrationGraph, identity: String, mounted: &[String]) Never! {
+    tir_each_stmt_list_child(body, (expression: TExpr) -> sema_http_collect_mounted(expression, graph, identity, &mounted))
+}
+
 fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     mounted := [String]{}
     loop module_row in modules {
         identity :: module_row.module_identity
-        loop function in module_row.functions {
-            tir_each_stmt_list_child(function.body, (expression: TExpr) -> sema_http_collect_mounted(expression, graph, identity, &mounted))
-        }
+        loop function in module_row.functions -> sema_http_collect_mounted_body(function.body, graph, identity, &mounted)
     }
     diagnostics := [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {

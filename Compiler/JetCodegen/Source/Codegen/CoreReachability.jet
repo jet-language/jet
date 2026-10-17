@@ -205,10 +205,15 @@ fn jet_codegen_core_reach_function_keys(function: TFunc, functions: [TFunc], fmt
     loop parameter in function.params {
         if parameter.default == Val(value) -> jet_codegen_core_reach_tree_keys(value, functions, &keys, fmt_keys)
     }
-    loop statement in function.body {
-        tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_core_reach_tree_keys(child, functions, &keys, fmt_keys))
-    }
+    loop statement in function.body -> jet_codegen_core_reach_statement_keys(statement, functions, &keys, fmt_keys)
     keys
+}
+
+// One statement's subtrees. Its own function so the visitor closure lends the
+// `keys` write parameter: the stage-0 Rust tier then lends `functions` and
+// `fmt_keys` to the closure instead of copying them per statement.
+fn jet_codegen_core_reach_statement_keys(statement: TStmt, functions: [TFunc], keys: &[String], fmt_keys: [String:String]) Never! {
+    tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_core_reach_tree_keys(child, functions, &keys, fmt_keys))
 }
 
 // The keys one checked expression and every expression below it name, read

@@ -5081,9 +5081,16 @@ fn jet_driver_unresolved_direct_call(function: TFunc, targets: [String:Bool]) ->
     }
     loop statement in function.body {
         if missing != None -> break
-        tir_each_stmt_child(statement, (child: TExpr) -> jet_driver_unresolved_call_in(child, targets, &missing))
+        jet_driver_unresolved_call_statement(statement, targets, &missing)
     }
     missing
+}
+
+// One statement's subtrees. Its own function so the visitor closure lends the
+// `missing` write parameter: the stage-0 Rust tier then lends `targets` to the
+// closure instead of copying it per statement.
+fn jet_driver_unresolved_call_statement(statement: TStmt, targets: [String:Bool], missing: &String?) Never! {
+    tir_each_stmt_child(statement, (child: TExpr) -> jet_driver_unresolved_call_in(child, targets, &missing))
 }
 
 // Records in `missing` (once) the first direct-call callee key in
