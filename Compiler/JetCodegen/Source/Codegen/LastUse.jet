@@ -666,31 +666,57 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     origins := [U64:[U64]]{}
     loop value in copy_order -> _ := &origins.add(value, [U64]{value})
     loop value in borrow_order -> _ := &origins.add(value, [U64]{value})
-    changed := true
+    // The results that can carry origins: the filter is the same on every
+    // pass, so the passes visit only these, in block and instruction order.
+    // A carrier none of whose operands changed since it last ran would
+    // change nothing and is skipped (`changed_at` / `ran_at` steps).
+    carrier_blocks := [Int]{}
+    carrier_indices := [Int]{}
+    loop (block, row) in builder.blocks {
+        loop (index, instruction) in row.instructions {
+            result :: instruction.result ?? next
+            if copy_place.get(result.value) != None || borrow_roots.get(result.value) != None -> next
+            if !jet_codegen_last_use_holds_borrow(builder, program, value_row, result) -> next
+            &carrier_blocks.push(block)
+            &carrier_indices.push(index)
+        }
+    }
+    changed_at := [U64:Int]{}
+    ran_at := (loop _ in 0..<carrier_blocks.len() -> -1)
+    step := 0
+    changed := carrier_blocks.len() > 0
     loop changed {
         changed = false
-        loop row in builder.blocks {
-            loop instruction in row.instructions {
-                result :: instruction.result ?? next
-                if copy_place.get(result.value) != None || borrow_roots.get(result.value) != None -> next
-                if !jet_codegen_last_use_holds_borrow(builder, program, value_row, result) -> next
-                carried := origins.get(result.value) ?? [U64]{}
-                before :: carried.len()
-                seen := [U64:Bool]{}
-                loop origin in carried -> _ := &seen.add(origin, true)
+        loop carrier in 0..<carrier_blocks.len() {
+            instruction :: builder.blocks[carrier_blocks[carrier]].instructions[carrier_indices[carrier]]
+            result :: instruction.result ?? next
+            step = step + 1
+            last_ran :: ran_at[carrier]
+            ran_at[carrier] = step
+            if last_ran >= 0 {
+                stale := false
                 loop operand in mir_operation_value_uses(instruction.operation) {
-                    from :: origins.get(operand.value) ?? next
-                    loop origin in from {
-                        if seen.get(origin) == None {
-                            _ := &seen.add(origin, true)
-                            &carried.push(origin)
-                        }
+                    if (changed_at.get(operand.value) ?? -1) > last_ran -> stale = true
+                }
+                if !stale -> next
+            }
+            carried := origins.get(result.value) ?? [U64]{}
+            before :: carried.len()
+            seen := [U64:Bool]{}
+            loop origin in carried -> _ := &seen.add(origin, true)
+            loop operand in mir_operation_value_uses(instruction.operation) {
+                from :: origins.get(operand.value) ?? next
+                loop origin in from {
+                    if seen.get(origin) == None {
+                        _ := &seen.add(origin, true)
+                        &carried.push(origin)
                     }
                 }
-                if carried.len() != before {
-                    _ := &origins.add(result.value, carried)
-                    changed = true
-                }
+            }
+            if carried.len() != before {
+                _ := &origins.add(result.value, carried)
+                changed_at[result.value] = step
+                changed = true
             }
         }
     }
