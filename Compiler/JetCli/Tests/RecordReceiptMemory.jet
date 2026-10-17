@@ -35,7 +35,7 @@ fn run() {
     sequence_entry := entry.copy()
     same :: jet_cli_record_index_fresh_sequence(restored, ^sequence_entry) ?? panic("existing sequence")
     record_receipt_memory_require(same == entry, "existing identity preserves its sequence for idempotence")
-    section :: jet_cli_receipt_section_new("test", "TestRecord", "{}".bytes()) ?? panic("section")
+    section :: jet_cli_receipt_section_new("test", "TestRecord", "{{}}".bytes()) ?? panic("section")
     appended :: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: receipt.digest, section: section}
     // copy: `receipt` stays with `receipt`, which is read again at line 40, and the binding
     // `original` owns its own.

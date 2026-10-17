@@ -1008,8 +1008,8 @@ fn flash_test_host_for_machine(machine: MIRTargetMachine) -> FlashTestHost Never
             if rows[0] == .Object(nested) {
                 assert_eq(nested[0].key, "z")
                 assert_eq(nested[1].key, "a")
-                assert(nested[0].value == .Bool(true))
-                assert(nested[1].value == .Int(17))
+                assert(if nested[0].value == .Bool(flag) -> flag else -> false)
+                assert(if nested[1].value == .Int(number) -> number == 17 else -> false)
             } else { panic("nested object") }
         } else { panic("array") }
     } else { panic("object") }
