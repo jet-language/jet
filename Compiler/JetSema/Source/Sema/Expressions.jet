@@ -2820,6 +2820,8 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
     if route_value == {
         .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
         .Source(target) -> {
+            math_abs :: sema_call_try_core_math_abs(module_name, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if math_abs.handled -> return SemaMethodSpecialCheck{handled: true, value: math_abs.value}
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1

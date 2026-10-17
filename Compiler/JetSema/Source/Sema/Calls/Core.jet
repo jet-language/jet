@@ -558,6 +558,30 @@ fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment
     sema_expr_expected(typed, Val(expected), environment, program, &diagnostics)
 }
 
+// Rust core_call.rs `("core.math", "abs")`: `abs` takes Int, Float or F32
+// (D-FLOATW1) and Complex, returning the argument type (Float for Complex).
+// The Int form stays the routed source `abs`; a float or Complex argument is
+// the MathBuiltin `abs` that Rust `lower_core_math_abs` lowers it to, which is
+// the route `Complex.abs` already takes. Anything else is not handled here.
+fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.math" || member != "abs" || args.len() != 1 || type_args.len() != 0 || args[0].label != None -> return unhandled
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return unhandled
+    type_name := ""
+    result_ty := Type.Float
+    if probed.ty == Type.Float -> type_name = "Float"
+    if probed.ty == Type.Float32 {
+        type_name = "F32"
+        result_ty = Type.Float32
+    }
+    if probed.ty == (Type.Named{name: "Complex"}) -> type_name = "Complex"
+    if type_name == "" -> return unhandled
+    value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    magnitude :: sema_tir_node(result_ty, TExprKind.MathBuiltin{type_name: type_name, function: "abs", args: [TExpr]{value}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
+}
+
 // Width selection is the existing checked mathematical normalization; it is
 // separate from source forwarding and never widens F32 values.
 fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
