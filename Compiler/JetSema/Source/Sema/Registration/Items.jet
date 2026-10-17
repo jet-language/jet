@@ -3082,9 +3082,10 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     prepared_inputs := ^inputs
     sema_registration_retain_original_error_module(&prepared_inputs, &diagnostics)
     units_catalog :: sema_units_catalog(&diagnostics)
+    units_names :: sema_units_catalog_names(units_catalog)
     loop index in 0..<prepared_inputs.len() {
         if prepared_inputs[index].module_identity == canonical_effect_module_identity -> next
-        sema_units_inject(&prepared_inputs[index], units_catalog)
+        sema_units_inject(&prepared_inputs[index], units_catalog, units_names)
     }
     sema_units_resolve(&prepared_inputs, edges, &diagnostics)
     // Rust CheckInner `bind_marker_applications`: a directly used imported

@@ -32,12 +32,27 @@ fn sema_units_local_names(items: [Item], occupied: &[String:Bool], local_familie
     }
 }
 
-fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef]) Never! {
+// The names a source mention scan looks up (sema_units_source_mentions):
+// every catalog family name and member type name. Built once per graph,
+// sorted first so each insert appends to the sorted entry list.
+fn sema_units_catalog_names(catalog: [UnitFamilyDef]) -> [String:Bool] Never! {
+    names := [String]{}
+    loop family in catalog {
+        &names.push(family.family)
+        loop member in family.members -> &names.push(sema_registration_unit_type_name(member.name))
+    }
+    &names.sort_by((left: String, right: String) -> left <=> right)
+    wanted := [String:Bool]{}
+    loop name in names -> wanted[name] = true
+    wanted
+}
+
+fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], wanted: [String:Bool]) Never! {
     if input.program.no_prelude -> return
     occupied := [String:Bool]{}
     local_families := [String:Bool]{}
     sema_units_local_names(input.program.items, &occupied, &local_families)
-    mentions :: sema_units_source_mentions(input.source)
+    mentions :: sema_units_source_mentions(input.source, wanted)
     rows := [String:Int]{}
     selected := [String:Bool]{}
     queue := [Int]{}
