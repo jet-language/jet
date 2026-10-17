@@ -334,8 +334,22 @@ fn x64_condition(condition: LIRCondition) -> X64Cond Never! {
     }
 }
 
-fn x64_edge_moves(function: LIRFunction, allocation: X64Allocation, target: LIRJumpTarget) -> [X64Move] Never! {
-    params :: function.blocks[lir_block_index(function, target.block)].params
+// The first row of each block ID (lir_block_index's answer), built once per
+// function so every edge resolves without a block scan.
+fn x64_block_rows(function: LIRFunction) -> [Int:Int] Never! {
+    rows := [Int:Int]{}
+    loop (index, block) in function.blocks {
+        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("checked absent above")
+    }
+    rows
+}
+
+fn x64_block_row(rows: [Int:Int], id: LIRBlockID) -> Int Never! {
+    rows.get(id.value) ?? -1
+}
+
+fn x64_edge_moves(function: LIRFunction, allocation: X64Allocation, target: LIRJumpTarget, target_row: Int) -> [X64Move] Never! {
+    params :: function.blocks[target_row].params
     moves := [X64Move]{}
     loop (position, arg) in target.args -> &moves.push(X64Move{src: allocation.locations[arg.value], dst: allocation.locations[params[position].value]})
     moves
@@ -596,6 +610,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     positions := [Int]{}
     defining := [Bool]{}
     block_offsets := [Int]{}
+    block_rows :: x64_block_rows(function)
     loop (block_index, block) in function.blocks {
         &block_offsets.push(emitter.code.len())
         &positions.push(emitter.code.len())
@@ -622,7 +637,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         &positions.push(emitter.code.len())
         &defining.push(false)
         if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[block.insts.len()])
-        x64_select_terminator(&emitter, function, allocation, block, block_index, fused)
+        x64_select_terminator(&emitter, function, allocation, block, block_index, fused, block_rows)
     }
     &positions.push(emitter.code.len())
     loop fixup in emitter.fixups -> x64_patch_rel32(&emitter.code, fixup.at, block_offsets[fixup.block])
@@ -1058,7 +1073,7 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
     }
 }
 
-fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool) Never! {
+fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool, block_rows: [Int:Int]) Never! {
     if block.terminator == {
         .Return(value) -> {
             if value == .Val(returned) {
@@ -1068,8 +1083,8 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
             x64_emit_epilogue(&emitter)
         }
         .Jump(target) -> {
-            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, target))
-            target_index :: lir_block_index(function, target.block)
+            target_index :: x64_block_row(block_rows, target.block)
+            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, target, target_index))
             if target_index != block_index + 1 -> x64_emit_jump(&emitter, target_index)
         }
         .Branch(condition, then_target, else_target) -> {
@@ -1084,10 +1099,10 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
                 reg :: x64_operand(&emitter, allocation.locations[condition.value], X64_R10)
                 x64_test_rr(&emitter.code, reg, reg)
             }
-            then_index :: lir_block_index(function, then_target.block)
-            else_index :: lir_block_index(function, else_target.block)
-            then_moves :: x64_edge_moves(function, allocation, then_target)
-            else_moves :: x64_edge_moves(function, allocation, else_target)
+            then_index :: x64_block_row(block_rows, then_target.block)
+            else_index :: x64_block_row(block_rows, else_target.block)
+            then_moves :: x64_edge_moves(function, allocation, then_target, then_index)
+            else_moves :: x64_edge_moves(function, allocation, else_target, else_index)
             // The then block follows and the else edge moves nothing: one
             // inverted jcc to the else block, then fall through (LLVM's
             // branch layout) instead of `jcc then; jmp else`.

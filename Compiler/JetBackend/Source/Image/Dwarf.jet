@@ -436,13 +436,23 @@ fn dwarf_location(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
     expr
 }
 
-// The ranges of `variable`, by start; where two overlap the later binding
-// wins (a new value of the variable is defined while the old one is still
-// live).
-fn dwarf_variable_ranges(ranges: [X64VariableRange], variable: Int) -> [X64VariableRange] Never! {
+// The ranges of each of a function's `count` variables, in binding order:
+// one pass over the function's ranges instead of one per variable.
+fn dwarf_variable_buckets(ranges: [X64VariableRange], count: Int) -> [[X64VariableRange]] Never! {
+    buckets := [[X64VariableRange]]{}
+    loop _ in 0..<count -> &buckets.push([X64VariableRange]{})
+    loop range in ranges {
+        if range.variable >= 0 && range.variable < count -> &buckets[range.variable].push(range)
+    }
+    buckets
+}
+
+// The ranges of one variable (its bucket, in binding order), by start; where
+// two overlap the later binding wins (a new value of the variable is defined
+// while the old one is still live).
+fn dwarf_variable_ranges(ranges: [X64VariableRange]) -> [X64VariableRange] Never! {
     sorted := [X64VariableRange]{}
     loop range in ranges {
-        if range.variable != variable -> next
         &sorted.push(range)
         at := sorted.len() - 1
         loop at > 0 && sorted[at - 1].start > sorted[at].start {
@@ -531,8 +541,9 @@ fn dwarf_info(sections: &X64DwarfSections, program: LIRModule, functions: [X64Co
         elf64_u64(&info, function.code.len())
         dwarf_uleb(&info, 1)
         dwarf_u8(&info, 0x56)
+        buckets :: dwarf_variable_buckets(debug[index].ranges, facts.variables.len())
         loop (variable, row) in facts.variables {
-            ranges :: dwarf_variable_ranges(debug[index].ranges, variable)
+            ranges :: dwarf_variable_ranges(buckets[variable])
             located :: ranges.len() > 0
             abbrev := if located -> DWARF_ABBREV_VARIABLE else -> DWARF_ABBREV_VARIABLE_UNLOCATED
             if row.parameter {
