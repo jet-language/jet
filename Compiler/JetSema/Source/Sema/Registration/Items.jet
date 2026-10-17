@@ -2222,6 +2222,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
             item_index += 1
         }
     }
+    // D-VALIDATE1: each struct's `validate { … }` block becomes its
+    // generated `T.validate(value)` before any declaration is registered.
+    sema_validate_blocks(&module_row.program.items, &diagnostics)
     // D-ERR-CONV: declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
     sema_error_conversion_items(&module_row.program.items, &diagnostics)

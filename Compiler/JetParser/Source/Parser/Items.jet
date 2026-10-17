@@ -1813,6 +1813,16 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
             if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
             next
         }
+        // D-VALIDATE1 (Rust `at_validate_block` / `validate_block`):
+        // `validate { … }` holds the struct's rule statements as an ordinary
+        // block; sema restricts and synthesizes them (sema_validate_blocks).
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_value(state, parser_current(&state)) == "validate" {
+            keyword :: parser_bump(&state)
+            block :: parser_parse_block(&state)
+            value.validate_block = block.statements
+            value.validate_span = Val(parser_cover(keyword.span, block.span))
+            next
+        }
         if parser_current_kind(&state) == {
             TOKEN_KW_FN -> {
                 method :: parser_parse_function(&state, member_modifiers, true)
