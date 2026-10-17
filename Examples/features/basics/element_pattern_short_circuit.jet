@@ -1,0 +1,34 @@
+// A pattern subject that is a list element below a read parameter is a
+// read window (element_pattern_window), except on the right of `&&` or
+// `||`: there the subject's block does not dominate the arm, so a window
+// place carrying the index operand could not be read in the arm (MIR
+// legality: place use not dominated by its definition). Such a subject
+// binds copies instead; the parameter's rows stay whole either way.
+enum Arg {
+    Text(value: String)
+    Flag(name: String, on: Bool)
+}
+
+fn text(args: [Arg], index: Int) -> String? {
+    if index < args.len() && args[index] == .Text(value) -> return Val(value.copy())
+    None
+}
+
+fn first_flag(args: [Arg]) -> String {
+    if args.len() == 0 || args[0] == .Text(_) -> return "-"
+    if args.len() > 0 && args[0] == .Flag(name, on) && on -> return name
+    "off"
+}
+
+fn probe(args: [Arg]) -> Bool {
+    gate := false
+    loop index in 0..<args.len() { if index + 2 >= args.len() && args[index] == .Text(text) { if text.to_lower() == "reproducible" -> gate = true } }
+    gate
+}
+
+fn run() {
+    args :: [Arg]{Arg.Flag{name: "f", on: true}, Arg.Text{value: "Reproducible"}}
+    print("{text(args, 1) ?? "-"} {text(args, 5) ?? "-"} {probe(args)}")
+    print("{first_flag(args)} {first_flag([Arg]{})} {first_flag([Arg]{Arg.Flag{name: "g", on: false}})}")
+    print("{args.len()} {args[1] == .Text(_)}")
+}

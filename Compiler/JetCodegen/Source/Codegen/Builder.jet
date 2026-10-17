@@ -476,6 +476,12 @@ struct JetCodegenBuilder {
     // name as a read-only alias: the parameter cannot change while the
     // function runs, so the alias reads exactly what a copy would hold.
     read_windows: [U64:Bool]
+    // How many short-circuit right sides (`&&`/`||`, jet_codegen_lower_short_circuit)
+    // enclose the expression being lowered. Their block does not dominate
+    // the arm the condition guards, so a pattern subject lowered there takes
+    // no window whose place carries index operands
+    // (jet_codegen_lower_read_window).
+    short_circuit_depth: Int{0}
     // Read-only alias locals' places (by place ID): a walked list's item or
     // a read window binding names another value's slot, so a consuming use
     // copies it instead of moving the slot out of its owner.
@@ -1254,6 +1260,7 @@ struct JetCodegenFunctionState {
     read_windows: [U64:Bool]
     read_alias_places: [U64:Bool]
     stable_element_lets: [String:Bool]
+    short_circuit_depth: Int{0}
     plain_try_operand: String?
     plain_try_taken: Bool
 }
@@ -1396,6 +1403,7 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         spawn_occurrences: builder.spawn_occurrences,
         pattern_windows: builder.pattern_windows,
         pattern_window_rows: builder.pattern_window_rows,
+        short_circuit_depth: builder.short_circuit_depth,
         pattern_lookup_head: builder.pattern_lookup_head,
         pattern_lookup_caches: builder.pattern_lookup_caches,
         window_aliases: builder.window_aliases,
@@ -1460,6 +1468,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.spawn_occurrences = ^state.spawn_occurrences
     builder.pattern_windows = ^state.pattern_windows
     builder.pattern_window_rows = ^state.pattern_window_rows
+    builder.short_circuit_depth = state.short_circuit_depth
     builder.window_aliases = ^state.window_aliases
     builder.read_windows = ^state.read_windows
     builder.read_alias_places = ^state.read_alias_places

@@ -5999,7 +5999,9 @@ fn jet_codegen_lower_short_circuit(builder: &JetCodegenBuilder, program: JetCode
         else -> panic("short-circuit lowering received a non-short-circuit operator")
     }
     jet_codegen_switch_block(&builder, program, rhs_block)
+    builder.short_circuit_depth += 1
     right := jet_codegen_lower_expr(&builder, program, rhs)
+    builder.short_circuit_depth -= 1
     incoming := [MIRPhiIncoming]{}
     if jet_codegen_current_is_open(builder, program) {
         &incoming.push(MIRPhiIncoming{block: builder.current, value: right})
@@ -6311,11 +6313,20 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
 // carrier can hold a payload in a host representation (Dyn.Int is i64)
 // that only the checked payload readers widen, so an aliased payload place
 // would read the wrong type.
+// An element window's place carries its index operands, values defined
+// where the subject is lowered; every read of a binding aliasing the window
+// uses them, so that block must dominate the arm. On the right of `&&` or
+// `||` (builder.short_circuit_depth) it does not: the arm is reached through
+// the short-circuit join, which the left side's short edge also enters. Such
+// a subject keeps the value path (its bindings hold copies). A stored-field
+// window carries no operand and stays valid anywhere.
 fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, stable: Bool) -> MIRValueID? {
     if subject.ty == .Named(name) && jet_rust_emit_core_rust_type_name(name) != None -> return None
     place := jet_codegen_read_window_place(&builder, program, subject)
-    if place == None -> place = jet_codegen_read_parameter_element_place(&builder, program, subject)
-    if place == None && stable -> place = jet_codegen_stable_window_place(&builder, program, subject)
+    if place == None && builder.short_circuit_depth == 0 {
+        place = jet_codegen_read_parameter_element_place(&builder, program, subject)
+        if place == None && stable -> place = jet_codegen_stable_window_place(&builder, program, subject)
+    }
     window :: place ?? return None
     value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: window})
     _ := &builder.read_windows.add(window.value, true)
