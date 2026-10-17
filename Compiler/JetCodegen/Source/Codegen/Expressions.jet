@@ -6078,7 +6078,7 @@ fn jet_codegen_lower_guarded_nested_pattern(builder: &JetCodegenBuilder, program
     jet_codegen_switch_block(&builder, program, matched_block)
     nested_window := if window == .Val(subject_window) -> Val(jet_codegen_payload_window_place(&builder, program, subject_window.base, subject_window.kind, payload_ty, span)) else -> MIRPlaceID?{None}
     payload := jet_codegen_emit_value(&builder, program, span, payload_ty, payload_operation)
-    if nested_window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: payload, place: place})
+    if nested_window == .Val(place) -> jet_codegen_push_pattern_window(&builder, payload, place)
     nested_test := jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(payload_ty, span), payload, nested.shape, bind, reuse)
     matched_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
@@ -6099,7 +6099,7 @@ fn jet_codegen_lower_guarded_nested_pattern(builder: &JetCodegenBuilder, program
 // alias `window` (the payload place), never a copy.
 fn jet_codegen_bind_nested_pattern(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, payload_ty: Type, nested: TNestedPattern, span: Span, payload_operation: MIROperation, reuse: Bool, window: MIRPlaceID?) {
     payload := jet_codegen_emit_value(&builder, program, span, payload_ty, payload_operation)
-    if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: payload, place: place})
+    if window == .Val(place) -> jet_codegen_push_pattern_window(&builder, payload, place)
     _ := jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(payload_ty, span), payload, nested.shape, true, reuse)
 }
 
@@ -6254,7 +6254,7 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
     }
     place :: window ?? return jet_codegen_lower_expr(&builder, program, subject)
     value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: place})
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    jet_codegen_push_pattern_window(&builder, value, place)
     value
 }
 
@@ -6275,7 +6275,7 @@ fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodege
     window :: place ?? return None
     value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: window})
     _ := &builder.read_windows.add(window.value, true)
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: window})
+    jet_codegen_push_pattern_window(&builder, value, window)
     Val(value)
 }
 
@@ -6631,11 +6631,16 @@ fn jet_codegen_local_is_read_alias(builder: JetCodegenBuilder, program: JetCodeg
     builder.read_alias_places.get(binding.place.value) != None
 }
 
+// The window registered first for `value` (jet_codegen_push_pattern_window
+// keeps the first row per value in `pattern_window_rows`).
 fn jet_codegen_pattern_window(builder: JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID) -> MIRPlaceID? {
-    loop window in builder.pattern_windows {
-        if window.value == value -> return Val(window.place)
-    }
-    None
+    row :: builder.pattern_window_rows.get(value.value) ?? return None
+    Val(builder.pattern_windows[row].place)
+}
+
+fn jet_codegen_push_pattern_window(builder: &JetCodegenBuilder, value: MIRValueID, place: MIRPlaceID) Never! {
+    if builder.pattern_window_rows.get(value.value) == None -> builder.pattern_window_rows[value.value] = builder.pattern_windows.len()
+    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
 }
 
 // Unregisters the pattern window of `value` and returns its place, so the
@@ -6644,10 +6649,14 @@ fn jet_codegen_pattern_window(builder: JetCodegenBuilder, program: JetCodegenPro
 fn jet_codegen_hide_pattern_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID) -> MIRPlaceID? {
     place :: jet_codegen_pattern_window(builder, program, value) ?? return None
     kept := [JetCodegenPatternWindow]{}
+    rows := [U64:Int]{}
     loop window in builder.pattern_windows {
-        if window.value != value -> &kept.push(window)
+        if window.value == value -> next
+        if rows.get(window.value.value) == None -> rows[window.value.value] = kept.len()
+        &kept.push(window)
     }
-    builder.pattern_windows = kept
+    builder.pattern_windows = ^kept
+    builder.pattern_window_rows = ^rows
     Val(place)
 }
 
@@ -7053,7 +7062,7 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, program: JetCodegen
         jet_codegen_switch_block(&builder, program, next_block)
         index += 1
     }
-    if hidden == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
+    if hidden == .Val(place) -> jet_codegen_push_pattern_window(&builder, subject_value, place)
     false_value := jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
     missed_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
@@ -7212,7 +7221,7 @@ fn jet_codegen_pattern_read_window(builder: &JetCodegenBuilder, program: JetCode
     place :: jet_codegen_bind_local(&builder, program, local, subject.ty, false, None, None, false)
     _ := jet_codegen_emit(&builder, program, subject.span, None, MIROperation.WritePlace{place: place, value: value})
     _ := &builder.read_windows.add(place.value, true)
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    jet_codegen_push_pattern_window(&builder, value, place)
     place
 }
 
@@ -7230,7 +7239,7 @@ fn jet_codegen_lower_collection_slot(builder: &JetCodegenBuilder, program: JetCo
         }
         .Range(lo, hi) -> return jet_codegen_lower_numeric_pattern_range(&builder, program, value, ty, lo, hi, span)
         .Nested(nested) -> {
-            if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+            if window == .Val(place) -> jet_codegen_push_pattern_window(&builder, value, place)
             return jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(ty, span), value, nested.shape, bind, reuse)
         }
     }

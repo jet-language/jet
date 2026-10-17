@@ -407,9 +407,14 @@ struct JetCodegenBuilder {
     values: [MIRValueFact]
     // Last row for each value id, matching reverse ownership lookup.
     value_positions: [U64:Int]
+    // First row for each value id, matching a forward scan of `values`.
+    value_first_positions: [U64:Int]{[U64:Int]{}}
     places: [MIRPlace]
     // First row for each place id, matching `jet_codegen_find_place`.
     place_positions: [U64:Int]
+    // Place ids pushed more than once (jet_codegen_push_place): access
+    // retention updates every row of such an id, any other id's one row.
+    place_repeats: [U64:Bool]{[U64:Bool]{}}
     scopes: [MIRScope]
     contract_scopes: [JetCodegenContractScopeState]
     params: [MIRParam]
@@ -461,6 +466,8 @@ struct JetCodegenBuilder {
     // Pattern subjects read through `&place`, and generated locals aliased
     // to one; their payload bindings alias the place (MIRProjection.Payload).
     pattern_windows: [JetCodegenPatternWindow]
+    // Value id -> its first row in `pattern_windows` (jet_codegen_push_pattern_window).
+    pattern_window_rows: [U64:Int]{[U64:Int]{}}
     pattern_lookup_head: MIRBlockID?
     pattern_lookup_caches: [String:MIRPlaceID]
     window_aliases: [String]
@@ -1204,8 +1211,10 @@ struct JetCodegenFunctionState {
     local_positions: [U64:Int]
     values: [MIRValueFact]
     value_positions: [U64:Int]
+    value_first_positions: [U64:Int]{[U64:Int]{}}
     places: [MIRPlace]
     place_positions: [U64:Int]
+    place_repeats: [U64:Bool]{[U64:Bool]{}}
     scopes: [MIRScope]
     contract_scopes: [JetCodegenContractScopeState]
     params: [MIRParam]
@@ -1238,6 +1247,7 @@ struct JetCodegenFunctionState {
     switch_subject: JetCodegenSwitchSubject?
     spawn_occurrences: [String:Int]
     pattern_windows: [JetCodegenPatternWindow]
+    pattern_window_rows: [U64:Int]{[U64:Int]{}}
     pattern_lookup_head: MIRBlockID?
     pattern_lookup_caches: [String:MIRPlaceID]
     window_aliases: [String]
@@ -1349,8 +1359,10 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         local_positions: builder.local_positions,
         values: builder.values,
         value_positions: builder.value_positions,
+        value_first_positions: builder.value_first_positions,
         places: builder.places,
         place_positions: builder.place_positions,
+        place_repeats: builder.place_repeats,
         scopes: builder.scopes,
         contract_scopes: builder.contract_scopes,
         params: builder.params,
@@ -1383,6 +1395,7 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         switch_subject: builder.switch_subject,
         spawn_occurrences: builder.spawn_occurrences,
         pattern_windows: builder.pattern_windows,
+        pattern_window_rows: builder.pattern_window_rows,
         pattern_lookup_head: builder.pattern_lookup_head,
         pattern_lookup_caches: builder.pattern_lookup_caches,
         window_aliases: builder.window_aliases,
@@ -1412,8 +1425,10 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.local_positions = ^state.local_positions
     builder.values = ^state.values
     builder.value_positions = ^state.value_positions
+    builder.value_first_positions = ^state.value_first_positions
     builder.places = ^state.places
     builder.place_positions = ^state.place_positions
+    builder.place_repeats = ^state.place_repeats
     builder.scopes = ^state.scopes
     builder.contract_scopes = ^state.contract_scopes
     builder.params = ^state.params
@@ -1444,6 +1459,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.switch_subject = ^state.switch_subject
     builder.spawn_occurrences = ^state.spawn_occurrences
     builder.pattern_windows = ^state.pattern_windows
+    builder.pattern_window_rows = ^state.pattern_window_rows
     builder.window_aliases = ^state.window_aliases
     builder.read_windows = ^state.read_windows
     builder.read_alias_places = ^state.read_alias_places
@@ -1735,12 +1751,7 @@ fn jet_codegen_phi_ownership(builder: JetCodegenBuilder, program: JetCodegenProg
     same_mode := true
     loop input in incoming {
         fact := MIRValueFact?{None}
-        loop value in builder.values {
-            if value.id == input.value {
-                fact = Val(value)
-                break
-            }
-        }
+        if builder.value_first_positions.get(input.value.value) == .Val(row) -> fact = Val(builder.values[row])
         ownership := (fact ?? panic("Jet codegen phi input has no ownership fact")).ownership
         if {
             first == None -> {
@@ -2123,14 +2134,22 @@ fn jet_codegen_register_drop_leaves(builder: &JetCodegenBuilder, program: JetCod
 // keeps the strongest access any of them required (Move, then Write, then
 // Read), so a later read cannot invalidate an earlier borrow or move.
 fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, requested: MIRAccess) Never! {
+    if builder.place_repeats.get(place.value) == None {
+        row :: builder.place_positions.get(place.value) ?? return
+        jet_codegen_retain_place_row(&builder, row, requested)
+        return
+    }
     loop index in 0..<builder.places.len() {
-        if builder.places[index].id != place -> next
-        current :: builder.places[index].access
-        if {
-            current == MIRAccess.Move || requested == MIRAccess.Move -> builder.places[index].access = MIRAccess.Move
-            current == MIRAccess.Write || requested == MIRAccess.Write -> builder.places[index].access = MIRAccess.Write
-            else -> {}
-        }
+        if builder.places[index].id == place -> jet_codegen_retain_place_row(&builder, index, requested)
+    }
+}
+
+fn jet_codegen_retain_place_row(builder: &JetCodegenBuilder, index: Int, requested: MIRAccess) Never! {
+    current :: builder.places[index].access
+    if {
+        current == MIRAccess.Move || requested == MIRAccess.Move -> builder.places[index].access = MIRAccess.Move
+        current == MIRAccess.Write || requested == MIRAccess.Write -> builder.places[index].access = MIRAccess.Write
+        else -> {}
     }
 }
 
@@ -2946,6 +2965,8 @@ fn jet_codegen_find_binding_for_local(builder: JetCodegenBuilder, program: JetCo
 fn jet_codegen_push_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlace) Never! {
     if builder.place_positions.get(place.id.value) == None {
         _ := &builder.place_positions.add(place.id.value, builder.places.len())
+    } else {
+        builder.place_repeats[place.id.value] = true
     }
     &builder.places.push(place)
 }
@@ -2961,6 +2982,7 @@ fn jet_codegen_push_local(builder: &JetCodegenBuilder, program: JetCodegenProgra
 // Rust: none (Jet-only pass)
 fn jet_codegen_push_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, fact: MIRValueFact) Never! {
     _ := &builder.value_positions.add(fact.id.value, builder.values.len())
+    if builder.value_first_positions.get(fact.id.value) == None -> builder.value_first_positions[fact.id.value] = builder.values.len()
     &builder.values.push(fact)
 }
 
@@ -2969,9 +2991,12 @@ fn jet_codegen_push_value(builder: &JetCodegenBuilder, program: JetCodegenProgra
 // Rust: none (Jet-only pass)
 fn jet_codegen_reindex_lowering_rows(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     builder.place_positions = [U64:Int]{}
+    builder.place_repeats = [U64:Bool]{}
     loop (index, place) in builder.places {
         if builder.place_positions.get(place.id.value) == None {
             _ := &builder.place_positions.add(place.id.value, index)
+        } else {
+            builder.place_repeats[place.id.value] = true
         }
     }
     builder.local_positions = [U64:Int]{}
@@ -2981,8 +3006,10 @@ fn jet_codegen_reindex_lowering_rows(builder: &JetCodegenBuilder, program: JetCo
         }
     }
     builder.value_positions = [U64:Int]{}
+    builder.value_first_positions = [U64:Int]{}
     loop (index, fact) in builder.values {
         _ := &builder.value_positions.add(fact.id.value, index)
+        if builder.value_first_positions.get(fact.id.value) == None -> builder.value_first_positions[fact.id.value] = index
     }
 }
 

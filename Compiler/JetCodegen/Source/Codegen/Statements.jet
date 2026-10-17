@@ -547,7 +547,7 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCode
     if clone_subject && !plain_read && jet_codegen_read_window_of(builder, program, subject_value) == None {
         subject_value = jet_codegen_emit_value(&builder, program, span, subject.ty, MIROperation.Copy{value: subject_value, fact: MIRCopyFact.Materialize})
         // The copy tests the same place, so its payload bindings still alias it.
-        if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
+        if window == .Val(place) -> jet_codegen_push_pattern_window(&builder, subject_value, place)
     }
     saved_lookup_head := builder.pattern_lookup_head
     builder.pattern_lookup_head = Val(builder.current)
@@ -1384,13 +1384,10 @@ fn jet_codegen_drop_temporary_shared_guard(builder: &JetCodegenBuilder, program:
     place_row :: row ?? return
     if place_row.base == {
         .Temporary(value) -> {
-            loop fact in builder.values {
-                if fact.id == value {
-                    if jet_codegen_is_shared_guard_mir_type(fact.ty) && fact.ownership.drop != MIRDropKind.NoDrop {
-                        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.Drop{value: value, kind: fact.ownership.drop})
-                    }
-                    return
-                }
+            row :: builder.value_first_positions.get(value.value) ?? return
+            drop_kind := builder.values[row].ownership.drop
+            if jet_codegen_is_shared_guard_mir_type(builder.values[row].ty) && drop_kind != MIRDropKind.NoDrop {
+                _ := jet_codegen_emit(&builder, program, span, None, MIROperation.Drop{value: value, kind: drop_kind})
             }
         }
         else -> return
