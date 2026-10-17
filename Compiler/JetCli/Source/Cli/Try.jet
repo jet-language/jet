@@ -255,7 +255,7 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
             index := JetCLISemIndex?{None}
             if disk && checked.complete {
                 if checked.product == {
-                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})) }
+                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile)) }
                     .CheckedCompilerValue(_) -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query returned an unrequested compiler value")}) }
                     .Failed -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query completed without its requested checked product")}) }
                 }

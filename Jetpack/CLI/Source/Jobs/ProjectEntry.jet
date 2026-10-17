@@ -88,7 +88,9 @@ fn cli_has_dev_or_run_entry(file: String) -[FS]> Bool Never! {
 // projects need no `run` entry.
 fn cli_checked_project_job_registry(file: String) -[FS, Env, Exec, Time.Wait]> JobRegistry JobRegistryCheckError! {
     source :: files.read(file) ?? return Err(cli_job_registry_unchecked(file, "`{file}` could not be read: {err}"))
-    response :: envmodel_compiler_service(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request(file, source)) ?? return Err(cli_job_registry_unchecked(file, err.detail))
+    // copy: the request owns its texts; `file` (a read parameter) names every refusal below and
+    // `source` is parsed for the registry after the check.
+    response :: envmodel_compiler_service(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request(file.copy(), source.copy())) ?? return Err(cli_job_registry_unchecked(file, err.detail))
     diagnostics :: compiler_service_check_diagnostics(response) ?? return Err(cli_job_registry_unchecked(file, "the compiler's answer is not a list of diagnostics"))
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(JobRegistryCheckError{diagnostics: diagnostics})

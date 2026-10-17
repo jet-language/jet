@@ -298,7 +298,7 @@ fn compiler_service_value_wire(value: CtValue) -> Dyn? Never! {
 }
 
 fn compiler_service_char(text: String) -> Char? Never! {
-    chars :: text.chars().to_list()
+    chars :: text.chars()
     if chars.len() != 1 -> return None
     Val(chars[0])
 }
@@ -460,15 +460,16 @@ fn compiler_service_key_from_wire(value: Dyn) -> CtKey? Never! {
 
 // The fields of a diagnostic the requester renders or re-anchors: severity,
 // code, the span within the requester's own source, and the three sentences.
-fn compiler_service_diagnostic_wire(diagnostic: Diagnostic) -> Dyn Never! {
+// The diagnostic moves in; its texts move into the wire, uncopied.
+fn compiler_service_diagnostic_wire(diagnostic: ^Diagnostic) -> Dyn Never! {
     span :: if diagnostic.span == .Val(found) -> Dyn.Object(["start": Dyn.Int(found.start), "end": Dyn.Int(found.end)]) else -> Dyn.Null
     Dyn.Object([
         "severity": Dyn.Int(diagnostic.severity),
-        "code": Dyn.Text(diagnostic.code),
+        "code": Dyn.Text(^diagnostic.code),
         "span": span,
-        "what": Dyn.Text(diagnostic.what),
-        "why": Dyn.Text(diagnostic.why),
-        "fix": Dyn.Text(diagnostic.fix),
+        "what": Dyn.Text(^diagnostic.what),
+        "why": Dyn.Text(^diagnostic.why),
+        "fix": Dyn.Text(^diagnostic.fix),
     ])
 }
 
@@ -489,7 +490,7 @@ fn compiler_service_diagnostic_from_wire(value: Dyn) -> Diagnostic? Never! {
 
 // ── Requests and responses ──
 
-fn compiler_service_comptime_request(program: String, base_dir: String) -> String Never! {
+fn compiler_service_comptime_request(program: ^String, base_dir: ^String) -> String Never! {
     compiler_service_render(Dyn.Object(["program": Dyn.Text(program), "base_dir": Dyn.Text(base_dir)]))
 }
 
@@ -502,13 +503,13 @@ fn compiler_service_comptime_request_from(request: Dyn) -> (program: String, bas
 
 // A value that no wire spelling carries is refused as the evaluator refuses
 // a result a config value can't hold.
-fn compiler_service_comptime_response(outcome: JetConfigOutcome) -> String Never! {
+fn compiler_service_comptime_response(outcome: ^JetConfigOutcome) -> String Never! {
     if outcome == {
         .Value(value) -> {
             if compiler_service_value_wire(value) == .Val(wire) -> return compiler_service_render(Dyn.Object(["value": wire]))
             compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold"))]))
         }
-        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
+        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(^diagnostic)]))
     }
 }
 
@@ -520,7 +521,7 @@ fn compiler_service_comptime_outcome(response: Dyn) -> JetConfigOutcome? Never! 
     None
 }
 
-fn compiler_service_check_request(file: String, source: String) -> String Never! {
+fn compiler_service_check_request(file: ^String, source: ^String) -> String Never! {
     compiler_service_render(Dyn.Object(["file": Dyn.Text(file), "source": Dyn.Text(source)]))
 }
 
@@ -531,8 +532,8 @@ fn compiler_service_check_request_from(request: Dyn) -> (file: String, source: S
     Val((file: file, source: source))
 }
 
-fn compiler_service_check_response(diagnostics: [Diagnostic]) -> String Never! {
-    rows :: loop diagnostic in diagnostics -> compiler_service_diagnostic_wire(diagnostic)
+fn compiler_service_check_response(diagnostics: ^[Diagnostic]) -> String Never! {
+    rows :: loop diagnostic in ^diagnostics -> compiler_service_diagnostic_wire(^diagnostic)
     compiler_service_render(Dyn.Object(["diagnostics": Dyn.Array(rows)]))
 }
 

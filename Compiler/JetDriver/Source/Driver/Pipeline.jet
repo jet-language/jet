@@ -2464,12 +2464,10 @@ fn jet_driver_comptime_lost_session(values: [SemaComptimeItemValue], functions: 
 // while `values` held `from` values, if it is the check the run would make
 // now: no value has landed since whose key is one of its dependencies (a
 // check reads only the constants it references, and each referenced constant
-// without a value then is a dependency). Taken once: `precheck` is left None,
-// so a retried item checks again.
-fn jet_driver_comptime_prechecked(precheck: &SemaComptimeItemCheck?, values: [SemaComptimeItemValue], from: Int) -> SemaComptimeItemCheck? {
-    taken := ^precheck
-    precheck = None
-    check := ^taken ?? return None
+// without a value then is a dependency). Taken once: the caller moves its
+// precheck in and leaves it None, so a retried item checks again.
+fn jet_driver_comptime_prechecked(precheck: ^SemaComptimeItemCheck?, values: [SemaComptimeItemValue], from: Int) -> SemaComptimeItemCheck? {
+    check := ^precheck ?? return None
     loop index in from..<values.len() {
         loop dependency in check.dependencies {
             if values[index].key == dependency -> return None
@@ -3587,7 +3585,8 @@ fn jet_driver_comptime_run(
                         next
                     }
                 }
-                checked_item := jet_driver_comptime_prechecked(&precheck, values, prechecked_values) ?? sema_check_comptime_item(&environment, &program, &probe, available, source, values)
+                checked_item := jet_driver_comptime_prechecked(^precheck, values, prechecked_values) ?? sema_check_comptime_item(&environment, &program, &probe, available, source, values)
+                precheck = None
                 counters.items_checked += 1
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
                     flushed := jet_driver_comptime_flush(names, load, request, batch, &values, checked_functions, &trace, program, &available, &staging, &counters, &diagnostics)

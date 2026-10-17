@@ -1201,11 +1201,13 @@ fn x64_compile_module_owned(program: ^LIRModule, threads: CompilerThreads, keep_
     // Without JET_KEEP_GOING a stop stops the compile, so the calling thread
     // claims parts too; with it every claiming thread is a task whose stop is
     // caught at its join, and x64_compile_finish_parts completes its part.
+    // A task group is a failure source of its own: the claimers and the
+    // finishing tasks fail only when their group does, which stops the compile.
     if keep_going {
-        _ := x64_compile_claimers(inputs, parts, queue, workers, false, true)
-        x64_compile_finish_parts(inputs, parts)
+        _ := x64_compile_claimers(inputs, parts, queue, workers, false, true) ?? panic("the x64 compile threads failed")
+        x64_compile_finish_parts(inputs, parts) ?? panic("the x64 compile threads failed")
     } else {
-        _ := x64_compile_claimers(inputs, parts, queue, workers - 1, true, false)
+        _ := x64_compile_claimers(inputs, parts, queue, workers - 1, true, false) ?? panic("the x64 compile threads failed")
     }
     program_back :: x64_compile_take_program(inputs)
     compiled := X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: ^errors}

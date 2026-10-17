@@ -247,7 +247,9 @@ fn sema_serde_items_derive_span(derives: [NamedSpan], name_span: Span) -> Span N
     loop entry in derives {
         if entry.name == "Encode" || entry.name == "Decode" -> return entry.span
     }
-    name_span
+    // copy: two Ints; the returned span is the caller's own, while `name_span` (a read
+    // parameter) stays on the declaration.
+    name_span.copy()
 }
 
 fn sema_serde_items_has_marker(markers: [Marker], name: String) -> Bool Never! {
@@ -756,8 +758,8 @@ fn sema_serde_items_rename_all_style(markers: [Marker]) -> String? Never! {
 fn sema_serde_items_variant_key(variant: Variant, style: String?) -> String Never! {
     loop marker in variant.serde_markers {
         if marker.name != "Rename" -> next
-        renamed :: sema_checked_marker_text_label(marker, "json") ?? sema_serde_items_static_string(marker)
-        if renamed == .Val(text) -> return text
+        if sema_checked_marker_text_label(marker, "json") == .Val(label) -> return label
+        if sema_serde_items_static_string(marker) == .Val(text) -> return text
         break
     }
     sema_checked_wire_case(style, variant.name)

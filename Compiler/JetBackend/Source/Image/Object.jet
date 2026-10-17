@@ -175,7 +175,7 @@ fn x64_relocatable_object_owned(program: ^LIRModule, entry: LIRFunctionID, threa
     if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
     if signature.params.len() != 0 || signature.result != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
-    kept := x64_compile_module_owned(^program, threads, keep_going, ^linted)
+    kept := x64_compile_module_owned(^program, threads, keep_going, linted)
     if !keep_going && kept.compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiler_take_rows<String>(&kept.compiled.errors)}
     main :: x64_object_main(entry)
     functions := [X64CompiledFunction]{main}

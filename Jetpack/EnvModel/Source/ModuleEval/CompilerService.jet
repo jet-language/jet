@@ -48,7 +48,8 @@ fn envmodel_compiler_service(op: String, request: String) -[FS, Env, Exec, Time.
 fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> CtValue ComptimeEvalError! {
     if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
     program :: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
-    response :: envmodel_compiler_service(JET_COMPILER_SERVICE_COMPTIME_EVALUATE, compiler_service_comptime_request(program, base_dir)) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err.detail}"))
+    // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
+    response :: envmodel_compiler_service(JET_COMPILER_SERVICE_COMPTIME_EVALUATE, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err.detail}"))
     outcome :: compiler_service_comptime_outcome(response) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: the compiler's answer is not a config value"))
     if outcome == {
         .Value(value) -> Ok(value)

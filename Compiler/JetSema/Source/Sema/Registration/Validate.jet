@@ -56,12 +56,10 @@ fn sema_validate_impl(definition: StructDef, diagnostics: &[Diagnostic]) -> Impl
     rules := [SemaValidateRule]{}
     valid := true
     loop statement in definition.validate_block {
-        if sema_validate_rule(statement, fields) == {
-            .Ok(rule) -> &rules.push(rule)
-            .Err(diagnostic) -> {
-                &diagnostics.push(diagnostic)
-                valid = false
-            }
+        if sema_validate_rule(statement, fields, &diagnostics) == .Val(rule) {
+            &rules.push(rule)
+        } else {
+            valid = false
         }
     }
     if !valid -> return None
@@ -69,23 +67,29 @@ fn sema_validate_impl(definition: StructDef, diagnostics: &[Diagnostic]) -> Impl
 }
 
 // Rust `extract_check_rule`: `check(condition, at: field, message)` with a
-// bare sibling field after `at:`.
-fn sema_validate_rule(statement: Stmt, fields: [String:Bool]) -> SemaValidateRule Diagnostic! {
+// bare sibling field after `at:`. A malformed rule reports its one problem
+// and gives None.
+fn sema_validate_rule(statement: Stmt, fields: [String:Bool], diagnostics: &[Diagnostic]) -> SemaValidateRule? {
     if statement == .Expr(expression) {
         if expression == .Call(call) {
-            if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return Err(sema_validate_e0353(call.name_span))
-            if call.args[0].label != None -> return Err(sema_validate_e0353(call.args[0].span))
-            at_label :: call.args[1].label ?? return Err(sema_validate_e0353(call.args[1].span))
-            if at_label.name != "at" -> return Err(sema_validate_e0353(call.args[1].span))
-            if call.args[2].label != None -> return Err(sema_validate_e0353(call.args[2].span))
+            if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return sema_validate_refuse(sema_validate_e0353(call.name_span), &diagnostics)
+            if call.args[0].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[0].span), &diagnostics)
+            at_label :: call.args[1].label ?? return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
+            if at_label.name != "at" -> return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
+            if call.args[2].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[2].span), &diagnostics)
             if call.args[1].expr == .Ident(name, name_span) {
-                if fields.get(name) == None -> return Err(sema_validate_e0354(name, name_span))
-                return Ok(SemaValidateRule{cond: call.args[0].expr.copy(), field: name.copy(), message: call.args[2].expr.copy()})
+                if fields.get(name) == None -> return sema_validate_refuse(sema_validate_e0354(name, name_span), &diagnostics)
+                return Val(SemaValidateRule{cond: call.args[0].expr.copy(), field: name.copy(), message: call.args[2].expr.copy()})
             }
-            return Err(sema_validate_e0353(call.args[1].span))
+            return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
         }
     }
-    Err(sema_validate_e0353(sema_user_text_stmt_span(statement)))
+    sema_validate_refuse(sema_validate_e0353(sema_user_text_stmt_span(statement)), &diagnostics)
+}
+
+fn sema_validate_refuse(diagnostic: ^Diagnostic, diagnostics: &[Diagnostic]) -> SemaValidateRule? Never! {
+    &diagnostics.push(diagnostic)
+    None
 }
 
 fn sema_validate_e0353(span: Span) -> Diagnostic Never! {
@@ -139,10 +143,10 @@ struct SemaValidateNames {
 
 fn sema_validate_referenced_fields(rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
     state :: shared SemaValidateNames{fields: fields, found: [String]{}}
-    visitor :: (expression: Expr) -> sema_validate_note_name(state, expression)
+    // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
-        ast_visit_expr(rule.cond, visitor)
-        ast_visit_expr(rule.message, visitor)
+        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(state, expression))
+        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(state, expression))
     }
     permit :: state.guard_read()
     permit.value.found.copy()
