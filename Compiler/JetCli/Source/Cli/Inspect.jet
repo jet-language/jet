@@ -322,7 +322,7 @@ fn jet_cli_inspect_word(command: String) -> Bool Never! {
 // Route one inspect-group command: `argv` is the normalized argv (the
 // `--` tail included), `jet_argv` the words before `--`, and `args` their
 // positional words; `args[0]` is the command word.
-fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCLIPlan Never! {
+fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     command :: args[0]
     inspect_env :: command == "inspect" && args.len() > 1 && args[1] == "env"
     if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)
@@ -732,7 +732,7 @@ fn jet_cli_inspect_reads_bytes(file: String) -[FS]> Bool Never! {
 // parse project the Jet lexer and parser over the inline-package-masked
 // source, source-map reads the `// jet:` markers of generated Rust, and check
 // projects the checked file (InspectCompiler.jet, Compiler.rs `checked_value`).
-fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FFI.C, FFI.Asm]> JetCLIPlan Never! {
+fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     operation :: if args.len() > 1 -> args[1] else -> ""
     file :: if args.len() > 2 -> args[2] else -> ""
     reads :: operation == "lex" || operation == "parse" || operation == "check" || operation == "source-map" || operation == "source_map"
