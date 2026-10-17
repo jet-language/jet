@@ -169,7 +169,8 @@ fn net_resolve_rows(host: I64, port: I64, rows_out: I64, length_out: I64, error_
 // an eight-byte slot (Lower/Routes.jet stores the buffer as the List data;
 // the List drop glue drops each handle and frees count*8).
 #Export(c) fn jet_net_raw_resolve_ordered(host: I64, port: I64, rows_out: I64, length_out: I64, error_out: I64) -> I64 {
-    if (net_resolve_rows(host, port, rows_out, length_out, error_out) == I64{0}) -> return I64{0}
+    // Reviewed u16 boundary (runtime-route-abi.mjs maskedWordParameters).
+    if (net_resolve_rows(host, port.bit_and(I64{65535}), rows_out, length_out, error_out) == I64{0}) -> return I64{0}
     rows :: net_word(rows_out, I64{0})
     count :: net_word(length_out, I64{0})
     handles := I64{0}
