@@ -3686,7 +3686,7 @@ fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBod
 // source, so a small program checks its bodies on the calling thread.
 SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
 // Estimated bytes of one thread's copy of the module scope, per module item.
-// The comptime probe's scope admission still uses this per-item estimate.
+// The comptime prechecks' scope admission still uses this per-item estimate.
 SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
 // Estimated bytes of one body thread's light copy of the module scope
 // (sema_scope_light_copy), per scope binding row. A full row measured about
@@ -5109,218 +5109,20 @@ fn sema_comptime_probe_refresh(probe: &SemaScopeProbe, graph: SemaRegistrationGr
     probe.constants = waiting
 }
 
-// One dependency probe of a comptime source (sema_comptime_probe_workers):
-// checks `expression` in `table`, the module's probe scope, against the
-// environment entered in the module, discards the reports, rolls `table`
-// back, and returns the constants the expression names. The environment is
-// borrowed, so reading its registration graph never copies the graph.
-fn sema_comptime_probe_dependencies(environment: SemaScopeEnvironment, program: SemaProgramTables, table: &SemaScopeTable, diagnostics: [Diagnostic], host_hooks: SemaHostHookAccess?, expression: Expr, expected_type: Type?) -> [String] {
-    if program.registration_graph == .Val(graph) {
-        context := sema_check_context_init()
-        context.host_hooks = host_hooks
-        mark :: sema_scope_mark(&table)
-        table.comptime_execution_depth = 1
-        probe_diagnostics := diagnostics.copy()
-        state := sema_ownership_state_init()
-        tail_store := sema_statement_tail_store_init()
-        _ := sema_check_expression(expression, expected_type, environment, program, &table, &state, &tail_store, &context, &probe_diagnostics)
-        sema_scope_rollback(&table, mark)
-        return sema_comptime_dependencies_from_references(graph, context.name_references, [SemaComptimeItemValue]{})
-    }
-    [String]{}
-}
-
 // A compiler thread is admitted for at least this many bytes of comptime
-// source expressions, so a module with few probes runs them on the calling
-// thread.
+// source expressions, so a module with few item checks makes them on the
+// calling thread (sema_comptime_precheck_items).
 SEMA_PROBE_MIN_BYTES_PER_THREAD :: 16384
 
-// SP17a: the dependencies of one module's comptime sources, which the
-// environment, entered in the module, and the module's probe scope (built
-// once) serve. Every probe rolls the scope back, so the probes are
-// independent. One admitted thread probes them in order
-// (sema_comptime_probe_in_order). More take consecutive parts
-// (sema_comptime_probe_parallel), each probed on its own copy of the scope
-// against the one environment, which moves into the threads' shared state
-// with the sources and back out after; host callbacks are withheld there,
-// and a probe that wanted one runs again on the calling thread with them
-// (sema_comptime_probe_part_apply). The dependencies are the same for any
-// thread count. `weights` gets each source expression's bytes.
-fn sema_comptime_probe_workers(sources: [SemaComptimeItemSource], scope_items: Int, threads: CompilerThreads, weights: &[Int]) -> Int {
-    work := 0
-    loop index in 0..<sources.len() {
-        weight := sources[index].span.end - sources[index].span.start
-        &weights.push(weight)
-        work += weight
-    }
-    compiler_threads_admit(threads, sources.len(), work, SEMA_PROBE_MIN_BYTES_PER_THREAD, scope_items * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
-}
-
-fn sema_comptime_probe_in_order(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, sources: &[SemaComptimeItemSource]) {
-    loop index in 0..<sources.len() {
-        dependencies := sema_comptime_probe_dependencies(environment, program, &probe.table, probe.diagnostics, probe.host_hooks, sources[index].expression, sources[index].expected_type)
-        sources[index].dependencies = ^dependencies
-    }
-}
-
-// Probes the sources in `shared_state` on `workers` threads, in the
-// consecutive parts `weights` cuts; returns the parts with their results.
-fn sema_comptime_probe_parallel(shared_state: Shared<SemaProbeShared>, probe: SemaScopeProbe, weights: [Int], workers: Int) -> [Shared<SemaProbePart>] {
-    bounds :: compiler_threads_partition(weights, workers)
-    parts := [Shared<SemaProbePart>]{}
-    loop part in 0..<workers {
-        row :: shared SemaProbePart{table: sema_scope_init(""), diagnostics: [Diagnostic]{}, first: bounds[part], last: bounds[part + 1], dependencies: [[String]]{}, wanted: [Bool]{}}
-        // copy: each parallel probe part starts from its own scope table and diagnostics, while
-        // `probe` (a read parameter) seeds every worker part in this loop.
-        sema_comptime_probe_part_fill(row, probe.table.copy(), probe.diagnostics.copy())
-        &parts.push(row)
-    }
-    _ := sema_comptime_probe_parts(shared_state, parts, 0)
-    parts
-}
-
-// What every probe thread of a module reads: the entered environment, the
-// pass's program tables and the module's sources, each moved in as the one
-// row of its list and moved back out after, so none is copied.
-struct SemaProbeShared {
-    environments: [SemaScopeEnvironment]
-    programs: [SemaProgramTables]
-    sources: [[SemaComptimeItemSource]]
-}
-
-// One thread's sources [first, last): its own copy of the probe scope and
-// its reports, and per source its dependencies and whether it wanted a host
-// callback.
-struct SemaProbePart {
-    table: SemaScopeTable
-    diagnostics: [Diagnostic]
-    first: Int
-    last: Int
-    dependencies: [[String]]
-    wanted: [Bool]
-}
-
-fn sema_comptime_probe_shared_fill(shared_state: Shared<SemaProbeShared>, environment: ^SemaScopeEnvironment, program: ^SemaProgramTables, sources: ^[SemaComptimeItemSource]) {
-    permit :: shared_state.guard_edit()
-    &permit.value.environments.push(^environment)
-    &permit.value.programs.push(^program)
-    &permit.value.sources.push(^sources)
-}
-
-fn sema_comptime_probe_shared_fill_environment(shared_state: Shared<SemaProbeShared>, environment: ^SemaScopeEnvironment, program: ^SemaProgramTables) {
-    permit :: shared_state.guard_edit()
-    &permit.value.environments.push(^environment)
-    &permit.value.programs.push(^program)
-}
-
-fn sema_comptime_probe_shared_take_environment(shared_state: Shared<SemaProbeShared>) -> SemaScopeEnvironment {
-    permit :: shared_state.guard_edit()
-    &permit.value.environments.pop() ?? panic("the probe environment left the threads' shared state")
-}
-
-fn sema_comptime_probe_shared_take_program(shared_state: Shared<SemaProbeShared>) -> SemaProgramTables {
-    permit :: shared_state.guard_edit()
-    &permit.value.programs.pop() ?? panic("the probe program tables left the threads' shared state")
-}
-
-fn sema_comptime_probe_shared_take_sources(shared_state: Shared<SemaProbeShared>) -> [SemaComptimeItemSource] {
-    permit :: shared_state.guard_edit()
-    &permit.value.sources.pop() ?? panic("the probed sources left the threads' shared state")
-}
-
-// Each module owns the environment and program tables only within this call,
-// so their move into shared state is not a move of a loop-carried binding.
-// The module is read from the tables' graph.
-fn sema_comptime_probe_module(shared_state: Shared<SemaProbeShared>, module_index: Int, host_hooks: SemaHostHookAccess?, threads: CompilerThreads) -> [SemaComptimeItemSource] {
-    environment := sema_comptime_probe_shared_take_environment(shared_state)
-    program := sema_comptime_probe_shared_take_program(shared_state)
-    module_identity := ""
-    scope_items := 0
-    module_sources := sema_comptime_probe_module_sources(program, module_index, &module_identity, &scope_items)
-    empty := if module_sources.len() > 0 -> sema_comptime_body_values_prefix(environment.comptime_body_publication, 0) else -> SemaComptimeBodyValues{}
-    entered :: if module_sources.len() > 0 -> sema_scope_environment_enter_probe_module(&environment, program, module_identity, ^empty) else -> false
-    if entered {
-        probe := sema_comptime_probe_init(host_hooks)
-        sema_comptime_probe_prepare(&probe, environment, program, -1)
-        if probe.applied {
-            weights := [Int]{}
-            workers :: sema_comptime_probe_workers(module_sources, scope_items, threads, &weights)
-            if workers > 1 {
-                sema_comptime_probe_shared_fill(shared_state, ^environment, ^program, ^module_sources)
-                parts :: sema_comptime_probe_parallel(shared_state, probe, weights, workers)
-                probed := sema_comptime_probe_shared_take_sources(shared_state)
-                inputs :: shared_state.guard_read()
-                loop part in parts -> sema_comptime_probe_part_apply(inputs.value.environments[0], inputs.value.programs[0], &probe, &probed, part)
-                return ^probed
-            }
-            sema_comptime_probe_in_order(environment, program, &probe, &module_sources)
-        }
-    }
-    sema_comptime_probe_shared_fill_environment(shared_state, ^environment, ^program)
-    ^module_sources
-}
-
-// The comptime sources of graph module `module_index` of `program`'s graph,
-// with the module's identity and item count.
-fn sema_comptime_probe_module_sources(program: SemaProgramTables, module_index: Int, module_identity: &String, scope_items: &Int) -> [SemaComptimeItemSource] {
-    if program.registration_graph == .Val(graph) {
-        module_identity = graph.modules[module_index].module_identity
-        scope_items = graph.modules[module_index].program.items.len()
-        return sema_comptime_collect_module_sources(graph, graph.modules[module_index])
-    }
+// D2: the comptime sources of graph module `module_index`, read from the
+// pass's program tables. A source's constant dependencies are not probed
+// here: the run's own check of the item names them
+// (sema_check_comptime_item_in, sema_comptime_dependencies_from_references),
+// as it did for every probed source, so the probe's second full check of
+// each expression is gone.
+fn sema_comptime_module_sources(program: SemaProgramTables, module_index: Int) -> [SemaComptimeItemSource] {
+    if program.registration_graph == .Val(graph) -> return sema_comptime_collect_module_sources(graph, graph.modules[module_index])
     panic("the declaration pass lost its registration graph")
-}
-
-fn sema_comptime_probe_part_fill(slot: Shared<SemaProbePart>, table: ^SemaScopeTable, diagnostics: ^[Diagnostic]) {
-    permit :: slot.guard_edit()
-    permit.value.table = ^table
-    permit.value.diagnostics = ^diagnostics
-}
-
-// Probes `parts[from..]`, one task per part and the last part on this
-// thread; returns how many sources they probed.
-fn sema_comptime_probe_parts(shared_state: Shared<SemaProbeShared>, parts: [Shared<SemaProbePart>], from: Int) -> Int {
-    if from >= parts.len() - 1 -> return sema_comptime_probe_part(shared_state, parts[from])
-    probed := 0
-    task.group sema_probe_threads {
-        head :: task sema_comptime_probe_part(shared_state, parts[from])
-        probed = sema_comptime_probe_parts(shared_state, parts, from + 1)
-        probed += head.join() ?? panic(compiler_threads_failure_text(err))
-    }
-    probed
-}
-
-// One thread: probes its part's sources in order on its own scope copy.
-fn sema_comptime_probe_part(shared_state: Shared<SemaProbeShared>, slot: Shared<SemaProbePart>) -> Int {
-    inputs :: shared_state.guard_read()
-    permit := slot.guard_edit()
-    // Passed straight through: a local binding of a guarded row would copy it.
-    sema_comptime_probe_part_in(inputs.value.environments[0], inputs.value.programs[0], inputs.value.sources[0], &permit.value)
-}
-
-fn sema_comptime_probe_part_in(environment: SemaScopeEnvironment, program: SemaProgramTables, sources: [SemaComptimeItemSource], part: &SemaProbePart) -> Int {
-    wanted :: shared SemaHostHookWanted{wanted: false}
-    loop position in part.first..<part.last {
-        sema_host_hook_unwant(wanted)
-        dependencies := sema_comptime_probe_dependencies(environment, program, &part.table, part.diagnostics, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: None}), sources[position].expression, sources[position].expected_type)
-        &part.dependencies.push(dependencies)
-        &part.wanted.push(sema_host_hook_was_wanted(wanted))
-    }
-    part.last - part.first
-}
-
-// Moves a part's dependencies onto its sources, last first; a source whose
-// probe wanted a host callback is probed again here, with the callbacks.
-fn sema_comptime_probe_part_apply(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, sources: &[SemaComptimeItemSource], slot: Shared<SemaProbePart>) {
-    permit :: slot.guard_edit()
-    position := permit.value.last
-    loop position > permit.value.first {
-        position -= 1
-        dependencies := &permit.value.dependencies.pop() ?? panic("a probe's dependencies left its part")
-        wanted :: &permit.value.wanted.pop() ?? panic("a probe's host-callback mark left its part")
-        if wanted -> dependencies = sema_comptime_probe_dependencies(environment, program, &probe.table, probe.diagnostics, probe.host_hooks, sources[position].expression, sources[position].expected_type)
-        sources[position].dependencies = ^dependencies
-    }
 }
 
 // A comptime run pass's item checks, made ahead of the pass on the compiler
@@ -5648,8 +5450,8 @@ fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> S
 
 // The comptime sources one module contributes, with the `module\nkey` of
 // each, so a repeated key is found without rescanning the list. Their
-// dependencies are probed once the module's list is complete
-// (sema_comptime_probe_workers).
+// constant dependencies come from the run's item checks
+// (sema_check_comptime_item_in).
 struct SemaComptimeSourceList {
     items: [SemaComptimeItemSource]
     keys: [String:Bool]
@@ -5851,8 +5653,9 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
     items
 }
 
-// `threads` admits the compiler threads of the source dependency probes
-// (sema_comptime_probe_workers). `graph` moves into the pass's program
+// `host_hooks` and `threads` are the comptime run's: the declaration pass
+// makes no body check of its own (D2: the sources' constant dependencies
+// come from the run's item checks). `graph` moves into the pass's program
 // tables, which no check changes, and leaves unchanged with the stage as the
 // comptime run's graph: the pass never copies it.
 fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
@@ -5898,19 +5701,12 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
         &modules.push(checked)
         module_index += 1
     }
-    environment := sema_check_shared_take_environment(module_state)
-    program := sema_check_shared_take_program(module_state)
-    // The source dependency probes re-target the pass environment, which
-    // carries this same graph; its checked types are empty as theirs are.
-    // Each module is entered and its probe scope built once for all of its
-    // sources (sema_comptime_probe_workers).
+    pass_environment := sema_check_shared_take_environment(module_state)
+    pass_program := sema_check_shared_take_program(module_state)
     sources := [SemaComptimeItemSource]{}
     source_keys := [String:Bool]{}
-    hook_access :: sema_host_hook_access(host_hooks)
-    shared_state :: shared SemaProbeShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, sources: [[SemaComptimeItemSource]]{}}
-    sema_comptime_probe_shared_fill_environment(shared_state, ^environment, ^program)
     loop source_module_index in 0..<module_count {
-        module_sources := sema_comptime_probe_module(shared_state, source_module_index, hook_access, threads)
+        module_sources := sema_comptime_module_sources(pass_program, source_module_index)
         // Moved onto `sources` in order, without a copy.
         reversed_sources := [SemaComptimeItemSource]{}
         loop module_sources.len() > 0 {
@@ -5934,9 +5730,7 @@ fn sema_collect_comptime_declarations(graph: ^SemaRegistrationGraph, package_pol
             &sources.push(source)
         }
     }
-    // All probes have joined; recover the original graph from its tables.
-    pass_environment := sema_comptime_probe_shared_take_environment(shared_state)
-    pass_program := sema_comptime_probe_shared_take_program(shared_state)
+    // Recover the original graph from its tables.
     sema_comptime_body_work_flush(pass_environment.comptime_body_publication, trace_sink, "sema.check")
     imports := sema_comptime_stage_imports(pass_program)
     names :: sema_comptime_stage_names(pass_program, modules)
@@ -6161,6 +5955,10 @@ fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: &SemaPr
 
 // Read-only half of the item check: the environment is borrowed, so reading
 // its registration graph never copies the graph (a writable parameter would).
+// D2: this one check is where a source's constant dependencies come from
+// (sema_comptime_dependencies_from_references over its own references, with
+// the dependencies the source carries from registration, a marker argument's
+// or a checked text's); no dependency probe checks the expression before it.
 fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
     if program.registration_graph == .Val(resolved_graph) {
         sema_comptime_probe_prepare(&probe, environment, program, available.counted_values)
