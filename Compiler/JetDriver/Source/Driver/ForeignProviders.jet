@@ -180,14 +180,14 @@ fn jet_driver_foreign_library_from_cpp_header(path: String) -> String? {
 
 fn jet_driver_foreign_import_library(declaration: ImportDecl) -> (library: String?, form: String) Never! {
     if declaration.kind == {
-        .Module(name, _) -> (library: jet_driver_foreign_library_from_c_path(name), form: "module")
-        .File(path, _) -> (library: jet_driver_foreign_library_from_header(path), form: "header")
+        .Module(name, _) -> (form: "module", library: jet_driver_foreign_library_from_c_path(name))
+        .File(path, _) -> (form: "header", library: jet_driver_foreign_library_from_header(path))
         .Unqualified(module_alias, _, items, _, _) -> {
             direct := jet_driver_foreign_library_from_c_path(module_alias)
             if {
-                direct != None -> (library: direct, form: "module")
-                module_alias == "c" && items.len() > 0 -> (library: jet_driver_foreign_library_from_c_path("c.{items[0].original}"), form: "module")
-                else -> (library: None, form: "module")
+                direct != None -> (form: "module", library: direct)
+                module_alias == "c" && items.len() > 0 -> (form: "module", library: jet_driver_foreign_library_from_c_path("c.{items[0].original}"))
+                else -> (form: "module", library: None)
             }
         }
     }
@@ -202,11 +202,11 @@ fn jet_driver_foreign_import_libraries(declaration: ImportDecl) -> (libraries: [
                 library :: jet_driver_foreign_library_from_c_path("c.{item.original}") ?? next
                 &libraries.push(library)
             }
-            return (libraries: libraries, form: "module")
+            return (form: "module", libraries: libraries)
         }
     }
     if imported.library == .Val(library) -> &libraries.push(library)
-    (libraries: libraries, form: imported.form)
+    (form: imported.form, libraries: libraries)
 }
 
 fn jet_driver_foreign_import_header(declaration: ImportDecl) -> String Never! {
@@ -544,10 +544,10 @@ fn jet_driver_foreign_line_parts(line: String) -> (name: String, value: String, 
         if bytes[index] == (U8{61}) {
             name :: String.from_bytes(bytes[0..<index]) ?? ""
             value :: String.from_bytes(bytes[index + 1..<bytes.len()]) ?? ""
-            return (name: name, value: value, valid: name.len() > 0 && value.len() > 0)
+            return (name: name, valid: name.len() > 0 && value.len() > 0, value: value)
         }
     }
-    (name: "", value: "", valid: false)
+    (name: "", valid: false, value: "")
 }
 
 fn jet_driver_foreign_metadata_error(path: String, reason: String, diagnostics: &[Diagnostic]) {
@@ -821,7 +821,7 @@ fn jet_driver_foreign_find_generated_module(program: Program, language: String, 
             else -> {}
         }
     }
-    (functions: functions, span: span, module_library: module_library)
+    (functions: functions, module_library: module_library, span: span)
 }
 
 fn jet_driver_foreign_make_adapter_function(handle: String, raw_function: String, origin_path: String, diagnostics: &[Diagnostic]) -> Func? {
@@ -885,7 +885,7 @@ fn jet_driver_foreign_prepare_functions(functions: [ExternFn], handles: [SemaFor
             &adapter_functions.push(adapter)
         }
     }
-    (functions: prepared, adapters: adapters, adapter_functions: adapter_functions)
+    (adapter_functions: adapter_functions, adapters: adapters, functions: prepared)
 }
 
 fn jet_driver_foreign_package_for_root(load: JetDriverLoadResult, root_index: Int) -> String Never! {

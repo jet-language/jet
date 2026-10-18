@@ -59,6 +59,7 @@ struct TypeTupleField {
 // so positional members keep their written order.
 fn type_tuple_fields_canonical(fields: [TypeTupleField]) -> [TypeTupleField] Never! {
     sorted := fields
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by((left: TypeTupleField, right: TypeTupleField) -> left.name <=> right.name)
     sorted
 }
@@ -234,6 +235,7 @@ fn dimension_combine(left: Dimension, right: Dimension, subtract: Bool) -> Dimen
             if next != 0 -> &axes.push(DimensionAxis{name: axis.name, exponent: Measure.SignedLiteral{kind: "dimension", value: next}})
         }
     }
+    axes = loop fresh_item in axes -> fresh_item
     &axes.sort_by((a: DimensionAxis, b: DimensionAxis) -> a.name <=> b.name)
     Val(Dimension{axes: axes})
 }

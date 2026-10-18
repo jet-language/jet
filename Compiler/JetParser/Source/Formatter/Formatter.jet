@@ -1433,6 +1433,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     source :: src.bytes()
     ordered := edits
     // Rust sorts by descending start; apply from the end of the source.
+    ordered = loop fresh_item in ordered -> fresh_item
     &ordered.sort_by((left: TextEdit, right: TextEdit) -> right.span.start <=> left.span.start)
     replaced_start := JFMT_NO_LIMIT
     loop edit in ordered {
@@ -1464,6 +1465,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
 
 fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
     sorted := edits
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by((left: TextEdit, right: TextEdit) -> left.span.start <=> right.span.start)
     sorted
 }

@@ -54,12 +54,12 @@ fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -
     // Every DocModule shares this one checked graph; never duplicate its rows.
     storage :: loop unit in modules { if unit.memory_facts == .Val(value) -> break value } ?? return [JetCLIExpandFact]{}
     permit :: storage.guard_read()
-    projections := [(root: String, fact: String):Int]{}
-    loop (position, row) in permit.value.projections -> projections[(root: row.root, fact: row.fact)] = position
+    projections := [(fact: String, root: String):Int]{}
+    loop (position, row) in permit.value.projections -> projections[(fact: row.fact, root: row.root)] = position
     facts := [JetCLIExpandFact]{}
     loop declaration in permit.value.declarations {
         loop root in declaration.roots {
-            projection :: if projections.get((root: root, fact: declaration.fact)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
+            projection :: if projections.get((fact: declaration.fact, root: root)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
             status :: jet_cli_expand_memory_status(projection)
             fields := [JetCLIStatusField]{
                 jet_cli_status_field("fact", jet_cli_status_text(declaration.fact)),

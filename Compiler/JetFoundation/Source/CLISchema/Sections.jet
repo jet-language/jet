@@ -94,8 +94,8 @@ fn cli_schema_elf_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] Metadata
         else -> { return Err(MetadataError.Malformed{why: "invalid ELF byte order"}) }
     }
     layout :: if class == {
-        CLI_SCHEMA_ELF_CLASS_1 -> (header: 52, shoff_at: 32, shentsize_at: 46, shnum_at: 48, shstr_at: 50, shoff_width: 4, sh_offset_at: 16, sh_size_at: 20, value_width: 4)
-        CLI_SCHEMA_ELF_CLASS_2 -> (header: 64, shoff_at: 40, shentsize_at: 58, shnum_at: 60, shstr_at: 62, shoff_width: 8, sh_offset_at: 24, sh_size_at: 32, value_width: 8)
+        CLI_SCHEMA_ELF_CLASS_1 -> (header: 52, sh_offset_at: 16, sh_size_at: 20, shentsize_at: 46, shnum_at: 48, shoff_at: 32, shoff_width: 4, shstr_at: 50, value_width: 4)
+        CLI_SCHEMA_ELF_CLASS_2 -> (header: 64, sh_offset_at: 24, sh_size_at: 32, shentsize_at: 58, shnum_at: 60, shoff_at: 40, shoff_width: 8, shstr_at: 62, value_width: 8)
         else -> { return Err(MetadataError.Malformed{why: "unsupported ELF class"}) }
     }
     _ :: cli_schema_bounds(bytes, 0, layout.header, maximum)

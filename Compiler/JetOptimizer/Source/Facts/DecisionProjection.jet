@@ -73,6 +73,7 @@ fn mir_decision_identity(program: MIRProgram, artifact: MIRArtifactID?, profile:
     }
     if plan == None && program.artifacts.len() > 0 -> plan = Val(program.artifacts[0])
     files := program.source_files
+    files = loop fresh_item in files -> fresh_item
     &files.sort_by((a, b) -> (a.path <=> b.path).then(a.id.value <=> b.id.value))
     source_material := [U8]{}
     loop file in files {

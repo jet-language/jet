@@ -263,6 +263,7 @@ enum ArtifactEntryKey {
 // Keys in their derived order.
 fn store_artifact_sort_keys(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
     out := keys
+    out = loop fresh_item in out -> fresh_item
     &out.sort_by((left: ArtifactEntryKey, right: ArtifactEntryKey) -> (left.kind().rank() <=> right.kind().rank()).then(left.primary() <=> right.primary()).then(left.secondary() <=> right.secondary()))
     out
 }
@@ -285,7 +286,7 @@ fn store_artifact_split_once(value: String, separator: String) -> (before: Strin
     raw :: value.bytes()
     at :: store_artifact_find(raw, separator.bytes(), 0)
     if at < 0 -> return None
-    Val((before: pkg_bytes_text(raw, 0, at), after: pkg_bytes_text(raw, at + separator.bytes().len(), raw.len())))
+    Val((after: pkg_bytes_text(raw, at + separator.bytes().len(), raw.len()), before: pkg_bytes_text(raw, 0, at)))
 }
 
 // The first byte offset at or after `from` where `needle` occurs, or -1.

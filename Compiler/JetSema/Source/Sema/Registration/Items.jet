@@ -1119,6 +1119,7 @@ fn sema_registration_keyed_row_push(rows: &[SemaRegistrationKeyedRow], key: Stri
 }
 
 fn sema_registration_keyed_rows_sort(rows: &[SemaRegistrationKeyedRow]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: SemaRegistrationKeyedRow, right: SemaRegistrationKeyedRow) -> (left.key <=> right.key).then(left.order <=> right.order))
 }
 

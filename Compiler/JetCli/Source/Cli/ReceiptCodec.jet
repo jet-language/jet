@@ -119,6 +119,7 @@ fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [Jet
     if total > JET_CLI_RECEIPT_MAX_FIELD {
         return Err(jet_cli_read_error("receipt sections are too large (maximum 67108864 bytes)"))
     }
+    normalized = loop fresh_item in normalized -> fresh_item
     &normalized.sort_by((left: JetCLIReceiptSection, right: JetCLIReceiptSection) -> left.name <=> right.name)
     loop index in 1..<normalized.len() {
         if normalized[index - 1].name == normalized[index].name {
@@ -163,6 +164,7 @@ fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) ->
     loop link in normalized {
         jet_cli_record_link_validate(link) ?? return Err(jet_cli_read_error("receipt {label} link is invalid: {err.message}"))
     }
+    normalized = loop fresh_item in normalized -> fresh_item
     &normalized.sort_by(jet_cli_receipt_link_order)
     loop index in 1..<normalized.len() {
         left :: normalized[index - 1]
@@ -307,6 +309,7 @@ fn jet_cli_receipt_encode_links(out: &[U8], links: [JetCLIRecordLink]) Never! {
     jet_cli_receipt_uint(&count, links.len(), 8)
     jet_cli_receipt_frame(&out, count)
     sorted := links
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(jet_cli_receipt_link_order)
     loop link in sorted {
         jet_cli_receipt_frame(&out, link.kind.bytes())
@@ -333,6 +336,7 @@ fn jet_cli_receipt_body(receipt: JetCLIReceipt) -> [U8] Never! {
     jet_cli_receipt_frame(&out, receipt.stderr)
     if receipt.sections.len() > 0 {
         sections := receipt.sections
+        sections = loop fresh_item in sections -> fresh_item
         &sections.sort_by((left: JetCLIReceiptSection, right: JetCLIReceiptSection) -> left.name <=> right.name)
         jet_cli_receipt_frame(&out, jet_cli_receipt_section_marker(JET_CLI_RECEIPT_SECTION_MAGIC))
         section_count := [U8]{}

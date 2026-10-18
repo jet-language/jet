@@ -1644,6 +1644,7 @@ fn jet_driver_comptime_run_index(checked_functions: [SemaComptimeFunctionResult]
 fn jet_driver_comptime_owners_build(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
     index.owners_built = true
     rows := jet_driver_registration_function_rows(graph)
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
     loop at in 0..<rows.len() {
         if at > 0 && rows[at - 1].key == rows[at].key {
@@ -5746,6 +5747,7 @@ fn jet_driver_push_module_key(rows: &[JetDriverModuleKeyRow], module_identity: S
 // The function keys each registration module declares, by module identity.
 fn jet_driver_registered_function_keys(graph: SemaRegistrationGraph) -> [String:[String:Bool]] Never! {
     rows := jet_driver_registration_function_rows(graph)
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) -> (left.module_identity <=> right.module_identity).then(left.key <=> right.key))
     registered := [String:[String:Bool]]{}
     keys := [String:Bool]{}

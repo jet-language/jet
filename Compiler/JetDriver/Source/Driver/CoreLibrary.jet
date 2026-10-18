@@ -72,6 +72,7 @@ fn jet_driver_core_source_parent_new(rows: ^[JetDriverCoreSource], runtime: ^Cor
     original := ^rows
     keys := [String:String]{}
     loop row in original -> keys[row.path] = jet_driver_core_source_owner_key(row.path)
+    original = loop fresh_item in original -> fresh_item
     &original.sort_by((a: JetDriverCoreSource, b: JetDriverCoreSource) -> ((keys.get(a.path) ?? "") <=> (keys.get(b.path) ?? "")).then(a.path <=> b.path))
     JetDriverCoreSourceParentHost{
         parent: core_shared_parent_new(), original_rows: ^original, runtime: ^runtime,

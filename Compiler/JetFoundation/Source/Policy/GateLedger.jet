@@ -165,6 +165,7 @@ fn gate_entry_compare(left: GateEntry, right: GateEntry) -> Ordering Never! {
 }
 
 fn gate_ledger_sort(ledger: &GateLedger) Never! {
+    ledger.rows = loop fresh_item in ledger.rows -> fresh_item
     &ledger.rows.sort_by((left: GateEntry, right: GateEntry) -> gate_entry_compare(left, right))
 }
 

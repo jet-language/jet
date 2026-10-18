@@ -456,7 +456,9 @@ fn pkg_overlay_keyed_wins(winners: [String: OverrideWinner], field: String, prio
 fn pkg_overlay_sorted_env(env: [OverrideEnv]) -> [OverrideEnv] Never! {
     sorted := env
     // Two stable passes order by (key, value).
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(fact -> fact.value)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(fact -> fact.key)
     sorted
 }

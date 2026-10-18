@@ -234,7 +234,7 @@ fn pkg_overlay_split_colon(value: String) -> (before: String, after: String)? Ne
             code == OVERLAY_QUOTE -> quoted = true
             pkg_overlay_is_open(code) -> depth += 1
             pkg_overlay_is_close(code) -> depth -= 1
-            code == OVERLAY_COLON && depth == 0 -> return Val((before: pkg_bytes_text(raw, 0, index), after: pkg_bytes_text(raw, index + 1, raw.len())))
+            code == OVERLAY_COLON && depth == 0 -> return Val((after: pkg_bytes_text(raw, index + 1, raw.len()), before: pkg_bytes_text(raw, 0, index)))
             else -> {}
         }
     }
@@ -418,7 +418,7 @@ fn pkg_overlay_read_ident(raw: [U8], at: Int) -> (ident: String, end: Int)? Neve
     loop end < raw.len() && (pkg_bytes_is_word(Int.from_u8(raw[end])) || Int.from_u8(raw[end]) == 45) {
         end += 1
     }
-    Val((ident: pkg_bytes_text(raw, at, end), end: end))
+    Val((end: end, ident: pkg_bytes_text(raw, at, end)))
 }
 
 // Trim, drop trailing commas, and strip one pair of surrounding quotes.

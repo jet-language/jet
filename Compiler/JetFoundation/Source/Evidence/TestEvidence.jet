@@ -42,8 +42,8 @@ fn test_evidence_error_text(error: TestEvidenceError) -> String Never! {
 
 fn test_evidence_report_parts(error: TestEvidenceError) -> (detail: String, message: String) Never! {
     text :: test_evidence_error_text(error)
-    if !text.contains("\n") -> return (message: text, detail: "")
-    (message: text.before("\n"), detail: text.after("\n"))
+    if !text.contains("\n") -> return (detail: "", message: text)
+    (detail: text.after("\n"), message: text.before("\n"))
 }
 
 fn validate_test_report(report: EvidenceReport) TestEvidenceError! {

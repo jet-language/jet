@@ -371,10 +371,10 @@ struct ProviderFacts {
         loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) {
             if !self.facts.has_key(key) -> return Err(ProviderFactsError{message: "provider provenance `{key}` has no fact"})
         }
-        identities :: [(key: String, expected: String)]{
-            (key: "provider.name", expected: self.provider),
-            (key: "provider.target", expected: self.target),
-            (key: "provider.selector", expected: self.selector.raw)
+        identities :: [(expected: String, key: String)]{
+            (expected: self.provider, key: "provider.name"),
+            (expected: self.target, key: "provider.target"),
+            (expected: self.selector.raw, key: "provider.selector")
         }
         loop identity in identities {
             if identity.expected != "" && self.text_fact(identity.key) != Val(identity.expected) {
@@ -384,10 +384,10 @@ struct ProviderFacts {
         if self.selector.raw == "" && self.facts.has_key("provider.selector") {
             return Err(ProviderFactsError{message: "provider selector fact is present without a selector"})
         }
-        fields :: [(key: String, expected: String)]{
-            (key: "provider.resolved_source", expected: self.resolved_source),
-            (key: "profile.name", expected: self.profile),
-            (key: "profile.provenance", expected: self.profile_provenance)
+        fields :: [(expected: String, key: String)]{
+            (expected: self.resolved_source, key: "provider.resolved_source"),
+            (expected: self.profile, key: "profile.name"),
+            (expected: self.profile_provenance, key: "profile.provenance")
         }
         loop field in fields {
             if field.expected != "" && self.text_fact(field.key) != Val(field.expected) {
@@ -566,9 +566,9 @@ fn pkg_provider_split_reference_selector(reference: String) -> (root: String, se
 
 // `target@authority`; a leading or trailing `@` names no authority.
 fn pkg_provider_split_reference_authority(reference: String) -> (target: String, provider: String) Never! {
-    halves :: reference.cut_last("@") ?? return (target: reference, provider: "")
-    if halves.before == "" || halves.after == "" -> return (target: reference, provider: "")
-    (target: halves.before, provider: halves.after)
+    halves :: reference.cut_last("@") ?? return (provider: "", target: reference)
+    if halves.before == "" || halves.after == "" -> return (provider: "", target: reference)
+    (provider: halves.after, target: halves.before)
 }
 
 // The external ecosystems whose references must name their provider and an

@@ -3507,6 +3507,7 @@ fn jet_codegen_bind_trait_impl_forms(functions: &[MIRFunction], impls: [MIRImplD
 }
 
 fn jet_codegen_sort_core_owners(rows: &[MIRCoreOwner]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRCoreOwner, right: MIRCoreOwner) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
@@ -4459,14 +4460,17 @@ fn jet_codegen_foreign_sort_strings(rows: &[String]) Never! {
 }
 
 fn jet_codegen_foreign_sort_rows(rows: &[MIRForeign]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRForeign, right: MIRForeign) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_foreign_sort_links(rows: &[MIRLinkUnit]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRLinkUnit, right: MIRLinkUnit) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.crate_spec <=> right.crate_spec)
 }
 
 fn jet_codegen_foreign_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRHandleLifecycle, right: MIRHandleLifecycle) -> left.id.value <=> right.id.value)
 }
 

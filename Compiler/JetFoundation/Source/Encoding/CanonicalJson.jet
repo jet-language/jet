@@ -30,6 +30,7 @@ fn canonical_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON Canonica
         seen[field.key] = true
     }
     sorted := fields
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
     Ok(CanonicalJSON.Object(sorted))
 }

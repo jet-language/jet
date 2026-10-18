@@ -176,7 +176,7 @@ fn fact_text(source: [U8], facts: [Int], index: Int) -> String Never! {
 
 fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) Never! {
     open :: previous_code_index(facts, index)
-    if open < 0 || kind_at(facts, open) != K_LBRACE -> return (raw_head: false, byte_head: false)
+    if open < 0 || kind_at(facts, open) != K_LBRACE -> return (byte_head: false, raw_head: false)
     before_open :: previous_code_index(facts, open)
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
     // D-BOUND-RAW1=A: a typed head is a name whose first character is an
@@ -207,7 +207,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
             }
         }
     }
-    (raw_head: raw, byte_head: byte)
+    (byte_head: byte, raw_head: raw)
 }
 
 fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
@@ -1072,7 +1072,7 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, co
             .Val(respelled) -> name_intern(&tables.names, respelled)
             .None -> text
         }
-        return (decoded: decoded, literal: -1, keep: true)
+        return (decoded: decoded, keep: true, literal: -1)
     }
     is_numeric_kind :: if kind == {
         K_INT -> true
@@ -1082,18 +1082,18 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, co
     }
     if is_numeric_kind {
         number :: numeric_payload(kind, source, start, end, &tables, &diagnostics)
-        return (decoded: number.decoded, literal: number.literal, keep: true)
+        return (decoded: number.decoded, keep: true, literal: number.literal)
     }
     if kind == K_STR {
         decoded :: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-        if !decoded.valid -> return (decoded: name_empty(), literal: -1, keep: false)
-        return (decoded: name_intern(&tables.names, decoded.decoded), literal: literal_row(&tables, text_literal(decoded.interpolations, decoded.parts)), keep: true)
+        if !decoded.valid -> return (decoded: name_empty(), keep: false, literal: -1)
+        return (decoded: name_intern(&tables.names, decoded.decoded), keep: true, literal: literal_row(&tables, text_literal(decoded.interpolations, decoded.parts)))
     }
     if kind == K_RAW_STR {
         raw :: decode_raw_string(slice_text(source, start, end), start, &tables)
-        return (decoded: name_intern(&tables.names, raw.decoded), literal: literal_row(&tables, text_literal(0, raw.parts)), keep: true)
+        return (decoded: name_intern(&tables.names, raw.decoded), keep: true, literal: literal_row(&tables, text_literal(0, raw.parts)))
     }
-    if kind == K_CHAR -> return (decoded: name_intern(&tables.names, decode_char(slice_text(source, start, end), start, &diagnostics)), literal: -1, keep: true)
+    if kind == K_CHAR -> return (decoded: name_intern(&tables.names, decode_char(slice_text(source, start, end), start, &diagnostics)), keep: true, literal: -1)
     // D-FENCE2=A: the retired `@[` / `]@` digraphs lex as fence tokens so
     // parsing recovers, and each one teaches its `<:` / `:>` respelling.
     if (kind == K_FENCE_OPEN && byte_at(source, start) == 64) || (kind == K_FENCE_CLOSE && byte_at(source, start) == 93) {
@@ -1108,7 +1108,7 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, co
     if kind == K_BLOCK_COMMENT && scan_block_comment_end(source, start) < 0 {
         add_diagnostic(&diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
     }
-    (decoded: text, literal: -1, keep: true)
+    (decoded: text, keep: true, literal: -1)
 }
 
 fn lexed_from(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {

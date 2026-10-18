@@ -733,11 +733,11 @@ fn jet_codegen_byte_buffer_native_int_operand(method: String) -> Bool Never! {
 fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, receiver: TExpr, mutating: Bool) -> (value: MIRValueID, place: MIRPlaceID?) {
     if !mutating {
         // An owned iterator receiver is consumed by the builtin.
-        if jet_codegen_builtin_iter_receiver(receiver.ty) -> return (value: jet_codegen_lower_consuming_value(&builder, program, receiver), place: None)
-        return (value: jet_codegen_lower_expr(&builder, program, receiver), place: None)
+        if jet_codegen_builtin_iter_receiver(receiver.ty) -> return (place: None, value: jet_codegen_lower_consuming_value(&builder, program, receiver))
+        return (place: None, value: jet_codegen_lower_expr(&builder, program, receiver))
     }
     place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Write)
-    if place == None -> return (value: jet_codegen_lower_expr(&builder, program, receiver), place: None)
+    if place == None -> return (place: None, value: jet_codegen_lower_expr(&builder, program, receiver))
     collection_value := false
     if receiver.kind == {
         .Index(_, _, _, _, _, _) | .Field(_, _) -> {
@@ -751,8 +751,8 @@ fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, program: JetC
         }
         else -> {}
     }
-    if collection_value -> return (value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.ReadPlace{place: place ?? panic("checked indexed collection receiver place disappeared")}), place: Val(place ?? panic("checked indexed collection receiver place disappeared")))
-    (value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.AddressOf{place: place ?? panic("checked mutating builtin receiver place disappeared"), access: MIRAccess.Write}), place: Val(place ?? panic("checked mutating builtin receiver place disappeared")))
+    if collection_value -> return (place: Val(place ?? panic("checked indexed collection receiver place disappeared")), value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.ReadPlace{place: place ?? panic("checked indexed collection receiver place disappeared")}))
+    (place: Val(place ?? panic("checked mutating builtin receiver place disappeared")), value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.AddressOf{place: place ?? panic("checked mutating builtin receiver place disappeared"), access: MIRAccess.Write}))
 }
 
 fn jet_codegen_builtin_native_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, source: Type, span: Span) -> MIRValueID Never! {

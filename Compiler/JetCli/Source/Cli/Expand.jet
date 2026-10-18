@@ -46,6 +46,7 @@ fn jet_cli_expand_source(modules: [JetDriverDocModule], path: String) -> String?
 }
 
 fn jet_cli_expand_sort_facts(facts: &[JetCLIExpandFact]) Never! {
+    facts = loop fresh_item in facts -> fresh_item
     &facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> (left.source <=> right.source).then(left.offset <=> right.offset).then(left.name <=> right.name))
 }
 

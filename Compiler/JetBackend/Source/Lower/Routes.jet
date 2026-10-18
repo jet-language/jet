@@ -534,7 +534,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // declarations); None for the exact Int and every other type.
 fn lower_route_fixed_int(p: MIRProgram, ty: MIRType) -> (signed: Bool, bits: Int)? {
     if ty.kind == {
-        .IntN(signed, bits) -> return if bits <= 64 -> Val((signed: signed, bits: bits)) else -> None
+        .IntN(signed, bits) -> return if bits <= 64 -> Val((bits: bits, signed: signed)) else -> None
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_route_fixed_int(p, inner)
         else -> {}
     }

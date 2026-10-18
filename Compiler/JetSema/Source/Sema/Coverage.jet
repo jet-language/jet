@@ -57,12 +57,12 @@ fn sema_coverage_shape_keys(shape: TPatternShape, keys: &[String], ranges: &[Sem
 // S31: the head key and single nested payload shape of a partial arm.
 fn sema_coverage_nested_part(shape: TPatternShape) -> (key: String, inner: TPatternShape)? {
     if shape == {
-        .Present(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Val", inner: nested.shape))
-        .Ok(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Ok", inner: nested.shape))
-        .Err(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Err", inner: nested.shape))
+        .Present(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, key: "Val"))
+        .Ok(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, key: "Ok"))
+        .Err(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, key: "Err"))
         .Variant(variant, bindings, _, _) -> {
             if bindings.len() == 1 {
-                if bindings[0] == .Nested(nested) -> return Val((key: variant, inner: nested.shape))
+                if bindings[0] == .Nested(nested) -> return Val((inner: nested.shape, key: variant))
             }
         }
         else -> {}

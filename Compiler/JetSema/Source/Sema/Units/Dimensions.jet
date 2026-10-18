@@ -21,12 +21,12 @@ struct SemaUnitDimensionVisibility {
     aliases: [String:Int]
 }
 fn sema_units_dimension_target(visible: SemaUnitDimensionVisibility, qualifier: String?, name: String) -> (target: Int?, ambiguous: Bool) Never! {
-    if qualifier == .Val(alias) -> return (target: visible.qualified.get("{alias}|{name}"), ambiguous: false)
-    if visible.local.get(name) == .Val(index) -> return (target: Val(index), ambiguous: false)
+    if qualifier == .Val(alias) -> return (ambiguous: false, target: visible.qualified.get("{alias}|{name}"))
+    if visible.local.get(name) == .Val(index) -> return (ambiguous: false, target: Val(index))
     candidates :: visible.imported.get(name) ?? [Int]{}
-    if candidates.len() > 1 -> return (target: None, ambiguous: true)
-    if candidates.len() == 1 -> return (target: Val(candidates[0]), ambiguous: false)
-    (target: Int?{None}, ambiguous: false)
+    if candidates.len() > 1 -> return (ambiguous: true, target: None)
+    if candidates.len() == 1 -> return (ambiguous: false, target: Val(candidates[0]))
+    (ambiguous: false, target: Int?{None})
 }
 fn sema_units_dimension_lookup(visible: SemaUnitDimensionVisibility, known: [Int:Dimension], qualifier: String?, name: String, ambiguity_only: Bool) -> SemaUnitDimensionLookup Never! {
     target :: sema_units_dimension_target(visible, qualifier, name)
@@ -124,7 +124,7 @@ fn sema_units_dimension_reads(expression: Expr, visible: SemaUnitDimensionVisibi
 // identity joined with the package-root-relative module path. Never derive
 // package identity from cwd, display labels or root text.
 fn sema_units_owner(input: SemaRegistrationModuleInput) -> (package: String, module_identity: String) Never! {
-    (package: input.package_identity, module_identity: "{input.package_identity}::{input.module_path}")
+    (module_identity: "{input.package_identity}::{input.module_path}", package: input.package_identity)
 }
 fn sema_units_resolve_standard(prelude: &[UnitFamilyDef]) Never! {
     local := [String:Int]{}

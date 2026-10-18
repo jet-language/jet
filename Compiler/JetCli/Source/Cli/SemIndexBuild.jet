@@ -2080,6 +2080,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
     definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)
     derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := ^db.arithmetic
+    arithmetic = loop fresh_item in arithmetic -> fresh_item
     &arithmetic.sort_by((left: JetCLISemArithmetic, right: JetCLISemArithmetic) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))
     JetCLISemIndex{
         definitions: definitions,

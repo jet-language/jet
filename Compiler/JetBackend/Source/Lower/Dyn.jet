@@ -339,7 +339,7 @@ fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         lower_start(&f, other, [LIRValueID]{})
     }
     // The remaining variants name their DynKind.rs kind in the stop detail.
-    unsized :: [(name: String, kind: String)]{(name: "Null", kind: "null"), (name: "Bool", kind: "Bool"), (name: "Int", kind: "Int"), (name: "Float", kind: "Float"), (name: "Number", kind: "number")}
+    unsized :: [(kind: String, name: String)]{(kind: "null", name: "Null"), (kind: "Bool", name: "Bool"), (kind: "Int", name: "Int"), (kind: "Float", name: "Float"), (kind: "number", name: "Number")}
     loop entry in unsized {
         found :: lower_variant(definition, entry.name) ?? {
             lower_fail(&m, &f, "Dyn.len has no {entry.name} variant")

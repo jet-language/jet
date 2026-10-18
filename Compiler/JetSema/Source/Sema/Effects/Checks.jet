@@ -2087,6 +2087,7 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         sites := [String:MIRSharedLifetime]{}
         site_diagnostics := [Diagnostic]{}
         facts := sema_effect_shared_facts(modules[inputs[module_index].module_index].call_facts)
+        facts = loop fresh_item in facts -> fresh_item
         &facts.sort_by((left: SemaCallSiteFact, right: SemaCallSiteFact) -> (left.shared_source <=> right.shared_source).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end).then(left.shared_member <=> right.shared_member))
         loop fact in facts {
             lifetime :: fact.shared_lifetime ?? next

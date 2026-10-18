@@ -2422,15 +2422,15 @@ fn sema_checked_item_span(item: Item) -> Span Never! {
 fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], active: &[String:Bool]) -> (reaches: Bool, cut: Bool) Never! {
     if ty == {
         .Named(_) -> {
-            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (reaches: false, cut: false)
+            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (cut: false, reaches: false)
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
             // Two single-level matches read the declaration in place; a nested
             // `.SourceAST(.Struct(definition))` pattern clones the whole Item.
             if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                 if item == .Struct(definition) {
-                    if key == owner -> return (reaches: true, cut: false)
-                    if memo.get(key) == .Val(known) -> return (reaches: known, cut: false)
-                    if active.get(key) == (Val(true)) -> return (reaches: false, cut: true)
+                    if key == owner -> return (cut: false, reaches: true)
+                    if memo.get(key) == .Val(known) -> return (cut: false, reaches: known)
+                    if active.get(key) == (Val(true)) -> return (cut: true, reaches: false)
                     active[key] = true
                     reaches := false
                     cut := false
@@ -2448,38 +2448,38 @@ fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, call
                     // A negative reached through an active cycle is provisional:
                     // a later sibling may reach the owner. Never memoize that cut.
                     if reaches || !cut -> memo[key] = reaches
-                    return (reaches: reaches, cut: cut)
+                    return (cut: cut, reaches: reaches)
                 }
             }
-            (reaches: false, cut: false)
+            (cut: false, reaches: false)
         }
         .Shared(inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
         .Map(first, _, second) | .Result(first, second) -> {
             left :: sema_checked_shared_reaches(graph, owner, caller, first, &memo, &active)
             if left.reaches -> return left
             right :: sema_checked_shared_reaches(graph, owner, caller, second, &memo, &active)
-            (reaches: right.reaches, cut: left.cut || right.cut)
+            (cut: left.cut || right.cut, reaches: right.reaches)
         }
         .Tuple(fields) -> {
             cut := false
             loop field in fields {
                 result :: sema_checked_shared_reaches(graph, owner, caller, field.ty, &memo, &active)
                 cut = cut || result.cut
-                if result.reaches -> return (reaches: true, cut: cut)
+                if result.reaches -> return (cut: cut, reaches: true)
             }
-            (reaches: false, cut: cut)
+            (cut: cut, reaches: false)
         }
         .Union(members) | .Apply(_, members) -> {
-            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (reaches: false, cut: false)
+            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (cut: false, reaches: false)
             cut := false
             loop member in members {
                 result :: sema_checked_shared_reaches(graph, owner, caller, member, &memo, &active)
                 cut = cut || result.cut
-                if result.reaches -> return (reaches: true, cut: cut)
+                if result.reaches -> return (cut: cut, reaches: true)
             }
-            (reaches: false, cut: cut)
+            (cut: cut, reaches: false)
         }
-        else -> (reaches: false, cut: false)
+        else -> (cut: false, reaches: false)
     }
 }
 

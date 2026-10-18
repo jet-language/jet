@@ -56,6 +56,7 @@ fn sema_unsafe_inspect(modules: [SemaGateModule], gates: GateSet) -> UnsafeInspe
         }
     }
     sema_unsafe_package_surface(modules, &result)
+    result.gates = loop fresh_item in result.gates -> fresh_item
     &result.gates.sort_by((a: UnsafeGateInspection, b: UnsafeGateInspection) -> (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end))
     result
 }

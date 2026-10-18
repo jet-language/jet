@@ -33,7 +33,7 @@ fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphRes
     callables := [SemaCostCallable]{}
     positions := [String:Int]{}
     module_rows := [String:[Int]]{}
-    declarations := [(module_identity: String, start: Int, end: Int, name: String):String]{}
+    declarations := [(end: Int, module_identity: String, name: String, start: Int):String]{}
     loop module_row_index in 0..<registration.modules.len() {
         first :: callables.len()
         loop function_index in 0..<registration.modules[module_row_index].functions.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].functions[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
@@ -51,7 +51,7 @@ fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphRes
         rows := [Int]{}
         loop index in first..<callables.len() {
             positions[callables[index].key] = index
-            declarations[(module_identity: callables[index].module_identity, start: callables[index].span.start, end: callables[index].span.end, name: callables[index].name)] = callables[index].key
+            declarations[(end: callables[index].span.end, module_identity: callables[index].module_identity, name: callables[index].name, start: callables[index].span.start)] = callables[index].key
             &rows.push(index)
         }
         &rows.sort_by((left, right) -> (callables[left].span.start <=> callables[right].span.start).then(left <=> right))
@@ -76,7 +76,7 @@ fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphRes
             if function.generic_params.len() > 0 -> next
             covered[function.key] = true
             // Specializations retain the source declaration's module and span.
-            if declarations.get((module_identity: function.module_identity, start: function.source_span.start, end: function.source_span.end, name: function.name)) == .Val(key) -> covered[key] = true
+            if declarations.get((end: function.source_span.end, module_identity: function.module_identity, name: function.name, start: function.source_span.start)) == .Val(key) -> covered[key] = true
         }
         loop call in module_row.call_facts {
             if call.callee == .Val(target) -> sema_cost_edge(&edges, call.caller_key, target.key)

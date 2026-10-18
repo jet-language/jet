@@ -67,6 +67,7 @@ fn jet_cli_record_snapshot_validate(entries: [JetCLIRecordIndexEntry], budget: U
         }
     }
     ordered := entries
+    ordered = loop fresh_item in ordered -> fresh_item
     &ordered.sort_by(jet_cli_record_entry_order)
     state := [String:Int]{}
     loop entry in ordered {

@@ -349,11 +349,11 @@ fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvironm
     if target == {
         .Field(base, field, span) -> {
             projected :: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
-            return Val((handle: projected.handle, target: LValue.Field{base: projected.place, field: field, span: span}, span: span))
+            return Val((handle: projected.handle, span: span, target: LValue.Field{base: projected.place, field: field, span: span}))
         }
         .Index(base, index, span, kind) -> {
             projected :: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
-            return Val((handle: projected.handle, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}, span: span))
+            return Val((handle: projected.handle, span: span, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}))
         }
         else -> { return None }
     }

@@ -255,6 +255,7 @@ fn mir_pass_loop_header_seen(rows: [MIRPassLoopShape], header: MIRBlockID) -> Bo
 }
 
 fn mir_pass_sort_loop_shapes(rows: &[MIRPassLoopShape]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRPassLoopShape, right: MIRPassLoopShape) -> left.header.value <=> right.header.value)
 }
 

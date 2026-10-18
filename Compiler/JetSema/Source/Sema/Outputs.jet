@@ -105,7 +105,7 @@ fn sema_output_string(value: Expr) -> String? Never! {
 
 fn sema_output_path(value: Expr) -> (root: String, root_span: Span, members: [ExprMember])? Never! {
     if value == {
-        .Ident(name, span) -> Val((root: name.copy(), root_span: span, members: [ExprMember]{}))
+        .Ident(name, span) -> Val((members: [ExprMember]{}, root: name.copy(), root_span: span))
         .Field(base, member, span) -> {
             path := sema_output_path(base) ?? return None
             &path.members.push(ExprMember{name: member.copy(), span: span})

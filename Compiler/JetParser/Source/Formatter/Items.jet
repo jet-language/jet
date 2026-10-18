@@ -596,6 +596,7 @@ fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
     }
     // Rust `sort_unstable_by_key(start)`.
     sorted := edits
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by((left: JetFmtSourceEdit, right: JetFmtSourceEdit) -> left.start <=> right.start)
     out := ""
     cursor := span.start
