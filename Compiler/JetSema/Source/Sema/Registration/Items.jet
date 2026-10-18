@@ -641,6 +641,13 @@ struct SemaRegistrationGraph {
     impl_trait_slots: [String:Int]{[String:Int]{}}
     impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
     impl_traits_indexed: Bool{false}
+    // Spelled trait name (an impl's `trait_name`, and its registered trait
+    // symbol's name) -> the impl rows under that name, in module/row order,
+    // built with the trait index above. The copy-facts and close-owner
+    // queries match impls by trait name (sema_copy_nominal_has_impl), so
+    // they read one name's rows instead of every impl of the graph.
+    impl_trait_name_slots: [String:Int]{[String:Int]{}}
+    impl_trait_name_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
     // Opaque impl type name -> the Core source modules that own its impls
     // (`sema_registration_source_owns_impl`), in module order. Built once with
     // the graph, so method lookup reads only the owning modules instead of
@@ -1220,10 +1227,23 @@ fn sema_registration_keyed_callable_push(rows: &[SemaRegistrationKeyedCallable],
 fn sema_registration_index_impl_traits(graph: &SemaRegistrationGraph) {
     graph.impl_trait_slots = [String:Int]{}
     graph.impl_trait_buckets = [[SemaRegistrationRowRef]]{}
+    graph.impl_trait_name_slots = [String:Int]{}
+    graph.impl_trait_name_buckets = [[SemaRegistrationRowRef]]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
-            trait_key :: sema_type_graph_impl_trait_key(graph, graph.modules[module_index].impls[row]) ?? next
             reference :: SemaRegistrationRowRef{module_index: module_index, row: row}
+            // By spelled name: the declared trait name and the registered
+            // trait symbol's name, once when both spell the same name. The
+            // names are copied out first: the push edits the graph.
+            declared_name := String?{None}
+            if graph.modules[module_index].impls[row].trait_name == .Val(declared) -> declared_name = Val(declared.copy())
+            symbol_name := String?{None}
+            if graph.modules[module_index].impls[row].trait_symbol == .Val(trait_symbol) -> symbol_name = Val(trait_symbol.name.copy())
+            if declared_name == .Val(name) -> sema_registration_impl_trait_name_push(&graph, name, reference)
+            if symbol_name == .Val(name) {
+                if declared_name != Val((name)) -> sema_registration_impl_trait_name_push(&graph, name, reference)
+            }
+            trait_key :: sema_type_graph_impl_trait_key(graph, graph.modules[module_index].impls[row]) ?? next
             if graph.impl_trait_slots.get(trait_key) == .Val(slot) {
                 &graph.impl_trait_buckets[slot].push(reference)
             } else {
@@ -1233,6 +1253,15 @@ fn sema_registration_index_impl_traits(graph: &SemaRegistrationGraph) {
         }
     }
     graph.impl_traits_indexed = true
+}
+
+fn sema_registration_impl_trait_name_push(graph: &SemaRegistrationGraph, trait_name: String, reference: SemaRegistrationRowRef) Never! {
+    if graph.impl_trait_name_slots.get(trait_name) == .Val(slot) {
+        &graph.impl_trait_name_buckets[slot].push(reference)
+    } else {
+        graph.impl_trait_name_slots[trait_name] = graph.impl_trait_name_buckets.len()
+        &graph.impl_trait_name_buckets.push([SemaRegistrationRowRef]{reference})
+    }
 }
 
 fn sema_registration_named_symbol(module_identity: String, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {

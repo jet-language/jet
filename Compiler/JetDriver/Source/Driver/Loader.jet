@@ -6,6 +6,7 @@ use jet_foundation.[
     CORE_BARE_SOURCE_MODULES,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    CompilerThreads,
     DeriveBodyItem,
     Diagnostic,
     Func,
@@ -28,6 +29,7 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_part_of,
     compiler_threads_partition,
+    compiler_threads_single,
     core_bare_source_module,
     core_module_export,
     core_module_has_member,
@@ -66,6 +68,7 @@ use jet_lexer.[
 ]
 use jet_parser.[
     parse_lexed_with_source,
+    parse_lexed_with_source_threads,
     parser_line_starts,
 ]
 use jet_sema.[
@@ -2784,6 +2787,7 @@ fn jet_driver_collect_core_identifier_demand(tokens: [Token], tables: TokenTable
     }
 }
 
+// One thread; the entry the `Never!` source queries call (no thread spawn).
 fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverParsedUnit {
     carrier :: jet_driver_inline_package(text)
     if carrier.error == .Val(diagnostic) {
@@ -2797,6 +2801,25 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     line_starts :: parser_line_starts(source)
     lines :: line_starts.len() - 1
     parsed :: parse_lexed_with_source(^lexed, source, line_starts)
+    JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
+}
+
+// jet_driver_parse_user_unit on the compiler threads: a large unit's parse
+// splits at item boundaries (parse_lexed_with_source_threads). Fallible like
+// every thread-spawning step of the parse wave.
+fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
+    carrier :: jet_driver_inline_package(text)
+    if carrier.error == .Val(diagnostic) {
+        return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{diagnostic}}, demand: jet_driver_empty_core_identifier_demand()}
+    }
+    source :: if carrier.found -> jet_driver_mask_inline_package(text, carrier).bytes() else -> text.bytes()
+    lexed :: lex(source)
+    demand := jet_driver_empty_core_identifier_demand()
+    if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, true)
+    tokens :: lexed.tokens.len()
+    line_starts :: parser_line_starts(source)
+    lines :: line_starts.len() - 1
+    parsed :: parse_lexed_with_source_threads(^lexed, source, line_starts, threads)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
 }
 
@@ -2859,11 +2882,14 @@ fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
     }
 }
 
-fn jet_driver_parse_one(job: JetDriverParseJob) -> JetDriverParsedUnit {
+// `threads` are the compiler threads a parse may split one unit across
+// (parse_lexed_with_source_threads); a wave that already runs its
+// units on several threads parses each unit on one.
+fn jet_driver_parse_one(job: JetDriverParseJob, threads: CompilerThreads) -> JetDriverParsedUnit {
     if job == {
-        .Source(text) -> jet_driver_parse_user_unit(text, true)
-        .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true)
-        .Core(text, module_name, owned_members, runtime) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, false)
+        .Source(text) -> jet_driver_parse_user_unit_threads(text, true, threads)
+        .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
+        .Core(text, module_name, owned_members, runtime) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, false, threads)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
@@ -2872,7 +2898,7 @@ fn jet_driver_parse_one(job: JetDriverParseJob) -> JetDriverParsedUnit {
 // that have crossed the Core cutover: private helpers and declarations stay,
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output.
-fn jet_driver_parse_core_source(text: String, module_name: String, owned_members: [String], runtime: Bool, runtime_entry: Bool) -> JetDriverParsedUnit {
+fn jet_driver_parse_core_source(text: String, module_name: String, owned_members: [String], runtime: Bool, runtime_entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
     source :: jet_driver_mask_inline_package(text, jet_driver_inline_package(text)).bytes()
     lexed :: lex_generated(source)
     demand := jet_driver_empty_core_identifier_demand()
@@ -2880,7 +2906,7 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     tokens :: lexed.tokens.len()
     line_starts :: parser_line_starts(source)
     lines :: line_starts.len() - 1
-    parsed := parse_lexed_with_source(^lexed, source, line_starts)
+    parsed := parse_lexed_with_source_threads(^lexed, source, line_starts, threads)
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
@@ -2974,14 +3000,22 @@ fn jet_driver_core_private_unit(module_name: String, span: Span) -> Diagnostic? 
 }
 
 // One parse thread's jobs, held last-first; parsed and returned first-first.
-fn jet_driver_parse_part(jobs: [JetDriverParseJob]) -> [JetDriverParsedUnit] {
+// `threads` is the budget each unit's parse may split across: the calling
+// thread's single part gets the compiler threads; a spawned part (a wave of
+// several parts) parses every unit on its own thread, so no spawned thread
+// spawns.
+fn jet_driver_parse_part(jobs: [JetDriverParseJob], threads: CompilerThreads) -> [JetDriverParsedUnit] {
     results := [JetDriverParsedUnit]{}
     index := jobs.len()
     loop index > 0 {
         index -= 1
-        &results.push(jet_driver_parse_one(jobs[index]))
+        &results.push(jet_driver_parse_one(jobs[index], threads))
     }
     results
+}
+
+fn jet_driver_parse_part_single(jobs: [JetDriverParseJob]) -> [JetDriverParsedUnit] {
+    jet_driver_parse_part(jobs, compiler_threads_single())
 }
 
 // Parses the parts popped from `parts` (first part on top), one task per
@@ -2990,10 +3024,10 @@ fn jet_driver_parse_part(jobs: [JetDriverParseJob]) -> [JetDriverParsedUnit] {
 fn jet_driver_parse_parts(parts: ^[[JetDriverParseJob]]) -> [[JetDriverParsedUnit]] {
     remaining := ^parts
     jobs :: &remaining.pop() ?? return [[JetDriverParsedUnit]]{}
-    if remaining.len() == 0 -> return [[JetDriverParsedUnit]]{jet_driver_parse_part(jobs)}
+    if remaining.len() == 0 -> return [[JetDriverParsedUnit]]{jet_driver_parse_part_single(jobs)}
     parsed := [[JetDriverParsedUnit]]{}
     task.group parse_threads {
-        first :: task jet_driver_parse_part(jobs)
+        first :: task jet_driver_parse_part_single(jobs)
         parsed = jet_driver_parse_parts(^remaining)
         &parsed.push(^^first.join() ?? panic(compiler_threads_failure_text(err)))
     }
@@ -3073,7 +3107,9 @@ fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDri
         }
         &parts.reverse()
     }
-    parsed := jet_driver_parse_parts(^parts)
+    // One part: it parses on this thread, and each unit may split its own
+    // parse across the compiler threads.
+    parsed := if workers <= 1 -> [[JetDriverParsedUnit]]{jet_driver_parse_part(parts[0], request.compiler_threads)} else -> jet_driver_parse_parts(^parts)
     results := [JetDriverParsedUnit]{}
     loop {
         done :: &parsed.pop() ?? break

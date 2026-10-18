@@ -132,10 +132,19 @@ fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProject
     Val(path)
 }
 
-// Whether `ty` reaches a Close owner, once per type for the whole module.
-// A fresh lower_contains_close walk answers exactly that reachability (its
-// `seen` set only cuts cycles), so the cached answer is the walk's own.
+// Whether `ty` reaches a Close owner, once per type for the whole module
+// (by the checked identity when the type has one, else by its identity
+// key, the same partition mir_type_identity_key spells). A fresh
+// lower_contains_close walk answers exactly that reachability (its `seen`
+// set only cuts cycles), so the cached answer is the walk's own.
 fn lower_type_contains_close(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Bool Never! {
+    if ty.identity == .Val(identity) {
+        if m.contains_close_ids.get(identity.value) == .Val(known) -> return known
+        seen := [String:Bool]{}
+        found :: lower_contains_close(p, m, ty, &seen)
+        &m.contains_close_ids.add(identity.value, found).drop("checked absent above")
+        return found
+    }
     key :: mir_type_identity_key(ty)
     if m.contains_close.get(key) == .Val(known) -> return known
     seen := [String:Bool]{}

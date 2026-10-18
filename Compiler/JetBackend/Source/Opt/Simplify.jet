@@ -370,13 +370,9 @@ fn opt_fold_sweep(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
     changed
 }
 
-// Block id -> index in `function.blocks`.
+// Block id -> index in `function.blocks` (lir_block_rows).
 fn opt_block_rows(function: LIRFunction) -> [Int:Int] Never! {
-    rows := [Int:Int]{}
-    loop (index, block) in function.blocks {
-        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("block ids are unique (LIR lint)")
-    }
-    rows
+    lir_block_rows(function)
 }
 
 // Keep the blocks reachable from the entry, in their order.

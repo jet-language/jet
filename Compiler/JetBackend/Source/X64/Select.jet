@@ -337,11 +337,7 @@ fn x64_condition(condition: LIRCondition) -> X64Cond Never! {
 // The first row of each block ID (lir_block_index's answer), built once per
 // function so every edge resolves without a block scan.
 fn x64_block_rows(function: LIRFunction) -> [Int:Int] Never! {
-    rows := [Int:Int]{}
-    loop (index, block) in function.blocks {
-        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("checked absent above")
-    }
-    rows
+    lir_block_rows(function)
 }
 
 fn x64_block_row(rows: [Int:Int], id: LIRBlockID) -> Int Never! {

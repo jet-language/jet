@@ -6,7 +6,7 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
 
 #Test("runtime parse jobs retain all functions but only exact entries retain controls") {
     source :: "fn decode() -> Int Never! {{ 1 }}\nfn helper() -> Int Never! {{ 2 }}\n#Test(\"control\") {{ assert(true) }}\n"
-    runtime :: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.args", owned_members: [String]{}, runtime: true})
+    runtime :: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.args", owned_members: [String]{}, runtime: true}, compiler_threads_single())
     assert(!jet_driver_has_errors(runtime.parsed.diagnostics))
     functions := [String]{}
     controls := 0
@@ -19,14 +19,14 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
     }
     assert_eq(functions, [String]{"decode", "helper"})
     assert_eq(controls, 0)
-    ordinary :: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.args", owned_members: [String]{}, runtime: false})
+    ordinary :: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.args", owned_members: [String]{}, runtime: false}, compiler_threads_single())
     assert(!jet_driver_has_errors(ordinary.parsed.diagnostics))
     ordinary_functions := [String]{}
     loop item in ordinary.parsed.program.items {
         if item == .Func(value) -> &ordinary_functions.push(value.name)
     }
     assert_eq(ordinary_functions, [String]{"helper"})
-    entry :: jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: source})
+    entry :: jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: source}, compiler_threads_single())
     assert(!jet_driver_has_errors(entry.parsed.diagnostics))
     entry_controls := 0
     loop item in entry.parsed.program.items {
@@ -45,7 +45,7 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.x"), Val(1))
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.word"), Val(0))
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets_extra.word"), None)
-    parsed := jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: "use core.text.runtime.assets.x.word as read\nuse core.text.runtime.assets.x\nfn run() {{}}\n"})
+    parsed := jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: "use core.text.runtime.assets.x.word as read\nuse core.text.runtime.assets.x\nfn run() {{}}\n"}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
     jet_driver_core_runtime_member_imports(&parsed.parsed.program, rows)
     assert_eq(parsed.parsed.program.imports.len(), 2)

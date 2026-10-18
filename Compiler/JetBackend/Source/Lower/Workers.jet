@@ -58,6 +58,8 @@ struct LowerMarks {
     fixups: Int
     extents: Int
     keys: Int
+    sites: Int
+    exports: Int
 }
 
 // A keyed registration that creates other rows while it registers: a debug
@@ -83,7 +85,7 @@ struct LowerFunctionKey {
 }
 
 fn lower_marks(m: LowerModule) -> LowerMarks Never! {
-    LowerMarks{signatures: m.signatures.len(), data: m.data.len(), debug_types: m.debug_types.len(), debug_files: m.debug_files.len(), glue: m.glue.len(), issues: m.issues.len(), fixups: m.static_fixups.len(), extents: m.extents.len(), keys: m.function_keys.len()}
+    LowerMarks{signatures: m.signatures.len(), data: m.data.len(), debug_types: m.debug_types.len(), debug_files: m.debug_files.len(), glue: m.glue.len(), issues: m.issues.len(), fixups: m.static_fixups.len(), extents: m.extents.len(), keys: m.function_keys.len(), sites: m.shared_sites.len(), exports: m.export_rows.len()}
 }
 
 // Records that the registration of `key`, begun at `start`, created every
@@ -136,11 +138,18 @@ struct LowerWorkersInputs {
     programs: [MIRProgram]
     functions: [LowerPreparedFunction]
     instances: [MIRFunction]
-    // The module after the signature pre-registration, which every thread
-    // copies, and which the merge replays every part into.
+    // The module every thread copies (after the signature pre-registration
+    // for bodies; as it stands at the wave's start for glue), and which the
+    // merge replays every part into.
     modules: [LowerModule]
     // The preparation's failed concrete functions.
     failed: [U64:Bool]
+    // A glue wave (lower_workers_glue): the rows of the module's glue list
+    // the parts lower, in order, instead of the inventory; `native_pack`
+    // rewrites each lowered glue function's runtime calls on its thread.
+    glue_wave: Bool
+    glue: [Int]
+    native_pack: Bool
 }
 
 // One thread's module (none until its first part) and failed functions.
@@ -175,7 +184,7 @@ fn lower_workers_lower(program: ^MIRProgram, m: ^LowerModule, functions: ^[Lower
     if count < 1 -> count = 1
     bounds :: compiler_threads_partition(weights, count)
     bases :: lower_marks(m)
-    inputs :: shared LowerWorkersInputs{programs: [MIRProgram]{^program}, functions: ^functions, instances: ^instances, modules: [LowerModule]{^m}, failed: ^failed}
+    inputs :: shared LowerWorkersInputs{programs: [MIRProgram]{^program}, functions: ^functions, instances: ^instances, modules: [LowerModule]{^m}, failed: ^failed, glue_wave: false, glue: [Int]{}, native_pack: false}
     parts := [Shared<LowerWorkersPart>]{}
     loop part in 0..<count {
         row :: shared LowerWorkersPart{position: bounds[part], last: bounds[part + 1], worker: -1, start: bases, end: bases, functions: [LIRFunction]{}}
@@ -251,6 +260,7 @@ fn lower_workers_part_run(inputs: Shared<LowerWorkersInputs>, worker: Shared<Low
     permit := part.guard_edit()
     if held.value.modules.len() == 0 -> lower_workers_open(read.value.modules[0], read.value.failed, &held.value)
     // Passed straight through: a local binding of the guarded program would copy it.
+    if read.value.glue_wave -> return lower_workers_glue_rows(read.value.programs[0], read.value.modules[0], read.value.glue, read.value.native_pack, &held.value, slot, &permit.value)
     lower_workers_rows(read.value.programs[0], read.value.functions, read.value.instances, &held.value, slot, &permit.value)
 }
 
@@ -281,6 +291,128 @@ fn lower_workers_rows(program: MIRProgram, functions: [LowerPreparedFunction], i
     }
     part.end = lower_marks(worker.modules[0])
     part.last - first
+}
+
+// Lowers `part`'s glue rows (`wave[position..<last]`, rows of the wave's
+// base module `base`) against module `slot`, as lower_workers_rows lowers
+// bodies: lower_checked_glue_function, then with `native_pack` the runtime
+// call rewrite of the lowered function, as the serial glue loop does.
+fn lower_workers_glue_rows(program: MIRProgram, base: LowerModule, wave: [Int], native_pack: Bool, worker: &LowerWorker, slot: Int, part: &LowerWorkersPart) -> Int Never! {
+    if part.worker < 0 {
+        part.worker = slot
+        part.start = lower_marks(worker.modules[0])
+    }
+    first :: part.position
+    loop part.position < part.last {
+        index :: part.position
+        function :: lower_checked_glue_function(program, &worker.modules[0], base.glue[wave[index]])
+        if native_pack -> lower_native_glue_rewrite(program, &worker.modules[0], function)
+        &part.functions.push(function)
+        part.position = index + 1
+    }
+    part.end = lower_marks(worker.modules[0])
+    part.last - first
+}
+
+// Lowers the glue rows `wave` (rows of `m`'s glue list, in order; no trait
+// dispatcher or barrier row among them, lower_glue_barrier) on `workers`
+// threads: consecutive parts of about equal row counts, each thread lowering
+// its parts against a copy of `m` as it stands now, merged in part order
+// (lower_workers_merge). Returns the merged module and the lowered
+// functions in wave order, in lower_workers_lower's form; the module's glue
+// list then holds, after the wave's rows, every row the wave registered, in
+// the order the serial loop registers them.
+fn lower_workers_glue(program: ^MIRProgram, m: ^LowerModule, wave: [Int], workers: Int, native_pack: Bool) -> LowerKeepGoingLowered {
+    count := workers * LOWER_WORKERS_PARTS_PER_THREAD
+    if count > wave.len() -> count = wave.len()
+    if count < 1 -> count = 1
+    weights := [Int]{}
+    loop _ in wave -> &weights.push(1)
+    bounds :: compiler_threads_partition(weights, count)
+    bases :: lower_marks(m)
+    inputs :: shared LowerWorkersInputs{programs: [MIRProgram]{^program}, functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{}, modules: [LowerModule]{^m}, failed: [U64:Bool]{}, glue_wave: true, glue: wave.copy(), native_pack: native_pack}
+    parts := [Shared<LowerWorkersPart>]{}
+    loop part in 0..<count {
+        row :: shared LowerWorkersPart{position: bounds[part], last: bounds[part + 1], worker: -1, start: bases, end: bases, functions: [LIRFunction]{}}
+        &parts.push(row)
+    }
+    slots := [Shared<LowerWorker>]{}
+    loop _ in 0..<(workers + 1) {
+        slot :: shared LowerWorker{modules: [LowerModule]{}, failed: [U64:Bool]{}}
+        &slots.push(slot)
+    }
+    queue :: shared LowerWorkersQueue{next: 0}
+    _ := lower_workers_claimers(inputs, slots, parts, queue, workers - 1, true, false)
+    lower_workers_merge(inputs, slots, parts, bases)
+}
+
+// A glue row whose body reads the glue registry itself (Iter.jet
+// lower_iter_dispatch: the iterator cursor's drop glue and its `iter.advance`
+// helper close a dispatch over the `iter.release` rows registered so far), so
+// it lowers on the calling thread once every row before it is merged.
+fn lower_glue_barrier(glue: LowerGlue) -> Bool Never! {
+    if !lower_is_iter_cursor(glue.ty) || glue.clone -> return false
+    glue.helper == "" || glue.helper == "drop.structural" || glue.helper == "iter.advance"
+}
+
+// The module the glue waves return, and the cursor past the last row lowered.
+struct LowerGlueWaves {
+    state: LowerModule
+    cursor: Int
+}
+
+// The parallel form of lower_selected_in_place's glue loop: lowers the glue
+// rows from `cursor` to the end of the list, and the rows those register, in
+// waves on the threads (lower_workers_glue) until none is left. Each wave is
+// the rows registered so far and not yet lowered: a trait dispatcher row is
+// deferred into `dispatchers` (its function None until the caller emits it);
+// a barrier row (lower_glue_barrier) ends its wave and lowers here once the
+// rows before it are merged, so it reads the registry exactly as the serial
+// loop does at that row. `glue_functions` gets one entry per row, by row.
+fn lower_glue_waves(program: MIRProgram, m: ^LowerModule, cursor: Int, workers: Int, native_pack: Bool, dispatchers: &[Int], glue_functions: &[LIRFunction?]) -> LowerGlueWaves Never! {
+    state := ^m
+    at := cursor
+    loop at < state.glue.len() {
+        end :: state.glue.len()
+        wave := [Int]{}
+        barrier := -1
+        loop row in at..<end {
+            &glue_functions.push(None)
+            if lower_trait_dispatcher(program, state.glue[row]) {
+                &dispatchers.push(row)
+                next
+            }
+            if lower_glue_barrier(state.glue[row]) {
+                barrier = row
+                break
+            }
+            &wave.push(row)
+        }
+        if wave.len() > 0 {
+            // copy: the threads read an indexed program of their own, while `program` (the caller's,
+            // write-borrowed there) still feeds the barrier rows and the caller. Its rows are shared
+            // buffers, not copies of the whole program.
+            parted := lower_workers_glue(program.copy(), ^state, wave, workers, native_pack) ?? panic("the native glue lowering threads failed")
+            state = ^parted.state
+            lowered := ^parted.functions
+            loop index in 0..<wave.len() {
+                row :: wave[wave.len() - 1 - index]
+                glue_functions[row] = Val(&lowered.pop() ?? panic("a native glue wave lost a function"))
+            }
+        }
+        if barrier < 0 {
+            at = end
+            next
+        }
+        // copy: the barrier row is read while lowering it pushes into `state` (`&state`). A view
+        // into state.glue would dangle when that list grows.
+        glue :: state.glue[barrier].copy()
+        function :: lower_checked_glue_function(program, &state, glue)
+        if native_pack -> lower_native_glue_rewrite(program, &state, function)
+        glue_functions[barrier] = Val(function)
+        at = barrier + 1
+    }
+    LowerGlueWaves{state: ^state, cursor: at}
 }
 
 // JET_KEEP_GOING: in part order, each part a stopped thread left open
@@ -414,17 +546,26 @@ fn lower_remap_open(local: LowerModule, bases: LowerMarks, remap: &LowerRemap) N
     remap.file_keys = ^file_keys
 }
 
-// Replays every part into the pre-registered module, in part order, and
-// moves the program, inventory and instances back out of the inputs.
+// Replays every part into the pre-registered module, in part order, on this
+// thread (the registries merge serially; each slot's remap fills), then
+// renumbers the parts' functions to the merged rows on the threads (one task
+// per slot, claiming parts), collects them in part order, and moves the
+// program, inventory and instances back out of the inputs.
 fn lower_workers_merge(inputs: Shared<LowerWorkersInputs>, slots: [Shared<LowerWorker>], parts: [Shared<LowerWorkersPart>], bases: LowerMarks) -> LowerKeepGoingLowered {
     held := inputs.guard_edit()
     m := &held.value.modules.pop() ?? panic("the native lowering module left its shared inputs")
     failed := held.value.failed.copy()
-    remaps := [LowerRemap]{}
-    loop _ in 0..<slots.len() -> &remaps.push(lower_remap_empty())
-    functions := [LIRFunction]{}
-    loop part in parts -> lower_workers_merge_part(&m, slots, part, bases, &remaps, &functions)
+    remaps := [Shared<LowerRemap>]{}
+    loop _ in 0..<slots.len() {
+        remap :: shared lower_remap_empty()
+        &remaps.push(remap)
+    }
+    loop part in parts -> lower_workers_merge_part(&m, slots, part, bases, remaps)
     loop slot in slots -> lower_workers_merge_failed(slot, &failed)
+    queue :: shared LowerWorkersQueue{next: 0}
+    _ := lower_workers_renumberers(remaps, slots, parts, queue, bases, m.glue_base, slots.len() - 1)
+    functions := [LIRFunction]{}
+    loop part in parts -> lower_workers_merge_take(part, &functions)
     LowerKeepGoingLowered{state: ^m, failed: ^failed, functions: ^functions, inventory: compiler_take_rows<LowerPreparedFunction>(&held.value.functions), instances: compiler_take_rows<MIRFunction>(&held.value.instances), programs: compiler_take_rows<MIRProgram>(&held.value.programs)}
 }
 
@@ -435,21 +576,59 @@ fn lower_workers_merge_failed(slot: Shared<LowerWorker>, failed: &[U64:Bool]) {
     }
 }
 
-fn lower_workers_merge_part(m: &LowerModule, slots: [Shared<LowerWorker>], part: Shared<LowerWorkersPart>, bases: LowerMarks, remaps: &[LowerRemap], functions: &[LIRFunction]) {
-    permit := part.guard_edit()
+fn lower_workers_merge_part(m: &LowerModule, slots: [Shared<LowerWorker>], part: Shared<LowerWorkersPart>, bases: LowerMarks, remaps: [Shared<LowerRemap>]) {
+    permit :: part.guard_read()
     if permit.value.worker < 0 {
         if permit.value.functions.len() > 0 -> panic("a native lowering part has functions but no module")
         return
     }
     slot :: permit.value.worker
-    held := slots[slot].guard_edit()
-    if !remaps[slot].ready -> lower_remap_open(held.value.modules[0], bases, &remaps[slot])
-    lower_workers_replay(&m, held.value.modules[0], permit.value.start, permit.value.end, bases, &remaps[slot])
+    held :: slots[slot].guard_read()
+    remap := remaps[slot].guard_edit()
+    if !remap.value.ready -> lower_remap_open(held.value.modules[0], bases, &remap.value)
+    lower_workers_replay(&m, held.value.modules[0], permit.value.start, permit.value.end, bases, &remap.value)
+}
+
+// Runs `tasks` renumbering threads, one task each, and one more on this
+// thread; returns how many parts they renumbered. A task that stops
+// re-raises its panic here (lower_workers_stopped).
+fn lower_workers_renumberers(remaps: [Shared<LowerRemap>], slots: [Shared<LowerWorker>], parts: [Shared<LowerWorkersPart>], queue: Shared<LowerWorkersQueue>, bases: LowerMarks, glue_base: Int, tasks: Int) -> Int {
+    if tasks <= 0 -> return lower_workers_renumber_claimed(remaps, slots, parts, queue, bases, glue_base)
+    renumbered := 0
+    task.group lower_native {
+        head :: task lower_workers_renumber_claimed(remaps, slots, parts, queue, bases, glue_base)
+        renumbered = lower_workers_renumberers(remaps, slots, parts, queue, bases, glue_base, tasks - 1)
+        renumbered += head.join() ?? lower_workers_stopped(false, err)
+    }
+    renumbered
+}
+
+// One thread: renumbers the parts it claims until none is left.
+fn lower_workers_renumber_claimed(remaps: [Shared<LowerRemap>], slots: [Shared<LowerWorker>], parts: [Shared<LowerWorkersPart>], queue: Shared<LowerWorkersQueue>, bases: LowerMarks, glue_base: Int) -> Int {
+    renumbered := 0
+    loop {
+        index :: lower_workers_claim(queue)
+        if index >= parts.len() -> break
+        lower_workers_renumber_part(remaps, slots, parts[index], bases, glue_base)
+        renumbered += 1
+    }
+    renumbered
+}
+
+// Renumbers one part's functions in place, to its slot's merged rows.
+fn lower_workers_renumber_part(remaps: [Shared<LowerRemap>], slots: [Shared<LowerWorker>], part: Shared<LowerWorkersPart>, bases: LowerMarks, glue_base: Int) {
+    permit := part.guard_edit()
+    if permit.value.worker < 0 -> return
+    slot :: permit.value.worker
+    held :: slots[slot].guard_read()
+    remap :: remaps[slot].guard_read()
     keys :: lower_workers_keys(held.value.modules[0], permit.value.start.keys, permit.value.end.keys)
-    rows := compiler_take_rows<LIRFunction>(&permit.value.functions)
-    glue_base :: m.glue_base
-    loop at in 0..<rows.len() -> lower_workers_renumber(&rows[at], remaps[slot], bases, glue_base, keys)
-    &functions.extend(^rows)
+    loop at in 0..<permit.value.functions.len() -> lower_workers_renumber(&permit.value.functions[at], remap.value, bases, glue_base, keys)
+}
+
+fn lower_workers_merge_take(part: Shared<LowerWorkersPart>, functions: &[LIRFunction]) {
+    permit := part.guard_edit()
+    &functions.extend(compiler_take_rows<LIRFunction>(&permit.value.functions))
 }
 
 // The part's function-key constants, as function * 2^32 + LIR value.
@@ -604,6 +783,17 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
     loop at in start.issues..<end.issues {
         if dropped_issues[at - start.issues] -> next
         &m.issues.push(local.issues[at].copy())
+    }
+    // Shared-site exports name their own glue (a final id); a native export
+    // an earlier part registered keeps that part's helper, as the serial
+    // lowering found it registered (lower_native_glue_import).
+    loop at in start.sites..<end.sites -> &m.shared_sites.push(local.shared_sites[at].copy())
+    loop at in start.exports..<end.exports {
+        symbol :: local.export_rows[at]
+        if m.native_exports.get(symbol) != None -> next
+        id :: local.native_exports.get(symbol) ?? panic("parallel native lowering: a recorded native export {symbol} has no row")
+        to :: lower_workers_function(remap, bases, m.glue_base, id)
+        &m.native_exports.add(symbol.copy(), to).drop("checked absent above")
     }
 }
 

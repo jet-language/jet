@@ -631,8 +631,21 @@ fn sema_expr_operator_nominal_candidates(graph: SemaRegistrationGraph, nominal: 
     if !owner_inference.complete || !owner_inference.compatible -> return
     owner_type :: sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
     receiver_owner :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, nominal.ty, owner_module, nominal.generic_params, [SemaRegistrationGenericParam]{}), owner_inference.substitutions)
-    loop impl_index in 0..<graph.modules[module_index].impls.len() {
-        sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_index], nominal, module_index, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+    // Only this module's impls declaring `trait_name` can pass
+    // sema_expr_operator_nominal_impl_candidates: with the registration
+    // index built they are read from the trait-name rows (module/row order,
+    // so the candidates land in the order the module scan produced them).
+    if graph.impl_traits_indexed {
+        if graph.impl_trait_name_slots.get(trait_name) == .Val(found) {
+            loop impl_row in graph.impl_trait_name_buckets[found] {
+                if impl_row.module_index != module_index -> next
+                sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_row.row], nominal, module_index, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+            }
+        }
+    } else {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_index], nominal, module_index, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
+        }
     }
     if nominal.source == .SourceAST(item) -> sema_expr_operator_source_candidates(graph, nominal, item, module_index, owner_module, owner_inference.substitutions, owner_type, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, &diagnostics, &candidates)
 }
