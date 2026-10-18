@@ -500,7 +500,10 @@ fn lower_partial_may_clear(p: MIRProgram, c: LowerContext, f: LowerFunction, own
         }
     }
     loop (index, predecessor) in c.mir.blocks {
-        if c.ranks[index] < 0 -> next
+        // An unranked block is unreachable, unless lower_forward_blocks
+        // bypassed it (an empty jump-only block): walk through those, since
+        // the partial move may sit before them.
+        if c.ranks[index] < 0 && c.forward[index] == index -> next
         loop target in mir_terminator_targets(predecessor.terminator) {
             if target != c.mir.blocks[block].id -> next
             if lower_partial_may_clear(p, c, f, owner, path, index, predecessor.instructions.len(), &seen) -> return true
