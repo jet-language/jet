@@ -115,11 +115,14 @@ struct X64CompiledModule {
 // The call-graph schedule of a compile at level > 0. `deps[f]` are f's
 // non-recursive direct callees (each once), whose final bodies f's inline
 // step reads; `callers[g]` counts the functions whose `deps` hold g and
-// `dependents[g]` lists them; `priority[f]` is the instruction weight of f
-// plus the heaviest chain of dependents above it (the remaining critical
-// path through f), so when several functions are ready the one that gates
-// the most work goes first. Ids are rows of the module's function table, so
-// the schedule is the same for any thread count.
+// `dependents[g]` lists them; `priority[f]` is the compile cost of f
+// (opt_stream_cost) plus the costliest chain of dependents above it (the
+// remaining critical path through f), so when several functions are ready
+// the one that gates the most work goes first, and a function whose own
+// compile is long starts as soon as its callees settle. Ids are rows of the
+// module's function table, so the schedule is the same for any thread
+// count; the results are filed by id, so the order jobs run in never
+// reaches the output.
 struct OptSchedule {
     recursive: [Bool]
     deps: [[Int]]
@@ -156,7 +159,7 @@ fn opt_schedule(program: &LIRModule) -> OptSchedule Never! {
         &deps.push([Int]{})
         &callers.push(0)
         &dependents.push([Int]{})
-        &priority.push(opt_stream_weight(function))
+        &priority.push(opt_stream_cost(opt_stream_weight(function)))
         &mark.push(-1)
     }
     loop node in 0..<count {
@@ -185,7 +188,7 @@ fn opt_schedule(program: &LIRModule) -> OptSchedule Never! {
 }
 
 // The schedule of a level 0 compile: no function reads another, every
-// function is ready at once, heaviest first.
+// function is ready at once, costliest first.
 fn opt_schedule_flat(program: LIRModule) -> OptSchedule Never! {
     recursive := [Bool]{}
     deps := [[Int]]{}
@@ -197,7 +200,7 @@ fn opt_schedule_flat(program: LIRModule) -> OptSchedule Never! {
         &deps.push([Int]{})
         &callers.push(0)
         &dependents.push([Int]{})
-        &priority.push(opt_stream_weight(function))
+        &priority.push(opt_stream_cost(opt_stream_weight(function)))
     }
     OptSchedule{recursive: recursive, deps: deps, callers: callers, dependents: dependents, priority: priority}
 }
@@ -214,6 +217,20 @@ fn opt_stream_weight(function: LIRFunction) -> Int Never! {
     loop block in function.blocks -> size += block.insts.len() + 1
     size
 }
+
+// The estimated compile time of a function of `weight` instructions, in
+// instruction units: the selector and its register allocator are
+// super-linear in a function's size (a function of 10^5 instructions takes
+// about fifteen times longer per instruction than the self-compile's
+// average function), so a priority on instruction counts alone starts the
+// longest jobs last and they end the phase alone.
+fn opt_stream_cost(weight: Int) -> Int Never! {
+    weight + (weight * weight) /% X64_COMPILE_COST_QUADRATIC
+}
+
+// Instructions at which a function's compile costs about twice its
+// instruction count.
+X64_COMPILE_COST_QUADRATIC :: 4096
 
 // What every job reads and nothing writes while jobs run: the module with
 // its function bodies taken out (each row keeps its id, name and signature,
