@@ -92,6 +92,11 @@ struct X64Emitter {
     stack: [Int]
     // Offset of every `ret`, for the CFI of the epilogues.
     returns: [Int]
+    // x64_emit_parallel_moves' destination index: per place key
+    // (x64_place_key) the first pending move of the current set writing
+    // that place, -1 for none; every key a set used is -1 again when the
+    // set returns.
+    places: [Int]
 }
 
 struct X64Frame { stack: [Int], bytes: Int }
@@ -202,16 +207,20 @@ fn x64_same_place(left: X64Loc, right: X64Loc) -> Bool Never! {
 // Entry xmm1 may still be an incoming source. Prefer it when unread, otherwise
 // take another unread xmm, never a destination already installed by this move
 // set. A pending destination is safe: redirected readers delay its write.
-fn x64_parallel_float_scratch(moves: [X64Move], pending: [X64Move]) -> Int Never! {
+fn x64_parallel_float_scratch(moves: [X64Move], pending: [Int], done: [Bool], redirect: [Int], scratches: [X64Loc]) -> Int Never! {
     loop candidate in 0..<16 {
         reg :: if candidate == 0 -> 1 else if candidate == 1 -> 0 else -> candidate
         loc :: X64Loc.Xmm{reg: reg, single: false}
         blocked := false
-        loop move in pending { if x64_same_place(move.src, loc) -> blocked = true }
+        loop position in 0..<pending.len() {
+            if !done[position] && x64_parallel_reads(moves, pending, redirect, scratches, position, loc) -> blocked = true
+        }
         loop move in moves {
             if x64_same_place(move.dst, loc) {
                 unwritten := false
-                loop remaining in pending { if x64_same_place(remaining.dst, loc) -> unwritten = true }
+                loop position in 0..<pending.len() {
+                    if !done[position] && x64_same_place(moves[pending[position]].dst, loc) -> unwritten = true
+                }
                 if !unwritten -> blocked = true
             }
         }
@@ -222,82 +231,178 @@ fn x64_parallel_float_scratch(moves: [X64Move], pending: [X64Move]) -> Int Never
     panic("x64 parallel Float move set has no unread scratch register")
 }
 
-// Emit `moves` as if all sources were read before any destination is written.
-// Each move whose destination no pending move still reads goes first; a pure
-// cycle is broken in rax (general) or an unread xmm (prefer xmm1).
-// `readers[i]` counts the other pending moves reading move i's destination;
-// pending moves keep their order and are compacted in place.
-fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
-    pending := [X64Move]{}
-    loop move in moves { if move.src != move.dst -> &pending.push(move) }
-    readers := x64_parallel_readers(pending)
-    loop pending.len() > 0 {
-        ready := -1
-        index := 0
-        loop index < pending.len() {
-            // ABI xmm1 is also the cycle scratch: install its final value
-            // only after all other moves (and therefore cycles) are done.
-            blocked := readers[index] > 0
-            if pending[index].dst == .Xmm(reg, _) {
-                if reg == 1 && pending.len() > 1 -> blocked = true
-            }
-            if !blocked {
-                ready = index
-                break
-            }
-            index += 1
-        }
-        if ready >= 0 {
-            emitted :: pending[ready].copy()
-            x64_emit_move(&emitter, emitted.src, emitted.dst)
-            kept := 0
-            index = 0
-            loop index < pending.len() {
-                if index != ready {
-                    pending[kept] = pending[index].copy()
-                    readers[kept] = if x64_same_place(pending[kept].dst, emitted.src) -> readers[index] - 1 else -> readers[index].copy()
-                    kept += 1
-                }
-                index += 1
-            }
-            _ := &pending.pop()
-            _ := &readers.pop()
-        } else {
-            saved := pending[0].dst
-            loop move in pending {
-                if move.dst == .Xmm(reg, _) { if reg == 1 -> next }
-                saved = move.dst
-            }
-            scratch :: if saved == {
-                .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: x64_parallel_float_scratch(moves, pending), single: false}
-                else -> X64Loc.Reg{reg: X64_RAX}
-            }
-            x64_emit_move(&emitter, saved, scratch)
-            index = 0
-            loop index < pending.len() {
-                if x64_same_place(pending[index].src, saved) -> pending[index] = X64Move{src: scratch, dst: pending[index].dst}
-                index += 1
-            }
-            readers = x64_parallel_readers(pending)
-        }
+// Whether pending move `position` reads `loc`: its own source, or the
+// scratch a cycle break redirected it to.
+fn x64_parallel_reads(moves: [X64Move], pending: [Int], redirect: [Int], scratches: [X64Loc], position: Int, loc: X64Loc) -> Bool Never! {
+    if redirect[position] >= 0 -> return x64_same_place(scratches[redirect[position]], loc)
+    x64_same_place(moves[pending[position]].src, loc)
+}
+
+// The key of the place a move reads or writes, one per physical place as
+// x64_same_place compares them (xmmN and slot N in either precision are one
+// place), for the destination index of x64_emit_parallel_moves; -1 for an
+// immediate or folded location, which the index does not hold.
+fn x64_place_key(loc: X64Loc) -> Int Never! {
+    if loc == {
+        .Reg(reg) -> reg
+        .Xmm(reg, _) -> 16 + reg
+        .Stack(slot) -> 32 + 3 * slot
+        .FloatStack(slot, _) -> 33 + 3 * slot
+        .Frame(value) -> 34 + 3 * value
+        else -> -1
     }
 }
 
-// Per pending move, how many other pending moves read its destination.
-fn x64_parallel_readers(pending: [X64Move]) -> [Int] Never! {
+// Emit `moves` as if all sources were read before any destination is written.
+// Each move whose destination no pending move still reads goes first (the
+// first such in move order); a pure cycle is broken in rax (general) or an
+// unread xmm (prefer xmm1). The moves stay where they are: `pending` lists
+// the moves to emit (in order), `done` marks the emitted ones, `readers[p]`
+// counts the other pending moves reading pending move p's destination,
+// `redirect[p]` names the scratch (a row of `scratches`) a cycle break made
+// move p read instead of its source (-1: its source), and `ready` is a
+// min-heap of the pending positions with no reader (the first in order pops
+// first). The destination index (`emitter.places[key]`, the first pending
+// move writing the place of `key`, chained through `same_dst`) finds the
+// readers of a source without a scan; it is reset before the set returns.
+// A destination without a key (x64_place_key) is counted by comparing it
+// against every source instead.
+fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
+    pending := [Int]{}
+    loop (index, move) in moves { if move.src != move.dst -> &pending.push(index) }
+    count :: pending.len()
+    if count == 0 -> return
+    done := [Bool]{}
     readers := [Int]{}
-    index := 0
-    loop index < pending.len() {
-        count := 0
-        other := 0
-        loop other < pending.len() {
-            if other != index && x64_same_place(pending[other].src, pending[index].dst) -> count += 1
-            other += 1
+    redirect := [Int]{}
+    same_dst := [Int]{}
+    keys := [Int]{}
+    priority := [Int]{}
+    keyless := false
+    loop position in 0..<count {
+        &done.push(false)
+        &readers.push(0)
+        &redirect.push(-1)
+        &same_dst.push(-1)
+        &priority.push(0)
+        key :: x64_place_key(moves[pending[position]].dst)
+        &keys.push(key)
+        if key < 0 {
+            keyless = true
+            next
         }
-        &readers.push(count)
-        index += 1
+        loop emitter.places.len() <= key -> &emitter.places.push(-1)
+        same_dst[position] = emitter.places[key]
+        emitter.places[key] = position
     }
-    readers
+    scratches := [X64Loc]{}
+    x64_parallel_count(moves, pending, done, redirect, scratches, keyless, same_dst, emitter.places, &readers)
+    ready := [Int]{}
+    remaining := count
+    loop position in 0..<count -> x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, position)
+    loop remaining > 0 {
+        position := -1
+        loop ready.len() > 0 {
+            candidate :: opt_heap_pop(&ready, priority)
+            if done[candidate] || readers[candidate] != 0 -> next
+            position = candidate
+            break
+        }
+        if position >= 0 {
+            index :: pending[position]
+            if redirect[position] >= 0 -> x64_emit_move(&emitter, scratches[redirect[position]], moves[index].dst)
+            else -> x64_emit_move(&emitter, moves[index].src, moves[index].dst)
+            done[position] = true
+            remaining -= 1
+            // The moves writing this move's source lose a reader.
+            source_key :: if redirect[position] >= 0 -> x64_place_key(scratches[redirect[position]]) else -> x64_place_key(moves[index].src)
+            if source_key >= 0 {
+                if source_key < emitter.places.len() {
+                    other := emitter.places[source_key].copy()
+                    loop other >= 0 {
+                        if !done[other] {
+                            readers[other] = readers[other] - 1
+                            x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other)
+                        }
+                        other = same_dst[other]
+                    }
+                }
+            } else {
+                if keyless {
+                    loop other in 0..<count {
+                        if done[other] || !x64_parallel_reads(moves, pending, redirect, scratches, position, moves[pending[other]].dst) -> next
+                        readers[other] = readers[other] - 1
+                        x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other)
+                    }
+                }
+            }
+            // ABI xmm1 is also the cycle scratch: its move waited for the
+            // others; alone, it is ready.
+            if remaining == 1 {
+                loop other in 0..<count { if !done[other] -> x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other) }
+            }
+            next
+        }
+        // A cycle: save the last pending destination that is not xmm1 (else
+        // the first pending one) in a scratch, read the scratch instead of
+        // it, and count the readers again.
+        saved_at := -1
+        loop other in 0..<count {
+            if done[other] -> next
+            if saved_at < 0 -> saved_at = other
+            if moves[pending[other]].dst == .Xmm(reg, _) { if reg == 1 -> next }
+            saved_at = other
+        }
+        saved_index :: pending[saved_at]
+        scratch :: if moves[saved_index].dst == {
+            .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: x64_parallel_float_scratch(moves, pending, done, redirect, scratches), single: false}
+            else -> X64Loc.Reg{reg: X64_RAX}
+        }
+        x64_emit_move(&emitter, moves[saved_index].dst, scratch)
+        &scratches.push(^scratch)
+        row :: scratches.len() - 1
+        loop other in 0..<count {
+            if !done[other] && x64_parallel_reads(moves, pending, redirect, scratches, other, moves[saved_index].dst) -> redirect[other] = row
+        }
+        x64_parallel_count(moves, pending, done, redirect, scratches, keyless, same_dst, emitter.places, &readers)
+        ready = [Int]{}
+        loop other in 0..<count -> x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other)
+    }
+    loop position in 0..<count { if keys[position] >= 0 -> emitter.places[keys[position]] = -1 }
+}
+
+// Pushes pending move `position` onto `ready` when nothing pending reads its
+// destination and it is not the xmm1 move waiting for the others.
+fn x64_parallel_offer(ready: &[Int], priority: [Int], moves: [X64Move], pending: [Int], readers: [Int], remaining: Int, position: Int) Never! {
+    if readers[position] != 0 -> return
+    if moves[pending[position]].dst == .Xmm(reg, _) {
+        if reg == 1 && remaining > 1 -> return
+    }
+    opt_heap_push(&ready, priority, position)
+}
+
+// Per pending move (not done), how many other pending moves read its
+// destination, into `readers`.
+fn x64_parallel_count(moves: [X64Move], pending: [Int], done: [Bool], redirect: [Int], scratches: [X64Loc], keyless: Bool, same_dst: [Int], places: [Int], readers: &[Int]) Never! {
+    loop position in 0..<pending.len() -> readers[position] = 0
+    loop position in 0..<pending.len() {
+        if done[position] -> next
+        key :: if redirect[position] >= 0 -> x64_place_key(scratches[redirect[position]]) else -> x64_place_key(moves[pending[position]].src)
+        if key >= 0 {
+            if key >= places.len() -> next
+            other := places[key].copy()
+            loop other >= 0 {
+                if other != position && !done[other] -> readers[other] = readers[other] + 1
+                other = same_dst[other]
+            }
+            next
+        }
+        if !keyless -> next
+        loop other in 0..<pending.len() {
+            if other == position || done[other] -> next
+            if x64_parallel_reads(moves, pending, redirect, scratches, position, moves[pending[other]].dst) -> readers[other] = readers[other] + 1
+        }
+    }
 }
 
 // The register holding `loc`, loading a spilled value or materializing an
@@ -636,7 +741,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     allocation := x64_allocate(function)
     x64_enter_block(&allocation, 0)
     frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
-    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}}
+    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}, places: [Int]{}}
 
     // The frame and its call frame instructions: after `push rbp` the CFA
     // is rsp + 16 with rbp saved below the return address; after
