@@ -6998,15 +6998,17 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
     loop module_index in 0..<modules.len() {
         if sema_registration_module_index(graph, modules[module_index].module_identity) == None -> next
         policy :: sema_comptime_policy_for_package(policies, modules[module_index].package_identity) ?? next
+        // The policy's allow and deny lists are parsed once per module, not
+        // per function.
+        allowed :: sema_effect_scope_bounds(policy.authority_allow ?? [String]{})
+        prohibited :: sema_effect_authority_prohibited(policy.authority_deny ?? [String]{})
         loop function_index in 0..<modules[module_index].functions.len() {
             if authority_reach.get(modules[module_index].functions[function_index].key) == None -> next
             if policy.authority_allow != None {
-                allowed :: policy.authority_allow ?? [String]{}
-                if !sema_effect_check_scope_caps("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) -> complete = false
+                if !sema_effect_check_scope_bounds("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) -> complete = false
             }
             if policy.authority_deny != None {
-                denied :: policy.authority_deny ?? [String]{}
-                covered :: sema_effect_authority_deny_covered(denied, modules[module_index].functions[function_index].effects.solved)
+                covered :: sema_effect_covered(modules[module_index].functions[function_index].effects.solved, prohibited)
                 if covered.len() > 0 {
                     &diagnostics.push(sema_comptime_policy_deny_diagnostic(modules[module_index].package_identity, covered, modules[module_index].functions[function_index].source_span))
                     complete = false

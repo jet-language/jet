@@ -469,7 +469,8 @@ fn sema_effect_covered(inferred: [String], prohibited: [String]) -> [String] Nev
     result
 }
 
-fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [String] Never! {
+// The effect names a policy's deny list prohibits, as a ranked set.
+fn sema_effect_authority_prohibited(denies: [String]) -> [String] Never! {
     prohibited := [String]{}
     loop raw in denies {
         effect_name := raw
@@ -481,7 +482,7 @@ fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [
         parsed :: sema_effect_parse_name(effect_name)
         if parsed == .Val(value) -> sema_effect_set_add(&prohibited, value)
     }
-    sema_effect_covered(inferred, prohibited)
+    prohibited
 }
 
 fn sema_effect_show(values: [String]) -> String Never! {
@@ -1456,9 +1457,16 @@ fn sema_effect_scope_diagnostic(marker: String, over: [String], bounds: [String]
     sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside — even through a call — must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
 }
 
-fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    bounds := [String]{}
-    valid := true
+// A scope cap list parsed once: the effect names it allows as a ranked set
+// and the names sema_effect_parse_name rejects, in cap order, so a cap list
+// checked against many functions (a package policy) is parsed once.
+struct SemaEffectScopeBounds {
+    bounds: [String]
+    unknown: [String]
+}
+
+fn sema_effect_scope_bounds(caps: [String]) -> SemaEffectScopeBounds {
+    parsed := SemaEffectScopeBounds{bounds: [String]{}, unknown: [String]{}}
     loop raw in caps {
         if raw.starts_with("..") -> next
         prohibited :: raw.starts_with("!")
@@ -1468,16 +1476,23 @@ fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [Strin
             if pieces.len() > 1 -> name = pieces[1]
         }
         effect_name :: sema_effect_parse_name(name) ?? {
-            &diagnostics.push(sema_effect_unknown(name, span))
-            valid = false
+            &parsed.unknown.push(name)
             next
         }
         if prohibited -> next
-        sema_effect_set_add(&bounds, effect_name)
+        sema_effect_set_add(&parsed.bounds, effect_name)
     }
-    over :: sema_effect_uncovered(inferred, bounds)
+    parsed
+}
+
+// Checks `inferred` against caps parsed by sema_effect_scope_bounds: one
+// unknown-effect report per rejected cap at `span`, then the scope report.
+fn sema_effect_check_scope_bounds(marker: String, parsed: SemaEffectScopeBounds, inferred: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    valid := parsed.unknown.len() == 0
+    loop name in parsed.unknown -> &diagnostics.push(sema_effect_unknown(name, span))
+    over :: sema_effect_uncovered(inferred, parsed.bounds)
     if over.len() > 0 {
-        &diagnostics.push(sema_effect_scope_diagnostic(marker, over, bounds, span))
+        &diagnostics.push(sema_effect_scope_diagnostic(marker, over, parsed.bounds, span))
         valid = false
     }
     valid
