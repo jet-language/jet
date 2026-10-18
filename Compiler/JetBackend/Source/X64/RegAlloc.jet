@@ -411,37 +411,15 @@ fn x64_liveness(function: LIRFunction, folds: X64AddressFolds) -> X64Liveness Ne
     }
     cursor := 0
     loop cursor < pending.len() {
-        block_index := pending[cursor]
+        block_index :: pending[cursor]
         cursor += 1
         queued[block_index] = false
-        epoch += 1
-        out := [Int]{}
-        loop successor in successors[block_index] {
-            loop value in live_in[successor] {
-                if seen_marks[value] != epoch {
-                    seen_marks[value] = epoch
-                    &out.push(value)
-                }
-            }
-        }
-        loop value in kills[block_index] -> defined_marks[value] = epoch
-        epoch += 1
-        incoming := [Int]{}
-        loop value in gens[block_index] {
-            seen_marks[value] = epoch
-            &incoming.push(value)
-        }
-        loop value in out {
-            if defined_marks[value] != epoch - 1 && seen_marks[value] != epoch {
-                seen_marks[value] = epoch
-                &incoming.push(value)
-            }
-        }
-        grew :: incoming.len() != live_in[block_index].len()
-        live_out[block_index] = out
-        if grew {
-            live_in[block_index] = incoming
-            loop predecessor in predecessors[block_index] {
+        epoch += 2
+        if x64_liveness_step(block_index, epoch, gens, kills, successors, &live_in, &live_out, &defined_marks, &seen_marks) {
+            at := 0
+            loop at < predecessors[block_index].len() {
+                predecessor :: predecessors[block_index][at]
+                at += 1
                 if !queued[predecessor] {
                     queued[predecessor] = true
                     &pending.push(predecessor)
@@ -460,6 +438,54 @@ fn x64_liveness(function: LIRFunction, folds: X64AddressFolds) -> X64Liveness Ne
         &out_starts.push(flat_out.len())
     }
     X64Liveness{live_in: flat_in, in_starts: in_starts, live_out: flat_out, out_starts: out_starts}
+}
+
+// One worklist visit of block `block_index`: its live-out is the union of
+// its successors' live-in sets (marked with `epoch - 1`), its live-in its
+// gen set plus the live-out values it does not kill (marked with `epoch`).
+// Returns whether the live-in set grew.
+fn x64_liveness_step(block_index: Int, epoch: Int, gens: [[Int]], kills: [[Int]], successors: [[Int]], live_in: &[[Int]], live_out: &[[Int]], defined_marks: &[Int], seen_marks: &[Int]) -> Bool Never! {
+    out := [Int]{}
+    at := 0
+    loop at < successors[block_index].len() {
+        successor :: successors[block_index][at]
+        at += 1
+        from := 0
+        loop from < live_in[successor].len() {
+            value :: live_in[successor][from]
+            from += 1
+            if seen_marks[value] != epoch - 1 {
+                seen_marks[value] = epoch - 1
+                &out.push(value)
+            }
+        }
+    }
+    at = 0
+    loop at < kills[block_index].len() {
+        defined_marks[kills[block_index][at]] = epoch - 1
+        at += 1
+    }
+    incoming := [Int]{}
+    at = 0
+    loop at < gens[block_index].len() {
+        value :: gens[block_index][at]
+        at += 1
+        seen_marks[value] = epoch
+        &incoming.push(value)
+    }
+    at = 0
+    loop at < out.len() {
+        value :: out[at]
+        at += 1
+        if defined_marks[value] != epoch - 1 && seen_marks[value] != epoch {
+            seen_marks[value] = epoch
+            &incoming.push(value)
+        }
+    }
+    grew :: incoming.len() != live_in[block_index].len()
+    live_out[block_index] = out
+    if grew -> live_in[block_index] = incoming
+    grew
 }
 
 // ABI hints use the same disjoint register namespaces as the allocator.
