@@ -21,11 +21,14 @@ struct InlineGraph {
     order: [Int]
 }
 
-// The module being inlined bottom-up: `functions[id]` is final once `id`
-// has been visited in `order`; `sizes` and `consumed` describe that body.
+// The module being inlined bottom-up: `functions[id]` is a one-row list
+// holding the body of function `id`, final once `id` has been visited in
+// `order`; `sizes` and `consumed` describe that body. One-row lists, so a
+// body moves in and out of its row (the streaming back end takes a body out
+// for its job and puts the final one back; Opt.jet).
 struct LIRInlineState {
     signatures: [LIRSignature]
-    functions: [LIRFunction]
+    functions: [[LIRFunction]]
     data: [LIRData]
     debug: LIRModuleDebug
     recursive: [Bool]
@@ -167,7 +170,11 @@ fn inline_alias_safe(caller: LIRFunction, callee: LIRFunction, consumed: [Bool],
     true
 }
 
-fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
+// `functions[id]` is a one-row list holding function `id`'s body, read only
+// for a callee whose final body is measured (`sizes[id]` at most 40), which
+// is never missing: a caller runs only after every such callee is final, and
+// a final body is released only after its last caller has run.
+fn inline_caller(functions: [[LIRFunction]], original: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
     function := original
     uses := [Int]{}
     loop _ in original.values -> &uses.push(0)
@@ -196,7 +203,7 @@ fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bo
                     id :: target.value
                     if id >= 0 && id < functions.len() {
                         if !recursive[id] && sizes[id] <= 40 && expanded + sizes[id] <= 200 {
-                            candidate :: functions[id]
+                            candidate :: functions[id][0]
                             if candidate.signature == signature && candidate.blocks.len() > 0 && inline_alias_safe(original, candidate, consumed[id], uses, arguments) {
                                 selected = id
                                 result = dst
@@ -211,7 +218,7 @@ fn inline_caller(functions: [LIRFunction], original: LIRFunction, recursive: [Bo
                 &lines.push(opt_debug_line(block, index))
                 next
             }
-            callee :: functions[selected]
+            callee :: functions[selected][0]
             expanded += sizes[selected]
             changed = true
             // Entry parameters are aliases of the call arguments. LIR lint
@@ -294,13 +301,19 @@ fn lir_inline_start(program: ^LIRModule) -> LIRInlineState Never! {
         &sizes.push(41)
         &consumed.push([Bool]{})
     }
-    LIRInlineState{signatures: ^owned.signatures, functions: ^direct, data: ^owned.data, debug: ^owned.debug, recursive: ^graph.recursive, sizes: ^sizes, consumed: ^consumed, order: ^graph.order}
+    rows := [[LIRFunction]]{}
+    loop direct.len() > 0 {
+        function := &direct.pop() ?? { break }
+        &rows.push([LIRFunction]{^function})
+    }
+    &rows.reverse()
+    LIRInlineState{signatures: ^owned.signatures, functions: ^rows, data: ^owned.data, debug: ^owned.debug, recursive: ^graph.recursive, sizes: ^sizes, consumed: ^consumed, order: ^graph.order}
 }
 
 // Function `id` with its eligible direct calls inlined from the final
 // bodies of its (already visited) callees.
 fn lir_inline_step(state: LIRInlineState, id: Int) -> LIRFunction Never! {
-    inline_caller(state.functions, state.functions[id], state.recursive, state.sizes, state.consumed)
+    inline_caller(state.functions, state.functions[id][0], state.recursive, state.sizes, state.consumed)
 }
 
 // The inline facts of a final body: its instruction count (the size every
@@ -329,11 +342,21 @@ fn lir_inline_finish(state: &LIRInlineState, id: Int, function: ^LIRFunction) Ne
     facts := lir_inline_measure(function)
     state.sizes[id] = facts.size
     state.consumed[id] = ^facts.consumed
-    state.functions[id] = ^function
+    state.functions[id] = [LIRFunction]{^function}
 }
 
+// The module's rows, each moved out of its one-row list.
 fn lir_inline_result(state: ^LIRInlineState) -> LIRModule Never! {
-    LIRModule{signatures: ^state.signatures, functions: ^state.functions, data: ^state.data, debug: ^state.debug}
+    owned := ^state
+    rows := compiler_take_rows<[LIRFunction]>(&owned.functions)
+    functions := [LIRFunction]{}
+    loop rows.len() > 0 {
+        row := &rows.pop() ?? { break }
+        function := &row.pop() ?? panic("an inlined function left its row")
+        &functions.push(^function)
+    }
+    &functions.reverse()
+    LIRModule{signatures: ^owned.signatures, functions: ^functions, data: ^owned.data, debug: ^owned.debug}
 }
 
 fn lir_inline_module(program: ^LIRModule) -> LIRModule Never! {

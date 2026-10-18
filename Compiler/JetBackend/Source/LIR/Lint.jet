@@ -3,12 +3,15 @@
 // bugs surface here with the function and block they occur in, instead of as
 // wrong machine code.
 //
-// The lint runs once per module, on the final LIR, inside the x64 compile
-// (SPEED-500K D6): lir_lint_module_rows checks the module's tables, and
-// lir_lint_function_row each function in its final form, reading of other
-// functions only their name and signature (so a function whose body the
-// streaming compile already released still lints its callers correctly).
-// lir_lint_module is the two together, in table-then-function order.
+// The lint runs inside the x64 compile (SPEED-500K D6): lir_lint_module_rows
+// checks the module's tables once, and lir_lint_function_row each function,
+// reading of other functions only their name and signature (so a function
+// whose body the streaming compile already released still lints its callers
+// correctly). The streaming back end (Opt/Opt.jet opt_stream_job) lints a
+// function's lowered body before its passes and its final body again only
+// when a pass changed it; the serial x64_compile_module lints the module it
+// is given. lir_lint_module is the tables and every function together, in
+// table-then-function order.
 
 struct LIRLintIssue {
     function: String
@@ -441,11 +444,7 @@ fn lir_lint_terminator(function: LIRFunction, signature: LIRSignature, terminato
 
 // Block ID -> its first row in `function.blocks` (lir_block_index's answer).
 fn lir_lint_block_rows(function: LIRFunction) -> [Int:Int] Never! {
-    rows := [Int:Int]{}
-    loop (index, block) in function.blocks {
-        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("a block ID keeps its first row")
-    }
-    rows
+    lir_block_rows(function)
 }
 
 // Dominance over block rows. The lint referees optimized LIR, so it computes
