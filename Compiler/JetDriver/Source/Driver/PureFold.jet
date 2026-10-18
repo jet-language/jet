@@ -13,6 +13,11 @@
 // captures or a generator is left alone, as is any evaluation that fails,
 // prints, exhausts its fuel or yields a value too large to inline.
 use jet_foundation.[
+    CompilerThreads,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
+    compiler_transfer_rows,
     MIRBasicBlock,
     MIRBlockID,
     MIRCallArg,
@@ -81,17 +86,21 @@ struct JetDriverPureFoldCandidates {
 // program through one machine that evaluates every candidate (never a copy
 // per evaluation), drops the synthetics again, and only then writes the
 // folded constants, so every evaluation of a round sees the same program.
-fn jet_driver_fold_pure_calls(program: ^MIRProgram) -> MIRProgram {
+fn jet_driver_fold_pure_calls(program: ^MIRProgram, threads: CompilerThreads) -> MIRProgram {
     declined := [String:Bool]{}
-    folded := jet_driver_pure_fold_rounds(^program, &declined, 0)
+    folded := jet_driver_pure_fold_rounds(^program, &declined, 0, threads)
     jet_driver_pure_fold_resolve_joins(&folded)
     folded
 }
 
-fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], round: Int) -> MIRProgram {
-    folding := program
-    if round >= JET_DRIVER_PURE_FOLD_ROUNDS -> return folding
-    candidates :: jet_driver_pure_fold_candidates(folding, declined)
+fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], round: Int, threads: CompilerThreads) -> MIRProgram {
+    taken := program
+    if round >= JET_DRIVER_PURE_FOLD_ROUNDS -> return taken
+    // The scan moves the program through the threads' shared inputs and
+    // hands it back unchanged.
+    scan := jet_driver_pure_fold_candidates(^taken, declined, threads)
+    candidates := ^scan.candidates
+    folding := ^scan.program
     if candidates.sites.len() == 0 -> return folding
     base_len :: folding.functions.len()
     loop synthetic in candidates.functions -> &folding.functions.push(synthetic)
@@ -111,7 +120,7 @@ fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], r
         }
     }
     if !changed -> return result
-    jet_driver_pure_fold_rounds(^result, &declined, round + 1)
+    jet_driver_pure_fold_rounds(^result, &declined, round + 1, threads)
 }
 
 // Replace a scalar join whose live edges all carry one constant with that
@@ -164,36 +173,134 @@ fn jet_driver_pure_fold_site_key(function: Int, block: Int, instruction: Int) ->
     "{function}:{block}:{instruction}"
 }
 
-fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool]) -> JetDriverPureFoldCandidates {
+// One scan's result: the program back from the threads and its candidates.
+struct JetDriverPureFoldScan {
+    program: MIRProgram
+    candidates: JetDriverPureFoldCandidates
+}
+
+// The threads' inputs for one candidate scan: the program (moved in, moved
+// back after the join), the declined sites and the program-wide callee and
+// Prelude sets.
+struct JetDriverPureFoldShared {
+    programs: [MIRProgram]
+    declined: [String:Bool]
+    callees: [U64:Bool]
+    preludes: [U64:Bool]
+}
+
+// One thread's consecutive function range and its candidates, in function
+// order, with synthetic ids still unassigned (`outputs` holds one row once
+// the thread finished).
+struct JetDriverPureFoldPart {
+    start: Int
+    end: Int
+    outputs: [JetDriverPureFoldCandidates]
+}
+
+// Fewest MIR instructions one scan thread is admitted for.
+JET_DRIVER_PURE_FOLD_MIN_INSTRUCTIONS_PER_THREAD :: 50000
+
+// Every function's candidate sites and synthetic functions. The functions
+// are scanned in consecutive parts on the threads (each function's
+// candidates depend on that function and the program-wide callee and
+// Prelude sets only) and the parts are joined in function order, where the
+// synthetic ids are assigned in site order from the highest function id, so
+// the sites, their synthetics and the ids are those of a one-thread scan.
+// The program moves through the shared inputs and comes back unchanged.
+fn jet_driver_pure_fold_candidates(program: ^MIRProgram, declined: [String:Bool], threads: CompilerThreads) -> JetDriverPureFoldScan {
+    scanned := program
     next_id := U64{0}
     callees := [U64:Bool]{}
-    loop function in program.functions {
+    weights := [Int]{}
+    total := 0
+    loop function in scanned.functions {
         if function.id.value > next_id -> next_id = function.id.value
         if jet_driver_pure_fold_callee(function) {
             _ := &callees.add(function.id.value, true)
         }
+        count := 0
+        loop block in function.blocks -> count += block.instructions.len()
+        &weights.push(count)
+        total += count
     }
     preludes := [U64:Bool]{}
-    loop record in program.prelude_calls {
+    loop record in scanned.prelude_calls {
         if jet_driver_pure_fold_prelude(record) {
             _ := &preludes.add(record.id.value, true)
         }
     }
+    workers :: compiler_threads_admit(threads, weights.len(), total, JET_DRIVER_PURE_FOLD_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    bounds :: compiler_threads_partition(weights, workers)
+    inputs :: shared JetDriverPureFoldShared{programs: [MIRProgram]{^scanned}, declined: declined, callees: ^callees, preludes: ^preludes}
+    parts := [Shared<JetDriverPureFoldPart>]{}
+    loop part in 0..<(bounds.len() - 1) -> &parts.push(shared JetDriverPureFoldPart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverPureFoldCandidates]{}})
+    _ := jet_driver_pure_fold_scan_parts(inputs, parts, 0)
+    returned := jet_driver_pure_fold_shared_take(inputs)
     sites := [JetDriverPureFoldSite]{}
     synthetics := [MIRFunction]{}
-    // The program-wide callee and Prelude sets are built once; each function
-    // replaces only its own rows, so the sets are never copied per function.
-    inputs := JetDriverPureFoldInputs{
+    loop part in parts {
+        output := jet_driver_pure_fold_part_take(part)
+        compiler_transfer_rows<JetDriverPureFoldSite>(&sites, &output.sites)
+        compiler_transfer_rows<MIRFunction>(&synthetics, &output.functions)
+    }
+    loop index in 0..<sites.len() {
+        next_id += 1
+        identity :: MIRFunctionID{value: next_id}
+        sites[index].synthetic = identity
+        synthetics[index].id = identity
+        synthetics[index].key = jet_driver_pure_fold_synthetic_key(returned.functions[sites[index].function].key, identity)
+    }
+    JetDriverPureFoldScan{program: ^returned, candidates: JetDriverPureFoldCandidates{sites: ^sites, functions: ^synthetics}}
+}
+
+// The program, back from the shared inputs after the join.
+fn jet_driver_pure_fold_shared_take(inputs: Shared<JetDriverPureFoldShared>) -> MIRProgram {
+    permit :: inputs.guard_edit()
+    &permit.value.programs.pop() ?? panic("the pure-fold scan left the program in its shared inputs")
+}
+
+// A part's candidates, after its thread joined.
+fn jet_driver_pure_fold_part_take(part: Shared<JetDriverPureFoldPart>) -> JetDriverPureFoldCandidates {
+    permit :: part.guard_edit()
+    &permit.value.outputs.pop() ?? panic("a pure-fold scan thread left no candidates")
+}
+
+// Scans `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts scanned.
+fn jet_driver_pure_fold_scan_parts(inputs: Shared<JetDriverPureFoldShared>, parts: [Shared<JetDriverPureFoldPart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return jet_driver_pure_fold_scan_part(inputs, parts[from])
+    scanned := 0
+    task.group pure_fold_scan_threads {
+        head :: task jet_driver_pure_fold_scan_part(inputs, parts[from])
+        scanned = jet_driver_pure_fold_scan_parts(inputs, parts, from + 1)
+        scanned += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    scanned
+}
+
+// One thread: the candidates of its function range, in function order. The
+// synthetic ids are placeholders until the join assigns them.
+fn jet_driver_pure_fold_scan_part(inputs: Shared<JetDriverPureFoldShared>, part: Shared<JetDriverPureFoldPart>) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    sites := [JetDriverPureFoldSite]{}
+    synthetics := [MIRFunction]{}
+    // The program-wide callee and Prelude sets are copied once per thread;
+    // each function replaces only its own rows, so the sets are never
+    // copied per function.
+    scan := JetDriverPureFoldInputs{
         constants: [U64:MIRConstant]{},
         types: [U64:MIRType]{},
         definitions: [U64:MIROperation]{},
         initializers: [U64:U64]{},
         roots: [U64:U64]{},
-        callees: callees,
-        preludes: preludes,
+        callees: reads.value.callees,
+        preludes: reads.value.preludes,
     }
-    loop function_index in 0..<program.functions.len() {
-        function :: program.functions[function_index]
+    placeholder :: MIRFunctionID{value: U64{0}}
+    loop function_index in permit.value.start..<permit.value.end {
+        function :: reads.value.programs[0].functions[function_index]
         initializers :: jet_driver_pure_fold_initializers(function)
         if initializers.len() == 0 -> next
         definitions := [U64:MIROperation]{}
@@ -209,39 +316,38 @@ fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool])
         }
         feeding :: jet_driver_pure_fold_feeding(function, initializers, definitions)
         roots :: jet_driver_pure_fold_root_locals(function)
-        inputs.constants = jet_driver_pure_fold_constants(function, initializers, roots)
-        inputs.types = types
-        inputs.definitions = definitions
-        inputs.initializers = initializers
-        inputs.roots = roots
+        scan.constants = jet_driver_pure_fold_constants(function, initializers, roots)
+        scan.types = types
+        scan.definitions = definitions
+        scan.initializers = initializers
+        scan.roots = roots
         loop (block_index, block) in function.blocks {
             loop (instruction_index, instruction) in block.instructions {
                 result :: instruction.result ?? next
                 ty :: instruction.ty ?? next
                 if feeding.get(result.value) == None -> next
-                if inputs.constants.get(result.value) != None -> next
+                if scan.constants.get(result.value) != None -> next
                 if !jet_driver_pure_fold_result_type(ty) -> next
-                if !jet_driver_pure_fold_operation(instruction.operation, inputs.callees, inputs.preludes) -> next
+                if !jet_driver_pure_fold_operation(instruction.operation, scan.callees, scan.preludes) -> next
                 // Only a site that is otherwise a candidate builds its key.
-                if declined.len() > 0 && declined.get(jet_driver_pure_fold_site_key(function_index, block_index, instruction_index)) != None -> next
+                if reads.value.declined.len() > 0 && reads.value.declined.get(jet_driver_pure_fold_site_key(function_index, block_index, instruction_index)) != None -> next
                 slice := JetDriverPureFoldSlice{instructions: [MIRInstruction]{}, defined: [U64:Bool]{}, visiting: [U64:Bool]{}}
                 complete := true
                 loop value in mir_operation_value_uses(instruction.operation) {
-                    if !jet_driver_pure_fold_reproduce(inputs, value, instruction, &slice) {
+                    if !jet_driver_pure_fold_reproduce(scan, value, instruction, &slice) {
                         complete = false
                         break
                     }
                 }
                 if !complete -> next
                 &slice.instructions.push(instruction)
-                next_id += 1
-                synthetic_id := MIRFunctionID{value: next_id}
-                &synthetics.push(jet_driver_pure_fold_synthetic(function, synthetic_id, slice.instructions, result, ty))
-                &sites.push(JetDriverPureFoldSite{function: function_index, block: block_index, instruction: instruction_index, synthetic: synthetic_id, ty: ty})
+                &synthetics.push(jet_driver_pure_fold_synthetic(function, placeholder, slice.instructions, result, ty))
+                &sites.push(JetDriverPureFoldSite{function: function_index, block: block_index, instruction: instruction_index, synthetic: placeholder, ty: ty})
             }
         }
     }
-    JetDriverPureFoldCandidates{sites: sites, functions: synthetics}
+    &permit.value.outputs.push(JetDriverPureFoldCandidates{sites: ^sites, functions: ^synthetics})
+    1
 }
 
 // What one function offers a fold: known constants, value types, the
@@ -650,6 +756,12 @@ fn jet_driver_pure_fold_result_type(ty: MIRType) -> Bool Never! {
     }
 }
 
+// The key of the synthetic function `identity` folding a site of the host
+// with key `host_key`.
+fn jet_driver_pure_fold_synthetic_key(host_key: String, identity: MIRFunctionID) -> String Never! {
+    "{host_key}::__jet_pure_fold_{identity.value}"
+}
+
 // A function that runs `instructions` (the rebuilt inputs, operands first,
 // then the folded instruction) and returns `result`.
 fn jet_driver_pure_fold_synthetic(host: MIRFunction, identity: MIRFunctionID, instructions: [MIRInstruction], result: MIRValueID, ty: MIRType) -> MIRFunction Never! {
@@ -668,7 +780,7 @@ fn jet_driver_pure_fold_synthetic(host: MIRFunction, identity: MIRFunctionID, in
         id: identity,
         module_id: host.module_id,
         source_file: host.source_file,
-        key: "{host.key}::__jet_pure_fold_{identity.value}",
+        key: jet_driver_pure_fold_synthetic_key(host.key, identity),
         module_name: host.module_name,
         name: host.name,
         span: span,

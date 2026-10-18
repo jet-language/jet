@@ -6492,7 +6492,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     sema_graph_result_release_rows(&checked_graph)
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
-    program_value = jet_driver_fold_pure_calls(^program_value)
+    program_value = jet_driver_fold_pure_calls(^program_value, request.compiler_threads)
     if request.trace_sink == .Val(sink) -> sink.end("assemble", program_value.functions.len())
     jet_driver_trace_mir_insts(request.trace_sink, "assemble", program_value.functions)
 
