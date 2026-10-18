@@ -1524,27 +1524,145 @@ fn jet_cli_sem_witness(function: String, effect_name: String, summaries: [JetCLI
     None
 }
 
-// JSON.rs `convert_effects`.
+// JSON.rs `convert_effects`. Same rows, witnesses and order as a per-query
+// scan, at index cost: summary rows by key (first occurrence wins, as the
+// scan's first match), call facts grouped by caller in module order (the
+// scan's first fact), one path-scoped `visited` list pushed and popped
+// around each step (the scan copied it per step), and a stable merge sort of
+// the rows by function key before the output is built (the insertion sort
+// copied whole effect rows quadratically).
 fn jet_cli_sem_effects(summaries: [JetCLISemSummary], modules: [JetDriverDocModule]) -> [JetCLISemEffect] {
+    index :: jet_cli_sem_index(summaries, modules)
     output := [JetCLISemEffect]{}
-    loop summary in summaries {
+    visited := [String]{}
+    loop row in jet_cli_sem_key_order(summaries) {
+        summary :: summaries[row]
         provenance := [JetCLISemEffectProvenance]{}
         loop effect_name in summary.solved {
-            found :: jet_cli_sem_witness(summary.key, effect_name, summaries, [String]{}, modules) ?? next
+            found :: jet_cli_sem_witness_at(summary.key, effect_name, summaries, index, &visited) ?? next
             &provenance.push(JetCLISemEffectProvenance{effect_name: effect_name, call_path: found.path, spans: found.spans})
         }
         &output.push(JetCLISemEffect{function: summary.key, direct: summary.direct, callees: summary.edges, inferred: summary.solved, maximal: summary.maximal, provenance: provenance})
     }
-    loop index in 1..<output.len() {
-        value :: output[index]
-        position := index
-        loop position > 0 && output[position - 1].function > value.function {
-            output[position] = output[position - 1]
-            position -= 1
-        }
-        output[position] = value
-    }
     output
+}
+
+struct JetCLISemCallTarget {
+    key: String
+    span: Span
+}
+
+struct JetCLISemEffectIndex {
+    by_key: [String:Int]
+    by_caller: [String:Int]
+    callers: [[JetCLISemCallTarget]]
+}
+
+fn jet_cli_sem_index(summaries: [JetCLISemSummary], modules: [JetDriverDocModule]) -> JetCLISemEffectIndex {
+    by_key := [String:Int]{}
+    loop (row, summary) in summaries {
+        if by_key.get(summary.key) == None -> _ := &by_key.add(summary.key, row)
+    }
+    by_caller := [String:Int]{}
+    callers := [[JetCLISemCallTarget]]{}
+    loop doc_module in modules {
+        loop fact in doc_module.call_facts {
+            target :: fact.callee ?? next
+            group := by_caller.get(fact.caller_key) ?? -1
+            if group < 0 {
+                group = callers.len()
+                _ := &by_caller.add(fact.caller_key, group)
+                &callers.push([JetCLISemCallTarget]{})
+            }
+            &callers[group].push(JetCLISemCallTarget{key: target.key, span: fact.span})
+        }
+    }
+    JetCLISemEffectIndex{by_key: by_key, by_caller: by_caller, callers: callers}
+}
+
+// Row indices ordered by summary key; equal keys keep row order (stable).
+fn jet_cli_sem_key_order(summaries: [JetCLISemSummary]) -> [Int] Never! {
+    order := [Int]{}
+    loop row in 0..<summaries.len() -> &order.push(row)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !(summaries[order[left]].key > summaries[order[right]].key)) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = ^merged
+        width = width * 2
+    }
+    order
+}
+
+// jet_cli_sem_call_span over the index.
+fn jet_cli_sem_indexed_span(summary: JetCLISemSummary, callee: String, index: JetCLISemEffectIndex) -> Span? {
+    raw_callee := ""
+    loop edge in summary.raw_edges {
+        local :: jet_cli_sem_function_local_key(edge) ?? next
+        if callee == local || callee.ends_with("::{local}") {
+            raw_callee = edge
+            break
+        }
+    }
+    group :: index.by_caller.get(summary.raw_key) ?? return None
+    loop target in index.callers[group] {
+        if target.key == raw_callee -> return Val(target.span)
+    }
+    None
+}
+
+// jet_cli_sem_witness over the index; `visited` is the current path.
+fn jet_cli_sem_witness_at(function: String, effect_name: String, summaries: [JetCLISemSummary], index: JetCLISemEffectIndex, visited: &[String]) -> JetCLISemWitness? {
+    if visited.contains(function) -> return None
+    &visited.push(function)
+    found :: jet_cli_sem_witness_step(function, effect_name, summaries, index, &visited)
+    _ := &visited.pop()
+    found
+}
+
+fn jet_cli_sem_witness_step(function: String, effect_name: String, summaries: [JetCLISemSummary], index: JetCLISemEffectIndex, visited: &[String]) -> JetCLISemWitness? {
+    row :: index.by_key.get(function) ?? return None
+    summary :: summaries[row]
+    if summary.direct.contains(effect_name) {
+        spans := [Span]{}
+        loop (position, name) in summary.direct {
+            if name == effect_name -> &spans.push(summary.direct_spans[position])
+        }
+        return Val(JetCLISemWitness{path: [String]{function}, spans: spans})
+    }
+    if summary.maximal {
+        spans := [Span]{}
+        if summary.maximal_span == .Val(span) -> &spans.push(span)
+        return Val(JetCLISemWitness{path: [String]{function}, spans: spans})
+    }
+    loop callee in summary.edges {
+        callee_row :: index.by_key.get(callee) ?? next
+        if !summaries[callee_row].solved.contains(effect_name) -> next
+        found :: jet_cli_sem_witness_at(callee, effect_name, summaries, index, &visited) ?? next
+        path := [String]{function}
+        loop part in found.path -> &path.push(part)
+        spans := [Span]{}
+        if jet_cli_sem_indexed_span(summary, callee, index) == .Val(span) -> &spans.push(span)
+        loop span in found.spans -> &spans.push(span)
+        return Val(JetCLISemWitness{path: path, spans: spans})
+    }
+    None
 }
 
 // Build.rs `apply_inferred_effect_rows`: a function with no written row
