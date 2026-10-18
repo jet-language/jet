@@ -359,10 +359,13 @@ fn fx_shared_site_checks() -> Bool Never! {
         startup :: pinned.lir.functions[entry.value]
         if !startup.name.contains("core.shared.init") -> return false
         startup_text :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{startup}, data: pinned.lir.data, debug: pinned.lir.debug})
-        if !startup_text.contains("jet_rt_string_from_static") || startup_text.contains("jet_rt_native_shared_new") -> return false
-        finalizer :: pinned.finalizer ?? return false
-        release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data, debug: pinned.lir.debug})
-        if !release.contains("jet_rt_string_drop") || release.contains("jet_rt_native_shared_drop") -> return false
+        // A frozen String is a relocation to its immortal header: the entry
+        // constructs nothing for it, and pinned Core has no finalizer (program
+        // owners live until process exit; only a dynamic compiler callable
+        // with runtime-filled statics gets one, Lower.jet lower_selected_in_place).
+        if startup_text.contains("jet_rt_string_from_static") || startup_text.contains("jet_rt_native_shared_new") -> return false
+        if !fx_statics_has_text_header(pinned.lir, "pinned") -> return false
+        if pinned.finalizer != None -> return false
         getter_text :: lir_print_module(pinned.lir)
         if !getter_text.contains("jet_rt_native_shared_clone") -> return false
         if lifetime == MIRSharedLifetime.Process || lifetime == MIRSharedLifetime.World {
@@ -378,11 +381,28 @@ fn fx_shared_site_checks() -> Bool Never! {
     exact := fx_program([MIRFunction]{root}, [])
     exact.constants = [MIRConstantDef]{fx_static_definition("shared_digits", fx_int(), MIRConstant.BigInt{decimal: "18446744073709551616"})}
     pinned :: lir_lower_core_shared(exact, [MIRFunctionID]{root.id})
-    if pinned.issues.len() != 0 -> return false
-    finalizer :: pinned.finalizer ?? return false
-    release :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[finalizer.value]}, data: pinned.lir.data, debug: pinned.lir.debug})
-    if !release.contains("jet_rt_int_drop") || release.contains("jet_rt_string_drop") -> return false
+    if pinned.issues.len() != 0 || pinned.finalizer != None -> return false
+    entry :: pinned.entry ?? return false
+    startup :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{pinned.lir.functions[entry.value]}, data: pinned.lir.data, debug: pinned.lir.debug})
+    // A spilled exact Int is still a runtime-owned word the entry constructs.
+    if !startup.contains("jet_rt_int_from_static") || startup.contains("jet_rt_string_from_static") -> return false
     true
+}
+
+// Whether `lir` holds the immortal header of `text` (StaticText.jet
+// lower_immortal_text): 24 bytes, one relocation at offset 0 to the literal
+// bytes, the byte length at 8 and a zero capacity.
+fn fx_statics_has_text_header(lir: LIRModule, text: String) -> Bool Never! {
+    loop data in lir.data {
+        if fx_statics_text_header_matches(lir, data, text.bytes().len()) -> return true
+    }
+    false
+}
+
+fn fx_statics_text_header_matches(lir: LIRModule, data: LIRData, length: Int) -> Bool Never! {
+    if data.bytes.len() != 24 || data.align != 8 || data.relocs.len() != 1 -> return false
+    if data.relocs[0].offset != 0 || data.relocs[0].addend != 0 -> return false
+    Int.from_u8(data.bytes[8]) == length && lir.data[data.relocs[0].target.value].bytes.len() == length
 }
 
 // expect-stdout statics-map: "3\nPASS\nEDIT\nFAIL\n0\nFAIL\n"

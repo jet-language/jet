@@ -1,0 +1,118 @@
+// Which carried inline aggregate slots a back edge copies (Lower.jet
+// lower_edge): a slot's value made inside a loop lives in StackSlot storage
+// the next iteration overwrites, so the back edge copies it into the slot's
+// own frame storage. A slot no block of the loop rebinds holds, at the back
+// edge, the value it entered the loop with, whose storage nothing in the loop
+// writes: the edge passes that value as it is, and a slot no back edge copies
+// needs no frame storage (lower_frame_storage).
+//
+// The loop of a back edge S -> H is H plus every block that reaches S without
+// passing through H. A block rebinds a slot when an instruction result
+// defines it (lower_define), a whole-root WritePlace, ReplacePlace or
+// InitializeUninit names one of its places (lower_write_place), a MapLookup
+// caches into it, or a SharedGuardWait redefines its guard (every
+// lower_set_slot caller that binds a value). Clearing a slot to its null
+// placeholder (a move out, a drop) is no rebinding: the placeholder passes
+// unchanged either way, and a projected write or a lent Write argument edits
+// the storage the slot already names.
+use jet_foundation.[MIRFunction]
+
+struct LowerLoopCopies {
+    // Back edge key `from * blocks + to` -> the candidate slots the loop of
+    // that edge rebinds, ascending.
+    edges: [Int:[Int]]
+    // Per slot: whether any back edge copies it.
+    copied: [Bool]
+    // Per MIR block position: whether a back edge enters it (an inline phi
+    // there gets frame storage the edge copies into).
+    headers: [Bool]
+}
+
+fn lower_loop_copies(function: MIRFunction, candidates: [Bool], place_slots: [U64:Int], defined_slots: [U64:Int], successors: [[Int]], ranks: [Int]) -> LowerLoopCopies Never! {
+    count :: function.blocks.len()
+    copied := [Bool]{}
+    loop _ in candidates -> &copied.push(false)
+    headers := [Bool]{}
+    loop _ in function.blocks -> &headers.push(false)
+    edges := [Int:[Int]]{}
+    roots := [U64:Bool]{}
+    loop place in function.places {
+        if place.projections.len() == 0 -> _ := &roots.add(place.id.value, true)
+    }
+    // Per block: the candidate slots its instructions rebind.
+    rebinds := [[Int]]{}
+    any := false
+    loop block in function.blocks {
+        row := [Int]{}
+        loop instruction in block.instructions {
+            if instruction.result == .Val(result) {
+                if defined_slots.get(result.value) == .Val(slot) -> lower_loop_rebind(&row, candidates, slot)
+            }
+            if instruction.operation == {
+                .WritePlace(place, _) | .ReplacePlace(place, _) | .InitializeUninit(place) -> {
+                    if roots.get(place.value) != None {
+                        if place_slots.get(place.value) == .Val(slot) -> lower_loop_rebind(&row, candidates, slot)
+                    }
+                }
+                .MapLookup(_, _, cache) -> {
+                    if place_slots.get(cache.value) == .Val(slot) -> lower_loop_rebind(&row, candidates, slot)
+                }
+                .Semantic(semantic) -> {
+                    if semantic == .SharedGuardWait(_, guard, _, _) {
+                        if defined_slots.get(guard.value) == .Val(slot) -> lower_loop_rebind(&row, candidates, slot)
+                    }
+                }
+                else -> {}
+            }
+        }
+        if row.len() > 0 -> any = true
+        &rebinds.push(row)
+    }
+    predecessors := [[Int]]{}
+    loop _ in function.blocks -> &predecessors.push([Int]{})
+    loop (from, targets) in successors {
+        loop to in targets -> &predecessors[to].push(from)
+    }
+    loop (from, targets) in successors {
+        if ranks[from] < 0 -> next
+        loop to in targets {
+            if ranks[to] < 0 || ranks[to] > ranks[from] -> next
+            slots := [Int]{}
+            if any {
+                // The loop body: `to`, then everything reaching `from` before `to`.
+                body := [Bool]{}
+                loop _ in function.blocks -> &body.push(false)
+                body[to] = true
+                body[from] = true
+                pending := [Int]{from}
+                loop pending.len() > 0 {
+                    block :: &pending.pop() ?? break
+                    loop predecessor in predecessors[block] {
+                        if body[predecessor] -> next
+                        body[predecessor] = true
+                        &pending.push(predecessor)
+                    }
+                }
+                rebound := [Bool]{}
+                loop _ in candidates -> &rebound.push(false)
+                loop (position, inside) in body {
+                    if !inside -> next
+                    loop slot in rebinds[position] -> rebound[slot] = true
+                }
+                loop (slot, flag) in rebound {
+                    if !flag -> next
+                    &slots.push(slot)
+                    copied[slot] = true
+                }
+            }
+            headers[to] = true
+            _ := &edges.add(from * count + to, slots)
+        }
+    }
+    LowerLoopCopies{edges: edges, copied: copied, headers: headers}
+}
+
+fn lower_loop_rebind(row: &[Int], candidates: [Bool], slot: Int) Never! {
+    if !candidates[slot] || row.contains(slot) -> return
+    &row.push(slot)
+}

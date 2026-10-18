@@ -217,10 +217,7 @@ fn lower_constant_tree_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
         .Bool(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: if value -> 1 else -> 0})
         .Char(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
         .Float(value, f32, _) -> lower_emit(&f, LIRInst.Const{dst: dst, value: lower_float_constant_bits(value, f32)})
-        .String(value) -> {
-            args :: lower_static_text(&m, &f, value)
-            lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(dst))
-        }
+        .String(value) -> lower_emit(&f, LIRInst.DataAddress{dst: dst, data: lower_immortal_text(&m, value)})
         .Struct(name, fields) -> {
             if ty.kind == .Tuple(_) {
                 lower_storage_into(p, &f, dst, ty)
