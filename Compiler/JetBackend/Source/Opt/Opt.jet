@@ -268,9 +268,12 @@ struct OptStreamQueue {
 // until after the settle, with the function's lowered body inside for the
 // job's duration, so a thread that stops leaves the body for the fault
 // dump, and `done` false tells the thread that wakes on the released guard
-// that the job stopped rather than settled.
+// that the job stopped rather than settled. `seat` is the claiming seat,
+// recorded with the claim, so a keep-going trap settles that seat without
+// reading any other token (their guards are held by running jobs).
 struct OptStreamJob {
     id: Int
+    seat: Int
     done: Bool
     function: [LIRFunction]
 }
@@ -337,7 +340,7 @@ fn x64_compile_module_owned(program: ^LIRModule, threads: CompilerThreads, level
     seat_weights := [Int]{}
     loop _ in 0..<seats {
         &busy.push(false)
-        &tokens.push(shared OptStreamJob{id: -1, done: true, function: [LIRFunction]{}})
+        &tokens.push(shared OptStreamJob{id: -1, seat: -1, done: true, function: [LIRFunction]{}})
         &seat_weights.push(0)
     }
     heap := [Int]{}
@@ -489,7 +492,7 @@ fn opt_stream_claimed(tables: Shared<OptStreamTables>, store: Shared<OptStreamSt
 // so no thread sees it unheld before its job settles, and the job when a
 // function is ready. The claim's wait (or neither) comes back otherwise.
 fn opt_stream_turn(tables: Shared<OptStreamTables>, store: Shared<OptStreamStore>, queue: Shared<OptStreamQueue>, seat: Int) -> OptStreamClaim {
-    token :: shared OptStreamJob{id: -1, done: false, function: [LIRFunction]{}}
+    token :: shared OptStreamJob{id: -1, seat: -1, done: false, function: [LIRFunction]{}}
     permit := token.guard_edit()
     claim :: opt_stream_claim(queue, seat, token)
     if claim.id < 0 {
@@ -497,6 +500,7 @@ fn opt_stream_turn(tables: Shared<OptStreamTables>, store: Shared<OptStreamStore
         return OptStreamClaim{id: -1, wait: claim.wait}
     }
     permit.value.id = claim.id
+    permit.value.seat = seat
     opt_stream_job(tables, store, queue, seat, claim.id, &permit.value)
     permit.value.done = true
     OptStreamClaim{id: claim.id, wait: None}
@@ -508,6 +512,10 @@ fn opt_stream_turn(tables: Shared<OptStreamTables>, store: Shared<OptStreamStore
 fn opt_stream_claim(queue: Shared<OptStreamQueue>, seat: Int, token: Shared<OptStreamJob>) -> OptStreamClaim {
     permit := queue.guard_edit()
     if permit.value.stopped -> return OptStreamClaim{id: -1, wait: None}
+    // A seat still marked busy here held a job whose thread stopped (the
+    // keep-going follow-up claimer reuses its seat): trap that job first,
+    // never overwrite its token.
+    if permit.value.busy[seat] -> return OptStreamClaim{id: -1, wait: Val(permit.value.tokens[seat])}
     if permit.value.ready.len() > 0 {
         id :: opt_queue_pop(&permit.value)
         permit.value.busy[seat] = true
@@ -560,7 +568,7 @@ fn opt_stream_stop(queue: Shared<OptStreamQueue>) {
 fn opt_stream_trap(tables: Shared<OptStreamTables>, store: Shared<OptStreamStore>, queue: Shared<OptStreamQueue>, job: &OptStreamJob) {
     id :: job.id
     name :: opt_stream_name(tables, id)
-    seat :: opt_stream_seat_of(queue, id)
+    seat :: job.seat
     result := X64CompileResult{function: None, debug: None, errors: [String]{"x64: {name}: keep-going trap: compiling it stopped"}}
     opt_stream_settle(store, queue, seat, id, [LIRFunction]{}, 0, [Bool]{}, [String]{}, ^result, &job.function)
 }
@@ -568,21 +576,6 @@ fn opt_stream_trap(tables: Shared<OptStreamTables>, store: Shared<OptStreamStore
 fn opt_stream_name(tables: Shared<OptStreamTables>, id: Int) -> String {
     read :: tables.guard_read()
     read.value.programs[0].functions[id].name
-}
-
-// The seat whose running job is function `id`.
-fn opt_stream_seat_of(queue: Shared<OptStreamQueue>, id: Int) -> Int {
-    read :: queue.guard_read()
-    loop (seat, flag) in read.value.busy {
-        if !flag -> next
-        if opt_stream_token_id(read.value.tokens[seat]) == id -> return seat
-    }
-    panic("the stopped x64 compile job of function {id} has no seat")
-}
-
-fn opt_stream_token_id(token: Shared<OptStreamJob>) -> Int {
-    read :: token.guard_read()
-    read.value.id
 }
 
 // One job: function `id`'s back end at the tables' level, with the lowered
