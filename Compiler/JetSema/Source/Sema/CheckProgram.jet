@@ -5400,6 +5400,8 @@ fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs:
     permit :: shared_state.guard_edit()
     environment := &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
     program := &permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    // The last module's declaration scope leaves with its threads.
+    environment.module_scope = None
     &environments.push(^environment)
     &programs.push(^program)
     checks
@@ -5445,19 +5447,28 @@ fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environ
 }
 
 // Enters the shared environment in `module_identity`, prepares the module's
-// probe scope and makes it and `positions` the current module's rows. False
-// when the module cannot be entered or its scope not applied (the run then
-// checks its sources at their turn). `scope_items` gets the module's item
-// count.
+// probe scope and makes it and `positions` the current module's rows. The
+// prepared scope moves into the environment's `module_scope`, where every
+// thread reads it in place through its own light copy
+// (sema_comptime_precheck_thread_probe); the probe row keeps the module's
+// other prepared facts. False when the module cannot be entered or its scope
+// not applied (the run then checks its sources at their turn). `scope_items`
+// gets the module's item count.
 fn sema_comptime_precheck_enter(shared_state: Shared<SemaPrecheckShared>, module_identity: String, version: Int, positions: [Int], scope_items: &Int) -> Bool {
     permit :: shared_state.guard_edit()
     // The environment moves out of the shared state and back, so entering
     // never copies it.
     environment := &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    environment.module_scope = None
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     entered :: sema_scope_environment_enter_probe_module(&environment, permit.value.programs[0], module_identity, ^empty)
     probe := sema_comptime_probe_init(None)
     if entered -> sema_comptime_probe_prepare(&probe, environment, permit.value.programs[0], version)
+    if entered && probe.applied {
+        table := ^probe.table
+        probe.table = sema_scope_init(module_identity)
+        environment.module_scope = Val(^table)
+    }
     &permit.value.environments.push(^environment)
     if !entered || !probe.applied -> return false
     if permit.value.programs[0].registration_graph == .Val(graph) {
@@ -5468,6 +5479,28 @@ fn sema_comptime_precheck_enter(shared_state: Shared<SemaPrecheckShared>, module
     &permit.value.probes.push(^probe)
     permit.value.positions = [[Int]]{positions}
     true
+}
+
+// A precheck thread's own probe: a light copy of the module's declaration
+// scope (the shared environment's `module_scope`, whose function types the
+// copy reads in place, sema_scope_light_copy) beside copies of the prepared
+// probe's small rows, with host callbacks withheld through `wanted`. The
+// copied probe is prepared for the same module and version, so a check's
+// sema_comptime_probe_prepare keeps it as it is.
+fn sema_comptime_precheck_thread_probe(environment: SemaScopeEnvironment, source: SemaScopeProbe, wanted: Shared<SemaHostHookWanted>) -> SemaScopeProbe {
+    if environment.module_scope == .Val(table) {
+        return SemaScopeProbe{
+            module_identity: source.module_identity.copy(),
+            table: sema_scope_light_copy(table),
+            applied: source.applied,
+            // copy: the thread's probe owns its rows while the shared probe keeps its own.
+            diagnostics: source.diagnostics.copy(),
+            constants: source.constants.copy(),
+            host_hooks: Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: None}),
+            version: source.version,
+        }
+    }
+    panic("the precheck module scope left the shared environment")
 }
 
 // Runs claiming threads `from..<workers`, one task each, and moves every
@@ -5485,15 +5518,12 @@ fn sema_comptime_precheck_claimers(shared_state: Shared<SemaPrecheckShared>, bou
     }
 }
 
-// One thread: checks the parts it claims until none is left, on its own copy
-// of the module's probe scope, with host callbacks withheld.
+// One thread: checks the parts it claims until none is left, on its own light
+// copy of the module's probe scope, with host callbacks withheld.
 fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, bounds: [Int], queue: Shared<SemaPrecheckQueue>) -> [SemaPrecheckPart] {
     inputs :: shared_state.guard_read()
     wanted :: shared SemaHostHookWanted{wanted: false}
-    // copy: each thread checks on its own scope, while the module's prepared
-    // probe (owner: the shared state, read by every thread) stays as it is.
-    probe := inputs.value.probes[0].copy()
-    probe.host_hooks = Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: None})
+    probe := sema_comptime_precheck_thread_probe(inputs.value.environments[0], inputs.value.probes[0], wanted)
     claimed := [SemaPrecheckPart]{}
     loop {
         part :: sema_comptime_precheck_claim(queue)
