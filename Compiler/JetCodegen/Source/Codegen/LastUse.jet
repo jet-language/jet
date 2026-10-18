@@ -353,10 +353,13 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
 
     // Owned locals and owned (`^`) parameters: a whole place with a drop flag
     // whose release has no observable effect (no scope-end `close`, not a
-    // view). Keyed by root: "local:<id>" or "parameter:<value>".
+    // view). Keyed by root: "local:<id>" or "parameter:<value>"; a parameter
+    // root's candidate is also keyed by the parameter value
+    // (parameter_candidate) for the bare-value use scan below.
     candidates := [JetCodegenLastUseCandidate]{}
     rejected := [Bool]{}
     root_candidate := [String:Int]{}
+    parameter_candidate := [U64:Int]{}
     flag_candidate := [U64:Int]{}
     loop record in builder.drop_live_all {
         if place_row.get(record.place.value) == None -> next
@@ -366,9 +369,13 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         if jet_codegen_scope_end_close_function(builder, program, record.ty) != None -> next
         if jet_codegen_last_use_view(row.ty) -> next
         root_key := String?{None}
+        parameter := U64?{None}
         if row.base == {
             .Local(local) -> root_key = Val("local:{local.value}")
-            .Parameter(value) -> root_key = Val("parameter:{value.value}")
+            .Parameter(value) -> {
+                root_key = Val("parameter:{value.value}")
+                parameter = Val(value.value)
+            }
             else -> {}
         }
         key :: root_key ?? next
@@ -377,6 +384,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             next
         }
         _ := &root_candidate.add(key, candidates.len())
+        if parameter == .Val(parameter_value) -> _ := &parameter_candidate.add(parameter_value, candidates.len())
         _ := &flag_candidate.add(record.live.value, candidates.len())
         &candidates.push(jet_codegen_last_use_new_candidate(true, false, false, record.place, record.live, no_value, -1, [MIRFieldID]{}))
         &rejected.push(false)
@@ -462,7 +470,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             loop value in mir_operation_value_uses(instruction.operation) -> &uses.push(value)
         }
         loop value in uses {
-            if root_candidate.get("parameter:{value.value}") == .Val(candidate) -> rejected[candidate] = true
+            if parameter_candidate.get(value.value) == .Val(candidate) -> rejected[candidate] = true
         }
     }
 
