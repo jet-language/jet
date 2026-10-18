@@ -10,6 +10,8 @@
 // exact result outside the signed 64-bit range) is left to the machine.
 // Float operations are never folded (signed zeros, NaN payloads).
 
+use jet_foundation.[compiler_take_rows]
+
 OPT_I64_MIN :: prep { -9223372036854775808 }
 OPT_I64_MAX :: prep { 9223372036854775807 }
 
@@ -506,38 +508,61 @@ fn opt_thread(function: &LIRFunction) -> Bool Never! {
 // trivial word or pointer into an owner) is the only spelling of that
 // adoption, so it is never merged; aliasing would drop the obligation
 // (inline_alias_safe refuses the same change at call entries).
+//
+// One pass in block order: a block absorbs its successor, then (its
+// terminator is now the successor's) the next, until its jump no longer
+// qualifies; an absorbed block is skipped and the list is compacted once.
+// This is the result of rescanning from the first block after every merge:
+// a merge moves the successor's edges to the block, so no other block's
+// terminator, edge count or drop comparison changes (the successor's
+// parameters alias arguments of the same drop glue), and the rescan's first
+// candidate is the merging block again or a later one.
 fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
+    rows :: opt_block_rows(function)
+    counts :: opt_predecessor_counts(function, rows)
+    absorbed := [Bool]{}
+    loop _ in function.blocks -> &absorbed.push(false)
     changed := false
-    loop {
-        rows :: opt_block_rows(function)
-        counts :: opt_predecessor_counts(function, rows)
-        merged := false
-        loop (index, block) in function.blocks {
-            if merged -> break
-            if block.terminator == .Jump(target) {
-                row :: rows.get(target.block.value) ?? -1
-                if row > 0 && row != index && counts[row] == 1 && opt_merge_keeps_drops(function, facts, function.blocks[row], target) {
-                    successor :: function.blocks[row]
-                    loop (position, param) in successor.params -> facts.alias[param.value] = opt_root(facts, target.args[position].value)
-                    insts := block.insts
-                    loop inst in successor.insts -> &insts.push(inst)
-                    lines := [Int]{}
-                    loop at in 0..<block.insts.len() -> &lines.push(opt_debug_line(block, at))
-                    loop at in 0..<(successor.insts.len() + 1) -> &lines.push(opt_debug_line(successor, at))
-                    function.blocks[index] = LIRBlock{id: block.id, params: block.params, insts: insts, terminator: successor.terminator, lines: lines, cold: block.cold}
-                    kept := [LIRBlock]{}
-                    loop (other, candidate) in function.blocks {
-                        if other != row -> &kept.push(candidate)
-                    }
-                    function.blocks = kept
-                    merged = true
-                }
+    loop index in 0..<function.blocks.len() {
+        if absorbed[index] -> next
+        loop {
+            jump := LIRJumpTarget?{None}
+            if function.blocks[index].terminator == .Jump(found) -> jump = Val(found.copy())
+            target :: jump ?? { break }
+            row :: rows.get(target.block.value) ?? -1
+            if row <= 0 || row == index || absorbed[row] || counts[row] != 1 || !opt_merge_keeps_drops(function, facts, function.blocks[row], target) -> break
+            loop (position, param) in function.blocks[row].params -> facts.alias[param.value] = opt_root(facts, target.args[position].value)
+            // The block's own source lines stay when they describe its
+            // instructions, else they are unknown (opt_debug_line); then the
+            // successor's, for its instructions and its terminator.
+            block_count :: function.blocks[index].insts.len()
+            successor_count :: function.blocks[row].insts.len()
+            if function.blocks[index].lines.len() == block_count + 1 {
+                _ := &function.blocks[index].lines.pop()
+            } else {
+                function.blocks[index].lines = [Int]{}
+                loop _ in 0..<block_count -> &function.blocks[index].lines.push(0)
             }
+            if function.blocks[row].lines.len() == successor_count + 1 {
+                successor_lines := compiler_take_rows<Int>(&function.blocks[row].lines)
+                &function.blocks[index].lines.extend(^successor_lines)
+            } else {
+                loop _ in 0..<(successor_count + 1) -> &function.blocks[index].lines.push(0)
+            }
+            successor_insts := compiler_take_rows<LIRInst>(&function.blocks[row].insts)
+            &function.blocks[index].insts.extend(^successor_insts)
+            terminator :: function.blocks[row].terminator.copy()
+            function.blocks[index].terminator = terminator
+            absorbed[row] = true
+            changed = true
         }
-        if !merged -> break
-        changed = true
     }
-    changed
+    if !changed -> return false
+    blocks := compiler_take_rows<LIRBlock>(&function.blocks)
+    loop (index, block) in blocks {
+        if !absorbed[index] -> &function.blocks.push(block)
+    }
+    true
 }
 
 // Every parameter of `successor` has the drop glue of its argument's root.
