@@ -115,18 +115,44 @@ Need our version of jai implicit context passed as an invisible arg to every fun
 
 TLA+ /\ as trailing disjunction?
 
-Is there a legitimate, good reason to use {} c style rather than python space/tab/indent based? Research this.
-
 Thoughts on every value in the language being basically a custom wrapped pointer, so whenever you pass something it is always "by pointer" unless you "unpack it" to copy to another memory address. That way you can access both the value or pointer without having to think about it, the compiler picks the most efficient one, and things are clean. Just rough brainstorming, need discussion
 
 Port doom to jet to test
 
-MUST RESEARCH V -> INCREDIBLE LOOKING LANGUAGE VERY ALIGNED WIH A LOT OF JET GOALS, just missing metaprogramming and effects auditing, but performance and cross compilation and interop are already where jet is targeting
-
 Mine: https://smarimccarthy.is/posts/2024-12-02-four-years-of-jai/
 https://www.forrestthewoods.com/blog/learning-jai-via-advent-of-code/
-https://vlang.io/
 
 Make := that is never reassigned an error
 
 Lambda as unnamed function and anonymous union as unnamed enum
+
+Mine the jet playlist to gather as much intel on jai as possible, put into a "reverse engineering" analysis to learn from it. Also, ensure we have an exhaustive list/info on the compiler and build options and metaprograms specifically so we can ensure the same level of support features customization etc in jet
+
+dispatch by type in jai just works -> if param.value.tag == {
+  Int -> 
+  Float -> 
+  else ->
+}
+
+Research relative pointers and benefits -> maybe use at comptime and erase for zero cost runtime?
+```c
+typedef struct Node Node;
+
+struct Node {
+    char text[32];
+    uint16_t left;
+    uint16_t right;
+};
+
+#define NODE_POOL_CAP 1024
+Node node_pool[NODE_POOL_CAP];
+
+int main()
+{
+    Node root;
+    node_pool[root->left];
+    return 0;
+}
+```
+
+language bindings could just be a single jet file that is a metaprogram for rewriting in jet or some other binding method
