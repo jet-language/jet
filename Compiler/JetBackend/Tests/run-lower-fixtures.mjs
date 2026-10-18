@@ -174,6 +174,7 @@ const parts = [
   item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_admit("),
   item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_partition("),
   item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_failure_text("),
+  item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_single("),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
   body("Compiler/JetBackend/Source/UiABI.jet"),

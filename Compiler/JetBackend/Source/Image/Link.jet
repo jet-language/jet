@@ -31,7 +31,7 @@ fn x64_data_align(data: [LIRData]) -> Int Never! {
 fn x64_link_place(text: &[U8], function: X64CompiledFunction) -> Int Never! {
     loop text.len() % X64_FUNCTION_ALIGN != 0 -> x64_int3(&text)
     at :: text.len()
-    loop byte in function.code -> &text.push(byte)
+    &text.extend(function.code)
     at
 }
 

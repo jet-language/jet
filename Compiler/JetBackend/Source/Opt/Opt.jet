@@ -767,7 +767,7 @@ fn x64_relocatable_object_owned(program: ^LIRModule, entry: LIRFunctionID, threa
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&kept.compiled.functions))
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&kept.compiled.debug))
-    written := x64_object_functions(kept.program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+    written := x64_object_functions_threads(kept.program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, threads)
     if !keep_going -> return X64ObjectOutcome{object: ^written, faults: [LIRFunction]{}}
     errors := compiler_take_rows<String>(&kept.compiled.errors)
     &errors.extend(compiler_take_rows<String>(&written.errors))
