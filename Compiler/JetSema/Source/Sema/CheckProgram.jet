@@ -5138,11 +5138,14 @@ fn sema_comptime_module_sources(program: SemaProgramTables, module_index: Int) -
 // module's probe scope (sema_comptime_probe_prepare), each thread on its own
 // copy, against the one environment entered in the module, which moves into
 // the threads' shared state with the program tables and back out after.
+// Each is the one row of its slot (`environments`, `programs`), so it is
+// popped and pushed back, never copied: moving a borrowed environment or
+// program out would copy the whole registration graph once per pass.
 // Host callbacks are withheld there; a check that wanted one, a checked-text
 // source (its check reads no expression), and every source of a module whose
 // checks admit one thread have no row (None), and the run checks them at
 // their turn. The result has one row per source.
-fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &SemaProgramTables, available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads) -> [SemaComptimeItemCheck?] {
+fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads) -> [SemaComptimeItemCheck?] {
     checks := [SemaComptimeItemCheck?]{}
     loop _ in 0..<sources.len() -> &checks.push(None)
     // The expression sources of each module, in order of first appearance.
@@ -5167,7 +5170,7 @@ fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &Se
     }
     if compiler_threads_admit(threads, sources.len(), total, SEMA_PROBE_MIN_BYTES_PER_THREAD, 0, 0) <= 1 -> return checks
     shared_state :: shared SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, probes: [SemaScopeProbe]{}, positions: [[Int]]{}}
-    sema_comptime_precheck_fill(shared_state, ^environment, ^program)
+    sema_comptime_precheck_fill(shared_state, &environments, &programs)
     loop row in 0..<module_positions.len() {
         weights := [Int]{}
         work := 0
@@ -5197,8 +5200,10 @@ fn sema_comptime_precheck_items(environment: &SemaScopeEnvironment, program: &Se
         }
     }
     permit :: shared_state.guard_edit()
-    environment = &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
-    program = &permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    environment := &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    program := &permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    &environments.push(^environment)
+    &programs.push(^program)
     checks
 }
 
@@ -5230,10 +5235,13 @@ struct SemaPrecheckPart {
     checks: [SemaComptimeItemCheck?]
 }
 
-// Moves the run's environment and program tables into the precheck threads'
-// shared state; sema_comptime_precheck_items moves them back.
-fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environment: ^SemaScopeEnvironment, program: ^SemaProgramTables) {
+// Moves the run's environment and program tables out of their slots into the
+// precheck threads' shared state; sema_comptime_precheck_items moves them
+// back.
+fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environments: &[SemaScopeEnvironment], programs: &[SemaProgramTables]) {
     permit :: shared_state.guard_edit()
+    environment := &environments.pop() ?? panic("the run's environment left its slot")
+    program := &programs.pop() ?? panic("the run's program tables left their slot")
     &permit.value.environments.push(^environment)
     &permit.value.programs.push(^program)
 }
