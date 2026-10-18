@@ -385,19 +385,30 @@ MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD :: 20000
 // thread steps: a pass's working rows grow with the function it rewrites.
 MIR_PASS_BYTES_PER_INSTRUCTION :: 512
 
-// One thread's part of a wave: its functions, last-first. The part moves into
-// the slot and back out by single-element moves, and its thread steps the
-// functions in place behind the slot's guard, so no function is copied.
+// Parts per admitted thread of a wave: enough that a thread which drew light
+// parts claims more while another finishes a heavy one.
+MIR_PASS_PARTS_PER_THREAD :: 32
+
+// One part of a wave: its functions, last-first. The part moves into the
+// slot and back out by single-element moves, and the thread that claims it
+// steps the functions in place behind the slot's guard, so no function is
+// copied.
 struct MIRPassWaveSlot {
     functions: [MIRFunction]
 }
 
+// The next unclaimed rank of a wave.
+struct MIRPassWaveQueue {
+    next: Int
+}
+
 // Steps `first` through `last` on every function of `program`. One admitted
-// thread steps each function in place, in program order. More threads take
+// thread steps each function in place, in program order. More threads claim
 // consecutive parts of the function list (moved out of the program into one
-// slot each), step them in place, and the parts move back in part order.
-// Each function's steps read only that function and the shared inputs, and
-// the counts are sums, so the program and the counts are the same either way.
+// slot each), heaviest part first, step them in place, and the parts move
+// back in part order. Each function's steps read only that function and the
+// shared inputs, and the counts are sums, so the program and the counts are
+// the same either way.
 fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWaveInputs, threads: CompilerThreads) -> MIRPassWaveCounts {
     counts := mir_pass_wave_counts()
     plan :: mir_pass_wave_plan(program, threads)
@@ -410,17 +421,21 @@ fn mir_pass_wave(program: &MIRProgram, first: Int, last: Int, inputs: MIRPassWav
     }
     slots :: mir_pass_wave_take(&program, plan)
     shared_inputs :: shared inputs
-    counts = mir_pass_wave_slots(slots, 0, first, last, shared_inputs)
+    queue :: shared MIRPassWaveQueue{next: 0}
+    counts = mir_pass_wave_slots(slots, plan, queue, 0, first, last, shared_inputs)
     loop slot in slots -> mir_pass_wave_restore(&program, slot)
     counts
 }
 
 // How many threads a wave over the program's functions admits, and, for more
 // than one, the first function of each consecutive part (`bounds[p]`, with
-// `bounds[workers]` the function count). Parts are weighed by instructions.
+// the last bound the function count) and the order the parts are claimed in
+// (`order[rank]`: the part with the heaviest single function first). Parts
+// are weighed by instructions.
 struct MIRPassWavePlan {
     workers: Int
     bounds: [Int]
+    order: [Int]
 }
 
 fn mir_pass_wave_plan(program: MIRProgram, threads: CompilerThreads) -> MIRPassWavePlan {
@@ -435,29 +450,40 @@ fn mir_pass_wave_plan(program: MIRProgram, threads: CompilerThreads) -> MIRPassW
         if size > largest -> largest = size
     }
     workers :: compiler_threads_admit(threads, program.functions.len(), total, MIR_PASS_MIN_INSTRUCTIONS_PER_THREAD, largest * MIR_PASS_BYTES_PER_INSTRUCTION, 0)
-    if workers <= 1 -> return MIRPassWavePlan{workers: 1, bounds: [Int]{}}
-    MIRPassWavePlan{workers: workers, bounds: compiler_threads_partition(weights, workers)}
+    if workers <= 1 -> return MIRPassWavePlan{workers: 1, bounds: [Int]{}, order: [Int]{}}
+    count := workers * MIR_PASS_PARTS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    bounds :: compiler_threads_partition(weights, count)
+    peaks := [Int]{}
+    loop part in 0..<count {
+        peak := 0
+        loop position in bounds[part]..<bounds[part + 1] {
+            if weights[position] > peak -> peak = weights[position]
+        }
+        &peaks.push(peak)
+    }
+    MIRPassWavePlan{workers: workers, bounds: bounds, order: compiler_threads_heaviest_first(peaks)}
 }
 
 // Moves the program's functions into one slot per part of `plan`: slot `p`
 // holds the functions `bounds[p]` up to `bounds[p + 1]`, last-first.
 // mir_pass_wave_restore moves them back, slot by slot, in part order.
 fn mir_pass_wave_take(program: &MIRProgram, plan: MIRPassWavePlan) -> [Shared<MIRPassWaveSlot>] {
-    workers :: plan.workers
+    count :: plan.bounds.len() - 1
     parts := [[MIRFunction]]{}
-    loop _ in 0..<workers -> &parts.push([MIRFunction]{})
-    part := workers - 1
+    loop _ in 0..<count -> &parts.push([MIRFunction]{})
+    part := count - 1
     loop {
         function :: &program.functions.pop() ?? break
         part = compiler_threads_part_of(plan.bounds, part, program.functions.len())
         &parts[part].push(function)
     }
     slots := [Shared<MIRPassWaveSlot>]{}
-    loop _ in 0..<workers {
+    loop _ in 0..<count {
         slot :: shared MIRPassWaveSlot{functions: [MIRFunction]{}}
         &slots.push(slot)
     }
-    filled := workers
+    filled := count
     loop filled > 0 {
         filled -= 1
         functions := &parts.pop() ?? break
@@ -482,25 +508,39 @@ fn mir_pass_wave_restore(program: &MIRProgram, slot: Shared<MIRPassWaveSlot>) {
     }
 }
 
-// One thread: steps every function of its slot in place.
-fn mir_pass_wave_slot(slot: Shared<MIRPassWaveSlot>, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
+// Claims the next part of a wave: its slot index, or -1 once every part is
+// claimed.
+fn mir_pass_wave_claim(plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>) -> Int {
+    permit :: queue.guard_edit()
+    rank :: permit.value.next
+    permit.value.next = rank + 1
+    if rank >= plan.order.len() -> return -1
+    plan.order[rank]
+}
+
+// One thread: steps every function of each part it claims, in place.
+fn mir_pass_wave_slot(slots: [Shared<MIRPassWaveSlot>], plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
     counts := mir_pass_wave_counts()
     inputs :: shared_inputs.guard_read()
-    permit := slot.guard_edit()
-    loop index in 0..<permit.value.functions.len() {
-        mir_pass_function_steps(&permit.value.functions[index], first, last, inputs.value, &counts)
+    loop {
+        part :: mir_pass_wave_claim(plan, queue)
+        if part < 0 -> break
+        permit := slots[part].guard_edit()
+        loop index in 0..<permit.value.functions.len() {
+            mir_pass_function_steps(&permit.value.functions[index], first, last, inputs.value, &counts)
+        }
     }
     counts
 }
 
-// Steps `slots[from..]`, one task per slot and the last slot on this thread,
-// and returns the summed counts.
-fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
-    if from >= slots.len() - 1 -> return mir_pass_wave_slot(slots[from], first, last, shared_inputs)
+// Runs claiming threads `from..<plan.workers`, one task each and the last on
+// this thread, and returns the summed counts.
+fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>, from: Int, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
+    if from >= plan.workers - 1 -> return mir_pass_wave_slot(slots, plan, queue, first, last, shared_inputs)
     counts := mir_pass_wave_counts()
     task.group optimizer_threads {
-        head :: task mir_pass_wave_slot(slots[from], first, last, shared_inputs)
-        counts = mir_pass_wave_slots(slots, from + 1, first, last, shared_inputs)
+        head :: task mir_pass_wave_slot(slots, plan, queue, first, last, shared_inputs)
+        counts = mir_pass_wave_slots(slots, plan, queue, from + 1, first, last, shared_inputs)
         mir_pass_wave_counts_add(&counts, head.join() ?? panic(compiler_threads_failure_text(err)))
     }
     counts
@@ -549,42 +589,63 @@ fn mir_pass_lint(program: MIRProgram, pass: MIROptimizationPassID) -> MIROptimiz
 }
 
 // mir_pass_lint on up to `threads` threads. The lint index is built once
-// over the whole program; then each part lints its functions, moved into its
-// slot, in program order, and the first failure of the first failing part is
-// the result: the program's first failure in program order, as on one thread.
+// over the whole program and copied once per thread; then each thread lints
+// the parts it claims (functions moved into one slot per part), each part in
+// program order, and the first failure of the lowest failing part is the
+// result: the program's first failure in program order, as on one thread.
 // Every part joins and every function moves back before the result returns.
 fn mir_pass_lint_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads: CompilerThreads) -> MIROptimizationError? {
     plan :: mir_pass_wave_plan(program, threads)
     if plan.workers <= 1 -> return mir_pass_lint(program, pass)
     shared_index :: shared mir_lint_index(program)
     slots :: mir_pass_wave_take(&program, plan)
-    failures :: mir_pass_lint_slots(slots, 0, shared_index) ?? panic("a MIR lint wave lost a compiler thread")
+    queue :: shared MIRPassWaveQueue{next: 0}
+    failures :: mir_pass_lint_slots(slots, plan, queue, 0, shared_index) ?? panic("a MIR lint wave lost a compiler thread")
     loop slot in slots -> mir_pass_wave_restore(&program, slot)
-    if failures.len() == 0 -> return None
-    Val(mir_pass_lint_error(pass, failures[0]))
+    found := -1
+    loop (row, failure) in failures {
+        if found < 0 || failure.part < failures[found].part -> found = row
+    }
+    if found < 0 -> return None
+    Val(mir_pass_lint_error(pass, failures[found].failure))
 }
 
-// One thread: lints its slot's functions on its own copy of the index; the
-// part stops at its first failure (at most one is returned).
-fn mir_pass_lint_slot(slot: Shared<MIRPassWaveSlot>, shared_index: Shared<MIRLintIndex>) -> [MIRLintError] {
-    // copy: every worker lints with its own index (owner: this worker, moved into
-    // mir_lint_owned_part) built from the one shared index (owner: the Shared cell, read by all
-    // workers); a read guard only lends a view, so none may move it out.
+// The first failure of one part of a lint wave.
+struct MIRPassLintPartFailure {
+    part: Int
+    failure: MIRLintError
+}
+
+// One thread: lints the functions of each part it claims on its own copy of
+// the index; a part stops at its first failure, which is returned with the
+// part.
+fn mir_pass_lint_slot(slots: [Shared<MIRPassWaveSlot>], plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>, shared_index: Shared<MIRLintIndex>) -> [MIRPassLintPartFailure] {
+    // copy: every worker lints with its own index (owner: this worker, lent to
+    // mir_lint_owned_part per part) built from the one shared index (owner: the Shared cell, read by
+    // all workers); a read guard only lends a view, so none may move it out.
     index := shared_index.guard_read().value.copy()
-    permit := slot.guard_edit()
-    mir_lint_owned_part(^index, &permit.value.functions, false)
+    failures := [MIRPassLintPartFailure]{}
+    loop {
+        part :: mir_pass_wave_claim(plan, queue)
+        if part < 0 -> break
+        permit := slots[part].guard_edit()
+        linted := mir_lint_owned_part(^index, &permit.value.functions, false)
+        if linted.failures.len() > 0 -> &failures.push(MIRPassLintPartFailure{part: part, failure: linted.failures[0]})
+        index = ^linted.index
+    }
+    failures
 }
 
-// Lints `slots[from..]`, one task per slot and the last slot on this thread;
-// returns the first failure in part order (at most one).
-fn mir_pass_lint_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, shared_index: Shared<MIRLintIndex>) -> [MIRLintError] {
-    if from >= slots.len() - 1 -> return mir_pass_lint_slot(slots[from], shared_index)
-    failures := [MIRLintError]{}
+// Runs claiming lint threads `from..<plan.workers`, one task each and the
+// last on this thread; returns every part's first failure.
+fn mir_pass_lint_slots(slots: [Shared<MIRPassWaveSlot>], plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>, from: Int, shared_index: Shared<MIRLintIndex>) -> [MIRPassLintPartFailure] {
+    if from >= plan.workers - 1 -> return mir_pass_lint_slot(slots, plan, queue, shared_index)
+    failures := [MIRPassLintPartFailure]{}
     task.group optimizer_threads {
-        head :: task mir_pass_lint_slot(slots[from], shared_index)
-        rest :: mir_pass_lint_slots(slots, from + 1, shared_index)
+        head :: task mir_pass_lint_slot(slots, plan, queue, shared_index)
+        rest :: mir_pass_lint_slots(slots, plan, queue, from + 1, shared_index)
         failures = head.join() ?? panic(compiler_threads_failure_text(err))
-        if failures.len() == 0 -> failures = rest
+        loop failure in rest -> &failures.push(failure)
     }
     failures
 }
@@ -596,48 +657,70 @@ struct MIRPassLegalityInputs {
     pass: MIROptimizationPassID
 }
 
+// The first failure of one part of a legality wave.
+struct MIRPassLegalityPartFailure {
+    part: Int
+    failure: MIROptimizationError
+}
+
 // mir_pass_validate_program on up to `threads` threads. The schema check,
 // the program tables and the zero/duplicate identity checks run first over
-// the whole program; then each part validates its functions in place, in
-// program order, and the first failure of the first failing part is the
-// result: the program's first failure in program order, as on one thread.
+// the whole program; then each thread validates the parts it claims in
+// place, each in program order, and the first failure of the lowest failing
+// part is the result: the program's first failure in program order, as on
+// one thread.
 fn mir_pass_validate_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads: CompilerThreads) -> MIROptimizationError? {
     if program.schema_version != MIR_SCHEMA_VERSION -> return mir_pass_validate_program(program, pass)
     plan :: mir_pass_wave_plan(program, threads)
     if plan.workers <= 1 -> return mir_pass_validate_program(program, pass)
     shared_inputs :: shared MIRPassLegalityInputs{tables: mir_pass_legality_tables(program), identities: mir_pass_identity_failures(program, pass), pass: pass}
     slots :: mir_pass_wave_take(&program, plan)
-    failures :: mir_pass_validate_slots(slots, plan.bounds, 0, shared_inputs) ?? panic("a MIR legality wave lost a compiler thread")
+    queue :: shared MIRPassWaveQueue{next: 0}
+    failures :: mir_pass_validate_slots(slots, plan, queue, 0, shared_inputs) ?? panic("a MIR legality wave lost a compiler thread")
     loop slot in slots -> mir_pass_wave_restore(&program, slot)
-    if failures.len() == 0 -> return None
-    Val(failures[0])
-}
-
-// One thread: validates its slot's functions, which start at program
-// position `start` and are held last-first, in program order; the first
-// failure ends the part.
-fn mir_pass_validate_slot(slot: Shared<MIRPassWaveSlot>, start: Int, shared_inputs: Shared<MIRPassLegalityInputs>) -> [MIROptimizationError] {
-    inputs :: shared_inputs.guard_read()
-    permit :: slot.guard_read()
-    count :: permit.value.functions.len()
-    loop offset in 0..<count {
-        failure := inputs.value.identities[start + offset]
-        if failure == None -> failure = mir_pass_validate_function(permit.value.functions[count - 1 - offset], inputs.value.pass, inputs.value.tables)
-        if failure == .Val(error) -> return [MIROptimizationError]{error}
+    found := -1
+    loop (row, failure) in failures {
+        if found < 0 || failure.part < failures[found].part -> found = row
     }
-    [MIROptimizationError]{}
+    if found < 0 -> return None
+    Val(failures[found].failure)
 }
 
-// Validates `slots[from..]`, one task per slot and the last slot on this
-// thread; returns the first failure in part order (at most one).
-fn mir_pass_validate_slots(slots: [Shared<MIRPassWaveSlot>], bounds: [Int], from: Int, shared_inputs: Shared<MIRPassLegalityInputs>) -> [MIROptimizationError] {
-    if from >= slots.len() - 1 -> return mir_pass_validate_slot(slots[from], bounds[from], shared_inputs)
-    failures := [MIROptimizationError]{}
+// One thread: validates the functions of each part it claims; a part's
+// functions start at program position `bounds[part]` and are held
+// last-first, checked in program order; the first failure ends the part and
+// is returned with it.
+fn mir_pass_validate_slot(slots: [Shared<MIRPassWaveSlot>], plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>, shared_inputs: Shared<MIRPassLegalityInputs>) -> [MIRPassLegalityPartFailure] {
+    inputs :: shared_inputs.guard_read()
+    failures := [MIRPassLegalityPartFailure]{}
+    loop {
+        part :: mir_pass_wave_claim(plan, queue)
+        if part < 0 -> break
+        start :: plan.bounds[part]
+        permit :: slots[part].guard_read()
+        count :: permit.value.functions.len()
+        loop offset in 0..<count {
+            failure := inputs.value.identities[start + offset]
+            if failure == None -> failure = mir_pass_validate_function(permit.value.functions[count - 1 - offset], inputs.value.pass, inputs.value.tables)
+            if failure == .Val(error) {
+                &failures.push(MIRPassLegalityPartFailure{part: part, failure: error})
+                break
+            }
+        }
+    }
+    failures
+}
+
+// Runs claiming legality threads `from..<plan.workers`, one task each and
+// the last on this thread; returns every part's first failure.
+fn mir_pass_validate_slots(slots: [Shared<MIRPassWaveSlot>], plan: MIRPassWavePlan, queue: Shared<MIRPassWaveQueue>, from: Int, shared_inputs: Shared<MIRPassLegalityInputs>) -> [MIRPassLegalityPartFailure] {
+    if from >= plan.workers - 1 -> return mir_pass_validate_slot(slots, plan, queue, shared_inputs)
+    failures := [MIRPassLegalityPartFailure]{}
     task.group optimizer_threads {
-        head :: task mir_pass_validate_slot(slots[from], bounds[from], shared_inputs)
-        rest :: mir_pass_validate_slots(slots, bounds, from + 1, shared_inputs)
+        head :: task mir_pass_validate_slot(slots, plan, queue, shared_inputs)
+        rest :: mir_pass_validate_slots(slots, plan, queue, from + 1, shared_inputs)
         failures = head.join() ?? panic(compiler_threads_failure_text(err))
-        if failures.len() == 0 -> failures = rest
+        loop failure in rest -> &failures.push(failure)
     }
     failures
 }
