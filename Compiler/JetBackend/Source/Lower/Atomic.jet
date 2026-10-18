@@ -6,7 +6,7 @@
 // inputs and return independently owned OLD/load values. Prevailing Int
 // ownership/drop lowering supplies their lifetime (NativeFeed5/NativeSlice6).
 // Non-Clone policy is Sema/Ownership/Copy.jet:127, not a second Lower policy.
-use jet_foundation.[MIRAccess, MIRCallArg, MIRInstruction, MIROperation, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_symbol_name, mir_type_same_checked_type]
+use jet_foundation.[MIRAccess, MIRCallArg, MIRInstruction, MIROperation, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeDefKind, MIRTypeKind, MIRValueID, mir_symbol_name, mir_type_same_checked_type]
 
 fn lower_atomic_lane(p: MIRProgram, scalar: MIRType) -> String? Never! {
     if scalar.kind == {
@@ -18,8 +18,12 @@ fn lower_atomic_lane(p: MIRProgram, scalar: MIRType) -> String? Never! {
         }
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_atomic_lane(p, inner)
         else -> {
+            // The declaration is read in place; only an instantiated
+            // (generic) definition is materialized.
+            row :: lower_type_def_row(p, scalar)
+            if row >= 0 -> return lower_atomic_lane_declared(p, p.types[row].kind)
             definition :: lower_type_def(p, scalar) ?? return None
-            if definition.kind == .Alias(inner) | .Distinct(inner, _) -> return lower_atomic_lane(p, inner)
+            return lower_atomic_lane_declared(p, definition.kind)
         }
     }
     None
@@ -31,11 +35,23 @@ fn lower_atomic_scalar(p: MIRProgram, ty: MIRType) -> MIRType? Never! {
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_atomic_scalar(p, inner)
         .Apply(name, args) -> {
             if (name.name == "Atomic" || name.name.ends_with("::Atomic") || name.name.ends_with(".Atomic")) && args.len() == 1 && lower_atomic_lane(p, args[0]) != None -> return Val(args[0])
+            row :: lower_type_def_row(p, ty)
+            if row >= 0 -> return lower_atomic_scalar_declared(p, p.types[row].kind)
             definition :: lower_type_def(p, ty) ?? return None
-            if definition.kind == .Alias(inner) | .Distinct(inner, _) -> return lower_atomic_scalar(p, inner)
+            return lower_atomic_scalar_declared(p, definition.kind)
         }
         else -> {}
     }
+    None
+}
+
+fn lower_atomic_lane_declared(p: MIRProgram, kind: MIRTypeDefKind) -> String? Never! {
+    if kind == .Alias(inner) | .Distinct(inner, _) -> return lower_atomic_lane(p, inner)
+    None
+}
+
+fn lower_atomic_scalar_declared(p: MIRProgram, kind: MIRTypeDefKind) -> MIRType? Never! {
+    if kind == .Alias(inner) | .Distinct(inner, _) -> return lower_atomic_scalar(p, inner)
     None
 }
 

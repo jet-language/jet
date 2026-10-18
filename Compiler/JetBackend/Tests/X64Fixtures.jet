@@ -115,7 +115,7 @@ fn x64_fx_allocation() -> Bool Never! {
 }
 
 fn x64_fx_emitter() -> X64Emitter Never! {
-    X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: [Int]{}, stack: [Int]{}, returns: [Int]{}}
+    X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: [Int]{}, stack: [Int]{}, returns: [Int]{}, places: [Int]{}}
 }
 
 // Export a standalone Linux machine witness for the runner to execute. It
@@ -184,17 +184,17 @@ fn x64_fx_scalar() Never! {
     a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}, segment_values: [Int]{}, segment_locations: [X64Loc]{}, segment_starts: [Int]{}, segment_ends: [Int]{}, block_segments: [Int]{0, 0}, block_entries: [Int]{0}, folds: x64_address_folds(f)}
     x64_emit_move(&e, .Imm{value: 0x3ff0000000000000}, a.locations[left.value])
     x64_emit_move(&e, .Imm{value: 0x4000000000000000}, a.locations[right.value])
-    x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right})
+    x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right}, 0, 1)
     x64_fx_expect(&e, 11, 0x4008000000000000)
-    x64_select_inst(&e, f, a, .Convert{dst: single, src: dst})
+    x64_select_inst(&e, f, a, .Convert{dst: single, src: dst}, 0, 1)
     x64_movd_from_xmm(&e.code, X64_RAX, 12)
     x64_fx_expect_word(&e, X64_RAX, 0x40400000)
-    x64_select_inst(&e, f, a, .Convert{dst: left, src: single})
+    x64_select_inst(&e, f, a, .Convert{dst: left, src: single}, 0, 1)
     x64_fx_expect(&e, 10, 0x4008000000000000)
     // Reusing the right register must not reverse distinct NaN payloads.
     x64_emit_move(&e, .Imm{value: 0x7ff8000000000011}, a.locations[left.value])
     x64_emit_move(&e, .Imm{value: 0x7ff8000000000022}, a.locations[right.value])
-    x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right})
+    x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right}, 0, 1)
     x64_fx_expect(&e, 11, 0x7ff8000000000011)
     precisions :: [Bool]{false, true}
     conditions :: [LIRCondition]{.Eq, .Ne, .Lt, .Le, .Gt, .Ge}
@@ -330,10 +330,17 @@ fn x64_fixtures() -> Bool Never! {
     critical :: x64_fx_critical_edges()
     edge_store :: x64_fx_edge_store()
     shared_slot :: x64_fx_shared_slot()
-    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic && frame && split && fused && call_loop && critical && edge_store && shared_slot
+    int_route :: x64_fx_int_route()
+    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic && frame && split && fused && call_loop && critical && edge_store && shared_slot && int_route
 }
 
 fn x64_fx_executable(name: String, program: LIRModule, argument: Int?, expected: Int) -> Bool Never! {
+    x64_fx_executable_stubbed(name, program, argument, expected, [U8]{})
+}
+
+// `runtime` is raw code every runtime-symbol relocation resolves to (the
+// int-route witness's fake runtime); empty, such a relocation is a failure.
+fn x64_fx_executable_stubbed(name: String, program: LIRModule, argument: Int?, expected: Int, runtime: [U8]) -> Bool Never! {
     compiled :: x64_compile_module(program)
     if compiled.errors.len() > 0 {
         print("X64 FAIL {name} lint/selection: {compiled.errors}")
@@ -353,14 +360,24 @@ fn x64_fx_executable(name: String, program: LIRModule, argument: Int?, expected:
         &offsets.push(e.code.len())
         loop byte in f.code -> &e.code.push(byte)
     }
+    stub :: e.code.len()
+    loop byte in runtime -> &e.code.push(byte)
     x64_patch_rel32(&e.code, call, offsets[0])
     loop (index, f) in compiled.functions {
         loop reloc in f.relocs {
-            if reloc.target == .Function(id) {
-                x64_patch_rel32(&e.code, offsets[index] + reloc.at, offsets[id.value])
-            } else {
-                print("X64 FAIL {name}: unexpected external relocation")
-                return false
+            if reloc.target == {
+                .Function(id) -> x64_patch_rel32(&e.code, offsets[index] + reloc.at, offsets[id.value])
+                .Runtime(_) -> {
+                    if runtime.len() == 0 {
+                        print("X64 FAIL {name}: unexpected external relocation")
+                        return false
+                    }
+                    x64_patch_rel32(&e.code, offsets[index] + reloc.at, stub)
+                }
+                else -> {
+                    print("X64 FAIL {name}: unexpected external relocation")
+                    return false
+                }
             }
         }
     }
@@ -458,7 +475,7 @@ fn x64_fx_address_plan() -> Bool Never! {
     needed :: [LIRValueID]{base, index}
     loop value in needed {
         if a.locations[value.value] == .Reg(reg) {
-            if !x64_pool_has(X64_CALLEE_SAVED_POOL, reg) -> ok = false
+            if !x64_pools().members[X64_POOL_GENERAL_CROSSING][reg] -> ok = false
         } else if a.locations[value.value] == .Stack(slot) {
             if slot < 0 -> ok = false
         } else {
@@ -499,14 +516,12 @@ fn x64_fx_address_plan() -> Bool Never! {
     if wide_plan.skipped[off.value] || !wide_plan.skipped[pointer.value] -> ok = false
     if !x64_fx_address_lint(wide) -> ok = false
     // Both the constant and its combination with every memory displacement
-    // must fit disp32 before that constant can replace a pointer definition.
+    // must fit disp32 before that constant can replace a pointer definition
+    // (loads take only non-negative aligned offsets, so the sum overflows
+    // upward only).
     displaced := function
     displaced.blocks[0].insts[1] = .Const{dst: off, value: 2147483647}
-    displaced.blocks[0].insts[4] = .Load{dst: result, base: pointer, offset: 1}
-    if x64_address_folds(displaced).skipped[pointer.value] -> ok = false
-    if !x64_fx_address_lint(displaced) -> ok = false
-    displaced.blocks[0].insts[1] = .Const{dst: off, value: -2147483648}
-    displaced.blocks[0].insts[4] = .Load{dst: result, base: pointer, offset: -1}
+    displaced.blocks[0].insts[4] = .Load{dst: result, base: pointer, offset: 8}
     if x64_address_folds(displaced).skipped[pointer.value] -> ok = false
     if !x64_fx_address_lint(displaced) -> ok = false
     // A matching later overflow test retains the original Add.
@@ -1044,4 +1059,92 @@ fn x64_fx_shared_slot() -> Bool Never! {
         return false
     }
     x64_fx_executable("shared-slot", x64_fx_split_program(function), Val(1), 784)
+}
+
+// A fake runtime for the int-route witness: returns its argument (as
+// jet_rt_int_clone does) and clobbers every caller-saved register a System V
+// callee may, including r10/r11 and xmm2..xmm15, so a value the selector
+// left there survives only if the cold path saved it.
+fn x64_fx_clobbering_runtime() -> [U8] Never! {
+    code := [U8]{}
+    x64_mov_rr(&code, X64_RAX, X64_RDI)
+    volatile :: [Int]{X64_RCX, X64_RDX, X64_RSI, X64_RDI, X64_R8, X64_R9, X64_R10, X64_R11}
+    loop reg in volatile -> x64_mov_ri(&code, reg, 6510615555426900570)
+    loop xmm in 2..<16 -> x64_movq_to_xmm(&code, xmm, X64_R11)
+    x64_ret(&code)
+    code
+}
+
+// Exact Int drops and clones are selected inline (RegAlloc.jet x64_int_drop,
+// Select.jet x64_select_int_route): no call for an inline word, and a call
+// that preserves the caller-saved registers in use for a boxed one. The
+// owning words come from calls to the fake runtime (which returns its
+// argument) before any other value is live: `boxed` is seed + 2^62 - 1
+// (bits 63 and 62 differ) and `small` seed + seed. Six seed multiples and one
+// Float then stay live in caller-saved registers across the drop of `boxed`
+// and the clone of `boxed2`, whose cold calls reach the clobbering fake
+// runtime; the drop of `small` and the clone of `small2` take the inline
+// path. Seed 1: 21 + 1 + (dup - boxed2) + (dup2 - small2) = 22.
+fn x64_fx_int_route() -> Bool Never! {
+    b := x64_fx_builder()
+    seed :: lir_builder_word(&b)
+    limit :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: limit, value: 4611686018427387903})
+    big :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: big, op: .Add, left: seed, right: limit})
+    twice :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: twice, op: .Add, left: seed, right: seed})
+    boxed :: lir_builder_value(&b, lir_layout_word(), .Runtime{symbol: "jet_rt_int_drop"}, None)
+    lir_builder_push(&b, .Call{dst: Val(boxed), signature: LIRSignatureID{value: 2}, callee: .Runtime{symbol: "fake_box"}, args: [LIRValueID]{big}})
+    small :: lir_builder_value(&b, lir_layout_word(), .Runtime{symbol: "jet_rt_int_drop"}, None)
+    lir_builder_push(&b, .Call{dst: Val(small), signature: LIRSignatureID{value: 2}, callee: .Runtime{symbol: "fake_box"}, args: [LIRValueID]{twice}})
+    boxed2 :: lir_builder_word(&b)
+    lir_builder_push(&b, .Call{dst: Val(boxed2), signature: LIRSignatureID{value: 2}, callee: .Runtime{symbol: "fake_box"}, args: [LIRValueID]{big}})
+    small2 :: lir_builder_word(&b)
+    lir_builder_push(&b, .Call{dst: Val(small2), signature: LIRSignatureID{value: 2}, callee: .Runtime{symbol: "fake_box"}, args: [LIRValueID]{twice}})
+    crossing :: x64_fx_multiples(&b, seed, 7)
+    real :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
+    lir_builder_push(&b, .Convert{dst: real, src: seed})
+    drop_at :: b.open.len()
+    lir_builder_push(&b, .Drop{value: boxed})
+    lir_builder_push(&b, .Drop{value: small})
+    dup :: lir_builder_word(&b)
+    lir_builder_push(&b, .Call{dst: Val(dup), signature: LIRSignatureID{value: 2}, callee: .Runtime{symbol: "jet_rt_int_clone"}, args: [LIRValueID]{boxed2}})
+    dup2 :: lir_builder_word(&b)
+    lir_builder_push(&b, .Call{dst: Val(dup2), signature: LIRSignatureID{value: 2}, callee: .Runtime{symbol: "jet_rt_int_clone"}, args: [LIRValueID]{small2}})
+    back :: lir_builder_word(&b)
+    lir_builder_push(&b, .Convert{dst: back, src: real})
+    kept :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: kept, op: .Sub, left: dup, right: boxed2})
+    kept2 :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: kept2, op: .Sub, left: dup2, right: small2})
+    total :: x64_fx_sum(&b, back, crossing)
+    with_kept :: x64_fx_sum(&b, total, [LIRValueID]{kept, kept2})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{seed}, .Return{value: Val(with_kept)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    // The drop of `boxed` is allocation position 1 + drop_at (the block start
+    // precedes its instructions): it is no call, so caller-saved general
+    // registers and an xmm register hold values across it.
+    position :: 1 + drop_at
+    words := 0
+    floats := 0
+    loop segment in a.block_segments[0]..<a.block_segments[1] {
+        if a.segment_starts[segment] >= position || a.segment_ends[segment] <= position -> next
+        if a.segment_locations[segment] == {
+            .Reg(reg) -> { if !x64_pools().members[X64_POOL_GENERAL_CROSSING][reg] -> words += 1 }
+            .Xmm(_, _) -> floats += 1
+            else -> {}
+        }
+    }
+    if words < 4 || floats != 1 {
+        print("X64 FAIL int-route allocation: {words} caller-saved words and {floats} floats across the drop")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 2}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
+    x64_fx_executable_stubbed("int-route", program, Val(1), 22, x64_fx_clobbering_runtime())
 }

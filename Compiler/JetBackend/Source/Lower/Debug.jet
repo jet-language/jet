@@ -37,6 +37,7 @@ fn lower_debug_file(p: MIRProgram, m: &LowerModule, file: MIRSourceFileID) -> In
     row :: m.debug_files.len()
     &m.debug_files.push(path)
     &m.debug_file_rows.add(file.value, row).drop("checked absent above")
+    lower_keyed_record(&m, LOWER_KEYED_DEBUG_FILE, row, "", file.value)
     row
 }
 
@@ -160,6 +161,7 @@ fn lower_debug_type(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Int Never! {
 fn lower_debug_reserve(m: &LowerModule, key: String) -> Int Never! {
     row :: m.debug_types.len()
     &m.debug_types.push(LIRDebugType{name: "", size: 0, kind: LIRDebugTypeKind.Opaque})
+    lower_keyed_record(&m, LOWER_KEYED_DEBUG_TYPE, row, key, U64{0})
     &m.debug_type_rows.add(key, row).drop("checked absent above")
     row
 }

@@ -7,9 +7,9 @@
 // enough bulk to admit several threads (X64_COMPILE_MIN_INSTRUCTIONS_PER_THREAD).
 use jet_foundation.[CompilerThreads]
 use jet_backend.[
-    LIRBlockID, LIRCallConv, LIRCallee, LIRData, LIRFunction, LIRFunctionID, LIRInst, LIRLayout, LIRModule, LIRSignature, LIRSignatureID, LIRTerminator, LIRValueID,
+    LIRBlockID, LIRCallConv, LIRCallee, LIRData, LIRDebugBinding, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunction, LIRFunctionDebug, LIRFunctionID, LIRInst, LIRLayout, LIRModule, LIRModuleDebug, LIRSignature, LIRSignatureID, LIRTerminator, LIRValueID,
     X64ModuleResult, lir_builder, lir_builder_finish, lir_builder_push, lir_builder_seal, lir_builder_word, lir_layout_word, lir_module_debug_none,
-    lir_optimize_module, x64_compile_module, x64_compile_module_owned, LIRBinaryOp,
+    lir_optimize_module, x64_compile_module, x64_compile_module_owned, x64_relocatable_object_owned, LIRBinaryOp,
 ]
 
 FX_STREAM_CHAIN :: 12
@@ -156,6 +156,33 @@ fn fx_stream_lint_stop(level: Int) -> Bool Never! {
     trap.name == "pair_a" && trap.code.len() == 2 && trap.relocs.len() == 0
 }
 
+// The module with source facts on every one-parameter function (a file, an
+// Int type, one parameter variable bound to the function's argument), so
+// every subprogram of the object's `.debug_info` has a variable and a
+// location list.
+fn fx_stream_debug_module() -> LIRModule Never! {
+    unit := fx_stream_module(-1)
+    unit.debug = LIRModuleDebug{directory: ".", files: [String]{"stream.jet"}, types: [LIRDebugType]{LIRDebugType{name: "Int", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Signed}}}}
+    loop index in 0..<unit.functions.len() {
+        if unit.functions[index].signature.value != 0 -> next
+        unit.functions[index].debug = LIRFunctionDebug{name: "fn{index}", file: 0, line: index + 1, variables: [LIRDebugVariable]{LIRDebugVariable{name: "a", ty: 0, line: index + 1, parameter: true, indirect: false}}, bindings: [LIRDebugBinding]{LIRDebugBinding{variable: 0, value: LIRValueID{value: 0}}}}
+    }
+    unit
+}
+
+// The relocatable object of the debug module is the same bytes on one
+// thread and on four: the subprograms of `.debug_info` and their location
+// lists build in parts on the threads (Image/Dwarf.jet dwarf_info) and join
+// in function order.
+fn fx_stream_object_check(level: Int) -> Bool Never! {
+    entry :: LIRFunctionID{value: FX_STREAM_CHAIN + 3}
+    one :: x64_relocatable_object_owned(fx_stream_debug_module(), entry, fx_stream_threads(1), level, false)
+    four :: x64_relocatable_object_owned(fx_stream_debug_module(), entry, fx_stream_threads(4), level, false)
+    if one.object.errors.len() != 0 || four.object.errors.len() != 0 -> return false
+    if one.object.bytes.len() == 0 -> return false
+    one.object.bytes == four.object.bytes
+}
+
 fn fx_stream_compile_check() -> Bool Never! {
     clean := true
     loop level in 0..<3 {
@@ -165,6 +192,10 @@ fn fx_stream_compile_check() -> Bool Never! {
         if !fx_stream_owned("O{level} one thread", level, 1, serial, false) -> clean = false
         if !fx_stream_owned("O{level} four threads", level, 4, serial, false) -> clean = false
         if !fx_stream_owned("O{level} keep-going four threads", level, 4, serial, true) -> clean = false
+        if !fx_stream_object_check(level) {
+            print("stream-compile object O{level}: the object bytes differ between one and four threads")
+            clean = false
+        }
         if !fx_stream_lint_stop(level) {
             print("stream-compile lint-stop O{level}: the finding rows or the trap differ")
             clean = false

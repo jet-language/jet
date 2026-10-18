@@ -61,7 +61,7 @@ fn opt_licm_available(inst: LIRInst, available: [Bool]) -> Bool Never! {
     }
 }
 
-fn opt_licm_candidate(function: LIRFunction, defs: OptDefs, inst: LIRInst, header: Bool, clobbered: Bool) -> Bool Never! {
+fn opt_licm_candidate(function: LIRFunction, consts: OptConsts, inst: LIRInst, header: Bool, clobbered: Bool) -> Bool Never! {
     if inst == {
         .Const(_, _) | .Compare(_, _, _, _) | .PointerAdd(_, _, _) |
         .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) | .Bitcast(_, _) -> true
@@ -69,7 +69,8 @@ fn opt_licm_candidate(function: LIRFunction, defs: OptDefs, inst: LIRInst, heade
             // IEEE Float division cannot trap; no folding/reassociation occurs.
             if function.values[left.value].layout.class == .Float -> return true
             if op == .Div || op == .Rem || op == .UDiv || op == .URem {
-                if defs.insts[right.value] == .Val(.Const(_, divisor)) {
+                if consts.known[right.value] {
+                    divisor :: consts.consts[right.value]
                     if divisor == 0 -> return false
                     if (op == .Div || op == .Rem) && divisor == -1 -> return false
                     return true
@@ -105,7 +106,7 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
         if !body[predecessor] -> &outside.push(predecessor)
     }
     if outside.len() == 0 -> return
-    defs :: opt_defs(function)
+    consts :: opt_const_defs(function)
     available := [Bool]{}
     consumed := [Bool]{}
     loop _ in function.values {
@@ -136,7 +137,7 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
             kept := [LIRInst]{}
             kept_lines := [Int]{}
             loop (index, inst) in function.blocks[row].insts {
-                movable := opt_licm_candidate(function, defs, inst, row == header, clobbered)
+                movable := opt_licm_candidate(function, consts, inst, row == header, clobbered)
                 if lir_inst_def(inst) == .Val(dst) {
                     if consumed[dst.value] || function.values[dst.value].drop != .Trivial -> movable = false
                 } else {
@@ -191,21 +192,22 @@ fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
     &function.blocks.push(LIRBlock{id: preheader, params: params, insts: hoisted, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: header_id, args: params}}, lines: hoisted_lines, cold: false})
 }
 
-fn lir_licm_function(original: LIRFunction) -> LIRFunction Never! {
-    function := original
-    dom :: opt_dominators(function)
-    rows :: opt_block_rows(function)
+// The function moves through: every loop edits it in place.
+fn lir_licm_function(function: ^LIRFunction) -> LIRFunction Never! {
+    owned := ^function
+    dom :: opt_dominators(owned)
+    rows :: opt_block_rows(owned)
     headers := [Int]{}
     sizes := [Int]{}
     seen := [Bool]{}
-    loop _ in function.blocks -> &seen.push(false)
+    loop _ in owned.blocks -> &seen.push(false)
     loop source in dom.order {
-        loop target in lir_terminator_targets(function.blocks[source].terminator) {
+        loop target in lir_terminator_targets(owned.blocks[source].terminator) {
             header :: rows.get(target.block.value) ?? -1
             if header < 0 -> next
             if seen[header] || !opt_licm_dominates(dom, header, source) -> next
             seen[header] = true
-            if opt_licm_body(function, dom, header) == .Val(body) {
+            if opt_licm_body(owned, dom, header) == .Val(body) {
                 size := 0
                 loop member in body { if member -> size += 1 }
                 &headers.push(header)
@@ -223,8 +225,8 @@ fn lir_licm_function(original: LIRFunction) -> LIRFunction Never! {
         }
         if selected >= 0 {
             sizes[selected] = -1
-            opt_licm_loop(&function, headers[selected])
+            opt_licm_loop(&owned, headers[selected])
         }
     }
-    function
+    owned
 }

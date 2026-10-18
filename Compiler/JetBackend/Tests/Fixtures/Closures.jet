@@ -233,16 +233,18 @@ fn fx_scope_guard_reown_checks() -> Bool Never! {
                 if inst == .Reown(dst, src) {
                     found = true
                     // Ordinary Move must still reject the changed destructor.
-                    if lir_lint_inst(lowered.lir, function, LIRInst.Move{dst: dst, src: src}).len() == 0 -> return false
+                    move :: LIRInst.Move{dst: dst, src: src}
+                    if lir_lint_inst(lowered.lir, function, move, lir_inst_uses(move)).len() == 0 -> return false
+                    uses :: lir_inst_uses(inst)
                     bad := function.copy()
                     bad.values[src.value].layout = lir_layout_word()
-                    if lir_lint_inst(lowered.lir, bad, inst).len() == 0 -> return false
+                    if lir_lint_inst(lowered.lir, bad, inst, uses).len() == 0 -> return false
                     bad = function.copy()
                     bad.values[dst.value].layout = lir_layout_word()
-                    if lir_lint_inst(lowered.lir, bad, inst).len() == 0 -> return false
+                    if lir_lint_inst(lowered.lir, bad, inst, uses).len() == 0 -> return false
                     bad = function.copy()
                     bad.values[dst.value].drop = LIRDrop.Trivial
-                    if lir_lint_inst(lowered.lir, bad, inst).len() == 0 -> return false
+                    if lir_lint_inst(lowered.lir, bad, inst, uses).len() == 0 -> return false
                     if function.values[src.value].layout != lir_layout_pointer() -> return false
                 }
             }

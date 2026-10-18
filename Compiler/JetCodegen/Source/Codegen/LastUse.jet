@@ -329,9 +329,114 @@ fn jet_codegen_last_use_iter_source(builder: JetCodegenBuilder, users_block: [U6
     -1
 }
 
+// The row lookups of the function move_last_uses reads: each block's
+// position, each result's defining block and index, and each value's and
+// place's row.
+struct JetCodegenLastUseIndex {
+    block_index: [U64:Int]
+    def_block: [U64:Int]
+    def_index: [U64:Int]
+    value_row: [U64:Int]
+    place_row: [U64:Int]
+}
+
+// The root and field candidates' lookups (the candidates themselves and
+// their rejections stay with the pass): a parameter value's, drop flag's or
+// place's root candidate, a place's field candidate, the field candidates
+// of each root, every candidate a place observes, and a local's candidate.
+struct JetCodegenLastUseRoots {
+    parameter_candidate: [U64:Int]
+    flag_candidate: [U64:Int]
+    place_candidate: [U64:Int]
+    field_candidate: [U64:Int]
+    root_fields: [Int:[Int]]
+    touches: [U64:[Int]]
+    local_candidate: [U64:Int]
+}
+
+// Copies: the result of a ReadPlace of a candidate place, with that place,
+// its block and its index, in definition order.
+struct JetCodegenLastUseCopies {
+    copy_place: [U64:U64]
+    copy_block: [U64:Int]
+    copy_index: [U64:Int]
+    copy_order: [U64]
+}
+
+// Enum subjects: every EnumIs/EnumPayload use, the uses of each subject,
+// each subject's candidate, and the payload groups (one per match arm).
+struct JetCodegenLastUseSubjects {
+    enum_uses: [JetCodegenLastUseEnumUse]
+    uses_by_subject: [U64:[Int]]
+    subject_candidate: [U64:Int]
+    groups: [JetCodegenLastUseGroup]
+}
+
+// Borrow origins: the candidates each borrowed or view result observes, and
+// the origins (copies and borrow roots) each value carries.
+struct JetCodegenLastUseOrigins {
+    borrow_roots: [U64:[Int]]
+    origins: [U64:[U64]]
+}
+
+// Each copy's liveness bit (a copy used outside its own block) and the copy
+// bits that observe each candidate.
+struct JetCodegenLastUseBits {
+    copy_bit: [U64:Int]
+    observing: [Int:[Int]]
+}
+
+// Per-block events in execution order (each block's start, with one more
+// entry for the end), and each candidate's read windows per block.
+struct JetCodegenLastUseEvents {
+    events: [JetCodegenLastUseEvent]
+    event_start: [Int]
+    read_windows: [Int:[Int]]
+}
+
+// Each value's uses, as parallel (block, index) rows with the terminator at
+// the block's instruction count.
+struct JetCodegenLastUseUsers {
+    users_block: [U64:[Int]]
+    users_index: [U64:[Int]]
+}
+
+// What the pass decided: the reads to convert (keyed by position, with the
+// candidate), the list walks that take their collection, and the payload
+// groups that take their subject apart.
+struct JetCodegenLastUseDecisions {
+    conversions: [Int:Int]
+    iter_takes: [Int:Bool]
+    moved_groups: [Int]
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_last_use.rs::LowerCtx::move_last_uses
+// Each phase is its own function over the tables it reads (one row struct
+// each), so no loop of the pass carries every table of the pass across its
+// edges.
 fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     block_count :: builder.blocks.len()
+    index :: jet_codegen_last_use_index(builder)
+    candidates := [JetCodegenLastUseCandidate]{}
+    rejected := [Bool]{}
+    roots :: jet_codegen_last_use_roots(builder, program, index, &candidates, &rejected)
+    copies :: jet_codegen_last_use_copies(builder, program, index, roots)
+    subjects :: jet_codegen_last_use_subjects(builder, program, index, &candidates, &rejected)
+    if candidates.len() == 0 -> return
+
+    // CFG: predecessors, reachable blocks and guarded cleanup blocks.
+    cfg :: jet_codegen_last_use_cfg(builder, block_count, index.block_index, index.def_block, index.def_index, roots.flag_candidate)
+    origins :: jet_codegen_last_use_origins(builder, program, index, roots, copies, &rejected)
+    bits :: jet_codegen_last_use_bits(builder, roots, copies, origins, &candidates, &rejected)
+    evts :: jet_codegen_last_use_events(builder, index, roots, copies, subjects, origins, bits, cfg, candidates, &rejected)
+    live_out := jet_codegen_last_use_live_out(block_count, evts.events, evts.event_start, cfg.predecessors)
+    users :: jet_codegen_last_use_users(builder)
+    decisions :: jet_codegen_last_use_decide(builder, program, index, roots, subjects, bits, evts, users, cfg, candidates, rejected, &live_out)
+    if decisions.conversions.len() == 0 && decisions.moved_groups.len() == 0 -> return
+    jet_codegen_last_use_rewrite(&builder, program, index, subjects, candidates, decisions)
+}
+
+fn jet_codegen_last_use_index(builder: JetCodegenBuilder) -> JetCodegenLastUseIndex Never! {
     block_index := [U64:Int]{}
     def_block := [U64:Int]{}
     def_index := [U64:Int]{}
@@ -348,27 +453,37 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     loop (index, fact) in builder.values -> _ := &value_row.add(fact.id.value, index)
     place_row := [U64:Int]{}
     loop (index, row) in builder.places -> _ := &place_row.add(row.id.value, index)
+    JetCodegenLastUseIndex{block_index: ^block_index, def_block: ^def_block, def_index: ^def_index, value_row: ^value_row, place_row: ^place_row}
+}
+
+// The root and field candidates.
+fn jet_codegen_last_use_roots(builder: JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, candidates: &[JetCodegenLastUseCandidate], rejected: &[Bool]) -> JetCodegenLastUseRoots Never! {
     no_place :: MIRPlaceID{value: 0}
     no_value :: MIRValueID{value: 0}
 
     // Owned locals and owned (`^`) parameters: a whole place with a drop flag
     // whose release has no observable effect (no scope-end `close`, not a
-    // view). Keyed by root: "local:<id>" or "parameter:<value>".
-    candidates := [JetCodegenLastUseCandidate]{}
-    rejected := [Bool]{}
+    // view). Keyed by root: "local:<id>" or "parameter:<value>"; a parameter
+    // root's candidate is also keyed by the parameter value
+    // (parameter_candidate) for the bare-value use scan below.
     root_candidate := [String:Int]{}
+    parameter_candidate := [U64:Int]{}
     flag_candidate := [U64:Int]{}
     loop record in builder.drop_live_all {
-        if place_row.get(record.place.value) == None -> next
-        row_index :: place_row.get(record.place.value) ?? panic("checked last-use row is missing")
+        if index.place_row.get(record.place.value) == None -> next
+        row_index :: index.place_row.get(record.place.value) ?? panic("checked last-use row is missing")
         row :: builder.places[row_index]
         if row.projections.len() != 0 || row.persist_key != None -> next
         if jet_codegen_scope_end_close_function(builder, program, record.ty) != None -> next
         if jet_codegen_last_use_view(row.ty) -> next
         root_key := String?{None}
+        parameter := U64?{None}
         if row.base == {
             .Local(local) -> root_key = Val("local:{local.value}")
-            .Parameter(value) -> root_key = Val("parameter:{value.value}")
+            .Parameter(value) -> {
+                root_key = Val("parameter:{value.value}")
+                parameter = Val(value.value)
+            }
             else -> {}
         }
         key :: root_key ?? next
@@ -377,6 +492,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             next
         }
         _ := &root_candidate.add(key, candidates.len())
+        if parameter == .Val(parameter_value) -> _ := &parameter_candidate.add(parameter_value, candidates.len())
         _ := &flag_candidate.add(record.live.value, candidates.len())
         &candidates.push(jet_codegen_last_use_new_candidate(true, false, false, record.place, record.live, no_value, -1, [MIRFieldID]{}))
         &rejected.push(false)
@@ -462,50 +578,58 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             loop value in mir_operation_value_uses(instruction.operation) -> &uses.push(value)
         }
         loop value in uses {
-            if root_candidate.get("parameter:{value.value}") == .Val(candidate) -> rejected[candidate] = true
+            if parameter_candidate.get(value.value) == .Val(candidate) -> rejected[candidate] = true
         }
     }
+    JetCodegenLastUseRoots{parameter_candidate: ^parameter_candidate, flag_candidate: ^flag_candidate, place_candidate: ^place_candidate, field_candidate: ^field_candidate, root_fields: ^root_fields, touches: ^touches, local_candidate: ^local_candidate}
+}
 
-    // Copies: the result of a ReadPlace of a candidate place, with that
-    // place, its block and its index. A ReadBorrow read (a borrowed local's
-    // write, jet_codegen_write_borrowed_binding) is no copy: it is a borrow
-    // origin below, so storing it keeps every read of its place a copy.
+// Copies: the result of a ReadPlace of a candidate place, with that
+// place, its block and its index. A ReadBorrow read (a borrowed local's
+// write, jet_codegen_write_borrowed_binding) is no copy: it is a borrow
+// origin (jet_codegen_last_use_origins), so storing it keeps every read of
+// its place a copy.
+fn jet_codegen_last_use_copies(builder: JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, roots: JetCodegenLastUseRoots) -> JetCodegenLastUseCopies Never! {
     copy_place := [U64:U64]{}
     copy_block := [U64:Int]{}
     copy_index := [U64:Int]{}
     copy_order := [U64]{}
     loop (block, row) in builder.blocks {
-        loop (index, instruction) in row.instructions {
+        loop (position, instruction) in row.instructions {
             if instruction.operation == .ReadPlace(place) {
                 if instruction.result == .Val(result) {
-                    if touches.get(place.value) != None && !jet_codegen_last_use_holds_borrow(builder, program, value_row, result) {
+                    if roots.touches.get(place.value) != None && !jet_codegen_last_use_holds_borrow(builder, program, index.value_row, result) {
                         _ := &copy_place.add(result.value, place.value)
                         _ := &copy_block.add(result.value, block)
-                        _ := &copy_index.add(result.value, index)
+                        _ := &copy_index.add(result.value, position)
                         &copy_order.push(result.value)
                     }
                 }
             }
         }
     }
+    JetCodegenLastUseCopies{copy_place: ^copy_place, copy_block: ^copy_block, copy_index: ^copy_index, copy_order: ^copy_order}
+}
 
-    // Enum subjects: every use is an EnumIs or an EnumPayload, and each
-    // block that binds payloads binds those of one variant (each index once)
-    // after every EnumIs of that block. Each such block (one match arm) is
-    // its own payload group; an arm whose bindings are the subject's last
-    // use takes the subject apart there.
+// Enum subjects: every use is an EnumIs or an EnumPayload, and each
+// block that binds payloads binds those of one variant (each index once)
+// after every EnumIs of that block. Each such block (one match arm) is
+// its own payload group; an arm whose bindings are the subject's last
+// use takes the subject apart there.
+fn jet_codegen_last_use_subjects(builder: JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, candidates: &[JetCodegenLastUseCandidate], rejected: &[Bool]) -> JetCodegenLastUseSubjects Never! {
+    no_place :: MIRPlaceID{value: 0}
     enum_uses := [JetCodegenLastUseEnumUse]{}
     enum_subject := [U64]{}
     other_uses := [U64:Bool]{}
     loop (block, row) in builder.blocks {
-        loop (index, instruction) in row.instructions {
+        loop (position, instruction) in row.instructions {
             if instruction.operation == {
                 .EnumIs(subject, owner, variant) -> {
-                    &enum_uses.push(JetCodegenLastUseEnumUse{block: block, index: index, payload: false, owner: owner, variant: variant, field: -1})
+                    &enum_uses.push(JetCodegenLastUseEnumUse{block: block, index: position, payload: false, owner: owner, variant: variant, field: -1})
                     &enum_subject.push(subject.value)
                 }
                 .EnumPayload(subject, owner, variant, field) -> {
-                    &enum_uses.push(JetCodegenLastUseEnumUse{block: block, index: index, payload: true, owner: owner, variant: variant, field: field})
+                    &enum_uses.push(JetCodegenLastUseEnumUse{block: block, index: position, payload: true, owner: owner, variant: variant, field: field})
                     &enum_subject.push(subject.value)
                 }
                 else -> {
@@ -563,10 +687,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                 if !entry.payload && entry.block == arm_block && entry.index > head.index -> valid = false
             }
         }
-        if def_block.get(subject) == None -> next
-        defined_block :: def_block.get(subject) ?? panic("checked last-use row is missing")
-        if def_index.get(subject) == None -> next
-        defined_index :: def_index.get(subject) ?? panic("checked last-use row is missing")
+        if index.def_block.get(subject) == None -> next
+        defined_block :: index.def_block.get(subject) ?? panic("checked last-use row is missing")
+        if index.def_index.get(subject) == None -> next
+        defined_index :: index.def_index.get(subject) ?? panic("checked last-use row is missing")
         if builder.blocks[defined_block].instructions[defined_index].operation == {
             .Parameter(_, _) | .Capture(_) | .Global(_) -> valid = false
             // A borrowed local's value belongs to its subject: never taken apart.
@@ -575,8 +699,8 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             }
             else -> {}
         }
-        if value_row.get(subject) == None -> next
-        fact_row :: value_row.get(subject) ?? panic("checked last-use row is missing")
+        if index.value_row.get(subject) == None -> next
+        fact_row :: index.value_row.get(subject) ?? panic("checked last-use row is missing")
         if builder.values[fact_row].ownership.mode == {
             .Owned | .Move -> {}
             else -> valid = false
@@ -593,22 +717,19 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         &candidates.push(jet_codegen_last_use_new_candidate(false, false, false, no_place, no_place, MIRValueID{value: subject}, -1, [MIRFieldID]{}))
         &rejected.push(false)
     }
-    if candidates.len() == 0 -> return
+    JetCodegenLastUseSubjects{enum_uses: ^enum_uses, uses_by_subject: ^uses_by_subject, subject_candidate: ^subject_candidate, groups: ^groups}
+}
 
-    // CFG: predecessors, reachable blocks and guarded cleanup blocks.
-    cfg := jet_codegen_last_use_cfg(builder, block_count, block_index, def_block, def_index, flag_candidate)
-    predecessors := ^cfg.predecessors
-    reachable := ^cfg.reachable
-    guarded := ^cfg.guarded
-
-    // Borrows and views of candidate places, by origin. An origin is a copy
-    // (its own ReadPlace value, observing its place's candidates) or a
-    // borrowed or view result of an operation on candidate places
-    // (borrow_roots, with the candidates those places observe). A borrowed
-    // or view result of an operand that carries origins carries them too,
-    // transitively; every use of such a value is a use of its origins. An
-    // operation that lets a place escape (raw address, closure capture) keeps
-    // all of that place's reads copies.
+// Borrows and views of candidate places, by origin. An origin is a copy
+// (its own ReadPlace value, observing its place's candidates) or a
+// borrowed or view result of an operation on candidate places
+// (borrow_roots, with the candidates those places observe). A borrowed
+// or view result of an operand that carries origins carries them too,
+// transitively; every use of such a value is a use of its origins. An
+// operation that lets a place escape (raw address, closure capture) keeps
+// all of that place's reads copies.
+fn jet_codegen_last_use_origins(builder: JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, roots: JetCodegenLastUseRoots, copies: JetCodegenLastUseCopies, rejected: &[Bool]) -> JetCodegenLastUseOrigins Never! {
+    no_value :: MIRValueID{value: 0}
     borrow_roots := [U64:[Int]]{}
     borrow_order := [U64]{}
     loop row in builder.blocks {
@@ -620,16 +741,16 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             }
             observed := [Int]{}
             loop place in jet_codegen_last_use_places(instruction.operation) {
-                list :: touches.get(place.value) ?? next
+                list :: roots.touches.get(place.value) ?? next
                 loop candidate in list {
                     if escapes -> rejected[candidate] = true
                     &observed.push(candidate)
                 }
             }
             if observed.len() == 0 -> next
-            if instruction.operation == .ReadPlace(_) && copy_place.get((instruction.result ?? no_value).value) != None -> next
+            if instruction.operation == .ReadPlace(_) && copies.copy_place.get((instruction.result ?? no_value).value) != None -> next
             if instruction.result == .Val(result) {
-                if jet_codegen_last_use_holds_borrow(builder, program, value_row, result) {
+                if jet_codegen_last_use_holds_borrow(builder, program, index.value_row, result) {
                     if borrow_roots.get(result.value) == None -> &borrow_order.push(result.value)
                     _ := &borrow_roots.add(result.value, observed)
                 }
@@ -637,21 +758,51 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
         }
     }
     origins := [U64:[U64]]{}
-    loop value in copy_order -> _ := &origins.add(value, [U64]{value})
+    loop value in copies.copy_order -> _ := &origins.add(value, [U64]{value})
     loop value in borrow_order -> _ := &origins.add(value, [U64]{value})
-    // The results that can carry origins: the filter is the same on every
-    // pass, so the passes visit only these, in block and instruction order.
-    // A carrier none of whose operands changed since it last ran would
-    // change nothing and is skipped (`changed_at` / `ran_at` steps).
+    jet_codegen_last_use_carry_origins(builder, program, index, copies, borrow_roots, &origins)
+    // A borrow or view stored into a place or captured outlives every read
+    // this pass decides.
+    loop row in builder.blocks {
+        loop instruction in row.instructions {
+            stored := [MIRValueID]{}
+            if instruction.operation == {
+                .WritePlace(_, value) -> &stored.push(value)
+                .ReplacePlace(_, value) -> &stored.push(value)
+                .Closure(_, captures, _) -> {
+                    loop capture in captures {
+                        if capture == .Value(value) -> &stored.push(value)
+                    }
+                }
+                else -> {}
+            }
+            loop value in stored {
+                if copies.copy_place.get(value.value) != None -> next
+                from :: origins.get(value.value) ?? next
+                loop origin in from {
+                    loop candidate in jet_codegen_last_use_observed(roots.touches, copies.copy_place, borrow_roots, origin) -> rejected[candidate] = true
+                }
+            }
+        }
+    }
+    JetCodegenLastUseOrigins{borrow_roots: ^borrow_roots, origins: ^origins}
+}
+
+// The origins each borrow-carrying result carries, to a fixed point. The
+// results that can carry origins: the filter is the same on every pass, so
+// the passes visit only these, in block and instruction order. A carrier
+// none of whose operands changed since it last ran would change nothing
+// and is skipped (`changed_at` / `ran_at` steps).
+fn jet_codegen_last_use_carry_origins(builder: JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, copies: JetCodegenLastUseCopies, borrow_roots: [U64:[Int]], origins: &[U64:[U64]]) Never! {
     carrier_blocks := [Int]{}
     carrier_indices := [Int]{}
     loop (block, row) in builder.blocks {
-        loop (index, instruction) in row.instructions {
+        loop (position, instruction) in row.instructions {
             result :: instruction.result ?? next
-            if copy_place.get(result.value) != None || borrow_roots.get(result.value) != None -> next
-            if !jet_codegen_last_use_holds_borrow(builder, program, value_row, result) -> next
+            if copies.copy_place.get(result.value) != None || borrow_roots.get(result.value) != None -> next
+            if !jet_codegen_last_use_holds_borrow(builder, program, index.value_row, result) -> next
             &carrier_blocks.push(block)
-            &carrier_indices.push(index)
+            &carrier_indices.push(position)
         }
     }
     changed_at := [U64:Int]{}
@@ -693,43 +844,22 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             }
         }
     }
-    // A borrow or view stored into a place or captured outlives every read
-    // this pass decides.
-    loop row in builder.blocks {
-        loop instruction in row.instructions {
-            stored := [MIRValueID]{}
-            if instruction.operation == {
-                .WritePlace(_, value) -> &stored.push(value)
-                .ReplacePlace(_, value) -> &stored.push(value)
-                .Closure(_, captures, _) -> {
-                    loop capture in captures {
-                        if capture == .Value(value) -> &stored.push(value)
-                    }
-                }
-                else -> {}
-            }
-            loop value in stored {
-                if copy_place.get(value.value) != None -> next
-                from :: origins.get(value.value) ?? next
-                loop origin in from {
-                    loop candidate in jet_codegen_last_use_observed(touches, copy_place, borrow_roots, origin) -> rejected[candidate] = true
-                }
-            }
-        }
-    }
+}
 
-    // A use of a copy's value after the copy in its own block lies in the
-    // copy's read window; a use anywhere else is tracked by the copy's own
-    // liveness bit.
+// A use of a copy's value after the copy in its own block lies in the
+// copy's read window; a use anywhere else is tracked by the copy's own
+// liveness bit.
+fn jet_codegen_last_use_bits(builder: JetCodegenBuilder, roots: JetCodegenLastUseRoots, copies: JetCodegenLastUseCopies, origins: JetCodegenLastUseOrigins, candidates: &[JetCodegenLastUseCandidate], rejected: &[Bool]) -> JetCodegenLastUseBits Never! {
+    no_place :: MIRPlaceID{value: 0}
     copy_bit := [U64:Int]{}
     loop (block, row) in builder.blocks {
         terminator_index :: row.instructions.len()
         use_values := [MIRValueID]{}
         use_indices := [Int]{}
-        loop (index, instruction) in row.instructions {
+        loop (position, instruction) in row.instructions {
             loop value in mir_operation_value_uses(instruction.operation) {
                 &use_values.push(value)
-                &use_indices.push(index)
+                &use_indices.push(position)
             }
         }
         loop value in mir_terminator_value_uses(row.terminator) {
@@ -737,10 +867,10 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             &use_indices.push(terminator_index)
         }
         loop (position, value) in use_values {
-            from :: origins.get(value.value) ?? next
+            from :: origins.origins.get(value.value) ?? next
             loop origin in from {
-                if copy_place.get(origin) == None || copy_bit.get(origin) != None -> next
-                if jet_codegen_last_use_inside_copy(copy_block, copy_index, origin, block, use_indices[position]) -> next
+                if copies.copy_place.get(origin) == None || copy_bit.get(origin) != None -> next
+                if jet_codegen_last_use_inside_copy(copies.copy_block, copies.copy_index, origin, block, use_indices[position]) -> next
                 _ := &copy_bit.add(origin, candidates.len())
                 &candidates.push(jet_codegen_last_use_new_candidate(false, false, true, no_place, no_place, MIRValueID{value: origin}, -1, [MIRFieldID]{}))
                 &rejected.push(false)
@@ -749,29 +879,33 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
     // The copy bits that observe each candidate.
     observing := [Int:[Int]]{}
-    loop value in copy_order {
+    loop value in copies.copy_order {
         bit :: copy_bit.get(value) ?? next
-        observed :: touches.get(copy_place.get(value) ?? 0) ?? [Int]{}
+        observed :: roots.touches.get(copies.copy_place.get(value) ?? 0) ?? [Int]{}
         loop candidate in observed {
             bits := observing.get(candidate) ?? [Int]{}
             &bits.push(bit)
             _ := &observing.add(candidate, bits)
         }
     }
+    JetCodegenLastUseBits{copy_bit: ^copy_bit, observing: ^observing}
+}
 
-    // Per-block events in execution order; the terminator's index is the
-    // block's instruction count.
+// Per-block events in execution order; the terminator's index is the
+// block's instruction count.
+fn jet_codegen_last_use_events(builder: JetCodegenBuilder, index: JetCodegenLastUseIndex, roots: JetCodegenLastUseRoots, copies: JetCodegenLastUseCopies, subjects: JetCodegenLastUseSubjects, origins: JetCodegenLastUseOrigins, bits: JetCodegenLastUseBits, cfg: JetCodegenLastUseCFG, candidates: [JetCodegenLastUseCandidate], rejected: &[Bool]) -> JetCodegenLastUseEvents Never! {
+    no_value :: MIRValueID{value: 0}
     copy_end := [U64:Int]{}
     events := [JetCodegenLastUseEvent]{}
     event_start := [Int]{}
-    remainder :: jet_codegen_last_use_remainder_moves(builder, place_row)
+    remainder :: jet_codegen_last_use_remainder_moves(builder, index.place_row)
     loop (block, row) in builder.blocks {
         &event_start.push(events.len())
-        loop (index, instruction) in row.instructions {
+        loop (position, instruction) in row.instructions {
             kills := [Int]{}
             loop place in jet_codegen_last_use_places(instruction.operation) {
-                list :: touches.get(place.value) ?? next
-                projections :: builder.places[place_row.get(place.value) ?? panic("checked last-use row is missing")].projections
+                list :: roots.touches.get(place.value) ?? next
+                projections :: builder.places[index.place_row.get(place.value) ?? panic("checked last-use row is missing")].projections
                 loop candidate in list {
                     entry :: candidates[candidate]
                     // 1 = kill, 0 = use, -1 = no event.
@@ -783,7 +917,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                                 if whole -> outcome = 1
                             }
                             .MovePlace(_) -> {
-                                if whole && guarded[block] == candidate -> outcome = -1
+                                if whole && cfg.guarded[block] == candidate -> outcome = -1
                             }
                             else -> {}
                         }
@@ -808,35 +942,35 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                         outcome = -1
                     }
                     if outcome == 1 -> &kills.push(candidate)
-                    if outcome == 0 -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
+                    if outcome == 0 -> &events.push(JetCodegenLastUseEvent{index: position, candidate: candidate, kill: false})
                 }
             }
             loop local in jet_codegen_last_use_locals(instruction.operation) {
-                if local_candidate.get(local.value) == None -> next
-                candidate :: local_candidate.get(local.value) ?? panic("checked last-use row is missing")
-                &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: false})
-                fields :: root_fields.get(candidate) ?? [Int]{}
-                loop field in fields -> &events.push(JetCodegenLastUseEvent{index: index, candidate: field, kill: false})
+                if roots.local_candidate.get(local.value) == None -> next
+                candidate :: roots.local_candidate.get(local.value) ?? panic("checked last-use row is missing")
+                &events.push(JetCodegenLastUseEvent{index: position, candidate: candidate, kill: false})
+                fields :: roots.root_fields.get(candidate) ?? [Int]{}
+                loop field in fields -> &events.push(JetCodegenLastUseEvent{index: position, candidate: field, kill: false})
             }
             loop value in mir_operation_value_uses(instruction.operation) {
-                jet_codegen_last_use_value_events(&events, &copy_end, subject_candidate, origins, copy_block, copy_index, copy_bit, borrow_roots, block, index, value)
+                jet_codegen_last_use_value_events(&events, &copy_end, subjects.subject_candidate, origins.origins, copies.copy_block, copies.copy_index, bits.copy_bit, origins.borrow_roots, block, position, value)
             }
             if instruction.result == .Val(result) {
-                if subject_candidate.get(result.value) == .Val(candidate) -> &kills.push(candidate)
-                if copy_bit.get(result.value) == .Val(bit) -> &kills.push(bit)
+                if subjects.subject_candidate.get(result.value) == .Val(candidate) -> &kills.push(candidate)
+                if bits.copy_bit.get(result.value) == .Val(bit) -> &kills.push(bit)
             }
-            loop candidate in kills -> &events.push(JetCodegenLastUseEvent{index: index, candidate: candidate, kill: true})
+            loop candidate in kills -> &events.push(JetCodegenLastUseEvent{index: position, candidate: candidate, kill: true})
         }
         terminator_index :: row.instructions.len()
         loop value in mir_terminator_value_uses(row.terminator) {
-            jet_codegen_last_use_value_events(&events, &copy_end, subject_candidate, origins, copy_block, copy_index, copy_bit, borrow_roots, block, terminator_index, value)
+            jet_codegen_last_use_value_events(&events, &copy_end, subjects.subject_candidate, origins.origins, copies.copy_block, copies.copy_index, bits.copy_bit, origins.borrow_roots, block, terminator_index, value)
         }
-        if !reachable[block] {
+        if !cfg.reachable[block] {
             loop event_index in event_start[block]..<events.len() {
                 if events[event_index].kill -> next
                 candidate :: events[event_index].candidate
                 if candidates[candidate].copied {
-                    observed :: touches.get(copy_place.get(candidates[candidate].value.value) ?? 0) ?? [Int]{}
+                    observed :: roots.touches.get(copies.copy_place.get(candidates[candidate].value.value) ?? 0) ?? [Int]{}
                     loop observed_candidate in observed -> rejected[observed_candidate] = true
                 } else {
                     rejected[candidate] = true
@@ -846,34 +980,35 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
     &event_start.push(events.len())
     read_windows := [Int:[Int]]{}
-    loop value in copy_order {
+    loop value in copies.copy_order {
         if copy_end.get(value) == .Val(window_end) {
-            window_block :: copy_block.get(value) ?? -1
-            window_candidates :: touches.get(copy_place.get(value) ?? 0) ?? [Int]{}
+            window_block :: copies.copy_block.get(value) ?? -1
+            window_candidates :: roots.touches.get(copies.copy_place.get(value) ?? 0) ?? [Int]{}
             loop window_candidate in window_candidates {
                 key :: jet_codegen_last_use_key(window_block, window_candidate)
                 bounds := read_windows.get(key) ?? [Int]{}
-                &bounds.push(copy_index.get(value) ?? -1)
+                &bounds.push(copies.copy_index.get(value) ?? -1)
                 &bounds.push(window_end)
                 _ := &read_windows.add(key, bounds)
             }
         }
     }
+    JetCodegenLastUseEvents{events: ^events, event_start: ^event_start, read_windows: ^read_windows}
+}
 
-    live_out := jet_codegen_last_use_live_out(block_count, events, event_start, predecessors)
-
-    // Each value's uses, as parallel (block, index) rows with the terminator
-    // at the block's instruction count, to decide whether a read is consumed.
+// Each value's uses, as parallel (block, index) rows with the terminator
+// at the block's instruction count, to decide whether a read is consumed.
+fn jet_codegen_last_use_users(builder: JetCodegenBuilder) -> JetCodegenLastUseUsers Never! {
     users_block := [U64:[Int]]{}
     users_index := [U64:[Int]]{}
     loop (block, row) in builder.blocks {
         terminator_index :: row.instructions.len()
         use_values := [MIRValueID]{}
         use_indices := [Int]{}
-        loop (index, instruction) in row.instructions {
+        loop (position, instruction) in row.instructions {
             loop value in mir_operation_value_uses(instruction.operation) {
                 &use_values.push(value)
-                &use_indices.push(index)
+                &use_indices.push(position)
             }
         }
         loop value in mir_terminator_value_uses(row.terminator) {
@@ -889,31 +1024,35 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             _ := &users_index.add(value.value, user_indices)
         }
     }
+    JetCodegenLastUseUsers{users_block: ^users_block, users_index: ^users_index}
+}
 
-    // Decide each read against the liveness right after it.
+// Decide each read against the liveness right after it. The fixed point
+// is complete; each block's live-out row is consumed in place.
+fn jet_codegen_last_use_decide(builder: JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, roots: JetCodegenLastUseRoots, subjects: JetCodegenLastUseSubjects, bits: JetCodegenLastUseBits, evts: JetCodegenLastUseEvents, users: JetCodegenLastUseUsers, cfg: JetCodegenLastUseCFG, candidates: [JetCodegenLastUseCandidate], rejected: [Bool], live_out: &[[Int:Bool]]) -> JetCodegenLastUseDecisions Never! {
+    block_count :: builder.blocks.len()
     group_end := [Int:Int]{}
-    loop (group_index, row) in groups -> _ := &group_end.add(jet_codegen_last_use_key(row.block, row.payloads[row.payloads.len() - 1]), group_index)
+    loop (group_index, row) in subjects.groups -> _ := &group_end.add(jet_codegen_last_use_key(row.block, row.payloads[row.payloads.len() - 1]), group_index)
     conversions := [Int:Int]{}
     iter_takes := [Int:Bool]{}
     moved_groups := [Int]{}
     loop block in 0..<block_count {
-        if !reachable[block] -> next
-        // The fixed point is complete; consume this live-out row in place.
-        cursor := event_start[block + 1]
-        index := builder.blocks[block].instructions.len()
-        loop cursor > event_start[block] && events[cursor - 1].index >= index {
+        if !cfg.reachable[block] -> next
+        cursor := evts.event_start[block + 1]
+        position := builder.blocks[block].instructions.len()
+        loop cursor > evts.event_start[block] && evts.events[cursor - 1].index >= position {
             cursor -= 1
-            _ := &live_out[block].add(events[cursor].candidate, !events[cursor].kill)
+            _ := &live_out[block].add(evts.events[cursor].candidate, !evts.events[cursor].kill)
         }
-        loop index > 0 {
-            index -= 1
-            if builder.blocks[block].instructions[index].operation == .ReadPlace(place) {
+        loop position > 0 {
+            position -= 1
+            if builder.blocks[block].instructions[position].operation == .ReadPlace(place) {
                 target := -1
-                if place_candidate.get(place.value) == .Val(root_index) {
+                if roots.place_candidate.get(place.value) == .Val(root_index) {
                     if candidates[root_index].local && candidates[root_index].place == place -> target = root_index
                 }
-                if target < 0 -> target = field_candidate.get(place.value) ?? -1
-                if builder.blocks[block].instructions[index].result == .Val(result) && target >= 0 {
+                if target < 0 -> target = roots.field_candidate.get(place.value) ?? -1
+                if builder.blocks[block].instructions[position].result == .Val(result) && target >= 0 {
                     // A field move pays for splitting its owner only for an
                     // owned (heap) value; a Copy field stays a read. The
                     // liveness right after the read already proves nothing
@@ -924,83 +1063,87 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                     // jet_codegen_emit_borrowed_carrier) lends the place and
                     // never takes it, even at the place's last use.
                     worth := true
-                    if value_row.get(result.value) == .Val(read_row) -> worth = !jet_codegen_last_use_borrowed(builder.values[read_row].ownership.mode)
+                    if index.value_row.get(result.value) == .Val(read_row) -> worth = !jet_codegen_last_use_borrowed(builder.values[read_row].ownership.mode)
                     if candidates[target].field {
                         root = candidates[target].root
                         worth = false
-                        if value_row.get(result.value) == .Val(fact_row) {
+                        if index.value_row.get(result.value) == .Val(fact_row) {
                             if builder.values[fact_row].ownership.mode == {
                                 .Owned | .Move -> worth = true
                                 else -> {}
                             }
                         }
                     }
-                    own :: copy_bit.get(result.value) ?? -1
+                    own :: bits.copy_bit.get(result.value) ?? -1
                     other_copy := false
-                    bits :: observing.get(target) ?? [Int]{}
-                    loop bit in bits {
+                    observing_bits :: bits.observing.get(target) ?? [Int]{}
+                    loop bit in observing_bits {
                         if bit != own && (live_out[block].get(bit) ?? false) -> other_copy = true
                     }
                     // A read only a borrowed list walk's cursor takes moves
                     // into it, and the walk then hands its items out by value.
-                    consumed := jet_codegen_last_use_consumed(builder, program, users_block, users_index, result)
+                    consumed := jet_codegen_last_use_consumed(builder, program, users.users_block, users.users_index, result)
                     iter_key := -1
                     if !consumed {
                         listed := false
-                        if value_row.get(result.value) == .Val(list_row) {
+                        if index.value_row.get(result.value) == .Val(list_row) {
                             if builder.values[list_row].ty.kind == .List(_) -> listed = true
                         }
-                        if listed -> iter_key = jet_codegen_last_use_iter_source(builder, users_block, users_index, result)
+                        if listed -> iter_key = jet_codegen_last_use_iter_source(builder, users.users_block, users.users_index, result)
                     }
-                    if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(read_windows, block, index, target) && !other_copy && jet_codegen_read_window_of(builder, program, result) == None && (consumed || iter_key >= 0) {
-                        _ := &conversions.add(jet_codegen_last_use_key(block, index), target)
+                    if worth && !rejected[target] && !rejected[root] && !(live_out[block].get(target) ?? false) && !jet_codegen_last_use_in_window(evts.read_windows, block, position, target) && !other_copy && jet_codegen_read_window_of(builder, program, result) == None && (consumed || iter_key >= 0) {
+                        _ := &conversions.add(jet_codegen_last_use_key(block, position), target)
                         if iter_key >= 0 -> _ := &iter_takes.add(iter_key, true)
                     }
                 }
             }
-            if group_end.get(jet_codegen_last_use_key(block, index)) == .Val(group_index) {
-                candidate :: groups[group_index].candidate
+            if group_end.get(jet_codegen_last_use_key(block, position)) == .Val(group_index) {
+                candidate :: subjects.groups[group_index].candidate
                 if !rejected[candidate] && !(live_out[block].get(candidate) ?? false) -> &moved_groups.push(group_index)
             }
-            loop cursor > event_start[block] && events[cursor - 1].index >= index {
+            loop cursor > evts.event_start[block] && evts.events[cursor - 1].index >= position {
                 cursor -= 1
-                _ := &live_out[block].add(events[cursor].candidate, !events[cursor].kill)
+                _ := &live_out[block].add(evts.events[cursor].candidate, !evts.events[cursor].kill)
             }
         }
     }
-    if conversions.len() == 0 && moved_groups.len() == 0 -> return
+    JetCodegenLastUseDecisions{conversions: ^conversions, iter_takes: ^iter_takes, moved_groups: ^moved_groups}
+}
 
-    // Rewrite each touched block once: a group's Move goes before its first
-    // payload, which with the later payloads reads the moved value; a
-    // converted read becomes a MovePlace of its own place, and a whole
-    // local's is followed by its drop-flag clear. A field move leaves its
-    // owner live: the refill that follows makes it whole again.
-    // A value is consumed once (MIR legality), so a subject with several
-    // moved groups (an or-pattern's alternatives, each binding the subject's
-    // payloads on its own path; arms of one match over one subject) is taken
-    // by one Move right after its definition, and every variant test and
-    // payload read of it reads the moved value instead.
+// Rewrite each touched block once: a group's Move goes before its first
+// payload, which with the later payloads reads the moved value; a
+// converted read becomes a MovePlace of its own place, and a whole
+// local's is followed by its drop-flag clear. A field move leaves its
+// owner live: the refill that follows makes it whole again.
+// A value is consumed once (MIR legality), so a subject with several
+// moved groups (an or-pattern's alternatives, each binding the subject's
+// payloads on its own path; arms of one match over one subject) is taken
+// by one Move right after its definition, and every variant test and
+// payload read of it reads the moved value instead.
+fn jet_codegen_last_use_rewrite(builder: &JetCodegenBuilder, program: JetCodegenProgram, index: JetCodegenLastUseIndex, subjects: JetCodegenLastUseSubjects, candidates: [JetCodegenLastUseCandidate], decisions: JetCodegenLastUseDecisions) Never! {
+    block_count :: builder.blocks.len()
+    no_place :: MIRPlaceID{value: 0}
     takes := [Int:MIRInstruction]{}
     after_takes := [Int:MIRInstruction]{}
     retarget := [Int:MIRValueID]{}
     touched := [Int:Bool]{}
     moved_counts := [Int:Int]{}
-    loop group_index in moved_groups {
-        candidate :: groups[group_index].candidate
+    loop group_index in decisions.moved_groups {
+        candidate :: subjects.groups[group_index].candidate
         _ := &moved_counts.add(candidate, (moved_counts.get(candidate) ?? 0) + 1)
     }
     shared_takes := [Int:Bool]{}
-    loop group_index in moved_groups {
-        row :: groups[group_index]
+    loop group_index in decisions.moved_groups {
+        row :: subjects.groups[group_index]
         subject :: candidates[row.candidate].value
-        if value_row.get(subject.value) == None -> next
-        fact_row :: value_row.get(subject.value) ?? panic("checked last-use row is missing")
+        if index.value_row.get(subject.value) == None -> next
+        fact_row :: index.value_row.get(subject.value) ?? panic("checked last-use row is missing")
         subject_ty := builder.values[fact_row].ty
         if (moved_counts.get(row.candidate) ?? 0) > 1 {
             if shared_takes.get(row.candidate) != None -> next
             _ := &shared_takes.add(row.candidate, true)
-            defined_block :: def_block.get(subject.value) ?? panic("checked last-use row is missing")
-            after := def_index.get(subject.value) ?? panic("checked last-use row is missing")
+            defined_block :: index.def_block.get(subject.value) ?? panic("checked last-use row is missing")
+            after := index.def_index.get(subject.value) ?? panic("checked last-use row is missing")
             // A phi subject's Move follows the block's whole phi prefix.
             count :: builder.blocks[defined_block].instructions.len()
             loop after + 1 < count && builder.blocks[defined_block].instructions[after + 1].operation == .Phi(_) -> after += 1
@@ -1010,9 +1153,9 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
             shared :: shared_take.result ?? panic("checked last-use row is missing")
             _ := &after_takes.add(jet_codegen_last_use_key(defined_block, after), shared_take)
             _ := &touched.add(defined_block, true)
-            use_rows :: uses_by_subject.get(subject.value) ?? panic("checked last-use row is missing")
+            use_rows :: subjects.uses_by_subject.get(subject.value) ?? panic("checked last-use row is missing")
             loop use_row in use_rows {
-                entry :: enum_uses[use_row]
+                entry :: subjects.enum_uses[use_row]
                 _ := &retarget.add(jet_codegen_last_use_key(entry.block, entry.index), shared)
                 _ := &touched.add(entry.block, true)
             }
@@ -1030,20 +1173,20 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     clears := [Int:[MIRInstruction]]{}
     bool_type :: jet_codegen_lower_type_for_function(Type.Bool, builder, program)
     loop block in 0..<block_count {
-        loop index in 0..<builder.blocks[block].instructions.len() {
-            key :: jet_codegen_last_use_key(block, index)
-            if conversions.get(key) == None -> next
-            candidate :: conversions.get(key) ?? panic("checked last-use row is missing")
+        loop position in 0..<builder.blocks[block].instructions.len() {
+            key :: jet_codegen_last_use_key(block, position)
+            if decisions.conversions.get(key) == None -> next
+            candidate :: decisions.conversions.get(key) ?? panic("checked last-use row is missing")
             read_place := no_place
-            if builder.blocks[block].instructions[index].operation == .ReadPlace(place) -> read_place = place
+            if builder.blocks[block].instructions[position].operation == .ReadPlace(place) -> read_place = place
             _ := &moved_reads.add(key, read_place)
             _ := &touched.add(block, true)
-            if place_row.get(read_place.value) == .Val(place_index) -> builder.places[place_index].access = MIRAccess.Move
-            if builder.blocks[block].instructions[index].result == .Val(result) {
-                if value_row.get(result.value) == .Val(fact_row) -> builder.values[fact_row].ownership = mir_ownership_from_access(MIRAccess.Move)
+            if index.place_row.get(read_place.value) == .Val(place_index) -> builder.places[place_index].access = MIRAccess.Move
+            if builder.blocks[block].instructions[position].result == .Val(result) {
+                if index.value_row.get(result.value) == .Val(fact_row) -> builder.values[fact_row].ownership = mir_ownership_from_access(MIRAccess.Move)
             }
             if !candidates[candidate].local -> next
-            span := builder.blocks[block].instructions[index].span
+            span := builder.blocks[block].instructions[position].span
             off :: jet_codegen_last_use_instruction(&builder, program, span, "owned.local.last-use.state", Val(bool_type), mir_copy_ownership(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
             if off.result == None -> next
             off_value :: off.result ?? panic("checked last-use row is missing")
@@ -1054,15 +1197,15 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
     // A borrowed list walk whose collection read became a move takes the
     // list by value (LoopIterInit by_value: the items move out of it).
     loop block in 0..<block_count {
-        loop index in 0..<builder.blocks[block].instructions.len() {
-            if iter_takes.get(jet_codegen_last_use_key(block, index)) != None -> _ := &touched.add(block, true)
+        loop position in 0..<builder.blocks[block].instructions.len() {
+            if decisions.iter_takes.get(jet_codegen_last_use_key(block, position)) != None -> _ := &touched.add(block, true)
         }
     }
     loop block in 0..<block_count {
         if touched.get(block) == None -> next
         rewritten := [MIRInstruction]{}
-        loop (index, original) in builder.blocks[block].instructions {
-            key :: jet_codegen_last_use_key(block, index)
+        loop (position, original) in builder.blocks[block].instructions {
+            key :: jet_codegen_last_use_key(block, position)
             if takes.get(key) == .Val(moved_take) -> &rewritten.push(moved_take)
             instruction := original
             if retarget.get(key) == .Val(taken) {
@@ -1073,7 +1216,7 @@ fn jet_codegen_move_last_uses(builder: &JetCodegenBuilder, program: JetCodegenPr
                 }
             }
             if moved_reads.get(key) == .Val(read_place) -> instruction.operation = MIROperation.MovePlace{place: read_place}
-            if iter_takes.get(key) != None && original.operation == .LoopIterInit(call, collection, iter_step, _, source_kind) {
+            if decisions.iter_takes.get(key) != None && original.operation == .LoopIterInit(call, collection, iter_step, _, source_kind) {
                 instruction.operation = MIROperation.LoopIterInit{call: call, collection: collection, step: iter_step, by_value: true, source_kind: source_kind}
             }
             &rewritten.push(instruction)

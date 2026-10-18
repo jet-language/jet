@@ -653,14 +653,37 @@ fn scan_block_comment_end(source: [U8], start: Int) -> Int Never! {
 
 fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
-    last_code := -1
-    i := 0
-    if byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
+    _ := raw_token_facts_range(source, config_surface, 0, source.len(), -1, &facts)
+    facts
+}
+
+// Where a range scan stopped: `stop` is the first byte the scan did not
+// read (`to` when the range ends between tokens, past it when a token
+// straddles the range end); `bodies_local` is false when a `"""` head was
+// scanned with no `fn` fact in the range before it, so `raw_foreign_body_at`
+// would have read facts before the range.
+struct RawScanStop {
+    stop: Int
+    bodies_local: Bool
+}
+
+// Scans `source[from..<to]` appending its facts to `facts`. A token that
+// starts before `to` is scanned whole, so the scan can end past `to`. The
+// range starts between tokens: `previous_code` is the kind of the code token
+// before `from` (-1 at the start of the source); the `#!` launch line is
+// read at byte 0 only, and the EOF fact is emitted when the range reaches
+// the end of the source.
+fn raw_token_facts_range(source: [U8], config_surface: Bool, from: Int, to: Int, previous_code: Int, facts: &[Int]) -> RawScanStop {
+    last_code := previous_code
+    fn_in_range := false
+    bodies_local := true
+    i := from
+    if i == 0 && byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
         loop i < source.len() && byte_at(source, i) != 10 -> i += 1
         if i < source.len() -> i += 1
     }
     count :: source.len()
-    loop i < count {
+    loop i < to {
         // ASCII whitespace and identifier starts (most bytes and tokens) are
         // tested inline before the punctuation chain; a non-ASCII byte keeps
         // the scalar whitespace and identifier tests below.
@@ -672,6 +695,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
         if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) {
             end :: scan_identifier_end(source, i)
             kind :: word_kind(source, i, end, last_code)
+            if kind == K_FN -> fn_in_range = true
             last_code = push_code(&facts, kind, i, end, kind == K_IDENT && value <= 90 && value >= 65)
             i = end
             next
@@ -1115,6 +1139,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
         if value == 34 {
             if {
                 next1 == 34 && next2 == 34 -> {
+                    if !fn_in_range -> bodies_local = false
                     end := if {
                         raw_foreign_body_at(source, facts, facts.len() /% 4) -> scan_raw_foreign_string_end(source, start)
                         else -> {
@@ -1193,6 +1218,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
         if is_identifier_start(source, i) {
             end :: scan_identifier_end(source, i)
             kind :: word_kind(source, i, end, last_code)
+            if kind == K_FN -> fn_in_range = true
             upper := false
             if kind == K_IDENT -> upper = first_char_is_upper(source, i)
             last_code = push_code(&facts, kind, i, end, upper)
@@ -1201,8 +1227,8 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
         }
         i += utf8_width(source, i)
     }
-    emit(&facts, K_EOF, source.len(), source.len(), false)
-    facts
+    if to >= source.len() -> emit(&facts, K_EOF, source.len(), source.len(), false)
+    RawScanStop{stop: i, bodies_local: bodies_local}
 }
 
 fn terminator_events_scanned(source: [U8], config_surface: Bool) -> [Int] {

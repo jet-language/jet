@@ -92,6 +92,11 @@ struct X64Emitter {
     stack: [Int]
     // Offset of every `ret`, for the CFI of the epilogues.
     returns: [Int]
+    // x64_emit_parallel_moves' destination index: per place key
+    // (x64_place_key) the first pending move of the current set writing
+    // that place, -1 for none; every key a set used is -1 again when the
+    // set returns.
+    places: [Int]
 }
 
 struct X64Frame { stack: [Int], bytes: Int }
@@ -202,16 +207,20 @@ fn x64_same_place(left: X64Loc, right: X64Loc) -> Bool Never! {
 // Entry xmm1 may still be an incoming source. Prefer it when unread, otherwise
 // take another unread xmm, never a destination already installed by this move
 // set. A pending destination is safe: redirected readers delay its write.
-fn x64_parallel_float_scratch(moves: [X64Move], pending: [X64Move]) -> Int Never! {
+fn x64_parallel_float_scratch(moves: [X64Move], pending: [Int], done: [Bool], redirect: [Int], scratches: [X64Loc]) -> Int Never! {
     loop candidate in 0..<16 {
         reg :: if candidate == 0 -> 1 else if candidate == 1 -> 0 else -> candidate
         loc :: X64Loc.Xmm{reg: reg, single: false}
         blocked := false
-        loop move in pending { if x64_same_place(move.src, loc) -> blocked = true }
+        loop position in 0..<pending.len() {
+            if !done[position] && x64_parallel_reads(moves, pending, redirect, scratches, position, loc) -> blocked = true
+        }
         loop move in moves {
             if x64_same_place(move.dst, loc) {
                 unwritten := false
-                loop remaining in pending { if x64_same_place(remaining.dst, loc) -> unwritten = true }
+                loop position in 0..<pending.len() {
+                    if !done[position] && x64_same_place(moves[pending[position]].dst, loc) -> unwritten = true
+                }
                 if !unwritten -> blocked = true
             }
         }
@@ -222,47 +231,176 @@ fn x64_parallel_float_scratch(moves: [X64Move], pending: [X64Move]) -> Int Never
     panic("x64 parallel Float move set has no unread scratch register")
 }
 
+// Whether pending move `position` reads `loc`: its own source, or the
+// scratch a cycle break redirected it to.
+fn x64_parallel_reads(moves: [X64Move], pending: [Int], redirect: [Int], scratches: [X64Loc], position: Int, loc: X64Loc) -> Bool Never! {
+    if redirect[position] >= 0 -> return x64_same_place(scratches[redirect[position]], loc)
+    x64_same_place(moves[pending[position]].src, loc)
+}
+
+// The key of the place a move reads or writes, one per physical place as
+// x64_same_place compares them (xmmN and slot N in either precision are one
+// place), for the destination index of x64_emit_parallel_moves; -1 for an
+// immediate or folded location, which the index does not hold.
+fn x64_place_key(loc: X64Loc) -> Int Never! {
+    if loc == {
+        .Reg(reg) -> reg
+        .Xmm(reg, _) -> 16 + reg
+        .Stack(slot) -> 32 + 3 * slot
+        .FloatStack(slot, _) -> 33 + 3 * slot
+        .Frame(value) -> 34 + 3 * value
+        else -> -1
+    }
+}
+
 // Emit `moves` as if all sources were read before any destination is written.
-// Each move whose destination no pending move still reads goes first; a pure
-// cycle is broken in rax (general) or an unread xmm (prefer xmm1).
+// Each move whose destination no pending move still reads goes first (the
+// first such in move order); a pure cycle is broken in rax (general) or an
+// unread xmm (prefer xmm1). The moves stay where they are: `pending` lists
+// the moves to emit (in order), `done` marks the emitted ones, `readers[p]`
+// counts the other pending moves reading pending move p's destination,
+// `redirect[p]` names the scratch (a row of `scratches`) a cycle break made
+// move p read instead of its source (-1: its source), and `ready` is a
+// min-heap of the pending positions with no reader (the first in order pops
+// first). The destination index (`emitter.places[key]`, the first pending
+// move writing the place of `key`, chained through `same_dst`) finds the
+// readers of a source without a scan; it is reset before the set returns.
+// A destination without a key (x64_place_key) is counted by comparing it
+// against every source instead.
 fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
-    pending := [X64Move]{}
-    loop move in moves { if move.src != move.dst -> &pending.push(move) }
-    loop pending.len() > 0 {
-        ready := -1
-        loop (index, move) in pending {
-            if ready < 0 {
-                blocked := false
-                loop (other, reader) in pending { if other != index && x64_same_place(reader.src, move.dst) -> blocked = true }
-                // ABI xmm1 is also the cycle scratch: install its final value
-                // only after all other moves (and therefore cycles) are done.
-                if move.dst == .Xmm(reg, _) {
-                    if reg == 1 && pending.len() > 1 -> blocked = true
-                }
-                if !blocked -> ready = index
-            }
+    pending := [Int]{}
+    loop (index, move) in moves { if move.src != move.dst -> &pending.push(index) }
+    count :: pending.len()
+    if count == 0 -> return
+    done := [Bool]{}
+    readers := [Int]{}
+    redirect := [Int]{}
+    same_dst := [Int]{}
+    keys := [Int]{}
+    priority := [Int]{}
+    keyless := false
+    loop position in 0..<count {
+        &done.push(false)
+        &readers.push(0)
+        &redirect.push(-1)
+        &same_dst.push(-1)
+        &priority.push(0)
+        key :: x64_place_key(moves[pending[position]].dst)
+        &keys.push(key)
+        if key < 0 {
+            keyless = true
+            next
         }
-        if ready >= 0 {
-            x64_emit_move(&emitter, pending[ready].src, pending[ready].dst)
-            rest := [X64Move]{}
-            loop (index, move) in pending { if index != ready -> &rest.push(move) }
-            pending = rest
-        } else {
-            saved := pending[0].dst
-            loop move in pending {
-                if move.dst == .Xmm(reg, _) { if reg == 1 -> next }
-                saved = move.dst
+        loop emitter.places.len() <= key -> &emitter.places.push(-1)
+        same_dst[position] = emitter.places[key]
+        emitter.places[key] = position
+    }
+    scratches := [X64Loc]{}
+    x64_parallel_count(moves, pending, done, redirect, scratches, keyless, same_dst, emitter.places, &readers)
+    ready := [Int]{}
+    remaining := count
+    loop position in 0..<count -> x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, position)
+    loop remaining > 0 {
+        position := -1
+        loop ready.len() > 0 {
+            candidate :: opt_heap_pop(&ready, priority)
+            if done[candidate] || readers[candidate] != 0 -> next
+            position = candidate
+            break
+        }
+        if position >= 0 {
+            index :: pending[position]
+            if redirect[position] >= 0 -> x64_emit_move(&emitter, scratches[redirect[position]], moves[index].dst)
+            else -> x64_emit_move(&emitter, moves[index].src, moves[index].dst)
+            done[position] = true
+            remaining -= 1
+            // The moves writing this move's source lose a reader.
+            source_key :: if redirect[position] >= 0 -> x64_place_key(scratches[redirect[position]]) else -> x64_place_key(moves[index].src)
+            if source_key >= 0 {
+                if source_key < emitter.places.len() {
+                    other := emitter.places[source_key].copy()
+                    loop other >= 0 {
+                        if !done[other] {
+                            readers[other] = readers[other] - 1
+                            x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other)
+                        }
+                        other = same_dst[other]
+                    }
+                }
+            } else {
+                if keyless {
+                    loop other in 0..<count {
+                        if done[other] || !x64_parallel_reads(moves, pending, redirect, scratches, position, moves[pending[other]].dst) -> next
+                        readers[other] = readers[other] - 1
+                        x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other)
+                    }
+                }
             }
-            scratch :: if saved == {
-                .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: x64_parallel_float_scratch(moves, pending), single: false}
-                else -> X64Loc.Reg{reg: X64_RAX}
+            // ABI xmm1 is also the cycle scratch: its move waited for the
+            // others; alone, it is ready.
+            if remaining == 1 {
+                loop other in 0..<count { if !done[other] -> x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other) }
             }
-            x64_emit_move(&emitter, saved, scratch)
-            rest := [X64Move]{}
-            loop move in pending {
-                &rest.push(if x64_same_place(move.src, saved) -> X64Move{src: scratch, dst: move.dst} else -> move)
+            next
+        }
+        // A cycle: save the last pending destination that is not xmm1 (else
+        // the first pending one) in a scratch, read the scratch instead of
+        // it, and count the readers again.
+        saved_at := -1
+        loop other in 0..<count {
+            if done[other] -> next
+            if saved_at < 0 -> saved_at = other
+            if moves[pending[other]].dst == .Xmm(reg, _) { if reg == 1 -> next }
+            saved_at = other
+        }
+        saved_index :: pending[saved_at]
+        scratch :: if moves[saved_index].dst == {
+            .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: x64_parallel_float_scratch(moves, pending, done, redirect, scratches), single: false}
+            else -> X64Loc.Reg{reg: X64_RAX}
+        }
+        x64_emit_move(&emitter, moves[saved_index].dst, scratch)
+        &scratches.push(^scratch)
+        row :: scratches.len() - 1
+        loop other in 0..<count {
+            if !done[other] && x64_parallel_reads(moves, pending, redirect, scratches, other, moves[saved_index].dst) -> redirect[other] = row
+        }
+        x64_parallel_count(moves, pending, done, redirect, scratches, keyless, same_dst, emitter.places, &readers)
+        ready = [Int]{}
+        loop other in 0..<count -> x64_parallel_offer(&ready, priority, moves, pending, readers, remaining, other)
+    }
+    loop position in 0..<count { if keys[position] >= 0 -> emitter.places[keys[position]] = -1 }
+}
+
+// Pushes pending move `position` onto `ready` when nothing pending reads its
+// destination and it is not the xmm1 move waiting for the others.
+fn x64_parallel_offer(ready: &[Int], priority: [Int], moves: [X64Move], pending: [Int], readers: [Int], remaining: Int, position: Int) Never! {
+    if readers[position] != 0 -> return
+    if moves[pending[position]].dst == .Xmm(reg, _) {
+        if reg == 1 && remaining > 1 -> return
+    }
+    opt_heap_push(&ready, priority, position)
+}
+
+// Per pending move (not done), how many other pending moves read its
+// destination, into `readers`.
+fn x64_parallel_count(moves: [X64Move], pending: [Int], done: [Bool], redirect: [Int], scratches: [X64Loc], keyless: Bool, same_dst: [Int], places: [Int], readers: &[Int]) Never! {
+    loop position in 0..<pending.len() -> readers[position] = 0
+    loop position in 0..<pending.len() {
+        if done[position] -> next
+        key :: if redirect[position] >= 0 -> x64_place_key(scratches[redirect[position]]) else -> x64_place_key(moves[pending[position]].src)
+        if key >= 0 {
+            if key >= places.len() -> next
+            other := places[key].copy()
+            loop other >= 0 {
+                if other != position && !done[other] -> readers[other] = readers[other] + 1
+                other = same_dst[other]
             }
-            pending = rest
+            next
+        }
+        if !keyless -> next
+        loop other in 0..<pending.len() {
+            if other == position || done[other] -> next
+            if x64_parallel_reads(moves, pending, redirect, scratches, position, moves[pending[other]].dst) -> readers[other] = readers[other] + 1
         }
     }
 }
@@ -482,6 +620,65 @@ fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64All
     }
 }
 
+// The registers a call would clobber that hold a value across `position`
+// in block row `row`: caller-saved general registers and xmm registers of
+// segments that start before and end after it (RegAlloc.jet: a segment
+// crosses a position strictly between its start and end).
+fn x64_live_volatile(allocation: X64Allocation, row: Int, position: Int) -> [X64Loc] Never! {
+    live := [X64Loc]{}
+    callee_saved :: x64_pools().members[X64_POOL_GENERAL_CROSSING]
+    loop segment in allocation.block_segments[row]..<allocation.block_segments[row + 1] {
+        if allocation.segment_starts[segment] >= position || allocation.segment_ends[segment] <= position -> next
+        if allocation.segment_locations[segment] == {
+            .Reg(reg) -> { if !callee_saved[reg] -> &live.push(X64Loc.Reg{reg: reg}) }
+            .Xmm(reg, _) -> &live.push(X64Loc.Xmm{reg: reg, single: false})
+            else -> {}
+        }
+    }
+    live
+}
+
+// An exact Int's drop or clone (RegAlloc.jet x64_int_drop / x64_int_clone):
+// the runtime route returns at once for an inline Int (Int.jet int_inline:
+// bits 63 and 62 agree, so doubling the word does not overflow), and only a
+// boxed big integer needs its reference count touched. The hot path is
+// `mov rax, value; mov r10, rax; add r10, r10; jno done`; the cold path saves
+// every caller-saved register holding a value across this instruction (the
+// allocator treats it as no call), calls `symbol`(value) with rsp still
+// 16-byte aligned, restores them and, for a clone, leaves the result in the
+// value's own register (jet_rt_int_clone returns its argument word). A clone
+// then moves that register to `dst`.
+fn x64_select_int_route(emitter: &X64Emitter, allocation: X64Allocation, row: Int, position: Int, value: X64Loc, symbol: String, dst: X64Loc?) Never! {
+    reg :: x64_operand(&emitter, value, X64_RAX)
+    x64_mov_rr(&emitter.code, X64_R10, reg)
+    x64_alu_rr(&emitter.code, X64Alu.Add, X64_R10, X64_R10)
+    done :: x64_jcc_rel32(&emitter.code, X64Cond.NO)
+    live :: x64_live_volatile(allocation, row, position)
+    bytes :: 8 * (live.len() + live.len() % 2)
+    if bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, bytes)
+    loop (index, loc) in live {
+        if loc == {
+            .Reg(saved) -> x64_store(&emitter.code, X64_RSP, 8 * index, saved)
+            .Xmm(saved, _) -> x64_float_store(&emitter.code, false, X64_RSP, 8 * index, saved)
+            else -> {}
+        }
+    }
+    if reg != X64_RDI -> x64_mov_rr(&emitter.code, X64_RDI, reg)
+    at :: x64_call_rel32(&emitter.code)
+    &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: symbol}})
+    if dst != None && reg != X64_RAX -> x64_mov_rr(&emitter.code, reg, X64_RAX)
+    loop (index, loc) in live {
+        if loc == {
+            .Reg(saved) -> x64_load(&emitter.code, saved, X64_RSP, 8 * index)
+            .Xmm(saved, _) -> x64_float_load(&emitter.code, false, saved, X64_RSP, 8 * index)
+            else -> {}
+        }
+    }
+    if bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Add, X64_RSP, bytes)
+    x64_patch_rel32(&emitter.code, done, emitter.code.len())
+    if dst == .Val(result) -> x64_emit_move(&emitter, X64Loc.Reg{reg: reg}, result)
+}
+
 fn x64_emit_epilogue(emitter: &X64Emitter) Never! {
     x64_lea(&emitter.code, X64_RSP, X64_RBP, 0 - 8 * emitter.saved.len())
     index := emitter.saved.len() - 1
@@ -544,7 +741,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     allocation := x64_allocate(function)
     x64_enter_block(&allocation, 0)
     frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
-    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}}
+    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}, places: [Int]{}}
 
     // The frame and its call frame instructions: after `push rbp` the CFA
     // is rsp + 16 with rbp saved below the return address; after
@@ -654,7 +851,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
             &positions.push(emitter.code.len())
             &defining.push(true)
             if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[inst_index])
-            if !(fused && inst_index == block.insts.len() - 1) -> x64_select_inst(&emitter, function, allocation, inst)
+            if !(fused && inst_index == block.insts.len() - 1) -> x64_select_inst(&emitter, function, allocation, inst, block_index, positions.len() - 1)
         }
         &positions.push(emitter.code.len())
         &defining.push(false)
@@ -696,16 +893,20 @@ fn x64_debug_location(loc: X64Loc, saved: Int, stack: [Int]) -> X64DebugLocation
 // parameter or live-in value) through the segment's last position, in that
 // segment's location. Segments that follow one another in the code in one
 // location yield one range. A value bound twice to one variable yields its
-// ranges once.
+// ranges once: the variables seen per value chain from `seen_heads[value]`
+// through `seen_next` (a flat list, no map: the bindings of one function
+// run to thousands, and a map insert moves every later entry).
 fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: [Int], positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
     count :: function.values.len()
     // Each value's segments in function order, as a chain from heads[value]
     // through links.
     heads := [Int]{}
     tails := [Int]{}
+    seen_heads := [Int]{}
     loop _ in 0..<count {
         &heads.push(-1)
         &tails.push(-1)
+        &seen_heads.push(-1)
     }
     links := [Int]{}
     loop (segment, value) in allocation.segment_values {
@@ -718,14 +919,13 @@ fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: 
         tails[value] = segment
     }
     ranges := [X64VariableRange]{}
-    seen := [Int:Bool]{}
+    seen_variables := [Int]{}
+    seen_next := [Int]{}
     saved :: allocation.callee_saved.len()
     loop binding in function.debug.bindings {
         value :: binding.value.value
         if heads[value] < 0 -> next
-        key :: binding.variable * count + value
-        if seen.get(key) != None -> next
-        &seen.add(key, true).drop("checked absent above")
+        if x64_binding_seen(&seen_heads, &seen_variables, &seen_next, value, binding.variable) -> next
         open_start := -1
         open_end := -1
         open_location := X64DebugLocation.Register{reg: 0}
@@ -749,6 +949,19 @@ fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: 
         if open_start >= 0 -> &ranges.push(X64VariableRange{variable: binding.variable, start: open_start, end: open_end, location: open_location})
     }
     ranges
+}
+
+// Whether `variable` was already bound to `value`; records it otherwise.
+fn x64_binding_seen(seen_heads: &[Int], seen_variables: &[Int], seen_next: &[Int], value: Int, variable: Int) -> Bool Never! {
+    node := seen_heads[value].copy()
+    loop node >= 0 {
+        if seen_variables[node] == variable -> return true
+        node = seen_next[node].copy()
+    }
+    &seen_next.push(seen_heads[value].copy())
+    seen_heads[value] = seen_variables.len()
+    &seen_variables.push(variable)
+    false
 }
 
 // Ordered IEEE comparison of Float (or, `single`, Float32) xmm operands into
@@ -947,7 +1160,10 @@ fn x64_select_lea(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValueID, ad
     x64_finish_result(&emitter, locations[dst.value], reg)
 }
 
-fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst) Never! {
+// `row` is the block's row and `position` the instruction's allocation
+// position (RegAlloc.jet: block starts, instructions and terminators in
+// function order), for the segments live across it.
+fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst, row: Int, position: Int) Never! {
     locations :: allocation.locations
     folds :: allocation.folds
     if lir_inst_def(inst) == .Val(dst) && folds.skipped[dst.value] -> return
@@ -1101,6 +1317,11 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_emit_move(&emitter, locations[src.value], locations[dst.value])
         }
         .Call(dst, _, callee, args) -> {
+            if x64_int_clone(callee, args) {
+                result := X64Loc?{None}
+                if dst == .Val(id) -> result = Val(locations[id.value])
+                return x64_select_int_route(&emitter, allocation, row, position, locations[args[0].value], "jet_rt_int_clone", result)
+            }
             target :: if callee == {
                 .Function(id) -> X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}
                 .Runtime(symbol) -> X64CallTarget.Direct{target: X64RelocTarget.Runtime{symbol: symbol}}
@@ -1109,6 +1330,7 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_emit_call(&emitter, function, allocation, target, args, dst)
         }
         .Drop(value) -> {
+            if x64_int_drop(function, value) -> return x64_select_int_route(&emitter, allocation, row, position, locations[value.value], "jet_rt_int_drop", None)
             if function.values[value.value].drop == {
                 .Runtime(symbol) -> x64_emit_call(&emitter, function, allocation, X64CallTarget.Direct{target: X64RelocTarget.Runtime{symbol: symbol}}, [LIRValueID]{value}, None)
                 .Function(id) -> x64_emit_call(&emitter, function, allocation, X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}, [LIRValueID]{value}, None)

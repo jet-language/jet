@@ -103,7 +103,9 @@ fn abi_fixtures() {
     init :: X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "jet_rt_alloc_init"}
     initialized :: x64_runtime_object(library, [X64RuntimeExport]{init, export})
     assert_eq(initialized.errors, [String]{})
-    assert(Int.from_u8(initialized.bytes[60]) == 11)
+    // e_shnum: the null section, the ELF64_OBJECT_SECTIONS object sections and the
+    // initializer's .init_array.N with its .rela (20 since the DWARF sections, e0628be87).
+    assert(Int.from_u8(initialized.bytes[60]) == ELF64_OBJECT_SECTIONS + 3)
     files.write_bytes("runtime-init.o", initialized.bytes) ?? panic("cannot write runtime initializer fixture")
     assert(x64_runtime_object(abi_bool_module(false), [X64RuntimeExport]{init}).errors.len() > 0)
     abi_write_bool("bool-register-false", false, 0)

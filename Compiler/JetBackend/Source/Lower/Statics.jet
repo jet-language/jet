@@ -1,10 +1,11 @@
 // Module constants are frozen once; Global borrows their data and clones only
 // when checked MIR ownership requires an owner. Literal Constant stays separate.
 //
-// Runtime-owned words inside a frozen tree (String and spilled exact Int)
-// cannot be frozen at build time. Their slots stay zero until the entry
-// runs the recorded constructor on static text. Program owners live until
-// process exit; callable owners live until image finalization. An
+// A String inside a frozen tree is a relocation to its immortal header
+// (StaticText.jet lower_immortal_text). A spilled exact Int is a runtime-owned
+// word that cannot be frozen at build time: its slot stays zero until the
+// entry runs the recorded constructor on static text. Program owners live
+// until process exit; callable owners live until image finalization. An
 // ownership-bearing Global read clones them.
 use jet_foundation.[
     MIRConstant, MIRConstantDef, MIRConstMapEntry, MIRInstruction, MIRPlace, MIRProgram, MIRSharedLifetime, MIRType, MIRValueID,
@@ -199,7 +200,7 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
         .Bool(value) -> return Val(lower_static_word(if value -> 1 else -> 0))
         .Char(value) -> return Val(lower_static_word(value))
         .Float(value, f32, _) -> return Val(lower_static_word(lower_float_constant_bits(value, f32)))
-        .String(value) -> return Val(lower_static_runtime(&m, value, "jet_rt_string_from_static"))
+        .String(value) -> return Val(lower_static_pointer(lower_immortal_text(&m, value)))
         .Struct(_, _) -> {
             id :: lower_static_object(&m, lower_size(p, ty).size)
             lower_static_fill(p, &m, &f, id, 0, ty, constant)
@@ -402,8 +403,9 @@ fn lower_static_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 
 // The frozen value of module constant `definition`, built once and shared by
 // every `Global` read and `Static` place (`static_rows`): a word, or the data
-// object holding it (a runtime-owned word's cell filled at startup). A frozen
-// box's payload offset is cached beside it ("box:" key, lower_static_box).
+// object holding it (a runtime-owned word's cell filled at startup, or the
+// cell holding an immortal text's address). A frozen box's payload offset is
+// cached beside it ("box:" key, lower_static_box).
 fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LowerStaticValue? {
     if m.static_rows.get(definition.key) == .Val(index) {
         cached := lower_static_pointer(LIRDataID{value: index})
@@ -412,15 +414,20 @@ fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction
     }
     start :: lower_marks(m)
     value := lower_static_tree(p, &m, &f, definition.ty, definition.value) ?? return None
-    if value.text != None {
+    text_handle :: if definition.value == {.String(_) -> true else -> false}
+    if value.text != None || text_handle {
         cell :: lower_static_object(&m, 8)
         lower_static_store(&m, cell, 0, value)
         value = lower_static_pointer(cell)
     }
     if value.data == .Val(data) {
         lower_extent_record(&m, true, definition.key, data.value, value.addend, start)
+        lower_keyed_record(&m, LOWER_KEYED_STATIC, data.value, definition.key, U64{0})
         &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
-        if value.addend != 0 -> &m.static_rows.add("box:{definition.key}", value.addend).drop("cached with its row")
+        if value.addend != 0 {
+            lower_keyed_record(&m, LOWER_KEYED_STATIC, value.addend, "box:{definition.key}", U64{0})
+            &m.static_rows.add("box:{definition.key}", value.addend).drop("cached with its row")
+        }
     }
     Val(value)
 }
@@ -448,6 +455,7 @@ fn lower_static_constant_object(p: MIRProgram, m: &LowerModule, f: &LowerFunctio
         lower_static_store_sized(&m, object, 0, value, if size > 0 && size < 8 -> size else -> 8)
     }
     lower_extent_record(&m, true, key, object.value, 0, start)
+    lower_keyed_record(&m, LOWER_KEYED_STATIC, object.value, key, U64{0})
     &m.static_rows.add(key, object.value).drop("checked absent above")
     Val(object)
 }
@@ -475,6 +483,7 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
         }
         if f.failed -> return None
         lower_extent_record(&m, true, key, object.value, 0, start)
+        lower_keyed_record(&m, LOWER_KEYED_STATIC, object.value, key, U64{0})
         &m.static_rows.add(key, object.value).drop("checked absent above")
     }
     cell :: lower_pointer(&f)

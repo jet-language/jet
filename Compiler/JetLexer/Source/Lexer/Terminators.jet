@@ -557,7 +557,7 @@ fn lexed_with_terminators(facts: [Int], input: ^LexedTokens, events: [Int]) -> L
 fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
     tables := token_tables()
     facts :: raw_token_facts(source, config_surface)
-    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0, &tables)
+    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0, 0, source.len(), &tables)
     events :: terminator_events(source, facts)
     lexed :: lexed_with_terminators(facts, ^raw, events)
     Lexed{tokens: lexed.tokens, tables: tables, diagnostics: lexed.diagnostics}

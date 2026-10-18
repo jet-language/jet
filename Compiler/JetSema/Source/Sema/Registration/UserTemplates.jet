@@ -222,7 +222,8 @@ fn sema_user_template_register(graph: &SemaRegistrationGraph, module_index: Int,
                 }
             }
         }
-        loop item in generated -> sema_registration_add_impl(&module_row, item, &problems)
+        impl_rows :: sema_registration_impl_rows(module_row)
+        loop item in generated -> sema_registration_add_impl(&module_row, item, impl_rows, &problems)
         graph.modules[module_index] = module_row
         sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
     }

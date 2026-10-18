@@ -17,6 +17,8 @@
 // `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
 // function's frame, source lines and variables.
 
+use jet_foundation.[CompilerThreads, compiler_threads_single]
+
 ELF64_SECTION_HEADER_SIZE :: prep { 64 }
 ELF64_SYMBOL_SIZE :: prep { 24 }
 ELF64_RELA_SIZE :: prep { 24 }
@@ -71,7 +73,7 @@ struct X64ObjectSection {
 // Append `text` to a string table; returns its offset.
 fn elf64_string(table: &[U8], text: String) -> Int Never! {
     at :: table.len()
-    loop byte in text.bytes() -> &table.push(byte)
+    &table.extend(text.bytes())
     &table.push(U8{0})
     at
 }
@@ -163,8 +165,17 @@ fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Execut
     x64_object_functions(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
 }
 
-// Shared section/relocation writer for hosted program and runtime objects.
+// Shared section/relocation writer for hosted program and runtime objects,
+// on the calling thread. The native route's object, whose debug sections
+// build on the threads it admits, is x64_object_functions_threads.
 fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport]) -> X64ExecutableResult Never! {
+    x64_object_functions_threads(program, functions, debug, exports, compiler_threads_single())
+}
+
+// x64_object_functions with the `.debug_info` subprograms built on the
+// threads `threads` admits (Dwarf.jet dwarf_info); the bytes are the same
+// for any thread count.
+fn x64_object_functions_threads(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads) -> X64ExecutableResult Never! {
     exported := [Int:Bool]{}
     export_names := [String:Bool]{}
     function_rows := [Int:Int]{}
@@ -189,7 +200,7 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], de
         elf64_pad(&rodata, object.align)
         if object.align > rodata_align -> rodata_align = object.align
         &data_offsets.push(rodata.len())
-        loop byte in object.bytes -> &rodata.push(byte)
+        &rodata.extend(object.bytes)
     }
     data_relas := [X64ObjectRela]{}
     data_errors := [String]{}
@@ -277,7 +288,7 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], de
     }
     dwarf :: x64_dwarf_sections(program, functions, debug, offsets, text.len(), X64DwarfSymbols{
         text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
-    })
+    }, threads)
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
@@ -355,7 +366,7 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], de
         elf64_pad(&bytes, section.align)
         &section_offsets.push(bytes.len())
         &section_sizes.push(contents.len())
-        loop byte in contents -> &bytes.push(byte)
+        &bytes.extend(contents)
     }
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()

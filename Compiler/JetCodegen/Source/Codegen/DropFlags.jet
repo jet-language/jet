@@ -12,7 +12,20 @@
 // flag traffic. The pass only removes branches whose outcome is the same on
 // every path, so execution order and drop timing are unchanged.
 //
-// Flag states: 1 live, 2 not live, 3 unknown.
+// Flag states: 1 live, 2 not live, 3 unknown. The propagation keeps each
+// block's states as two bit sets over the flags (`live` and `dead` words of
+// 64 flags each; neither bit is unknown), so copying a block's state and
+// merging it into a successor cost one word per 64 flags.
+
+JET_CODEGEN_DROP_FLAG_ALL_BITS :: U64{0xffffffffffffffff}
+
+fn jet_codegen_drop_flag_word(flag: Int) -> Int Never! {
+    flag >> 6
+}
+
+fn jet_codegen_drop_flag_bit(flag: Int) -> U64 Never! {
+    U64{1} << flag.bit_and(63)
+}
 
 fn jet_codegen_drop_flag_count_use(uses: &[U64:Int], value: MIRValueID) Never! {
     _ := &uses.add(value.value, (uses.get(value.value) ?? 0) + 1)
@@ -130,10 +143,15 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder, program: JetCodeg
     if !any_open -> return
 
     // Forward constant propagation of every flag to a fixed point over flat
-    // block x flag rows. A resolved guard only passes its state along the
+    // block x word rows. A resolved guard only passes its state along the
     // edge it takes.
-    states := [Int]{}
-    loop filler in 0..<(block_count * count) -> &states.push(3)
+    words :: (count + 63) >> 6
+    live_bits := [U64]{}
+    dead_bits := [U64]{}
+    loop filler in 0..<(block_count * words) {
+        &live_bits.push(U64{0})
+        &dead_bits.push(U64{0})
+    }
     reached := [Bool]{}
     queued := [Bool]{}
     loop filler in 0..<block_count {
@@ -148,12 +166,16 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder, program: JetCodeg
         &pending.push(entry)
     }
     read_state := [U64:Int]{}
+    state_live := (loop _ in 0..<words -> U64{0})
+    state_dead := (loop _ in 0..<words -> U64{0})
     loop pending.len() > 0 {
         block :: &pending.pop() ?? { break }
         queued[block] = false
-        base :: block * count
-        state := [Int]{}
-        loop flag in 0..<count -> &state.push(states[base + flag])
+        base :: block * words
+        loop word in 0..<words {
+            state_live[word] = live_bits[base + word]
+            state_dead[word] = dead_bits[base + word]
+        }
         loop instruction in builder.blocks[block].instructions {
             if instruction.operation == {
                 .WritePlace(place, value) -> {
@@ -163,12 +185,23 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder, program: JetCodeg
                             written = 2
                             if known -> written = 1
                         }
-                        state[flag] = written
+                        word :: jet_codegen_drop_flag_word(flag)
+                        bit :: jet_codegen_drop_flag_bit(flag)
+                        cleared :: bit.bit_xor(JET_CODEGEN_DROP_FLAG_ALL_BITS)
+                        state_live[word] = if written == 1 -> state_live[word].bit_or(bit) else -> state_live[word].bit_and(cleared)
+                        state_dead[word] = if written == 2 -> state_dead[word].bit_or(bit) else -> state_dead[word].bit_and(cleared)
                     }
                 }
                 .ReadPlace(place) -> {
                     if flag_of_place.get(place.value) == .Val(flag) {
-                        if instruction.result == .Val(result) -> _ := &read_state.add(result.value, state[flag])
+                        if instruction.result == .Val(result) {
+                            word :: jet_codegen_drop_flag_word(flag)
+                            bit :: jet_codegen_drop_flag_bit(flag)
+                            state := 3
+                            if state_live[word].bit_and(bit) != (U64{0}) -> state = 1
+                            if state_dead[word].bit_and(bit) != (U64{0}) -> state = 2
+                            _ := &read_state.add(result.value, state)
+                        }
                     }
                 }
                 else -> {}
@@ -188,16 +221,28 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder, program: JetCodeg
         loop target in targets {
             position :: block_index.get(target.value) ?? -1
             if position < 0 -> next
-            target_base :: position * count
+            target_base :: position * words
             changed := false
             if !reached[position] {
                 reached[position] = true
                 changed = true
-                loop flag in 0..<count -> states[target_base + flag] = state[flag]
+                loop word in 0..<words {
+                    live_bits[target_base + word] = state_live[word]
+                    dead_bits[target_base + word] = state_dead[word]
+                }
             } else {
-                loop flag in 0..<count {
-                    if states[target_base + flag] != state[flag] && states[target_base + flag] != 3 {
-                        states[target_base + flag] = 3
+                // A flag whose two states differ (or is unknown on either
+                // side) becomes unknown: it keeps a bit only where both
+                // sides hold that bit.
+                loop word in 0..<words {
+                    merged_live :: live_bits[target_base + word].bit_and(state_live[word])
+                    if merged_live != live_bits[target_base + word] {
+                        live_bits[target_base + word] = merged_live
+                        changed = true
+                    }
+                    merged_dead :: dead_bits[target_base + word].bit_and(state_dead[word])
+                    if merged_dead != dead_bits[target_base + word] {
+                        dead_bits[target_base + word] = merged_dead
                         changed = true
                     }
                 }

@@ -38,6 +38,8 @@ use jet_foundation.[
     jet_ring_parse_manifest_layer,
     mir_boundary_head_carrier_module,
     mir_source_file_id,
+    name_find,
+    name_index,
 ]
 use jet_lexer.[
     STRING_PART_INTERPOLATION,
@@ -58,11 +60,15 @@ use jet_lexer.[
     TOKEN_QUESTION_DOT,
     TOKEN_SEMI,
     TOKEN_STRING,
+    Lexed,
     Token,
     TokenTables,
     lex,
     lex_config,
     lex_generated,
+    lex_generated_threads,
+    lex_threads,
+    lexer_chunk_cut,
     token_decoded,
     token_string_parts,
 ]
@@ -2629,12 +2635,27 @@ fn jet_driver_inline_block_end(bytes: [U8], open: Int) -> Int Never! {
 // The start of a `package {` carrier in top-level item position at or after
 // `from`, or -1 (Rust `find_top_level_inline_package`).
 fn jet_driver_inline_top_level_package(bytes: [U8], from: Int) -> Int Never! {
+    jet_driver_inline_item_scan(bytes, from, bytes.len()).found
+}
+
+// A top-level item scan of one byte range: the first carrier start in it,
+// or -1; and `clean` when the range, scanned from item position with every
+// delimiter closed, ended there as well — between tokens exactly at its
+// end, no close without its open and every open closed — so the scan of
+// the bytes after it starts from that state too.
+struct JetDriverInlineScan {
+    found: Int
+    clean: Bool
+}
+
+fn jet_driver_inline_item_scan(bytes: [U8], from: Int, to: Int) -> JetDriverInlineScan Never! {
     cursor := from
     braces := 0
     brackets := 0
     parens := 0
     item_position := true
-    loop cursor < bytes.len() {
+    clean := true
+    loop cursor < to {
         byte :: jet_driver_inline_byte(bytes, cursor)
         following :: jet_driver_inline_byte(bytes, cursor + 1)
         if byte == 34 || byte == 39 {
@@ -2650,14 +2671,14 @@ fn jet_driver_inline_top_level_package(bytes: [U8], from: Int) -> Int Never! {
             next
         }
         top :: braces == 0 && brackets == 0 && parens == 0
-        if top && item_position && jet_driver_inline_package_open(bytes, cursor) >= 0 -> return cursor
+        if top && item_position && jet_driver_inline_package_open(bytes, cursor) >= 0 -> return JetDriverInlineScan{found: cursor, clean: clean}
         if {
             byte == 123 -> {
                 braces += 1
                 item_position = false
             }
             byte == 125 -> {
-                if braces > 0 -> braces -= 1
+                if braces > 0 -> braces -= 1 else { clean = false }
                 if braces == 0 && brackets == 0 && parens == 0 -> item_position = true
             }
             byte == 91 -> {
@@ -2665,14 +2686,14 @@ fn jet_driver_inline_top_level_package(bytes: [U8], from: Int) -> Int Never! {
                 item_position = false
             }
             byte == 93 -> {
-                if brackets > 0 -> brackets -= 1
+                if brackets > 0 -> brackets -= 1 else { clean = false }
             }
             byte == 40 -> {
                 parens += 1
                 item_position = false
             }
             byte == 41 -> {
-                if parens > 0 -> parens -= 1
+                if parens > 0 -> parens -= 1 else { clean = false }
             }
             byte == 59 && top -> item_position = true
             top && !jet_driver_inline_space(byte) -> item_position = false
@@ -2680,13 +2701,15 @@ fn jet_driver_inline_top_level_package(bytes: [U8], from: Int) -> Int Never! {
         }
         cursor += 1
     }
-    -1
+    JetDriverInlineScan{found: -1, clean: clean && cursor == to && braces == 0 && brackets == 0 && parens == 0}
 }
 
 fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetDriverInlinePackage {
     JetDriverInlinePackage{found: false, start: start, end: end, body_start: start, body_end: start, error: Val(jet_driver_row_diagnostic(code, Val(Span{start: start, end: end})))}
 }
 
+// One thread: this entry spawns nothing, so it stays infallible for its
+// `Never!` callers.
 fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
     none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
     if !source.contains("package") -> return none
@@ -2707,6 +2730,111 @@ fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
     if stray < 0 -> return none
     stray_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, stray))
     jet_driver_inline_package_failure("E1360", stray, if stray_end < 0 -> bytes.len() else -> stray_end)
+}
+
+// jet_driver_inline_package with the top-level item scan of a large source
+// on the compiler threads (jet_driver_inline_top_level_package_threads).
+// A thread spawn can fail, so this entry is fallible like the threaded
+// parse entries that call it.
+fn jet_driver_inline_package_threads(source: String, threads: CompilerThreads) -> JetDriverInlinePackage {
+    none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
+    if !source.contains("package") -> return none
+    bytes :: source.bytes()
+    first :: jet_driver_inline_trivia_end(bytes, 0)
+    open :: jet_driver_inline_package_open(bytes, first)
+    if open >= 0 {
+        end :: jet_driver_inline_block_end(bytes, open)
+        if end < 0 -> return jet_driver_inline_package_failure("E1362", first, bytes.len())
+        duplicate :: jet_driver_inline_top_level_package_threads(bytes, end, threads)
+        if duplicate >= 0 {
+            duplicate_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, duplicate))
+            return jet_driver_inline_package_failure("E1361", duplicate, if duplicate_end < 0 -> bytes.len() else -> duplicate_end)
+        }
+        return JetDriverInlinePackage{found: true, start: first, end: end, body_start: open + 1, body_end: end - 1, error: None}
+    }
+    stray :: jet_driver_inline_top_level_package_threads(bytes, first, threads)
+    if stray < 0 -> return none
+    stray_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, stray))
+    jet_driver_inline_package_failure("E1360", stray, if stray_end < 0 -> bytes.len() else -> stray_end)
+}
+
+// A top-level item scan thread is admitted for at least this many bytes.
+JET_DRIVER_INLINE_SCAN_MIN_BYTES :: 262144
+
+// What every item scan thread reads.
+struct JetDriverInlineShared {
+    bytes: [U8]
+}
+
+// One thread's byte range and, after the scan, its one output row.
+struct JetDriverInlinePart {
+    start: Int
+    end: Int
+    outputs: [JetDriverInlineScan]
+}
+
+// jet_driver_inline_top_level_package on the compiler threads: the bytes
+// from `from` are cut at item lines (lexer_chunk_cut: `\n}\n` then an item
+// word, where a one-thread scan that is between tokens with every
+// delimiter closed stands at item position) and each range scans from
+// that state on its thread. The ranges join in order: the first carrier
+// of the first range that finds one is the one-thread scan's, provided
+// every range before it proved that state at its end (`clean`); a range
+// that did not hands the rest of the bytes to the one-thread scan from
+// its start, where the state is proven by the ranges before it.
+fn jet_driver_inline_top_level_package_threads(bytes: [U8], from: Int, threads: CompilerThreads) -> Int {
+    work :: bytes.len() - from
+    workers :: compiler_threads_admit(threads, work, work, JET_DRIVER_INLINE_SCAN_MIN_BYTES, 0, 0)
+    if workers <= 1 -> return jet_driver_inline_top_level_package(bytes, from)
+    bounds := [Int]{from}
+    loop share in 1..<workers {
+        target := from + share * work /% workers
+        if target <= bounds[bounds.len() - 1] -> target = bounds[bounds.len() - 1] + 1
+        if target < 3 -> target = 3
+        cut :: lexer_chunk_cut(bytes, target)
+        if cut < 0 -> break
+        &bounds.push(cut)
+    }
+    &bounds.push(bytes.len())
+    if bounds.len() <= 2 -> return jet_driver_inline_top_level_package(bytes, from)
+    inputs :: shared JetDriverInlineShared{bytes: bytes}
+    parts := [Shared<JetDriverInlinePart>]{}
+    loop part in 0..<(bounds.len() - 1) -> &parts.push(shared JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}})
+    _ := jet_driver_inline_scan_parts(inputs, parts, 0)
+    loop part in 0..<parts.len() {
+        output := jet_driver_inline_part_take(parts[part])
+        if output.found >= 0 -> return output.found
+        if !output.clean -> return jet_driver_inline_top_level_package(bytes, bounds[part])
+    }
+    -1
+}
+
+// A part's output row, after its thread joined.
+fn jet_driver_inline_part_take(part: Shared<JetDriverInlinePart>) -> JetDriverInlineScan {
+    permit :: part.guard_edit()
+    &permit.value.outputs.pop() ?? panic("an item scan thread left no output")
+}
+
+// Scans `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts scanned.
+fn jet_driver_inline_scan_parts(inputs: Shared<JetDriverInlineShared>, parts: [Shared<JetDriverInlinePart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return jet_driver_inline_scan_part(inputs, parts[from])
+    scanned := 0
+    task.group inline_scan_threads {
+        head :: task jet_driver_inline_scan_part(inputs, parts[from])
+        scanned = jet_driver_inline_scan_parts(inputs, parts, from + 1)
+        scanned += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    scanned
+}
+
+// One thread: the item scan of its byte range.
+fn jet_driver_inline_scan_part(inputs: Shared<JetDriverInlineShared>, part: Shared<JetDriverInlinePart>) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    scan :: jet_driver_inline_item_scan(reads.value.bytes, permit.value.start, permit.value.end)
+    &permit.value.outputs.push(scan)
+    1
 }
 
 // Blank `start..<end` with spaces, keeping line endings, so every span stays
@@ -2759,32 +2887,169 @@ fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Ne
     JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_literal: false}
 }
 
+// The spellings the demand scan looks for, as ids of one lexed source's
+// name table (name_find; a spelling the source never uses has no id, -1,
+// which no token carries), so the scan compares ids, never Strings. Each
+// bare module row has its name's id and, for `URL`, the id of `url` too.
+// The fields are not spelled `or_err`, `abs` or `regex`: this scan runs on
+// the compiler's own source too, and `names.abs` would be an `abs` receiver
+// demand of the self-compile.
+struct JetDriverCoreDemandNames {
+    or_err_name: Int
+    abs_name: Int
+    regex_name: Int
+    bare: [Int]
+    bare_alias: [Int]
+}
+
+fn jet_driver_core_demand_name(tables: TokenTables, text: String) -> Int Never! {
+    found :: name_find(tables.names, text) ?? return -1
+    name_index(found)
+}
+
+fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames Never! {
+    bare := [Int]{}
+    bare_alias := [Int]{}
+    loop row in CORE_BARE_SOURCE_MODULES {
+        &bare.push(jet_driver_core_demand_name(tables, row.name))
+        alias := -1
+        if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
+        &bare_alias.push(alias)
+    }
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias}
+}
+
 // Interpolation tokens share the enclosing lexed source's spelling/literal table.
 fn jet_driver_collect_core_identifier_demand(tokens: [Token], tables: TokenTables, demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
-    loop index in 0..<tokens.len() {
+    names :: jet_driver_core_demand_names(tables)
+    jet_driver_collect_core_identifier_demand_ids(tokens, tables, names, 0, tokens.len(), &demand, collect_bare)
+}
+
+// The demand of `tokens[from..<to]` (a whole token list, or one item run of
+// a chunked lex: a run's look-back and look-ahead of one token stay inside
+// it, since a run begins with a terminator and ends with a `}`).
+fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenTables, names: JetDriverCoreDemandNames, from: Int, to: Int, demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
+    loop index in from..<to {
         if tokens[index].kind == TOKEN_IDENT {
-            name :: token_decoded(tables, tokens[index])
-            if name == "or_err" -> demand.option_or_err = true
+            name :: name_index(tokens[index].decoded)
+            if name == names.or_err_name -> demand.option_or_err = true
             // Loading a potential source owner is syntactic; Sema alone
             // decides whether this receiver is the canonical primitive Int.
-            if name == "abs" {
+            if name == names.abs_name {
                 previous := index - 1
-                loop previous >= 0 && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
-                if previous >= 0 && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
+                loop previous >= from && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
+                if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
             }
-            if name == "Regex" && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_literal = true
+            if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_literal = true
             if collect_bare {
-                loop bare in CORE_BARE_SOURCE_MODULES {
-                    if name == bare.name || (bare.name == "URL" && name == "url") {
-                        if !demand.bare_names.contains(bare.name) -> &demand.bare_names.push(bare.name)
+                loop at in 0..<names.bare.len() {
+                    if name == names.bare[at] || name == names.bare_alias[at] {
+                        bare :: CORE_BARE_SOURCE_MODULES[at].name
+                        if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
                     }
                 }
             }
         }
+        if tokens[index].literal < 0 -> next
         loop part in token_string_parts(tables, tokens[index]) {
-            if part.kind == STRING_PART_INTERPOLATION -> jet_driver_collect_core_identifier_demand(part.tokens, tables, &demand, collect_bare)
+            if part.kind == STRING_PART_INTERPOLATION -> jet_driver_collect_core_identifier_demand_ids(part.tokens, tables, names, 0, part.tokens.len(), &demand, collect_bare)
         }
     }
+}
+
+// What every demand scan thread reads: the lexed unit (moved in, moved
+// back after the join) and the demand name ids.
+struct JetDriverDemandShared {
+    lexed: [Lexed]
+    names: JetDriverCoreDemandNames
+    collect_bare: Bool
+}
+
+// One thread's item runs `runs[start..<end]` and, after the scan, its one
+// output row.
+struct JetDriverDemandPart {
+    start: Int
+    end: Int
+    outputs: [JetDriverCoreIdentifierDemand]
+}
+
+// A demand scan thread is admitted for at least this many tokens.
+JET_DRIVER_DEMAND_MIN_TOKENS :: 65536
+
+// The demand scan's result: the lexed unit back from the scan and its demand.
+struct JetDriverDemandScan {
+    lexed: Lexed
+    demand: JetDriverCoreIdentifierDemand
+}
+
+// jet_driver_collect_core_identifier_demand over the lexer's item runs on
+// the compiler threads: consecutive runs per thread, joined in run order
+// (the flags are any-occurrence facts; the bare names list in first-seen
+// order, which the join of the per-part first-seen lists in part order
+// reproduces). No scan when `scan` is false (an empty demand). The lexed
+// unit moves through the shared inputs and comes back unchanged.
+fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int], scan: Bool, collect_bare: Bool, threads: CompilerThreads) -> JetDriverDemandScan {
+    lexed := ^input
+    demand := jet_driver_empty_core_identifier_demand()
+    if !scan -> return JetDriverDemandScan{lexed: ^lexed, demand: ^demand}
+    run_count :: runs.len() - 1
+    workers :: compiler_threads_admit(threads, run_count, lexed.tokens.len(), JET_DRIVER_DEMAND_MIN_TOKENS, 0, 0)
+    if workers <= 1 {
+        jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, collect_bare)
+        return JetDriverDemandScan{lexed: ^lexed, demand: ^demand}
+    }
+    names :: jet_driver_core_demand_names(lexed.tables)
+    inputs :: shared JetDriverDemandShared{lexed: [Lexed]{^lexed}, names: names, collect_bare: collect_bare}
+    parts := [Shared<JetDriverDemandPart>]{}
+    loop part in 0..<workers -> &parts.push(shared JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}})
+    _ := jet_driver_demand_scan_parts(inputs, parts, runs, 0)
+    loop part in parts {
+        output := jet_driver_demand_part_take(part)
+        if output.option_or_err -> demand.option_or_err = true
+        if output.math_abs_receiver -> demand.math_abs_receiver = true
+        if output.regex_literal -> demand.regex_literal = true
+        loop bare in output.bare_names {
+            if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
+        }
+    }
+    JetDriverDemandScan{lexed: jet_driver_demand_shared_take(inputs), demand: ^demand}
+}
+
+// The lexed unit, back from the shared inputs after the join.
+fn jet_driver_demand_shared_take(inputs: Shared<JetDriverDemandShared>) -> Lexed {
+    permit :: inputs.guard_edit()
+    &permit.value.lexed.pop() ?? panic("the demand scan left the lexed unit in its shared inputs")
+}
+
+// A part's output row, after its thread joined.
+fn jet_driver_demand_part_take(part: Shared<JetDriverDemandPart>) -> JetDriverCoreIdentifierDemand {
+    permit :: part.guard_edit()
+    &permit.value.outputs.pop() ?? panic("a demand scan thread left no output")
+}
+
+// Scans `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts scanned.
+fn jet_driver_demand_scan_parts(inputs: Shared<JetDriverDemandShared>, parts: [Shared<JetDriverDemandPart>], runs: [Int], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return jet_driver_demand_scan_part(inputs, parts[from], runs)
+    scanned := 0
+    task.group demand_scan_threads {
+        head :: task jet_driver_demand_scan_part(inputs, parts[from], runs)
+        scanned = jet_driver_demand_scan_parts(inputs, parts, runs, from + 1)
+        scanned += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    scanned
+}
+
+// One thread: the demand of its runs.
+fn jet_driver_demand_scan_part(inputs: Shared<JetDriverDemandShared>, part: Shared<JetDriverDemandPart>, runs: [Int]) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    demand := jet_driver_empty_core_identifier_demand()
+    loop run in permit.value.start..<permit.value.end {
+        jet_driver_collect_core_identifier_demand_ids(reads.value.lexed[0].tokens, reads.value.lexed[0].tables, reads.value.names, runs[run], runs[run + 1], &demand, reads.value.collect_bare)
+    }
+    &permit.value.outputs.push(^demand)
+    1
 }
 
 // One thread; the entry the `Never!` source queries call (no thread spawn).
@@ -2804,22 +3069,22 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
 }
 
-// jet_driver_parse_user_unit on the compiler threads: a large unit's parse
-// splits at item boundaries (parse_lexed_with_source_threads). Fallible like
-// every thread-spawning step of the parse wave.
+// jet_driver_parse_user_unit on the compiler threads: a large unit lexes in
+// source chunks (lex_threads, which also yields the newline table) and its
+// parse splits at item boundaries (parse_lexed_with_source_threads).
+// Fallible like every thread-spawning step of the parse wave.
 fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
-    carrier :: jet_driver_inline_package(text)
+    carrier :: jet_driver_inline_package_threads(text, threads)
     if carrier.error == .Val(diagnostic) {
         return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{diagnostic}}, demand: jet_driver_empty_core_identifier_demand()}
     }
     source :: if carrier.found -> jet_driver_mask_inline_package(text, carrier).bytes() else -> text.bytes()
-    lexed :: lex(source)
-    demand := jet_driver_empty_core_identifier_demand()
-    if retain_demand -> jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, true)
-    tokens :: lexed.tokens.len()
-    line_starts :: parser_line_starts(source)
-    lines :: line_starts.len() - 1
-    parsed :: parse_lexed_with_source_threads(^lexed, source, line_starts, threads)
+    lexed := lex_threads(source, threads)
+    tokens :: lexed.lexed.tokens.len()
+    lines :: lexed.line_starts.len() - 1
+    scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
+    demand := ^scanned.demand
+    parsed :: parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens}
 }
 
@@ -2899,14 +3164,13 @@ fn jet_driver_parse_one(job: JetDriverParseJob, threads: CompilerThreads) -> Jet
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output.
 fn jet_driver_parse_core_source(text: String, module_name: String, owned_members: [String], runtime: Bool, runtime_entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
-    source :: jet_driver_mask_inline_package(text, jet_driver_inline_package(text)).bytes()
-    lexed :: lex_generated(source)
-    demand := jet_driver_empty_core_identifier_demand()
-    jet_driver_collect_core_identifier_demand(lexed.tokens, lexed.tables, &demand, runtime_entry)
-    tokens :: lexed.tokens.len()
-    line_starts :: parser_line_starts(source)
-    lines :: line_starts.len() - 1
-    parsed := parse_lexed_with_source_threads(^lexed, source, line_starts, threads)
+    source :: jet_driver_mask_inline_package(text, jet_driver_inline_package_threads(text, threads)).bytes()
+    lexed := lex_generated_threads(source, threads)
+    tokens :: lexed.lexed.tokens.len()
+    lines :: lexed.line_starts.len() - 1
+    scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, true, runtime_entry, threads)
+    demand := ^scanned.demand
+    parsed := parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {

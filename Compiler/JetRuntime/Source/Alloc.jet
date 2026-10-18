@@ -2,10 +2,14 @@
 // No Core allocation API, libc, Rust allocator, sentry, or exact-Int operation
 // participates. The ABI is three machine words, matching the lowering's calls.
 //
-// State layout: arena 0 [lock][8 available-slab heads][8 retained-empty-slab
-// addresses] at 0..136; word 208 holds the table of arenas 1..31 (136 bytes
-// each, same layout); the large-block cache owns lock 216, cached bytes 224
-// and 59 class heads from 256.
+// State layout: word 0 of the state page is the detached-thread GS target
+// (Thread.jet thread_detached_base): it always reads zero, so thread_base()
+// yields 0 on a thread that has no TCB and the allocator takes its locked
+// path there. Word 208 holds the table of the 32 arenas (216 bytes each:
+// [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
+// 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
+// the large-block cache owns lock 216, cached bytes 224 and 59 class heads
+// from 256.
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
@@ -19,13 +23,26 @@
 // owner can share it (Refcount.jet jet_rt_block_retain/release/unique) no
 // matter which runtime route or lowering site allocated it. Byte buffers
 // (align < 8, text data) keep the two-word header and have no count.
-// Only slabs with free blocks are linked. A thread allocates from the arena its
-// stack band selects (alloc_arena) and a block returns to its slab's arena;
+// Only slabs with free blocks are linked. An attached thread allocates and
+// frees small blocks through its own cache first (TCB @320, Thread.jet):
+// eight [head][count] rows, one per class, of blocks threaded through their
+// first two words as [next][slab]. The cache needs no atomic: only its owner
+// touches it. It refills with up to 32 blocks of one slab under the arena
+// lock of the stack band's arena (alloc_arena), and when it holds 64 blocks a
+// free first returns 32 of them, each to its own slab under that slab's
+// arena lock. A cached block counts as live in its slab, so a slab is unmapped
+// only when no payload and no cache holds any of its blocks; the arena row's
+// live total per class counts every block out of a slab the same way, and
+// alloc_live_blocks subtracts the cached ones for the leak-witness fixtures.
+// Thread exit (jet_rt_thread_detach) returns the whole cache. A thread without
+// a TCB (before attach, foreign) allocates from the arena its stack band
+// selects (alloc_arena) and a block returns to its slab's arena;
 // each arena's slab metadata is protected by that arena's futex lock
 // (alloc_lock: a short spin, then a kernel sleep), so threads on different
 // stacks rarely contend and a waiter never burns a core. Payloads belong exclusively to
-// their callers. At most one empty slab per class and arena is retained to
-// avoid mmap/munmap on every temporary; additional empty slabs are unmapped
+// their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per class and
+// arena stay linked to avoid mmap/munmap on every temporary; additional empty
+// slabs are unmapped
 // immediately. Large mappings are rounded to a size class (at most 25% over
 // the page-rounded need) and a freed one is kept on its class list while the
 // cache holds at most 64 MiB in all (resident pages a compiler keeps, so the
@@ -131,21 +148,23 @@ fn alloc_unmap(address: I64, bytes: I64) {
     if (alloc_root != I64{0}) {
         return
     }
-    // mmap is zero-filled: the locks, every free-list head and the large
-    // cache start at zero.
+    // mmap is zero-filled: the locks, every free-list head, every live total
+    // and the large cache start at zero.
     alloc_root = alloc_map(I64{4096}, I64{4096})
-    // Arenas 1..31: 31 * 136 bytes in one zero-filled mapping.
+    // The 32 arenas: 32 * 200 bytes in one zero-filled mapping.
     table :: alloc_map(I64{8192}, I64{8192})
     #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
         os_store_i64(wrapping(alloc_root + I64{208}), table)
     }
+    // The initializing thread has no TCB yet; point its GS at the zero word
+    // so thread_base() reads 0 instead of faulting on the kernel's GS base 0.
+    thread_set_base(thread_detached_base())
 }
 
-// The arena roots: 0 is the state page's own arena, 1..31 rows of the table.
+// The arena roots: rows of the table.
 fn alloc_arena_root(index: I64) -> I64 {
-    if (index == I64{0}) { return alloc_root }
     #Unsafe("initialization wrote the arena table word once, before any allocation") {
-        return wrapping(os_load_i64(wrapping(alloc_root + I64{208})) + wrapping(wrapping(index - I64{1}) * I64{136}))
+        return wrapping(os_load_i64(wrapping(alloc_root + I64{208})) + wrapping(index * I64{216}))
     }
 }
 
@@ -162,21 +181,31 @@ fn alloc_arena() -> I64 {
     alloc_arena_root((wrapping(band * I64{-7046029254386353131}) >> I64{59}).bit_and(I64{31}))
 }
 
-// Live payloads in the available slabs of class `width` across every arena;
-// isolated single-threaded fixtures use it as their leak witness.
-fn alloc_available_live(width: I64) -> I64 {
+// Live payloads of class `width`: every block handed out of a slab across
+// all arenas minus the blocks parked in attached threads' caches. Isolated
+// fixtures use it as their leak witness; the caller is quiescent (no thread
+// is allocating, freeing or exiting while it reads).
+fn alloc_live_blocks(width: I64) -> I64 {
     total := I64{0}
     index := I64{0}
     loop index < (I64{32}) {
-        #Unsafe("the caller is quiescent: no thread mutates the slab lists it walks") {
-            slab := os_load_i64(alloc_head(alloc_arena_root(index), width))
-            loop slab != (I64{0}) {
-                total = wrapping(total + os_load_i64(wrapping(slab + I64{24})))
-                slab = os_load_i64(slab)
-            }
+        #Unsafe("the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them") {
+            total = wrapping(total + os_load_i64(wrapping(alloc_head(alloc_arena_root(index), width) + I64{128})))
         }
         index = wrapping(index + I64{1})
     }
+    if (thread_tls_registry == I64{0}) { return total }
+    count_offset :: wrapping(I64{312} + wrapping(alloc_head(I64{0}, width) * I64{2}))
+    sync_mutex_lock(thread_tls_registry)
+    live :: thread_tls_registry + I64{64}
+    count :: sync_load(live)
+    data :: sync_load(live + I64{16})
+    at := I64{0}
+    loop at < count {
+        total = wrapping(total - sync_load(sync_load(data + (at + I64{1}) * I64{8}) + count_offset))
+        at += I64{2}
+    }
+    sync_mutex_unlock(thread_tls_registry)
     total
 }
 
@@ -259,30 +288,177 @@ fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
     slab
 }
 
+// Empty slabs a class keeps linked per arena, so a burst of temporaries
+// (a thread's cache drains 32 blocks at a time) does not unmap a slab it
+// maps again moments later: at most 8 x 64 KiB per class and arena.
+ALLOC_RETAINED_EMPTY_SLABS :: prep { I64{8} }
+
+// Take up to `limit` free blocks of the class's head slab under the held
+// arena lock and thread them, as [next][slab], onto the cache row `row`
+// ([head][count]); returns how many were taken: zero only when no slab can
+// be mapped. The blocks count as live in the slab; the arena's live total
+// grows with them; a retained-empty slab leaves the class's retained count
+// (a fresh slab was never counted); an emptied slab is unlinked.
+fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64 {
+    #Unsafe("the held arena lock protects the class list, the slab's free links and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them") {
+        slab := os_load_i64(head)
+        fresh := false
+        if (slab == I64{0}) {
+            slab = alloc_new_slab(root, head, slot)
+            fresh = true
+        }
+        if (slab == I64{0}) { return I64{0} }
+        free := os_load_i64(wrapping(slab + I64{16}))
+        list := os_load_i64(row)
+        taken := I64{0}
+        loop free != (I64{0}) && taken < limit {
+            block :: free
+            free = os_load_i64(block)
+            os_store_i64(block, list)
+            os_store_i64(wrapping(block + I64{8}), slab)
+            list = block
+            taken = wrapping(taken + I64{1})
+        }
+        os_store_i64(row, list)
+        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) + taken))
+        os_store_i64(wrapping(slab + I64{16}), free)
+        live :: os_load_i64(wrapping(slab + I64{24}))
+        if (live == I64{0} && !fresh) {
+            retained :: wrapping(head + I64{64})
+            os_store_i64(retained, wrapping(os_load_i64(retained) - I64{1}))
+        }
+        os_store_i64(wrapping(slab + I64{24}), wrapping(live + taken))
+        total :: wrapping(head + I64{128})
+        os_store_i64(total, wrapping(os_load_i64(total) + taken))
+        if (free == I64{0}) { alloc_unlink(slab) }
+        return taken
+    }
+}
+
+// Return one block to its slab. Caller holds the slab's arena lock. The slab
+// is linked again when its free list was empty; a slab whose last block
+// returns stays linked as one of the class's retained empty slabs
+// (ALLOC_RETAINED_EMPTY_SLABS) or is unmapped.
+fn alloc_slab_return(slab: I64, block: I64) {
+    #Unsafe("the held arena lock protects the slab's free links, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
+        free :: os_load_i64(wrapping(slab + I64{16}))
+        live :: wrapping(os_load_i64(wrapping(slab + I64{24})) - I64{1})
+        os_store_i64(block, free)
+        os_store_i64(wrapping(slab + I64{16}), block)
+        os_store_i64(wrapping(slab + I64{24}), live)
+        head :: os_load_i64(wrapping(slab + I64{32}))
+        total :: wrapping(head + I64{128})
+        os_store_i64(total, wrapping(os_load_i64(total) - I64{1}))
+        if (free == I64{0}) { alloc_link(slab, head) }
+        if (live == I64{0}) {
+            retained :: wrapping(head + I64{64})
+            count :: os_load_i64(retained)
+            if (count < ALLOC_RETAINED_EMPTY_SLABS) { os_store_i64(retained, wrapping(count + I64{1})) } else {
+                alloc_unlink(slab)
+                alloc_unmap(slab, I64{65536})
+            }
+        }
+    }
+}
+
+// The locked allocation of a thread without a cache: one block, straight
+// from the arena's head slab.
 fn alloc_small(root: I64, size: I64, align: I64, slot: I64) -> I64 {
     head :: alloc_head(root, slot)
+    // The arena's scratch row (root + 200) is exclusive under its lock.
+    scratch :: wrapping(root + I64{200})
+    block := I64{0}
     alloc_lock(root)
-    pointer := I64{0}
-    #Unsafe("the held heap lock protects the class list, block links and slab live count; the chosen block has at least size+header+slack bytes") {
-        slab := os_load_i64(head)
-        if (slab == I64{0}) { slab = alloc_new_slab(root, head, slot) }
-        if (slab == I64{0}) {
-            alloc_unlock(root)
-            return I64{0}
-        }
-        block :: os_load_i64(wrapping(slab + I64{16}))
-        remaining :: os_load_i64(block)
-        os_store_i64(wrapping(slab + I64{16}), remaining)
-        live :: os_load_i64(wrapping(slab + I64{24}))
-        if (live == I64{0}) { os_store_i64(wrapping(head + I64{64}), I64{0}) }
-        os_store_i64(wrapping(slab + I64{24}), wrapping(live + I64{1}))
-        if (remaining == I64{0}) { alloc_unlink(slab) }
-        pointer = alloc_align(wrapping(block + alloc_header(align)), align)
+    #Unsafe("the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released") {
+        _ := alloc_slab_take(root, head, slot, scratch, I64{1})
+        block = os_load_i64(scratch)
+        os_store_i64(scratch, I64{0})
+        os_store_i64(wrapping(scratch + I64{8}), I64{0})
+    }
+    alloc_unlock(root)
+    if (block == I64{0}) { return I64{0} }
+    pointer :: alloc_align(wrapping(block + alloc_header(align)), align)
+    #Unsafe("block is this caller's exclusive block; its two cached words are read before the payload header overwrites them") {
+        slab :: os_load_i64(wrapping(block + I64{8}))
         os_store_i64(wrapping(pointer - I64{16}), slab)
         os_store_i64(wrapping(pointer - I64{8}), block)
     }
-    alloc_unlock(root)
     pointer
+}
+
+// The calling thread's cache row [head][count] for a class, or zero when the
+// thread has no TCB (TCB @320 + 16 per class, Thread.jet).
+fn alloc_cache_row(slot: I64) -> I64 {
+    base :: thread_base()
+    if (base == I64{0}) -> I64{0} else -> wrapping(base + wrapping(I64{304} + wrapping(alloc_head(I64{0}, slot) * I64{2})))
+}
+
+// Refill this thread's cache row with up to 32 blocks of one slab of the
+// stack band's arena. False only when no slab can be mapped.
+fn alloc_cache_refill(row: I64, slot: I64) -> Bool {
+    root :: alloc_arena()
+    alloc_lock(root)
+    taken :: alloc_slab_take(root, alloc_head(root, slot), slot, row, I64{32})
+    alloc_unlock(root)
+    taken != I64{0}
+}
+
+// Hand out the cached head block of a row as a payload of `align`, writing
+// the same [slab][block-start] header an uncached allocation writes.
+fn alloc_cache_pop(row: I64, block: I64, align: I64) -> I64 {
+    pointer :: alloc_align(wrapping(block + alloc_header(align)), align)
+    #Unsafe("row is this thread's private cache row and block its cached head; both cached words are read before the payload header overwrites them") {
+        os_store_i64(row, os_load_i64(block))
+        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+        slab :: os_load_i64(wrapping(block + I64{8}))
+        os_store_i64(wrapping(pointer - I64{16}), slab)
+        os_store_i64(wrapping(pointer - I64{8}), block)
+    }
+    pointer
+}
+
+// Return the first `count` cached blocks of a row to their slabs, each under
+// its own slab's arena lock; consecutive blocks of one arena share a hold.
+fn alloc_cache_drain(row: I64, count: I64) {
+    held := I64{0}
+    remaining := count
+    #Unsafe("row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock") {
+        block := os_load_i64(row)
+        loop remaining > (I64{0}) && block != (I64{0}) {
+            next_block :: os_load_i64(block)
+            slab :: os_load_i64(wrapping(block + I64{8}))
+            root :: os_load_i64(wrapping(slab + I64{40}))
+            if (root != held) {
+                if (held != I64{0}) { alloc_unlock(held) }
+                alloc_lock(root)
+                held = root
+            }
+            alloc_slab_return(slab, block)
+            block = next_block
+            remaining = wrapping(remaining - I64{1})
+        }
+        os_store_i64(row, block)
+        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - wrapping(count - remaining)))
+    }
+    if (held != I64{0}) { alloc_unlock(held) }
+}
+
+// Return every cached block of the calling thread: thread exit, and the
+// fixtures that inspect slab metadata. A thread without a TCB holds none.
+fn alloc_cache_flush() {
+    base :: thread_base()
+    if (base == I64{0}) {
+        return
+    }
+    row := wrapping(base + I64{320})
+    index := I64{0}
+    loop index < (I64{8}) {
+        #Unsafe("row is one of this thread's eight private cache rows") {
+            alloc_cache_drain(row, os_load_i64(wrapping(row + I64{8})))
+        }
+        row = wrapping(row + I64{16})
+        index = wrapping(index + I64{1})
+    }
 }
 
 // Large size classes in pages: 2, 3, then four steps per doubling from 4
@@ -378,7 +554,21 @@ fn alloc_large(size: I64, align: I64) -> I64 {
 // still uses the same heap and exact-layout free as ordinary native storage.
 fn alloc_try_validated(size: I64, align: I64) -> I64 {
     slot :: alloc_class(size, align)
-    pointer :: if (slot == I64{0}) -> alloc_large(size, align) else -> alloc_small(alloc_arena(), size, align, slot)
+    if (slot == I64{0}) {
+        pointer :: alloc_large(size, align)
+        alloc_count_init(pointer, align)
+        return pointer
+    }
+    row :: alloc_cache_row(slot)
+    pointer := I64{0}
+    if (row == I64{0}) { pointer = alloc_small(alloc_arena(), size, align, slot) } else {
+        block := I64{0}
+        #Unsafe("row is this thread's private cache row") {
+            block = os_load_i64(row)
+            if (block == I64{0} && alloc_cache_refill(row, slot)) { block = os_load_i64(row) }
+        }
+        if (block != I64{0}) { pointer = alloc_cache_pop(row, block, align) }
+    }
     alloc_count_init(pointer, align)
     pointer
 }
@@ -597,11 +787,27 @@ fn alloc_release_valid(pointer: I64, size: I64, align: I64) {
 }
 
 fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
-    if (alloc_class(size, align) == I64{0}) {
+    slot :: alloc_class(size, align)
+    if (slot == I64{0}) {
         #Unsafe("the lowering returns this still-live direct allocation with exactly its original size and alignment") {
             mapping :: os_load_i64(wrapping(pointer - I64{16}))
             bytes :: os_load_i64(wrapping(pointer - I64{8}))
             alloc_large_free(mapping, bytes)
+        }
+        return
+    }
+    row :: alloc_cache_row(slot)
+    if (row != I64{0}) {
+        // A row holding 64 blocks first returns its 32 most recently pushed
+        // ones to their slabs, then takes this block.
+        #Unsafe("row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
+            if (os_load_i64(wrapping(row + I64{8})) >= I64{64}) { alloc_cache_drain(row, I64{32}) }
+            slab :: os_load_i64(wrapping(pointer - I64{16}))
+            block :: os_load_i64(wrapping(pointer - I64{8}))
+            os_store_i64(block, os_load_i64(row))
+            os_store_i64(wrapping(block + I64{8}), slab)
+            os_store_i64(row, block)
+            os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) + I64{1}))
         }
         return
     }
@@ -613,21 +819,7 @@ fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
     }
     alloc_lock(root)
     #Unsafe("the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock") {
-        block :: os_load_i64(wrapping(pointer - I64{8}))
-        free :: os_load_i64(wrapping(slab + I64{16}))
-        live :: wrapping(os_load_i64(wrapping(slab + I64{24})) - I64{1})
-        os_store_i64(block, free)
-        os_store_i64(wrapping(slab + I64{16}), block)
-        os_store_i64(wrapping(slab + I64{24}), live)
-        head :: os_load_i64(wrapping(slab + I64{32}))
-        if (free == I64{0}) { alloc_link(slab, head) }
-        if (live == I64{0}) {
-            empty_cell :: wrapping(head + I64{64})
-            if (os_load_i64(empty_cell) == I64{0}) { os_store_i64(empty_cell, slab) } else {
-                alloc_unlink(slab)
-                alloc_unmap(slab, I64{65536})
-            }
-        }
+        alloc_slab_return(slab, os_load_i64(wrapping(pointer - I64{8})))
     }
     alloc_unlock(root)
 }

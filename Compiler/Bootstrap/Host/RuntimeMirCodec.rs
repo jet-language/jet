@@ -1938,7 +1938,7 @@ fn source_field_name(owner: &str, host_field: &str) -> String {
 fn source_field_is_host_derived(owner: &str, field: &str) -> bool {
     matches!(
         (owner, field),
-        ("MIRFunction", "memo_unbounded") | ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows")
+        ("MIRFunction", "memo_unbounded") | ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows") | ("MIRProgram", "trait_name_rows")
     )
 }
 
@@ -1981,7 +1981,7 @@ fn custom_struct_field_from_host(owner: &str, source_field: &str) -> Option<Stri
         ("MIRFunction", "memo_unbounded") => Some("matches!(value.memo_bound, Some(None))".to_string()),
         // The consumer-built type index is never carried natively; it comes back
         // empty. JetMap has no Default, but collects from its own pairs.
-        ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows") => {
+        ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows") | ("MIRProgram", "trait_name_rows") => {
             Some("::std::iter::empty().collect()".to_string())
         }
         _ => None,

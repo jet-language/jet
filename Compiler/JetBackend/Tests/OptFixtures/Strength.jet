@@ -72,7 +72,7 @@ fn sfx_body(op: LIRBinaryOp, k: Int) -> String Never! {
 
 fn sfx_case(op: LIRBinaryOp, k: Int, reverse: Bool) -> Bool Never! {
     before :: sfx_function("strength-{op}-{k}-{reverse}", op, 1 << k, reverse)
-    after :: lir_strength_function(before)
+    after :: lir_strength_function(before.copy())
     passed := true
     if k == 1 || k == 2 || k == 62 || reverse {
         if !ofx_check(before, after, ofx_expected(before, sfx_body(op, k))) -> passed = false
@@ -97,7 +97,7 @@ fn sfx_case(op: LIRBinaryOp, k: Int, reverse: Bool) -> Bool Never! {
 }
 fn sfx_refuse(op: LIRBinaryOp, divisor: Int) -> Bool Never! {
     before :: sfx_function("strength-refuse-{op}-{divisor}", op, divisor, false)
-    ofx_check(before, lir_strength_function(before), lir_print_module(ofx_module(before)))
+    ofx_check(before, lir_strength_function(before.copy()), lir_print_module(ofx_module(before)))
 }
 
 fn sfx_float() -> Bool Never! {
@@ -108,7 +108,7 @@ fn sfx_float() -> Bool Never! {
     lir_builder_push(&b, LIRInst.Const{dst: c, value: 4})
     lir_builder_push(&b, LIRInst.Binary{dst: result, op: LIRBinaryOp.Mul, left: x, right: c})
     before :: ofx_finish(&b, [LIRValueID]{x}, result)
-    ofx_check(before, lir_strength_function(before), lir_print_module(ofx_module(before)))
+    ofx_check(before, lir_strength_function(before.copy()), lir_print_module(ofx_module(before)))
 }
 
 fn sfx_copy() -> Bool Never! {
@@ -119,7 +119,7 @@ fn sfx_copy() -> Bool Never! {
     lir_builder_push(&b, LIRInst.Copy{dst: copied, src: c})
     result :: ofx_binary(&b, LIRBinaryOp.Div, x, copied)
     before :: ofx_finish(&b, [LIRValueID]{x}, result)
-    ofx_check(before, lir_strength_function(before), lir_print_module(ofx_module(before)))
+    ofx_check(before, lir_strength_function(before.copy()), lir_print_module(ofx_module(before)))
 }
 
 fn opt_fixtures_strength() -> Bool Never! {

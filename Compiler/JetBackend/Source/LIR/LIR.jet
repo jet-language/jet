@@ -328,35 +328,57 @@ fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
     }
 }
 
-fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
+// The values `inst` reads, into `uses` (cleared first): a caller keeps one
+// buffer for a whole walk, so no instruction allocates a list of its own.
+fn lir_inst_uses_into(inst: LIRInst, uses: &[LIRValueID]) Never! {
+    &uses.clear()
     if inst == {
-        .Const(_, _) -> [LIRValueID]{}
-        .Binary(_, _, left, right) -> [LIRValueID]{left, right}
-        .Compare(_, _, left, right) -> [LIRValueID]{left, right}
-        .Move(_, src) -> [LIRValueID]{src}
-        .Reown(_, src) -> [LIRValueID]{src}
-        .Copy(_, src) -> [LIRValueID]{src}
-        .Bitcast(_, src) -> [LIRValueID]{src}
-        .Call(_, _, callee, args) -> {
-            if callee == .Value(target) {
-                uses := [LIRValueID]{target}
-                loop arg in args -> &uses.push(arg)
-                return uses
-            }
-            args
+        .Const(_, _) -> {}
+        .Binary(_, _, left, right) -> {
+            &uses.push(left)
+            &uses.push(right)
         }
-        .InlineAsm(_, args, _, _, _) -> args
-        .Drop(value) -> [LIRValueID]{value}
-        .Overflows(_, _, left, right) -> [LIRValueID]{left, right}
-        .Load(_, base, _) -> [LIRValueID]{base}
-        .PointerAdd(_, base, offset) -> [LIRValueID]{base, offset}
-        .Store(base, _, value) -> [LIRValueID]{base, value}
-        .DataAddress(_, _) -> [LIRValueID]{}
-        .FunctionAddress(_, _) -> [LIRValueID]{}
-        .Convert(_, src) -> [LIRValueID]{src}
-        .StackSlot(_, _, _) -> [LIRValueID]{}
-        .ThreadWord(_, _) -> [LIRValueID]{}
+        .Compare(_, _, left, right) -> {
+            &uses.push(left)
+            &uses.push(right)
+        }
+        .Move(_, src) -> &uses.push(src)
+        .Reown(_, src) -> &uses.push(src)
+        .Copy(_, src) -> &uses.push(src)
+        .Bitcast(_, src) -> &uses.push(src)
+        .Call(_, _, callee, args) -> {
+            if callee == .Value(target) -> &uses.push(target)
+            loop arg in args -> &uses.push(arg)
+        }
+        .InlineAsm(_, args, _, _, _) -> { loop arg in args -> &uses.push(arg) }
+        .Drop(value) -> &uses.push(value)
+        .Overflows(_, _, left, right) -> {
+            &uses.push(left)
+            &uses.push(right)
+        }
+        .Load(_, base, _) -> &uses.push(base)
+        .PointerAdd(_, base, offset) -> {
+            &uses.push(base)
+            &uses.push(offset)
+        }
+        .Store(base, _, value) -> {
+            &uses.push(base)
+            &uses.push(value)
+        }
+        .DataAddress(_, _) -> {}
+        .FunctionAddress(_, _) -> {}
+        .Convert(_, src) -> &uses.push(src)
+        .StackSlot(_, _, _) -> {}
+        .ThreadWord(_, _) -> {}
     }
+}
+
+// The values `inst` reads as a fresh list: the fixtures' form. A walk over
+// a function keeps one buffer and calls lir_inst_uses_into instead.
+fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
+    uses := [LIRValueID]{}
+    lir_inst_uses_into(inst, &uses)
+    uses
 }
 
 // Values whose life the instruction ends.
@@ -379,17 +401,20 @@ fn lir_terminator_targets(terminator: LIRTerminator) -> [LIRJumpTarget] Never! {
     }
 }
 
-fn lir_terminator_uses(terminator: LIRTerminator) -> [LIRValueID] Never! {
-    uses := [LIRValueID]{}
+// The values `terminator` reads, into `uses` (cleared first): the condition
+// or returned value, then every edge's arguments in edge order.
+fn lir_terminator_uses_into(terminator: LIRTerminator, uses: &[LIRValueID]) Never! {
+    &uses.clear()
     if terminator == {
-        .Branch(condition, _, _) -> &uses.push(condition)
+        .Jump(target) -> { loop arg in target.args -> &uses.push(arg) }
+        .Branch(condition, then_target, else_target) -> {
+            &uses.push(condition)
+            loop arg in then_target.args -> &uses.push(arg)
+            loop arg in else_target.args -> &uses.push(arg)
+        }
         .Return(value) -> { if value == .Val(returned) -> &uses.push(returned) }
-        else -> {}
+        .Unreachable -> {}
     }
-    loop target in lir_terminator_targets(terminator) {
-        loop arg in target.args -> &uses.push(arg)
-    }
-    uses
 }
 
 fn lir_block_index(function: LIRFunction, id: LIRBlockID) -> Int Never! {

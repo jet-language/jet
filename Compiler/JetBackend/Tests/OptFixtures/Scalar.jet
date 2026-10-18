@@ -20,11 +20,11 @@ fn oscalar_target(block: Int, args: [LIRValueID]) -> LIRJumpTarget Never! {
 }
 
 fn oscalar_check(function: LIRFunction, body: String) -> Bool Never! {
-    ofx_check(function, lir_scalar_replace_function(function), ofx_expected(function, body))
+    ofx_check(function, lir_scalar_replace_function(function.copy()), ofx_expected(function, body))
 }
 
 fn oscalar_refuse(function: LIRFunction) -> Bool Never! {
-    ofx_check(function, lir_scalar_replace_function(function), lir_print_module(ofx_module(function)))
+    ofx_check(function, lir_scalar_replace_function(function.copy()), lir_print_module(ofx_module(function)))
 }
 
 fn oscalar_straight(two: Bool) -> Bool Never! {
@@ -124,7 +124,7 @@ fn oscalar_escape(pointer_add: Bool) -> Bool Never! {
     before := ofx_module(function)
     before.signatures[1].params = [LIRLayout]{lir_layout_pointer()}
     after := before
-    after.functions = [LIRFunction]{lir_scalar_replace_function(function)}
+    after.functions = [LIRFunction]{lir_scalar_replace_function(function.copy())}
     print("=== {function.name} before ===\n{lir_print_module(before)}=== {function.name} after ===\n{lir_print_module(after)}")
     passed := lir_print_module(before) == lir_print_module(after)
     loop issue in lir_lint_module(before) {
@@ -205,7 +205,7 @@ fn oscalar_dead_predecessor() -> Bool Never! {
     lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{})})
     before :: ofx_module(lir_builder_finish(b))
     after := before
-    after.functions = [LIRFunction]{lir_scalar_replace_function(before.functions[0])}
+    after.functions = [LIRFunction]{lir_scalar_replace_function(before.functions[0].copy())}
     print("=== scalar-unreachable-predecessor before ===\n{lir_print_module(before)}=== scalar-unreachable-predecessor after ===\n{lir_print_module(after)}")
     input_issues :: lir_lint_module(before)
     output_issues :: lir_lint_module(after)

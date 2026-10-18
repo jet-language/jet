@@ -27,6 +27,12 @@ use jet_foundation.[
     Marker,
     MetaAttr,
     NamedSpan,
+    NameTable,
+    name_count,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
     Param,
     Program,
     Span,
@@ -3702,8 +3708,12 @@ fn sema_check_module_function(ready: &[SemaPreparedBody], queries: &[Int:SemaBod
 }
 
 // A compiler thread is admitted for at least this many bytes of function
-// source, so a small program checks its bodies on the calling thread.
-SEMA_BODY_MIN_BYTES_PER_THREAD :: 32768
+// source, so a small program checks its bodies on the calling thread. A
+// thread's fixed cost is its light scope copy (sema_scope_light_copy, a few
+// hundred bytes per scope row); 32 KB per thread left every Core module of
+// the self-compile (most under 64 KB of bodies) on one thread, about 6 s of
+// the pass after the entry module's parallel check.
+SEMA_BODY_MIN_BYTES_PER_THREAD :: 4096
 // Estimated bytes of one thread's copy of the module scope, per module item.
 // The comptime prechecks' scope admission still uses this per-item estimate.
 SEMA_BODY_SCOPE_BYTES_PER_ITEM :: 4096
@@ -3766,14 +3776,38 @@ struct SemaOwnedModuleCheck {
     memory_plan: SemaFunctionMemoryPlan
 }
 
-// One thread's part of a module's bodies: its own copy of the post-summary
-// module scope, the item indexes it checks in order, and their bodies.
+// One thread of a module's parallel body pass: its own copy of the
+// post-summary module scope, and the bodies it checked with each one's
+// position in the pass's job list, in the order it claimed them.
 struct SemaBodyPart {
     scopes: SemaScopeTable
-    items: [SemaBodyJob]
     bodies: [SemaPreparedBody]
-    cache_replay: [Bool]{[Bool]{}}
-    cache_observe: Bool{false}
+    positions: [Int]
+}
+
+// What every thread of a parallel body pass reads: the jobs in job order,
+// the order they are claimed in (`order[rank]` is a job position, heaviest
+// source first), which positions are cache replays, and whether checks
+// observe for the incremental cache.
+struct SemaBodyPlan {
+    jobs: [SemaBodyJob]
+    order: [Int]
+    replay: [Bool]
+    observe: Bool
+}
+
+// The next unclaimed rank of a parallel body pass.
+struct SemaBodyQueue {
+    next: Int
+}
+
+// One claimed job: its position in the plan's job list, or -1 when every job
+// is claimed.
+struct SemaBodyClaim {
+    position: Int
+    job: SemaBodyJob
+    replay: Bool
+    observe: Bool
 }
 
 // The item indexes of module `module_index`'s top-level functions a compiler
@@ -3884,22 +3918,27 @@ fn sema_check_prepare_method_body(job: SemaBodyJob, module_index: Int, memory_pl
     SemaParallelBody{job_index: ordinal, checked: Val(^checked), diagnostics: ^diagnostics, call_facts: ^call_facts, comptime_requests: ^comptime_requests, name_references: ^name_references, method_input: Val(^input), wanted_hooks: sema_host_hook_was_wanted(wanted), host_reached: reach.host, volatile: reach.foreign_raw_body}
 }
 
+// One thread's checks: it claims the plan's jobs one at a time, heaviest
+// source first, until none is left, and checks each on its own scope copy.
 // The existing guard_read remains in sema_check_body_part. Both retained
 // owners stay pinned until this read-only worker returns; admission/join and
 // packet publication are unchanged.
-fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: &SemaBodyPart, module_index: Int) -> Int {
+fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: &SemaBodyPart, plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>, module_index: Int) -> Int {
     if program.registration_graph == .Val(graph) {
         wanted :: shared SemaHostHookWanted{wanted: false}
         checked_count := 0
-        loop index in 0..<part.items.len() {
-            if index < part.cache_replay.len() && part.cache_replay[index] {
-                &part.bodies.push(SemaPreparedBody.Replay{job_index: sema_check_body_job_index(part.items[index])})
+        loop {
+            claim :: sema_check_body_claim(plan, queue)
+            if claim.position < 0 -> break
+            if claim.replay {
+                &part.bodies.push(SemaPreparedBody.Replay{job_index: sema_check_body_job_index(claim.job)})
+                &part.positions.push(claim.position)
                 next
             }
-            observed :: sema_incremental_observer(part.cache_observe)
+            observed :: sema_incremental_observer(claim.observe)
             checked_count += 1
             sema_host_hook_unwant(wanted)
-            if part.items[index] == {
+            if claim.job == {
                 .TopLevel(item_index) -> {
                     // The function's span is read through a read parameter:
                     // a pattern over the payload binding copied the function.
@@ -3909,18 +3948,42 @@ fn sema_check_body_part_in(environment: SemaScopeEnvironment, program: SemaProgr
                         call_facts := [SemaCallSiteFact]{}
                         comptime_requests := [SemaComptimeRequest]{}
                         name_references := [SemaNameReferenceFact]{}
-                        checked := sema_function_check_registered_shared(part.items[index], module_index, memory_plan, memory_position, symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, part.items[index], module_index)), TFuncKind.TopLevel, false, environment, program, &part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), &diagnostics, &call_facts, &comptime_requests, &name_references)
+                        checked := sema_function_check_registered_shared(claim.job, module_index, memory_plan, memory_position, symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index)), TFuncKind.TopLevel, false, environment, program, &part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), &diagnostics, &call_facts, &comptime_requests, &name_references)
                         reach :: sema_incremental_reach(observed)
                         &part.bodies.push(SemaPreparedBody.Checked{body: SemaParallelBody{job_index: item_index, checked: Val(^checked), diagnostics: ^diagnostics, call_facts: ^call_facts, comptime_requests: ^comptime_requests, name_references: ^name_references, method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), host_reached: reach.host, volatile: reach.foreign_raw_body}})
+                        &part.positions.push(claim.position)
                     }
                 }
-                .NominalMethod(ordinal, _, _) -> &part.bodies.push(SemaPreparedBody.Checked{body: sema_check_prepare_method_body(part.items[index], module_index, memory_plan, ordinal, environment, program, &part.scopes, wanted, observed)})
-                .ImplMethod(ordinal, _, _) -> &part.bodies.push(SemaPreparedBody.Checked{body: sema_check_prepare_method_body(part.items[index], module_index, memory_plan, ordinal, environment, program, &part.scopes, wanted, observed)})
+                .NominalMethod(ordinal, _, _) -> {
+                    &part.bodies.push(SemaPreparedBody.Checked{body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, &part.scopes, wanted, observed)})
+                    &part.positions.push(claim.position)
+                }
+                .ImplMethod(ordinal, _, _) -> {
+                    &part.bodies.push(SemaPreparedBody.Checked{body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, &part.scopes, wanted, observed)})
+                    &part.positions.push(claim.position)
+                }
             }
         }
         return checked_count
     }
     0
+}
+
+// Claims the next rank of `queue` and reads its job from `plan`; position -1
+// once every job is claimed.
+fn sema_check_body_claim(plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>) -> SemaBodyClaim {
+    rank :: sema_check_body_claim_rank(queue)
+    inputs :: plan.guard_read()
+    if rank >= inputs.value.order.len() -> return SemaBodyClaim{position: -1, job: SemaBodyJob.TopLevel{item_index: -1}, replay: false, observe: false}
+    position :: inputs.value.order[rank]
+    SemaBodyClaim{position: position, job: inputs.value.jobs[position], replay: inputs.value.replay.len() > position && inputs.value.replay[position], observe: inputs.value.observe}
+}
+
+fn sema_check_body_claim_rank(queue: Shared<SemaBodyQueue>) -> Int {
+    permit :: queue.guard_edit()
+    rank :: permit.value.next
+    permit.value.next = rank + 1
+    rank
 }
 
 // The span of the top-level function item `item_index`, when it is one.
@@ -3988,9 +4051,14 @@ fn sema_check_module_summary_scopes(environment: &SemaScopeEnvironment, program:
 }
 
 // The parallel body pass of module `module_index` on `workers` threads:
-// `jobs` (sema_check_parallel_jobs) cut into consecutive parts by `weights`,
-// one part per thread, each part checked in item order on its own copy of
-// `scopes` against the environment and memory plan in `shared`.
+// `jobs` (sema_check_parallel_jobs) are claimed one at a time by whichever
+// thread is free, heaviest source (`weights`) first, so no thread idles
+// while jobs remain, each checked on that thread's own copy of `scopes`
+// against the environment and memory plan in `shared`. A body's check reads
+// only the frozen environment and its thread's scope copy, so it is the same
+// body whichever thread checks it and whatever was checked before it; the
+// joined bodies are placed by job position, last first, as the body loop
+// pops them.
 fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int, scopes: ^SemaScopeTable, jobs: [SemaBodyJob], weights: [Int], workers: Int, memo: SemaModuleMemo?, owned_queries: ^[Int:SemaBodyMemoQuery]) -> SemaPreparedBodies {
     queries := ^owned_queries
     prepared := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaPreparedBody]{}, memo: memo, queries: [Int:SemaBodyMemoQuery]{}}
@@ -4016,33 +4084,46 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, module_index: Int
         prepared.queries = ^queries
         return ^prepared
     }
-    bounds :: compiler_threads_partition(weights, workers)
+    plan_jobs := [SemaBodyJob]{}
+    replay := [Bool]{}
+    loop position in 0..<jobs.len() {
+        &plan_jobs.push(jobs[position])
+        if has_memo {
+            index :: sema_check_body_job_index(jobs[position])
+            &replay.push(queries.has_key(index) && queries[index].replay)
+        }
+    }
+    order := compiler_threads_heaviest_first(weights)
+    plan :: shared SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: has_memo}
+    sema_check_body_plan_fill(plan, ^plan_jobs, ^order, ^replay)
+    queue :: shared SemaBodyQueue{next: 0}
     sema_check_shared_lend_scope(shared, ^scopes)
     slots := [Shared<SemaBodyPart>]{}
-    loop part in 0..<workers {
-        items := [SemaBodyJob]{}
-        replay := [Bool]{}
-        loop position in bounds[part]..<bounds[part + 1] {
-            &items.push(jobs[position])
-            if has_memo {
-                index :: sema_check_body_job_index(jobs[position])
-                &replay.push(queries.has_key(index) && queries[index].replay)
-            }
-        }
-        slot :: shared SemaBodyPart{scopes: sema_scope_init(""), items: [SemaBodyJob]{}, bodies: [SemaPreparedBody]{}}
-        sema_check_body_part_fill(slot, ^items, ^replay, has_memo)
+    loop _ in 0..<workers {
+        slot :: shared SemaBodyPart{scopes: sema_scope_init(""), bodies: [SemaPreparedBody]{}, positions: [Int]{}}
         &slots.push(slot)
     }
-    _ := sema_check_body_parts(shared, slots, 0, module_index)
+    _ := sema_check_body_parts(shared, slots, plan, queue, 0, module_index)
     restored := sema_check_shared_return_scope(shared)
     &prepared.scopes.push(^restored)
     prepared.queries = ^queries
-    part := workers
-    loop part > 0 {
-        part -= 1
-        sema_check_body_part_drain(slots[part], &prepared.bodies)
+    placed := [SemaPreparedBody?]{}
+    loop _ in 0..<jobs.len() -> &placed.push(None)
+    loop slot in slots -> sema_check_body_part_place(slot, &placed)
+    loop placed.len() > 0 {
+        taken := &placed.pop() ?? break
+        body := ^taken ?? next
+        &prepared.bodies.push(^body)
     }
     ^prepared
+}
+
+// Moves the pass's jobs, claim order and replay flags into its shared plan.
+fn sema_check_body_plan_fill(plan: Shared<SemaBodyPlan>, jobs: ^[SemaBodyJob], order: ^[Int], replay: ^[Bool]) {
+    permit :: plan.guard_edit()
+    permit.value.jobs = ^jobs
+    permit.value.order = ^order
+    permit.value.replay = ^replay
 }
 
 // The post-summary module scope is the pass's shared read-only module scope:
@@ -4064,14 +4145,6 @@ fn sema_check_shared_return_scope(shared: Shared<SemaCheckShared>) -> SemaScopeT
     ^taken ?? panic("the body-check module scope left the shared environment")
 }
 
-// Moves a thread's item indexes into its slot.
-fn sema_check_body_part_fill(slot: Shared<SemaBodyPart>, items: ^[SemaBodyJob], replay: ^[Bool], observe: Bool) {
-    permit :: slot.guard_edit()
-    permit.value.items = ^items
-    permit.value.cache_replay = ^replay
-    permit.value.cache_observe = observe
-}
-
 // Gives a thread's slot its own light copy of the shared module scope, made
 // on that thread.
 fn sema_check_body_part_copy_scope(environment: SemaScopeEnvironment, slot: Shared<SemaBodyPart>) {
@@ -4085,38 +4158,39 @@ fn sema_check_body_part_copy_scope(environment: SemaScopeEnvironment, slot: Shar
     panic("the body-check module scope left the shared environment")
 }
 
-// Moves a part's bodies onto `bodies`, last item first.
-fn sema_check_body_part_drain(slot: Shared<SemaBodyPart>, bodies: &[SemaPreparedBody]) {
+// Moves a thread's bodies into `placed`, each at its job position.
+fn sema_check_body_part_place(slot: Shared<SemaBodyPart>, placed: &[SemaPreparedBody?]) {
     permit :: slot.guard_edit()
     loop permit.value.bodies.len() > 0 {
         body :: &permit.value.bodies.pop() ?? break
-        &bodies.push(body)
+        position :: &permit.value.positions.pop() ?? panic("a checked body has no job position")
+        placed[position] = Val(body)
     }
 }
 
-// Checks `slots[from..]`, one task per slot and the last slot on this
+// Checks on `slots[from..]`, one task per slot and the last slot on this
 // thread; returns how many bodies they checked.
-fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], from: Int, module_index: Int) -> Int {
-    if from >= slots.len() - 1 -> return sema_check_body_part(shared, slots[from], module_index)
+fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>, from: Int, module_index: Int) -> Int {
+    if from >= slots.len() - 1 -> return sema_check_body_part(shared, slots[from], plan, queue, module_index)
     checked := 0
     task.group sema_threads {
-        head :: task sema_check_body_part(shared, slots[from], module_index)
-        checked = sema_check_body_parts(shared, slots, from + 1, module_index)
+        head :: task sema_check_body_part(shared, slots[from], plan, queue, module_index)
+        checked = sema_check_body_parts(shared, slots, plan, queue, from + 1, module_index)
         checked += head.join() ?? panic(compiler_threads_failure_text(err))
     }
     checked
 }
 
 // One thread: makes its light copy of the module scope in its slot, then
-// checks its part's functions in item order on that copy. Host callbacks are
-// withheld; a check that wanted one is marked, and the body loop checks that
-// function again on the calling thread.
-fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, module_index: Int) -> Int {
+// checks the functions it claims on that copy. Host callbacks are withheld;
+// a check that wanted one is marked, and the body loop checks that function
+// again on the calling thread.
+fn sema_check_body_part(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>, module_index: Int) -> Int {
     inputs :: shared.guard_read()
     sema_check_body_part_copy_scope(inputs.value.environments[0], slot)
     permit := slot.guard_edit()
     // Passed straight through: a local binding of a guarded row would copy it.
-    sema_check_body_part_in(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], &permit.value, module_index)
+    sema_check_body_part_in(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], &permit.value, plan, queue, module_index)
 }
 
 fn sema_host_hook_unwant(wanted: Shared<SemaHostHookWanted>) {
@@ -4286,15 +4360,43 @@ fn sema_name_owner_index(graph: SemaRegistrationGraph) -> [String:String] Never!
     names
 }
 
-fn sema_name_index_symbol(index: &[String:SemaNameResolvedDeclaration], symbol: Symbol, kind: String) Never! {
-    if index.get(symbol.id.key) != None -> return
-    index[symbol.id.key] = SemaNameResolvedDeclaration{symbol: symbol, kind: kind}
+// The declarations a call fact can name: `keys` interns each symbol ID
+// (an open-addressing hash, so indexing never shifts a sorted entry list)
+// and `rows[id]` is the declaration row of that ID, or -1 while unindexed
+// (`name_table()` interns "" as id 0 before any symbol).
+struct SemaNameSymbolIndex {
+    keys: NameTable
+    rows: [Int]
+    declarations: [SemaNameResolvedDeclaration]
+}
+
+fn sema_name_index_symbol(index: &SemaNameSymbolIndex, symbol: Symbol, kind: String) Never! {
+    id :: name_index(name_intern(&index.keys, symbol.id.key))
+    if id == index.rows.len() -> &index.rows.push(-1)
+    if index.rows[id] >= 0 -> return
+    index.rows[id] = index.declarations.len()
+    &index.declarations.push(SemaNameResolvedDeclaration{symbol: symbol, kind: kind})
+}
+
+// The declaration row of `key`, or -1.
+fn sema_name_symbol_row(index: SemaNameSymbolIndex, key: String) -> Int Never! {
+    name :: name_find(index.keys, key) ?? return -1
+    index.rows[name_index(name)]
+}
+
+// Whether `key` (never empty) is new to `seen`, recording it: the first row
+// with a key is kept and every later one dropped, as a seen map did, without
+// a sorted key list that each insert shifts.
+fn sema_name_first_seen(seen: &NameTable, key: String) -> Bool Never! {
+    before :: name_count(seen)
+    _ :: name_intern(&seen, key)
+    name_count(seen) != before
 }
 
 // Every declaration a call fact can name, keyed by symbol ID. The first
 // declaration in graph order wins, as the ordered search did.
-fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResolvedDeclaration] Never! {
-    index := [String:SemaNameResolvedDeclaration]{}
+fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> SemaNameSymbolIndex Never! {
+    index := SemaNameSymbolIndex{keys: name_table(), rows: [Int]{-1}, declarations: [SemaNameResolvedDeclaration]{}}
     loop graph_module_index in 0..<graph.modules.len() {
         loop symbol_index in 0..<graph.modules[graph_module_index].symbols.len() {
             sema_name_index_symbol(&index, graph.modules[graph_module_index].symbols[symbol_index], if {
@@ -4319,14 +4421,13 @@ fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResol
 
 fn sema_name_first_declarations(rows: ^[MIRNameDeclaration]) -> [MIRNameDeclaration] Never! {
     owned_rows := ^rows
-    seen := [String:Bool]{}
+    seen := name_table()
     kept := [MIRNameDeclaration]{}
     &owned_rows.reverse()
     loop owned_rows.len() > 0 {
         row := &owned_rows.pop() ?? break
         key :: "{row.module_index}|{row.name}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        if !sema_name_first_seen(&seen, key) -> next
         &kept.push(^row)
     }
     kept
@@ -4334,32 +4435,109 @@ fn sema_name_first_declarations(rows: ^[MIRNameDeclaration]) -> [MIRNameDeclarat
 
 fn sema_name_first_aliases(rows: ^[MIRNameAlias]) -> [MIRNameAlias] Never! {
     owned_rows := ^rows
-    seen := [String:Bool]{}
+    seen := name_table()
     kept := [MIRNameAlias]{}
     &owned_rows.reverse()
     loop owned_rows.len() > 0 {
         row := &owned_rows.pop() ?? break
         key :: "{row.module_index}|{row.name}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        if !sema_name_first_seen(&seen, key) -> next
         &kept.push(^row)
     }
     kept
 }
 
+// The keys of the reference rows seen so far: the interned ids of a row's
+// module path and kind, its definition span, and its semantic identity's id
+// plus one (0 for none), in an open-addressing hash over parallel columns,
+// so a row is deduplicated without formatting and interning one String per
+// row.
+struct SemaNameReferenceKeys {
+    path: [Int]
+    kind: [Int]
+    start: [Int]
+    end: [Int]
+    identity: [Int]
+    // 0 is empty, otherwise the key's row plus one.
+    slots: [Int]
+    mask: Int
+}
+
+SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS :: 1024
+
+fn sema_name_reference_keys() -> SemaNameReferenceKeys Never! {
+    slots := [Int]{}
+    loop _ in 0..<SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS -> &slots.push(0)
+    SemaNameReferenceKeys{path: [Int]{}, kind: [Int]{}, start: [Int]{}, end: [Int]{}, identity: [Int]{}, slots: slots, mask: SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS - 1}
+}
+
+// Only the hash reads a part's magnitude: equality compares the parts
+// themselves, so a negative span bound folds onto its positive twin's slot.
+fn sema_name_reference_hash_mix(hash: U64, part: Int) -> U64 Never! {
+    magnitude :: if part < 0 -> 0 - part else -> part
+    (hash.bit_xor(U64{magnitude})).wrapping_mul(U64{0x100000001b3})
+}
+
+// FNV-1a over the five key parts, as a slot index under `mask`.
+fn sema_name_reference_slot(mask: Int, path: Int, kind: Int, start: Int, end: Int, identity: Int) -> Int Never! {
+    hash := U64{0x811c9dc5}
+    hash = sema_name_reference_hash_mix(hash, path)
+    hash = sema_name_reference_hash_mix(hash, kind)
+    hash = sema_name_reference_hash_mix(hash, start)
+    hash = sema_name_reference_hash_mix(hash, end)
+    hash = sema_name_reference_hash_mix(hash, identity)
+    Int.from_u64(hash.bit_and(U64{mask}))
+}
+
+fn sema_name_reference_keys_grow(keys: &SemaNameReferenceKeys) Never! {
+    capacity :: (keys.mask + 1) * 2
+    mask :: capacity - 1
+    slots := [Int]{}
+    loop _ in 0..<capacity -> &slots.push(0)
+    loop row in 0..<keys.path.len() {
+        slot := sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row])
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = row + 1
+    }
+    keys.slots = ^slots
+    keys.mask = mask
+}
+
+// Whether the key is already in `keys`, recording it when it is new.
+fn sema_name_reference_seen(keys: &SemaNameReferenceKeys, path: Int, kind: Int, start: Int, end: Int, identity: Int) -> Bool Never! {
+    slot := sema_name_reference_slot(keys.mask, path, kind, start, end, identity)
+    loop keys.slots[slot] != 0 {
+        row :: keys.slots[slot] - 1
+        if keys.path[row] == path && keys.kind[row] == kind && keys.start[row] == start && keys.end[row] == end && keys.identity[row] == identity -> return true
+        slot = (slot + 1).bit_and(keys.mask)
+    }
+    row :: keys.path.len()
+    &keys.path.push(path)
+    &keys.kind.push(kind)
+    &keys.start.push(start)
+    &keys.end.push(end)
+    &keys.identity.push(identity)
+    keys.slots[slot] = row + 1
+    if (row + 1) * 2 > keys.mask -> sema_name_reference_keys_grow(&keys)
+    false
+}
+
+// The first row per key, in order. A row's key is its module path, kind,
+// definition span and semantic identity (present or not): the strings are
+// interned in one table, so two rows have the same key exactly when their
+// ids, span bounds and identity ids agree.
 fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Never! {
-    seen := [String:Bool]{}
+    parts := name_table()
+    seen := sema_name_reference_keys()
     kept := [MIRNameReference]{}
     loop row in rows {
-        // The path is length-prefixed and the identity is last, so no two
-        // distinct rows share a key.
         identity :: if row.semantic_identity == {
-            .Val(value) -> "+{value}"
-            else -> "-"
+            .Val(value) -> name_index(name_intern(&parts, value)) + 1
+            else -> 0
         }
-        key :: "{row.module_path.len()}:{row.module_path}|{row.kind}|{row.def_span.start}:{row.def_span.end}|{identity}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        path :: name_index(name_intern(&parts, row.module_path))
+        kind :: name_index(name_intern(&parts, row.kind))
+        if sema_name_reference_seen(&seen, path, kind, row.def_span.start, row.def_span.end, identity) -> next
         &kept.push(row)
     }
     kept
@@ -4588,8 +4766,8 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
         loop call in checked.call_facts {
             callee :: call.callee ?? next
-            resolved :: symbol_index.get(callee.key)
-            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, call.span, declaration.symbol, declaration.kind)
+            row :: sema_name_symbol_row(symbol_index, callee.key)
+            if row >= 0 -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, call.span, symbol_index.declarations[row].symbol, symbol_index.declarations[row].kind)
         }
         module_index += 1
     }
@@ -5222,6 +5400,8 @@ fn sema_comptime_precheck_items(environments: &[SemaScopeEnvironment], programs:
     permit :: shared_state.guard_edit()
     environment := &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
     program := &permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    // The last module's declaration scope leaves with its threads.
+    environment.module_scope = None
     &environments.push(^environment)
     &programs.push(^program)
     checks
@@ -5267,19 +5447,28 @@ fn sema_comptime_precheck_fill(shared_state: Shared<SemaPrecheckShared>, environ
 }
 
 // Enters the shared environment in `module_identity`, prepares the module's
-// probe scope and makes it and `positions` the current module's rows. False
-// when the module cannot be entered or its scope not applied (the run then
-// checks its sources at their turn). `scope_items` gets the module's item
-// count.
+// probe scope and makes it and `positions` the current module's rows. The
+// prepared scope moves into the environment's `module_scope`, where every
+// thread reads it in place through its own light copy
+// (sema_comptime_precheck_thread_probe); the probe row keeps the module's
+// other prepared facts. False when the module cannot be entered or its scope
+// not applied (the run then checks its sources at their turn). `scope_items`
+// gets the module's item count.
 fn sema_comptime_precheck_enter(shared_state: Shared<SemaPrecheckShared>, module_identity: String, version: Int, positions: [Int], scope_items: &Int) -> Bool {
     permit :: shared_state.guard_edit()
     // The environment moves out of the shared state and back, so entering
     // never copies it.
     environment := &permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    environment.module_scope = None
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     entered :: sema_scope_environment_enter_probe_module(&environment, permit.value.programs[0], module_identity, ^empty)
     probe := sema_comptime_probe_init(None)
     if entered -> sema_comptime_probe_prepare(&probe, environment, permit.value.programs[0], version)
+    if entered && probe.applied {
+        table := ^probe.table
+        probe.table = sema_scope_init(module_identity)
+        environment.module_scope = Val(^table)
+    }
     &permit.value.environments.push(^environment)
     if !entered || !probe.applied -> return false
     if permit.value.programs[0].registration_graph == .Val(graph) {
@@ -5290,6 +5479,28 @@ fn sema_comptime_precheck_enter(shared_state: Shared<SemaPrecheckShared>, module
     &permit.value.probes.push(^probe)
     permit.value.positions = [[Int]]{positions}
     true
+}
+
+// A precheck thread's own probe: a light copy of the module's declaration
+// scope (the shared environment's `module_scope`, whose function types the
+// copy reads in place, sema_scope_light_copy) beside copies of the prepared
+// probe's small rows, with host callbacks withheld through `wanted`. The
+// copied probe is prepared for the same module and version, so a check's
+// sema_comptime_probe_prepare keeps it as it is.
+fn sema_comptime_precheck_thread_probe(environment: SemaScopeEnvironment, source: SemaScopeProbe, wanted: Shared<SemaHostHookWanted>) -> SemaScopeProbe {
+    if environment.module_scope == .Val(table) {
+        return SemaScopeProbe{
+            module_identity: source.module_identity.copy(),
+            table: sema_scope_light_copy(table),
+            applied: source.applied,
+            // copy: the thread's probe owns its rows while the shared probe keeps its own.
+            diagnostics: source.diagnostics.copy(),
+            constants: source.constants.copy(),
+            host_hooks: Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: None}),
+            version: source.version,
+        }
+    }
+    panic("the precheck module scope left the shared environment")
 }
 
 // Runs claiming threads `from..<workers`, one task each, and moves every
@@ -5307,15 +5518,12 @@ fn sema_comptime_precheck_claimers(shared_state: Shared<SemaPrecheckShared>, bou
     }
 }
 
-// One thread: checks the parts it claims until none is left, on its own copy
-// of the module's probe scope, with host callbacks withheld.
+// One thread: checks the parts it claims until none is left, on its own light
+// copy of the module's probe scope, with host callbacks withheld.
 fn sema_comptime_precheck_claimed(shared_state: Shared<SemaPrecheckShared>, bounds: [Int], queue: Shared<SemaPrecheckQueue>) -> [SemaPrecheckPart] {
     inputs :: shared_state.guard_read()
     wanted :: shared SemaHostHookWanted{wanted: false}
-    // copy: each thread checks on its own scope, while the module's prepared
-    // probe (owner: the shared state, read by every thread) stays as it is.
-    probe := inputs.value.probes[0].copy()
-    probe.host_hooks = Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: None})
+    probe := sema_comptime_precheck_thread_probe(inputs.value.environments[0], inputs.value.probes[0], wanted)
     claimed := [SemaPrecheckPart]{}
     loop {
         part :: sema_comptime_precheck_claim(queue)
@@ -6899,15 +7107,17 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
     loop module_index in 0..<modules.len() {
         if sema_registration_module_index(graph, modules[module_index].module_identity) == None -> next
         policy :: sema_comptime_policy_for_package(policies, modules[module_index].package_identity) ?? next
+        // The policy's allow and deny lists are parsed once per module, not
+        // per function.
+        allowed :: sema_effect_scope_bounds(policy.authority_allow ?? [String]{})
+        prohibited :: sema_effect_authority_prohibited(policy.authority_deny ?? [String]{})
         loop function_index in 0..<modules[module_index].functions.len() {
             if authority_reach.get(modules[module_index].functions[function_index].key) == None -> next
             if policy.authority_allow != None {
-                allowed :: policy.authority_allow ?? [String]{}
-                if !sema_effect_check_scope_caps("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) -> complete = false
+                if !sema_effect_check_scope_bounds("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) -> complete = false
             }
             if policy.authority_deny != None {
-                denied :: policy.authority_deny ?? [String]{}
-                covered :: sema_effect_authority_deny_covered(denied, modules[module_index].functions[function_index].effects.solved)
+                covered :: sema_effect_covered(modules[module_index].functions[function_index].effects.solved, prohibited)
                 if covered.len() > 0 {
                     &diagnostics.push(sema_comptime_policy_deny_diagnostic(modules[module_index].package_identity, covered, modules[module_index].functions[function_index].source_span))
                     complete = false

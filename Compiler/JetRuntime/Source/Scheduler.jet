@@ -90,13 +90,14 @@ fn scheduler_control_current() -> I64 { sync_load(thread_base() + I64{16}) }
 // Only diagnostic/startup paths use this syscall probe. The attached hot
 // scheduler query above remains a single TCB load. A failed probe is a host
 // defect: do not recurse into a reporter whose ownership cannot be established.
+// An unattached thread's GS names the detached zero word; report it as 0.
 fn scheduler_report_base() -> I64 {
     base := I64{0}
-    #Unsafe("the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB") {
+    #Unsafe("the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word") {
         base = os_tls_base_probe_i64()
     }
     if (base < I64{0}) -> trap_gs_failure()
-    base
+    if (base == thread_detached_base()) -> I64{0} else -> base
 }
 fn scheduler_report_control_current() -> I64 {
     base :: scheduler_report_base()

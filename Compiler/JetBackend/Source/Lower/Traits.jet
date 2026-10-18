@@ -43,6 +43,13 @@ fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
     }
     if ty.kind == .Apply(name, args) {
         if args.len() != 0 || lower_type_def_exists(p, ty) -> return None
+        // The first trait row whose key or name is the type's name: the
+        // index row when the program carries one (lower_attach_type_index),
+        // else a scan.
+        if p.trait_name_rows.len() > 0 {
+            row :: p.trait_name_rows.get(name.name) ?? return None
+            return Val(MIRTraitRef{id: p.traits[row].id, name: p.traits[row].name})
+        }
         loop definition in p.traits {
             if definition.key == name.name || definition.name == name.name -> return Val(MIRTraitRef{id: definition.id, name: definition.name})
         }

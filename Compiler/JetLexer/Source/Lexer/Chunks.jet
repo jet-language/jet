@@ -1,0 +1,342 @@
+// Parallel lexing of one large source (D-JOBS1=A). The source is cut at
+// bytes that start a top-level item line right after a `}` line
+// (`lexer_chunk_cut`), each chunk is lexed whole on its own thread — scan,
+// payload, terminators, each with its own name table — and the chunks are
+// joined in source order. A chunk's lex equals the one-thread lex of its
+// bytes when its cut is a token boundary of the one-thread lex and every
+// fact the chunk reads lies inside the chunk; every chunk proves both on its
+// thread (`lexer_chunk_clean`) and a source with one unproven chunk lexes on
+// one thread instead, so the tokens, name ids, literal rows and diagnostics
+// are those of `lex` for any thread count.
+use jet_foundation.[
+    CompilerThreads,
+    Diagnostic,
+    Name,
+    NameTable,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_transfer_rows,
+    name_count,
+    name_index,
+    name_intern_bytes,
+    name_start,
+]
+
+// A chunk thread is admitted for at least this many source bytes.
+LEXER_CHUNK_MIN_BYTES :: 262144
+// Each chunk thread holds its chunk's facts and tokens beside the source:
+// about this much per source byte of the chunk.
+LEXER_CHUNK_SCRATCH_PER_SOURCE_BYTE :: 96
+
+// A chunked lex: the lexed source, the newline table of the source and the
+// token index where each chunk started (`[0, r1, …, tokens.len()]`). Each
+// run start is the first token of a top-level item line after a `}` line
+// and the delimiters of every run nest within it, so the parser may cut
+// its item runs there.
+struct LexedThreads {
+    lexed: Lexed
+    line_starts: [Int]
+    runs: [Int]
+}
+
+// What every chunk thread reads.
+struct LexerChunkShared {
+    source: [U8]
+    config_surface: Bool
+    allow_reserved_identifiers: Bool
+}
+
+// One thread's chunk: its byte range and, after the lex, its one output
+// row.
+struct LexerChunkPart {
+    start: Int
+    end: Int
+    outputs: [LexerChunkOutput]
+}
+
+// A chunk's lex: its tokens (the seed `}` of a later chunk dropped), its
+// own name table and literal rows, its payload and terminator diagnostics
+// (the one-thread lex lists all payload diagnostics before all terminator
+// diagnostics), the line starts inside its bytes, and whether the chunk
+// proved its lex equal to the one-thread lex of its bytes. After the join,
+// `map` and `literal_base` carry the joined table's ids and literal row
+// base for the chunk's second pass.
+struct LexerChunkOutput {
+    tokens: [Token]
+    tables: TokenTables
+    diagnostics: [Diagnostic]
+    terminator_diagnostics: [Diagnostic]
+    line_starts: [Int]
+    clean: Bool
+    map: [Int]
+    literal_base: Int
+}
+
+fn lex_threads(source: [U8], threads: CompilerThreads) -> LexedThreads {
+    lex_with_terminators_threads(source, false, false, threads)
+}
+
+fn lex_generated_threads(source: [U8], threads: CompilerThreads) -> LexedThreads {
+    lex_with_terminators_threads(source, false, true, threads)
+}
+
+// The one-thread lex of `source` with its newline table and one run.
+fn lexed_threads_single(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> LexedThreads {
+    lexed := lex_with_terminators(source, config_surface, allow_reserved_identifiers)
+    count :: lexed.tokens.len()
+    LexedThreads{lexed: ^lexed, line_starts: lexer_line_starts(source, 0, source.len(), true), runs: [Int]{0, count}}
+}
+
+// The starts of the lines that begin inside `source[from..<to]`: line 1 when
+// `first` (the range starts the source), then one past every newline.
+fn lexer_line_starts(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Never! {
+    starts := [Int]{}
+    if first -> &starts.push(0)
+    loop index in from..<to {
+        if source[index] == (U8{10}) -> &starts.push(index + 1)
+    }
+    starts
+}
+
+// The item words a chunk may start with: the parser's item heads
+// (parser_chunk_head_kind), every one a keyword the scanner reads without
+// context.
+LEXER_CHUNK_HEAD_WORDS :: [String]{"fn", "pub", "priv", "struct", "enum", "impl", "trait", "use", "extern", "module", "const", "comptime", "effect", "derive", "tag"}
+
+// Whether `at` starts a top-level item line: the bytes before it are
+// `\n}\n` and it spells `#` or an item word followed by a non-identifier
+// byte. Such a byte is a token boundary of the one-thread lex exactly when
+// the `}` is a token, which the chunk before it proves by ending there.
+fn lexer_chunk_head_at(source: [U8], at: Int) -> Bool Never! {
+    if at < 3 || at >= source.len() -> return false
+    if source[at - 1] != (U8{10}) || source[at - 2] != (U8{125}) || source[at - 3] != (U8{10}) -> return false
+    first :: Int.from_u8(source[at])
+    if first == 35 -> return true
+    if first < 97 || first > 122 -> return false
+    end :: scan_identifier_end(source, at)
+    loop word in LEXER_CHUNK_HEAD_WORDS {
+        bytes :: word.bytes()
+        if end - at != bytes.len() -> next
+        matched := true
+        loop offset in 0..<bytes.len() {
+            if source[at + offset] != bytes[offset] -> matched = false
+        }
+        if matched -> return true
+    }
+    false
+}
+
+// The first item line start at or past `target`, or -1.
+fn lexer_chunk_cut(source: [U8], target: Int) -> Int Never! {
+    at := target
+    loop at < source.len() {
+        if source[at - 1] == (U8{10}) && lexer_chunk_head_at(source, at) -> return at
+        at += 1
+    }
+    -1
+}
+
+// lex_with_terminators on the admitted compiler threads.
+fn lex_with_terminators_threads(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, threads: CompilerThreads) -> LexedThreads {
+    workers :: compiler_threads_admit(threads, source.len(), source.len(), LEXER_CHUNK_MIN_BYTES, LEXER_CHUNK_MIN_BYTES * LEXER_CHUNK_SCRATCH_PER_SOURCE_BYTE, 0)
+    if workers <= 1 -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    bounds := [Int]{0}
+    loop share in 1..<workers {
+        target := share * source.len() /% workers
+        if target <= bounds[bounds.len() - 1] -> target = bounds[bounds.len() - 1] + 1
+        if target < 3 -> target = 3
+        cut :: lexer_chunk_cut(source, target)
+        if cut < 0 -> break
+        &bounds.push(cut)
+    }
+    &bounds.push(source.len())
+    if bounds.len() <= 2 -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    inputs :: shared LexerChunkShared{source: source, config_surface: config_surface, allow_reserved_identifiers: allow_reserved_identifiers}
+    parts := [Shared<LexerChunkPart>]{}
+    loop chunk in 0..<(bounds.len() - 1) -> &parts.push(shared LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}})
+    _ := lexer_lex_chunk_parts(inputs, parts, 0)
+    clean := true
+    loop part in parts {
+        reads :: part.guard_read()
+        if reads.value.outputs.len() != 1 || !reads.value.outputs[0].clean -> clean = false
+    }
+    if !clean -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
+    // The name ids of the one-thread lex are first-seen ids over the whole
+    // token stream; interning each chunk's spellings in chunk order and
+    // local id order assigns exactly those ids. Literal rows follow in the
+    // same order.
+    first := lexer_chunk_part_take(parts[0])
+    tables := ^first.tables
+    literal_base := tables.literals.len()
+    loop chunk in 1..<parts.len() {
+        map := lexer_chunk_name_map(parts[chunk], &tables)
+        permit := parts[chunk].guard_edit()
+        permit.value.outputs[0].map = ^map
+        permit.value.outputs[0].literal_base = literal_base
+        literal_base += permit.value.outputs[0].tables.literals.len()
+    }
+    _ := lexer_remap_chunk_parts(parts, 1)
+    tokens := ^first.tokens
+    diagnostics := ^first.diagnostics
+    terminator_diagnostics := ^first.terminator_diagnostics
+    line_starts := ^first.line_starts
+    runs := [Int]{0}
+    loop chunk in 1..<parts.len() {
+        output := lexer_chunk_part_take(parts[chunk])
+        &runs.push(tokens.len())
+        compiler_transfer_rows<Token>(&tokens, &output.tokens)
+        compiler_transfer_rows<TokenLiteral>(&tables.literals, &output.tables.literals)
+        compiler_transfer_rows<Diagnostic>(&diagnostics, &output.diagnostics)
+        compiler_transfer_rows<Diagnostic>(&terminator_diagnostics, &output.terminator_diagnostics)
+        compiler_transfer_rows<Int>(&line_starts, &output.line_starts)
+    }
+    &runs.push(tokens.len())
+    compiler_transfer_rows<Diagnostic>(&diagnostics, &terminator_diagnostics)
+    LexedThreads{lexed: Lexed{tokens: ^tokens, tables: ^tables, diagnostics: ^diagnostics}, line_starts: ^line_starts, runs: ^runs}
+}
+
+// A later chunk's name ids mapped onto the joined table: each local id in
+// order interns its spelling, so a spelling new to the joined table takes
+// the next id, as the one-thread lex assigned it at that token.
+fn lexer_chunk_name_map(part: Shared<LexerChunkPart>, tables: &TokenTables) -> [Int] {
+    reads :: part.guard_read()
+    map := [Int]{}
+    loop id in 0..<name_count(reads.value.outputs[0].tables.names) {
+        local :: reads.value.outputs[0].tables.names
+        &map.push(name_index(name_intern_bytes(&tables.names, local.bytes, name_start(local, id), local.ends[id])))
+    }
+    map
+}
+
+// A part's output row, after its threads joined.
+fn lexer_chunk_part_take(part: Shared<LexerChunkPart>) -> LexerChunkOutput {
+    permit :: part.guard_edit()
+    &permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
+}
+
+// Lexes `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts lexed.
+fn lexer_lex_chunk_parts(inputs: Shared<LexerChunkShared>, parts: [Shared<LexerChunkPart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return lexer_lex_chunk_part(inputs, parts[from])
+    lexed := 0
+    task.group lexer_chunk_threads {
+        head :: task lexer_lex_chunk_part(inputs, parts[from])
+        lexed = lexer_lex_chunk_parts(inputs, parts, from + 1)
+        lexed += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    lexed
+}
+
+// Whether the delimiters of `facts[first..]` nest within the chunk: no
+// close without its open in the chunk, and (`closed`) every open closed.
+// Then every forward or backward delimiter match the scan and the
+// terminator pass make from inside the chunk ends inside it.
+fn lexer_chunk_delimiters_nest(facts: [Int], first: Int, closed: Bool) -> Bool Never! {
+    parens := 0
+    brackets := 0
+    braces := 0
+    index := first
+    loop index * 4 < facts.len() {
+        kind :: facts[index * 4]
+        if kind == K_LPAREN -> parens += 1
+        if kind == K_LBRACKET -> brackets += 1
+        if kind == K_LBRACE -> braces += 1
+        if kind == K_RPAREN -> parens -= 1
+        if kind == K_RBRACKET -> brackets -= 1
+        if kind == K_RBRACE -> braces -= 1
+        if parens < 0 || brackets < 0 || braces < 0 -> return false
+        index += 1
+    }
+    !closed || (parens == 0 && brackets == 0 && braces == 0)
+}
+
+// One thread: scans its byte range (seeded with the `}` fact before it, the
+// one code token the scan, the payload and the terminator pass read before
+// the range), builds the payload with its own tables, runs the terminator
+// pass, and leaves its output in its part. The chunk is clean when the scan
+// stopped exactly at the range end on the seed-shaped `}` (so the range end
+// is a token boundary of the one-thread lex), every `"""` head found its
+// `fn` inside the range, and the range's delimiters nest within it.
+fn lexer_lex_chunk_part(inputs: Shared<LexerChunkShared>, part: Shared<LexerChunkPart>) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    source :: reads.value.source
+    from :: permit.value.start
+    to :: permit.value.end
+    last :: to >= source.len()
+    facts := [Int]{}
+    seed :: from > 0
+    previous_code :: if seed -> K_RBRACE else -> -1
+    gap_start :: if seed -> from - 2 else -> 0
+    if seed -> emit(&facts, K_RBRACE, from - 2, from - 1, false)
+    scanned :: raw_token_facts_range(source, reads.value.config_surface, from, to, previous_code, &facts)
+    clean := true
+    if seed && !scanned.bodies_local -> clean = false
+    if !last {
+        if scanned.stop != to -> clean = false
+        count :: facts.len() /% 4
+        if count == 0 || facts[(count - 1) * 4] != K_RBRACE || facts[(count - 1) * 4 + 1] != to - 2 || facts[(count - 1) * 4 + 2] != to - 1 -> clean = false
+    }
+    if !lexer_chunk_delimiters_nest(facts, if seed -> 1 else -> 0, !last) -> clean = false
+    tables := token_tables()
+    raw := lex_payload_from_facts(source, facts, reads.value.config_surface, reads.value.allow_reserved_identifiers, 0, gap_start, to, &tables)
+    diagnostics := ^raw.diagnostics
+    raw.diagnostics = [Diagnostic]{}
+    events :: terminator_events(source, facts)
+    lexed := lexed_with_terminators(facts, ^raw, events)
+    if seed {
+        // The seed `}` is the last token of the chunk before; it leaves the
+        // front in place (reverse, pop, reverse: no token is copied).
+        if lexed.tokens.len() == 0 || lexed.tokens[0].kind != K_RBRACE -> clean = false
+        &lexed.tokens.reverse()
+        _ := &lexed.tokens.pop()
+        &lexed.tokens.reverse()
+    }
+    &permit.value.outputs.push(LexerChunkOutput{tokens: ^lexed.tokens, tables: ^tables, diagnostics: ^diagnostics, terminator_diagnostics: ^lexed.diagnostics, line_starts: lexer_line_starts(source, from, to, from == 0), clean: clean, map: [Int]{}, literal_base: 0})
+    1
+}
+
+// Remaps `parts[from..]` onto the joined tables, one task per part and the
+// last part on this thread; returns how many parts remapped.
+fn lexer_remap_chunk_parts(parts: [Shared<LexerChunkPart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return lexer_remap_chunk_part(parts[from])
+    remapped := 0
+    task.group lexer_remap_threads {
+        head :: task lexer_remap_chunk_part(parts[from])
+        remapped = lexer_remap_chunk_parts(parts, from + 1)
+        remapped += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    remapped
+}
+
+// One thread: rewrites its chunk's tokens and literal rows (interpolation
+// tokens included) from the chunk's name ids and literal rows to the
+// joined table's.
+fn lexer_remap_chunk_part(part: Shared<LexerChunkPart>) -> Int {
+    permit := part.guard_edit()
+    output := &permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
+    map := ^output.map
+    base :: output.literal_base
+    lexer_remap_tokens(&output.tokens, map, base)
+    loop row in 0..<output.tables.literals.len() {
+        output.tables.literals[row].suffix = lexer_remap_name(output.tables.literals[row].suffix, map)
+        loop part_index in 0..<output.tables.literals[row].string_parts.len() {
+            output.tables.literals[row].string_parts[part_index].text = lexer_remap_name(output.tables.literals[row].string_parts[part_index].text, map)
+            lexer_remap_tokens(&output.tables.literals[row].string_parts[part_index].tokens, map, base)
+        }
+    }
+    &permit.value.outputs.push(LexerChunkOutput{tokens: ^output.tokens, tables: ^output.tables, diagnostics: ^output.diagnostics, terminator_diagnostics: ^output.terminator_diagnostics, line_starts: ^output.line_starts, clean: output.clean, map: ^map, literal_base: base})
+    1
+}
+
+fn lexer_remap_name(name: Name, map: [Int]) -> Name Never! {
+    Name{id: U32{map[name_index(name)]}}
+}
+
+fn lexer_remap_tokens(tokens: &[Token], map: [Int], base: Int) Never! {
+    loop index in 0..<tokens.len() {
+        tokens[index].text = lexer_remap_name(tokens[index].text, map)
+        tokens[index].decoded = lexer_remap_name(tokens[index].decoded, map)
+        if tokens[index].literal >= 0 -> tokens[index].literal = tokens[index].literal + base
+    }
+}

@@ -140,15 +140,23 @@ fn mir_lint_program_scan(program: MIRProgram, all: Bool) -> [MIRLintError] Never
     failures
 }
 
+// One part's lint: its failures and the index it lent back.
+struct MIRLintPartResult {
+    index: MIRLintIndex
+    failures: [MIRLintError]
+}
+
 // Lint one part of a program whose functions are owned by the caller,
 // last-first (the optimizer wave law, Pipeline mir_pass_wave): each function
 // moves into the context, is checked, and moves back (a field move refilled
 // in the same block, LastUse.jet), so the part again holds its functions
 // last-first. Failures are in program order; without `all` the part stops at
-// its first failure, leaving the unchecked functions in place.
-fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Bool) -> [MIRLintError] Never! {
+// its first failure, leaving the unchecked functions in place. The index
+// moves into the context for the part and back out with the result, so one
+// thread lints part after part on one copy.
+fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Bool) -> MIRLintPartResult Never! {
     failures := [MIRLintError]{}
-    first := &functions.pop() ?? return failures
+    first := &functions.pop() ?? return MIRLintPartResult{index: ^index, failures: ^failures}
     ctx := mir_lint_context(^index, ^first)
     checked := [MIRFunction]{}
     loop {
@@ -168,7 +176,8 @@ fn mir_lint_owned_part(index: ^MIRLintIndex, functions: &[MIRFunction], all: Boo
         function := &checked.pop() ?? break
         &functions.push(^function)
     }
-    failures
+    lent := ^ctx.index
+    MIRLintPartResult{index: ^lent, failures: ^failures}
 }
 
 // A broken rule before the function and span are attached.

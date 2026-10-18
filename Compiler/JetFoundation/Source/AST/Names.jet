@@ -18,6 +18,9 @@ struct NameTable {
     // starts where id `n - 1` ends.
     bytes: [U8]
     ends: [Int]
+    // Each id's `name_hash`: a probe compares bytes only against an entry
+    // with the same hash, and a grow never hashes a spelling again.
+    hashes: [Int]
     // Open-addressing slots: 0 is empty, otherwise the id plus one.
     slots: [Int]
     mask: Int
@@ -29,7 +32,7 @@ NAME_TABLE_INITIAL_SLOTS :: 1024
 fn name_table() -> NameTable Never! {
     slots := [Int]{}
     loop _ in 0..<NAME_TABLE_INITIAL_SLOTS -> &slots.push(0)
-    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, slots: slots, mask: NAME_TABLE_INITIAL_SLOTS - 1}
+    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: slots, mask: NAME_TABLE_INITIAL_SLOTS - 1}
     name_intern_bytes(&table, [U8]{}, 0, 0)
     table
 }
@@ -61,7 +64,9 @@ fn name_hash(bytes: [U8], start: Int, end: Int) -> Int Never! {
     Int.from_u32(hash)
 }
 
-fn name_bytes_equal(table: NameTable, id: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
+// Whether id `id` spells `bytes[start..<end]`, whose `name_hash` is `hash`.
+fn name_bytes_equal(table: NameTable, id: Int, hash: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    if table.hashes[id] != hash -> return false
     first :: name_start(table, id)
     if table.ends[id] - first != end - start -> return false
     loop offset in 0..<(end - start) {
@@ -73,15 +78,17 @@ fn name_bytes_equal(table: NameTable, id: Int, bytes: [U8], start: Int, end: Int
 // The id of `bytes[start..<end]`, interning it when it is new. A spelling
 // that is not UTF-8 resolves to "" but keeps its own id.
 fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
-    slot := name_hash(bytes, start, end).bit_and(table.mask)
+    hash :: name_hash(bytes, start, end)
+    slot := hash.bit_and(table.mask)
     loop table.slots[slot] != 0 {
         id :: table.slots[slot] - 1
-        if name_bytes_equal(table, id, bytes, start, end) -> return Name{id: U32{id}}
+        if name_bytes_equal(table, id, hash, bytes, start, end) -> return Name{id: U32{id}}
         slot = (slot + 1).bit_and(table.mask)
     }
     id :: table.texts.len()
     loop index in start..<end -> &table.bytes.push(bytes[index])
     &table.ends.push(table.bytes.len())
+    &table.hashes.push(hash)
     &table.texts.push(String.from_bytes(bytes.slice(start, end)) ?? "")
     table.slots[slot] = id + 1
     if (id + 1) * 2 > table.mask -> name_table_grow(&table)
@@ -91,10 +98,17 @@ fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Na
 // The id of `text` when the table holds it; never interns.
 fn name_find(table: NameTable, text: String) -> Name? Never! {
     bytes :: text.bytes()
-    slot := name_hash(bytes, 0, bytes.len()).bit_and(table.mask)
+    name_find_bytes(table, bytes, 0, bytes.len())
+}
+
+// The id of `bytes[start..<end]` when the table holds that spelling; never
+// interns.
+fn name_find_bytes(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name? Never! {
+    hash :: name_hash(bytes, start, end)
+    slot := hash.bit_and(table.mask)
     loop table.slots[slot] != 0 {
         id :: table.slots[slot] - 1
-        if name_bytes_equal(table, id, bytes, 0, bytes.len()) -> return Val(Name{id: U32{id}})
+        if name_bytes_equal(table, id, hash, bytes, start, end) -> return Val(Name{id: U32{id}})
         slot = (slot + 1).bit_and(table.mask)
     }
     None
@@ -111,7 +125,7 @@ fn name_table_grow(table: &NameTable) Never! {
     slots := [Int]{}
     loop _ in 0..<capacity -> &slots.push(0)
     loop id in 0..<table.texts.len() {
-        slot := name_hash(table.bytes, name_start(table, id), table.ends[id]).bit_and(mask)
+        slot := table.hashes[id].bit_and(mask)
         loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
         slots[slot] = id + 1
     }

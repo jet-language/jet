@@ -397,6 +397,7 @@ fn lower_closure_helper_id(m: &LowerModule, helper: String, index: Int, source: 
     id :: LIRFunctionID{value: m.glue_base + row}
     name :: if source.key == "" -> source.name else -> source.key
     &m.glue.push(LowerGlue{key: name, ty: source.return_type, id: id, clone: false, helper: helper, function: index})
+    lower_keyed_record(&m, LOWER_KEYED_GLUE, row, row_key, U64{0})
     &m.glue_rows.add(row_key, row).drop("checked absent above")
     id
 }

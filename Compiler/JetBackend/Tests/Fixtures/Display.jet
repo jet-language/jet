@@ -299,10 +299,11 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
     program :: fx_runtime_bitcast_module()
     function :: program.functions[0]
     inst :: function.blocks[0].insts[0]
-    if lir_inst_def(inst) == .None || lir_inst_uses(inst).len() != 1 || lir_inst_consumes(inst).len() != 0 {
+    uses :: lir_inst_uses(inst)
+    if lir_inst_def(inst) == .None || uses.len() != 1 || lir_inst_consumes(inst).len() != 0 {
         return false
     }
-    if lir_lint_inst(program, function, inst).len() != 0 -> return false
+    if lir_lint_inst(program, function, inst, uses).len() != 0 -> return false
     if inst == .Bitcast(dst, src) {
         layouts :: [LIRLayout]{
             LIRLayout{size: 4, align: 4, class: .Integer},
@@ -312,29 +313,29 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
         loop layout in layouts {
             bad := function.copy()
             bad.values[src.value].layout = layout
-            if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+            if lir_lint_inst(program, bad, inst, uses).len() == 0 -> return false
             bad = function.copy()
             bad.values[dst.value].layout = layout
-            if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+            if lir_lint_inst(program, bad, inst, uses).len() == 0 -> return false
         }
         // Binary32 <-> Word is admitted; a bitcast is still not a
         // Float32/Float64 conversion or a pointer reinterpretation.
         binary32 :: LIRLayout{size: 4, align: 4, class: .Float}
         cross_float := function.copy()
         cross_float.values[dst.value].layout = binary32
-        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        if lir_lint_inst(program, cross_float, inst, uses).len() == 0 -> return false
         cross_float = function.copy()
         cross_float.values[src.value].layout = binary32
         cross_float.values[dst.value].layout = lir_layout_float()
-        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        if lir_lint_inst(program, cross_float, inst, uses).len() == 0 -> return false
         cross_float.values[dst.value].layout = lir_layout_pointer()
-        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        if lir_lint_inst(program, cross_float, inst, uses).len() == 0 -> return false
         bad := function.copy()
         bad.values[src.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
-        if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        if lir_lint_inst(program, bad, inst, uses).len() == 0 -> return false
         bad = function.copy()
         bad.values[dst.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
-        if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        if lir_lint_inst(program, bad, inst, uses).len() == 0 -> return false
         return true
     }
     false

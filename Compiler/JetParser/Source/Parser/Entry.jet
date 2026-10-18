@@ -9,6 +9,7 @@ use jet_foundation.[
     DiagnosticFixSafety,
     ElseArmSpan,
     Expr,
+    FencedStatement,
     ImportDecl,
     Item,
     Marker,
@@ -45,6 +46,8 @@ use jet_lexer.[
     TOKEN_COLON_COLON,
     TOKEN_DOT,
     TOKEN_EOF,
+    TOKEN_FENCE_CLOSE,
+    TOKEN_FENCE_OPEN,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_COMPTIME,
@@ -114,9 +117,13 @@ fn parse_lexed_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> P
 }
 
 // parse_lexed_with_source on the admitted compiler threads: a large source
-// is cut at top-level item boundaries and its chunks parse at once.
-fn parse_lexed_with_source_threads(lexed: ^Lexed, source: [U8], line_starts: [Int], threads: CompilerThreads) -> ParseResult {
-    parser_parse_lexed_lines_threads(^lexed, source, line_starts, false, threads)
+// is cut at top-level item boundaries and its chunks parse at once. `runs`
+// are the lexer's item runs (`LexedThreads.runs`: `[0, r1, …, tokens.len()]`,
+// each later run starting with the terminator of the item before it and
+// then an item head, delimiters nesting within every run), where the cut
+// scan itself runs in parallel; `[0, tokens.len()]` scans on this thread.
+fn parse_lexed_with_source_threads(lexed: ^Lexed, source: [U8], line_starts: [Int], runs: [Int], threads: CompilerThreads) -> ParseResult {
+    parser_parse_lexed_lines_threads(^lexed, source, line_starts, runs, false, threads)
 }
 
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
@@ -140,20 +147,56 @@ fn parser_parse_lexed_lines(input: ^Lexed, source: [U8], line_starts: [Int], all
     parser_parse_prepared(^prepared, lexed.diagnostics, source_end, line_starts, source, allow_environment_reads, ^lexed.tables)
 }
 
-// parser_parse_lexed_lines on the admitted compiler threads. Fence expansion
-// runs over the whole stream first; the chunk cut (parser_chunk_bounds) then
-// decides whether the stream parses as one or as parallel item runs. A
-// thread spawn can fail, so this entry is fallible like the loader's parse
-// waves that call it.
-fn parser_parse_lexed_lines_threads(input: ^Lexed, source: [U8], line_starts: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
+// parser_parse_lexed_lines on the admitted compiler threads. With one item
+// run, fence expansion runs over the whole stream first and the chunk cut
+// (parser_chunk_bounds) then decides whether the stream parses as one or as
+// parallel item runs. With the lexer's item runs the cut scan runs per run
+// on the threads (parser_chunk_bounds_runs); a stream without fences keeps
+// the lexer's tokens, so the cut it found applies to them, and a stream
+// with fences takes the one-run route. A thread spawn can fail, so this
+// entry is fallible like the loader's parse waves that call it.
+fn parser_parse_lexed_lines_threads(input: ^Lexed, source: [U8], line_starts: [Int], runs: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     lexed := ^input
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     tokens := ^lexed.tokens
-    lexed.tokens = [Token]{}
-    prepared := parser_prepare_tokens(^tokens, &lexed.tables)
-    bounds :: if prepared.diagnostics.len() > 0 -> [Int]{} else -> parser_chunk_bounds(prepared.tokens, lexed.tables, source, threads)
-    if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, lexed.diagnostics, source_end, line_starts, source, allow_environment_reads, ^lexed.tables)
-    parser_parse_chunked(^prepared, bounds, lexed.diagnostics, source_end, line_starts, source, allow_environment_reads, ^lexed.tables)
+    tables := ^lexed.tables
+    diagnostics := ^lexed.diagnostics
+    if runs.len() <= 2 -> return parser_parse_tokens_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+    parser_parse_runs_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, runs, allow_environment_reads, threads)
+}
+
+// The item-run route: the cut scan per run on the threads; a stream with
+// fences takes the one-run route from here.
+fn parser_parse_runs_threads(input: ^[Token], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], runs: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
+    tables := ^tables_input
+    diagnostics := ^lexer_diagnostics
+    scan := parser_chunk_bounds_runs(^input, tables, source, runs, threads)
+    fences :: scan.fences
+    bounds := ^scan.bounds
+    tokens := ^scan.tokens
+    if fences -> return parser_parse_tokens_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+    parser_parse_bounds_threads(^tokens, bounds, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads)
+}
+
+// A fence-free stream with its cut bounds: the lexer's tokens parse as one
+// or as the chunks the bounds name.
+fn parser_parse_bounds_threads(input: ^[Token], bounds: [Int], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
+    tables := ^tables_input
+    diagnostics := ^lexer_diagnostics
+    prepared := ParserFenceExpansion{tokens: ^input, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
+    parser_parse_chunked(^prepared, bounds, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
+}
+
+// The one-run route: fence expansion over the whole stream, then the cut
+// scan on this thread.
+fn parser_parse_tokens_threads(input: ^[Token], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
+    tables := ^tables_input
+    diagnostics := ^lexer_diagnostics
+    prepared := parser_prepare_tokens(^input, &tables)
+    bounds :: if prepared.diagnostics.len() > 0 -> [Int]{} else -> parser_chunk_bounds(prepared.tokens, tables, source, threads)
+    if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
+    parser_parse_chunked(^prepared, bounds, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
 }
 
 fn parser_line_starts(source: [U8]) -> [Int] Never! {
@@ -273,12 +316,37 @@ fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threa
     whole :: [Int]{0, tokens.len()}
     workers :: compiler_threads_admit(threads, tokens.len(), tokens.len(), PARSER_CHUNK_MIN_TOKENS, source.len() * PARSER_CHUNK_SCRATCH_PER_SOURCE_BYTE, 0)
     if workers <= 1 -> return whole
+    scan :: parser_chunk_scan(tokens, source, parser_chunk_file_rules(tables), 0, tokens.len())
+    if scan.whole -> return whole
+    parser_chunk_bounds_of(scan.candidates, tokens.len(), workers)
+}
+
+// The name ids of the file rules (parser_chunk_bounds).
+fn parser_chunk_file_rules(tables: TokenTables) -> [Int] Never! {
     file_rules := [Int]{}
     file_rule_names :: [String]{"PubFile", "PublicFile", "NoPrelude", "HTML", "Html", "Target", "Policy"}
     loop rule in file_rule_names {
         if name_find(tables.names, rule) == .Val(name) -> &file_rules.push(name_index(name))
     }
+    file_rules
+}
+
+// A cut scan of one token range: whether the range keeps the stream whole,
+// whether it holds a fence token, and its cut candidates.
+struct ParserChunkScan {
+    whole: Bool
+    fences: Bool
+    candidates: [Int]
+}
+
+// The cut scan of `tokens[from..<to]` from the state the one-thread scan
+// has at a range that starts the stream or starts an item run (depth 0,
+// no `#` marker ahead, no marker list open): the candidates inside the
+// range, and whether it keeps the stream whole.
+fn parser_chunk_scan(tokens: [Token], source: [U8], file_rules: [Int], from: Int, to: Int) -> ParserChunkScan Never! {
+    whole :: ParserChunkScan{whole: true, fences: true, candidates: [Int]{}}
     candidates := [Int]{}
+    fences := false
     depth := 0
     // The previous code token's kind (-1 at the start).
     previous := -1
@@ -290,9 +358,10 @@ fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threa
     hash_ahead := false
     // Inside a top-level `#[ … ]` marker list.
     marker_list := false
-    loop index in 0..<tokens.len() {
+    loop index in from..<to {
         kind :: tokens[index].kind
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> next
+        if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE -> fences = true
         if kind == TOKEN_SEMI {
             if tokens[index].span.start < tokens[index].span.end -> return whole
             if closed_item -> terminated = true
@@ -326,18 +395,136 @@ fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threa
         }
         previous = kind
     }
-    if depth != 0 || candidates.len() == 0 -> return whole
-    // Cut at the first candidate at or past each equal share of the tokens.
+    if depth != 0 -> return whole
+    ParserChunkScan{whole: false, fences: fences, candidates: ^candidates}
+}
+
+// The chunk bounds over `candidates` (ascending token indexes): a cut at the
+// first candidate at or past each equal share of the tokens.
+fn parser_chunk_bounds_of(candidates: [Int], count: Int, workers: Int) -> [Int] Never! {
+    if candidates.len() == 0 -> return [Int]{0, count}
     bounds := [Int]{0}
     candidate := 0
     loop share in 1..<workers {
-        target :: share * tokens.len() /% workers
+        target :: share * count /% workers
         loop candidate < candidates.len() && candidates[candidate] < target -> candidate += 1
         if candidate >= candidates.len() -> break
         if candidates[candidate] > bounds[bounds.len() - 1] -> &bounds.push(candidates[candidate])
     }
-    &bounds.push(tokens.len())
+    &bounds.push(count)
     bounds
+}
+
+// The cut and fence facts of the whole stream, scanned per lexer item run
+// on the threads.
+struct ParserRunBounds {
+    tokens: [Token]
+    bounds: [Int]
+    fences: Bool
+}
+
+// What every run scan thread reads.
+struct ParserRunShared {
+    tokens: [[Token]]
+    source: [U8]
+    file_rules: [Int]
+}
+
+// One thread's item runs `runs[start..<end]` and, after the scan, its one
+// output row.
+struct ParserRunPart {
+    start: Int
+    end: Int
+    outputs: [ParserChunkScan]
+}
+
+// parser_chunk_bounds over the lexer's item runs: the cut scan of each run
+// starts from the one-thread scan's state at a run start (the run's first
+// token is the terminator after a depth-0 `}`, so the scan there has depth
+// 0 and no marker ahead; only `terminated` differs, which decides exactly
+// the run's head token — a candidate by the lexer's cut rule, added here).
+// The runs' candidates join in run order and any run that keeps the stream
+// whole keeps it whole. The tokens move through the shared inputs and come
+// back unchanged.
+fn parser_chunk_bounds_runs(input: ^[Token], tables: TokenTables, source: [U8], runs: [Int], threads: CompilerThreads) -> ParserRunBounds {
+    tokens := ^input
+    count :: tokens.len()
+    workers :: compiler_threads_admit(threads, count, count, PARSER_CHUNK_MIN_TOKENS, source.len() * PARSER_CHUNK_SCRATCH_PER_SOURCE_BYTE, 0)
+    run_count :: runs.len() - 1
+    scanners :: if workers < run_count -> workers else -> run_count
+    if scanners <= 1 {
+        scan :: parser_chunk_scan(tokens, source, parser_chunk_file_rules(tables), 0, count)
+        bounds :: if scan.whole || workers <= 1 -> [Int]{0, count} else -> parser_chunk_bounds_of(scan.candidates, count, workers)
+        return ParserRunBounds{tokens: ^tokens, bounds: bounds, fences: scan.fences}
+    }
+    inputs :: shared ParserRunShared{tokens: [[Token]]{^tokens}, source: source, file_rules: parser_chunk_file_rules(tables)}
+    parts := [Shared<ParserRunPart>]{}
+    loop part in 0..<scanners -> &parts.push(shared ParserRunPart{start: part * run_count /% scanners, end: (part + 1) * run_count /% scanners, outputs: [ParserChunkScan]{}})
+    _ := parser_scan_run_parts(inputs, parts, runs, 0)
+    whole := false
+    fences := false
+    candidates := [Int]{}
+    loop part in parts {
+        output := parser_run_part_take(part)
+        if output.whole -> whole = true
+        if output.fences -> fences = true
+        compiler_transfer_rows<Int>(&candidates, &output.candidates)
+    }
+    returned := parser_run_shared_take(inputs)
+    bounds :: if whole -> [Int]{0, count} else -> parser_chunk_bounds_of(candidates, count, workers)
+    ParserRunBounds{tokens: ^returned, bounds: bounds, fences: fences}
+}
+
+// The token stream, back from the shared inputs after the join.
+fn parser_run_shared_take(inputs: Shared<ParserRunShared>) -> [Token] {
+    permit :: inputs.guard_edit()
+    &permit.value.tokens.pop() ?? panic("the run scan token stream left the shared inputs")
+}
+
+// A part's output row, after its thread joined.
+fn parser_run_part_take(part: Shared<ParserRunPart>) -> ParserChunkScan {
+    permit :: part.guard_edit()
+    &permit.value.outputs.pop() ?? panic("a run scan thread left no output")
+}
+
+// Scans `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts scanned.
+fn parser_scan_run_parts(inputs: Shared<ParserRunShared>, parts: [Shared<ParserRunPart>], runs: [Int], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return parser_scan_run_part(inputs, parts[from], runs)
+    scanned := 0
+    task.group parser_run_scan_threads {
+        head :: task parser_scan_run_part(inputs, parts[from], runs)
+        scanned = parser_scan_run_parts(inputs, parts, runs, from + 1)
+        scanned += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    scanned
+}
+
+// One thread: the cut scan of its runs, each run's head token first (a
+// later run starts with the synthetic terminator and then the head; a run
+// that does not keeps the stream whole, as the one-thread scan's state at
+// it is then unknown).
+fn parser_scan_run_part(inputs: Shared<ParserRunShared>, part: Shared<ParserRunPart>, runs: [Int]) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    whole := false
+    fences := false
+    candidates := [Int]{}
+    loop run in permit.value.start..<permit.value.end {
+        from :: runs[run]
+        to :: runs[run + 1]
+        if run > 0 {
+            head :: from + 1
+            if head >= to || reads.value.tokens[0][from].kind != TOKEN_SEMI || reads.value.tokens[0][from].span.start < reads.value.tokens[0][from].span.end || !parser_chunk_head_kind(reads.value.tokens[0][head].kind) -> whole = true
+            &candidates.push(head)
+        }
+        scan := parser_chunk_scan(reads.value.tokens[0], reads.value.source, reads.value.file_rules, from, to)
+        if scan.whole -> whole = true
+        if scan.fences -> fences = true
+        compiler_transfer_rows<Int>(&candidates, &scan.candidates)
+    }
+    &permit.value.outputs.push(ParserChunkScan{whole: whole, fences: fences, candidates: ^candidates})
+    1
 }
 
 // Parses the fence-expanded stream as the chunks `bounds` names, on one

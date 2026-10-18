@@ -43,16 +43,19 @@ fn opt_cse_lookup(function: LIRFunction, available: [LIRInst], inst: LIRInst, ds
     None
 }
 
-fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
-    function := original
-    dom :: opt_dominators(function)
-    aliases := opt_facts(function.values.len())
+// The function moves through: an instruction CSE replaces leaves its block
+// (with its line) and the rest stay where they are; unchanged, the body
+// comes back as it was.
+fn lir_cse_function(function: ^LIRFunction) -> LIRFunction Never! {
+    owned := ^function
+    dom :: opt_dominators(owned)
+    aliases := opt_facts(owned.values.len())
     consumed := [Bool]{}
-    loop _ in function.values -> &consumed.push(false)
+    loop _ in owned.values -> &consumed.push(false)
     // Aliasing either a consumed result or a result to a consumed value can
     // extend/merge ownership lifetimes. Refuse all such results, even when the
     // consume is in another block. Nontrivial loads likewise cannot be shared.
-    loop block in function.blocks {
+    loop block in owned.blocks {
         loop inst in block.insts {
             loop value in lir_inst_consumes(inst) -> consumed[value.value] = true
         }
@@ -61,7 +64,7 @@ fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
     undo := [String]{}
     count := 0
     marks := [Int]{}
-    loop _ in function.blocks -> &marks.push(0)
+    loop _ in owned.blocks -> &marks.push(0)
     changed := false
     loop event in opt_dom_events(dom) {
         if event < 0 {
@@ -75,62 +78,68 @@ fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
         row :: event
         marks[row] = count
         loads := [LIRInst]{}
-        insts := [LIRInst]{}
-        lines := [Int]{}
-        loop (index, original_inst) in function.blocks[row].insts {
-            inst :: opt_rename_inst(aliases, original_inst)
-            pure :: opt_cse_pure(inst)
-            load := false
-            if inst == .Load(_, _, _) -> load = true
+        // Unknown source positions stay zero (opt_debug_line).
+        lined :: owned.blocks[row].lines.len() == owned.blocks[row].insts.len() + 1
+        at := 0
+        loop at < owned.blocks[row].insts.len() {
+            _ := opt_rename_slot(aliases, &owned.blocks[row].insts, at)
             replaced := false
-            if pure || load {
-                if lir_inst_def(inst) == .Val(dst) {
-                    if !consumed[dst.value] && function.values[dst.value].drop == .Trivial {
-                        if load {
-                            if opt_cse_lookup(function, loads, inst, dst) == .Val(value) {
-                                aliases.alias[dst.value] = value.value
-                                replaced = true
-                            } else {
-                                &loads.push(inst)
-                            }
-                        } else {
-                            key :: opt_cse_key(function, inst, dst)
-                            candidate :: available.get(key) ?? -1
-                            if candidate >= 0 {
-                                aliases.alias[dst.value] = candidate
-                                replaced = true
-                            } else {
-                                if available.get(key) == None -> &available.add(key, dst.value).drop("key checked absent")
-                                else -> available[key] = dst.value
-                                if count < undo.len() -> undo[count] = key else -> &undo.push(key)
-                                count += 1
-                            }
-                        }
-                        if replaced -> changed = true
+            if opt_cse_candidate(owned, consumed, owned.blocks[row].insts[at]) == .Val(dst) {
+                if owned.blocks[row].insts[at] == .Load(_, _, _) {
+                    if opt_cse_lookup(owned, loads, owned.blocks[row].insts[at], dst) == .Val(value) {
+                        aliases.alias[dst.value] = value.value
+                        replaced = true
+                    } else {
+                        &loads.push(owned.blocks[row].insts[at])
+                    }
+                } else {
+                    key :: opt_cse_key(owned, owned.blocks[row].insts[at], dst)
+                    candidate :: available.get(key) ?? -1
+                    if candidate >= 0 {
+                        aliases.alias[dst.value] = candidate
+                        replaced = true
+                    } else {
+                        if available.get(key) == None -> &available.add(key, dst.value).drop("key checked absent")
+                        else -> available[key] = dst.value
+                        if count < undo.len() -> undo[count] = key else -> &undo.push(key)
+                        count += 1
                     }
                 }
             }
-            if !replaced {
-                &insts.push(inst)
-                &lines.push(opt_debug_line(function.blocks[row], index))
-            }
             // New effectful variants must join this barrier (as well as the
             // exhaustive LIR helper matches).
-            if inst == {
+            if owned.blocks[row].insts[at] == {
                 .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) | .Reown(_, _) -> { loads = [LIRInst]{} }
                 else -> {}
             }
+            if !replaced {
+                at += 1
+                next
+            }
+            changed = true
+            _ := &owned.blocks[row].insts.remove(at, .Slot)
+            if lined -> _ := &owned.blocks[row].lines.remove(at, .Slot)
         }
-        &lines.push(opt_debug_line(function.blocks[row], function.blocks[row].insts.len()))
-        function.blocks[row].lines = lines
-        function.blocks[row].insts = insts
-        function.blocks[row].terminator = opt_rename_terminator(aliases, function.blocks[row].terminator)
+        if !lined {
+            owned.blocks[row].lines = [Int]{}
+            loop _ in 0..<(owned.blocks[row].insts.len() + 1) -> &owned.blocks[row].lines.push(0)
+        }
+        _ := opt_rename_terminator_slot(aliases, &owned.blocks[row])
     }
-    // copy: the CSE result is a new owned LIRFunction. Unchanged, it equals `original`, the
-    // caller's function (a read parameter; the optimizer chain and the CSE fixtures still read it).
-    if !changed -> return original.copy()
+    if !changed -> return owned
     // Storage order need not match dominance order. Rename every edge/use,
     // including unreachable storage rows, before removing undefined aliases.
-    opt_rename_all(&function, aliases)
-    opt_compact(function)
+    opt_rename_all(&owned, aliases)
+    opt_compact(^owned)
+}
+
+// The result CSE may share: that of a pure instruction or a Load whose result
+// is a trivial word nothing consumes; None for any other instruction.
+fn opt_cse_candidate(function: LIRFunction, consumed: [Bool], inst: LIRInst) -> LIRValueID? {
+    load := false
+    if inst == .Load(_, _, _) -> load = true
+    if !opt_cse_pure(inst) && !load -> return None
+    dst :: lir_inst_def(inst) ?? return None
+    if consumed[dst.value] || function.values[dst.value].drop != .Trivial -> return None
+    Val(dst)
 }

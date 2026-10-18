@@ -8,7 +8,7 @@
 // inline aggregate stored in one is its bytes, not a further box. Recursive
 // edges stay boxed through the one-value wrapper.
 use jet_foundation.[
-    MIRAccess, MIRBlockID, MIRFieldID, MIRFunction, MIRFunctionID, MIRProgram, MIRType, MIRTypeDef, MIRTypeKind,
+    MIRAccess, MIRBlockID, MIRFieldID, MIRFunction, MIRFunctionID, MIRProgram, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind,
     MIRVariant, mir_field_id, mir_type_from_kind, mir_type_identity_key, mir_type_same_checked_type,
 ]
 
@@ -52,12 +52,20 @@ fn lower_packed_storage_type(p: MIRProgram, ty: MIRType) -> MIRType? {
         .Float32 -> Val(ty)
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> lower_packed_storage_type(p, inner)
         else -> {
+            // The declaration is read in place; only an instantiated
+            // (generic) definition is materialized.
+            row :: lower_type_def_row(p, ty)
+            if row >= 0 -> return lower_packed_storage_declared(p, p.types[row].kind)
             definition :: lower_type_def(p, ty) ?? return None
-            if definition.kind == {
-                .Distinct(inner, _) | .Alias(inner) -> lower_packed_storage_type(p, inner)
-                else -> None
-            }
+            lower_packed_storage_declared(p, definition.kind)
         }
+    }
+}
+
+fn lower_packed_storage_declared(p: MIRProgram, kind: MIRTypeDefKind) -> MIRType? {
+    if kind == {
+        .Distinct(inner, _) | .Alias(inner) -> lower_packed_storage_type(p, inner)
+        else -> None
     }
 }
 
@@ -81,6 +89,8 @@ fn lower_size(p: MIRProgram, ty: MIRType) -> LowerSize Never! {
 // nesting depth. lower_size is a pure function of (program, type), so a
 // remembered size is the one it would compute.
 fn lower_size_in(p: MIRProgram, ty: MIRType, sizes: &[String:LowerSize]) -> LowerSize Never! {
+    // A scalar's size is read off its kind faster than its key is spelled.
+    if ty.kind == .Int | .Float | .Bool | .Char | .String | .Float32 | .IntN(_, _) -> return lower_size_compute(p, ty, &sizes)
     key :: lower_repr_key(ty)
     if key == .Val(known_key) {
         if sizes.get(known_key) == .Val(known) -> return known
@@ -136,10 +146,21 @@ fn lower_inline_member_rows(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! 
     if ty.kind == .Tuple(fields) {
         identity :: mir_type_identity_key(ty)
         loop row in fields -> &rows.push(LowerMember{id: mir_field_id("{identity}::{row.name}"), name: row.name, offset: 0, ty: row.ty, boxed: false})
-    } else if lower_type_def(p, ty) == .Val(definition) {
-        if definition.kind == .Struct(fields, _) {
-            loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, row.name)})
-        }
+        return rows
+    }
+    // The declaration is read in place; only an instantiated (generic)
+    // definition is materialized.
+    definition_row :: lower_type_def_row(p, ty)
+    if definition_row >= 0 -> return lower_inline_member_rows_of(p.types[definition_row])
+    definition :: lower_type_def(p, ty) ?? return rows
+    lower_inline_member_rows_of(definition)
+}
+
+// lower_inline_member_rows of a struct declaration (none for other kinds).
+fn lower_inline_member_rows_of(definition: MIRTypeDef) -> [LowerMember] Never! {
+    rows := [LowerMember]{}
+    if definition.kind == .Struct(fields, _) {
+        loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, row.name)})
     }
     rows
 }
