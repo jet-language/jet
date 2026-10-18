@@ -67,7 +67,9 @@ fn consume(graph: ^Graph) -> Int {
 
 fn consumed(env: Env) -> Int {
     graph :: env.graph ?? return 0
-    consume(^graph)
+    // `graph` reads `env.graph` through a view (`env` is a read parameter), so the
+    // consumer gets an explicit copy; `^graph` would be E0201.
+    consume(graph.copy())
 }
 
 fn count_names(names: [String]) -> Int {
