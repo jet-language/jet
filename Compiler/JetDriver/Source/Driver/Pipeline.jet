@@ -3132,6 +3132,10 @@ fn jet_driver_comptime_grow(
     if counters.track_keys {
         loop function in new_functions -> counters.lowered_keys["{function.module_identity}\n{function.key}"] = true
     }
+    // A growth that brings global `shared` constant sites (closure rows the
+    // own/union build merges, Codegen Functions.jet) does not fit the live
+    // program: fall back to the union/own build, as a non-fitting growth does.
+    if grown.constants.len() > 0 -> return false
     ids := [U64:Bool]{}
     keys := [String:Bool]{}
     if !jet_driver_comptime_growth_functions_fit(live, grown.functions, &ids, &keys) -> return false
