@@ -502,12 +502,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     lower_selected_in_place(&lowered_program, roots, wrap_entry, shared_sites_dynamic, native_pack, imports, c_exports, test_serial, checks, ^runtime_intrinsics, keep_going, comptime_budget, sentry, compiler_threads_single())
 }
 
-// lower_selected over `program` in place: preparation and body lowering
-// resolve type definitions through the type index attached to `program`
-// (lower_attach_type_index); every other read sees the program as the
-// caller handed it, and the caller gets it back unchanged. The function
-// bodies lower on the threads `threads` admits for their size
-// (lower_workers_lower); the result is the same for any thread count.
+// lower_selected over `program` in place: every type lookup of the lowering
+// (preparation, bodies, glue, helpers and entry wrappers) resolves through
+// the type index attached to `program` (lower_attach_type_index; the index
+// answers exactly what a scan of `types` answers, lower_type_row), and the
+// caller gets the program back unchanged. The function bodies lower on the
+// threads `threads` admits for their size (lower_workers_lower); the result
+// is the same for any thread count.
 fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, native_pack: Bool, imports: [String], c_exports: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic], keep_going: Bool, comptime_budget: Bool, sentry: Bool, threads: CompilerThreads) -> LIRLowering Never! {
     test_indices := [U64:Int]{}
     test_issues := [LIRLoweringIssue]{}
@@ -528,9 +529,10 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     }
     all_roots := roots.copy()
     loop check in checks -> &all_roots.push(check.function)
-    // Preparation and body lowering resolve type definitions through the
-    // type index, attached to the program itself instead of to a copy of
-    // it; the caller's own index rows come back after body lowering.
+    // Preparation, body, glue and entry lowering resolve type definitions
+    // through the type index, attached to the program itself instead of to
+    // a copy of it (lower_type_row: the index answers exactly what a scan of
+    // `types` answers); the caller's own index rows come back at the end.
     caller_id_rows :: program.type_id_rows.copy()
     caller_key_rows :: program.type_key_rows.copy()
     lower_attach_type_index(&program)
@@ -540,11 +542,8 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     loop artifact in program.artifacts {
         if artifact.kind == .TestExecutable || artifact.kind == .TestOverride -> test_harness = true
     }
-    // The stop-point scans read the program without its index, as before.
-    lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
     stop_points :: lower_has_stop_points(program, prepared.functions)
     task_stop_points :: lower_task_stop_program(program, prepared.functions)
-    lower_attach_type_index(&program)
     m := LowerModule{
         signatures: [LIRSignature]{},
         test_harness: test_harness,
@@ -634,8 +633,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
             &functions.push(function)
         }
     }
-    // Glue, helpers and entry wrappers read the program as the caller handed it.
-    lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
+    // Glue, helpers and entry wrappers resolve types through the same index.
     glue_inputs :: shared LowerGlueInputs{programs: ^glue_programs}
     if !shared_sites_dynamic {
         loop definition in program.constants {
@@ -777,6 +775,8 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
             }
         }
     }
+    // The caller gets its program back as it came.
+    lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
     lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy(), debug: LIRModuleDebug{directory: "", files: m.debug_files.copy(), types: m.debug_types.copy()}}
     issues := m.issues.copy()
     if issues.len() > 0 && !keep_going {
@@ -1098,11 +1098,16 @@ fn lower_type_row(p: MIRProgram, name: MIRNominalRef, identity: MIRTypeID?) -> I
     }
     best := p.type_id_rows.get(name.id.value) ?? -1
     by_key :: p.type_key_rows.get(name.name) ?? -1
-    if by_key >= 0 && (best < 0 || by_key < best) -> best = by_key
+    // The key row joins the first-match choice only when it is an exact key
+    // match; a bare-name row (lower_attach_type_index) is the scan's
+    // fallback, taken only when no row matches by id, key or identity.
+    exact :: by_key >= 0 && p.types[by_key].key == name.name
+    if exact && (best < 0 || by_key < best) -> best = by_key
     if identity == .Val(id) {
         by_identity :: p.type_id_rows.get(id.value) ?? -1
         if by_identity >= 0 && (best < 0 || by_identity < best) -> best = by_identity
     }
+    if best < 0 && !exact -> best = by_key
     best
 }
 
