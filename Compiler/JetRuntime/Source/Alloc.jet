@@ -6,7 +6,7 @@
 // (Thread.jet thread_detached_base): it always reads zero, so thread_base()
 // yields 0 on a thread that has no TCB and the allocator takes its locked
 // path there. Word 208 holds the table of the 32 arenas (216 bytes each:
-// [lock 0][8 available-slab heads 8..64][8 retained-empty-slab addresses
+// [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
 // 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
 // the large-block cache owns lock 216, cached bytes 224 and 59 class heads
 // from 256.
@@ -40,8 +40,9 @@
 // each arena's slab metadata is protected by that arena's futex lock
 // (alloc_lock: a short spin, then a kernel sleep), so threads on different
 // stacks rarely contend and a waiter never burns a core. Payloads belong exclusively to
-// their callers. At most one empty slab per class and arena is retained to
-// avoid mmap/munmap on every temporary; additional empty slabs are unmapped
+// their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per class and
+// arena stay linked to avoid mmap/munmap on every temporary; additional empty
+// slabs are unmapped
 // immediately. Large mappings are rounded to a size class (at most 25% over
 // the page-rounded need) and a freed one is kept on its class list while the
 // cache holds at most 64 MiB in all (resident pages a compiler keeps, so the
@@ -287,16 +288,25 @@ fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
     slab
 }
 
+// Empty slabs a class keeps linked per arena, so a burst of temporaries
+// (a thread's cache drains 32 blocks at a time) does not unmap a slab it
+// maps again moments later: at most 8 x 64 KiB per class and arena.
+ALLOC_RETAINED_EMPTY_SLABS :: prep { I64{8} }
+
 // Take up to `limit` free blocks of the class's head slab under the held
 // arena lock and thread them, as [next][slab], onto the cache row `row`
 // ([head][count]); returns how many were taken: zero only when no slab can
 // be mapped. The blocks count as live in the slab; the arena's live total
-// grows with them; a retained-empty slab leaves its cell; an emptied slab is
-// unlinked.
+// grows with them; a retained-empty slab leaves the class's retained count
+// (a fresh slab was never counted); an emptied slab is unlinked.
 fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64 {
-    #Unsafe("the held arena lock protects the class list, the slab's free links and live count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them") {
+    #Unsafe("the held arena lock protects the class list, the slab's free links and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them") {
         slab := os_load_i64(head)
-        if (slab == I64{0}) { slab = alloc_new_slab(root, head, slot) }
+        fresh := false
+        if (slab == I64{0}) {
+            slab = alloc_new_slab(root, head, slot)
+            fresh = true
+        }
         if (slab == I64{0}) { return I64{0} }
         free := os_load_i64(wrapping(slab + I64{16}))
         list := os_load_i64(row)
@@ -313,7 +323,10 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) + taken))
         os_store_i64(wrapping(slab + I64{16}), free)
         live :: os_load_i64(wrapping(slab + I64{24}))
-        if (live == I64{0}) { os_store_i64(wrapping(head + I64{64}), I64{0}) }
+        if (live == I64{0} && !fresh) {
+            retained :: wrapping(head + I64{64})
+            os_store_i64(retained, wrapping(os_load_i64(retained) - I64{1}))
+        }
         os_store_i64(wrapping(slab + I64{24}), wrapping(live + taken))
         total :: wrapping(head + I64{128})
         os_store_i64(total, wrapping(os_load_i64(total) + taken))
@@ -324,9 +337,10 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
 
 // Return one block to its slab. Caller holds the slab's arena lock. The slab
 // is linked again when its free list was empty; a slab whose last block
-// returns is retained as the class's one empty slab or unmapped.
+// returns stays linked as one of the class's retained empty slabs
+// (ALLOC_RETAINED_EMPTY_SLABS) or is unmapped.
 fn alloc_slab_return(slab: I64, block: I64) {
-    #Unsafe("the held arena lock protects the slab's free links, live count, class list and live total; the block is no longer any payload or cache entry") {
+    #Unsafe("the held arena lock protects the slab's free links, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
         free :: os_load_i64(wrapping(slab + I64{16}))
         live :: wrapping(os_load_i64(wrapping(slab + I64{24})) - I64{1})
         os_store_i64(block, free)
@@ -337,8 +351,9 @@ fn alloc_slab_return(slab: I64, block: I64) {
         os_store_i64(total, wrapping(os_load_i64(total) - I64{1}))
         if (free == I64{0}) { alloc_link(slab, head) }
         if (live == I64{0}) {
-            empty_cell :: wrapping(head + I64{64})
-            if (os_load_i64(empty_cell) == I64{0}) { os_store_i64(empty_cell, slab) } else {
+            retained :: wrapping(head + I64{64})
+            count :: os_load_i64(retained)
+            if (count < ALLOC_RETAINED_EMPTY_SLABS) { os_store_i64(retained, wrapping(count + I64{1})) } else {
                 alloc_unlink(slab)
                 alloc_unmap(slab, I64{65536})
             }
