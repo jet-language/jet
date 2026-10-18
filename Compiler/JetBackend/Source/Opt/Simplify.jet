@@ -482,19 +482,37 @@ fn opt_outside_uses(function: LIRFunction) -> [Bool] Never! {
     loop (index, block) in function.blocks {
         loop param in block.params -> owner[param.value] = index
     }
+    operands := [LIRValueID]{}
     loop (index, block) in function.blocks {
         loop inst in block.insts {
-            loop used in lir_inst_uses(inst) { if owner[used.value] != index -> outside[used.value] = true }
+            lir_inst_uses_into(inst, &operands)
+            loop used in operands { if owner[used.value] != index -> outside[used.value] = true }
         }
-        loop used in lir_terminator_uses(block.terminator) { if owner[used.value] != index -> outside[used.value] = true }
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop used in operands { if owner[used.value] != index -> outside[used.value] = true }
     }
     outside
 }
 
+// Whether any edge of `function` can thread: a block after the entry with
+// no instructions that jumps on to another block (opt_thread_target's
+// shape tests before the parameter escape test).
+fn opt_has_hop(function: LIRFunction) -> Bool Never! {
+    loop (row, block) in function.blocks {
+        if row == 0 || block.insts.len() != 0 -> next
+        if block.terminator == .Jump(onward) {
+            if onward.block != block.id -> return true
+        }
+    }
+    false
+}
+
 // Threads every block's edges, reading the function as it was before this
 // pass (a hop threaded earlier in the pass is still read as the hop), then
-// writes the changed terminators back in place.
+// writes the changed terminators back in place. With no hop in the
+// function no edge changes, and the use scan is skipped.
 fn opt_thread(function: &LIRFunction) -> Bool Never! {
+    if !opt_has_hop(function) -> return false
     rows :: opt_block_rows(function)
     outside :: opt_outside_uses(function)
     threaded_rows := [Int]{}
@@ -610,10 +628,12 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
     defs :: opt_defs(function)
     loop param in function.blocks[0].params -> live[param.value] = true
     pending := [Int]{}
+    operands := [LIRValueID]{}
     loop block in function.blocks {
         loop inst in block.insts {
             if opt_inst_has_effect(inst) {
-                loop used in lir_inst_uses(inst) {
+                lir_inst_uses_into(inst, &operands)
+                loop used in operands {
                     if !live[used.value] {
                         live[used.value] = true
                         &pending.push(used.value)
@@ -666,7 +686,8 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
         value :: pending[cursor].copy()
         cursor += 1
         if defs.insts[value] == .Val(definition) {
-            loop used in lir_inst_uses(definition) {
+            lir_inst_uses_into(definition, &operands)
+            loop used in operands {
                 if !live[used.value] {
                     live[used.value] = true
                     &pending.push(used.value)
@@ -876,11 +897,11 @@ fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
     }
     // A sweep that removed a definition renamed only the uses after it, and
     // merging adds aliases: rename every use once more (renaming alone creates
-    // no aliases and folds no branch) before liveness.
+    // no aliases and folds no branch) before liveness. One dead-code pass is
+    // the fixed point: its live set is the closure over the kept effects,
+    // definitions and edges, which the removal leaves whole.
     opt_rename_all(&function, facts)
-    loop _ in 0..<OPT_SIMPLIFY_ROUNDS {
-        if !opt_dead_code(&function) -> break
-    }
+    _ := opt_dead_code(&function)
     opt_compact(function)
 }
 

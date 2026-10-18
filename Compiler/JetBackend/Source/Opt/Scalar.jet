@@ -11,8 +11,10 @@ fn opt_scalar_field(fields: [OptScalarField], offset: Int) -> Int Never! {
 
 fn opt_scalar_fields(function: LIRFunction, slot: LIRValueID, size: Int, dom: OptDominators) -> [OptScalarField]? {
     fields := [OptScalarField]{}
+    operands := [LIRValueID]{}
     loop (row, block) in function.blocks {
-        loop operand in lir_terminator_uses(block.terminator) { if operand == slot -> return None }
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop operand in operands { if operand == slot -> return None }
         loop inst in block.insts {
             offset := -1
             value := LIRValueID{value: -1}
@@ -30,7 +32,10 @@ fn opt_scalar_fields(function: LIRFunction, slot: LIRValueID, size: Int, dom: Op
                         value = src
                     }
                 }
-                else -> { loop operand in lir_inst_uses(inst) { if operand == slot -> return None } }
+                else -> {
+                    lir_inst_uses_into(inst, &operands)
+                    loop operand in operands { if operand == slot -> return None }
+                }
             }
             if value.value >= 0 {
                 if dom.parent[row] < 0 -> return None

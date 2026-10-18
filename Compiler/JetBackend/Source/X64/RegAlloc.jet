@@ -167,6 +167,7 @@ fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
         &folds.addresses.push(None)
         &folds.skipped.push(false)
     }
+    operands := [LIRValueID]{}
     loop (row, block) in function.blocks {
         loop param in block.params -> def_blocks[param.value] = row
         loop inst in block.insts {
@@ -178,9 +179,11 @@ fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
                 }
                 def_blocks[dst.value] = row
             }
-            loop used in lir_inst_uses(inst) -> uses[used.value] = uses[used.value] + 1
+            lir_inst_uses_into(inst, &operands)
+            loop used in operands -> uses[used.value] = uses[used.value] + 1
         }
-        loop used in lir_terminator_uses(block.terminator) -> uses[used.value] = uses[used.value] + 1
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop used in operands -> uses[used.value] = uses[used.value] + 1
     }
     loop (row, block) in function.blocks {
         loop inst in block.insts {
@@ -191,13 +194,15 @@ fn x64_address_folds(function: LIRFunction) -> X64AddressFolds Never! {
                 }
                 else -> {}
             }
-            loop used in lir_inst_uses(inst) {
+            lir_inst_uses_into(inst, &operands)
+            loop used in operands {
                 if inst == .Load(_, base, _) && used == base -> next
                 if inst == .Store(base, _, value) && used == base && used != value -> next
                 memory_only[used.value] = false
             }
         }
-        loop used in lir_terminator_uses(block.terminator) -> memory_only[used.value] = false
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop used in operands -> memory_only[used.value] = false
     }
     loop block in function.blocks {
         // Last matching overflow use in this block. LEA may not replace an
@@ -246,25 +251,43 @@ fn x64_selected_def(inst: LIRInst, folds: X64AddressFolds) -> LIRValueID? Never!
     dst
 }
 
-fn x64_selected_uses(inst: LIRInst, folds: X64AddressFolds) -> [LIRValueID] Never! {
-    if lir_inst_def(inst) == .Val(dst) && folds.skipped[dst.value] -> return [LIRValueID]{}
+// The values `inst` reads as selected, into `uses` (cleared first): none
+// for an instruction a fold eliminates, the folded address's inputs for a
+// memory operand it replaces, else the LIR operands.
+fn x64_selected_uses_into(inst: LIRInst, folds: X64AddressFolds, uses: &[LIRValueID]) Never! {
+    if lir_inst_def(inst) == .Val(dst) && folds.skipped[dst.value] {
+        &uses.clear()
+        return
+    }
     if inst == {
         .Load(_, base, _) -> {
-            if folds.addresses[base.value] == .Val(address) -> return x64_address_inputs(address)
+            if folds.addresses[base.value] == .Val(address) {
+                x64_address_inputs_into(address, &uses)
+                return
+            }
         }
         .Store(base, _, value) -> {
             if folds.addresses[base.value] == .Val(address) {
-                values := x64_address_inputs(address)
-                &values.push(value)
-                return values
+                x64_address_inputs_into(address, &uses)
+                &uses.push(value)
+                return
             }
         }
         .Binary(dst, _, _, _) -> {
-            if folds.addresses[dst.value] == .Val(address) -> return x64_address_inputs(address)
+            if folds.addresses[dst.value] == .Val(address) {
+                x64_address_inputs_into(address, &uses)
+                return
+            }
         }
         else -> {}
     }
-    lir_inst_uses(inst)
+    lir_inst_uses_into(inst, &uses)
+}
+
+fn x64_address_inputs_into(address: X64Address, uses: &[LIRValueID]) Never! {
+    &uses.clear()
+    &uses.push(address.base)
+    if address.index == .Val(index) -> &uses.push(index)
 }
 
 // An exact Int's drop and clone (jet_rt_int_drop / jet_rt_int_clone) are
@@ -354,6 +377,7 @@ fn x64_liveness(function: LIRFunction, folds: X64AddressFolds) -> X64Liveness Ne
     gens := [[Int]]{}
     kills := [[Int]]{}
     successors := [[Int]]{}
+    operands := [LIRValueID]{}
     loop block in function.blocks {
         epoch += 1
         defined := [Int]{}
@@ -363,7 +387,8 @@ fn x64_liveness(function: LIRFunction, folds: X64AddressFolds) -> X64Liveness Ne
             &defined.push(param.value)
         }
         loop inst in block.insts {
-            loop used in x64_selected_uses(inst, folds) {
+            x64_selected_uses_into(inst, folds, &operands)
+            loop used in operands {
                 if defined_marks[used.value] != epoch && seen_marks[used.value] != epoch {
                     seen_marks[used.value] = epoch
                     &gen.push(used.value)
@@ -374,7 +399,8 @@ fn x64_liveness(function: LIRFunction, folds: X64AddressFolds) -> X64Liveness Ne
                 &defined.push(dst.value)
             }
         }
-        loop used in lir_terminator_uses(block.terminator) {
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop used in operands {
             if defined_marks[used.value] != epoch && seen_marks[used.value] != epoch {
                 seen_marks[used.value] = epoch
                 &gen.push(used.value)
@@ -845,6 +871,7 @@ fn x64_segments(function: LIRFunction, folds: X64AddressFolds, liveness: X64Live
     }
     calls := [Int]{}
     position := 0
+    operands := [LIRValueID]{}
     loop (block_index, block) in function.blocks {
         mark :: block_index + 1
         first :: segments.build.values.len()
@@ -853,11 +880,13 @@ fn x64_segments(function: LIRFunction, folds: X64AddressFolds, liveness: X64Live
         &segments.block_entries.push(segments.build.values.len() - first)
         position += 1
         loop inst in block.insts {
-            x64_touch_inst(&segments, folds, inst, mark, position)
+            x64_selected_uses_into(inst, folds, &operands)
+            x64_touch_inst(&segments, folds, inst, operands, mark, position)
             if x64_inst_is_call(function, inst) -> &calls.push(position)
             position += 1
         }
-        x64_touch_values(&segments.build, lir_terminator_uses(block.terminator), mark, position)
+        lir_terminator_uses_into(block.terminator, &operands)
+        x64_touch_values(&segments.build, operands, mark, position)
         x64_touch_range(&segments.build, liveness.live_out, liveness.out_starts[block_index], liveness.out_starts[block_index + 1], mark, position)
         &segments.terminators.push(position)
         position += 1
@@ -888,10 +917,11 @@ fn x64_touch_values(build: &X64SegmentBuild, values: [LIRValueID], mark: Int, po
     loop used in values -> x64_segment_touch(&build, used.value, mark, position, 1)
 }
 
-// The uses of `inst`, then its selected definition, which the instruction
-// defines at `position` with its share candidates.
-fn x64_touch_inst(segments: &X64Segments, folds: X64AddressFolds, inst: LIRInst, mark: Int, position: Int) Never! {
-    x64_touch_values(&segments.build, x64_selected_uses(inst, folds), mark, position)
+// The uses of `inst` (`uses`, its selected operands: x64_selected_uses_into),
+// then its selected definition, which the instruction defines at `position`
+// with its share candidates.
+fn x64_touch_inst(segments: &X64Segments, folds: X64AddressFolds, inst: LIRInst, uses: [LIRValueID], mark: Int, position: Int) Never! {
+    x64_touch_values(&segments.build, uses, mark, position)
     dst :: x64_selected_def(inst, folds) ?? return
     x64_segment_touch(&segments.build, dst.value, mark, position, 1)
     segments.def_at[dst.value] = position

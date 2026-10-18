@@ -178,11 +178,14 @@ fn inline_caller(functions: [[LIRFunction]], original: LIRFunction, recursive: [
     function := original
     uses := [Int]{}
     loop _ in original.values -> &uses.push(0)
+    operands := [LIRValueID]{}
     loop block in original.blocks {
         loop inst in block.insts {
-            loop value in lir_inst_uses(inst) -> uses[value.value] = uses[value.value] + 1
+            lir_inst_uses_into(inst, &operands)
+            loop value in operands -> uses[value.value] = uses[value.value] + 1
         }
-        loop value in lir_terminator_uses(block.terminator) -> uses[value.value] = uses[value.value] + 1
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop value in operands -> uses[value.value] = uses[value.value] + 1
     }
     fresh_block := 0
     loop block in original.blocks { if block.id.value >= fresh_block -> fresh_block = block.id.value + 1 }

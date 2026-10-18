@@ -206,18 +206,18 @@ fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue
             }
         }
     }
+    operands := [LIRValueID]{}
     loop (block_index, block) in function.blocks {
         loop (inst_index, inst) in block.insts {
-            loop value in lir_inst_uses(inst) {
-                loop message in lir_lint_use(function, definitions, dominance, consumes, value, LIRLintSite{block: block_index, index: inst_index}) -> &issues.push(lir_lint_issue(function, block.id.value, message))
-            }
-            loop message in lir_lint_inst(program, function, inst) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+            lir_inst_uses_into(inst, &operands)
+            site :: LIRLintSite{block: block_index, index: inst_index}
+            loop value in operands -> lir_lint_use(function, definitions, dominance, consumes, value, site, block.id.value, &issues)
+            loop message in lir_lint_inst(program, function, inst, operands) -> &issues.push(lir_lint_issue(function, block.id.value, message))
         }
         terminator_site :: LIRLintSite{block: block_index, index: block.insts.len()}
-        loop value in lir_terminator_uses(block.terminator) {
-            loop message in lir_lint_use(function, definitions, dominance, consumes, value, terminator_site) -> &issues.push(lir_lint_issue(function, block.id.value, message))
-        }
-        loop message in lir_lint_terminator(function, signature, block.terminator) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+        lir_terminator_uses_into(block.terminator, &operands)
+        loop value in operands -> lir_lint_use(function, definitions, dominance, consumes, value, terminator_site, block.id.value, &issues)
+        loop message in lir_lint_terminator(function, signature, block.terminator, operands) -> &issues.push(lir_lint_issue(function, block.id.value, message))
     }
     issues
 }
@@ -228,22 +228,25 @@ fn lir_lint_site_dominates(dominance: LIRLintDominance, first: LIRLintSite, seco
 }
 
 // `consumes[v]` lists the sites that consume value v, in block and
-// instruction order; a use reports once per consume that dominates it.
-fn lir_lint_use(function: LIRFunction, definitions: [LIRLintSite?], dominance: LIRLintDominance, consumes: [[LIRLintSite]], value: LIRValueID, site: LIRLintSite) -> [String] Never! {
-    if !lir_lint_value_valid(function, value) -> return [String]{"use of missing value v{value.value}"}
-    messages := [String]{}
+// instruction order; a use reports once per consume that dominates it. The
+// findings go onto `issues` for block `block`.
+fn lir_lint_use(function: LIRFunction, definitions: [LIRLintSite?], dominance: LIRLintDominance, consumes: [[LIRLintSite]], value: LIRValueID, site: LIRLintSite, block: Int, issues: &[LIRLintIssue]) Never! {
+    if !lir_lint_value_valid(function, value) {
+        &issues.push(lir_lint_issue(function, block, "use of missing value v{value.value}"))
+        return
+    }
     if definitions[value.value] == .Val(definition) {
-        if !lir_lint_site_dominates(dominance, definition, site) -> &messages.push("use of v{value.value} is not dominated by its definition")
+        if !lir_lint_site_dominates(dominance, definition, site) -> &issues.push(lir_lint_issue(function, block, "use of v{value.value} is not dominated by its definition"))
     }
     loop event in consumes[value.value] {
-        if lir_lint_site_dominates(dominance, event, site) -> &messages.push("use of v{value.value} after it was moved or dropped")
+        if lir_lint_site_dominates(dominance, event, site) -> &issues.push(lir_lint_issue(function, block, "use of v{value.value} after it was moved or dropped"))
     }
-    messages
 }
 
-fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [String] Never! {
+// `uses` are the instruction's operands (lir_inst_uses_into).
+fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst, uses: [LIRValueID]) -> [String] Never! {
     messages := [String]{}
-    loop value in lir_inst_uses(inst) {
+    loop value in uses {
         if !lir_lint_value_valid(function, value) -> return messages
     }
     if inst == {
@@ -416,9 +419,10 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
     messages
 }
 
-fn lir_lint_terminator(function: LIRFunction, signature: LIRSignature, terminator: LIRTerminator) -> [String] Never! {
+// `uses` are the terminator's operands (lir_terminator_uses_into).
+fn lir_lint_terminator(function: LIRFunction, signature: LIRSignature, terminator: LIRTerminator, uses: [LIRValueID]) -> [String] Never! {
     messages := [String]{}
-    loop value in lir_terminator_uses(terminator) {
+    loop value in uses {
         if !lir_lint_value_valid(function, value) -> return messages
     }
     if terminator == {
