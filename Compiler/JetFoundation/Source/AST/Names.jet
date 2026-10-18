@@ -100,6 +100,18 @@ fn name_find(table: NameTable, text: String) -> Name? Never! {
     None
 }
 
+// The id of `bytes[start..<end]` when the table holds that spelling; never
+// interns.
+fn name_find_bytes(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name? Never! {
+    slot := name_hash(bytes, start, end).bit_and(table.mask)
+    loop table.slots[slot] != 0 {
+        id :: table.slots[slot] - 1
+        if name_bytes_equal(table, id, bytes, start, end) -> return Val(Name{id: U32{id}})
+        slot = (slot + 1).bit_and(table.mask)
+    }
+    None
+}
+
 fn name_intern(table: &NameTable, text: String) -> Name Never! {
     bytes :: text.bytes()
     name_intern_bytes(&table, bytes, 0, bytes.len())

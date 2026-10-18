@@ -343,14 +343,20 @@ fn sema_effect_known_root(root: String) -> Bool Never! {
     false
 }
 
+// The name up to its first `(` or `.`: the family of a member (`FS.Read`)
+// or of a bounded effect (`Mem.Alloc(above: 1)`), read from the bytes once
+// (an ASCII cut of UTF-8 text is UTF-8).
 fn sema_effect_root(name: String) -> String Never! {
-    base := name
-    if base.contains("(") {
-        parts :: base.split("(").to_list()
-        if parts.len() > 0 -> base = parts[0]
+    bytes :: name.bytes()
+    end := bytes.len()
+    loop (index, byte) in bytes {
+        if byte == (U8{40}) || byte == (U8{46}) {
+            end = index
+            break
+        }
     }
-    parts :: base.split(".").to_list()
-    if parts.len() == 0 -> base else -> parts[0]
+    if end == bytes.len() -> return name.copy()
+    String.from_bytes(bytes.slice(0, end)) ?? name.copy()
 }
 
 fn sema_effect_rank(name: String) -> Int Never! {
@@ -386,9 +392,10 @@ fn sema_effect_set_add(set: &[String], value: String) -> Bool Never! {
     if sema_effect_set_contains(set, value) -> return false
     &set.push(value)
     index := set.len() - 1
+    // The row at `index` is the pushed value at every step of the walk.
+    right :: sema_effect_rank(value)
     loop index > 0 {
         left :: sema_effect_rank(set[index - 1])
-        right :: sema_effect_rank(set[index])
         if left < right || (left == right && set[index - 1] <= set[index]) -> break
         swap := set[index - 1]
         set[index - 1] = set[index]

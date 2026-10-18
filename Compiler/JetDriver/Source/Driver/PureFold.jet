@@ -89,8 +89,7 @@ struct JetDriverPureFoldCandidates {
 fn jet_driver_fold_pure_calls(program: ^MIRProgram, threads: CompilerThreads) -> MIRProgram {
     declined := [String:Bool]{}
     folded := jet_driver_pure_fold_rounds(^program, &declined, 0, threads)
-    jet_driver_pure_fold_resolve_joins(&folded)
-    folded
+    jet_driver_pure_fold_resolve_joins(^folded, threads)
 }
 
 fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], round: Int, threads: CompilerThreads) -> MIRProgram {
@@ -126,12 +125,80 @@ fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], r
 // Replace a scalar join whose live edges all carry one constant with that
 // constant. Folding decided the branch (`m :: if a > b -> a else -> b`, or
 // the test behind `xs.min_by(f) ?? -1`), so every tier reads a literal.
-// Each function is read in place and its joins are rewritten after the
-// read, so no view of it is live across a write (which would copy it).
-fn jet_driver_pure_fold_resolve_joins(program: &MIRProgram) {
-    loop function_index in 0..<program.functions.len() {
-        rewrites := [JetDriverPureFoldJoin]{}
-        function :: program.functions[function_index]
+// The joins are found on the threads, each reading its consecutive function
+// range of the program in place (the same partition as the candidate scan),
+// and rewritten after every read returned, in function order; a function's
+// joins depend on that function alone, so the rewrites are those the
+// one-thread read-then-write loop made.
+fn jet_driver_pure_fold_resolve_joins(program: ^MIRProgram, threads: CompilerThreads) -> MIRProgram {
+    scanned := program
+    weights := [Int]{}
+    total := 0
+    loop function in scanned.functions {
+        count := 0
+        loop block in function.blocks -> count += block.instructions.len()
+        &weights.push(count)
+        total += count
+    }
+    workers :: compiler_threads_admit(threads, weights.len(), total, JET_DRIVER_PURE_FOLD_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    bounds :: compiler_threads_partition(weights, workers)
+    inputs :: shared JetDriverPureFoldShared{programs: [MIRProgram]{^scanned}, declined: [String:Bool]{}, callees: [U64:Bool]{}, preludes: [U64:Bool]{}}
+    parts := [Shared<JetDriverPureFoldJoinPart>]{}
+    loop part in 0..<(bounds.len() - 1) -> &parts.push(shared JetDriverPureFoldJoinPart{start: bounds[part], end: bounds[part + 1], outputs: [[JetDriverPureFoldJoin]]{}})
+    _ := jet_driver_pure_fold_join_parts(inputs, parts, 0)
+    folded := jet_driver_pure_fold_shared_take(inputs)
+    loop part in parts {
+        rewrites := jet_driver_pure_fold_join_part_take(part)
+        loop rewrite in rewrites {
+            folded.functions[rewrite.function].blocks[rewrite.block].instructions[rewrite.instruction].operation = MIROperation.Constant{value: rewrite.constant}
+        }
+    }
+    folded
+}
+
+// One join resolve_joins rewrites to its constant.
+struct JetDriverPureFoldJoin {
+    function: Int
+    block: Int
+    instruction: Int
+    constant: MIRConstant
+}
+
+// One thread's consecutive function range and the joins it found, in
+// function and instruction order (`outputs` holds one row once the thread
+// finished).
+struct JetDriverPureFoldJoinPart {
+    start: Int
+    end: Int
+    outputs: [[JetDriverPureFoldJoin]]
+}
+
+// A part's joins, after its thread joined.
+fn jet_driver_pure_fold_join_part_take(part: Shared<JetDriverPureFoldJoinPart>) -> [JetDriverPureFoldJoin] {
+    permit :: part.guard_edit()
+    &permit.value.outputs.pop() ?? panic("a pure-fold join thread left no rewrites")
+}
+
+// Reads `parts[from..]`, one task per part and the last part on this
+// thread; returns how many parts read.
+fn jet_driver_pure_fold_join_parts(inputs: Shared<JetDriverPureFoldShared>, parts: [Shared<JetDriverPureFoldJoinPart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return jet_driver_pure_fold_join_part(inputs, parts[from])
+    read := 0
+    task.group pure_fold_join_threads {
+        head :: task jet_driver_pure_fold_join_part(inputs, parts[from])
+        read = jet_driver_pure_fold_join_parts(inputs, parts, from + 1)
+        read += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    read
+}
+
+// One thread: the constant joins of its function range.
+fn jet_driver_pure_fold_join_part(inputs: Shared<JetDriverPureFoldShared>, part: Shared<JetDriverPureFoldJoinPart>) -> Int {
+    permit := part.guard_edit()
+    reads :: inputs.guard_read()
+    rewrites := [JetDriverPureFoldJoin]{}
+    loop function_index in permit.value.start..<permit.value.end {
+        function :: reads.value.programs[0].functions[function_index]
         initializers :: jet_driver_pure_fold_initializers(function)
         if initializers.len() == 0 -> next
         constants :: jet_driver_pure_fold_constants(function, initializers, jet_driver_pure_fold_root_locals(function))
@@ -143,23 +210,15 @@ fn jet_driver_pure_fold_resolve_joins(program: &MIRProgram) {
                 if instruction.operation == {
                     .Phi(_) -> {
                         constant :: constants.get(result.value) ?? next
-                        &rewrites.push(JetDriverPureFoldJoin{block: block_index, instruction: instruction_index, constant: constant})
+                        &rewrites.push(JetDriverPureFoldJoin{function: function_index, block: block_index, instruction: instruction_index, constant: constant})
                     }
                     else -> {}
                 }
             }
         }
-        loop rewrite in rewrites {
-            program.functions[function_index].blocks[rewrite.block].instructions[rewrite.instruction].operation = MIROperation.Constant{value: rewrite.constant}
-        }
     }
-}
-
-// One join resolve_joins rewrites to its constant.
-struct JetDriverPureFoldJoin {
-    block: Int
-    instruction: Int
-    constant: MIRConstant
+    &permit.value.outputs.push(^rewrites)
+    1
 }
 
 fn jet_driver_pure_fold_scalar(ty: MIRType) -> Bool Never! {

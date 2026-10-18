@@ -1918,10 +1918,31 @@ fn sema_registration_impl_nominal_index(module_row: SemaRegistrationModule, type
     -1
 }
 
+// The nominal rows an impl registration looks up, built once per module
+// while its nominals are fixed: `nominals` is the first nominal row of each
+// type name (sema_registration_impl_nominal_index's answer) and `traits`
+// the first Trait-kind nominal row of each name.
+struct SemaRegistrationImplRows {
+    nominals: [String:Int]
+    traits: [String:Int]
+}
+
+fn sema_registration_impl_rows(module_row: SemaRegistrationModule) -> SemaRegistrationImplRows Never! {
+    rows := SemaRegistrationImplRows{nominals: [String:Int]{}, traits: [String:Int]{}}
+    loop index in 0..<module_row.nominals.len() {
+        name :: module_row.nominals[index].symbol.name
+        if rows.nominals.get(name) == None -> rows.nominals[name] = index
+        if module_row.nominals[index].kind == SemaRegistrationNominalKind.Trait && rows.traits.get(name) == None -> rows.traits[name] = index
+    }
+    rows
+}
+
 // `owner_row` declares the implemented type: the impl's own module, or
 // (D-MOD-CYCLE1=A) the member file of its package that declares it.
-fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDef, owner_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) -> SemaRegistrationImpl {
-    nominal_index :: sema_registration_impl_nominal_index(owner_row, definition.type_name)
+// `owner_rows` indexes `owner_row`'s nominals and `trait_rows` the impl
+// module's (sema_registration_impl_rows of each).
+fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDef, owner_row: SemaRegistrationModule, owner_rows: SemaRegistrationImplRows, trait_rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) -> SemaRegistrationImpl {
+    nominal_index :: owner_rows.nominals.get(definition.type_name) ?? -1
     target_type := Type.Named{name: definition.type_name}
     target_identity := type_identity(target_type)
     target_identity_key := "{module_row.module_identity}:{type_identity_key(target_type)}"
@@ -1950,12 +1971,9 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
     trait_symbol := Symbol?{None}
     trait_identity := TypeIdentity?{None}
     if definition.trait_name == .Val(trait_name) {
-        loop candidate_index in 0..<module_row.nominals.len() {
-            if module_row.nominals[candidate_index].kind == SemaRegistrationNominalKind.Trait && module_row.nominals[candidate_index].symbol.name == trait_name {
-                trait_symbol = Val(module_row.nominals[candidate_index].symbol)
-                trait_identity = Val(module_row.nominals[candidate_index].identity)
-                break
-            }
+        if trait_rows.traits.get(trait_name) == .Val(candidate_index) {
+            trait_symbol = Val(module_row.nominals[candidate_index].symbol)
+            trait_identity = Val(module_row.nominals[candidate_index].identity)
         }
     }
     trait_key :: definition.trait_name ?? ""
@@ -1994,10 +2012,12 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
     }
 }
 
-fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, diagnostics: &[Diagnostic]) {
+// `rows` indexes `module_row`'s nominals (sema_registration_impl_rows),
+// which no impl registration changes.
+fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) {
     if item == {
         .Impl(definition) -> {
-            row := sema_registration_impl(module_row, definition, module_row, &diagnostics)
+            row := sema_registration_impl(module_row, definition, module_row, rows, rows, &diagnostics)
             // D-MOD-CYCLE1=A: in a package, the type may be declared by a
             // sibling member; sema_registration_attach_namespace_impls owns
             // that impl's E0301 once every member is registered.
@@ -2006,7 +2026,7 @@ fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, d
             }
             &module_row.impls.push(row)
             if row.target_module_identity != None {
-                nominal_index :: sema_registration_impl_nominal_index(module_row, definition.type_name)
+                nominal_index :: rows.nominals.get(definition.type_name) ?? -1
                 if nominal_index >= 0 {
                     loop method in row.methods -> &module_row.nominals[nominal_index].methods.push(method)
                 }
@@ -2119,7 +2139,7 @@ fn sema_registration_attach_namespace_impls(graph: &SemaRegistrationGraph) {
             // The first registration already reported the methods' own
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
-            row :: sema_registration_impl(graph.modules[module_index], definition, graph.modules[owner_index], &repeated)
+            row :: sema_registration_impl(graph.modules[module_index], definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), &repeated)
             graph.modules[module_index].impls[impl_index] = row
             nominal_index :: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
             loop method in row.methods -> &graph.modules[owner_index].nominals[nominal_index].methods.push(method)
@@ -2313,13 +2333,16 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         }
     }
     // Only impls register here; every other item is skipped without a copy.
+    // The nominal rows are indexed once: impls add methods to nominals, never
+    // nominals.
+    impl_rows :: sema_registration_impl_rows(module_row)
     loop index in 0..<module_row.program.items.len() {
         if module_row.program.items[index] == .Impl(_) {
             // copy: sema_registration_add_impl writes module_row (`&`) and stores the impl rows,
             // while the item stays in module_row.program.items. A view of that list would be live
             // across the write.
             item :: module_row.program.items[index].copy()
-            sema_registration_add_impl(&module_row, item, &diagnostics)
+            sema_registration_add_impl(&module_row, item, impl_rows, &diagnostics)
         }
     }
     // Root exports are retained separately so private declarations never become
