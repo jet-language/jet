@@ -458,7 +458,7 @@ fn x64_fx_address_plan() -> Bool Never! {
     needed :: [LIRValueID]{base, index}
     loop value in needed {
         if a.locations[value.value] == .Reg(reg) {
-            if !x64_pool_has(X64_CALLEE_SAVED_POOL, reg) -> ok = false
+            if !x64_pools().members[X64_POOL_GENERAL_CROSSING][reg] -> ok = false
         } else if a.locations[value.value] == .Stack(slot) {
             if slot < 0 -> ok = false
         } else {

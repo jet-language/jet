@@ -225,28 +225,43 @@ fn x64_parallel_float_scratch(moves: [X64Move], pending: [X64Move]) -> Int Never
 // Emit `moves` as if all sources were read before any destination is written.
 // Each move whose destination no pending move still reads goes first; a pure
 // cycle is broken in rax (general) or an unread xmm (prefer xmm1).
+// `readers[i]` counts the other pending moves reading move i's destination;
+// pending moves keep their order and are compacted in place.
 fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
     pending := [X64Move]{}
     loop move in moves { if move.src != move.dst -> &pending.push(move) }
+    readers := x64_parallel_readers(pending)
     loop pending.len() > 0 {
         ready := -1
-        loop (index, move) in pending {
-            if ready < 0 {
-                blocked := false
-                loop (other, reader) in pending { if other != index && x64_same_place(reader.src, move.dst) -> blocked = true }
-                // ABI xmm1 is also the cycle scratch: install its final value
-                // only after all other moves (and therefore cycles) are done.
-                if move.dst == .Xmm(reg, _) {
-                    if reg == 1 && pending.len() > 1 -> blocked = true
-                }
-                if !blocked -> ready = index
+        index := 0
+        loop index < pending.len() {
+            // ABI xmm1 is also the cycle scratch: install its final value
+            // only after all other moves (and therefore cycles) are done.
+            blocked := readers[index] > 0
+            if pending[index].dst == .Xmm(reg, _) {
+                if reg == 1 && pending.len() > 1 -> blocked = true
             }
+            if !blocked {
+                ready = index
+                break
+            }
+            index += 1
         }
         if ready >= 0 {
-            x64_emit_move(&emitter, pending[ready].src, pending[ready].dst)
-            rest := [X64Move]{}
-            loop (index, move) in pending { if index != ready -> &rest.push(move) }
-            pending = rest
+            emitted :: pending[ready].copy()
+            x64_emit_move(&emitter, emitted.src, emitted.dst)
+            kept := 0
+            index = 0
+            loop index < pending.len() {
+                if index != ready {
+                    pending[kept] = pending[index].copy()
+                    readers[kept] = if x64_same_place(pending[kept].dst, emitted.src) -> readers[index] - 1 else -> readers[index].copy()
+                    kept += 1
+                }
+                index += 1
+            }
+            _ := &pending.pop()
+            _ := &readers.pop()
         } else {
             saved := pending[0].dst
             loop move in pending {
@@ -258,13 +273,31 @@ fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
                 else -> X64Loc.Reg{reg: X64_RAX}
             }
             x64_emit_move(&emitter, saved, scratch)
-            rest := [X64Move]{}
-            loop move in pending {
-                &rest.push(if x64_same_place(move.src, saved) -> X64Move{src: scratch, dst: move.dst} else -> move)
+            index = 0
+            loop index < pending.len() {
+                if x64_same_place(pending[index].src, saved) -> pending[index] = X64Move{src: scratch, dst: pending[index].dst}
+                index += 1
             }
-            pending = rest
+            readers = x64_parallel_readers(pending)
         }
     }
+}
+
+// Per pending move, how many other pending moves read its destination.
+fn x64_parallel_readers(pending: [X64Move]) -> [Int] Never! {
+    readers := [Int]{}
+    index := 0
+    loop index < pending.len() {
+        count := 0
+        other := 0
+        loop other < pending.len() {
+            if other != index && x64_same_place(pending[other].src, pending[index].dst) -> count += 1
+            other += 1
+        }
+        &readers.push(count)
+        index += 1
+    }
+    readers
 }
 
 // The register holding `loc`, loading a spilled value or materializing an
@@ -696,16 +729,20 @@ fn x64_debug_location(loc: X64Loc, saved: Int, stack: [Int]) -> X64DebugLocation
 // parameter or live-in value) through the segment's last position, in that
 // segment's location. Segments that follow one another in the code in one
 // location yield one range. A value bound twice to one variable yields its
-// ranges once.
+// ranges once: the variables seen per value chain from `seen_heads[value]`
+// through `seen_next` (a flat list, no map: the bindings of one function
+// run to thousands, and a map insert moves every later entry).
 fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: [Int], positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
     count :: function.values.len()
     // Each value's segments in function order, as a chain from heads[value]
     // through links.
     heads := [Int]{}
     tails := [Int]{}
+    seen_heads := [Int]{}
     loop _ in 0..<count {
         &heads.push(-1)
         &tails.push(-1)
+        &seen_heads.push(-1)
     }
     links := [Int]{}
     loop (segment, value) in allocation.segment_values {
@@ -718,14 +755,13 @@ fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: 
         tails[value] = segment
     }
     ranges := [X64VariableRange]{}
-    seen := [Int:Bool]{}
+    seen_variables := [Int]{}
+    seen_next := [Int]{}
     saved :: allocation.callee_saved.len()
     loop binding in function.debug.bindings {
         value :: binding.value.value
         if heads[value] < 0 -> next
-        key :: binding.variable * count + value
-        if seen.get(key) != None -> next
-        &seen.add(key, true).drop("checked absent above")
+        if x64_binding_seen(&seen_heads, &seen_variables, &seen_next, value, binding.variable) -> next
         open_start := -1
         open_end := -1
         open_location := X64DebugLocation.Register{reg: 0}
@@ -749,6 +785,19 @@ fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: 
         if open_start >= 0 -> &ranges.push(X64VariableRange{variable: binding.variable, start: open_start, end: open_end, location: open_location})
     }
     ranges
+}
+
+// Whether `variable` was already bound to `value`; records it otherwise.
+fn x64_binding_seen(seen_heads: &[Int], seen_variables: &[Int], seen_next: &[Int], value: Int, variable: Int) -> Bool Never! {
+    node := seen_heads[value].copy()
+    loop node >= 0 {
+        if seen_variables[node] == variable -> return true
+        node = seen_next[node].copy()
+    }
+    &seen_next.push(seen_heads[value].copy())
+    seen_heads[value] = seen_variables.len()
+    &seen_variables.push(variable)
+    false
 }
 
 // Ordered IEEE comparison of Float (or, `single`, Float32) xmm operands into
