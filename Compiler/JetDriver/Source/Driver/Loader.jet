@@ -38,6 +38,8 @@ use jet_foundation.[
     jet_ring_parse_manifest_layer,
     mir_boundary_head_carrier_module,
     mir_source_file_id,
+    name_find,
+    name_index,
 ]
 use jet_lexer.[
     STRING_PART_INTERPOLATION,
@@ -2759,30 +2761,69 @@ fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Ne
     JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_literal: false}
 }
 
+// The spellings the demand scan looks for, as ids of one lexed source's
+// name table (name_find; a spelling the source never uses has no id, -1,
+// which no token carries), so the scan compares ids, never Strings. Each
+// bare module row has its name's id and, for `URL`, the id of `url` too.
+// The fields are not spelled `or_err`, `abs` or `regex`: this scan runs on
+// the compiler's own source too, and `names.abs` would be an `abs` receiver
+// demand of the self-compile.
+struct JetDriverCoreDemandNames {
+    or_err_name: Int
+    abs_name: Int
+    regex_name: Int
+    bare: [Int]
+    bare_alias: [Int]
+}
+
+fn jet_driver_core_demand_name(tables: TokenTables, text: String) -> Int Never! {
+    found :: name_find(tables.names, text) ?? return -1
+    name_index(found)
+}
+
+fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames Never! {
+    bare := [Int]{}
+    bare_alias := [Int]{}
+    loop row in CORE_BARE_SOURCE_MODULES {
+        &bare.push(jet_driver_core_demand_name(tables, row.name))
+        alias := -1
+        if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
+        &bare_alias.push(alias)
+    }
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias}
+}
+
 // Interpolation tokens share the enclosing lexed source's spelling/literal table.
 fn jet_driver_collect_core_identifier_demand(tokens: [Token], tables: TokenTables, demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
+    names :: jet_driver_core_demand_names(tables)
+    jet_driver_collect_core_identifier_demand_ids(tokens, tables, names, &demand, collect_bare)
+}
+
+fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenTables, names: JetDriverCoreDemandNames, demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
     loop index in 0..<tokens.len() {
         if tokens[index].kind == TOKEN_IDENT {
-            name :: token_decoded(tables, tokens[index])
-            if name == "or_err" -> demand.option_or_err = true
+            name :: name_index(tokens[index].decoded)
+            if name == names.or_err_name -> demand.option_or_err = true
             // Loading a potential source owner is syntactic; Sema alone
             // decides whether this receiver is the canonical primitive Int.
-            if name == "abs" {
+            if name == names.abs_name {
                 previous := index - 1
                 loop previous >= 0 && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
                 if previous >= 0 && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
             }
-            if name == "Regex" && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_literal = true
+            if name == names.regex_name && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_literal = true
             if collect_bare {
-                loop bare in CORE_BARE_SOURCE_MODULES {
-                    if name == bare.name || (bare.name == "URL" && name == "url") {
-                        if !demand.bare_names.contains(bare.name) -> &demand.bare_names.push(bare.name)
+                loop at in 0..<names.bare.len() {
+                    if name == names.bare[at] || name == names.bare_alias[at] {
+                        bare :: CORE_BARE_SOURCE_MODULES[at].name
+                        if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
                     }
                 }
             }
         }
+        if tokens[index].literal < 0 -> next
         loop part in token_string_parts(tables, tokens[index]) {
-            if part.kind == STRING_PART_INTERPOLATION -> jet_driver_collect_core_identifier_demand(part.tokens, tables, &demand, collect_bare)
+            if part.kind == STRING_PART_INTERPOLATION -> jet_driver_collect_core_identifier_demand_ids(part.tokens, tables, names, &demand, collect_bare)
         }
     }
 }
