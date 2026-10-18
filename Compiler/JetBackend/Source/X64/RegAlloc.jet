@@ -267,10 +267,26 @@ fn x64_selected_uses(inst: LIRInst, folds: X64AddressFolds) -> [LIRValueID] Neve
     lir_inst_uses(inst)
 }
 
-fn x64_inst_is_call(inst: LIRInst) -> Bool Never! {
+// An exact Int's drop and clone (jet_rt_int_drop / jet_rt_int_clone) are
+// selected inline (X64/Select.jet x64_select_int_route): a two-instruction
+// inline-range test, and only for a boxed big integer a call that saves and
+// restores every caller-saved register holding a value across it. To the
+// allocator they are ordinary instructions, not calls: values keep their
+// caller-saved registers across them and no argument hint applies.
+fn x64_int_drop(function: LIRFunction, value: LIRValueID) -> Bool Never! {
+    if function.values[value.value].drop == .Runtime(symbol) -> return symbol == "jet_rt_int_drop"
+    false
+}
+
+fn x64_int_clone(callee: LIRCallee, args: [LIRValueID]) -> Bool Never! {
+    if callee == .Runtime(symbol) -> return symbol == "jet_rt_int_clone" && args.len() == 1
+    false
+}
+
+fn x64_inst_is_call(function: LIRFunction, inst: LIRInst) -> Bool Never! {
     if inst == {
-        .Call(_, _, _, _) -> true
-        .Drop(_) -> true
+        .Call(_, _, callee, args) -> !x64_int_clone(callee, args)
+        .Drop(value) -> !x64_int_drop(function, value)
         .InlineAsm(_, _, _, _, _) -> true
         else -> false
     }
@@ -718,11 +734,12 @@ fn x64_hints(function: LIRFunction, block_rows: [Int:Int]) -> X64Hints Never! {
         }
         loop inst in block.insts {
             if inst == {
-                .Call(dst, _, _, args) -> {
+                .Call(dst, _, callee, args) -> {
+                    if x64_int_clone(callee, args) -> next
                     x64_hint_arguments(function, args, &hints.regs)
                     if dst == .Val(result) && function.values[result.value].layout.class == .Float -> &hints.regs[result.value].push(16)
                 }
-                .Drop(value) -> x64_hint_arguments(function, [LIRValueID]{value}, &hints.regs)
+                .Drop(value) -> { if !x64_int_drop(function, value) -> x64_hint_arguments(function, [LIRValueID]{value}, &hints.regs) }
                 else -> {}
             }
         }
@@ -811,7 +828,7 @@ fn x64_segments(function: LIRFunction, folds: X64AddressFolds, liveness: X64Live
         position += 1
         loop inst in block.insts {
             x64_touch_inst(&segments, folds, inst, mark, position)
-            if x64_inst_is_call(inst) -> &calls.push(position)
+            if x64_inst_is_call(function, inst) -> &calls.push(position)
             position += 1
         }
         x64_touch_values(&segments.build, lir_terminator_uses(block.terminator), mark, position)

@@ -515,6 +515,65 @@ fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64All
     }
 }
 
+// The registers a call would clobber that hold a value across `position`
+// in block row `row`: caller-saved general registers and xmm registers of
+// segments that start before and end after it (RegAlloc.jet: a segment
+// crosses a position strictly between its start and end).
+fn x64_live_volatile(allocation: X64Allocation, row: Int, position: Int) -> [X64Loc] Never! {
+    live := [X64Loc]{}
+    callee_saved :: x64_pools().members[X64_POOL_GENERAL_CROSSING]
+    loop segment in allocation.block_segments[row]..<allocation.block_segments[row + 1] {
+        if allocation.segment_starts[segment] >= position || allocation.segment_ends[segment] <= position -> next
+        if allocation.segment_locations[segment] == {
+            .Reg(reg) -> { if !callee_saved[reg] -> &live.push(X64Loc.Reg{reg: reg}) }
+            .Xmm(reg, _) -> &live.push(X64Loc.Xmm{reg: reg, single: false})
+            else -> {}
+        }
+    }
+    live
+}
+
+// An exact Int's drop or clone (RegAlloc.jet x64_int_drop / x64_int_clone):
+// the runtime route returns at once for an inline Int (Int.jet int_inline:
+// bits 63 and 62 agree, so doubling the word does not overflow), and only a
+// boxed big integer needs its reference count touched. The hot path is
+// `mov rax, value; mov r10, rax; add r10, r10; jno done`; the cold path saves
+// every caller-saved register holding a value across this instruction (the
+// allocator treats it as no call), calls `symbol`(value) with rsp still
+// 16-byte aligned, restores them and, for a clone, leaves the result in the
+// value's own register (jet_rt_int_clone returns its argument word). A clone
+// then moves that register to `dst`.
+fn x64_select_int_route(emitter: &X64Emitter, allocation: X64Allocation, row: Int, position: Int, value: X64Loc, symbol: String, dst: X64Loc?) Never! {
+    reg :: x64_operand(&emitter, value, X64_RAX)
+    x64_mov_rr(&emitter.code, X64_R10, reg)
+    x64_alu_rr(&emitter.code, X64Alu.Add, X64_R10, X64_R10)
+    done :: x64_jcc_rel32(&emitter.code, X64Cond.NO)
+    live :: x64_live_volatile(allocation, row, position)
+    bytes :: 8 * (live.len() + live.len() % 2)
+    if bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, bytes)
+    loop (index, loc) in live {
+        if loc == {
+            .Reg(saved) -> x64_store(&emitter.code, X64_RSP, 8 * index, saved)
+            .Xmm(saved, _) -> x64_float_store(&emitter.code, false, X64_RSP, 8 * index, saved)
+            else -> {}
+        }
+    }
+    if reg != X64_RDI -> x64_mov_rr(&emitter.code, X64_RDI, reg)
+    at :: x64_call_rel32(&emitter.code)
+    &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: symbol}})
+    if dst != None && reg != X64_RAX -> x64_mov_rr(&emitter.code, reg, X64_RAX)
+    loop (index, loc) in live {
+        if loc == {
+            .Reg(saved) -> x64_load(&emitter.code, saved, X64_RSP, 8 * index)
+            .Xmm(saved, _) -> x64_float_load(&emitter.code, false, saved, X64_RSP, 8 * index)
+            else -> {}
+        }
+    }
+    if bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Add, X64_RSP, bytes)
+    x64_patch_rel32(&emitter.code, done, emitter.code.len())
+    if dst == .Val(result) -> x64_emit_move(&emitter, X64Loc.Reg{reg: reg}, result)
+}
+
 fn x64_emit_epilogue(emitter: &X64Emitter) Never! {
     x64_lea(&emitter.code, X64_RSP, X64_RBP, 0 - 8 * emitter.saved.len())
     index := emitter.saved.len() - 1
@@ -687,7 +746,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
             &positions.push(emitter.code.len())
             &defining.push(true)
             if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[inst_index])
-            if !(fused && inst_index == block.insts.len() - 1) -> x64_select_inst(&emitter, function, allocation, inst)
+            if !(fused && inst_index == block.insts.len() - 1) -> x64_select_inst(&emitter, function, allocation, inst, block_index, positions.len() - 1)
         }
         &positions.push(emitter.code.len())
         &defining.push(false)
@@ -996,7 +1055,10 @@ fn x64_select_lea(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValueID, ad
     x64_finish_result(&emitter, locations[dst.value], reg)
 }
 
-fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst) Never! {
+// `row` is the block's row and `position` the instruction's allocation
+// position (RegAlloc.jet: block starts, instructions and terminators in
+// function order), for the segments live across it.
+fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst, row: Int, position: Int) Never! {
     locations :: allocation.locations
     folds :: allocation.folds
     if lir_inst_def(inst) == .Val(dst) && folds.skipped[dst.value] -> return
@@ -1150,6 +1212,11 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_emit_move(&emitter, locations[src.value], locations[dst.value])
         }
         .Call(dst, _, callee, args) -> {
+            if x64_int_clone(callee, args) {
+                result := X64Loc?{None}
+                if dst == .Val(id) -> result = Val(locations[id.value])
+                return x64_select_int_route(&emitter, allocation, row, position, locations[args[0].value], "jet_rt_int_clone", result)
+            }
             target :: if callee == {
                 .Function(id) -> X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}
                 .Runtime(symbol) -> X64CallTarget.Direct{target: X64RelocTarget.Runtime{symbol: symbol}}
@@ -1158,6 +1225,7 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_emit_call(&emitter, function, allocation, target, args, dst)
         }
         .Drop(value) -> {
+            if x64_int_drop(function, value) -> return x64_select_int_route(&emitter, allocation, row, position, locations[value.value], "jet_rt_int_drop", None)
             if function.values[value.value].drop == {
                 .Runtime(symbol) -> x64_emit_call(&emitter, function, allocation, X64CallTarget.Direct{target: X64RelocTarget.Runtime{symbol: symbol}}, [LIRValueID]{value}, None)
                 .Function(id) -> x64_emit_call(&emitter, function, allocation, X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}, [LIRValueID]{value}, None)
