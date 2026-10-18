@@ -480,6 +480,137 @@ Report: [mine-for-jet-2026-10-02-vale-valen](../../research/mine-for-jet-2026-10
 - https://verdagon.dev/blog/fearless-ffi
 - https://vale.dev/guide/references
 
+### Jai: Tsoding playlist, Jonathan Blow's demos and public references (mined 2026-10-15)
+
+Report: [jai-parity-2026-10-16](../../audits/jai-parity-2026-10-16.md).
+The first 13 videos are the owner's Tsoding playlist; the next 71 are Blow's
+"A Programming Language for Games" playlist; the last 10 are selected compiler
+livestreams.
+
+- https://youtube.com/playlist?list=PLpM-Dvs8t0Vb5bowR1en3vQPN9RfJAJAE
+- https://www.youtube.com/playlist?list=PLmV5I2fxaiCKfxMBrNsU1kgKJXD3PkyxO
+- https://www.youtube.com/watch?v=AwbLjR46HkY
+- https://www.youtube.com/watch?v=CDCU6b-WzAw
+- https://www.youtube.com/watch?v=BKvQXmEmDjU
+- https://www.youtube.com/watch?v=tPUXbxH2AFA
+- https://www.youtube.com/watch?v=Y5liBU9f_jM
+- https://www.youtube.com/watch?v=sx1cjdJIU70
+- https://www.youtube.com/watch?v=LTDM14349ws
+- https://www.youtube.com/watch?v=_HGkhvpCbsk
+- https://www.youtube.com/watch?v=tfME9wwdgGw
+- https://www.youtube.com/watch?v=8_5L8yVHcII
+- https://www.youtube.com/watch?v=6_C9h1dPp54
+- https://www.youtube.com/watch?v=YFtT48e9mA0
+- https://www.youtube.com/watch?v=kjF_YuLsPqo
+- https://www.youtube.com/watch?v=TH9VCN6UkyQ
+- https://www.youtube.com/watch?v=5Nc68IdNKdg
+- https://www.youtube.com/watch?v=UTqZNujQOlA
+- https://www.youtube.com/watch?v=-UPFH0eWHEI
+- https://www.youtube.com/watch?v=K45J_9jns7w
+- https://www.youtube.com/watch?v=ZHqFrNyLlpA
+- https://www.youtube.com/watch?v=HjyyREM0egw
+- https://www.youtube.com/watch?v=JoNkttD_MUs
+- https://www.youtube.com/watch?v=LPWXSXKnmqg
+- https://www.youtube.com/watch?v=CttIYXCUeVY
+- https://www.youtube.com/watch?v=OdmlCAVUYlM
+- https://www.youtube.com/watch?v=BwqeFrlSpuI
+- https://www.youtube.com/watch?v=7Fsy2WaxLOY
+- https://www.youtube.com/watch?v=DsLy0kyHJ-w
+- https://www.youtube.com/watch?v=ciGQCP6HgqI
+- https://www.youtube.com/watch?v=0KkW_Zo_pDc
+- https://www.youtube.com/watch?v=4h-0Sc2jK88
+- https://www.youtube.com/watch?v=OHZwYYW9koI
+- https://www.youtube.com/watch?v=59lKAlb6cRg
+- https://www.youtube.com/watch?v=iGiHa3GtQhM
+- https://www.youtube.com/watch?v=2IBr0XZOPsk
+- https://www.youtube.com/watch?v=iVN3LLf4wMg
+- https://www.youtube.com/watch?v=DP3vT1t0ZCA
+- https://www.youtube.com/watch?v=COQKyOCAxOQ
+- https://www.youtube.com/watch?v=a2f-TRdlWHY
+- https://www.youtube.com/watch?v=O9xn9h_874U
+- https://www.youtube.com/watch?v=cpPsfcxP4lg
+- https://www.youtube.com/watch?v=Q2O7UckAv0k
+- https://www.youtube.com/watch?v=Mo6_tJFeNMM
+- https://www.youtube.com/watch?v=k9HlR1VjNxs
+- https://www.youtube.com/watch?v=HLk4eiGUic8
+- https://www.youtube.com/watch?v=mIjGYbol0O4
+- https://www.youtube.com/watch?v=rJ7-j1nK9gk
+- https://www.youtube.com/watch?v=14zlJ98gJKA
+- https://www.youtube.com/watch?v=toz8edNQlso
+- https://www.youtube.com/watch?v=iUYZNbUKVAc
+- https://www.youtube.com/watch?v=MJRUHF6Lh8Y
+- https://www.youtube.com/watch?v=ZpgjnCgsGwk
+- https://www.youtube.com/watch?v=Z0tsNFZLxSU
+- https://www.youtube.com/watch?v=GQj8fzxpdrk
+- https://www.youtube.com/watch?v=yJukJS81o-k
+- https://www.youtube.com/watch?v=HXC5ufZf5wc
+- https://www.youtube.com/watch?v=SSVHWrYG974
+- https://www.youtube.com/watch?v=FCbUV8oSDgI
+- https://www.youtube.com/watch?v=8C6zuDDGU2w
+- https://www.youtube.com/watch?v=wfG2mCPzIA4
+- https://www.youtube.com/watch?v=MXNkQ5L4pLo
+- https://www.youtube.com/watch?v=-8yGl7jT8xM
+- https://www.youtube.com/watch?v=rFaBs-CUX5w
+- https://www.youtube.com/watch?v=8tMq3QZyz8s
+- https://www.youtube.com/watch?v=TZYfMzh3hTQ
+- https://www.youtube.com/watch?v=3TwEaRZ4H3w
+- https://www.youtube.com/watch?v=mGe5d6dPHAU
+- https://www.youtube.com/watch?v=y-d6GXNsbX4
+- https://www.youtube.com/watch?v=_tLk-JNGD60
+- https://www.youtube.com/watch?v=4_ODvZ01CjU
+- https://www.youtube.com/watch?v=RuNr092aXIw
+- https://www.youtube.com/watch?v=QX46eLqq1ps
+- https://www.youtube.com/watch?v=6qkL_DmHOuo
+- https://www.youtube.com/watch?v=Wp9XD5FKZ2c
+- https://www.youtube.com/watch?v=OAIqCpqszVw
+- https://www.youtube.com/watch?v=pg_Wk2GBZDw
+- https://www.youtube.com/watch?v=jjCfAg_gtDw
+- https://www.youtube.com/watch?v=BqF2SbY99B8
+- https://www.youtube.com/watch?v=kJp95IikU-U
+- https://www.youtube.com/watch?v=DN6kY5iH8ys
+- https://www.youtube.com/watch?v=Djr-u5rxXXU
+- https://www.youtube.com/watch?v=xNZr6wqm3Ik
+- https://www.youtube.com/watch?v=jm1QkRpEaRQ
+- https://www.youtube.com/watch?v=f_TWdyAbKwQ
+- https://www.youtube.com/watch?v=LPdMNsL5MgI
+- https://www.youtube.com/watch?v=KHIeP_-Kp00
+- https://www.youtube.com/watch?v=b5ATngfKQP4
+- https://www.youtube.com/watch?v=kHmbabcL-is
+- https://www.youtube.com/watch?v=AdoShhhnsQA
+- https://www.youtube.com/watch?v=TwqXTf7VfZk
+- https://www.youtube.com/watch?v=pgiVrhsGkKY
+- https://www.youtube.com/watch?v=zgoqZtu15kI
+- https://www.youtube.com/watch?v=0mQbBayzDPI
+- https://www.youtube.com/watch?v=A9JtTbY7mEw
+- https://www.youtube.com/watch?v=rzE6bz2Uf7g
+- https://github.com/Ivo-Balbaert/The_Way_to_Jai
+- https://github.com/Jai-Community/Jai-Community-Library
+- https://github.com/BSVino/JaiPrimer
+- https://github.com/focus-editor/focus
+- https://github.com/tsoding/jai-wasm
+- https://github.com/tsoding/infinite-pong-jai-wasm64
+- https://github.com/tsoding/jaibreak
+- https://github.com/tsoding/tetris-jai
+- https://github.com/PixelRifts/Jai-Shader-Transpiler
+- https://github.com/onelivesleft/Metaprogram
+- https://github.com/kujukuju/MetaThreadSafe
+- https://smarimccarthy.is/posts/2024-12-02-four-years-of-jai/
+
+### V (vlang): compiler, C interop, UI, Vinix and DOOM (mined 2026-10-16)
+
+Report: [mine-for-jet-2026-10-16-vlang](../../research/mine-for-jet-2026-10-16-vlang.md).
+
+- https://vlang.io
+- https://github.com/vlang/v
+- https://github.com/vlang/c2v
+- https://github.com/vlang/doom
+- https://github.com/vlang/vinix
+- https://github.com/vlang/ui
+- https://github.com/vlang/ui2
+- https://github.com/vlang/ved
+- https://github.com/vox-browser/vox
+- https://mawfig.github.io/2022/06/18/v-lang-in-2022.html
+
 ## Developer experience (e14)
 
 Sources from the nine e14 DX census manifests. IDs are manifest IDs; local paths remain provenance records.
