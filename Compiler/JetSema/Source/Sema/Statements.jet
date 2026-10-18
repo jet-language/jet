@@ -1246,6 +1246,30 @@ fn sema_stmt_for_in_driven_root(expression: Expr) -> String? {
     }
 }
 
+// D-COPY-DEFAULT1=A: `loop x in xs` where `xs` is a plain place (`xs`,
+// `a.b.xs`, `xs[i]`, `xs[a..b]`, also behind a read or write drive mark)
+// rooted in a read or write parameter: each loop name reads an element the
+// parameter's owner keeps, so an exact `^x` in the body would copy it. A
+// `.copy()` source or a `^xs` drive hands the loop owned elements.
+fn sema_stmt_for_in_borrowed_elements(expression: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expression == .Place(_, access, _) {
+        if access == PlaceAccess.Take -> return false
+    }
+    source :: if expression == .Place(inner, _, _) -> inner else -> expression
+    if !sema_stmt_for_in_plain_place(source) -> return false
+    root :: sema_stmt_for_in_expr_root_ident(source) ?? return false
+    index :: sema_scope_resolve_index(scopes, root) ?? return false
+    sema_ownership_binding_is_borrowed_param(scopes.bindings[index])
+}
+
+fn sema_stmt_for_in_plain_place(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Ident(_, _) -> true
+        .Field(base, _, _) | .Index(base, _, _, _) | .Slice(base, _, _, _, _) | .Paren(base, _) -> sema_stmt_for_in_plain_place(base)
+        else -> false
+    }
+}
+
 // #4318 §4 stable loop source: the root name of a source that is a plain
 // place, `xs` or `a.b.xs`. A user `.copy()` copy, a call, or an index is not one.
 // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::stable_loop_source_root
@@ -3223,6 +3247,9 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
+    // D-COPY-DEFAULT1=A: `name :: root.field` / `name :: root[i]` reads the
+    // place through a view; an exact `^name` later would copy it (E0201).
+    if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_scope_mark_place_alias(&scopes, binding.name)
     sema_ownership_note_frozen_binding(&state, symbol.id.key, binding.init, scopes)
     // D-CALLSITE-MARK1=A: a bound lambda that takes a capture runs once.
     if binding.init == .Lambda(bound_lambda) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
@@ -3250,6 +3277,27 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tir_promotion(promotion)) else -> None
     Val(TStmt.Let{local: local, let_ty: let_ty, init: view_init ?? init, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}})
+}
+
+// A `::` initializer that is a field or element projection of a name this
+// scope knows (`root.field`, `root[i].field`, parenthesized): the binding
+// reads it through a view. A whole name (`x :: y`) is the share-or-move rule
+// instead, and a range (`xs[a..b]`) is already a typed View.
+fn sema_stmt_binding_reads_projection(init: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if init == {
+        .Paren(inner, _) -> sema_stmt_binding_reads_projection(inner, scopes)
+        // `name :: root.field ?? return …`: a diverging fallback leaves the
+        // payload read through the same view (probe: `^name` copies it).
+        .OrFallback(value, fallback, _, _) -> if fallback == {
+            .Value(_) | .Block(_, _, _) -> false
+            else -> sema_stmt_binding_reads_projection(value, scopes)
+        }
+        .Field(base, _, _) | .Index(base, _, _, _) -> {
+            root :: sema_stmt_for_in_expr_root_ident(base) ?? return false
+            sema_scope_resolve_index(scopes, root) != None
+        }
+        else -> false
+    }
 }
 
 // D-RANGETYPE1 (E0136): the type head of a binding whose value is a range
@@ -5405,6 +5453,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         // #4318 §4: the source's root, resolved before the loop
                         // names can shadow it.
                         stable_root_key := sema_stmt_for_in_stable_root_key(collection_expr, scopes, state)
+                        // D-COPY-DEFAULT1=A: the loop names over a collection a
+                        // read or write parameter owns read each element through
+                        // a view (resolved before the names can shadow the root).
+                        borrowed_elements :: !consumes_collection && !range_source && sema_stmt_for_in_borrowed_elements(collection_expr, scopes)
                         sema_scope_enter(&scopes, &state, "for.in@{span.start}")
                         label_name := String?{None}
                         if label != None {
@@ -5431,6 +5483,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         if var2 != None && (second_type != None || !source_checked || pair_rejected) {
                             variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, environment, program, &scopes, &state, &diagnostics)
                             if variable_two == None -> valid = false
+                        }
+                        if borrowed_elements {
+                            sema_scope_mark_place_alias(&scopes, var)
+                            if var2 != None -> sema_scope_mark_place_alias(&scopes, var2.name)
                         }
                         lending_depth :: context.lending_view_parameter_keys.len()
                         sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, scopes, &state, &context)

@@ -346,7 +346,8 @@ fn sema_time_civil_method(receiver: Expr, receiver_value: TExpr, owner: String, 
         values := [TExpr]{}
         loop argument in packed -> &values.push(argument.value)
         finished :: sema_time_civil_value(pinned_receiver, owner, method, values, result, span, expected, environment, program, &scopes, &context, &diagnostics)
-        value :: finished.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        // The checked value moves out of `finished`: a `::` read of the field would copy it at `^value`.
+        value :: ^finished.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: Val(sema_call_with_binder_pins(^pins, ^value, span))}
     }
     SemaMethodSpecialCheck{handled: false, value: None}

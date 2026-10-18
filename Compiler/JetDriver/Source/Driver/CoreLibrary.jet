@@ -48,7 +48,9 @@ fn jet_driver_prepare_core_library(request: ^JetDriverCompileRequest) -> JetDriv
     if !compilation.complete || compilation.internal_problem != None || compilation.mir == None {
         return JetDriverCoreLibraryPreparation.CompileRefused{compilation: ^compilation}
     }
-    program :: compilation.mir ?? return JetDriverCoreLibraryPreparation.CompileRefused{compilation: ^compilation}
+    // The program moves out of its compilation (refused above when absent):
+    // a `::` read of the field would copy the whole core-library MIR at `^program`.
+    program :: ^compilation.mir ?? panic("the core library compilation lost its checked program")
     expected :: core_shared_expected_manifest(program, sources)
     if expected.errors.len() != 0 -> return JetDriverCoreLibraryPreparation.SchemaRefused{errors: expected.errors}
     JetDriverCoreLibraryPreparation.Prepared{

@@ -248,7 +248,8 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     if selected_outputs -> request.build_output_names = [String]{}
     loop error in checked.diagnostics -> &errors.push(error)
     if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(^request, ^errors, false, ^checked.internal_problem)
-    nodes :: checked.build_nodes ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("completed build query lost its compiler node identities"))
+    // The nodes move out of the checked result: a `::` read of the field would copy them at `^nodes`.
+    nodes :: ^checked.build_nodes ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("completed build query lost its compiler node identities"))
     // copy: the plan installs its own node list, and `nodes` moves into the response's `nodes`
     // below. These are two independent owners of the same node identities.
     jet_driver_build_install_nodes(plan, nodes.copy())

@@ -74,6 +74,11 @@ struct SemaScopeBinding {
     // D-TRACK-ORIGIN1=A: the `#Track` origin row for this binding; `None`
     // is the untracked row.
     origin: SemaOriginFact?{None}
+    // D-COPY-DEFAULT1=A: this `::` name reads a field or element of a place
+    // through a view, or is a loop name over a collection a read or write
+    // parameter owns. It owns nothing to give away: an exact `^` on it is
+    // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
+    place_alias: Bool{false}
 }
 
 struct SemaOriginFact {
@@ -1718,6 +1723,7 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
                 compiler_builtin: binding.compiler_builtin,
                 prepared: binding.prepared,
                 origin: binding.origin,
+                place_alias: binding.place_alias,
             })
         } else {
             // copy: sema_scope_light_copy returns an independent scope table (a snapshot for a
@@ -1808,6 +1814,14 @@ fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Boo
     frame :: table.current
     sema_scope_push_binding(&table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
     true
+}
+
+// Marks the binding `name` as a place alias (see SemaScopeBinding.place_alias)
+// after it is declared. A name that did not declare (`_`, a duplicate) has no
+// row to mark.
+fn sema_scope_mark_place_alias(table: &SemaScopeTable, name: String) Never! {
+    index :: sema_scope_resolve_index(table, name) ?? return
+    table.bindings[index].place_alias = true
 }
 
 // D-FLOWTYPE1=A: a proven payload refines a stable Optional name for the rest

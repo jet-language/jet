@@ -2545,6 +2545,27 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
             return true
         }
     }
+    // D-COPY-DEFAULT1=A (spec "Copies, moves, and owned destinations"): an
+    // exact `^name` on storage this scope does not own has nothing to give
+    // away, and lowering would copy the value instead (`jet audit copies`
+    // lists the site as an implicit read-view copy). A binding position
+    // refuses the mark in sema_expression_exact_move; a call argument, a
+    // consuming receiver, a task or a capture arrives here as a bare name and
+    // is refused the same way (E0201): a read or write parameter, a `::` name
+    // that reads a field or element through a view, or a loop name over a
+    // borrowed collection. An unmarked last use (`implicit_take_ok`) is not an
+    // exact mark and keeps the share-or-move rule.
+    if !unmarked && binding != None && sema_ownership_unmarked_moves_name(expr) && !sema_ownership_expr_site_listed(state.implicit_take_ok, expr) {
+        info :: binding
+        if sema_ownership_binding_is_borrowed_param(info) {
+            &diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` is a read or write parameter, so its caller keeps the value; moving it here would copy it", "write `{info.symbol.name}.copy()` when {consumer} should receive a copy, or declare the parameter `^` so the caller hands the value over"))
+            return false
+        }
+        if info.place_alias {
+            &diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it", "write `{info.symbol.name}.copy()` when {consumer} should receive a copy, or move the place itself with `^` when this scope owns it"))
+            return false
+        }
+    }
     // Named write windows keep ownership with their source (Rust
     // `note_exact_move`: `param_conv` `Write`). A read payload or view
     // binding is an ordinary local in Rust, so moving it is no E0201. A
