@@ -236,12 +236,14 @@ struct LowerModule {
     // file's line starts (Numeric.jet lower_source_line).
     line_rows: [U64:Int]{[U64:Int]{}}
     line_starts: [[Int]]{[[Int]]{}}
-    // Type identity key -> whether the type reaches a Close owner
-    // (PartialDrop.jet lower_partial_frame), once per module.
+    // Type identity key (or checked identity, `*_ids`) -> whether the type
+    // reaches a Close owner (PartialDrop.jet lower_type_contains_close) and
+    // whether it reaches a member no owner can copy
+    // (lower_type_contains_uncopyable), once per module.
     contains_close: [String:Bool]{[String:Bool]{}}
-    // Type identity key -> whether the type reaches a member no owner can
-    // copy (lower_type_contains_uncopyable), once per module.
+    contains_close_ids: [U64:Bool]{[U64:Bool]{}}
     contains_uncopyable: [String:Bool]{[String:Bool]{}}
+    contains_uncopyable_ids: [U64:Bool]{[U64:Bool]{}}
     // The type cache (lower_repr_of), lent to the function being lowered:
     // one row, or none while a function holds it.
     types: [LowerTypeCache]{[LowerTypeCache]{LowerTypeCache{reprs: [String:LowerRepr]{}, sizes: [String:LowerSize]{}, members: [String:[LowerMember]]{}, drops: [String:Bool]{}}}}
@@ -5520,10 +5522,19 @@ fn lower_borrowed_box_hops(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 }
 
 // Whether `ty` reaches a member no owner can copy: a Close owner, a runtime
-// handle without clone, or an atomic; once per type for the whole module. A
-// fresh lower_contains_uncopyable walk answers exactly that reachability
-// (its `seen` set only cuts cycles), so the cached answer is the walk's own.
+// handle without clone, or an atomic; once per type for the whole module
+// (by the checked identity when the type has one, else by its identity key,
+// the same partition mir_type_identity_key spells). A fresh
+// lower_contains_uncopyable walk answers exactly that reachability (its
+// `seen` set only cuts cycles), so the cached answer is the walk's own.
 fn lower_type_contains_uncopyable(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Bool Never! {
+    if ty.identity == .Val(identity) {
+        if m.contains_uncopyable_ids.get(identity.value) == .Val(known) -> return known
+        seen := [String:Bool]{}
+        found :: lower_contains_uncopyable(p, m, ty, &seen)
+        &m.contains_uncopyable_ids.add(identity.value, found).drop("checked absent above")
+        return found
+    }
     key :: mir_type_identity_key(ty)
     if m.contains_uncopyable.get(key) == .Val(known) -> return known
     seen := [String:Bool]{}
