@@ -15,29 +15,60 @@ fn lower_option_type(inner: MIRType) -> MIRType Never! {
     mir_type_from_kind(MIRTypeKind.Option{inner: inner})
 }
 
-fn lower_contains_close(p: MIRProgram, m: LowerModule, ty: MIRType, seen: &[String:Bool]) -> Bool Never! {
+// The walk behind lower_type_contains_close: whether `ty` reaches a Close
+// owner. `seen` cuts cycles within one walk (`cuts` counts them); the module
+// cache answers a type it already knows, and takes every type the walk
+// settles: one it found a Close owner from, or one whose whole closure it
+// explored (no cut inside it), so no type's members are laid out twice per
+// module. A type cut short of a settled answer stays uncached, since its
+// `false` may rest on an owner still being explored.
+fn lower_contains_close(p: MIRProgram, m: &LowerModule, ty: MIRType, seen: &[String:Bool], cuts: &Int) -> Bool Never! {
+    if ty.identity == .Val(identity) {
+        if m.contains_close_ids.get(identity.value) == .Val(known) -> return known
+    }
     key :: mir_type_identity_key(ty)
-    if seen.get(key) != None -> return false
+    if ty.identity == None {
+        if m.contains_close.get(key) == .Val(known) -> return known
+    }
+    if seen.get(key) != None {
+        cuts += 1
+        return false
+    }
     &seen.add(key, true).drop("first visit")
+    before :: cuts
+    found :: lower_contains_close_walk(p, &m, ty, &seen, &cuts)
+    if found || cuts == before -> lower_contains_close_record(&m, ty, key, found)
+    found
+}
+
+fn lower_contains_close_record(m: &LowerModule, ty: MIRType, key: String, found: Bool) Never! {
+    if ty.identity == .Val(identity) {
+        if m.contains_close_ids.get(identity.value) == None -> &m.contains_close_ids.add(identity.value, found).drop("checked absent above")
+        return
+    }
+    if m.contains_close.get(key) == None -> &m.contains_close.add(key.copy(), found).drop("checked absent above")
+}
+
+fn lower_contains_close_walk(p: MIRProgram, m: &LowerModule, ty: MIRType, seen: &[String:Bool], cuts: &Int) -> Bool Never! {
     if lower_close_method(p, m.close_methods, ty) != None -> return true
     if ty.kind == {
         .Tagged(_, inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) -> {
-            if lower_contains_close(p, m, inner, &seen) -> return true
+            if lower_contains_close(p, &m, inner, &seen, &cuts) -> return true
         }
         .Result(ok, err) | .Map(ok, err) -> {
-            if lower_contains_close(p, m, ok, &seen) || lower_contains_close(p, m, err, &seen) -> return true
+            if lower_contains_close(p, &m, ok, &seen, &cuts) || lower_contains_close(p, &m, err, &seen, &cuts) -> return true
         }
         else -> {}
     }
     if lower_is_inline(p, ty) {
         loop member in lower_inline_members(p, ty) {
-            if lower_contains_close(p, m, member.ty, &seen) -> return true
+            if lower_contains_close(p, &m, member.ty, &seen, &cuts) -> return true
         }
     } else if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == .Enum(variants, _) {
             loop variant in variants {
                 loop member in lower_variant_members(p, definition, variant) {
-                    if lower_contains_close(p, m, member.ty, &seen) -> return true
+                    if lower_contains_close(p, &m, member.ty, &seen, &cuts) -> return true
                 }
             }
         }
@@ -136,20 +167,13 @@ fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProject
 // (by the checked identity when the type has one, else by its identity
 // key, the same partition mir_type_identity_key spells). A fresh
 // lower_contains_close walk answers exactly that reachability (its `seen`
-// set only cuts cycles), so the cached answer is the walk's own.
+// set only cuts cycles, and the cached answers it consults are earlier
+// walks' own), so the cached answer is the walk's own.
 fn lower_type_contains_close(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Bool Never! {
-    if ty.identity == .Val(identity) {
-        if m.contains_close_ids.get(identity.value) == .Val(known) -> return known
-        seen := [String:Bool]{}
-        found :: lower_contains_close(p, m, ty, &seen)
-        &m.contains_close_ids.add(identity.value, found).drop("checked absent above")
-        return found
-    }
-    key :: mir_type_identity_key(ty)
-    if m.contains_close.get(key) == .Val(known) -> return known
     seen := [String:Bool]{}
-    found :: lower_contains_close(p, m, ty, &seen)
-    &m.contains_close.add(key, found).drop("checked absent above")
+    cuts := 0
+    found :: lower_contains_close(p, &m, ty, &seen, &cuts)
+    lower_contains_close_record(&m, ty, mir_type_identity_key(ty), found)
     found
 }
 
