@@ -57,7 +57,7 @@ fn method_wave_comptime_rows(graph: SemaRegistrationGraph, hooks: Shared<SemaReg
 
 fn method_wave_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cached: [SemaComptimeFunctionResult]) -> SemaGraphResult {
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, cached, hooks, threads, None, None)
 }
 
@@ -70,13 +70,15 @@ fn method_wave_lowered(checked: SemaGraphResult, source: String) -> JetCodegenFu
     lower_functions(&functions, &modules, [MIRSourceFile]{MIRSourceFile{id: mir_source_file_id("method-wave.jet"), path: "method-wave.jet", source: source}}, compiler_threads_single(), None, false, "2028", false)
 }
 
-fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int {
+fn method_wave_panic_witness(value: TExpr, function_name: String) -> Int Never! {
     found := 0
     if value.kind == .RequireStop(_, location, _) {
         method_wave_require(location.function == function_name && location.file == "method-wave.jet" && location.line > 0, "panic retains the current method and authored source coordinates after worker/inline drain")
         found += 1
     }
-    loop child in tir_expr_children(value) -> found += method_wave_panic_witness(child, function_name)
+    tir_each_expr_child(value, (child: TExpr) -> {
+        found += method_wave_panic_witness(child, function_name)
+    })
     found
 }
 
@@ -104,7 +106,7 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
     if generated_anchor == .Val(anchor) {
         remapped := false
         loop diagnostic in checked.diagnostics {
-            if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.span == Val(anchor) && diagnostic.what.contains("missing_generated_value") {
+            if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.span == Val((anchor)) && diagnostic.what.contains("missing_generated_value") {
                 method_wave_require(diagnostic.fix == "" && diagnostic.edit == None, "generated diagnostic keeps no non-authorable fix")
                 remapped = true
             }
@@ -122,15 +124,16 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
             if function.name == "window" -> consumer = function.return_view_provenance != None
             if function.name == "display" || function.name == "compare" {
                 expected :: if function.name == "display" -> Type.String else -> Type.Named{name: "Ordering"}
-                method_wave_require(function.ret == Val(expected) && function.params.len() > 0 && function.params[0].name == "self" && function.params[0].convention == AccessConvention.Read, "raw return and read receiver survive checking")
+                method_wave_require(function.ret == Val((expected)) && function.params.len() > 0 && function.params[0].name == "self" && function.params[0].convention == AccessConvention.Read, "raw return and read receiver survive checking")
                 raw_products += 1
             }
             if function.name != "fail" && function.name != "method_2" -> next
+            name :: function.name
             loop statement in function.body {
-                loop value in tir_stmt_children(statement) {
-                    if function.name == "fail" -> panic_sites += method_wave_panic_witness(value, function.name)
-                    if function.name == "method_2" && negative && keep_going -> stub_sites += method_wave_panic_witness(value, function.name)
-                }
+                tir_each_stmt_child(statement, (value: TExpr) -> {
+                    if name == "fail" -> panic_sites += method_wave_panic_witness(value, name)
+                    if name == "method_2" && negative && keep_going -> stub_sites += method_wave_panic_witness(value, name)
+                })
             }
         }
     }
@@ -217,7 +220,7 @@ fn method_wave_case(source: String, negative: Bool, keep_going: Bool, use_compti
 
 fn method_wave_cached_checked(graph: SemaRegistrationGraph, threads: CompilerThreads, cache: SemaIncrementalCache) -> SemaGraphResult {
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, threads, None)
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, Val(cache), None)
 }
 

@@ -219,6 +219,8 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             loop index in 0..<params.len() {
                 if index < args.len() && params[index].name == name -> return args[index]
             }
+            // copy: an unsubstituted named type is returned (owner: the result) while the caller
+            // keeps its type (owner: the read parameter, reused for every substitution).
             ty.copy()
         }
         .Apply(name, nested) -> {
@@ -227,8 +229,10 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             Type.Apply{name: name, args: out}
         }
         .List(inner) -> Type.List{element: jfmt_substitute_type(inner, params, args)}
-        .FixedList(elem, len) -> Type.FixedList{elem: jfmt_substitute_type(elem, params, args), len: len}
-        .Map(key, key_span, value) -> Type.Map{key: jfmt_substitute_type(key, params, args), key_span: key_span, value: jfmt_substitute_type(value, params, args)}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(elem, len) -> Type.FixedList{elem: jfmt_substitute_type(elem, params, args), len: len.copy()}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: jfmt_substitute_type(key, params, args), key_span: key_span.copy(), value: jfmt_substitute_type(value, params, args)}
         .Shared(inner) -> Type.Shared{inner: jfmt_substitute_type(inner, params, args)}
         .Option(inner) -> Type.Option{inner: jfmt_substitute_type(inner, params, args)}
         .Result(ok, err) -> Type.Result{ok: jfmt_substitute_type(ok, params, args), err: jfmt_substitute_type(err, params, args)}
@@ -237,7 +241,8 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             loop field in fields -> &out.push(TypeTupleField{name: field.name, ty: jfmt_substitute_type(field.ty, params, args)})
             Type.Tuple{fields: out}
         }
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: jfmt_substitute_type(inner, params, args)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: jfmt_substitute_type(inner, params, args)}
         .Union(members) -> {
             out := [Type]{}
             loop member in members -> &out.push(jfmt_substitute_type(member, params, args))
@@ -591,17 +596,8 @@ fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
     }
     // Rust `sort_unstable_by_key(start)`.
     sorted := edits
-    position_index := 1
-    loop position_index < sorted.len() {
-        current :: sorted[position_index].copy()
-        position := position_index
-        loop position > 0 && current.start < sorted[position - 1].start {
-            sorted[position] = sorted[position - 1]
-            position -= 1
-        }
-        sorted[position] = current
-        position_index += 1
-    }
+    sorted = loop fresh_item in sorted -> fresh_item
+    &sorted.sort_by((left: JetFmtSourceEdit, right: JetFmtSourceEdit) -> left.start <=> right.start)
     out := ""
     cursor := span.start
     loop edit in sorted {
@@ -1099,7 +1095,8 @@ fn jfmt_fmt_c_module(f: &JetFmt, c_module: CModule) {
 }
 
 fn jfmt_perf_lit(value: ContribValue) -> PerfLit? Never! {
-    if value == .Perf(perf) -> return Val(perf)
+    // copy: `perf` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+    if value == .Perf(perf) -> return Val(perf.copy())
     None
 }
 
@@ -1666,6 +1663,9 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func) {
             }
         }
     }
+    // copy: the enclosing return type (owner: f, a write parameter the body formatting reads) is
+    // restored after this function (owner: `saved_return_type`); a write parameter's field cannot
+    // be left moved out across the calls that borrow f.
     saved_return_type :: f.expected_return_type.copy()
     f.expected_return_type = func.return_type
     // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single

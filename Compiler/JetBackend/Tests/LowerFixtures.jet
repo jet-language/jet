@@ -794,6 +794,10 @@ fn run() {
         print("issue runtime-o1: library feed did not preserve canonical O1/export object bytes")
         clean = false
     }
+    if !fx_stream_compile_check() {
+        print("issue stream-compile: the streaming per-function compile differs from the serial pipeline")
+        clean = false
+    }
     if !fx_observe_address_checks() {
         print("issue observe-address: checked callback address/export contract failed")
         clean = false
@@ -921,6 +925,7 @@ fn run() {
     if !fx_report("write-params", fx_write_params()) -> clean = false
     if !fx_report("payload", fx_payload()) -> clean = false
     if !fx_report("payload-move", fx_payload_move()) -> clean = false
+    if !fx_report("boxes-cow", fx_boxes_cow()) -> clean = false
     if !fx_report("payload-move-backedge", fx_payload_move_backedge()) -> clean = false
     if !fx_report("order", fx_order()) -> clean = false
     if !fx_report("order-equal", fx_order_equal()) -> clean = false
@@ -928,6 +933,7 @@ fn run() {
     if !fx_payload_take_handle_check() -> clean = false
     if !fx_payload_take_subject_local_check() -> clean = false
     if !fx_report("lists", fx_lists()) -> clean = false
+    if !fx_report("lists-cow", fx_lists_cow()) -> clean = false
     if !fx_report("lists-place-read", fx_lists_place_read()) -> clean = false
     if !fx_report("lists-coalesce", fx_lists_place_coalesce()) -> clean = false
     if !fx_report("lists-clear", fx_lists_clear()) -> clean = false
@@ -935,6 +941,8 @@ fn run() {
     if !fx_report("lists-reverse", fx_lists_reverse()) -> clean = false
     if !fx_report("lists-extend", fx_lists_extend()) -> clean = false
     if !fx_report("lists-last", fx_lists_last()) -> clean = false
+    if !fx_report("list-surface", fx_list_surface()) -> clean = false
+    if !fx_report("map-entries", fx_map_entries()) -> clean = false
     if !fx_report("lists-try-reserve", fx_lists_try_reserve()) -> clean = false
     if !fx_report("lists-try-reserve-fault", fx_lists_try_reserve_fault()) -> clean = false
     if !fx_report("disjoint-split", fx_disjoint_split()) -> clean = false
@@ -1081,6 +1089,12 @@ fn run() {
     if !fx_report_runtime("try-capacity-unit", fx_try_capacity_unit()) -> clean = false
     if !fx_report_runtime("try-capacity-unit-fault", fx_try_capacity_unit_fault()) -> clean = false
     if !fx_report("stop-points", fx_stop_points()) -> clean = false
+    if !fx_report_stop_points_pack("stop-points-pack") -> clean = false
+    if !fx_report("stop-points-map", fx_stop_points_map()) -> clean = false
+    if !fx_stop_points_map_check() {
+        print("issue stop-points-map: the inline map loop is not guarded after its callback")
+        clean = false
+    }
     if !fx_sentry_scopes_check() {
         print("issue sentry-scopes: save/restore cleanup checks failed")
         clean = false
@@ -1095,6 +1109,7 @@ fn run() {
         if !fx_report_lir("align{align}", fx_align_module(align)) -> clean = false
     }
     if !fx_report("statics", fx_statics()) -> clean = false
+    if !fx_report("statics-box", fx_statics_box()) -> clean = false
     if !fx_report_lir("statics-addresses", fx_statics_addresses_module()) -> clean = false
     if !fx_report("statics-list", fx_statics_list()) -> clean = false
     if !fx_report("statics-bytes", fx_statics_bytes()) -> clean = false

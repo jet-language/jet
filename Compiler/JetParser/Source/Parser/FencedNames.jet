@@ -455,7 +455,8 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
         if entry.len() == 1 && entry[0].kind == TOKEN_IDENT {
             name :: token_decoded(tables, entry[0])
             if !parser_fence_reserve(&used, 0, name.len()) -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(span, "a fenced name exceeds the expansion resource budget"), used)
-            if binding_fence -> &seen.add(name.copy(), true) ?? return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0369", Val(span), "`{name}` appears twice in this fence", "one binding fence must name each generated copy once", "remove the second `{name}` or give it a different name"), used)
+            // `add_new` is true only for a name not seen before (Rust `HashSet::insert`).
+            if binding_fence && !&seen.add_new(name.copy(), true) -> return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0369", Val(span), "`{name}` appears twice in this fence", "one binding fence must name each generated copy once", "remove the second `{name}` or give it a different name"), used)
             &names.push(NamedSpan{name: name, span: span})
             next
         }

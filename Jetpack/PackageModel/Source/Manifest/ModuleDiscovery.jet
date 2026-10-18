@@ -82,7 +82,7 @@ fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError!
         }
         lexed :: lex(masked.bytes())
         if lexed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: lexer diagnostics: {pkg_diagnostic_codes(lexed.diagnostics)}"})
-        parsed :: parse_lexed(lexed)
+        parsed :: parse_lexed(^lexed)
         if parsed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: parser diagnostics: {pkg_diagnostic_codes(parsed.diagnostics)}"})
         &registry.append(JobRegistry.from_program(parsed.program))
         if resolver.revalidate_file(file) == .Err(error) -> return Err(JobDiscoveryError{message: error.message()})

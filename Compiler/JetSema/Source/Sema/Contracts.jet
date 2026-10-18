@@ -39,7 +39,6 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     tir_generated_local,
-    tir_call_arg_copy_fact,
     tir_symbol_local,
     type_name,
 ]
@@ -441,7 +440,7 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
             None
         }
         .Field(base, _, _) | .OptField(base, _, _, _, _) -> sema_contract_result_ident_in_expr(base)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found := sema_contract_result_ident_in_expr(receiver)
             if found != None -> return found
             sema_contract_result_ident_in_call_args(args)
@@ -581,7 +580,8 @@ fn sema_contract_distinct_range(ty: Type, environment: SemaScopeEnvironment, pro
     if local_row == .Val(local) -> row = local
     if qualified_row == .Val(qualified) && (row < 0 || qualified < row) -> row = qualified
     if row < 0 -> return None
-    if program.checked_types[row].kind == .Distinct(_, range) -> return range
+    // copy: `range` is a payload of read parameter `program`, which keeps the original; the returned value owns this one
+    if program.checked_types[row].kind == .Distinct(_, range) -> return range.copy()
     None
 }
 
@@ -720,11 +720,12 @@ fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, program:
         declaration :: sema_registration_callable_declaration(graph, target)
         if declaration != None -> return declaration
     }
-    loop declaration in environment.declarations {
-        if declaration.symbol_id.key == target.key {
-            if declaration.item == .Func(value) -> return Val(value)
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id.key == target.key {
+            // copy: `value` is a payload of read parameter `environment`, which keeps the original; the Val carrier owns this one
+            if environment.declarations[declaration_index].item == .Func(value) -> return Val(value.copy())
         }
-        method :: sema_contract_method_function_for_item(declaration.item, target, environment.module_identity)
+        method :: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
         if method != None -> return method
     }
     None
@@ -781,11 +782,11 @@ fn sema_contract_function_facts(environment: SemaScopeEnvironment, program: Sema
         registered :: sema_contract_registered_facts(graph, target)
         if registered != None -> return registered
     }
-    loop declaration in environment.declarations {
-        if declaration.symbol_id.key == target.key {
-            if declaration.item == .Func(value) -> return Val(sema_contract_callee_facts(value))
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id.key == target.key {
+            if environment.declarations[declaration_index].item == .Func(value) -> return Val(sema_contract_callee_facts(value))
         }
-        method :: sema_contract_method_facts_for_item(declaration.item, target, environment.module_identity)
+        method :: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
         if method != None -> return method
     }
     None
@@ -805,27 +806,21 @@ fn sema_contract_generated_argument_symbol(environment: SemaScopeEnvironment, pr
 
 fn sema_contract_pin_argument(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
     original := argument.value
-    ty :: original.ty
     init := original
-    if argument.clone || argument.arc_clone {
-        init = sema_tir_expr(ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(argument.arc_clone)}, original.span)
-        argument.clone = false
-        argument.arc_clone = false
-    }
     local := tir_generated_local("contract_arg_{call_span.start}_{index}", call_span)
     local.mutable = argument.mut_borrow
     if argument.borrow || argument.mut_borrow {
         access :: if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
-        init = sema_tir_expr(ty, TExprKind.Borrow{place: init, access: access}, original.span)
+        init = sema_tir_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         local.deref = true
     }
-    symbol :: sema_contract_generated_argument_symbol(environment, program, owner, index, parameter_name, call_span, ty)
+    symbol :: sema_contract_generated_argument_symbol(environment, program, owner, index, parameter_name, call_span, original.ty)
     local = tir_symbol_local(local.name, local.span, symbol.id)
     local.generated = true
     local.mutable = argument.mut_borrow
     local.deref = argument.borrow || argument.mut_borrow
-    local_value :: sema_tir_expr(ty, TExprKind.Local{local: local}, original.span)
-    replacement :: if convention == AccessConvention.Move -> sema_tir_expr(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+    local_value :: sema_tir_node(original.ty, TExprKind.Local{local: local}, original.span)
+    replacement :: if convention == AccessConvention.Move -> sema_tir_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
     argument.value = replacement
     &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: call_span})
     sema_scope_declare_local(&scopes, symbol, argument.mut_borrow, if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read, None, false)

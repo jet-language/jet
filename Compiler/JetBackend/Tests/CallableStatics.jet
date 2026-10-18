@@ -34,7 +34,7 @@ fn callable_statics() {
     root :: mir_function_id("run")
     lowered :: lir_lower_callables(program, [MIRFunctionID]{root})
     loop issue in lowered.issues -> print("{issue.function}: {issue.message}")
-    cs_require(lowered.issues.len() == 0, "production callable lowering and lint")
+    cs_require(lowered.issues.len() == 0, "production callable lowering")
     // Resolve this checked callable's init wrapper from the root inventory.
     entry :: lowered.callables.get(root.value) ?? panic("missing callable initialization")
     finalizer :: lowered.finalizer ?? panic("missing callable finalization")

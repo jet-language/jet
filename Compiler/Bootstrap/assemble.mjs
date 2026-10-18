@@ -54,6 +54,14 @@ const excludedSourceRoots = [
   "Compiler/JetCli/Source/Cli/Package/NativeFlash.jet",
   "Compiler/JetCli/Source/Cli/Supply.jet",
   "Compiler/JetCli/Source/Cli/ToolchainPin.jet",
+  // The REPL console, notebook and history-host ports (crates/jet-repl beyond
+  // lib.rs) are tool surfaces outside the compiler assembly closure.
+  "Compiler/JetRepl/Source/Console",
+  "Compiler/JetRepl/Source/ConsoleHost.jet",
+  "Compiler/JetRepl/Source/Docs.jet",
+  "Compiler/JetRepl/Source/Notebook",
+  "Compiler/JetRepl/Source/Repl",
+  "Compiler/JetRepl/Source/Sql.jet",
 ];
 
 function fail(message) {

@@ -33,7 +33,7 @@ fn spawn_observed(tag: &str, source: &str) -> Option<Running> {
     let dir = common::unique_tmp(&format!("jet_event_observe_{tag}"));
     fs::write(
         dir.join("package.jet"),
-        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Panic, Time, Time.Wait]\n    }\n}\n",
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Time, Time.Wait]\n    }\n}\n",
     )
     .unwrap();
     let source_path = dir.join("main.jet");

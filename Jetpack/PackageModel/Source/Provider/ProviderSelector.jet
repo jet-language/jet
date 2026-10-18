@@ -26,10 +26,10 @@ struct ProviderSelector {
 
     // At least one exact version, revision, or digest, and no inexact one.
     fn is_exact(self) -> Bool Never! {
-        identities :: [(value: String, field: ProviderSelectorField)]{
-            (value: self.version, field: ProviderSelectorField.Version),
-            (value: self.revision, field: ProviderSelectorField.Revision),
-            (value: self.digest, field: ProviderSelectorField.Digest)
+        identities :: [(field: ProviderSelectorField, value: String)]{
+            (field: ProviderSelectorField.Version, value: self.version),
+            (field: ProviderSelectorField.Revision, value: self.revision),
+            (field: ProviderSelectorField.Digest, value: self.digest)
         }
         exact := false
         loop identity in identities {

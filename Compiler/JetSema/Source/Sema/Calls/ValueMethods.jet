@@ -88,12 +88,13 @@ fn sema_value_method_tuple_struct(result: Type) -> String Never! {
 
 fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExprKind {
     if row.lowering == {
-        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: typed}
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation.copy(), args: typed}
         .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
         .StringRangeSlice -> {
-            zero_start := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            zero_end := sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
+            zero_start := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            zero_end := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+            TExprKind.Slice{base: receiver_value, start: ^zero_start, end: ^zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
         .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
@@ -135,12 +136,12 @@ fn sema_value_method_option_map(receiver: Expr, receiver_value: TExpr, inner: Ty
     // The method itself is known-pure (as every builtin value method); the
     // callback's own effects are its lambda's, merged where the walk meets it.
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Option.map", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
+    value := sema_tir_node(Type.Option{inner: success}, TExprKind.ClosureMethod{receiver: receiver_value, operation: TClosureOp.OptionMap, args: [TExpr]{callback}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
 fn sema_value_method_source_arg(value: TExpr) -> TCallArg Never! {
-    TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
 // D-FAIL-CARRIER1=A: preserve the old seed TIR method_calls.rs:4287-4288:

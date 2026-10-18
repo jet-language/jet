@@ -331,7 +331,7 @@ fn sentry_checked_fault(fault: I64, start: I64, alignment: I64) -> I64 {
 #Export(c) fn jet_rt_sentry_read(start: I64, bytes: I64, alignment: I64) -> I64 {
     fault :: jet_rt_sentry_check(start, bytes, alignment, I64{1})
     if (fault != I64{0}) {
-        sentry_stop(fault, I64{0}, false)
+        sentry_stop(fault, start, alignment, I64{0}, false)
         return I64{0}
     }
     start
@@ -520,7 +520,17 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
     sentry_append_owned(report, footer)
     report
 }
-fn sentry_stop(fault: I64, component: I64, fenced: Bool) {
+// Core.rs jet_runtime_sentry_stop records the raw fault detail (never the
+// rendered report) on every active expectation frame before it stops.
+fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool) {
+    detail :: sentry_detail(fault, start, alignment)
+    code :: if {
+        (sentry_code(fault) == I64{2}) -> TEST_SCOPE_R0802
+        (sentry_code(fault) == I64{3}) -> TEST_SCOPE_R0803
+        else -> TEST_SCOPE_R0801
+    }
+    test_scope_record_raw_stop(code, I64{5}, trap_word(detail), trap_word(detail + I64{8}))
+    jet_rt_string_drop(detail)
     domain :: jet_rt_stop_domain()
     if (domain != I64{0}) -> _ := scheduler_panic_check()
     operation :: services_msg_sentry_read()

@@ -52,7 +52,7 @@ Tools/agent/jet-env node Tools/agent/native-compiler.mjs \
 ```
 
 The seed must execute the Jet compiler's Jet CLI code, not the Rust reference
-CLI. Plain `build` selects native O0 lowering, ELF object emission and the Jet
+CLI. Plain `build` selects native O1 lowering, ELF object emission and the Jet
 static linker. The runtime directory must have `native.key`, the matching
 `KEY/jet_runtime.pack.o`, and `provenance.json` identifying a Jet-native pack
 with zero Rust/LLVM objects and its SHA-256. Every output stage receives this
@@ -75,7 +75,7 @@ and package the runtime first, then set `JET_RUNTIME_PACK` to
 `<jet-runtime>/<key>/jet_runtime.pack.o` inside that packaged runtime directory
 (its `native.key` must name `<key>`) while lowering the exact assembled CLI unit.
 The native feed runs `jet build`'s own native route
-(`jet_cli_native_executable` in `Compiler/JetCli/Source/Cli/Host.jet`) at O0
+(`jet_cli_native_executable` in `Compiler/JetCli/Source/Cli/Host.jet`) at O1
 with that directory as the runtime directory: the same C closure (inline
 `#FFI(c)` bodies, c@path archives, the musl platform from
 `<jet-runtime>/foreign/platform` or the toolchain), the same runtime object or
@@ -117,6 +117,8 @@ Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
   --repo /disk/pinned-source
 Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
   --self-rebuild --out /disk/native-fixedpoint
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --release-rebuild --out /disk/native-fixedpoint
 ```
 
 `native-feed.mjs --dry-run` performs only canonical CLI-unit assembly and records
@@ -133,6 +135,15 @@ has stage 2 compile the same unit into stage 3 and writes `self-rebuild.json`
 publication and may run beside smoke. Producer/harness hashes are recorded
 separately from the single pinned compiler/runtime source identity.
 
+The O2 compiler is a second follow-up: `--release-rebuild --out <published
+dir>` has stage 2 run `build --release` on the same unit (the `release`
+profile: MIR Release mode and LIR O2) into `release1`, then has `release1`
+rebuild itself with `build --release` into `release2`, and writes
+`release-rebuild.json` (`releaseRebuild.identical`: release 1 == release 2,
+whole files; `jet` = `release1/jet`). `release1/jet` is the compiler that
+compile-speed (LOC/s) measurements use; the self-hosting gate stays the O0
+stage 2 == stage 3 pair.
+
 The factory and every CLI stage run inside the source export's
 `Tools/agent/jet-env` shell entered from the caller's environment (the
 factory's drops inherited `JET_*`/`RUST_*`), so one C toolchain builds the
@@ -140,9 +151,17 @@ inline-C closure; each records its resolved `cc`/`ar` paths, versions and
 `NIX_HARDENING_ENABLE`, and a CLI stage whose toolchain differs from the
 factory's is refused. Each runs under GNU `time -v` (seconds, peak RSS) with a
 1 GiB main stack set by `prlimit` before exec: the native compiler runs on the
-main thread, and the Rust thread-stack variable does not raise it. CLI stages
-get `JET_COMPILER_IDENTITY` from the stage-1 factory receipt's
-`compiler_source_identity` and a `NATIVE_STAGE_TIMEOUT` (default 10800 s).
+main thread, and the Rust thread-stack variable does not raise it. Every
+compiler assembled by `native-compiler.mjs` knows its own identity: the
+assembly writes `compilerSourceIdentity(<source>)` (`native-factory.mjs`, the
+`BuildIdentity.rs` `compiler_source_id` framing, `name@version#<id>`) into
+Request.jet's last line, `JET_CLI_BUILT_COMPILER_IDENTITY`, and records it as
+the plan's `compilerIdentity`; so stage N+1 carries the identity of the source
+stage N compiled and a plain `jet build` needs no environment.
+`JET_COMPILER_IDENTITY` remains only an explicit override (tests, and builders
+that predate the embedded identity, such as a factory-era seed); the feed sets
+it for no stage built from an assembly. CLI stages get a `NATIVE_STAGE_TIMEOUT`
+(default 10800 s).
 Compiler thread admission (`compiler_threads_admit`) starts from the CPUs a
 process may run on. That is its only input the chain can set: the factory
 takes no `--threads` cap. So the stage 1 factory and every CLI stage run
@@ -154,6 +173,31 @@ hold N threads' scratch.
 `native-fixedpoint.sh` needs a real CLI builder (`stage1/jet` or `stage2/jet`,
 never `jetc0`) with `jet-runtime/` beside it, `JET_TOOLCHAIN_ROOT`, and the
 same identity (`--factory-receipt`); run it through the same `jet-env`.
+
+A self-hosted chain needs no factory, no Rust and no stage 0. `--seed
+<published dir>` takes a GREEN publication whose `self-rebuild.json` proves
+stage 2 == stage 3 and uses its `stage3/jet` as the builder of stage 1:
+
+```sh
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --seed /disk/previous/native-compiler/r29 --out /disk/native-fixedpoint \
+  --repo /disk/pinned-source
+Tools/agent/jet-env node Tools/agent/stage1/native-feed.mjs \
+  --self-rebuild --out /disk/native-fixedpoint
+```
+
+The seed's real `build` argv links stage 1 against `jet-runtime/` beside the
+seed: the pack its own lowering produced, so stage 1's code and runtime share
+one layout. Stage 1 then produces this source's runtime pack through the
+runtime-library seam (`prebuild-runtime.mjs <stage1/jet>`, written to
+`native-runtime/` and copied beside stage 1), and stages 2 and 3 link against
+that pack. The seed runs under its own identity (embedded, or for an older
+seed the `compilerSourceIdentity` of its publication's source, as an
+override); stages 1, 2 and 3 carry this source's embedded identity. The C
+toolchain reference is the one stage 1 resolves. The receipt records the seed
+(publication and self-rebuild hashes, stage 3 binary/object sha256, identity,
+runtime key and pack sha256) instead of `factorySha256`; stage 1 (the seed's
+lowering) differs from stage 2 by design, and the gate stays stage 2 == stage 3.
 
 `native-lowering-census.mjs FACTORY_RECORD PINNED_SOURCE FRESH_OUT` may run in
 parallel with the pack producer. It uses the existing `Entry.native` object

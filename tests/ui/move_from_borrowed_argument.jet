@@ -1,0 +1,50 @@
+// E0201: `^name` in a call argument (or a consuming receiver) cannot move
+// storage this scope does not own: a read or write parameter, a `::` name
+// that reads a field through a view, or a loop name over a borrowed
+// collection. Lowering would copy the value behind the explicit move, so the
+// mark is refused where it stands and the diagnostic teaches `.copy()` or an
+// owning value. (A binding position already reports it: move_from_borrowed_field.)
+struct Session {
+    id: Int
+    names: [String]
+}
+
+struct Root {
+    session: Session
+}
+
+fn consume(s: ^Session) -> Int {
+    s.id
+}
+
+fn sink(slot: &[Session], s: ^Session) {
+    &slot.push(^s)
+}
+
+fn read_param(s: Session) -> Int {
+    consume(^s)
+}
+
+fn write_param(s: &Session, slot: &[Session]) {
+    sink(&slot, ^s)
+}
+
+fn field_view(r: Root) -> Int {
+    view :: r.session
+    consume(^view)
+}
+
+fn loop_element(sessions: [Session]) -> Int {
+    last := 0
+    loop s in sessions -> last = consume(^s)
+    last
+}
+
+fn run() {
+    root := Root{session: Session{id: 3, names: [String]{}}}
+    slot := [Session]{}
+    print(read_param(root.session))
+    write_param(&root.session, &slot)
+    print(field_view(root))
+    print(loop_element([root.session]))
+}

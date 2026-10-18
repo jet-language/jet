@@ -224,7 +224,7 @@ function assembleUnit() {
     jetDecoder(schema),
   ];
   writeFileSync(join(dirs.lower, "unit.jet"), [...coreUses, "", ...parts].join("\n"));
-  writeFileSync(join(dirs.lower, "package.jet"), 'name: "jet_backend_goldens"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Panic, Time] } }\n');
+  writeFileSync(join(dirs.lower, "package.jet"), 'name: "jet_backend_goldens"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time] } }\n');
 }
 
 // The unit is built once (`jet build`, or `jet build --release` with

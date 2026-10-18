@@ -1,0 +1,962 @@
+// Private continuation of jet_devserver.WebHost.
+use jet_devserver.WebHost.[DevStatus, MAX_CONNECTION_THREADS, REQUEST_DEADLINE, WebHost, current_revision_for_request, current_revision_for_source_id, decode_devtools_envelope, devtools_path, inject_canvas_session, is_application_control_path, is_loopback_host, method_not_allowed, next_web_error_request_id, object_map, paused_evaluate_error_status, read_source_without_symlinks, serve_static_from_root, session_response, source_id_from_payload, source_tool_path, wait_for_shutdown, web_stream_path, with_session]
+use std.io.[Read, Write, BufReader, Error, ErrorKind]
+use std.net.[TcpStream, TcpListener, SocketAddr, IpAddr, Ipv4Addr]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.time.[Duration, Instant]
+use std.thread as thread
+use core.files.[OSPath]
+use jet_devserver.[Request, MAX_REQUEST_BODY_BYTES, ResidentDevSession, query_param, write_response]
+use jet_devserver.Canvas as Canvas
+use jet_devserver.BrowserWebAdapter as browser_web_adapter
+use jet_devserver.BrowserHost as BrowserHost
+use jet_devserver.Devtools as Devtools
+use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+use jet_driver.Package.[ReleaseDevtoolsPolicy]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
+// Rust: crates/jet-devserver/src/WebHost.rs:3789
+// Canonical WebPending implementation, not the Rust include bridge.
+use jet_codegen.Prelude.Core.WebPending as web_stream_bridge
+// Rust: crates/jet-devserver/src/WebHost.rs:3589
+fn canvas_api_path(path: String, target: String) -> Bool {
+    return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/__jet_canvas/session").bit_or("/__jet_canvas/live").bit_or("/__jet_canvas/graph").bit_or("/__jet_canvas/project").bit_or("/__jet_canvas/source-control").bit_or("/__jet_canvas/core-catalog").bit_or("/__jet_canvas/proof").bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction").bit_or("/__jet_canvas/project/transaction").bit_or("/__jet_canvas/query").bit_or("/__jet_canvas/debug").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/canvas/session").bit_or("/canvas/graph").bit_or("/canvas/project").bit_or("/canvas/source-control").bit_or("/canvas/core-catalog").bit_or("/canvas/proof").bit_or("/canvas/source").bit_or("/canvas/command").bit_or("/canvas/transaction").bit_or("/canvas/project/transaction").bit_or("/canvas/query").bit_or("/canvas/debug").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/panel/session").bit_or("/panel/graph").bit_or("/panel/project").bit_or("/panel/source-control").bit_or("/panel/core-catalog").bit_or("/panel/proof").bit_or("/panel/source").bit_or("/panel/command").bit_or("/panel/transaction").bit_or("/panel/project/transaction").bit_or("/panel/query").bit_or("/panel/debug").bit_or("/__jet_dev_version").bit_or("/__jet_dev_status").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser").bit_or("/__jet_web/stream")
+        || devtools_path(path)
+        || (path == "/" && (query_param(target, "jet_panel") == "1"
+            || query_param(target, "jet_panel_app") == "1"
+            || query_param(target, "jet_panel_graph") == "1"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3650
+fn canvas_request_authorized(request: Request, target: String, bind_host: String, port: U16, session_secret: String) -> Bool {
+    if session_secret.is_empty() || !(request.method == "GET".bit_or("POST"))
+        || request.body.len() > MAX_REQUEST_BODY_BYTES
+        || request.headers.contains_key("transfer-encoding")
+        || (request.method == "POST" && !request.headers.contains_key("content-length"))
+        || (request.method == "GET" && !request.body.is_empty()) -> return false
+    path :: target.split('?').next().unwrap_or("")
+    if !canvas_api_path(path, target) -> return false
+    host :: request.headers.get("host") ?? return false
+    if !host_header_allowed(host, bind_host, port) -> return false
+    origin :: request.headers.get("origin")
+    same_origin :: request.headers.get("sec-fetch-site").is_some_and((site) -> site.eq_ignore_ascii_case("same-origin"))
+    if origin == .Val(value) {
+        if !origin_allowed(value, bind_host, port) -> return false
+    } else if !canvas_bootstrap_path(path, target) && !same_origin -> return false
+    authorization :: request.headers.get("authorization")
+    query_session :: if unique_session_param(target) == {
+        .Ok(v) -> v
+        .Err(_) -> { return false }
+    }
+    session_valid :: if {
+        authorization == .Val(auth) && query_session == .Val(query) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret)) && constant_time_equal(query, session_secret)
+        authorization == .Val(auth) && query_session == .None -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret))
+        authorization == .None && query_session == .Val(query) -> constant_time_equal(query, session_secret)
+        authorization == .None && query_session == .None -> false
+    }
+    return session_valid && (origin.is_some() || canvas_bootstrap_path(path, target) || same_origin)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3709
+fn unique_session_param(target: String) -> String? Unit! {
+    (_, query) :: target.split_once('?') ?? return .Ok(.None)
+    found := false
+    loop part in query.split('&') {
+        name :: part.split_once('=').map(((_0: name, _1: _)) -> name).unwrap_or(part)
+        if name == "session" {
+            if found -> return .Err(_)
+            found = true
+        }
+    }
+    return .Ok(query_param(target, "session"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3726
+fn canvas_bootstrap_path(path: String, target: String) -> Bool {
+    return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/__jet_devtools").bit_or("/__jet_devtools/workbench")
+        || target == "/?jet_panel=1".bit_or("/?jet_panel_app=1")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3743
+fn requires_canvas_authorization(listener_kind: ListenerKind) -> Bool { listener_kind == .Canvas }
+// Rust: crates/jet-devserver/src/WebHost.rs:3747
+fn requires_session_authorization(listener_kind: ListenerKind, path: String) -> Bool {
+    (path != "/__jet_dev_status" && requires_canvas_authorization(listener_kind))
+        || (listener_kind == .Application && (devtools_path(path) || web_stream_path(path) || source_tool_path(path)))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3753
+fn host_header_allowed(value: String, bind_host: String, port: U16) -> Bool {
+    trimmed := value.trim() // #4303
+    value :: trimmed.to_ascii_lowercase()
+    if value == "{url_host(bind_host)}:{port}".to_ascii_lowercase() -> return true
+    if !is_loopback_host(bind_host) -> return false
+    return ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == "{alias}:{port}")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3766
+fn origin_allowed(value: String, bind_host: String, port: U16) -> Bool {
+    trimmed := value.trim() // #4303
+    value :: trimmed.to_ascii_lowercase()
+    expected :: "http://{url_host(bind_host)}:{port}".to_ascii_lowercase()
+    if value == expected -> return true
+    return is_loopback_host(bind_host) && ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == "http://{alias}:{port}")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3778
+fn constant_time_equal(left: String, right: String) -> Bool {
+    left :: left.as_bytes()
+    right :: right.as_bytes()
+    difference := left.len().bit_xor(right.len())
+    loop index in 0..left.len().max(right.len()) {
+        difference |= (USize{left.get(index).copied().unwrap_or(0)}).bit_xor((USize{right.get(index).copied().unwrap_or(0)}))
+    }
+    return difference == 0
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3794
+fn web_stream_json_string(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
+// Rust: crates/jet-devserver/src/WebHost.rs:3798
+fn web_stream_error(error: web_stream_bridge.JetWebPendingError) -> (String, String) { (_0: error.code().to_string(), _1: error.message()) }
+// Rust: crates/jet-devserver/src/WebHost.rs:3802
+fn web_stream_request_error(message: String) -> (String, String) { (_0: "invalid_request", _1: ^message) }
+// Rust: crates/jet-devserver/src/WebHost.rs:3806
+fn web_stream_required_string(object: [String:Dyn], key: String) -> Result<String, (String, String)> {
+    return if object.get(key) == {
+        .Val(.Text(value)) if !value.is_empty() -> .Ok(value.clone())
+        .Val(.Text(_)) -> .Err(web_stream_request_error("web stream `{key}` must not be empty"))
+        .Val(_) -> .Err(web_stream_request_error("web stream `{key}` must be a string"))
+        .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3823
+fn web_stream_required_text(object: [String:Dyn], key: String) -> Result<String, (String, String)> {
+    return if object.get(key) == {
+        .Val(.Text(value)) -> .Ok(value.clone())
+        .Val(_) -> .Err(web_stream_request_error("web stream `{key}` must be a string"))
+        .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3838
+fn web_stream_required_u64(object: [String:Dyn], key: String) -> Result<U64, (String, String)> {
+    return if object.get(key) == {
+        .Val(.Int(value)) if value >= 0 -> .Ok(U64{value})
+        .Val(.Int(_)) -> .Err(web_stream_request_error("web stream `{key}` must be non-negative"))
+        .Val(_) -> .Err(web_stream_request_error("web stream `{key}` must be an integer"))
+        .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3856
+fn web_stream_required_bool(object: [String:Dyn], key: String) -> Result<Bool, (String, String)> {
+    return if object.get(key) == {
+        .Val(.Bool(value)) -> .Ok(value)
+        .Val(_) -> .Err(web_stream_request_error("web stream `{key}` must be a boolean"))
+        .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3870
+fn web_stream_required_usize(object: [String:Dyn], key: String) -> Result<USize, (String, String)> {
+    value :: web_stream_required_u64(object, key)
+    return USize.try_from(value).map_err((_) -> web_stream_request_error("web stream `{key}` is too large")) // GATE #4483: selected pointer width.
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3879
+fn web_stream_object(object: [String:Dyn], key: String) -> Result<[String:Dyn], (String, String)> {
+    value :: object.get(key).ok_or_else(() -> web_stream_request_error("web stream request has no `{key}`"))
+    return object_map(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` must be an object"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3890
+fn web_stream_identity(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebIslandIdentity, (String, String)> {
+    identity :: web_stream_object(object, key)
+    island_id :: web_stream_required_string(&identity, "island_id")
+    source_id :: web_stream_required_string(&identity, "source_id")
+    build_id :: web_stream_required_string(&identity, "build_id")
+    revision :: web_stream_required_string(&identity, "revision")
+    return web_stream_bridge.JetWebIslandIdentity.new(^island_id, ^source_id, ^build_id, ^revision).map_err(web_stream_error)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3903
+fn web_stream_boundary_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebBoundaryId, (String, String)> {
+    return web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(object, key)?).map_err(web_stream_error)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3911
+fn web_stream_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebStreamId, (String, String)> {
+    stream :: web_stream_object(object, key)
+    boundary_id :: web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(&stream, "boundary_id")?).map_err(web_stream_error)
+    generation :: web_stream_required_u64(&stream, "generation")
+    identity :: web_stream_identity(&stream, "identity")
+    return web_stream_bridge.JetWebStreamId.from_parts(^boundary_id, generation, ^identity).map_err(web_stream_error)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3927
+fn web_stream_trigger(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebHydrationTrigger, (String, String)> {
+    value :: web_stream_required_string(object, key)
+    return web_stream_bridge.JetWebHydrationTrigger.parse(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` has an unknown hydration trigger"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3939
+fn web_stream_target(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebPendingProjectionTarget, (String, String)> {
+    return if web_stream_required_string(object, key)? == {
+        "server" -> .Ok(.Server)
+        "client" -> .Ok(.Client)
+        else -> .Err(web_stream_request_error("web stream `{key}` must be `server` or `client`"))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3952
+fn web_stream_failure(object: [String:Dyn]) -> Result<web_stream_bridge.JetWebPendingError, (String, String)> {
+    error :: web_stream_object(object, "error")
+    return if web_stream_required_string(&error, "code")? == {
+        "missing_final_chunk" -> .Ok(.MissingFinalChunk)
+        "invalid_lifecycle" -> .Ok(.InvalidLifecycle(state: .Pending, operation: "web_stream_fail"))
+        "content_too_large" -> .Ok(.ContentTooLarge(limit: web_stream_required_usize(&error, "limit")?, actual: web_stream_required_usize(&error, "actual")?))
+        code -> .Err(web_stream_request_error("web stream failure code `{code}` is not supported by the host bridge"))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3972
+fn web_stream_success(action: String, payload: String) -> String { "{{\"ok\":true,\"action\":{web_stream_json_string(action)},{payload} }}" }
+// Rust: crates/jet-devserver/src/WebHost.rs:3980
+fn web_stream_failure_json(code: String, message: String) -> String {
+    "{{\"ok\":false,\"error\":{{\"code\":{web_stream_json_string(code)},\"message\":{web_stream_json_string(message)}}}}}"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3988
+fn handle_web_stream_request(stream: &impl Write, request: &Request) Err! {
+    if request.method != "POST" -> return method_not_allowed(stream)
+    text :: match std.str.from_utf8(&request.body) { // GATE #4494: borrowed UTF-8 byte view.
+        .Ok(text) -> text
+        .Err(_) -> { return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be UTF-8 JSON").as_bytes()) }
+    }
+    root :: if parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) == {
+        .Ok(root) -> root
+        .Err(_) -> { return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request is not bounded JSON").as_bytes()) }
+    }
+    object :: object_map(&root) ?? return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be an object").as_bytes())
+    result :: Result<String, (String, String)>{(() -> {
+        action :: web_stream_required_string(&object, "action")?
+        return if action == {
+            "register" -> {
+                boundary_id :: web_stream_required_string(&object, "boundary_id")?
+                identity :: web_stream_identity(&object, "identity")?
+                boundary :: web_stream_bridge.jet_web_stream_register(^boundary_id, ^identity).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"boundary_id\":{boundary.render_json()}"))
+            }
+            "begin" -> {
+                boundary_id :: web_stream_boundary_id(&object, "boundary_id")?
+                identity :: web_stream_identity(&object, "identity")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                stream_id :: web_stream_bridge.jet_web_stream_begin(&boundary_id, ^identity, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"stream_id\":{stream_id.render_json()}"))
+            }
+            "chunk" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                sequence :: web_stream_required_u64(&object, "sequence")?
+                content :: web_stream_required_text(&object, "content")?
+                is_final :: web_stream_required_bool(&object, "is_final")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_chunk(&stream_id, sequence, ^content, is_final, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "commit" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_commit(&stream_id, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "fail" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                error :: web_stream_failure(&object)?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_fail(&stream_id, ^error, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "cancel" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_cancel(&stream_id, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "rollback" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_rollback(&stream_id, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "hydration_start" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                trigger :: web_stream_trigger(&object, "trigger")?
+                started_at_ns :: web_stream_required_u64(&object, "started_at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_hydration_start(&stream_id, trigger, started_at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "hydration_complete" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                completed_at_ns :: web_stream_required_u64(&object, "completed_at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_hydration_complete(&stream_id, completed_at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt.render_json()}"))
+            }
+            "receipt" -> {
+                boundary_id :: web_stream_boundary_id(&object, "boundary_id")?
+                receipt :: web_stream_bridge.jet_web_stream_receipt_json(&boundary_id).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"receipt\":{receipt}"))
+            }
+            "projection" -> {
+                boundary_id :: web_stream_boundary_id(&object, "boundary_id")?
+                target :: web_stream_target(&object, "target")?
+                projection :: web_stream_bridge.jet_web_stream_projection_json(&boundary_id, target).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, "\"projection\":{projection}"))
+            }
+            else -> .Err(web_stream_request_error("web stream action `{action}` is not recognized"))
+        }
+    })()}
+    return if result == {
+        .Ok(body) -> write_response(stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+        .Err((code, message)) -> write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json(code, message).as_bytes())
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4182
+fn unauthorized(stream: &impl Write) Err! {
+    write_response(stream, "401 Unauthorized", "text/plain; charset=utf-8", "devserver session, host, or origin rejected".bytes())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4190
+fn handle_release_devtools_request(stream: &impl Write, request: &Request, path: String, bind_host: String, port: U16, peer_addr: SocketAddr, session: &ResidentDevSession, policy: &ReleaseDevtoolsPolicy) Err! {
+    if path != "/__jet_devtools" || !policy.endpoint_enabled() -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "inspect endpoint absent".bytes())
+    if request.method != "GET" -> return method_not_allowed(stream)
+    if !policy.deployment_enabled() -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "inspect endpoint disabled".bytes())
+    host :: request.headers.get("host") ?? return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect host rejected".bytes())
+    if !host_header_allowed(host, bind_host, port) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect host rejected".bytes())
+    if request.headers.get("origin").is_some_and((origin) -> !origin_allowed(origin, bind_host, port)) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect origin rejected".bytes())
+    expected_token :: policy.deployment.token() ?? return write_response(stream, "401 Unauthorized", "application/json; charset=utf-8", "{{\"error\":\"JET_INSPECT_TOKEN required\"}}".bytes())
+    token_valid :: request.headers.get("authorization").and_then((value) -> value.strip_prefix("Bearer ")).is_some_and((token) -> constant_time_equal(token, expected_token))
+    if !token_valid -> return write_response(stream, "401 Unauthorized", "application/json; charset=utf-8", "{{\"error\":\"JET_INSPECT_TOKEN required\"}}".bytes())
+    if !policy.peer_allowed(peer_addr.ip()) -> return write_response(stream, "403 Forbidden", "application/json; charset=utf-8", "{{\"error\":\"inspect network address not allowed\"}}".bytes())
+    if !request.body.is_empty() || request.headers.contains_key("transfer-encoding") -> return write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "inspect endpoint accepts GET without a request body".bytes())
+    projection :: session.devtools_events_since(.None)
+    panels :: if session.devtools_panels(Devtools.JetDevtoolsHostKind.BrowserInApp, &Devtools.JetDevtoolsPanelCapability.ALL) == {
+        .Ok(panels) -> panels
+        .Err(error) -> { return write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.to_string().as_bytes()) }
+    }
+    body :: browser_web_adapter.release_json(&projection, &panels)
+    return write_response(stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4308
+enum ListenerKind { Canvas; Application }
+// Rust: crates/jet-devserver/src/WebHost.rs:4314
+struct DeadlineStream {
+    stream: TcpStream
+    deadline: Instant
+}
+impl DeadlineStream {
+    // Rust: crates/jet-devserver/src/WebHost.rs:4320
+    fn new(stream: TcpStream, deadline: Instant) -> Self { Self(stream: ^stream, deadline: deadline) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:4324
+    fn try_clone(self: Self) -> Self Err! { .Ok(Self.new(self.stream.try_clone(), self.deadline)) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:4328
+    fn remaining(self: Self) -> Duration Err! {
+        remaining :: self.deadline.saturating_duration_since(Instant.now()) // GATE #4494: monotonic clock.
+        if remaining.is_zero() { .Err(Error.new(ErrorKind.TimedOut, "devserver request deadline exceeded")) } else { .Ok(remaining) }
+    }
+}
+impl DeadlineStream.Read {
+    // Rust: crates/jet-devserver/src/WebHost.rs:4342
+    fn read(self: Self, buffer: [U8]) -> USize Err! {
+        remaining :: self.remaining()
+        self.stream.set_read_timeout(.Val(remaining))? // GATE #4494: retained native socket timeout.
+        return self.stream.read(buffer)
+    }
+}
+impl DeadlineStream.Write {
+    // Rust: crates/jet-devserver/src/WebHost.rs:4350
+    fn write(self: Self, buffer: [U8]) -> USize Err! {
+        remaining :: self.remaining()
+        self.stream.set_write_timeout(.Val(remaining))? // GATE #4494
+        return self.stream.write(buffer)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:4356
+    fn flush(self: &Self) Err! {
+        remaining :: self.remaining()
+        self.stream.set_write_timeout(.Val(remaining))
+        return self.stream.flush()
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4365
+// One thread per accepted connection, bounded by MAX_CONNECTION_THREADS.
+fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, debug_sessions: Arc<Canvas.DebugSessions>, session: Arc<ResidentDevSession>, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, shutdown: Arc<AtomicBool>, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, browser_state: Arc<Mutex<browser_web_adapter.BrowserWebState?>>, paused_evaluate: Arc<Mutex<PausedEvaluateHost>>, terminal_style: Arc<TerminalStyleHostAdapter>) -> Unit {
+    if listener.set_nonblocking(true).is_err() -> return
+    active_connections :: Arc.new(AtomicUsize.new(0)) // GATE #4494: native atomic and thread substrate.
+    loop !shutdown.load(Ordering.SeqCst) {
+        if listener.accept() == {
+            .Ok(tuple_10) -> {
+                stream :: tuple_10._0
+                peer_addr :: tuple_10._1
+                if !try_acquire_connection(&active_connections) { drop(^stream); next }
+                status :: Arc.clone(&status)
+                debug_sessions :: Arc.clone(&debug_sessions)
+                session :: Arc.clone(&session)
+                canvas_file :: canvas_file.clone()
+                bind_host :: bind_host.clone()
+                session_secret :: session_secret.clone()
+                static_root :: static_root.clone()
+                release_policy :: release_policy.clone()
+                browser_state :: Arc.clone(&browser_state)
+                paused_evaluate :: Arc.clone(&paused_evaluate)
+                terminal_style :: Arc.clone(&terminal_style)
+                active_connections :: Arc.clone(&active_connections)
+                _ :: thread.spawn(() -> {
+                    _ :: handle_connection_with_root_and_policy(^stream, &status, &debug_sessions, &session, canvas_file, listener_kind, bind_host, session_secret, &static_root, &browser_state, &paused_evaluate, &terminal_style, &release_policy, peer_addr)
+                    _ :: active_connections.fetch_sub(1, Ordering.AcqRel)
+                })
+            }
+            .Err(error) && error.kind() == ErrorKind.WouldBlock -> { _ :: wait_for_shutdown(&shutdown, Duration.from_millis(10)) }
+            .Err(_) -> { return }
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4432
+fn try_acquire_connection(active: AtomicUsize) -> Bool {
+    current := active.load(Ordering.Acquire) // GATE #4494
+    loop {
+        if current >= MAX_CONNECTION_THREADS -> return false
+        if active.compare_exchange(current, current + 1, Ordering.AcqRel, Ordering.Acquire) == {
+            .Ok(_) -> { return true }
+            .Err(next) -> current = next
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4504
+fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus, debug_sessions: &Canvas.DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, static_root: &OSPath, browser_state: &Arc<Mutex<browser_web_adapter.BrowserWebState?>>, paused_evaluate: &Arc<Mutex<PausedEvaluateHost>>, terminal_style: &Arc<TerminalStyleHostAdapter>, release_policy: &ReleaseDevtoolsPolicy, peer_addr: SocketAddr) Err! {
+    deadline :: Instant.now() + REQUEST_DEADLINE
+    stream := DeadlineStream.new(^stream, deadline)
+    reader := BufReader.new(stream.try_clone()?)
+    request :: Request.read(&reader) ?? return .Ok(_)
+    method :: request.method.as_str()
+    target :: request.target.as_str()
+    body :: request.body.as_slice()
+    path :: target.split('?').next().unwrap_or("/")
+    if listener_kind == .Application && release_policy.is_release() && devtools_path(path) {
+        return handle_release_devtools_request(&stream, &request, path, bind_host, session.application_port(), peer_addr, session, release_policy)
+    }
+    if requires_session_authorization(listener_kind, path) && !canvas_request_authorized(&request, target, bind_host, if listener_kind == .Canvas { session.canvas_port() } else { session.application_port() }, session_secret) -> return unauthorized(&stream)
+    if method != "GET" && method != "POST" -> return write_response(&stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "jet dev's web server only handles GET and Canvas POST requests".bytes())
+    // Source tools require Canvas authority even on the application origin.
+    if listener_kind == .Application && source_tool_path(path) {
+        if release_policy.is_release() -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "source tools are absent in release builds".bytes())
+        if session.canvas_port() == 0 -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", browser_web_adapter.SOURCE_TOOLS_OFF_REASON.as_bytes())
+    }
+    if listener_kind == .Canvas {
+        if query_param(target, "client_id") == .Val(client) -> session.note_client(client)
+    }
+    if listener_kind == .Application && !is_application_control_path(path) {
+        if method != "GET" -> return method_not_allowed(&stream)
+        started :: Instant.now()
+        nonce :: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
+        code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)
+        status.log_request(method, path, code, started.elapsed())
+        return .Ok(_)
+    }
+    if listener_kind == .Application && web_stream_path(path) -> return handle_web_stream_request(&stream, &request)
+    if devtools_path(path) {
+        if query_param(target, "client_id") == .Val(client) -> session.note_client(client)
+        placement :: if path == {
+            "/__jet_devtools/workbench" -> BrowserHost.BrowserPlacement.Workbench
+            else -> BrowserHost.BrowserPlacement.InApp
+        }
+        if method == "GET" && listener_kind == .Application && path == "/__jet_devtools".bit_or("/__jet_devtools/workbench") {
+            state := browser_state.lock().unwrap()
+            return if browser_web_adapter.sync_session(&state, session) == {
+                .Ok(_) -> {
+                    body :: browser_web_adapter.render_page(state.as_ref().expect("browser web state initialized"), placement)
+                    write_response(&stream, "200 OK", "text/html; charset=utf-8", body.as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/reconnect" && method == "GET" {
+            cursor :: if query_param(target, "cursor") == {
+                .Val(value) -> if value.parse<U64>() == {
+                    .Ok(cursor) -> .Val(cursor)
+                    .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "cursor must be a non-negative integer".bytes()) }
+                }
+                .None -> .None
+            }
+            state := browser_state.lock().unwrap()
+            return if browser_web_adapter.sync_session(&state, session) == {
+                .Ok(_) -> {
+                    projection :: session.devtools_events_since(cursor)
+                    state :: state.as_ref().expect("browser web state initialized")
+                    if browser_web_adapter.reconnect_json(state, cursor, projection.reset, projection.truncation) == {
+                        .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/state" && method == "GET" {
+            state := browser_state.lock().unwrap()
+            return if browser_web_adapter.sync_session(&state, session) == {
+                .Ok(_) -> {
+                    body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                    write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/swap" && method == "GET" {
+            state := browser_state.lock().unwrap()
+            return if browser_web_adapter.sync_session(&state, session) == {
+                .Ok(_) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", browser_web_adapter.swap_json(state.as_ref().expect("browser web state initialized")).as_bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/swap" && method == "POST" {
+            state := browser_state.lock().unwrap()
+            result :: browser_web_adapter.sync_session(&state, session).and_then((()) -> browser_web_adapter.record_dom_snapshot(&state, session.id(), body))
+            return if result == {
+                .Ok(_) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/recording" && release_policy.is_release() -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "recording endpoint absent in release builds".bytes())
+        if path == "/__jet_devtools/recording" && method == "GET" {
+            body :: if {
+                query_param(target, "sequence") == .Val(value) -> {
+                    sequence :: if value.parse<U64>() == {
+                        .Ok(sequence) -> sequence
+                        .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "sequence must be a non-negative integer".bytes()) }
+                    }
+                    session.recording_control("{{\"op\":\"scrub\",\"sequence\":{sequence}}}")
+                }
+                query_param(target, "timestamp_ms") == .Val(value) -> {
+                    timestamp_ms :: if value.parse<U64>() == {
+                        .Ok(timestamp_ms) -> timestamp_ms
+                        .Err(_) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "timestamp_ms must be a non-negative integer".bytes()) }
+                    }
+                    session.recording_control("{{\"op\":\"scrub_time\",\"timestamp_ms\":{timestamp_ms}}}")
+                }
+                else -> { .Ok(session.recording_json()) }
+            }
+            return if body == {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/recording" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "recording control must be UTF-8 JSON"))? // GATE #4409
+            return if session.recording_control(payload) == {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/action" && method == "POST" {
+            action :: if browser_web_adapter.parse_action(body, placement) == {
+                .Ok(action) -> action
+                .Err(error) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes()) }
+            }
+            state := browser_state.lock().unwrap()
+            return if browser_web_adapter.sync_session(&state, session) == {
+                .Ok(_) -> if browser_web_adapter.dispatch_action(state.as_mut().expect("browser web state initialized"), ^action) == {
+                    .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                    .Err(error) -> write_response(&stream, "403 Forbidden", "text/plain; charset=utf-8", error.to_string().as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/commands" && method == "GET" {
+            return if session.browser_game_control_frame() == {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/assets" && method == "GET" {
+            return if session.browser_game_asset_frame() == {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if method == "GET" && path == "/__jet_devtools".bit_or("/__jet_canvas/devtools").bit_or("/canvas/devtools").bit_or("/panel/devtools") {
+            state := browser_state.lock().unwrap()
+            return if browser_web_adapter.sync_session(&state, session) == {
+                .Ok(_) -> {
+                    body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                    write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools event must be UTF-8"))
+            return if decode_devtools_envelope(payload).and_then((decoded) -> == {
+                session.ingest_devtools_envelope(^decoded)?
+                session.dispatch_pending_database_explain().map((_) -> ())
+            }) {
+                .Ok(_) -> {
+                    state := browser_state.lock().unwrap()
+                    if browser_web_adapter.sync_session(&state, session) == {
+                        .Ok(_) -> {
+                            body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                            write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        }
+                        .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/selection" && method == "POST" {
+            selection :: if browser_web_adapter.parse_selection(body) == {
+                .Ok(selection) -> selection
+                .Err(error) -> { return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes()) }
+            }
+            if selection == .Val(tuple_11) {
+                panel_id :: tuple_11._0
+                panels :: if session.devtools_panels(Devtools.JetDevtoolsHostKind.BrowserInApp, &Devtools.JetDevtoolsPanelCapability.ALL) == {
+                    .Ok(panels) -> panels
+                    .Err(error) -> { return write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.to_string().as_bytes()) }
+                }
+                if !panels.iter().any((panel) -> panel.availability.descriptor.id.as_str() == panel_id) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "browser selection panel_id must match the canonical panel catalog".bytes())
+            }
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools selection must be UTF-8"))
+            return if session.set_devtools_selection(payload) == {
+                .Ok(_) -> {
+                    state := browser_state.lock().unwrap()
+                    if browser_web_adapter.sync_session(&state, session) == {
+                        .Ok(_) -> {
+                            body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                            write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        }
+                        .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/cursor" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools cursor must be UTF-8"))
+            return if session.set_devtools_cursor(payload) == {
+                .Ok(_) -> {
+                    state := browser_state.lock().unwrap()
+                    if browser_web_adapter.sync_session(&state, session) == {
+                        .Ok(_) -> {
+                            body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                            write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        }
+                        .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/error" && method == "GET" {
+            facts :: status.web_error_facts()
+            devtools_projection :: session.devtools_events_since(.None)
+            request_id :: next_web_error_request_id()
+            source_id :: devtools_projection.source_id.filter((value) -> !value.is_empty()).unwrap_or_else(() -> canvas_file.to_string())
+            build_id :: devtools_projection.build_id.filter((value) -> !value.is_empty()).or_else(() -> {
+                std.fs.read_to_string(static_root.join("web.manifest.json")).ok().and_then((manifest) -> browser_web_adapter.manifest_artifact_identity(manifest).ok())
+            }) ?? return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
+            accept :: request.headers.get("accept").map((v) -> v.as_str()).unwrap_or("*/*")
+            identity :: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(^request_id, session.id(), source_id.clone(), ^build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))
+            rendered :: if !facts.is_error() { .Ok(.None) } else {
+                source_excerpts :: Canvas.read_source_without_symlinks(OSPath.new(canvas_file)).ok().and_then((source) -> {
+                    excerpt :: source.chars().take(jet_devserver.WebErrorPage.MAX_WEB_ERROR_SOURCE_BYTES).collect<String>()
+                    jet_devserver.WebErrorPage.WebErrorSourceExcerpt.without_span(source_id.clone(), "failure source", .Val(^excerpt)).ok()
+                }).into_iter().collect<[_]>()
+                action_links :: [("Open devtools", "/__jet_devtools"), ("Reconnect", "/__jet_devtools/reconnect"), ("Open recording", "/__jet_devtools/recording")].into_iter().filter_map(((label, href)) -> jet_devserver.WebErrorPage.WebErrorActionLink.new(label, href).ok()).collect<[_]>()
+                page :: if {
+                    facts.is_internal_failure() -> {
+                        jet_devserver.WebErrorPage.WebErrorPage.from_internal(^identity, facts.code.clone(), facts.diagnostic.clone(), ^action_links).and_then((page) -> page.with_source_excerpts(^source_excerpts))
+                    }
+                    else -> {
+                        jet_devserver.WebErrorPage.WebErrorDiagnosticFact.from_dev_status(&facts).and_then((diagnostic) -> jet_devserver.WebErrorPage.WebErrorPage.new_with_status(500, ^identity, ^diagnostic, ^source_excerpts, .None, ^action_links))
+                    }
+                }
+                page.and_then((page) -> page.project(accept, jet_devserver.WebErrorPage.WebErrorCapabilities.local()).map((p) -> .Val(^p))).map_err((error) -> error.to_string())
+            }
+            return if rendered == {
+                .Ok(.Val(projection)) -> {
+                    status :: if projection.status == {
+                        200 -> "200 OK"; 400 -> "400 Bad Request"; 401 -> "401 Unauthorized"
+                        403 -> "403 Forbidden"; 404 -> "404 Not Found"; 405 -> "405 Method Not Allowed"
+                        409 -> "409 Conflict"; 413 -> "413 Payload Too Large"; 415 -> "415 Unsupported Media Type"
+                        422 -> "422 Unprocessable Content"; 429 -> "429 Too Many Requests"
+                        500 -> "500 Internal Server Error"; 501 -> "501 Not Implemented"; 502 -> "502 Bad Gateway"
+                        503 -> "503 Service Unavailable"; 504 -> "504 Gateway Timeout"
+                        _ if projection.status >= 400 && projection.status < 500 -> "400 Bad Request" else -> "500 Internal Server Error"
+                    }
+                    write_response(&stream, status, projection.content_type.as_str(), projection.body.as_bytes())
+                }
+                .Ok(.None) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/paused/inspect" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused inspect body must be UTF-8"))
+            request :: if jet_devserver.PausedEvaluate.InspectRequest.from_json(payload) == {
+                .Ok(request) -> request
+                .Err(error) -> {
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.InvalidRequest(^error)
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            host := paused_evaluate.lock().unwrap()
+            adapter :: if debug_sessions.paused_adapter(&request.identity) == {
+                .Ok(adapter) -> adapter
+                .Err(_) -> {
+                    host.clear_session()
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            if adapter.inject_into(&host).is_err() {
+                host.clear_session()
+                error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+            return if host.handle_inspect(payload) == {
+                .Ok(json) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", json.as_bytes())
+                .Err(error) -> write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/paused/evaluate" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused evaluate body must be UTF-8"))
+            request :: if jet_devserver.PausedEvaluate.EvaluateRequest.from_json(payload) == {
+                .Ok(request) -> request
+                .Err(error) -> {
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.InvalidRequest(^error)
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            host := paused_evaluate.lock().unwrap()
+            adapter :: if debug_sessions.paused_adapter(&request.identity) == {
+                .Ok(adapter) -> adapter
+                .Err(_) -> {
+                    host.clear_session()
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            if adapter.inject_into(&host).is_err() {
+                host.clear_session()
+                error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+            host.set_evaluator_result(adapter.evaluate(&request))
+            return if host.handle_evaluate(payload) == {
+                .Ok(json) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", json.as_bytes())
+                .Err(error) -> write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/style" && method == "GET" {
+            (_, event) :: terminal_style.current_json()
+            return write_response(&stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
+        }
+        if path == "/__jet_devtools/style" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "style request must be UTF-8"))
+            (_, event) :: terminal_style.apply_json(payload)
+            return write_response(&stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
+        }
+        return method_not_allowed(&stream)
+    }
+    if path == "/__jet_canvas/session".bit_or("/canvas/session").bit_or("/panel/session") {
+        client :: query_param(target, "client_id").unwrap_or_default()
+        if !client.is_empty() -> session.note_client(client)
+        if method == "GET" {
+            body :: session_response(session)
+            return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+        }
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: session_response(session)
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_canvas/live" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        pid :: query_param(target, "pid").and_then((value) -> value.parse<U32>().ok()).ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "missing live pid"))
+        source_id :: query_param(target, "source_id").unwrap_or_default()
+        return if jet_devserver.LiveInspect.read(pid) == {
+            .Ok(snapshot) -> {
+                revision :: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+                session.remember_last_good_view("runtime", source_id, revision, snapshot)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", snapshot.as_bytes())
+            }
+            .Err(message) -> if session.last_good_view("runtime", source_id) == {
+                .Val((_revision, snapshot)) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", snapshot.as_bytes())
+                .None -> write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", message.as_bytes())
+            }
+        }
+    }
+    if jet_devserver.canvas_asset(method, target, path) == .Val(asset) {
+        asset :: inject_canvas_session(^asset, session_secret)
+        return write_response(&stream, asset.status, asset.content_type, asset.body.as_bytes())
+    }
+    if target == "/?jet_panel_graph=1" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        return if Canvas.graph_json_for_file(OSPath.new(canvas_file)) == {
+            .Ok(body) -> {
+                session.select_project_source_from_payload(body)
+                source_id :: source_id_from_payload(body)
+                revision :: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+                session.remember_last_good_view("graph", source_id, revision, body)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(diags) -> {
+                body :: with_session(Canvas.graph_json_error_for_file(OSPath.new(canvas_file), &diags), session)
+                write_response(&stream, "409 Conflict", "application/json; charset=utf-8", body.as_bytes())
+            }
+        }
+    }
+    if path == "/__jet_canvas/graph".bit_or("/canvas/graph").bit_or("/panel/graph") {
+        if method != "GET" -> return method_not_allowed(&stream)
+        source_id :: query_param(target, "source_id")
+        graph :: if query_param(target, "pid") == {
+            .Val(pid) -> Canvas.graph_json_for_entry_source_with_live_pid(OSPath.new(canvas_file), source_id.as_ref(), pid.parse<U32>().unwrap_or(0))
+            .None -> Canvas.graph_json_for_entry_source(OSPath.new(canvas_file), source_id.as_ref())
+        }
+        if source_id == .Val(id) -> session.select_project_source(id)
+        return if graph == {
+            .Ok(body) -> {
+                session.select_project_source_from_payload(body)
+                source_id :: source_id.clone().unwrap_or_else(() -> source_id_from_payload(body))
+                revision :: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+                session.remember_last_good_view("graph", source_id, revision, body)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_canvas/project".bit_or("/canvas/project").bit_or("/panel/project") {
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: with_session(Canvas.project_json_for_entry(OSPath.new(canvas_file)), session)
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_canvas/source-control".bit_or("/canvas/source-control").bit_or("/panel/source-control") {
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: with_session(Canvas.source_control_json_for_entry(OSPath.new(canvas_file)), session)
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_canvas/core-catalog".bit_or("/canvas/core-catalog").bit_or("/panel/core-catalog") {
+        if method != "GET" -> return method_not_allowed(&stream)
+        query :: query_param(target, "query").unwrap_or_default()
+        return if Canvas.core_catalog_json_for_entry(OSPath.new(canvas_file), query) == {
+            .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_canvas/proof".bit_or("/canvas/proof").bit_or("/panel/proof") {
+        if method != "GET" -> return method_not_allowed(&stream)
+        source_id :: query_param(target, "source_id")
+        receipt :: status.command_receipt()
+        return if Canvas.proof_json_for_entry_with_receipt(OSPath.new(canvas_file), source_id.as_ref(), receipt.as_ref()) == {
+            .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_canvas/source".bit_or("/canvas/source").bit_or("/panel/source") {
+        if method != "GET" -> return method_not_allowed(&stream)
+        source_id :: query_param(target, "source_id")
+        source_path :: source_id.as_ref().and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
+        return if read_source_without_symlinks(&source_path) == {
+            .Ok(source) -> write_response(&stream, "200 OK", "text/plain; charset=utf-8", source.as_bytes())
+            .Err(e) -> write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "could not read Canvas source: {e}".as_bytes())
+        }
+    }
+    if path == "/__jet_canvas/command".bit_or("/canvas/command").bit_or("/panel/command") {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        _transaction :: session.lock_source_transaction()
+        return if Canvas.command_receipt_json_for_entry(OSPath.new(canvas_file), request) == {
+            .Ok(body) -> {
+                status.record_command_receipt(body.clone())
+                session.record_command(request)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_canvas/transaction".bit_or("/canvas/transaction").bit_or("/panel/transaction") {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        _transaction :: session.lock_source_transaction()
+        return if Canvas.apply_transaction_json(OSPath.new(canvas_file), request) == {
+            .Ok(body) -> {
+                _ :: status.version.fetch_add(1, Ordering.SeqCst)
+                revision :: current_revision_for_request(canvas_file, request)
+                session.accept_transaction(request, revision)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> {
+                revision :: current_revision_for_request(canvas_file, request)
+                session.refuse_transaction(request, revision)
+                write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+        }
+    }
+    if path == "/__jet_canvas/project/transaction".bit_or("/canvas/project/transaction").bit_or("/panel/project/transaction") {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        _transaction :: session.lock_source_transaction()
+        return if Canvas.apply_project_transaction_json(OSPath.new(canvas_file), request) == {
+            .Ok(body) -> {
+                _ :: status.version.fetch_add(1, Ordering.SeqCst)
+                revision :: current_revision_for_request(canvas_file, request)
+                session.accept_transaction(request, revision)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> {
+                revision :: current_revision_for_request(canvas_file, request)
+                session.refuse_transaction(request, revision)
+                write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+        }
+    }
+    if path == "/__jet_canvas/query".bit_or("/canvas/query").bit_or("/panel/query") {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        return if Canvas.query_json_for_entry(OSPath.new(canvas_file), request) == {
+            .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_canvas/debug".bit_or("/canvas/debug").bit_or("/panel/debug") {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        paused_evaluate := if paused_evaluate.lock() == {
+            .Ok(host) -> host
+            .Err(_) -> { return write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", "paused evaluate host unavailable".bytes()) }
+        }
+        return if Canvas.debug_session_json_for_entry_with_sessions_and_host(OSPath.new(canvas_file), request, debug_sessions, &paused_evaluate) == {
+            .Ok(body) -> {
+                session.record_debug_response(request, body)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_dev_version" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: status.version.load(Ordering.SeqCst).to_string()
+        return write_response(&stream, "200 OK", "text/plain; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_dev_status" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        status_authorized :: canvas_request_authorized(&request, target, bind_host, if listener_kind == .Canvas { session.canvas_port() } else { session.application_port() }, session_secret)
+        if status_authorized {
+            if query_param(target, "client") == .Val(client) { status.note_client(client); session.note_client(client) }
+        }
+        body :: status.json()
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_dev_disconnect" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        if query_param(target, "client") == .Val(client) { status.drop_client(client); session.drop_client(client) }
+        return write_response(&stream, "200 OK", "text/plain; charset=utf-8", "ok".bytes())
+    }
+    if path == "/__jet_perf_browser" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        relay :: status.browser_relay.lock().unwrap()
+        relay :: relay.as_ref() ?? return write_response(&stream, "503 Service Unavailable", "text/plain; charset=utf-8", "browser trace relay unavailable".bytes())
+        if query_param(target, "nonce") != .Val(relay.nonce()) -> return write_response(&stream, "403 Forbidden", "text/plain; charset=utf-8", "stale or foreign browser trace session".bytes())
+        return if relay.record(body) == {
+            .Ok(_) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
+            .Err(jet_devserver.BrowserTrace.RecordError.Oversized) -> write_response(&stream, "413 Payload Too Large", "text/plain; charset=utf-8", "browser trace envelope exceeds 512 bytes".bytes())
+            .Err(jet_devserver.BrowserTrace.RecordError.Malformed) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", "browser trace envelope is malformed".bytes())
+            .Err(jet_devserver.BrowserTrace.RecordError.Unavailable) -> write_response(&stream, "503 Service Unavailable", "text/plain; charset=utf-8", "browser trace relay unavailable".bytes())
+        }
+    }
+    if listener_kind == .Canvas -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", "Canvas control host does not serve program assets".bytes())
+    // Page/asset GETs alone get a request-log line; polling noise is excluded.
+    started :: Instant.now()
+    nonce :: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
+    code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)
+    status.log_request(method, path, code, started.elapsed())
+    return .Ok(_)
+}
+

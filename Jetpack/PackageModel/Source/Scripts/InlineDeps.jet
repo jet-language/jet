@@ -72,9 +72,13 @@ struct ScriptCacheIdentity {
     // content_hash) order so the identity is order independent.
     fn new(source_hash: String, dependencies: [ScriptDependencyIdentity], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
         sorted := dependencies
+        sorted = loop fresh_item in sorted -> fresh_item
         &sorted.sort_by(identity -> identity.content_hash)
+        sorted = loop fresh_item in sorted -> fresh_item
         &sorted.sort_by(identity -> identity.resolved_version)
+        sorted = loop fresh_item in sorted -> fresh_item
         &sorted.sort_by(identity -> identity.selector)
+        sorted = loop fresh_item in sorted -> fresh_item
         &sorted.sort_by(identity -> identity.name)
         ScriptCacheIdentity{source_hash: source_hash, dependencies: sorted, toolchain: toolchain, target: target}
     }
@@ -203,13 +207,13 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
         .Ok(listed) -> listed
         .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
     }
-    out := [(version: String, dir: String)]{}
+    out := [(dir: String, version: String)]{}
     loop entry in entries {
         stat :: if files.stat(entry.path) == {
             .Ok(found) -> found
             .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"})) }
         }
-        if stat.is_dir || stat.is_symlink -> &out.push((version: entry.name, dir: entry.path))
+        if stat.is_dir || stat.is_symlink -> &out.push((dir: entry.path, version: entry.name))
     }
     Ok(Val(out))
 }
@@ -218,7 +222,7 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
 // `1.4.2`); an exact `1.4.2` selector matches only that version.
 fn pkg_inline_deps_best_match(selector: String, candidates: [(version: String, dir: String)]) -> (version: String, dir: String)? Never! {
     selector_parts :: pkg_inline_deps_numeric_version(selector) ?? return None
-    matches := [(version: String, dir: String)]{}
+    matches := [(dir: String, version: String)]{}
     loop candidate in candidates {
         version_parts :: pkg_inline_deps_numeric_version(candidate.version) ?? next
         accepted :: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
@@ -302,11 +306,11 @@ fn pkg_inline_deps_framed_count(bytes: &[U8], count: Int) Never! {
 // version satisfies the selector.
 fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
     explanation :: if reason == {
-        .InvalidName -> (why: "`{dep.name}` is not a safe local package name.", fix: "use a single package name without path separators.")
-        .InvalidSelector -> (why: "`{dep.selector}` is not a supported dotted numeric version selector.", fix: "use `major`, `major.minor`, or `major.minor.patch`.")
-        .UnknownPackage -> (why: "no local source knows a package named `{dep.name}` — an inline dependency must resolve from a committed or explicitly materialized local copy.", fix: "commit a copy at `.jet/inline-deps/{dep.name}/<version>/`, materialize the source locally first, or run `jet init` and depend on `{dep.name}` through `package.jet`.")
-        .NoMatch -> (why: "`{dep.name}` is available locally, but no version satisfies `#{dep.selector}`.", fix: "commit a matching version under `.jet/inline-deps/{dep.name}/`, or loosen the selector to one you have.")
-        .InvalidTree(error) -> (why: "the local source for `{dep.name}` cannot be hashed safely: {error.message()}.", fix: "remove the hostile or oversized entry from `.jet/inline-deps/{dep.name}/`, then try again.")
+        .InvalidName -> (fix: "use a single package name without path separators.", why: "`{dep.name}` is not a safe local package name.")
+        .InvalidSelector -> (fix: "use `major`, `major.minor`, or `major.minor.patch`.", why: "`{dep.selector}` is not a supported dotted numeric version selector.")
+        .UnknownPackage -> (fix: "commit a copy at `.jet/inline-deps/{dep.name}/<version>/`, materialize the source locally first, or run `jet init` and depend on `{dep.name}` through `package.jet`.", why: "no local source knows a package named `{dep.name}` — an inline dependency must resolve from a committed or explicitly materialized local copy.")
+        .NoMatch -> (fix: "commit a matching version under `.jet/inline-deps/{dep.name}/`, or loosen the selector to one you have.", why: "`{dep.name}` is available locally, but no version satisfies `#{dep.selector}`.")
+        .InvalidTree(error) -> (fix: "remove the hostile or oversized entry from `.jet/inline-deps/{dep.name}/`, then try again.", why: "the local source for `{dep.name}` cannot be hashed safely: {error.message()}.")
     }
     diagnostic_from_registry("E1253", Val(dep.span), "inline dependency `{dep.name}#{dep.selector}` didn't resolve", explanation.why, explanation.fix)
 }

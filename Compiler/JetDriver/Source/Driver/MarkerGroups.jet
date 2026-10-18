@@ -1,6 +1,6 @@
 // D-MARKER-GROUP1=A: replay the loader's immutable source closure through the
 // ordinary parser; sema's resolver binds each member in its declaring module.
-use jet_foundation.[Diagnostic, ImportDecl, Item, MIRSourceFile, Marker, Span, diagnostic_with_source_path]
+use jet_foundation.[CompilerTraceSink, Diagnostic, ImportDecl, Item, MIRSourceFile, Marker, Span, diagnostic_with_source_path]
 use jet_lexer.[lex, lex_generated]
 use jet_parser.[NamedMarkerGroupTokens, named_marker_groups, expand_named_marker_groups_with_uses, parse_lexed_with_source, parser_line_starts]
 use jet_sema.[SemaRegistrationImportEdge, SemaMarkerModuleResolution, SemaMarkerModuleBinding, sema_marker_module_target_in_scope, sema_marker_module_resolve_items, sema_marker_module_declarations, sema_marker_module_declaration_by_span, sema_marker_module_bind_program]
@@ -112,6 +112,8 @@ fn jet_driver_marker_group_replay_item(existing: Item, parsed: Item) -> Item Nev
         module_value.body = jet_driver_marker_group_items(old.body, module_value.body)
         return Item.GenericModule{value: module_value}
     }
+    // copy: `parsed` is a view into the replay map `rows` (or the existing item list) of
+    // jet_driver_marker_group_items, which keeps both. The rebuilt item list owns its own items.
     parsed.copy()
 }
 
@@ -142,7 +144,11 @@ fn jet_driver_marker_group_dependency_order(identity: String, indices: [String:I
     &order.push(index)
 }
 
-fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], edges: &[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [MIRSourceFile], diagnostics: &[Diagnostic]) -> Bool {
+// D10(b) of SPEED-500K: a module that imports marker groups is re-lexed
+// whole, and re-parsed when it applies one. Traced as `load.marker_groups.relex`
+// (items: the bytes lexed) and `load.marker_groups.reparse` (items: the
+// module's items), one span per module.
+fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], edges: &[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [MIRSourceFile], diagnostics: &[Diagnostic], trace_sink: CompilerTraceSink?) -> Bool {
     raw := [String:[JetDriverMarkerGroup]]{}
     loop module_index in 0..<modules.len() {
         // Skip lexing files without group declarations.
@@ -210,8 +216,10 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         original :: jet_driver_marker_group_source(source_files, unit.path) ?? return false
         source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_inline_package(original, jet_driver_inline_package(original)) else -> original
         source_bytes :: source.bytes()
+        if trace_sink == .Val(sink) -> sink.begin("load.marker_groups.relex", unit.path, module_index, modules.len())
         lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source_bytes) else -> lex(source_bytes)
         expanded :: expand_named_marker_groups_with_uses(lexed.tokens, &lexed.tables, groups)
+        if trace_sink == .Val(sink) -> sink.end("load.marker_groups.relex", source_bytes.len())
         if expanded.uses.len() == 0 -> next
         bindings := [SemaMarkerModuleBinding]{}
         used_names := modules[module_index].program.used_import_names
@@ -233,15 +241,22 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
             }
         }
         lexed.tokens = expanded.tokens
-        parsed :: parse_lexed_with_source(lexed, source_bytes, parser_line_starts(source_bytes))
+        if trace_sink == .Val(sink) -> sink.begin("load.marker_groups.reparse", unit.path, module_index, modules.len())
+        parsed :: parse_lexed_with_source(^lexed, source_bytes, parser_line_starts(source_bytes))
+        if trace_sink == .Val(sink) -> sink.end("load.marker_groups.reparse", parsed.program.items.len())
         // Replay replaces initial local-group reports one-for-one; distinct
         // repeats at the same authored span must remain distinct diagnostics.
         prior_count := diagnostics.len()
         loop diagnostic in parsed.diagnostics {
+            // copy: `parsed` keeps its diagnostics for the jet_driver_has_errors check below, and
+            // the module's diagnostics list gets its own replayed copy, re-pathed to the unit.
             replayed :: diagnostic_with_source_path(diagnostic.copy(), unit.path, 0)
             loop index in 0..<prior_count {
                 previous :: diagnostics[index]
                 if previous.source_path == replayed.source_path && previous.severity == replayed.severity && previous.code == replayed.code && previous.span == replayed.span && previous.what == replayed.what && previous.why == replayed.why && previous.fix == replayed.fix && previous.edit == replayed.edit {
+                    // copy: List.remove takes the value to match while `&diagnostics` is being
+                    // written. `previous` is a view into that same list, so it has to be detached
+                    // first.
                     matched :: previous.copy()
                     _ := &diagnostics.remove(matched)
                     prior_count -= 1
@@ -261,9 +276,10 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         loop used in used_names {
             if !program.used_import_names.contains(used) -> &program.used_import_names.push(used)
         }
-        modules[module_index].program = sema_marker_module_bind_program(program, bindings)
         imports := [JetDriverScopedImport]{}
         jet_driver_scoped_imports(program.imports, program.items, "", true, &imports)
+        sema_marker_module_bind_program(&program, bindings)
+        modules[module_index].program = ^program
         loop index in 0..<edges.len() {
             if edges[index].source_module_identity != modules[module_index].module_identity -> next
             loop declaration in imports {

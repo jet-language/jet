@@ -19,8 +19,9 @@ fn run() {
     asm_leaf_require(!sema_has_error_since(diagnostics, 0) && rows.len() == 1, "the existing foreign stage admits exactly one asm row")
     asm_leaf_require(rows[0].asm_contract != None, "the row retains its real operand contract")
     applicability :: MIRTargetApplicability{rust_aot: true, interpreter: true, web: false}
-    leaf :: jet_codegen_lower_asm_leaf(rows[0], [SemaGraphModuleResult]{}, applicability)
-    repeat :: jet_codegen_lower_asm_leaf(rows[0], [SemaGraphModuleResult]{}, applicability)
+    nominals :: jet_codegen_nominal_index([SemaGraphModuleResult]{})
+    leaf :: jet_codegen_lower_asm_leaf(rows[0], nominals, applicability)
+    repeat :: jet_codegen_lower_asm_leaf(rows[0], nominals, applicability)
     asm_leaf_require(leaf.entry.value != 0 && leaf.id.value != 0, "asm leaf block and function identities are nonzero")
     asm_leaf_require(leaf.entry == repeat.entry && leaf.id == repeat.id, "asm leaf identities are deterministic")
     asm_leaf_require(leaf.key == rows[0].key && leaf.foreign_language == (Val("asm")), "asm_foreign resolves the exact checked key and language")

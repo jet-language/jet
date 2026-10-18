@@ -188,7 +188,7 @@ fn run() {
     seams_require(!schema_retained.compile.complete && schema_retained.source_modules.len() == 0, "retained schema failure is still a checker failure")
     ingress :: schema_retained.schema_ingress ?? panic("supplied schema input was discarded")
     if ingress == {
-        .Supplied(snapshots) -> seams_require(snapshots.get("Account") == Val(baseline), "supplied schema map remains a distinct actual input")
+        .Supplied(snapshots) -> seams_require(snapshots.get("Account") == Val((baseline)), "supplied schema map remains a distinct actual input")
         else -> panic("supplied schema map was confused with a disk cache read")
     }
     parsed :: parse_source("#PublishedSchema struct Account {{\n    name: String\n    verified: Bool\n}}".bytes())

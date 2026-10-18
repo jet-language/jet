@@ -45,7 +45,7 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         return
     }
     hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, compiler_threads_single(), None)
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
     checked := sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
     if !checked.complete {
         &failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
@@ -99,7 +99,7 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         })
     }
     &effect_inputs.reverse()
-    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"})
+    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"}, compiler_threads_single())
     if republished.memory_declarations.len() != 2 -> &failures.push("in-place effect publication: manifest memory declarations duplicated")
     function_count := 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()

@@ -65,12 +65,7 @@ fn int_limb(value: I64, index: I64) -> I64 {
     magnitude % I64{1000000000}
 }
 
-fn int_new(cap: I64) -> I64 {
-    // Checking the full byte size before multiplication preserves allocator
-    // failure behavior without allowing a wrapped undersized allocation.
-    if (cap <= I64{0} || cap > I64{2305843009213693951}) { rt_trap_invalid_box_layout() }
-    node :: jet_rt_alloc(I64{48}, I64{8})
-    limbs :: jet_rt_alloc(cap * I64{4}, I64{4})
+fn int_node_init(node: I64, limbs: I64, cap: I64) {
     int_store(node, I64{1})
     int_store(node + I64{8}, I64{0})
     int_store(node + I64{16}, I64{0})
@@ -82,6 +77,38 @@ fn int_new(cap: I64) -> I64 {
         int_put_u32(limbs + at * I64{4}, I64{0})
         at += I64{1}
     }
+}
+
+fn int_new(cap: I64) -> I64 {
+    // Checking the full byte size before multiplication preserves allocator
+    // failure behavior without allowing a wrapped undersized allocation.
+    if (cap <= I64{0} || cap > I64{2305843009213693951}) { rt_trap_invalid_box_layout() }
+    node :: jet_rt_alloc(I64{48}, I64{8})
+    limbs :: jet_rt_alloc(cap * I64{4}, I64{4})
+    int_node_init(node, limbs, cap)
+    node
+}
+
+// One probe per fallible operation is owned by the Atomic caller, not by each
+// physical allocation. Report native failing bytes; never fake Rust Vec sizes.
+fn int_try_new(cap: I64, requested: I64) -> I64 {
+    if (cap <= I64{0} || cap > I64{2305843009213693951}) {
+        int_store(requested, I64{9223372036854775807})
+        return I64{0}
+    }
+    node :: alloc_try_reserved(I64{48}, I64{8})
+    if (node == I64{0}) {
+        int_store(requested, I64{48})
+        return I64{0}
+    }
+    bytes :: cap * I64{4}
+    limbs :: alloc_try_reserved(bytes, I64{4})
+    if (limbs == I64{0}) {
+        jet_rt_free(node, I64{48}, I64{8})
+        int_store(requested, bytes)
+        return I64{0}
+    }
+    int_node_init(node, limbs, cap)
     node
 }
 
@@ -183,33 +210,21 @@ fn int_compare_abs(left: I64, right: I64) -> I64 {
     order
 }
 
-fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
-    ln :: int_negative(left)
-    rn :: int_negative(right) != subtract
-    ll :: int_len(left)
-    rl :: int_len(right)
-    if ln == rn {
-        length :: if ll > rl -> ll else -> rl
-        node :: int_new(length + I64{1})
-        carry := I64{0}
-        at := I64{0}
-        loop at < length {
-            sum :: int_limb(left, at) + int_limb(right, at) + carry
-            int_set(node, at, sum % I64{1000000000})
-            carry = sum /% I64{1000000000}
-            at += I64{1}
-        }
-        int_set(node, length, carry)
-        int_store(node + I64{32}, length + I64{1})
-        if ln -> int_store(node + I64{16}, I64{1})
-        return int_pack(node)
+fn int_add_fill(node: I64, left: I64, right: I64, length: I64, negative: Bool) {
+    carry := I64{0}
+    at := I64{0}
+    loop at < length {
+        sum :: int_limb(left, at) + int_limb(right, at) + carry
+        int_set(node, at, sum % I64{1000000000})
+        carry = sum /% I64{1000000000}
+        at += I64{1}
     }
-    order :: int_compare_abs(left, right)
-    if (order == I64{0}) { return I64{0} }
-    larger :: if (order > I64{0}) -> left else -> right
-    smaller :: if (order > I64{0}) -> right else -> left
-    length :: int_len(larger)
-    node :: int_new(length)
+    int_set(node, length, carry)
+    int_store(node + I64{32}, length + I64{1})
+    if negative -> int_store(node + I64{16}, I64{1})
+}
+
+fn int_sub_fill(node: I64, larger: I64, smaller: I64, length: I64, negative: Bool) {
     borrow := I64{0}
     at := I64{0}
     loop at < length {
@@ -223,8 +238,73 @@ fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
         at += I64{1}
     }
     int_store(node + I64{32}, length)
-    if (if (order > I64{0}) -> ln else -> rn) { int_store(node + I64{16}, I64{1}) }
+    if negative -> int_store(node + I64{16}, I64{1})
+}
+
+fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
+    ln :: int_negative(left)
+    rn :: int_negative(right) != subtract
+    ll :: int_len(left)
+    rl :: int_len(right)
+    if ln == rn {
+        length :: if ll > rl -> ll else -> rl
+        node :: int_new(length + I64{1})
+        int_add_fill(node, left, right, length, ln)
+        return int_pack(node)
+    }
+    order :: int_compare_abs(left, right)
+    if (order == I64{0}) { return I64{0} }
+    larger :: if (order > I64{0}) -> left else -> right
+    smaller :: if (order > I64{0}) -> right else -> left
+    length :: int_len(larger)
+    node :: int_new(length)
+    int_sub_fill(node, larger, smaller, length, if (order > I64{0}) -> ln else -> rn)
     int_pack(node)
+}
+
+// Inputs are borrowed exact owners. On success output owns the exact sum;
+// on refusal it is untouched and requested owns one raw physical byte count.
+// probed lends a Bool-as-word for the enclosing CAS loop's ONE fault probe.
+fn int_try_add(left: I64, right: I64, output: I64, requested: I64, probed: I64) -> Bool {
+    if int_inline(left) && int_inline(right) {
+        sum :: left + right
+        if int_inline(sum) {
+            int_store(output, sum)
+            return true
+        }
+    }
+    ln :: int_negative(left)
+    rn :: int_negative(right)
+    order :: if ln != rn -> int_compare_abs(left, right) else -> I64{0}
+    if (ln != rn && order == I64{0}) {
+        int_store(output, I64{0})
+        return true
+    }
+    if (int_load(probed) == I64{0}) {
+        int_store(probed, I64{1})
+        if jet_fault_should_fail_allocation() {
+            int_store(requested, I64{48})
+            return false
+        }
+    }
+    if ln == rn {
+        ll :: int_len(left)
+        rl :: int_len(right)
+        length :: if ll > rl -> ll else -> rl
+        node :: int_try_new(length + I64{1}, requested)
+        if (node == I64{0}) -> return false
+        int_add_fill(node, left, right, length, ln)
+        int_store(output, int_pack(node))
+        return true
+    }
+    larger :: if (order > I64{0}) -> left else -> right
+    smaller :: if (order > I64{0}) -> right else -> left
+    length :: int_len(larger)
+    node :: int_try_new(length, requested)
+    if (node == I64{0}) -> return false
+    int_sub_fill(node, larger, smaller, length, if (order > I64{0}) -> ln else -> rn)
+    int_store(output, int_pack(node))
+    true
 }
 
 #Export(c) fn jet_int_add(left: I64, right: I64) -> I64 {
@@ -369,7 +449,7 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
         }
         else -> jet_rt_unreachable(I64{0}, I64{0})
     }
-    published :: rt_task_panic_publish(message, length, I64{0})
+    published :: rt_task_panic_publish(message, length, I64{1})
     jet_rt_free(message, I64{40}, I64{8})
     if published -> return
     trap_header(I64{1})

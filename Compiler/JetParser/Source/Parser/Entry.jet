@@ -88,22 +88,24 @@ fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerG
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
 }
 
-fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed.copy(), [U8]{}, [Int]{}, false)
+// The parse entry points take the caller's tokens: they move into the parser
+// instead of being copied.
+fn parse_lexed(lexed: ^Lexed) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, [U8]{}, [Int]{}, false)
 }
 
 // Parse just the supplied token slice with its aggregate source available for
 // canonical source-dependent diagnostics. REPL turns never reparse old tokens.
-fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
-    parser_parse_lexed_lines(lexed.copy(), source, line_starts, false)
+fn parse_lexed_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, source, line_starts, false)
 }
 
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
 // for config values whose spelling is not a general Jet expression.
-fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lexed.copy(), source, parser_line_starts(source), true)
+fn parse_config_with_source(lexed: ^Lexed, source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, source, parser_line_starts(source), true)
 }
 
 // The lexed tokens move into the parser state (field moves reset the field,
@@ -150,7 +152,7 @@ fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagn
     }
     tokens := ^prepared.tokens
     prepared.tokens = [Token]{}
-    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source, allow_environment_reads: allow_environment_reads}
+    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms

@@ -11,12 +11,12 @@ fn trace_skeleton_content_json(value: TraceSkeleton) -> CanonicalJSON JetTraceEr
     loop item in value.browser -> &browser.push(trace_browser_to_json(item))
     frame_order := [Int]{}
     loop index in 0..<value.game_frames.len() -> &frame_order.push(index)
-    &frame_order.sort_by((left: Int, right: Int) -> (sequence: value.game_frames[left].sequence, frame_id: value.game_frames[left].frame_id) <=> (sequence: value.game_frames[right].sequence, frame_id: value.game_frames[right].frame_id))
+    &frame_order.sort_by((left: Int, right: Int) -> (frame_id: value.game_frames[left].frame_id, sequence: value.game_frames[left].sequence) <=> (frame_id: value.game_frames[right].frame_id, sequence: value.game_frames[right].sequence))
     frames := [CanonicalJSON]{}
     loop index in frame_order -> &frames.push(trace_game_frame_to_json(value.game_frames[index]))
     draw_order := [Int]{}
     loop index in 0..<value.game_draw_events.len() -> &draw_order.push(index)
-    &draw_order.sort_by((left: Int, right: Int) -> (sequence: value.game_draw_events[left].sequence, event_index: value.game_draw_events[left].event_index) <=> (sequence: value.game_draw_events[right].sequence, event_index: value.game_draw_events[right].event_index))
+    &draw_order.sort_by((left: Int, right: Int) -> (event_index: value.game_draw_events[left].event_index, sequence: value.game_draw_events[left].sequence) <=> (event_index: value.game_draw_events[right].event_index, sequence: value.game_draw_events[right].sequence))
     draws := [CanonicalJSON]{}
     loop index in draw_order -> &draws.push(trace_game_draw_event_to_json(value.game_draw_events[index]))
     tasks := [CanonicalJSON]{}

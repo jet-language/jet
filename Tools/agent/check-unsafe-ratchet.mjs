@@ -89,18 +89,22 @@ function manifestName(path, pattern) {
   return match?.[1] ?? null;
 }
 
+// A region's owner is its top-level repository directory (Compiler, Core,
+// Jetpack, Tools, Examples, tests, ...); a Cargo crate under `crates/` is owned
+// by that crate. A file at the scanned root belongs to the root package
+// manifest, which is how a single-package checkout is keyed.
 function packageName(root, file) {
   const relativePath = toPosix(relative(root, file));
   const parts = relativePath.split("/");
-  if (parts[0] === "crates" && parts[1]) {
+  if (parts.length === 1) {
+    return manifestName(join(root, "package.jet"), /^name\s*:\s*"([^"]+)"/m)
+      ?? manifestName(join(root, "pkg.jet"), /^name\s*:\s*"([^"]+)"/m)
+      ?? "root";
+  }
+  if (parts[0] === "crates" && parts.length > 2) {
     return manifestName(join(root, "crates", parts[1], "Cargo.toml"), /^name\s*=\s*"([^"]+)"/m) ?? `crate-${parts[1]}`;
   }
-  if (["Docs", "Examples", "tests"].includes(parts[0])) return parts[0];
-  return manifestName(join(root, "package.jet"), /^name\s*:\s*"([^"]+)"/m)
-    ?? manifestName(join(root, "pkg.jet"), /^name\s*:\s*"([^"]+)"/m)
-    ?? manifestName(join(root, "Cargo.toml"), /^name\s*=\s*"([^"]+)"/m)
-    ?? parts[0]
-    ?? "root";
+  return parts[0];
 }
 
 function lineStarts(text) {

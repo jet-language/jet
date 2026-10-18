@@ -308,7 +308,7 @@ fn pkg_lock_locked_nix_package_strict(project_root: String, reference_input: Str
                 }
                 if envelope.output_hash != closure.output || envelope.platform != closure.system -> return Err(LockError.Invalid("Nix envelope identity disagrees with its closure record"))
                 envelope.validate_nix_catalog()
-                return Ok(Val((name: package.name, version: package.version, closure: closure, envelope: envelope)))
+                return Ok(Val((closure: closure, envelope: envelope, name: package.name, version: package.version)))
             }
             else -> {}
         }
@@ -364,7 +364,7 @@ fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]> (ou
             .Cran(locked_reference, output, source_hash, repository, authority) -> {
                 if locked_reference == reference {
                     envelope :: package.envelope ?? return None
-                    return Val((output: output, source_hash: source_hash, repository: repository, authority: authority, envelope: envelope))
+                    return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
                 }
             }
             else -> {}
@@ -388,7 +388,7 @@ fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[FS]>
             .LuaRocks(locked_reference, output, source_hash, repository, authority) -> {
                 if locked_reference == reference {
                     envelope :: package.envelope ?? return None
-                    return Val((output: output, source_hash: source_hash, repository: repository, authority: authority, envelope: envelope))
+                    return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
                 }
             }
             else -> {}
@@ -414,7 +414,7 @@ fn pkg_lock_registry_realization(project_root: String, registry: String, referen
             .Registry(locked_registry, locked_reference, output, source_hash, repository, authority, _, _) -> {
                 if locked_registry == registry && locked_reference == reference {
                     envelope :: package.envelope ?? return None
-                    return Val((output: output, source_hash: source_hash, repository: repository, authority: authority, envelope: envelope))
+                    return Val((authority: authority, envelope: envelope, output: output, repository: repository, source_hash: source_hash))
                 }
             }
             else -> {}

@@ -16,7 +16,6 @@ use jet_foundation.[
     TExprKind,
     THandleOp,
     Type,
-    tir_call_arg_copy_fact,
 ]
 
 struct SemaNetworkHandleSpec {
@@ -334,9 +333,7 @@ fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], arg
         found := false
         loop index in 0..<typed.values.len() {
             if typed.slots[index] == slot {
-                value := typed.values[index]
-                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
-                &values.push(value)
+                &values.push(typed.values[index])
                 found = true
                 break
             }
@@ -347,7 +344,7 @@ fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], arg
 }
 
 fn sema_network_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String?, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_network_handle_effect_fact(environment, program, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -383,7 +380,7 @@ fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, me
         // records no effect for it. Record that empty row, so the effect
         // walk does not read the fact-less `.bytes()` as an unknown callee.
         if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "String.bytes", text.span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        typed_args[0] = sema_tir_expr(sema_network_handle_u8_list(), TExprKind.BuiltinMethod{receiver: text, operation: TBuiltinOp.Bytes{owned: false}, args: [TExpr]{}}, text.span)
+        typed_args[0] = sema_tir_node(sema_network_handle_u8_list(), TExprKind.BuiltinMethod{receiver: text, operation: TBuiltinOp.Bytes{owned: false}, args: [TExpr]{}}, text.span)
     }
     sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
@@ -449,6 +446,6 @@ fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallA
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     typed_args :: sema_network_handle_checked_args("{target}.{method}", params, args, None, AccessConvention.Read, false, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    unit_receiver := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    unit_receiver := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
     sema_network_handle_finish(unit_receiver, operation, typed_args, result_type, effect_name, "core.net.tls.{target}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }

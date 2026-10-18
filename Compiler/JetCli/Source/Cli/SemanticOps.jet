@@ -169,7 +169,7 @@ fn jet_cli_semantic_rename_ops(before: [JetCLISemDefinitionFact], after: [JetCLI
 // A refused/invalid structural check has no rename authority. Rust's fix
 // receipt then records the exact changed byte region instead.
 fn jet_cli_fix_definition_facts(file: String, source: String) -> [JetCLISemDefinitionFact]? {
-    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source)) ?? return None
+    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source), None) ?? return None
     if compiled == {
         .Refused(_) -> return None
         .Compiled(result, _) -> {

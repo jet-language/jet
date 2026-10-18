@@ -26,6 +26,22 @@ still writes the generated Rust verbatim; its machine mode affects diagnostic
 failures, not the emitted program. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
+`jet emit --ast|--mir|--lir <file>` prints one compiler tier of a file:
+`--ast` the parsed syntax tree (parsing only), `--mir` the checked MIR of the
+entry package's functions, and `--lir` the LIR `jet build` lowers for them,
+before the LIR passes of its optimization level. `--fn NAME` keeps one
+function. Each tier is one tree. The text form
+indents each child two spaces. `--json` writes the same tree as the `emit`
+status, a `{kind, text, children}` node per line. MIR numbers each function's
+values, blocks, places, locals and scopes from zero (`v0`, `b0`, `p0`, `l0`,
+`s0`) and shows every value's type and ownership mode. LIR renumbers
+module-wide functions, signatures and data in order of first use and lists
+a called function it does not show as `declare fN name`. When `jet build`
+fails to lower a function, it writes that function's MIR and LIR as `<n>.mir`
+and `<n>.lir` beside the build output in `.jet/build/<stem>.ice/`; when it
+fails to compile a function to machine code, it writes that function's final
+LIR as `<n>.lir` there. The report names that directory.
+
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.
 Only the source-file collision is refused; an existing `.stderr` is replaced.
@@ -571,7 +587,34 @@ arguments are the words after the first standalone `--`, or else the
 positional words after the file. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
 starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, `--threads`, `--allow`, and `--deny` are refused with E2104 until they are ported.
+`--color`, `--threads`, `--trace`, `--allow`, and `--deny` are refused with E2104 until they are ported.
+
+`jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
+compiler work: one line per event on stderr as it happens, with the elapsed
+time, each phase's start and end (with its duration, item count, and resident
+and peak memory), the item being processed (a module or, with
+`JET_TRACE_DETAIL=functions`, a function), throttled progress counts, and the
+scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
+trace-event lines, flushed per event, in the format of the Rust host's
+`JET_TRACE_FILE` trace (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
+follows a running compile; Perfetto loads the file); timestamps have
+millisecond resolution. `JET_TRACE_FILE=FILE` is the environment form for
+the same five commands (`-` or `stderr` selects the readable stream), and
+`--trace` takes precedence over it; `JET_PHASE_COUNTERS=1` also prints each
+counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
+`sources` walk, the driver's (`load` and its `parse` waves, `register`,
+`sema.check`, `comptime`, `sema.finalize`,
+`comptime.bodies`, `comptime.validate`, `lower`, `assemble`, `optimize`,
+`driver.result` holding `emit`, `driver.release` as the compile's
+intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
+`keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
+`cli.authority`) and the native backend's (`native.sources`,
+`native.rust_foreign`, `native.lower`, `native.object` (per function: the LIR
+passes of the level, the one LIR check, x86-64 selection and encoding; then the
+object), `native.foreign`, `native.link`; one `native.build` for a test
+harness). The readable stream is written through
+`/dev/stderr`, so redirect stderr to a file with `2>>`, or use
+`--trace=FILE`. A trace that cannot be written stops; the compile does not.
 
 Before `jet build` or `jet run` writes anything, the Jet host checks the
 application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):

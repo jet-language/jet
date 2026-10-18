@@ -492,6 +492,8 @@ fn jet_rust_emit_call_arg_for_formal(ctx: &JetRustEmitContext, function: MIRFunc
 fn jet_rust_emit_declared_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction, args: [MIRCallArg], target: Int) -> String Never! {
     rendered := [String]{}
     loop (index, arg) in args {
+        // copy: the formal type is read while argument emission writes the emit context (`&ctx`),
+        // so a view into ctx.program.functions would be live across those writes.
         formal :: ctx.program.functions[target].params[index].ty.copy()
         access := ctx.program.functions[target].params[index].access
         borrowed :: access == MIRAccess.Write || (access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(formal))
@@ -924,7 +926,11 @@ fn jet_rust_emit_scalar_comparison_type(ctx: &JetRustEmitContext, source: MIRTyp
 
 // MIRRust canonical_type: a typed identity reads its canonical instance row.
 fn jet_rust_emit_canonical_instance(ctx: &JetRustEmitContext, ty: MIRType) -> MIRType Never! {
+    // copy: the canonical instance is a new owned MIRType. Without an identity it equals `ty`, the
+    // caller's MIR type (a read parameter), which stays on its node.
     identity :: ty.identity ?? return ty.copy()
+    // copy: the canonical instance is a new owned MIRType. Without an instance it equals `ty`, the
+    // caller's MIR type (a read parameter), which stays on its node.
     jet_rust_emit_type_instance(ctx, identity, true) ?? ty.copy()
 }
 
@@ -994,6 +1000,8 @@ fn jet_rust_emit_selected_trait_impl(ctx: &JetRustEmitContext, ty: MIRType, trai
             }
         }
         if matches {
+            // copy: the impl row is read while the selection writes the emit context (`&ctx`), so a
+            // view into ctx.program.impls would be live across that write.
             implementation := ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) && !jet_rust_emit_runtime_carrier_trait_impl(&ctx, implementation) -> return implementation.trait_ref
         }
@@ -1597,8 +1605,10 @@ fn jet_rust_emit_call_borrow_mask(ctx: &JetRustEmitContext, callee: MIRCallee, f
 
 fn jet_rust_emit_return_fallibility(ty: MIRType) -> MIRCallFallibility Never! {
     if ty.kind == {
-        .Result(success, error) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: success, error: error}}
-        .Option(value) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: value}}
+        // copy: `success` and `error` are payloads of read parameter `ty`, which keeps the originals; the new MIRFailureCarrier.Result's fields own `success` and `error`
+        .Result(success, error) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: success.copy(), error: error.copy()}}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new MIRFailureCarrier.Optional owns this one
+        .Option(value) -> return MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: value.copy()}}
         else -> return MIRCallFallibility.Infallible
     }
 }
@@ -3377,10 +3387,16 @@ fn jet_rust_emit_is_core_http_type(definition: MIRTypeDef, leaf: String) -> Bool
 // MIRRust native_int_payload_value: a Jet `Int` stored in a fixed-width payload
 // slot narrows through the host word with a source-located range stop.
 fn jet_rust_emit_native_int_payload_value(ctx: &JetRustEmitContext, function: MIRFunction, value_id: MIRValueID, expected: MIRType, value: String, location: MIRPanicLoc?) -> String Never! {
+    // copy: the payload text is a new owned String. For a non-Int value it equals `value`, the
+    // caller's rendered expression (a read parameter), which the caller keeps.
     if jet_rust_emit_value_type(ctx, function, value_id).kind != MIRTypeKind.Int -> return value.copy()
+    // copy: `target` is narrowed through tags/ranges below, while `expected` is the caller's MIR
+    // type (a read parameter), which stays on its node.
     target := expected.copy()
     loop {
         if target.kind == {
+            // copy: `base` is a payload view of `target`, which this assignment replaces, so it is
+            // detached first.
             .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> target = base.copy()
             else -> break
         }
@@ -4031,6 +4047,9 @@ fn jet_rust_emit_payload_take(ctx: &JetRustEmitContext, result: MIRValueID, subj
     head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
     taken :: jet_rust_emit_value_move(ctx, subject)
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
+        // copy: the variant rows are read while the payload pattern writes the emit context (`&ctx`
+        // in jet_rust_emit_field_name), so a view into ctx.program.types would be live across those
+        // writes.
         definition := ctx.program.types[definition_index].copy()
         if definition.kind == {
             .Enum(variants, _) -> {
@@ -4078,6 +4097,8 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
     value :: jet_rust_emit_inspected_value_reference(&ctx, function, subject)
     root :: ctx.config.root_prefix.copy()
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
+        // copy: the variant rows are read while payload emission writes the emit context (`&ctx`),
+        // so a view into ctx.program.types would be live across those writes.
         definition := ctx.program.types[definition_index].copy()
         if definition.id == owner {
             if jet_rust_emit_is_core_http_type(definition, "Body") {
@@ -4321,6 +4342,8 @@ fn jet_rust_emit_payload_pattern(ctx: &JetRustEmitContext, kind: MIRPayloadKind)
         .Enum(owner, variant, index) -> {
             head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
             if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
+                // copy: the variant rows are read while the pattern writes the emit context
+                // (`&ctx`), so a view into ctx.program.types would be live across those writes.
                 definition := ctx.program.types[definition_index].copy()
                 if definition.id == owner {
                     if definition.kind == {
@@ -4671,6 +4694,8 @@ fn jet_rust_emit_default_err_struct(ctx: &JetRustEmitContext, id: MIRTypeID, val
     definition := MIRTypeDef?{None}
     // The last type row with this id, as the original full scan kept.
     loop index in 0..<ctx.program.types.len() {
+        // copy: the default-Err definition is read while the struct emission writes the emit
+        // context (`&ctx`), so a view into ctx.program.types would be live across those writes.
         if ctx.program.types[index].id == id -> definition = Val(ctx.program.types[index].copy())
     }
     if definition == None {
@@ -4778,6 +4803,21 @@ fn jet_rust_emit_static_path(ctx: &JetRustEmitContext, name: String) -> String N
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR static place has no storage constant", "persistent places name exactly one checked storage constant", None)
     "{ctx.config.root_prefix}{jet_rust_emit_generated_path(name)}"
+}
+
+// #5001: the place expression of a constant read in place (a `Static` place
+// naming a non-storage constant): its per-thread value, built once
+// (`<name>_static()`), or the value itself where no shared value exists.
+fn jet_rust_emit_constant_place(ctx: &JetRustEmitContext, name: String) -> String? Never! {
+    no_os :: jet_rust_emit_is_no_os(&ctx)
+    root := ctx.config.root_prefix
+    loop constant in ctx.program.constants {
+        if constant.key != name || constant.is_storage -> next
+        path :: "{root}{jet_rust_emit_generated_path(constant.key)}"
+        if jet_rust_emit_shared_constant(no_os, constant) -> return Val("(*{path}_static())")
+        return Val("({path}())")
+    }
+    None
 }
 
 

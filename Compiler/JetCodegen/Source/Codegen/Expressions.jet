@@ -439,8 +439,8 @@ fn jet_codegen_move_place_root(expression: TExpr) -> Bool Never! {
     }
 }
 
-fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool Never! {
-    jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
+fn jet_codegen_trait_bound_is_declared(nominals: JetCodegenNominalIndex, name: String, preferred_module_identity: String) -> Bool Never! {
+    jet_codegen_resolve_trait_name(nominals.traits, name, preferred_module_identity) != None
 }
 
 // Rust mir.rs call_arg: `box_as_trait` lowers its single-trait target type
@@ -456,10 +456,10 @@ fn jet_codegen_require_trait_box_target(target: Type, builder: JetCodegenBuilder
 
 fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MIRAccess Never! {
     if argument.mut_borrow -> return MIRAccess.Write
-    if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) {
+    if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !jet_codegen_is_copy_type(argument.value.ty) {
         return MIRAccess.Move
     }
-    if argument.clone || argument.arc_clone || jet_codegen_is_move_kind(argument.value.kind) -> return MIRAccess.Move
+    if jet_codegen_is_move_kind(argument.value.kind) -> return MIRAccess.Move
     if argument.borrow -> return MIRAccess.Read
     convention :: formal ?? AccessConvention.Read
     jet_codegen_lower_access(convention)
@@ -481,22 +481,21 @@ fn jet_codegen_is_string_view_local(builder: JetCodegenBuilder, program: JetCode
     builder.locals[index].string_view
 }
 
-fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> Bool Never! {
-    if value.ty != Type.String -> return false
-    if value.kind == {
-        .Local(local) -> return jet_codegen_is_string_view_local(builder, program, local)
-        .Borrow(inner, _) -> return jet_codegen_is_string_view_value(builder, program, inner)
-        else -> false
-    }
-}
-
 // MIRRust lower_local_value: a string-view binding keeps its Jet `String`
 // type for dispatch, but its place carries the borrowed `View<str>` carrier;
 // a read takes that carrier so its slot holds the borrowed `&str`.
 fn jet_codegen_local_read_type(builder: JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type) -> Type Never! {
+    // copy: the read type is a new owned Type. Here it equals `ty`, the caller's checked type (a
+    // read parameter), which stays on the TIR node.
     if ty != Type.String || local.persist_key != None || local.deref -> return ty.copy()
+    // copy: the read type is a new owned Type. Without a binding it equals `ty`, the caller's
+    // checked type (a read parameter), which stays on the TIR node.
     binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? return ty.copy()
+    // copy: the read type is a new owned Type equal to the binding's declared View type, which
+    // stays in the builder's binding table.
     if binding.ty == .Apply(name, args) && name == "View" && args.len() == 1 && args[0] == (Type.Named{name: "str"}) -> return binding.ty.copy()
+    // copy: the read type is a new owned Type. Otherwise it equals `ty`, the caller's checked type
+    // (a read parameter), which stays on the TIR node.
     ty.copy()
 }
 
@@ -536,7 +535,7 @@ fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, program: JetCodege
         }
         access := if {
             argument.mut_borrow -> MIRAccess.Write
-            argument.clone || resource_take -> MIRAccess.Move
+            resource_take -> MIRAccess.Move
             else -> MIRAccess.Read
         }
         &lowered.push(MIRCallArg{
@@ -548,7 +547,7 @@ fn jet_codegen_lower_extern_args(builder: &JetCodegenBuilder, program: JetCodege
             source_index: None,
             binder_slot: None,
             spread: false,
-            implicit_clone: argument.clone,
+            implicit_clone: false,
             shared_auto_clone: false,
             owned_last_use: access == MIRAccess.Move,
             authority_boundary: false,
@@ -571,7 +570,6 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         if argument.spread -> panic("checked call retains an unpacked variadic argument")
         slot := index
         formal := Val(conventions[slot])
-        materialize_view_clone := argument.clone && jet_codegen_is_string_view_value(builder, program, argument.value)
         access := jet_codegen_call_access(argument, formal)
         place := MIRPlaceID?{None}
         place_expr := argument.value
@@ -613,16 +611,13 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         place_ty := argument.value.ty
         if place != None && argument.mut_borrow && place_expr.kind == .Slice(_, _, _, _, _) -> place_ty = place_expr.ty
         value := if place == {
-            None -> jet_codegen_emit_expr(&builder, program, argument.value)
+            None -> jet_codegen_lower_call_carrier(&builder, program, argument, access, variadic, args, index) ?? jet_codegen_emit_expr(&builder, program, argument.value)
             Val(place_id) -> {
                 operation := MIROperation.ReadPlace{place: place_id}
-                if access == MIRAccess.Move && !materialize_view_clone && !argument.clone && !argument.arc_clone -> operation = MIROperation.MovePlace{place: place_id}
+                if access == MIRAccess.Move -> operation = MIROperation.MovePlace{place: place_id}
                 jet_codegen_emit_value(&builder, program, argument.value.span, place_ty, operation)
             }
         }
-        if materialize_view_clone -> value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: MIRCopyFact.ViewMaterialize})
-        materialized_clone := (argument.clone || argument.arc_clone) && !materialize_view_clone
-        if materialized_clone -> value = jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: if argument.arc_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize})
         // A synthetic rest List borrowed by the callee still belongs to the
         // caller. Its cleanup slot owns the pack, not the lent argument.
         is_pack := slot >= 0 && slot < variadic.len() && variadic[slot] && jet_codegen_collection_owned_temporary(argument.value)
@@ -668,7 +663,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
         owned_trait_box :: box_as_trait != None && access != MIRAccess.Read
         owned_last_use := access == MIRAccess.Move || owned_trait_box || (widen_to_union != None && place == .None && !copy_source)
         call_place := place
-        if owned_trait_box || argument.widen_to_union != None || materialize_view_clone -> call_place = None
+        if owned_trait_box || argument.widen_to_union != None -> call_place = None
         &lowered.push(MIRCallArg{
             value: value,
             place: call_place,
@@ -692,6 +687,188 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
     }
     lowered
 }
+
+// #5041 (plan M5): a `Val(place)` argument of a `T?` read parameter lends a
+// borrowed carrier (jet_codegen_emit_borrowed_carrier) instead of an owned
+// Option around a copy of the place. The place must hold still until the
+// call returns (jet_codegen_carrier_root_hold): beyond a read parameter's
+// place, every other argument must leave the root alone
+// (jet_codegen_operand_holds_root).
+fn jet_codegen_lower_call_carrier(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TCallArg, access: MIRAccess, variadic: [Bool], args: [TCallArg], index: Int) -> MIRValueID? {
+    if access != MIRAccess.Read || argument.borrow || argument.mut_borrow || argument.widen_to_vec -> return None
+    if argument.fn_coerce != None || argument.widen_to_union != None || argument.box_as_trait != None -> return None
+    if index < variadic.len() && variadic[index] -> return None
+    if argument.value.kind == .Present(payload) {
+        hold :: jet_codegen_carrier_root_hold(builder, program, argument.value.ty, payload) ?? return None
+        if hold != JET_CODEGEN_CARRIER_FROZEN {
+            loop (at, other) in args {
+                if at != index && !jet_codegen_operand_holds_root(other.value, hold == JET_CODEGEN_CARRIER_ALIAS) -> return None
+            }
+        }
+        return Val(jet_codegen_emit_borrowed_carrier(&builder, program, argument.value, payload))
+    }
+    if argument.value.kind == .OrFallback(subject, fallback, _) {
+        if fallback == .Value(fallback_value) {
+            hold :: jet_codegen_fallback_hold(builder, program, argument.value, subject, fallback_value) ?? return None
+            if hold != JET_CODEGEN_CARRIER_FROZEN {
+                loop (at, other) in args {
+                    if at != index && !jet_codegen_operand_holds_root(other.value, hold == JET_CODEGEN_CARRIER_ALIAS) -> return None
+                }
+            }
+            return Val(jet_codegen_lower_borrowed_fallback(&builder, program, argument.value, subject, fallback_value))
+        }
+    }
+    None
+}
+
+// What keeps a borrowed place still until its read-only use
+// (jet_codegen_place_hold). FROZEN: a read parameter's place, unchanged for
+// the whole call. OWNED: the own storage of an immutable local, which only a
+// move changes. ALIAS: a read alias whose root the binding's scope proved
+// stable (jet_codegen_stable_element_lets), which a write or a move made
+// before the use could still change.
+JET_CODEGEN_CARRIER_FROZEN :: 0
+JET_CODEGEN_CARRIER_OWNED :: 1
+JET_CODEGEN_CARRIER_ALIAS :: 2
+
+// #5041 (plan M5): whether `Val(payload)` of type `carrier_ty` may be a
+// borrowed carrier, and what holds its place still (jet_codegen_place_hold).
+fn jet_codegen_carrier_root_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, carrier_ty: Type, payload: TExpr) -> Int? {
+    item_matches :: if carrier_ty == {
+        .Option(item) -> item == payload.ty
+        else -> false
+    }
+    if !item_matches || jet_codegen_ownership(payload.ty).mode == MIROwnershipMode.Copy -> return None
+    jet_codegen_place_hold(builder, program, payload)
+}
+
+// #5041: what holds the place `expression` names still while a borrow of it
+// is read (JET_CODEGEN_CARRIER_*): a stored-field chain rooted at a read
+// parameter, at the own storage of an immutable local, or at a read alias.
+// A mutable local, a capture, a pointer local, a string view or a
+// persistent cell is reachable another way: None.
+fn jet_codegen_place_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Int? {
+    if !jet_codegen_is_stored_field_chain(builder, program, expression) -> return None
+    root :: jet_codegen_element_place_root(expression) ?? return None
+    if root.persist_key != None || root.deref -> return None
+    if expression.kind == .Local(_) && jet_codegen_is_string_view_local(builder, program, root) -> return None
+    binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
+    if jet_codegen_read_parameter_place(builder, program, binding.place) -> return Val(JET_CODEGEN_CARRIER_FROZEN)
+    if builder.read_alias_places.get(binding.place.value) != None -> return Val(JET_CODEGEN_CARRIER_ALIAS)
+    row :: jet_codegen_find_place(builder, program, binding.place) ?? return None
+    if row.access != MIRAccess.Read || row.projections.len() > 0 -> return None
+    own_storage :: if row.base == {
+        .Local(id) -> id == binding.local
+        else -> false
+    }
+    if !own_storage -> return None
+    Val(JET_CODEGEN_CARRIER_OWNED)
+}
+
+// #5041: whether `subject ?? fallback` (an Option place and a place of its
+// payload type, typed `expression.ty`) may be read in place, and the weaker
+// of the two places' holds (jet_codegen_place_hold).
+fn jet_codegen_fallback_hold(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, fallback: TExpr) -> Int? {
+    payload_matches :: if subject.ty == {
+        .Option(item) -> item == expression.ty
+        else -> false
+    }
+    if !payload_matches || fallback.ty != expression.ty || jet_codegen_ownership(expression.ty).mode == MIROwnershipMode.Copy -> return None
+    subject_hold :: jet_codegen_place_hold(builder, program, subject) ?? return None
+    fallback_hold :: jet_codegen_place_hold(builder, program, fallback) ?? return None
+    if subject_hold > fallback_hold -> return Val(subject_hold)
+    Val(fallback_hold)
+}
+
+// #5041: `subject ?? fallback` lent to a read-only use without copying
+// either side: the success route reads the subject's payload in place and
+// the failure route reads the fallback's place, both as ReadBorrow values a
+// ReadBorrow phi joins. Nothing is copied or dropped; the fallback is still
+// evaluated only on its route.
+fn jet_codegen_lower_borrowed_fallback(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, fallback: TExpr) -> MIRValueID Never! {
+    borrowed :: mir_ownership_from_access(MIRAccess.Read)
+    value_type :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
+    subject_place :: jet_codegen_lower_expression_place(&builder, program, subject, MIRAccess.Read) ?? panic("checked borrowed fallback subject has no place")
+    subject_type :: jet_codegen_lower_type_for_function(subject.ty, builder, program)
+    option :: jet_codegen_emit_mir_type(&builder, program, subject.span, subject_type, borrowed, MIROperation.ReadPlace{place: subject_place})
+    condition :: jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.OptionIsSome{subject: option})
+    success_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-success")
+    failure_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-failure")
+    join_block :: jet_codegen_new_block(&builder, program, expression.span, "fallback-join")
+    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: condition, then_target: success_block, else_target: failure_block})
+    incoming := [MIRPhiIncoming]{}
+    jet_codegen_switch_block(&builder, program, success_block)
+    payload :: jet_codegen_emit_mir_type(&builder, program, expression.span, value_type, borrowed, MIROperation.OptionValue{subject: option})
+    &incoming.push(MIRPhiIncoming{block: builder.current, value: payload})
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
+    jet_codegen_switch_block(&builder, program, failure_block)
+    fallback_place :: jet_codegen_lower_expression_place(&builder, program, fallback, MIRAccess.Read) ?? panic("checked borrowed fallback value has no place")
+    lent :: jet_codegen_emit_mir_type(&builder, program, fallback.span, value_type, borrowed, MIROperation.ReadPlace{place: fallback_place})
+    &incoming.push(MIRPhiIncoming{block: builder.current, value: lent})
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
+    jet_codegen_switch_block(&builder, program, join_block)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
+}
+
+// #5041 (plan M5): whether evaluating `expression` surely leaves a borrowed
+// carrier's root alone: a literal, a local, a field or element read, a
+// borrow, or an Option or List literal of those moves nothing, which is all
+// an immutable local needs. An `alias` root (JET_CODEGEN_CARRIER_ALIAS)
+// also needs no write borrow among them. Any other shape may change it.
+fn jet_codegen_operand_holds_root(expression: TExpr, alias: Bool) -> Bool Never! {
+    if expression.kind == {
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Unit | .DefaultLit | .Absent | .ConstRef(_) | .Local(_) -> true
+        // A checked byte constant (`[U8]{"…"}`) reads no place.
+        .CtLit(constant) -> constant == .Bytes(_)
+        .StrLit(parts) -> {
+            loop part in parts {
+                if part == .Interpolation(_, _) -> return false
+            }
+            true
+        }
+        .Field(receiver, _) -> jet_codegen_operand_holds_root(receiver, alias)
+        .Index(base, position, _, access, _, _) -> (!alias || access == AccessConvention.Read) && jet_codegen_operand_holds_root(base, alias) && jet_codegen_operand_holds_root(position, alias)
+        .Borrow(inner, access) -> (!alias || access == AccessConvention.Read) && jet_codegen_operand_holds_root(inner, alias)
+        .Present(inner) -> jet_codegen_operand_holds_root(inner, alias)
+        .List(values, _) | .ListLit(values) -> {
+            loop value in values {
+                if !jet_codegen_operand_holds_root(value, alias) -> return false
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+// #5041 (plan M5): the borrowed carrier of `Val(payload)`: a ReadBorrow read
+// of the payload's place under a ReadBorrow Present. The backend builds it
+// in a stack slot holding the place's bytes (lower_present); nothing copies
+// or drops them, the last-use pass never turns the read into a move, and
+// MIR lint holds the place still while the carrier lives.
+fn jet_codegen_emit_borrowed_carrier(builder: &JetCodegenBuilder, program: JetCodegenProgram, carrier: TExpr, payload: TExpr) -> MIRValueID Never! {
+    place :: jet_codegen_lower_expression_place(&builder, program, payload, MIRAccess.Read) ?? panic("checked borrowed carrier payload has no place")
+    borrowed :: mir_ownership_from_access(MIRAccess.Read)
+    payload_type :: jet_codegen_lower_type_for_function(payload.ty, builder, program)
+    read :: jet_codegen_emit_mir_type(&builder, program, payload.span, payload_type, borrowed, MIROperation.ReadPlace{place: place})
+    carrier_type :: jet_codegen_lower_type_for_function(carrier.ty, builder, program)
+    jet_codegen_emit_mir_type(&builder, program, carrier.span, carrier_type, borrowed, MIROperation.Present{value: read})
+}
+
+// #5041 (plan M5): an `==`/`!=` operand `Val(place)` compares a borrowed
+// carrier of the place, not an owned Option around its copy. A left carrier
+// is made before the right operand is evaluated, so beyond a read
+// parameter's place that operand must leave the root alone
+// (jet_codegen_operand_holds_root).
+fn jet_codegen_lower_compare_operand(builder: &JetCodegenBuilder, program: JetCodegenProgram, op: TBinaryOp, operand: TExpr, other: TExpr, first: Bool) -> MIRValueID {
+    if op == TBinaryOp.Eq || op == TBinaryOp.Ne {
+        if operand.kind == .Present(payload) {
+            hold :: jet_codegen_carrier_root_hold(builder, program, operand.ty, payload) ?? return jet_codegen_lower_expr(&builder, program, operand)
+            if hold == JET_CODEGEN_CARRIER_FROZEN || !first || jet_codegen_operand_holds_root(other, hold == JET_CODEGEN_CARRIER_ALIAS) -> return jet_codegen_emit_borrowed_carrier(&builder, program, operand, payload)
+        }
+    }
+    jet_codegen_lower_expr(&builder, program, operand)
+}
+
 fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TExpr, index: Int, record: CoreCallRecord, widen_to_vec: Bool) -> MIRCallArg {
     access := MIRAccess.Read
     place := MIRPlaceID?{None}
@@ -705,7 +882,8 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCode
     }
     if record.module_name == "core.net.tls" && record.member == "client" && index > 0 && place == None {
         source :: if argument.kind == {
-            .Clone(value, _) -> value
+            // copy: `value` is a payload of read parameter `argument`, which keeps the original; the assigned `source` owns this one
+            .Clone(value, _) -> value.copy()
             else -> argument
         }
         place = jet_codegen_lower_expression_place(&builder, program, source, MIRAccess.Read)
@@ -717,14 +895,7 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCode
     // argument is lowered as a value, and its last use becomes a move later
     // (LastUse.jet).
     value := if place == {
-        None -> {
-            move_place := MIRPlaceID?{None}
-            if access == MIRAccess.Move && jet_codegen_for_in_iter_element(argument.ty) != None -> move_place = jet_codegen_lower_expression_place(&builder, program, argument, MIRAccess.Move)
-            if move_place == {
-                None -> jet_codegen_lower_expr(&builder, program, argument)
-                Val(id) -> jet_codegen_emit_value(&builder, program, argument.span, argument.ty, MIROperation.MovePlace{place: id})
-            }
-        }
+        None -> if access == MIRAccess.Move && jet_codegen_for_in_iter_element(argument.ty) != None -> jet_codegen_lower_consuming_value(&builder, program, argument) else -> jet_codegen_lower_expr(&builder, program, argument)
         Val(place_id) -> jet_codegen_emit_value(&builder, program, argument.span, argument.ty, MIROperation.ReadPlace{place: place_id})
     }
     return MIRCallArg{
@@ -889,8 +1060,10 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
     result_type :: expression.ty
     helper := jet_codegen_precise_source_helper(type_name, function)
     if helper == .Val(name) {
-        loop semantic_module in program.modules {
-            if semantic_module.module_name != "core.math" || (type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None) -> next
+        math_modules :: program.nominals.named_modules.get("core.math") ?? [Int]{}
+        loop module_index in math_modules {
+            semantic_module :: program.modules[module_index]
+            if type_name != "Int" && semantic_module.nominal_positions.get(type_name) == None -> next
             // The helper is a top-level function: its checked key is its
             // registered symbol key, never its bare name.
             target :: jet_codegen_find_function_by_key(program.function_index, symbol_id(SymbolKind.Function, semantic_module.module_identity, "", name).key, semantic_module.module_identity) ?? panic("checked precise source helper `{name}` is absent from the lowered function set")
@@ -909,7 +1082,7 @@ fn jet_codegen_lower_precise_builtin(builder: &JetCodegenBuilder, program: JetCo
     }
     values := [MIRValueID]{}
     loop argument in args -> &values.push(jet_codegen_lower_expr(&builder, program, argument))
-    type_id := jet_codegen_type_instance_id(Type.Named{name: type_name}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    type_id := jet_codegen_type_instance_id(Type.Named{name: type_name}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     call := jet_codegen_precise_builtin_route(&builder, program, type_name, function, values.len(), carrier)
     jet_codegen_note_core_module(&builder, program, "core.math")
     jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: values}})
@@ -930,8 +1103,10 @@ fn jet_codegen_lower_registered_math_constructor(builder: &JetCodegenBuilder, pr
 
 fn jet_codegen_failure_carrier_for_type(ty: Type) -> TFailureCarrier Never! {
     if ty == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(value) -> TFailureCarrier.Optional{value: value}
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
         else -> TFailureCarrier.Infallible
     }
 }
@@ -1164,6 +1339,9 @@ fn jet_codegen_place_access(builder: &JetCodegenBuilder, program: JetCodegenProg
     source.access = access
     jet_codegen_projected_accessors(&builder, program, &source, access)
     jet_codegen_push_place(&builder, program, source)
+    // A place below a read alias's place stays one (jet_codegen_unmovable_place);
+    // a root's own place never is one.
+    if source.projections.len() > 0 && builder.read_alias_places.get(place.value) != None -> _ := &builder.read_alias_places.add(source.id.value, true)
     source.id
 }
 
@@ -1385,6 +1563,15 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
     if expression.kind == {
         .Local(local) -> {
             local_place :: jet_codegen_lower_local_place(&builder, program, local)
+            // Rust `place_for_local(local, Move)`: a consuming use moves the
+            // local's own place row, which retains Move access, so the
+            // MovePlace clears the local's drop flag and scope exit does not
+            // move it a second time. A place no consuming use may move keeps
+            // its access (jet_codegen_emit copies it instead).
+            if access == MIRAccess.Move {
+                if !jet_codegen_unmovable_place(builder, program, local_place) -> jet_codegen_retain_place_access(&builder, program, local_place, MIRAccess.Move)
+                return Val(local_place)
+            }
             return Val(jet_codegen_place_access(&builder, program, local_place, access))
         }
         .Field(receiver, reference) -> {
@@ -1451,13 +1638,47 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
             if field == {
                 None -> return Val(base)
                 Val(name) -> {
-                    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_ty, name, builder.function.key)
+                    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, element_ty, name, builder.function.key)
                     return Val(jet_codegen_project_field_place(&builder, program, base, expression.span, expression.ty, jet_codegen_mir_field_id(resolved)))
                 }
             }
         }
+        // #5001: a constant read in place is its `Static` place, read only.
+        .ConstRef(symbol) -> {
+            if access != MIRAccess.Read -> return None
+            return jet_codegen_constant_place(&builder, program, expression, symbol)
+        }
         else -> None
     }
+}
+
+// #5001: the `Static` place of a module constant every read borrows in place
+// (JetCodegenConstantIndex.in_place); None for any other constant.
+fn jet_codegen_constant_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, symbol: SymbolID) -> MIRPlaceID? {
+    global :: program.owners.constants.in_place.get(symbol.key) ?? return None
+    if jet_codegen_find_function_row(program.function_index, symbol.key) != None -> return None
+    identity := jet_codegen_identity(&builder, program, "place", expression.span, "constant", global)
+    id := MIRPlaceID{value: stable_id("mir-place", identity)}
+    lowered_ty :: jet_codegen_lower_type_for_function(expression.ty, builder, program)
+    jet_codegen_push_place(&builder, program, MIRPlace{
+        id: id,
+        span: expression.span,
+        ty: lowered_ty,
+        base: MIRPlaceBase.Static{name: global},
+        projections: [MIRProjection]{},
+        access: MIRAccess.Read,
+        persist_key: None,
+    })
+    Val(id)
+}
+
+// #5001: whether `expression` names a constant read in place.
+fn jet_codegen_is_constant_place(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
+    if expression.kind == .ConstRef(symbol) {
+        if program.owners.constants.in_place.get(symbol.key) == None -> return false
+        return jet_codegen_find_function_row(program.function_index, symbol.key) == None
+    }
+    false
 }
 
 fn jet_codegen_lower_place_for_access(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: TPlace, access: MIRAccess) -> MIRPlaceID {
@@ -1542,13 +1763,11 @@ fn jet_codegen_field_ref_id(builder: JetCodegenBuilder, program: JetCodegenProgr
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::is_stored_struct_field
 fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, reference: TFieldRef) -> Bool Never! {
     if reference.owner == .Val(owner) {
-        loop semantic_module in program.modules {
-            loop nominal in semantic_module.nominals {
-                if nominal.symbol.id.key != owner.key -> next
-                loop field in nominal.fields {
-                    if field.symbol.id.key == reference.field.key -> return nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed
-                }
-            }
+        // The first field row of that owner in module, nominal and field
+        // order (jet_codegen_field_symbol_index), not a scan of every module.
+        rows :: program.field_symbols.get(reference.field.key) ?? return false
+        loop row in rows {
+            if row.owner_key == owner.key -> return row.stored
         }
         return false
     }
@@ -1557,23 +1776,21 @@ fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, program: JetCo
         .Apply(name, _) -> name
         else -> { return false }
     }
-    found :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    found :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     // A compiler-owned record row (`Range`, a Core record) stores every field.
     identity :: found ?? return jet_codegen_compiler_owned_record_field(owner_name, reference.name) != None
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity != identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != identity.name -> next
-            loop field in nominal.fields {
-                if field.symbol.name == reference.name -> return nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed
-            }
+    loop nominal_row in jet_codegen_scope_nominal_rows(program.nominals, identity.module_identity, identity.name) {
+        nominal :: program.modules[nominal_row.module_index].nominals[nominal_row.nominal_index]
+        loop field in nominal.fields {
+            if field.symbol.name == reference.name -> return nominal.kind == SemaRegistrationNominalKind.Struct && !field.computed
         }
     }
     false
 }
 
 // A local or parameter (`self` included), or a chain of stored struct fields
-// rooted at one, with no `Pin` on the way: its field can be read in place.
+// rooted at one, with no `Pin` on the way: its field can be read in place. A
+// constant read in place (#5001) roots such a chain like a read parameter.
 fn jet_codegen_is_stored_field_chain(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
     if expression.ty == {
         .Apply(name, args) -> {
@@ -1583,6 +1800,7 @@ fn jet_codegen_is_stored_field_chain(builder: JetCodegenBuilder, program: JetCod
     }
     if expression.kind == {
         .Local(_) -> true
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Field(receiver, reference) -> jet_codegen_is_stored_field_chain(builder, program, receiver) && jet_codegen_is_stored_struct_field(builder, program, receiver.ty, reference)
         else -> false
     }
@@ -1602,6 +1820,7 @@ fn jet_codegen_is_field_read_chain(builder: JetCodegenBuilder, program: JetCodeg
     }
     if expression.kind == {
         .Local(_) | .SharedGuardValue(_, _) -> true
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Index(base, _, kind, access, checked_call, _) -> {
             if checked_call != None || access != AccessConvention.Read -> return false
             place_kind :: if kind == {
@@ -1626,7 +1845,7 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
     // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
     // nanosecond carrier, not a record. `d.ns` reads that carrier through the
     // canonical scalar projection on every tier, unless a declared row owns it.
-    if reference.name == "ns" && receiver_type == (Type.Named{name: "Duration"}) && jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, "Duration", builder.generic_type_names) == None && !jet_codegen_is_compiler_owned_row("Duration") {
+    if reference.name == "ns" && receiver_type == (Type.Named{name: "Duration"}) && jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, "Duration", builder.generic_type_names) == None && !jet_codegen_is_compiler_owned_row("Duration") {
         carrier :: TExpr{ty: Type.Int, kind: TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.DurationNsValue, args: [TExpr]{}}, span: expression.span, integer_bounds: None, cost: None}
         return jet_codegen_lower_expr(&builder, program, carrier)
     }
@@ -1672,10 +1891,11 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
 
 fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, member: String, flatten: Bool) -> MIRValueID {
     inner_type := if base.ty == {
-        .Option(inner) -> inner
+        // copy: `inner` is a payload of read parameter `base`, which keeps the original; the assigned `inner_type` owns this one
+        .Option(inner) -> inner.copy()
         else -> panic("checked optional field base is not optional")
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, inner_type, member, builder.function.key)
     field_id := jet_codegen_mir_field_id(resolved)
     selected_type := if {
         flatten -> expression.ty
@@ -1724,7 +1944,8 @@ fn jet_codegen_lower_optional_field(builder: &JetCodegenBuilder, program: JetCod
 // the call never takes ownership of it and no extra drop is registered.
 fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, binding: TLocal, call: TExpr, flatten: Bool) -> MIRValueID {
     inner_type := if base.ty == {
-        .Option(inner) -> inner
+        // copy: `inner` is a payload of read parameter `base`, which keeps the original; the assigned `inner_type` owns this one
+        .Option(inner) -> inner.copy()
         else -> panic("checked optional method receiver is not optional")
     }
     subject := jet_codegen_lower_expr(&builder, program, base)
@@ -1761,7 +1982,7 @@ fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: 
 
 
 fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?) -> MIRValueID {
-    owner :: jet_codegen_mir_type_id_for_type(program.modules, builder.function.module_identity, builder.generic_type_names, expression.ty)
+    owner :: jet_codegen_mir_type_id_for_type(program.nominals, builder.function.module_identity, builder.generic_type_names, expression.ty)
     lowered_fields := [MIRFieldValue]{}
     boxed_fields := [MIRFieldID]{}
     loop field in fields {
@@ -1809,7 +2030,7 @@ fn jet_codegen_lower_comptime_key(value: TComptimeKey) -> MIRConstKey? {
     }
 }
 
-fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MIRConstant? {
+fn jet_codegen_lower_comptime_value(value: TComptimeValue, nominals: JetCodegenNominalIndex, module_identity: String, generic_names: [String]) -> MIRConstant? {
     if value == {
         .Int(number) -> Val(mir_integer_constant(number, None, None))
         .Float(number, bits) -> Val(MIRConstant.Float{value: number, f32: bits == 32, spelling: None})
@@ -1821,7 +2042,7 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
         .List(values) -> {
             lowered := [MIRConstant]{}
             loop item in values {
-                lowered_value :: jet_codegen_lower_comptime_value(item, modules, module_identity, generic_names) ?? return None
+                lowered_value :: jet_codegen_lower_comptime_value(item, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(lowered_value)
             }
             Val(MIRConstant.List{values: lowered})
@@ -1830,7 +2051,7 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
             lowered := [MIRConstMapEntry]{}
             loop entry in entries {
                 key :: jet_codegen_lower_comptime_key(entry.key) ?? return None
-                item :: jet_codegen_lower_comptime_value(entry.value, modules, module_identity, generic_names) ?? return None
+                item :: jet_codegen_lower_comptime_value(entry.value, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(MIRConstMapEntry{key: key, value: item})
             }
             Val(MIRConstant.Map{entries: lowered})
@@ -1838,7 +2059,7 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
         .Struct(type_name, fields) -> {
             lowered := [MIRConstField]{}
             loop field in fields {
-                item :: jet_codegen_lower_comptime_value(field.value, modules, module_identity, generic_names) ?? return None
+                item :: jet_codegen_lower_comptime_value(field.value, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(MIRConstField{name: field.name, value: item})
             }
             Val(MIRConstant.Struct{type_name: type_name, fields: lowered})
@@ -1846,20 +2067,20 @@ fn jet_codegen_lower_comptime_value(value: TComptimeValue, modules: [SemaGraphMo
         .Enum(type_name, variant, args) -> {
             lowered := [MIRConstEnumArg]{}
             loop arg in args {
-                item :: jet_codegen_lower_comptime_value(arg.value, modules, module_identity, generic_names) ?? return None
+                item :: jet_codegen_lower_comptime_value(arg.value, nominals, module_identity, generic_names) ?? return None
                 &lowered.push(MIRConstEnumArg{name: arg.name, value: item})
             }
             Val(MIRConstant.Enum{type_name: type_name, variant: variant, args: lowered})
         }
         .Present(inner) -> {
-            lowered :: jet_codegen_lower_comptime_value(inner, modules, module_identity, generic_names) ?? return None
+            lowered :: jet_codegen_lower_comptime_value(inner, nominals, module_identity, generic_names) ?? return None
             Val(MIRConstant.Present{value: lowered})
         }
         .Failed(report) -> {
             lowered_report := if report == {
-                .Clean(ty) -> MIRConstReport.Clean{ty: jet_codegen_lower_type_with_modules(ty, modules, module_identity, generic_names)}
+                .Clean(ty) -> MIRConstReport.Clean{ty: jet_codegen_lower_type_with_nominals(ty, nominals, module_identity, generic_names)}
                 .Told(inner) -> {
-                    lowered :: jet_codegen_lower_comptime_value(inner, modules, module_identity, generic_names) ?? return None
+                    lowered :: jet_codegen_lower_comptime_value(inner, nominals, module_identity, generic_names) ?? return None
                     MIRConstReport.Told{value: lowered}
                 }
             }
@@ -1931,7 +2152,9 @@ fn jet_codegen_lower_compare_chain(builder: &JetCodegenBuilder, program: JetCode
 // is read in place through read parameters, so no level is copied. Each level
 // emits its condition, branch, then arm, else arm and the phi of the arm
 // values that reach its join, in the order nested `lower_expr` calls would.
-fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, condition: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr) -> MIRValueID {
+// Under a conditional binding's `lend` (jet_codegen_lower_lent_conditional)
+// every arm hands the join a ReadBorrow read instead (jet_codegen_lower_if_arm).
+fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, condition: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr, lend: JetCodegenConditionalLend?) -> MIRValueID {
     outer_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder, program)
     condition_value := jet_codegen_lower_condition(&builder, program, condition)
@@ -1944,7 +2167,7 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     jet_codegen_enter_lexical(&builder, program)
     jet_codegen_lower_statements(&builder, program, then_body)
     then_result := MIRValueID?{None}
-    if jet_codegen_current_is_open(builder, program) -> then_result = Val(jet_codegen_lower_expr(&builder, program, then_value))
+    if jet_codegen_current_is_open(builder, program) -> then_result = Val(jet_codegen_lower_if_arm(&builder, program, then_value, lend, condition, true))
     jet_codegen_leave_lexical(&builder, program)
     jet_codegen_close_if_arm(&builder, program, then_value, then_result, join_block, &incoming)
     builder.scope_depth = outer_depth
@@ -1954,9 +2177,9 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     else_result := MIRValueID?{None}
     if jet_codegen_current_is_open(builder, program) {
         if else_value.kind == .IfExpr(next_condition, next_then_body, next_then_value, next_else_body, next_else_value) {
-            else_result = Val(jet_codegen_lower_if_expression(&builder, program, else_value, next_condition, next_then_body, next_then_value, next_else_body, next_else_value))
+            else_result = Val(jet_codegen_lower_if_expression(&builder, program, else_value, next_condition, next_then_body, next_then_value, next_else_body, next_else_value, lend))
         } else {
-            else_result = Val(jet_codegen_lower_expr(&builder, program, else_value))
+            else_result = Val(jet_codegen_lower_if_arm(&builder, program, else_value, lend, condition, false))
         }
     }
     jet_codegen_leave_lexical(&builder, program)
@@ -1971,6 +2194,121 @@ fn jet_codegen_lower_if_expression(builder: &JetCodegenBuilder, program: JetCode
     result := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
     jet_codegen_leave_lexical(&builder, program)
     result
+}
+
+// The value one arm of a value `if` hands its join: its own value, or under
+// a conditional binding's `lend` a ReadBorrow read of the place the arm would
+// copy (jet_codegen_lent_arm_place) or, for any other arm, of the lend's
+// holder once the arm's value is moved there. A diverging arm lowers as is.
+// `guarded`: the arm runs under `condition` (its pattern bindings in scope).
+fn jet_codegen_lower_if_arm(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, lend: JetCodegenConditionalLend?, condition: TIfCond, guarded: Bool) -> MIRValueID {
+    lending :: lend ?? return jet_codegen_lower_expr(&builder, program, value)
+    if value.ty == (Type.Named{name: "Never"}) -> return jet_codegen_lower_expr(&builder, program, value)
+    place := jet_codegen_lent_arm_place(&builder, program, value, lending.depth, condition, guarded)
+    if place == None {
+        owned :: jet_codegen_lower_expr(&builder, program, value)
+        if !jet_codegen_current_is_open(builder, program) -> return owned
+        _ := jet_codegen_emit(&builder, program, value.span, None, MIROperation.WritePlace{place: lending.holder, value: owned})
+        place = Val(lending.holder)
+    }
+    lent :: place ?? panic("checked lent conditional arm has no place")
+    jet_codegen_emit_mir_type(&builder, program, value.span, lending.ty, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: lent})
+}
+
+// #5041: the place a conditional binding's arm lends instead of copying: the
+// arm is a compiler-inserted copy of a place a `::` binding aliases without
+// any proof (below a read parameter or a constant,
+// jet_codegen_read_binding_place), or of a stored-field or List element
+// chain, or the whole, of a root the binding's scope leaves alone
+// (jet_codegen_stable_root; jet_codegen_stable_element_lets proved it for
+// every arm's root). The root must be bound at or above the binding's scope
+// `depth`: a root bound inside the arm (an arm-body local, a pattern binding
+// holding its own copy) dies at the arm's end, so its places are never lent
+// past it; a payload binding of the arm's own guard that aliases a slot of
+// the guard's subject lends that slot (jet_codegen_lent_payload_place).
+fn jet_codegen_lent_arm_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr, depth: Int, condition: TIfCond, guarded: Bool) -> MIRPlaceID? {
+    if value.kind == .Clone(inner, _) {
+        frozen :: jet_codegen_read_binding_place(&builder, program, value, false)
+        if frozen != None -> return frozen
+        return jet_codegen_lent_chain_place(&builder, program, inner, depth, condition, guarded, true)
+    }
+    // An uncopied place is a move out of an outer root, which costs nothing;
+    // only a payload alias of the guard (whose read copies) is lent.
+    if !guarded -> return None
+    jet_codegen_lent_chain_place(&builder, program, value, depth, condition, guarded, false)
+}
+
+// The jet_codegen_lent_arm_place of a stored-field / List element chain
+// `inner`; `copied`: the arm copies it (a compiler-inserted clone).
+fn jet_codegen_lent_chain_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, inner: TExpr, depth: Int, condition: TIfCond, guarded: Bool, copied: Bool) -> MIRPlaceID? {
+    if !jet_codegen_is_element_place_chain(builder, program, inner) -> return None
+    root :: jet_codegen_element_place_root(inner) ?? return None
+    binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return None
+    if binding.depth > depth {
+        if !guarded -> return None
+        return jet_codegen_lent_payload_place(&builder, program, inner, root, binding.place, condition, depth)
+    }
+    if !copied -> return None
+    local_place :: jet_codegen_lower_local_place(&builder, program, root)
+    if !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+    if inner.kind == .Local(_) -> return Val(local_place)
+    jet_codegen_lower_expression_place(&builder, program, inner, MIRAccess.Read)
+}
+
+// #5041: `n :: if s.kind == .V(p) -> p else -> …`: the payload binding `p`
+// (`root`, bound at `alias`) dies at the arm's end, but when it aliases a
+// read-window slot of its guard's subject (a read alias rooted at the
+// subject root's own storage, or an or-pattern's borrowed local), that slot
+// outlives the arm. It is lent when the subject's root is bound at or above
+// `n`'s scope `depth` and stays put: a read parameter, or a stable root
+// (jet_codegen_stable_root; the proof covers it through the arm-root walk,
+// jet_codegen_arm_subject_root).
+fn jet_codegen_lent_payload_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, inner: TExpr, root: TLocal, alias: MIRPlaceID, condition: TIfCond, depth: Int) -> MIRPlaceID? {
+    subject_root :: jet_codegen_arm_subject_root(condition, root.name) ?? return None
+    owner :: jet_codegen_find_binding_for_local(builder, program, subject_root) ?? return None
+    if owner.depth > depth -> return None
+    owner_place :: jet_codegen_lower_local_place(&builder, program, subject_root)
+    if !jet_codegen_read_parameter_place(builder, program, owner_place) && !jet_codegen_stable_root(builder, program, subject_root, owner_place) -> return None
+    if !jet_codegen_borrowed_local_place(builder, program, alias) {
+        if builder.read_alias_places.get(alias.value) == None || builder.read_windows.get(alias.value) == None -> return None
+        slot :: jet_codegen_find_place(builder, program, alias) ?? return None
+        held :: jet_codegen_find_place(builder, program, owner_place) ?? return None
+        if slot.base != held.base -> return None
+    }
+    if inner.kind == .Local(_) -> return Val(alias)
+    jet_codegen_lower_expression_place(&builder, program, inner, MIRAccess.Read)
+}
+
+// #5041: `n :: if c -> a.f else -> g(x)`, or a `:=` of it nothing writes,
+// whose scope leaves every arm's root alone and never consumes `n`
+// (jet_codegen_stable_element_lets): `n` is a borrowed local
+// (jet_codegen_bind_borrowed_local) holding the ReadBorrow phi of its arms.
+// An arm that would copy a stable place lends that place; any other arm moves
+// its value into the holder, an owned local of `n`'s scope whose live flag
+// drops it at scope end, and lends the holder. No arm copies, and a
+// consuming use of `n` copies its place (jet_codegen_unmovable_place).
+fn jet_codegen_lower_lent_conditional(builder: &JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, init: TExpr, span: Span) {
+    holder_local :: tir_generated_local("conditional_lend_{span.start}", span)
+    holder :: jet_codegen_bind_local(&builder, program, holder_local, init.ty, false, None, None, false)
+    lend_ty :: jet_codegen_lower_type_for_function(init.ty, builder, program)
+    lend :: JetCodegenConditionalLend{holder: holder, ty: lend_ty, depth: builder.scope_depth}
+    value :: if init.kind == {
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, init, condition, then_body, then_value, else_body, else_value, Val(lend))
+        else -> panic("checked lent conditional binding is not a value `if`")
+    }
+    place :: jet_codegen_bind_borrowed_local(&builder, program, local, init.ty)
+    if jet_codegen_current_is_open(builder, program) -> _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: value})
+}
+
+// Whether a stable binding of `init` lends its arms
+// (jet_codegen_lower_lent_conditional): a value `if` of an owned type,
+// outside a retained root's top level (whose bindings are cells).
+fn jet_codegen_lends_conditional(builder: JetCodegenBuilder, program: JetCodegenProgram, init: TExpr) -> Bool Never! {
+    if builder.retained_root && builder.scope_depth == 0 -> return false
+    if init.kind == {
+        .IfExpr(_, _, _, _, _) -> jet_codegen_ownership(init.ty).mode == MIROwnershipMode.Owned
+        else -> false
+    }
 }
 
 // Close one value-`if` arm at its join. An arm whose checked value is
@@ -2101,8 +2439,6 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
                     template_items: [SymbolID]{},
                     borrow: true,
                     mut_borrow: false,
-                    clone: false,
-                    arc_clone: false,
                     fn_coerce: None,
                     widen_to_vec: false,
                     widen_to_union: None,
@@ -2122,8 +2458,6 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
                         template_items: [SymbolID]{},
                         borrow: !jet_codegen_is_copy_type(ty),
                         mut_borrow: false,
-                        clone: false,
-                        arc_clone: false,
                         fn_coerce: None,
                         widen_to_vec: false,
                         widen_to_union: None,
@@ -2200,15 +2534,8 @@ fn jet_codegen_lower_fn_value(builder: &JetCodegenBuilder, program: JetCodegenPr
 
 fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, operation: String) -> TFunc? Never! {
     head :: jet_codegen_type_head_name(owner_type) ?? return None
-    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, head, builder.generic_type_names) ?? return None
-    source_module := false
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity == owner.module_identity && semantic_module.module_name == "core.math" {
-            source_module = true
-            break
-        }
-    }
-    if !source_module -> return None
+    owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, head, builder.generic_type_names) ?? return None
+    if !jet_codegen_scope_has_module(program.nominals, program.modules, owner.module_identity, "core.math") -> return None
     if owner.name == {
         "ScreenPoint" | "ScreenDelta" | "WorldPoint" | "WorldDelta" | "ViewPoint" | "ViewDelta" | "CameraPoint" | "CameraDelta" | "DevicePoint" | "DeviceDelta" | "Point2" | "Delta2" | "Transform" | "Transform2" -> {}
         else -> return None
@@ -2303,7 +2630,7 @@ struct JetCodegenEnumVariantShape {
 
 fn jet_codegen_enum_variant_shape(builder: JetCodegenBuilder, program: JetCodegenProgram, enum_type: String, variant_name: String, named: Bool) -> JetCodegenEnumVariantShape Never! {
     names := [String]{}
-    identity_option := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, enum_type, builder.generic_type_names)
+    identity_option := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, enum_type, builder.generic_type_names)
     if identity_option == .Val(identity) {
         row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? panic("checked enum literal `{enum_type}` has no declaration facts")
         definition :: program.modules[row.module_index].declarations.type_defs[row.definition_index]
@@ -2338,9 +2665,7 @@ fn jet_codegen_enum_variant(definition: TTypeDef, variant_name: String) -> TVari
 }
 
 fn jet_codegen_lower_enum_argument(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TEnumArg) -> MIRValueID {
-    value := jet_codegen_lower_expr(&builder, program, argument.value)
-    if argument.clone -> return jet_codegen_emit_value(&builder, program, argument.value.span, argument.value.ty, MIROperation.Copy{value: value, fact: MIRCopyFact.Materialize})
-    value
+    jet_codegen_lower_expr(&builder, program, argument.value)
 }
 
 fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, program: JetCodegenProgram, shape: JetCodegenEnumVariantShape, variant_name: String, payload: TEnumPayload) -> [MIREnumArg] {
@@ -2406,7 +2731,7 @@ fn jet_codegen_lower_enum_literal(builder: &JetCodegenBuilder, program: JetCodeg
         else -> false
     }
     shape := jet_codegen_enum_variant_shape(builder, program, enum_type, variant, named)
-    type_id := jet_codegen_type_instance_id(Type.Named{name: enum_type}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    type_id := jet_codegen_type_instance_id(Type.Named{name: enum_type}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     args := jet_codegen_lower_enum_payload(&builder, program, shape, variant, payload)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: variant, args: args})
 }
@@ -2419,86 +2744,82 @@ fn jet_codegen_lower_enum_slot(builder: &JetCodegenBuilder, program: JetCodegenP
 }
 
 fn jet_codegen_lower_enum_constructor(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, owner: SymbolID, variant: SymbolID, payload: TEnumPayload) -> MIRValueID {
-    loop module_index in 0..<program.modules.len() {
-        loop nominal_index in 0..<program.modules[module_index].nominals.len() {
-            if program.modules[module_index].nominals[nominal_index].symbol.id.key != owner.key -> next
-            // Lowering mutates builder, so copy out only the matched variant
-            // and the two declaration facts used below. Iterating or copying
-            // the write-borrowed builder's nominal or declaration tables costs
-            // the program's type declarations per constructor.
-            variant_index := -1
-            loop index in 0..<program.modules[module_index].nominals[nominal_index].variants.len() {
-                if program.modules[module_index].nominals[nominal_index].variants[index].symbol.id.key == variant.key {
-                    variant_index = index
-                    break
-                }
-            }
-            if variant_index < 0 -> panic("checked enum constructor variant does not belong to its owner")
-            candidate := program.modules[module_index].nominals[nominal_index].variants[variant_index]
-            definition := -1
-            loop index in 0..<program.modules[module_index].declarations.type_defs.len() {
-                if program.modules[module_index].declarations.type_defs[index].name == program.modules[module_index].nominals[nominal_index].symbol.name -> definition = index
-            }
-            if definition < 0 -> panic("checked enum constructor has no type declaration")
-            declared_key := program.modules[module_index].declarations.type_defs[definition].key
-            boxed_edges := program.modules[module_index].declarations.type_defs[definition].boxed_edges
-            lowered := [MIREnumArg]{}
-            if candidate.payload == {
-                .Unit -> {
-                    if payload == {
-                        .Unit -> {}
-                        else -> panic("checked unit enum constructor carries a payload")
-                    }
-                }
-                .Single(slot_type, _) -> {
-                    argument :: if payload == {
-                        .Positional(args) -> if args.len() == 1 -> args[0] else -> panic("checked enum constructor has the wrong payload arity")
-                        else -> panic("checked single enum constructor has no positional payload")
-                    }
-                    value := jet_codegen_lower_enum_slot(&builder, program, argument, slot_type)
-                    &lowered.push(MIREnumArg{field: None, value: value, boxed: boxed_edges.contains(candidate.symbol.name)})
-                }
-                .Named(fields) -> {
-                    args :: if payload == {
-                        .Named(values) -> values
-                        else -> panic("checked named enum constructor has no named payload")
-                    }
-                    if args.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
-                    // Rust `lower_enum_lit`: every argument is evaluated in
-                    // the order it was written; only then do the values
-                    // take their declared payload slots.
-                    values := [MIRValueID?]{}
-                    loop _ in fields -> &values.push(None)
-                    loop argument in args {
-                        slot := -1
-                        loop (index, field) in fields {
-                            if field.name == argument.name {
-                                slot = index
-                                break
-                            }
-                        }
-                        if slot < 0 -> panic("checked enum constructor payload field is not declared")
-                        if values[slot] != None -> panic("checked enum constructor repeats a payload field")
-                        values[slot] = Val(jet_codegen_lower_enum_slot(&builder, program, argument.value, fields[slot].ty))
-                    }
-                    loop (index, field) in fields {
-                        field_id := mir_field_id("{declared_key}::{candidate.symbol.name}::{field.name}")
-                        value :: values[index] ?? panic("checked enum constructor misses a payload field")
-                        &lowered.push(MIREnumArg{field: Val(field_id), value: value, boxed: boxed_edges.contains("{candidate.symbol.name}.{field.name}")})
-                    }
-                }
-            }
-            type_id := jet_codegen_type_instance_id(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names)
-            return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
+    // The first nominal row of the owner key (jet_codegen_nominal_index), not
+    // a scan of every module's nominals per constructor.
+    owner_rows :: program.nominals.rows.get(owner.key) ?? panic("checked enum constructor has no registered nominal owner")
+    if owner_rows.len() == 0 -> panic("checked enum constructor has no registered nominal owner")
+    module_index :: owner_rows[0].module_index
+    nominal_index :: owner_rows[0].nominal_index
+    // Lowering mutates builder, so copy out only the matched variant
+    // and the two declaration facts used below. Iterating or copying
+    // the write-borrowed builder's nominal or declaration tables costs
+    // the program's type declarations per constructor.
+    variant_index := -1
+    loop index in 0..<program.modules[module_index].nominals[nominal_index].variants.len() {
+        if program.modules[module_index].nominals[nominal_index].variants[index].symbol.id.key == variant.key {
+            variant_index = index
+            break
         }
     }
-    panic("checked enum constructor has no registered nominal owner")
+    if variant_index < 0 -> panic("checked enum constructor variant does not belong to its owner")
+    candidate := program.modules[module_index].nominals[nominal_index].variants[variant_index]
+    // The module's last type definition of the nominal's name.
+    definition :: owner_rows[0].type_def_index
+    if definition < 0 -> panic("checked enum constructor has no type declaration")
+    declared_key := program.modules[module_index].declarations.type_defs[definition].key
+    boxed_edges := program.modules[module_index].declarations.type_defs[definition].boxed_edges
+    lowered := [MIREnumArg]{}
+    if candidate.payload == {
+        .Unit -> {
+            if payload == {
+                .Unit -> {}
+                else -> panic("checked unit enum constructor carries a payload")
+            }
+        }
+        .Single(slot_type, _) -> {
+            argument :: if payload == {
+                .Positional(args) -> if args.len() == 1 -> args[0] else -> panic("checked enum constructor has the wrong payload arity")
+                else -> panic("checked single enum constructor has no positional payload")
+            }
+            value := jet_codegen_lower_enum_slot(&builder, program, argument, slot_type)
+            &lowered.push(MIREnumArg{field: None, value: value, boxed: boxed_edges.contains(candidate.symbol.name)})
+        }
+        .Named(fields) -> {
+            args :: if payload == {
+                .Named(values) -> values
+                else -> panic("checked named enum constructor has no named payload")
+            }
+            if args.len() != fields.len() -> panic("checked enum constructor has the wrong named payload arity")
+            // Rust `lower_enum_lit`: every argument is evaluated in
+            // the order it was written; only then do the values
+            // take their declared payload slots.
+            values := [MIRValueID?]{}
+            loop _ in fields -> &values.push(None)
+            loop argument in args {
+                slot := -1
+                loop (index, field) in fields {
+                    if field.name == argument.name {
+                        slot = index
+                        break
+                    }
+                }
+                if slot < 0 -> panic("checked enum constructor payload field is not declared")
+                if values[slot] != None -> panic("checked enum constructor repeats a payload field")
+                values[slot] = Val(jet_codegen_lower_enum_slot(&builder, program, argument.value, fields[slot].ty))
+            }
+            loop (index, field) in fields {
+                field_id := mir_field_id("{declared_key}::{candidate.symbol.name}::{field.name}")
+                value :: values[index] ?? panic("checked enum constructor misses a payload field")
+                &lowered.push(MIREnumArg{field: Val(field_id), value: value, boxed: boxed_edges.contains("{candidate.symbol.name}.{field.name}")})
+            }
+        }
+    }
+    type_id := jet_codegen_type_instance_id(expression.ty, program.nominals, builder.function.module_identity, builder.generic_type_names)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: candidate.symbol.name, args: lowered})
 }
 fn jet_codegen_symbol_name(builder: JetCodegenBuilder, program: JetCodegenProgram, symbol: SymbolID) -> String Never! {
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key == symbol.key -> return nominal.symbol.name
-        }
+    if program.nominals.rows.get(symbol.key) == .Val(rows) {
+        if rows.len() > 0 -> return program.modules[rows[0].module_index].nominals[rows[0].nominal_index].symbol.name
     }
     // A builtin trait (Sema `sema_type_builtin_trait_symbol`: an operator hook's
     // `Add`/`Sub`/`Mul`/`Div` owner, or a builtin bound) has no owning module;
@@ -2516,18 +2837,18 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
     symbol :: method.trait_owner ?? panic("checked trait method call has no trait owner")
     selected := JetCodegenTraitMethod?{None}
     owner_found := false
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != symbol.key -> next
-            if nominal.kind != SemaRegistrationNominalKind.Trait -> panic("checked trait method owner is not a trait")
-            owner_found = true
-            loop definition in semantic_module.declarations.traits {
-                if definition.name != nominal.symbol.name -> next
-                loop trait_method in definition.methods {
-                    if trait_method.name != method.name -> next
-                    if selected != None -> panic("checked trait method identity is ambiguous")
-                    selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, symbol), method: trait_method})
-                }
+    owner_rows :: program.nominals.rows.get(symbol.key) ?? [JetCodegenNominalRow]{}
+    loop owner_row in owner_rows {
+        module_index :: owner_row.module_index
+        nominal_index :: owner_row.nominal_index
+        if program.modules[module_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Trait -> panic("checked trait method owner is not a trait")
+        owner_found = true
+        loop definition in program.modules[module_index].declarations.traits {
+            if definition.name != program.modules[module_index].nominals[nominal_index].symbol.name -> next
+            loop trait_method in definition.methods {
+                if trait_method.name != method.name -> next
+                if selected != None -> panic("checked trait method identity is ambiguous")
+                selected = Val(JetCodegenTraitMethod{trait_key: definition.key, trait_ref: jet_codegen_mir_trait_ref_for_symbol(program.modules, program.nominals, symbol), method: trait_method})
             }
         }
     }
@@ -2536,13 +2857,12 @@ fn jet_codegen_resolve_trait_method(builder: JetCodegenBuilder, program: JetCode
     trait_name :: parts[parts.len() - 1]
     preferred_module := builder.function.module_identity
     if parts.len() >= 4 && parts[1] != "" -> preferred_module = parts[1]
-    trait_ref :: jet_codegen_resolve_trait_ref(program.modules, trait_name, preferred_module) ?? panic("checked call of trait `{trait_name}` method `{method.name}` has no trait declaration to dispatch through")
-    loop semantic_module in program.modules {
-        loop definition in semantic_module.declarations.traits {
-            if mir_trait_ref(jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)).id != trait_ref.id -> next
-            loop trait_method in definition.methods {
-                if trait_method.name == method.name -> return JetCodegenTraitMethod{trait_key: definition.key, trait_ref: trait_ref, method: trait_method}
-            }
+    trait_ref :: jet_codegen_resolve_trait_name(program.nominals.traits, trait_name, preferred_module) ?? panic("checked call of trait `{trait_name}` method `{method.name}` has no trait declaration to dispatch through")
+    references :: program.nominals.traits.by_id.get(trait_ref.id.value) ?? [JetCodegenTraitDefRef]{}
+    loop reference in references {
+        definition :: program.modules[reference.module_index].declarations.traits[reference.definition_index]
+        loop trait_method in definition.methods {
+            if trait_method.name == method.name -> return JetCodegenTraitMethod{trait_key: definition.key, trait_ref: trait_ref, method: trait_method}
         }
     }
     panic("checked trait `{trait_name}` declares no method `{method.name}`")
@@ -2761,6 +3081,8 @@ fn jet_codegen_unit_never_return(builder: &JetCodegenBuilder, program: JetCodege
         else -> return None
     }
     // A copy: lowering the `Ok(())` below writes the builder.
+    // copy: the declared return type is read while the return lowering writes the builder
+    // (`&builder`), so a view into builder.function would be live across those writes.
     declared :: builder.function.ret.copy()
     carrier :: declared ?? return None
     success :: jet_codegen_never_carrier_success(carrier) ?? return None
@@ -2806,8 +3128,8 @@ fn jet_codegen_is_plain_call_return(builder: JetCodegenBuilder, program: JetCode
     }
     success :: jet_codegen_never_carrier_success(checked) ?? return false
     if jet_codegen_unwrap_pattern_tags(success) == jet_codegen_unwrap_pattern_tags(returned) -> return true
-    qualified_success :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(success), program.modules, builder.function.module_identity, builder.generic_type_names)
-    qualified_returned :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(returned), program.modules, builder.function.module_identity, builder.generic_type_names)
+    qualified_success :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(success), program.nominals, builder.function.module_identity, builder.generic_type_names)
+    qualified_returned :: jet_codegen_qualify_type(jet_codegen_unwrap_pattern_tags(returned), program.nominals, builder.function.module_identity, builder.generic_type_names)
     qualified_success == qualified_returned
 }
 
@@ -2905,8 +3227,6 @@ fn jet_codegen_plain_named_function_value(builder: &JetCodegenBuilder, program: 
             template_items: [SymbolID]{},
             borrow: !jet_codegen_is_copy_type(ty),
             mut_borrow: false,
-            clone: false,
-            arc_clone: false,
             fn_coerce: None,
             widen_to_vec: false,
             widen_to_union: None,
@@ -2987,7 +3307,7 @@ fn jet_codegen_callable_return_type(signature: Type) -> Type Never! {
 fn jet_codegen_expression_call_return_type(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Type? {
     if expression.kind == {
         .Call(callee, type_args, _) -> {
-            if jet_codegen_find_checked_foreign_row(program.modules, callee.key) != None -> return None
+            if jet_codegen_find_checked_foreign_row(program, callee.key) != None -> return None
             row :: jet_codegen_find_function_row(program.function_index, callee.key) ?? panic("checked call has no TFunc target")
             return Val(jet_codegen_executable_function_return_type(program.function_index.rows[row], type_args))
         }
@@ -3729,7 +4049,7 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodege
             return None
         }
     }
-    identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
+    identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names)
     if identity == None -> return None
     owner :: identity ?? return None
     row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(owner.module_identity, owner.name)) ?? return None
@@ -3739,14 +4059,20 @@ fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodege
     }
 }
 fn jet_codegen_find_distinct_definition(builder: JetCodegenBuilder, program: JetCodegenProgram, owner: SymbolID) -> TTypeDef Never! {
+    // Every definition whose key, or whose name, is the owner key
+    // (jet_codegen_nominal_index), each counted once.
+    by_key :: program.nominals.type_defs_by_key.get(owner.key) ?? [JetCodegenTypeDefRef]{}
+    by_name :: program.nominals.type_defs_by_name.get(owner.key) ?? [JetCodegenTypeDefRef]{}
+    matches := by_key.len()
+    loop reference in by_name {
+        if program.modules[reference.module_index].declarations.type_defs[reference.definition_index].key != owner.key -> matches += 1
+    }
+    if matches > 1 -> panic("checked distinct owner resolves to multiple type definitions")
     found := TTypeDef?{None}
-    loop semantic_module in program.modules {
-        loop definition in semantic_module.declarations.type_defs {
-            if definition.key == owner.key || definition.name == owner.key {
-                if found != None -> panic("checked distinct owner resolves to multiple type definitions")
-                found = Val(definition)
-            }
-        }
+    if by_key.len() == 1 {
+        found = Val(program.modules[by_key[0].module_index].declarations.type_defs[by_key[0].definition_index])
+    } else if by_name.len() == 1 {
+        found = Val(program.modules[by_name[0].module_index].declarations.type_defs[by_name[0].definition_index])
     }
     definition :: found ?? panic("checked distinct owner has no registered TTypeDef")
     if definition.kind == {
@@ -3758,7 +4084,8 @@ fn jet_codegen_find_distinct_definition(builder: JetCodegenBuilder, program: Jet
 
 fn jet_codegen_distinct_success_type(ty: Type) -> Type Never! {
     if ty == {
-        .Result(ok, _) -> ok
+        // copy: `ok` is a payload of read parameter `ty`, which keeps the original; the returned value owns this one
+        .Result(ok, _) -> ok.copy()
         else -> ty
     }
 }
@@ -3767,31 +4094,31 @@ fn jet_codegen_is_default_err_type(builder: JetCodegenBuilder, program: JetCodeg
     identity := jet_codegen_lower_type_for_function(ty, builder, program).identity
     if identity == None -> return false
     target_id :: identity ?? return false
-    loop semantic_module in program.modules {
-        loop definition in semantic_module.declarations.type_defs {
-            if mir_type_id(definition.key) == target_id && definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) -> return true
-        }
-    }
-    false
+    program.nominals.default_err_ids.get(target_id.value) != None
 }
 
 // The unit's one original Prelude `Err`; its own registered module owns it,
 // so it is not looked up in the converting function's module.
 fn jet_codegen_default_err_type(program: JetCodegenProgram) -> Type {
-    identity :: jet_codegen_default_err_identity(program.modules) ?? panic("checked default-error conversion has no canonical compiler-owned Err")
+    identity :: jet_codegen_default_err_identity(program.nominals) ?? panic("checked default-error conversion has no canonical compiler-owned Err")
     Type.Named{name: identity.key}
 }
 
 fn jet_codegen_try_output_error_type(builder: JetCodegenBuilder, program: JetCodegenProgram, source_error: Type, conversion: TTryConvert, carrier: TFailureCarrier) -> Type {
     if conversion == {
         .DefaultErr -> return jet_codegen_default_err_type(program)
-        .Typed(_, _, target) -> return target
+        // copy: `target` is a payload of read parameter `conversion`, which keeps the original; the returned value owns this one
+        .Typed(_, _, target) -> return target.copy()
         .WidenUnion(_, _) -> {
             if carrier == {
-                .Result(_, error) -> return error
+                // copy: `error` is a payload of read parameter `carrier`, which keeps the original; the returned value owns this one
+                .Result(_, error) -> return error.copy()
                 else -> panic("checked union error widening has no Result failure carrier")
             }
         }
+        // copy: the output error type is a new owned Type. Without a conversion it equals
+        // `source_error`, the caller's checked error type (a read parameter), which stays on the
+        // TIR node.
         .NoConversion -> return source_error.copy()
         else -> panic("diverging conversion has no output error type")
     }
@@ -3935,7 +4262,8 @@ fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program
         }
         .WidenUnion(_, _) -> {
             target := if carrier == {
-                .Result(_, error_type) -> error_type
+                // copy: `error_type` is a payload of read parameter `carrier`, which keeps the original; the assigned `target` owns this one
+                .Result(_, error_type) -> error_type.copy()
                 else -> panic("checked error union widening has no Result failure carrier")
             }
             variant := ""
@@ -3976,9 +4304,9 @@ fn jet_codegen_widen_result_payload(builder: &JetCodegenBuilder, program: JetCod
     }
     source := jet_codegen_builtin_untag(value.ty)
     if source == .Union(_) -> return lowered.copy()
-    source_key := type_identity_key(jet_codegen_qualify_type(source, program.modules, builder.function.module_identity, builder.generic_type_names))
+    source_key := type_identity_key(jet_codegen_qualify_type(source, program.nominals, builder.function.module_identity, builder.generic_type_names))
     loop member in members {
-        if type_identity_key(jet_codegen_qualify_type(member, program.modules, builder.function.module_identity, builder.generic_type_names)) != source_key -> next
+        if type_identity_key(jet_codegen_qualify_type(member, program.nominals, builder.function.module_identity, builder.generic_type_names)) != source_key -> next
         identity :: jet_codegen_lower_type_for_function(target, builder, program).identity ?? panic("checked union result payload has no MIR identity")
         return jet_codegen_emit_value(&builder, program, expression.span, target, MIROperation.Enum{type_id: identity, variant: jet_codegen_union_member_tag(member), args: [MIREnumArg]{MIREnumArg{field: None, value: lowered, boxed: false}}})
     }
@@ -4097,7 +4425,8 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
     jet_codegen_switch_block(&builder, program, failure_block)
     carrier := builder.function.failure_carrier
     source_error := if input_type == {
-        .Result(_, error) -> error
+        // copy: `error` is a payload of read parameter `input_type`, which keeps the original; the assigned `source_error` owns this one
+        .Result(_, error) -> error.copy()
         else -> Type.Named{name: "Unit"}
     }
     if convert == {
@@ -4350,7 +4679,7 @@ fn jet_codegen_lower_pool_slot_value(builder: &JetCodegenBuilder, program: JetCo
             slot
         }
         Val(name) -> {
-            resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, element_type, name, builder.function.key)
+            resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, element_type, name, builder.function.key)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Field{base: slot, field: jet_codegen_mir_field_id(resolved)})
         }
     }
@@ -4492,7 +4821,8 @@ fn jet_codegen_lower_slice(builder: &JetCodegenBuilder, program: JetCodegenProgr
     if base.kind == .Clone(inner, _) -> receiver = inner
     if jet_codegen_builtin_untag(receiver.ty) == .Apply(name, view_args) {
         if (name == "View" || name == "ViewMut") && view_args.len() == 1 {
-            args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}
+            // copy: `range_expr` is a payload of read parameter `range`, which keeps the original; the list literal owns this one
+            args := if range == .Val(range_expr) -> [TExpr]{range_expr.copy()} else -> [TExpr]{start, end}
             view_type := Type.Apply{name: "View", args: [Type]{view_args[0]}}
             view := TExpr{ty: view_type, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: checked_location.line}, args: args}, span: expression.span, integer_bounds: None, cost: None}
             return jet_codegen_lower_expr(&builder, program, view)
@@ -4533,7 +4863,8 @@ fn jet_codegen_list_read_view(expression: TExpr, value: TExpr, access: AccessCon
             }
             else -> return None
         }
-        args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start, end}
+        // copy: `start` and `end` are payloads of read parameter `value`, which keeps the originals; the list literal owns `start` and `end`
+        args := if range == .Val(range_expr) -> [TExpr]{range_expr} else -> [TExpr]{start.copy(), end.copy()}
         return Val(TExpr{ty: expression.ty, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.ViewNew{line: location.line}, args: args}, span: expression.span, integer_bounds: None, cost: None})
     }
     None
@@ -4699,7 +5030,7 @@ fn jet_codegen_lower_carrier_fact(builder: &JetCodegenBuilder, program: JetCodeg
         .Result(_, error) -> error
         else -> unwrapped_type
     }
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, report_type, field, builder.function.key)
     value := jet_codegen_lower_expr(&builder, program, receiver)
     carrier := jet_codegen_failure_carrier_for_type(receiver.ty)
     member := if notes -> "notes" else -> "partial"
@@ -4788,11 +5119,13 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
         }
         else -> {}
     }
+    // copy: the owner type is a new owned Type. Otherwise it equals `ty`, the caller's checked type
+    // (a read parameter), which stays on the TIR node.
     ty.copy()
 }
 
 fn jet_codegen_host_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, field_name: String) -> MIRFieldID Never! {
-    resolved := jet_codegen_resolve_field_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, owner_type, field_name, builder.function.key)
+    resolved := jet_codegen_resolve_field_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, owner_type, field_name, builder.function.key)
     jet_codegen_mir_field_id(resolved)
 }
 
@@ -4811,7 +5144,7 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, program: JetC
         .Named(name) | .Apply(name, _) -> name
         else -> panic("checked host projection owner is not nominal")
     }
-    identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) != None {
         return jet_codegen_compiler_owned_record_field_type(owner, owner_name, field_name) ?? panic("checked host projection field `{owner_name}.{field_name}` has no registered field")
     }
@@ -4836,20 +5169,17 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, program: JetC
             }
         }
     }
-    loop semantic_module in program.modules {
-        if semantic_module.module_identity != nominal_identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != nominal_identity.name -> next
-            loop field in nominal.fields {
-                if field.symbol.name == field_name {
-                    generic_names := [String]{}
-                    loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
-                    if generic_names.len() != generic_args.len() -> panic("checked host projection has incomplete generic owner arguments")
-                    return sema_inference_substitute_type(field.ty, generic_names, generic_args)
-                }
+    loop nominal_row in jet_codegen_scope_nominal_rows(program.nominals, nominal_identity.module_identity, nominal_identity.name) {
+        nominal :: program.modules[nominal_row.module_index].nominals[nominal_row.nominal_index]
+        loop field in nominal.fields {
+            if field.symbol.name == field_name {
+                generic_names := [String]{}
+                loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
+                if generic_names.len() != generic_args.len() -> panic("checked host projection has incomplete generic owner arguments")
+                return sema_inference_substitute_type(field.ty, generic_names, generic_args)
             }
-            panic("checked host projection field has no registered nominal field")
         }
+        panic("checked host projection field has no registered nominal field")
     }
     panic("checked host projection nominal disappeared from Codegen input")
 }
@@ -4868,7 +5198,7 @@ fn jet_codegen_direct_render_function(builder: JetCodegenBuilder, program: JetCo
             return None
         }
     }
-    value_identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, value_name, builder.generic_type_names)
+    value_identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, value_name, builder.generic_type_names)
     nominal_identity :: value_identity ?? return None
     selected := TFunc?{None}
     row := program.function_index.first_by_name.get(member) ?? -1
@@ -4879,7 +5209,7 @@ fn jet_codegen_direct_render_function(builder: JetCodegenBuilder, program: JetCo
             .TraitMethod(_, convention, owner, trait_symbol, _) -> {
                 if convention == None || jet_codegen_symbol_name(builder, program, trait_symbol) != trait_name -> next
                 owner_name :: jet_codegen_type_head_name(owner) ?? next
-                owner_identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+                owner_identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
                 if owner_identity == None || (owner_identity ?? nominal_identity).key != nominal_identity.key -> next
                 if selected != None -> panic("checked {trait_name} method for a type is ambiguous")
                 selected = Val(function)
@@ -5105,7 +5435,7 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, program: JetCodegenPro
         .Named(value) | .Apply(value, _) -> value
         else -> panic("checked close receiver has no nominal owner")
     }
-    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) ?? panic("checked close receiver has no registered owner")
+    owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) ?? panic("checked close receiver has no registered owner")
     selected := TFunc?{None}
     row := program.function_index.first_by_name.get("close") ?? -1
     loop row >= 0 {
@@ -5113,7 +5443,7 @@ fn jet_codegen_close_function(builder: JetCodegenBuilder, program: JetCodegenPro
         row = program.function_index.next_by_name[row]
         function_owner :: jet_codegen_method_owner_type(function.kind) ?? next
         function_owner_name :: jet_codegen_type_head_name(jet_codegen_unwrap_pattern_tags(function_owner)) ?? next
-        identity :: jet_codegen_find_nominal_identity(program.modules, function.module_identity, function_owner_name, [String]{}) ?? next
+        identity :: jet_codegen_find_nominal_identity(program.nominals, function.module_identity, function_owner_name, [String]{}) ?? next
         if identity.key != owner.key -> next
         if selected != None -> panic("checked close method is ambiguous")
         selected = Val(function)
@@ -5129,7 +5459,7 @@ fn jet_codegen_nominal_close_function(builder: JetCodegenBuilder, program: JetCo
         .Named(value) | .Apply(value, _) -> name = value
         else -> return None
     }
-    owner :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) ?? return None
+    owner :: jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) ?? return None
     row := program.function_index.first_by_name.get("close") ?? -1
     loop row >= 0 {
         function :: program.function_index.rows[row]
@@ -5140,7 +5470,7 @@ fn jet_codegen_nominal_close_function(builder: JetCodegenBuilder, program: JetCo
         }
         function_owner :: close_owner ?? next
         function_owner_name :: jet_codegen_type_head_name(jet_codegen_unwrap_pattern_tags(function_owner)) ?? next
-        identity :: jet_codegen_find_nominal_identity(program.modules, function.module_identity, function_owner_name, [String]{}) ?? next
+        identity :: jet_codegen_find_nominal_identity(program.nominals, function.module_identity, function_owner_name, [String]{}) ?? next
         if identity.key != owner.key -> next
         return Val(function)
     }
@@ -5286,7 +5616,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
                 name: key,
                 span: program.function_index.rows[row].source_span,
                 visibility: MIRVisibility.Private,
-                ty: jet_codegen_lower_type_with_modules(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names),
+                ty: jet_codegen_lower_type_with_nominals(expression.ty, program.nominals, builder.function.module_identity, builder.generic_type_names),
                 is_storage: false,
                 value: MIRConstant.SharedSite{site: MIRSharedSite{initializer: init_id, lifetime: lifetime}},
             }
@@ -5303,7 +5633,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .InlineBlock(body) -> jet_codegen_lower_inline_block(&builder, program, expression, body)
         .Unit -> jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
         .CtLit(value) -> {
-            constant :: jet_codegen_lower_comptime_value(value, program.modules, builder.function.module_identity, builder.generic_type_names) ?? panic("checked comptime closure cannot lower as a MIR constant")
+            constant :: jet_codegen_lower_comptime_value(value, program.nominals, builder.function.module_identity, builder.generic_type_names) ?? panic("checked comptime closure cannot lower as a MIR constant")
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
         .DistinctCtor(_, argument, _) -> {
@@ -5391,7 +5721,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: lowered_types, fallibility: call_failure, data_plan: data_plan})
         }
         .Call(callee, type_args, args) -> {
-            checked_foreign := jet_codegen_find_checked_foreign_row(program.modules, callee.key)
+            checked_foreign := jet_codegen_find_checked_foreign_row(program, callee.key)
             if checked_foreign != None {
                 foreign_row :: checked_foreign ?? panic("checked foreign call row disappeared")
                 if type_args.len() != 0 -> panic("checked foreign call carries type arguments")
@@ -5414,7 +5744,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             jet_codegen_reconcile_plain_call_return(&builder, program, expression, callee.key, value, call_return_type)
         }
         .ExternCall(symbol, _, args) -> {
-            foreign_row :: jet_codegen_find_checked_foreign_row(program.modules, symbol) ?? panic("checked extern call has no foreign row")
+            foreign_row :: jet_codegen_find_checked_foreign_row(program, symbol) ?? panic("checked extern call has no foreign row")
             foreign_id := MIRForeignID{value: stable_id("mir-foreign", foreign_row.key)}
             lowered_args := jet_codegen_lower_extern_args(&builder, program, args)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Foreign{id: foreign_id}, args: lowered_args, type_args: [MIRType]{}})
@@ -5442,8 +5772,8 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             }
             folded :: jet_codegen_fold_fact_enum_equality(&builder, program, expression, op, lhs, rhs)
             if folded == .Val(value) -> return value
-            left := jet_codegen_lower_expr(&builder, program, lhs)
-            right := jet_codegen_lower_expr(&builder, program, rhs)
+            left := jet_codegen_lower_compare_operand(&builder, program, op, lhs, rhs, true)
+            right := jet_codegen_lower_compare_operand(&builder, program, op, rhs, lhs, false)
             dispatch := jet_codegen_binary_dispatch(&builder, program, op, overflow, lhs.ty, expression.span, line)
             mir_overflow := MIRBinaryOverflow.Unchecked
             if overflow && jet_codegen_fixed_width(lhs.ty) != None -> mir_overflow = MIRBinaryOverflow.Trap
@@ -5540,6 +5870,10 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             if value.kind == {
                 .Local(local) -> {
                     place := jet_codegen_lower_local_place(&builder, program, local)
+                    // A checked `^p` of a match payload aliasing an owned
+                    // subject takes the payload out of the subject (sema
+                    // marked that part of the subject moved).
+                    if local.payload_take && builder.owned_payload_places.get(place.value) != None -> _ := &builder.payload_take_places.add(place.value, true)
                     // A read alias of an element is copied (jet_codegen_emit),
                     // so its place keeps its read access.
                     if !jet_codegen_unmovable_place(builder, program, place) -> jet_codegen_retain_place_access(&builder, program, place, MIRAccess.Move)
@@ -5615,7 +5949,7 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .HandleMethod(receiver, operation, args) -> jet_codegen_lower_handle_method(&builder, program, expression, receiver, operation, args)
         .ClosureMethod(receiver, operation, args) -> jet_codegen_lower_closure_method(&builder, program, expression, receiver, operation, args)
         .HostCall(call) -> jet_codegen_lower_host_call(&builder, program, expression, call)
-        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, expression, condition, then_body, then_value, else_body, else_value)
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> jet_codegen_lower_if_expression(&builder, program, expression, condition, then_body, then_value, else_body, else_value, None)
         .StaticCall(owner, owner_type, method, type_args, args) -> jet_codegen_lower_static_call(&builder, program, expression, owner, owner_type, method, type_args, args)
         .ModuleCall(target, form, target_return, type_args, args) -> jet_codegen_lower_module_call(&builder, program, expression, target, form, target_return, type_args, args)
         .DefaultLit | .ListLit(_) | .ColumnarListLit(_, _) | .TupleLit(_, _) | .IndexRead(_, _, _, _, _) | .SliceOwned(_, _, _, _, _) | .MapLit(_) | .LayoutLit(_) -> jet_codegen_lower_collection_expression(&builder, program, expression)
@@ -5644,7 +5978,9 @@ fn jet_codegen_lower_short_circuit(builder: &JetCodegenBuilder, program: JetCode
         else -> panic("short-circuit lowering received a non-short-circuit operator")
     }
     jet_codegen_switch_block(&builder, program, rhs_block)
+    builder.short_circuit_depth += 1
     right := jet_codegen_lower_expr(&builder, program, rhs)
+    builder.short_circuit_depth -= 1
     incoming := [MIRPhiIncoming]{}
     if jet_codegen_current_is_open(builder, program) {
         &incoming.push(MIRPhiIncoming{block: builder.current, value: right})
@@ -5667,6 +6003,8 @@ struct JetCodegenPatternTest {
 fn jet_codegen_unwrap_pattern_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_unwrap_pattern_tags(inner)
+        // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on the TIR node.
         else -> return ty.copy()
     }
 }
@@ -5765,7 +6103,7 @@ fn jet_codegen_lower_guarded_nested_pattern(builder: &JetCodegenBuilder, program
     jet_codegen_switch_block(&builder, program, matched_block)
     nested_window := if window == .Val(subject_window) -> Val(jet_codegen_payload_window_place(&builder, program, subject_window.base, subject_window.kind, payload_ty, span)) else -> MIRPlaceID?{None}
     payload := jet_codegen_emit_value(&builder, program, span, payload_ty, payload_operation)
-    if nested_window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: payload, place: place})
+    if nested_window == .Val(place) -> jet_codegen_push_pattern_window(&builder, payload, place)
     nested_test := jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(payload_ty, span), payload, nested.shape, bind, reuse)
     matched_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
@@ -5786,37 +6124,35 @@ fn jet_codegen_lower_guarded_nested_pattern(builder: &JetCodegenBuilder, program
 // alias `window` (the payload place), never a copy.
 fn jet_codegen_bind_nested_pattern(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, payload_ty: Type, nested: TNestedPattern, span: Span, payload_operation: MIROperation, reuse: Bool, window: MIRPlaceID?) {
     payload := jet_codegen_emit_value(&builder, program, span, payload_ty, payload_operation)
-    if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: payload, place: place})
+    if window == .Val(place) -> jet_codegen_push_pattern_window(&builder, payload, place)
     _ := jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(payload_ty, span), payload, nested.shape, true, reuse)
 }
 
 fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, program: JetCodegenProgram, subject_ty: Type, owner: SymbolID, variant: String, index: Int) -> Type Never! {
     subject_type := jet_codegen_unwrap_pattern_tags(subject_ty)
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != owner.key -> next
-            variant_row := SemaRegistrationVariant?{None}
-            loop candidate in nominal.variants {
-                if candidate.symbol.name == variant -> variant_row = Val(candidate)
-            }
-            row :: variant_row ?? panic("checked pattern variant has no registered payload")
-            raw_type := if row.payload == {
-                .Unit -> panic("checked unit variant has a payload pattern")
-                .Single(ty, _) -> if index == 0 -> ty else -> panic("checked variant payload index is out of range")
-                .Named(fields) -> if index >= 0 && index < fields.len() -> fields[index].ty else -> panic("checked variant payload index is out of range")
-            }
-            generic_names := [String]{}
-            loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
-            generic_args := if subject_type == {
-                .Named(_) -> [Type]{}
-                .Apply(_, args) -> args
-                else -> panic("checked variant pattern subject is not its nominal owner")
-            }
-            if generic_names.len() != generic_args.len() -> panic("checked variant pattern has incomplete owner type arguments")
-            return sema_inference_substitute_type(raw_type, generic_names, generic_args)
-        }
+    // The first module nominal (in module order) declaring `owner`.
+    owner_rows :: program.nominals.rows.get(owner.key) ?? [JetCodegenNominalRow]{}
+    if owner_rows.len() == 0 -> panic("checked pattern owner has no registered nominal declaration")
+    nominal :: program.modules[owner_rows[0].module_index].nominals[owner_rows[0].nominal_index]
+    variant_row := SemaRegistrationVariant?{None}
+    loop candidate in nominal.variants {
+        if candidate.symbol.name == variant -> variant_row = Val(candidate)
     }
-    panic("checked pattern owner has no registered nominal declaration")
+    row :: variant_row ?? panic("checked pattern variant has no registered payload")
+    raw_type := if row.payload == {
+        .Unit -> panic("checked unit variant has a payload pattern")
+        .Single(ty, _) -> if index == 0 -> ty else -> panic("checked variant payload index is out of range")
+        .Named(fields) -> if index >= 0 && index < fields.len() -> fields[index].ty else -> panic("checked variant payload index is out of range")
+    }
+    generic_names := [String]{}
+    loop parameter in nominal.generic_params -> &generic_names.push(parameter.name)
+    generic_args := if subject_type == {
+        .Named(_) -> [Type]{}
+        .Apply(_, args) -> args
+        else -> panic("checked variant pattern subject is not its nominal owner")
+    }
+    if generic_names.len() != generic_args.len() -> panic("checked variant pattern has incomplete owner type arguments")
+    sema_inference_substitute_type(raw_type, generic_names, generic_args)
 }
 
 // The MIR enum a checked variant pattern tests and projects. A union subject
@@ -5844,7 +6180,7 @@ fn jet_codegen_pattern_variant_owner(builder: JetCodegenBuilder, program: JetCod
         return JetCodegenVariantOwner{owner: mir_type_id(name), variant: variant, union_member: None}
     }
     owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
-    JetCodegenVariantOwner{owner: jet_codegen_mir_type_id_for_symbol(program.modules, owner), variant: variant, union_member: None}
+    JetCodegenVariantOwner{owner: jet_codegen_mir_type_id_for_symbol(program, owner), variant: variant, union_member: None}
 }
 
 // A variant pattern on a compiler-owned enum (`IOError`, `ProcessStreamMode`,
@@ -5855,7 +6191,7 @@ fn jet_codegen_compiler_owned_pattern_enum(builder: JetCodegenBuilder, program: 
         .Named(value) | .Apply(value, _) -> value
         else -> { return None }
     }
-    if jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) != None -> return None
+    if jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, name, builder.generic_type_names) != None -> return None
     if jet_codegen_compiler_owned_enum_variants(name) == None -> return None
     Val(name)
 }
@@ -5921,8 +6257,10 @@ fn jet_codegen_write_pattern_binding(builder: &JetCodegenBuilder, program: JetCo
 // generated local a hoisted switch aliases to one, is a write window: the
 // variant tests read the place, and every payload binding aliases it through
 // `MIRProjection.Payload`, so edits reach the owner's storage, never a copy.
-// D-MEM-COPYSEM1: a subject naming a read parameter's place is a read window
-// the same way, so testing it never copies the whole subject.
+// D-MEM-COPYSEM1: a subject naming a read parameter's place, or a place whose
+// root the bindings' scopes leave alone (jet_codegen_stable_element_lets), is
+// a read window the same way, so neither testing it nor binding its payloads
+// copies the subject.
 fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr) -> MIRValueID {
     window := MIRPlaceID?{None}
     if subject.kind == {
@@ -5935,28 +6273,95 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
         else -> {}
     }
     if window == None {
-        read :: jet_codegen_lower_read_window(&builder, program, subject)
+        stable :: builder.stable_element_lets.get(jet_codegen_pattern_subject_key(subject)) == (Val(true))
+        read :: jet_codegen_lower_read_window(&builder, program, subject, stable)
         if read == .Val(value) -> return value
     }
     place :: window ?? return jet_codegen_lower_expr(&builder, program, subject)
     value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: place})
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    jet_codegen_push_pattern_window(&builder, value, place)
     value
 }
 
 // D-MEM-COPYSEM1: read `subject` as a read window when it names a read
-// parameter's place; None leaves the subject to the ordinary value path.
+// parameter's place (a stored-field path, or a chain of stored fields and
+// plain List reads below it), or (`stable`: its bindings leave the root
+// alone) a place over a stable root (jet_codegen_stable_window_place); None
+// leaves the subject to the ordinary value path.
 // A Core subject with a native Rust carrier keeps the value path: the
 // carrier can hold a payload in a host representation (Dyn.Int is i64)
 // that only the checked payload readers widen, so an aliased payload place
 // would read the wrong type.
-fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr) -> MIRValueID? {
+// An element window's place carries its index operands, values defined
+// where the subject is lowered; every read of a binding aliasing the window
+// uses them, so that block must dominate the arm. On the right of `&&` or
+// `||` (builder.short_circuit_depth: the expression operators and the
+// if-condition `&&` alike) it does not: the arm is reached through the
+// short-circuit join, which the left side's short edge also enters. Such
+// a subject keeps the value path (its bindings hold copies). A stored-field
+// window carries no operand and stays valid anywhere.
+fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, stable: Bool) -> MIRValueID? {
     if subject.ty == .Named(name) && jet_rust_emit_core_rust_type_name(name) != None -> return None
-    place :: jet_codegen_read_window_place(&builder, program, subject) ?? return None
-    value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: place})
-    _ := &builder.read_windows.add(place.value, true)
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    place := jet_codegen_read_window_place(&builder, program, subject)
+    if place == None && builder.short_circuit_depth == 0 {
+        place = jet_codegen_read_parameter_element_place(&builder, program, subject)
+        if place == None && stable -> place = jet_codegen_stable_window_place(&builder, program, subject)
+    }
+    window :: place ?? return None
+    value := jet_codegen_emit_value(&builder, program, subject.span, subject.ty, MIROperation.ReadPlace{place: window})
+    _ := &builder.read_windows.add(window.value, true)
+    jet_codegen_push_pattern_window(&builder, value, window)
     Val(value)
+}
+
+// D-MEM-COPYSEM1: the place a pattern subject names when it is a chain of
+// stored fields and plain List reads (jet_codegen_is_element_place_chain)
+// below a read parameter (`rows[i].kind`, `graph.modules[m].items[j]`). The
+// parameter cannot change while the function runs, so each read of a
+// binding aliasing the element's payload holds what a copy made at the
+// binding would (as jet_codegen_read_binding_place aliases such an element
+// for a `::` binding). The index operands are evaluated once, here, as
+// reading the subject would; the bounds check runs where the place is read.
+fn jet_codegen_read_parameter_element_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRPlaceID? {
+    if expression.kind == {
+        .Clone(inner, _) -> return jet_codegen_read_parameter_element_place(&builder, program, inner)
+        .Borrow(inner, access) -> {
+            if access == AccessConvention.Read -> return jet_codegen_read_parameter_element_place(&builder, program, inner)
+        }
+        else -> {}
+    }
+    if !jet_codegen_is_element_place_chain(builder, program, expression) || jet_codegen_element_chain_constant(builder, program, expression) -> return None
+    // Settle the root before lowering anything: lowering the place evaluates
+    // its index operands, so a refusal after it would evaluate them twice.
+    root :: jet_codegen_element_place_root(expression) ?? return None
+    local_place := jet_codegen_lower_local_place(&builder, program, root)
+    root_place := jet_codegen_place_access(&builder, program, local_place, MIRAccess.Read)
+    if !jet_codegen_read_parameter_place(builder, program, root_place) -> return None
+    jet_codegen_lower_expression_place(&builder, program, expression, MIRAccess.Read)
+}
+
+// D-MEM-COPYSEM1: the place a pattern subject names when it is a chain of
+// stored fields and plain List reads (jet_codegen_is_element_place_chain)
+// over a stable root (jet_codegen_stable_root). The caller proved the
+// bindings' scopes never change, move, or capture that root
+// (jet_codegen_stable_element_lets), so each read of a binding aliasing the
+// subject's payload holds what a copy made at the binding would. The index
+// operands are evaluated once, here, as reading the subject would.
+fn jet_codegen_stable_window_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRPlaceID? {
+    if expression.kind == {
+        .Clone(inner, _) -> return jet_codegen_stable_window_place(&builder, program, inner)
+        .Borrow(inner, access) -> {
+            if access == AccessConvention.Read -> return jet_codegen_stable_window_place(&builder, program, inner)
+        }
+        else -> {}
+    }
+    if !jet_codegen_is_element_place_chain(builder, program, expression) || jet_codegen_element_chain_constant(builder, program, expression) -> return None
+    // Settle the root before lowering anything: lowering the place evaluates
+    // its index operands, so a refusal after it would evaluate them twice.
+    root :: jet_codegen_element_place_root(expression) ?? return None
+    local_place :: jet_codegen_lower_local_place(&builder, program, root)
+    if !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+    jet_codegen_lower_expression_place(&builder, program, expression, MIRAccess.Read)
 }
 
 // The read-window place `value` was lowered from, if any.
@@ -5990,74 +6395,71 @@ fn jet_codegen_read_window_place(builder: &JetCodegenBuilder, program: JetCodege
 // (`row :: graph.modules[i]`, `item :: row.items[j].field`) is aliased in
 // place: the parameter cannot change while the function runs, so each read of
 // the element holds exactly what a copy made at the binding would, and
-// binding it never copies the element. So is a place whose root the binding's
-// scope leaves alone (`stable_root`, jet_codegen_stable_alias_root). The index
-// operands are evaluated once, here, as reading the value would; the bounds
-// check runs where the element is read, as MIRRust renders the window place at
-// each use.
+// binding it never copies the element. So is a field or element place below a
+// root the binding's scope leaves alone (`stable_root`,
+// jet_codegen_stable_root): `g :: program.graph`, `row :: rows[i]`; such a
+// place becomes a read window, so a pattern over the binding aliases it too.
+// The index operands are evaluated once, here, as reading the value would;
+// the bounds check runs where the element is read, as MIRRust renders the
+// window place at each use.
 fn jet_codegen_read_binding_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, stable_root: Bool) -> MIRPlaceID? {
     window :: jet_codegen_read_window_place(&builder, program, expression)
     if window != None -> return window
     element := expression
     if expression.kind == .Clone(inner, _) -> element = inner
     if !jet_codegen_is_element_place_chain(builder, program, element) -> return None
+    // #5001: a chain rooted at a constant read in place never changes.
+    if jet_codegen_element_chain_constant(builder, program, element) -> return jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read)
     // Settle the root before lowering anything: lowering the place evaluates
     // its index operands, so a refusal after it would evaluate them twice.
     root :: jet_codegen_element_place_root(element) ?? return None
     local_place := jet_codegen_lower_local_place(&builder, program, root)
     root_place := jet_codegen_place_access(&builder, program, local_place, MIRAccess.Read)
-    if !jet_codegen_read_parameter_place(builder, program, root_place) {
-        if !stable_root || !jet_codegen_stable_alias_root(builder, program, root, local_place, element) -> return None
+    if jet_codegen_read_parameter_place(builder, program, root_place) {
+        // Every link below the root is a stored field or a List index, so
+        // the lowered place stays rooted at the root's own storage.
+        return jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read)
     }
-    // Every link below the root is a stored field or a List index, so the
-    // lowered place stays rooted at the root's own storage.
-    jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read)
+    // A whole root is no place below it: binding it stays a copy, which the
+    // MIR pass moves at the root's last use.
+    if !stable_root || element.kind == .Local(_) || !jet_codegen_stable_root(builder, program, root, local_place) -> return None
+    place :: jet_codegen_lower_expression_place(&builder, program, element, MIRAccess.Read) ?? return None
+    _ := &builder.read_windows.add(place.value, true)
+    Val(place)
 }
 
-// D-MEM-COPYSEM1 (Rust `check_binding` read window, E0212): beyond a read
-// parameter, an immutable binding of a list element aliases it when the
-// binding's scope never changes, moves, or captures the element's root once
-// the binding is made (`stable_root`, jet_codegen_stable_element_lets): each
-// read of the alias then holds what a copy made at the binding would, and a
-// consuming use copies the element (jet_codegen_unmovable_place). The root is
-// a write parameter itself (`item :: p.items[j].field`), or the own storage of
-// a local or an owned parameter whose element the binding names
-// (`row :: rows[i]`; Rust materializes a field read of a local), never a
-// window or an alias reaching its owner under another name.
-fn jet_codegen_stable_alias_root(builder: JetCodegenBuilder, program: JetCodegenProgram, root: TLocal, local_place: MIRPlaceID, element: TExpr) -> Bool Never! {
-    if root.persist_key != None || builder.window_aliases.contains(root.name) -> return false
+// D-MEM-COPYSEM1 (Rust `check_binding` read window, E0212): a root whose
+// places an immutable binding may alias when the binding's scope never
+// changes, moves, or captures it once the binding is made
+// (jet_codegen_stable_element_lets): each read of the alias then holds what a
+// copy made at the binding would, and a consuming use copies the aliased
+// place (jet_codegen_unmovable_place). The root is the own storage of a
+// local, or an owned or write parameter, or a read alias of a read window
+// (a payload of a stable pattern subject, `g :: program.graph`), never a
+// write window, a capture, a persistent cell, a split owner (its fields
+// have drops of their own), or another alias reaching its owner under
+// another name.
+fn jet_codegen_stable_root(builder: JetCodegenBuilder, program: JetCodegenProgram, root: TLocal, local_place: MIRPlaceID) -> Bool Never! {
+    if root.persist_key != None || builder.window_aliases.contains(root.name) || builder.partial_move_roots.get(root.name) != None -> return false
     binding :: jet_codegen_find_binding_for_local(builder, program, root) ?? return false
-    if binding.place != local_place || builder.read_alias_places.get(local_place.value) != None -> return false
+    if binding.place != local_place -> return false
+    if builder.read_alias_places.get(local_place.value) != None -> return builder.read_windows.get(local_place.value) != None
     row :: jet_codegen_find_place(builder, program, local_place) ?? return false
     if row.projections.len() > 0 -> return false
-    element_read :: if element.kind == {
-        .Index(_, _, _, _, _, _) -> true
-        else -> false
-    }
     if row.base == {
         .Parameter(value) -> {
             access :: jet_codegen_parameter_value_access(builder, program, value) ?? return false
-            if access == MIRAccess.Write -> return jet_codegen_chain_reads_element(element)
-            return access == MIRAccess.Move && element_read
+            return access == MIRAccess.Write || access == MIRAccess.Move
         }
-        .Local(id) -> return binding.local == id && element_read
+        .Local(id) -> return binding.local == id
         else -> return false
-    }
-}
-
-// Whether a jet_codegen_is_element_place_chain chain indexes a list.
-fn jet_codegen_chain_reads_element(expression: TExpr) -> Bool Never! {
-    if expression.kind == {
-        .Index(_, _, _, _, _, _) -> true
-        .Field(receiver, _) -> jet_codegen_chain_reads_element(receiver)
-        else -> false
     }
 }
 
 // A chain of stored struct fields and plain List reads (each indexed base a
 // List place, under at most a compiler-inserted clone of a plain place) down
-// to a non-persistent local, with no `Pin` on the way. Lowering it as a place
-// evaluates only its index operands.
+// to a non-persistent local or a constant read in place (#5001), with no
+// `Pin` on the way. Lowering it as a place evaluates only its index operands.
 fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
     if expression.ty == {
         .Apply(name, args) -> {
@@ -6067,6 +6469,7 @@ fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCo
     }
     if expression.kind == {
         .Local(local) -> local.persist_key == None
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
         .Field(receiver, reference) -> jet_codegen_is_element_place_chain(builder, program, receiver) && jet_codegen_is_stored_struct_field(builder, program, receiver.ty, reference)
         .Index(base, _, kind, access, checked_call, _) -> {
             if access != AccessConvention.Read || checked_call != None -> return false
@@ -6088,7 +6491,8 @@ fn jet_codegen_is_element_place_chain(builder: JetCodegenBuilder, program: JetCo
 // The local a jet_codegen_is_element_place_chain chain is rooted at.
 fn jet_codegen_element_place_root(expression: TExpr) -> TLocal? {
     if expression.kind == {
-        .Local(local) -> Val(local)
+        // copy: `local` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Local(local) -> Val(local.copy())
         .Field(receiver, _) -> jet_codegen_element_place_root(receiver)
         .Index(base, _, _, _, _, _) -> {
             if base.kind == .Clone(inner, _) -> return jet_codegen_element_place_root(inner)
@@ -6098,15 +6502,35 @@ fn jet_codegen_element_place_root(expression: TExpr) -> TLocal? {
     }
 }
 
+// #5001: whether a jet_codegen_is_element_place_chain chain is rooted at a
+// constant read in place.
+fn jet_codegen_element_chain_constant(builder: JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> Bool Never! {
+    if expression.kind == {
+        .ConstRef(_) -> jet_codegen_is_constant_place(builder, program, expression)
+        .Field(receiver, _) -> jet_codegen_element_chain_constant(builder, program, receiver)
+        .Index(base, _, _, _, _, _) -> {
+            if base.kind == .Clone(inner, _) -> return jet_codegen_element_chain_constant(builder, program, inner)
+            jet_codegen_element_chain_constant(builder, program, base)
+        }
+        else -> false
+    }
+}
+
 // D-MEM-COPYSEM1: true when `place` is rooted at a read parameter through
 // field, payload, and list-index projections only. A read parameter cannot
 // change while the function runs, so reading such a place in place is
-// indistinguishable from reading a copy of it.
+// indistinguishable from reading a copy of it. Neither can a constant read
+// in place (#5001, a `Static` place of JetCodegenConstantIndex.in_place_keys).
 fn jet_codegen_read_parameter_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
     row :: jet_codegen_find_place(builder, program, place) ?? return false
     rooted := MIRValueID?{None}
-    if row.base == .Parameter(value) -> rooted = Val(value)
-    parameter :: rooted ?? return false
+    constant := false
+    if row.base == {
+        .Parameter(value) -> rooted = Val(value)
+        .Static(name) -> constant = program.owners.constants.in_place_keys.get(name) != None
+        else -> {}
+    }
+    if rooted == None && !constant -> return false
     loop projection in row.projections {
         if projection == {
             .Field(_, _) -> {}
@@ -6117,6 +6541,8 @@ fn jet_codegen_read_parameter_place(builder: JetCodegenBuilder, program: JetCode
             else -> return false
         }
     }
+    if constant -> return true
+    parameter :: rooted ?? return false
     jet_codegen_parameter_value_access(builder, program, parameter) == (Val(MIRAccess.Read))
 }
 
@@ -6139,14 +6565,87 @@ fn jet_codegen_parameter_value_access(builder: JetCodegenBuilder, program: JetCo
 // D-MEM-COPYSEM1: a place a consuming use copies instead of moving: a read
 // parameter's place, or an element of a container (Rust
 // `lower_receiver_place` never moves an index place; a read alias of an
-// element names one).
+// element names one), or any place of a constant read in place (#5001), or a
+// place below a read alias's place (`JetCodegenBuilder.read_alias_places`
+// with at least one projection, or an access or field place derived from
+// one): its root still owns it. A root's own place is never such a place, so
+// an explicit `^r` or `^r.f` of the root still moves, and neither is a match
+// payload over an owned subject that a checked `^p` takes
+// (JetCodegenBuilder.payload_take_places). No place of a borrowed local
+// (jet_codegen_bind_borrowed_local) ever moves, even under a payload take: its
+// subject owns what it holds.
 fn jet_codegen_unmovable_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    if jet_codegen_borrowed_local_place(builder, program, place) -> return true
+    if builder.payload_take_places.get(place.value) != None -> return false
     if jet_codegen_read_parameter_place(builder, program, place) -> return true
     row :: jet_codegen_find_place(builder, program, place) ?? return false
+    if row.projections.len() > 0 && builder.read_alias_places.get(place.value) != None -> return true
+    if row.base == .Static(name) {
+        if program.owners.constants.in_place_keys.get(name) != None -> return true
+    }
     loop projection in row.projections {
         if projection == .Index(_, _, _, _, _, _, _) -> return true
     }
     false
+}
+
+// #5041: `place` is rooted at a borrowed local (jet_codegen_bind_borrowed_local,
+// the only Local-based MIR local whose storage is a ReadBorrow): neither it
+// nor anything below it can be moved or have a payload taken.
+fn jet_codegen_borrowed_local_place(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    row :: jet_codegen_find_place(builder, program, place) ?? return false
+    if row.base == .Local(local) {
+        at :: builder.local_positions.get(local.value) ?? return false
+        return builder.locals[at].ownership.mode == MIROwnershipMode.ReadBorrow
+    }
+    false
+}
+
+// Whether `place` lies under a root whose drop is split into per-field
+// leaves (jet_codegen_register_drop_live): a payload taken below one leaf
+// would leave that leaf neither live nor moved.
+fn jet_codegen_under_split_root(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    if builder.split_drop_roots.len() == 0 -> return false
+    row :: jet_codegen_find_place(builder, program, place) ?? return false
+    loop owner in builder.places {
+        if builder.split_drop_roots.get(owner.id.value) != None && owner.base == row.base -> return true
+    }
+    false
+}
+
+// #5041: the payload slot `root = p` takes instead of copying: `p` aliases a
+// payload of a read window over the owned local `root` it refills
+// (jet_codegen_bind_window_binding's owned_payload_places: no read parameter,
+// element, constant, aliased window or split drop on the way), and `root`
+// has no Close of its own. Taking the payload leaves a hole the write fills
+// at once: the write drops what is left of the old root (its carrier glue
+// skips the taken member) and stores the payload. The stability proof
+// admitted the window only if nothing reads `p` once `root` changes
+// (jet_codegen_stability_subject_refill), so no alias outlives the take.
+fn jet_codegen_subject_refill_slot(builder: JetCodegenBuilder, program: JetCodegenProgram, place: TPlace, value: TExpr) -> MIRPlaceID? Never! {
+    if builder.owned_payload_places.len() == 0 -> return None
+    taken :: jet_codegen_refill_binding(value) ?? return None
+    target :: jet_codegen_refill_target(place) ?? return None
+    binding :: jet_codegen_find_binding_for_local(builder, program, taken) ?? return None
+    if builder.owned_payload_places.get(binding.place.value) == None -> return None
+    root :: jet_codegen_find_binding_for_local(builder, program, target) ?? return None
+    slot :: jet_codegen_find_place(builder, program, binding.place) ?? return None
+    owner :: jet_codegen_find_place(builder, program, root.place) ?? return None
+    if owner.projections.len() != 0 || slot.base != owner.base -> return None
+    if owner.base == {
+        .Local(_) -> {}
+        else -> return None
+    }
+    if jet_codegen_nominal_close_function(builder, program, root.ty) != None -> return None
+    Val(binding.place)
+}
+
+// Take the payload in `slot` out of its subject (a checked `^p`'s MovePlace
+// through the payload projection, jet_codegen_unmovable_place admitting it).
+fn jet_codegen_take_refill_slot(builder: &JetCodegenBuilder, program: JetCodegenProgram, slot: MIRPlaceID, ty: Type, span: Span) -> MIRValueID Never! {
+    _ := &builder.payload_take_places.add(slot.value, true)
+    jet_codegen_retain_place_access(&builder, program, slot, MIRAccess.Move)
+    jet_codegen_emit_value(&builder, program, span, ty, MIROperation.MovePlace{place: slot})
 }
 
 // #4318 §4: the place a stable loop source names. Like
@@ -6189,7 +6688,8 @@ fn jet_codegen_stable_source_place(builder: &JetCodegenBuilder, program: JetCode
 // The local a `Local` or stored-field chain expression is rooted at.
 fn jet_codegen_field_chain_root_local(expression: TExpr) -> TLocal? Never! {
     if expression.kind == {
-        .Local(local) -> return Val(local)
+        // copy: `local` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Local(local) -> return Val(local.copy())
         .Field(receiver, _) -> return jet_codegen_field_chain_root_local(receiver)
         else -> return None
     }
@@ -6202,11 +6702,16 @@ fn jet_codegen_local_is_read_alias(builder: JetCodegenBuilder, program: JetCodeg
     builder.read_alias_places.get(binding.place.value) != None
 }
 
+// The window registered first for `value` (jet_codegen_push_pattern_window
+// keeps the first row per value in `pattern_window_rows`).
 fn jet_codegen_pattern_window(builder: JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID) -> MIRPlaceID? {
-    loop window in builder.pattern_windows {
-        if window.value == value -> return Val(window.place)
-    }
-    None
+    row :: builder.pattern_window_rows.get(value.value) ?? return None
+    Val(builder.pattern_windows[row].place)
+}
+
+fn jet_codegen_push_pattern_window(builder: &JetCodegenBuilder, value: MIRValueID, place: MIRPlaceID) Never! {
+    if builder.pattern_window_rows.get(value.value) == None -> builder.pattern_window_rows[value.value] = builder.pattern_windows.len()
+    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
 }
 
 // Unregisters the pattern window of `value` and returns its place, so the
@@ -6215,10 +6720,14 @@ fn jet_codegen_pattern_window(builder: JetCodegenBuilder, program: JetCodegenPro
 fn jet_codegen_hide_pattern_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID) -> MIRPlaceID? {
     place :: jet_codegen_pattern_window(builder, program, value) ?? return None
     kept := [JetCodegenPatternWindow]{}
+    rows := [U64:Int]{}
     loop window in builder.pattern_windows {
-        if window.value != value -> &kept.push(window)
+        if window.value == value -> next
+        if rows.get(window.value.value) == None -> rows[window.value.value] = kept.len()
+        &kept.push(window)
     }
-    builder.pattern_windows = kept
+    builder.pattern_windows = ^kept
+    builder.pattern_window_rows = ^rows
     Val(place)
 }
 
@@ -6239,6 +6748,9 @@ fn jet_codegen_project_window_place(builder: &JetCodegenBuilder, program: JetCod
     if read {
         _ := &builder.read_windows.add(id.value, true)
     }
+    // A window under a read alias's place (`h :: owner.child`, then a match
+    // on `h`) still names the aliased owner's storage.
+    if builder.read_alias_places.get(base.value) != None || builder.aliased_window_places.get(base.value) != None -> _ := &builder.aliased_window_places.add(id.value, true)
     id
 }
 
@@ -6251,6 +6763,9 @@ fn jet_codegen_payload_window_place(builder: &JetCodegenBuilder, program: JetCod
 fn jet_codegen_bind_window_binding(builder: &JetCodegenBuilder, program: JetCodegenProgram, fact: TPatternBindingFact, place: MIRPlaceID) Never! {
     if fact.name == "" || fact.name == "_" -> return
     mutable :: builder.read_windows.get(place.value) == None
+    // A read-window payload over an owned root is the subject's own
+    // storage: a checked `^name` takes it out (jet_codegen_lower_expr Move).
+    if !mutable && builder.aliased_window_places.get(place.value) == None && !jet_codegen_unmovable_place(builder, program, place) && !jet_codegen_under_split_root(builder, program, place) -> _ := &builder.owned_payload_places.add(place.value, true)
     local := tir_user_local(fact.name, fact.span)
     local.mutable = mutable
     local.symbol_id = fact.symbol_id
@@ -6422,18 +6937,16 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
 }
 
 fn jet_codegen_pattern_group_leaves(builder: JetCodegenBuilder, program: JetCodegenProgram, owner: SymbolID, group: String) -> [String]? {
-    loop semantic_module in program.modules {
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.id.key != owner.key -> next
-            leaves := [String]{}
-            prefix := "{group}."
-            loop variant in nominal.variants {
-                if variant.symbol.name.starts_with(prefix) -> &leaves.push(variant.symbol.name)
-            }
-            if leaves.len() > 0 -> return Val(leaves)
-            return None
-        }
+    // The first module nominal (in module order) declaring `owner`.
+    owner_rows :: program.nominals.rows.get(owner.key) ?? [JetCodegenNominalRow]{}
+    if owner_rows.len() == 0 -> return None
+    nominal :: program.modules[owner_rows[0].module_index].nominals[owner_rows[0].nominal_index]
+    leaves := [String]{}
+    prefix := "{group}."
+    loop variant in nominal.variants {
+        if variant.symbol.name.starts_with(prefix) -> &leaves.push(variant.symbol.name)
     }
+    if leaves.len() > 0 -> return Val(leaves)
     None
 }
 
@@ -6602,13 +7115,17 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, program: JetCodegen
     // window hidden, never a copy of it.
     // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_pattern_shape_condition (`Or` passes no window)
     hidden := jet_codegen_hide_pattern_window(&builder, program, subject_value)
+    // #5041: under a read window each alternative's matched block binds its
+    // names to borrows of its own payload slots (jet_codegen_bind_or_borrowed).
+    borrow_window :: jet_codegen_or_borrow_window(builder, program, pattern, alternatives, hidden, bind_success, reuse_bindings)
     index := 0
     loop index < alternatives.len() {
-        test := jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, alternatives[index], bind_success, reuse_bindings || index > 0)
+        test := jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, alternatives[index], bind_success && borrow_window == None, reuse_bindings || index > 0)
         matched_block := jet_codegen_new_block(&builder, program, span, "pattern-or-matched")
         next_block := jet_codegen_new_block(&builder, program, span, "pattern-or-next")
         jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: test, then_target: matched_block, else_target: next_block})
         jet_codegen_switch_block(&builder, program, matched_block)
+        if borrow_window == .Val(base) -> jet_codegen_bind_or_borrowed(&builder, program, pattern, subject, base, alternatives[index], index > 0)
         true_value := jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: true}})
         matched_predecessor := builder.current
         jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
@@ -6616,13 +7133,154 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, program: JetCodegen
         jet_codegen_switch_block(&builder, program, next_block)
         index += 1
     }
-    if hidden == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
+    if hidden == .Val(place) -> jet_codegen_push_pattern_window(&builder, subject_value, place)
     false_value := jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: false}})
     missed_predecessor := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
     &incoming.push(MIRPhiIncoming{block: missed_predecessor, value: false_value})
     jet_codegen_switch_block(&builder, program, join_block)
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: incoming})
+}
+
+// #5041: the read window an or-pattern's bindings borrow from, or None to
+// bind copies. A read window's place cannot change while the bindings live
+// (a read parameter, or a stable root: jet_codegen_lower_read_window), so a
+// borrow of an alternative's payload slot reads exactly what a copy made at
+// the binding would. Only an immutable pattern whose alternatives bind
+// direct payload slots qualifies: a nested, collection, text or binary
+// alternative, or a variant group (its leaf is known only at run time),
+// keeps the copying lowerer, as do bindings an enclosing pattern already
+// declared (`reuse_bindings`).
+fn jet_codegen_or_borrow_window(builder: JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, alternatives: [TPatternShape], window: MIRPlaceID?, bind_success: Bool, reuse_bindings: Bool) -> MIRPlaceID? Never! {
+    if !bind_success || reuse_bindings || pattern.mutable -> return None
+    if builder.retained_root && builder.scope_depth == 0 -> return None
+    place :: window ?? return None
+    if builder.read_windows.get(place.value) == None -> return None
+    // The borrowed local is one MIR local for the whole function, and the
+    // or-join that enters the arm also merges the unmatched edge, on which
+    // the local still holds the borrow an earlier loop iteration made. In a
+    // loop the window must therefore be a place that never changes while the
+    // function runs (a read parameter's, or a constant read in place). A
+    // stable local root (a table's `it`, a `::` binding in the loop body) is
+    // proven unchanged only inside the arm: re-bound or dropped by the next
+    // iteration, it leaves that older borrow stale (MIR Lint view.valid), so
+    // such a subject keeps the copying lowerer inside a loop.
+    if builder.loops.len() > 0 && !jet_codegen_read_parameter_place(builder, program, place) -> return None
+    loop fact in pattern.bindings {
+        if fact.mutable -> return None
+    }
+    loop shape in alternatives {
+        if !jet_codegen_or_borrow_shape(builder, program, pattern, shape) -> return None
+    }
+    Val(place)
+}
+
+fn jet_codegen_or_borrow_shape(builder: JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, shape: TPatternShape) -> Bool Never! {
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            if pattern.enum_type == .Val(owner) {
+                if jet_codegen_pattern_group_leaves(builder, program, owner, variant) != None -> return false
+            }
+            loop binding in bindings {
+                if binding == .Nested(_) -> return false
+            }
+            return true
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> return inner == None
+        .Absent(_) | .Range(_, _, _) -> return true
+        .Struct(fields, _, _) -> {
+            loop field in fields {
+                if field == .Nested(_, _, _) -> return false
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
+// #5041: bind the names of one or-pattern alternative that matched under the
+// read window `base`, each to its payload slot (jet_codegen_bind_pattern_shape's
+// window places). `reuse`: an earlier alternative declared the locals.
+fn jet_codegen_bind_or_borrowed(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, base: MIRPlaceID, shape: TPatternShape, reuse: Bool) Never! {
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            subject_type := jet_codegen_unwrap_pattern_tags(subject.ty)
+            result_variant := false
+            if subject_type == .Result(_, _) -> result_variant = variant == "Ok" || variant == "Err"
+            if result_variant {
+                loop binding in bindings {
+                    if binding == .Bind(name, _) {
+                        if name == "" || name == "_" -> next
+                        fact :: jet_codegen_pattern_binding_fact(pattern, name)
+                        slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Result{ok: variant == "Ok"}, fact.ty, fact.span)
+                        jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+                    }
+                }
+                return
+            }
+            target :: jet_codegen_pattern_variant_owner(builder, program, pattern, subject.ty, variant)
+            loop (index, binding) in bindings {
+                if binding == .Bind(name, _) {
+                    if name == "" || name == "_" -> next
+                    fact :: jet_codegen_pattern_binding_fact(pattern, name)
+                    slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Enum{owner: target.owner, variant: target.variant, index: index}, fact.ty, fact.span)
+                    jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+                }
+            }
+        }
+        .Present(name, binding_span, _, _) -> {
+            if name == "" || name == "_" -> return
+            fact :: jet_codegen_pattern_binding_fact(pattern, name)
+            slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Option, fact.ty, binding_span)
+            jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+        }
+        .Ok(name, binding_span, _, _) | .Err(name, binding_span, _, _) -> {
+            if name == "" || name == "_" -> return
+            ok :: if shape == {.Ok(_, _, _, _) -> true else -> false}
+            fact :: jet_codegen_pattern_binding_fact(pattern, name)
+            slot :: jet_codegen_payload_window_place(&builder, program, base, MIRPayloadKind.Result{ok: ok}, fact.ty, binding_span)
+            jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+        }
+        .Struct(fields, _, _) -> {
+            loop field in fields {
+                if field == .Bind(field_name, name, _) {
+                    if name == "" || name == "_" -> next
+                    fact :: jet_codegen_pattern_binding_fact(pattern, name)
+                    field_id :: jet_codegen_host_field_id(builder, program, subject.ty, field_name)
+                    slot :: jet_codegen_project_window_place(&builder, program, base, MIRProjection.Field{field: field_id, span: fact.span}, fact.ty, fact.span)
+                    jet_codegen_write_borrowed_binding(&builder, program, fact, slot, reuse)
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
+// #5041: bind `fact` to the value in the read-window slot `slot`. An owned
+// type binds a borrowed local holding a ReadBorrow read of the slot, so
+// nothing is copied and nothing drops; a consuming use of the name copies
+// the slot (jet_codegen_unmovable_place). A copy type reads its value.
+fn jet_codegen_write_borrowed_binding(builder: &JetCodegenBuilder, program: JetCodegenProgram, fact: TPatternBindingFact, slot: MIRPlaceID, reuse: Bool) Never! {
+    local := tir_user_local(fact.name, fact.span)
+    local.mutable = false
+    local.symbol_id = fact.symbol_id
+    borrowed :: jet_codegen_ownership(fact.ty).mode == MIROwnershipMode.Owned
+    place := if {
+        reuse -> {
+            binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? panic("checked or-pattern binding has no shared MIR local")
+            binding.place
+        }
+        borrowed -> jet_codegen_bind_borrowed_local(&builder, program, local, fact.ty)
+        else -> jet_codegen_bind_local(&builder, program, local, fact.ty, false, None, None, false)
+    }
+    value :: if {
+        borrowed -> {
+            fact_type :: jet_codegen_lower_type_for_function(fact.ty, builder, program)
+            jet_codegen_emit_mir_type(&builder, program, fact.span, fact_type, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: slot})
+        }
+        else -> jet_codegen_emit_value(&builder, program, fact.span, fact.ty, MIROperation.ReadPlace{place: slot})
+    }
+    _ := jet_codegen_emit(&builder, program, fact.span, None, MIROperation.WritePlace{place: place, value: value})
 }
 
 fn jet_codegen_pattern_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: Int, span: Span) -> MIRValueID Never! {
@@ -6644,7 +7302,7 @@ fn jet_codegen_pattern_read_window(builder: &JetCodegenBuilder, program: JetCode
     place :: jet_codegen_bind_local(&builder, program, local, subject.ty, false, None, None, false)
     _ := jet_codegen_emit(&builder, program, subject.span, None, MIROperation.WritePlace{place: place, value: value})
     _ := &builder.read_windows.add(place.value, true)
-    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    jet_codegen_push_pattern_window(&builder, value, place)
     place
 }
 
@@ -6662,7 +7320,7 @@ fn jet_codegen_lower_collection_slot(builder: &JetCodegenBuilder, program: JetCo
         }
         .Range(lo, hi) -> return jet_codegen_lower_numeric_pattern_range(&builder, program, value, ty, lo, hi, span)
         .Nested(nested) -> {
-            if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+            if window == .Val(place) -> jet_codegen_push_pattern_window(&builder, value, place)
             return jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(ty, span), value, nested.shape, bind, reuse)
         }
     }
@@ -6786,6 +7444,8 @@ fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCod
     local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", span)
     cache :: jet_codegen_bind_local(&builder, program, local, cache_ty, true, None, None, false)
     current := builder.current
+    // copy: the lookup head is read while the cache setup writes the builder (`&builder`, which
+    // resets pattern_lookup_head), so a view would be live across that write.
     lookup_block :: builder.pattern_lookup_head.copy()
     if lookup_block == .Val(head) -> jet_codegen_switch_block(&builder, program, head)
     absent :: jet_codegen_emit_value(&builder, program, span, cache_ty, MIROperation.Absent)
@@ -6925,14 +7585,10 @@ fn jet_codegen_lower_pattern_condition(builder: &JetCodegenBuilder, program: Jet
     jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, pattern.shape, bind_success, false)
 }
 
-// Rust `lower_consuming_value`: an owned handle moves from its own place row,
-// so its drop flag clears and scope exit does not move it a second time.
+// Rust `lower_consuming_value`: an owned value moves from its own place row
+// (jet_codegen_lower_expression_place with Move access), so its drop flag
+// clears and scope exit does not move it a second time.
 fn jet_codegen_lower_consuming_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
-    if value.kind == .Local(local) {
-        place := jet_codegen_lower_local_place(&builder, program, local)
-        if !jet_codegen_unmovable_place(builder, program, place) -> jet_codegen_retain_place_access(&builder, program, place, MIRAccess.Move)
-        return jet_codegen_emit_value(&builder, program, value.span, value.ty, MIROperation.MovePlace{place: place})
-    }
     if jet_codegen_lower_expression_place(&builder, program, value, MIRAccess.Move) == .Val(place) {
         return jet_codegen_emit_value(&builder, program, value.span, value.ty, MIROperation.MovePlace{place: place})
     }
@@ -7134,14 +7790,14 @@ fn jet_codegen_lower_index_hook(builder: &JetCodegenBuilder, program: JetCodegen
 
 fn jet_codegen_lower_layout_field_index(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, base: TExpr, field_name: String, line: Int) -> MIRValueID {
     field_type := Type.Named{name: "LayoutField"}
-    fields_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type}, builder.function.key)
+    fields_ref :: jet_codegen_field_ref_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, base.ty, "fields", Type.List{element: field_type}, builder.function.key)
     fields := TExpr{ty: Type.List{element: field_type}, kind: TExprKind.Field{receiver: base, field: fields_ref}, span: expression.span, integer_bounds: None, cost: None}
     owner_key := "{builder.function.key}::layout-field-select@{expression.span.start}..{expression.span.end}"
     parameter_symbol := symbol_id(SymbolKind.Parameter, builder.function.module_identity, owner_key, "layout_field")
     parameter := tir_symbol_local("layout_field", expression.span, parameter_symbol)
     parameter.deref = true
     parameter_value := TExpr{ty: field_type, kind: TExprKind.Local{local: parameter}, span: expression.span, integer_bounds: None, cost: None}
-    name_ref :: jet_codegen_field_ref_by_name(program.modules, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String, builder.function.key)
+    name_ref :: jet_codegen_field_ref_by_name(program.modules, program.nominals, builder.function.module_identity, builder.generic_type_names, field_type, "name", Type.String, builder.function.key)
     name := TExpr{ty: Type.String, kind: TExprKind.Field{receiver: parameter_value, field: name_ref}, span: expression.span, integer_bounds: None, cost: None}
     expected_name := TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: field_name}}}, span: expression.span, integer_bounds: None, cost: None}
     predicate := TExpr{ty: Type.Bool, kind: TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: line, lhs: name, rhs: expected_name}, span: expression.span, integer_bounds: None, cost: None}

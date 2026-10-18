@@ -48,6 +48,8 @@ fn lower_reach_constant(q: &LowerPrepared, value: MIRConstant, parent: Int) Neve
 
 fn lower_reach_id(q: &LowerPrepared, id: U64, parent: Int) Never! {
     row :: q.checked_types.rows.get(id) ?? return
+    // copy: `ty` is read while lower_reach_* writes the prepared tables (`&q`, which appends
+    // checked types), so a view into q.checked_types would be live across those writes.
     ty :: q.checked_types.types[row].copy()
     lower_mono_intern_type(&q, ty, parent)
 }
@@ -81,8 +83,8 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
         }
         .TraitMethod(method, bound, receiver) -> {
             lower_mono_intern_type(&q, receiver, parent)
-            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, receiver, bound) == .Val(implementation) {
-                checked :: lower_trait_method(p, bound, method) ?? return
+            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, q.traits, receiver, bound) == .Val(implementation) {
+                checked :: lower_trait_method(p, q.traits, bound, method) ?? return
                 loop id in implementation.methods {
                     row :: q.source_rows.get(id.value) ?? next
                     if p.functions[row].name == checked.name -> lower_mono_request(p, &q, id, Val(receiver), type_args, parent, site).drop("concrete trait method")
@@ -160,19 +162,7 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
         }
         .Closure(id, _, _) -> lower_mono_dependency(p, &q, id, bindings, parent, site)
-        .Global(name) -> {
-            named := q.constant_rows.get("key:{name}")
-            if named == None -> named = q.constant_rows.get("name:{name}")
-            row :: named ?? return
-            if q.constants_seen.get(row) != None -> return
-            &q.constants_seen.add(row, true).drop("checked absent above")
-            lower_mono_intern_type(&q, p.constants[row].ty, parent)
-            if p.constants[row].value == .SharedSite(shared_site) {
-                if !q.shared_sites_dynamic -> lower_mono_dependency(p, &q, shared_site.initializer, bindings, parent, site)
-            } else {
-                lower_reach_constant(&q, p.constants[row].value, parent)
-            }
-        }
+        .Global(name) -> lower_reach_global(p, &q, name, bindings, parent, site)
         .PtrFromAddr(_, element) -> lower_mono_intern_type(&q, element, parent)
         .CoreCall(_, route, args, type_args, fallibility, plan) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
@@ -233,6 +223,22 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
     }
 }
 
+// The module constant a `Global` read or a `Static` place names: its type and
+// value (or a shared site's initializer), once.
+fn lower_reach_global(p: MIRProgram, q: &LowerPrepared, name: String, bindings: LowerBindings, parent: Int, site: String) Never! {
+    named := q.constant_rows.get("key:{name}")
+    if named == None -> named = q.constant_rows.get("name:{name}")
+    row :: named ?? return
+    if q.constants_seen.get(row) != None -> return
+    &q.constants_seen.add(row, true).drop("checked absent above")
+    lower_mono_intern_type(&q, p.constants[row].ty, parent)
+    if p.constants[row].value == .SharedSite(shared_site) {
+        if !q.shared_sites_dynamic -> lower_mono_dependency(p, &q, shared_site.initializer, bindings, parent, site)
+    } else {
+        lower_reach_constant(&q, p.constants[row].value, parent)
+    }
+}
+
 fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], operation: MIRSemanticOp, parent: Int, site: String) Never! {
     if operation == {
         .Print(_, value) -> lower_reach_render_value(&q, function, facts, value, true, parent)
@@ -241,7 +247,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         }
         .BuiltinMethod(call, receiver, _, _, _) -> {
             // `list.join` shows every element (Lists.jet lower_helper_list_join).
-            if lower_prelude_row(p, call) == .Val(row) {
+            if lower_prepared_prelude_row(p, q, call) == .Val(row) {
                 if lower_runtime_symbol(row) == "jet_iter_join" {
                     lower_lazy_reach_value(&q, function, facts, receiver, parent)
                 } else if lower_runtime_symbol(row) == "jet_deque_join" {
@@ -313,7 +319,11 @@ fn lower_reach_body(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, bin
     }
     loop capture in function.capture_params -> lower_mono_intern_type(&q, capture.ty, parent)
     loop local in function.locals -> lower_mono_intern_type(&q, local.ty, parent)
-    loop place in function.places -> lower_mono_intern_type(&q, place.ty, parent)
+    loop place in function.places {
+        lower_mono_intern_type(&q, place.ty, parent)
+        // #5001: a constant read in place is reached like a `Global` read.
+        if place.base == .Static(name) -> lower_reach_global(p, &q, name, bindings, parent, function.key)
+    }
     if function.generator == .Val(generator) -> lower_mono_intern_type(&q, generator.item, parent)
     loop decision in function.optimization.decision_rows {
         if decision.function == .Val(id) -> lower_mono_dependency(p, &q, id, bindings, parent, function.key)
@@ -454,6 +464,8 @@ fn lower_reach_edges(p: MIRProgram, q: &LowerPrepared, first: Int, parent: Int, 
         cursor += 1
         if edge < 0 || q.edges_seen.get(edge) != None -> next
         &q.edges_seen.add(edge, true).drop("checked absent above")
+        // copy: the edge's function id is read while lower_reach_* writes `q` (the edge list grows
+        // as reach walks). A view into q.edges would be live across those writes.
         function :: q.edges[edge].function.copy()
         branch :: q.edges[edge].branch
         following :: q.edges[edge].next

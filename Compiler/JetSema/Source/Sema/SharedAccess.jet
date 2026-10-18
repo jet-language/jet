@@ -27,7 +27,8 @@ SEMA_SHARED_HOISTED_RHS :: prep { "__jet_shared_rhs" }
 
 fn sema_shared_access_inner(ty: Type) -> Type? {
     if ty == {
-        .Shared(inner) -> Val(inner)
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Shared(inner) -> Val(inner.copy())
         else -> None
     }
 }
@@ -183,7 +184,7 @@ fn sema_shared_access_expr_touches_shared(value: Expr, scopes: SemaScopeTable) -
         .Binary(_, left, right, _) -> return sema_shared_access_expr_touches_shared(left, scopes) || sema_shared_access_expr_touches_shared(right, scopes)
         .CompareChain(values, _, _, _) -> return sema_shared_access_expr_list_touches_shared(values, scopes)
         .Call(call) -> return sema_shared_access_expr_call_args_touches_shared(call.args, scopes)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> return sema_shared_access_expr_touches_shared(receiver, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> return sema_shared_access_expr_touches_shared(receiver, scopes) || sema_shared_access_expr_call_args_touches_shared(args, scopes)
         .StructLit(_, _, _, _, fields, _, _) -> {
             loop field in fields {
                 if sema_shared_access_expr_touches_shared(field.value, scopes) -> return true
@@ -273,7 +274,7 @@ fn sema_shared_access_call(handle: Expr, method: String, body: LambdaBody, span:
     flags := ast_empty_call_arg_flags()
     flags.shared_access_desugar = true
     argument :: CallArg{convention: AccessConvention.Read, expr: callback, span: span, flags: flags, label: None, spread: false}
-    Expr.MethodCall{receiver: handle, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+    Expr.MethodCall{receiver: handle, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None}
 }
 
 // `handle.field` -> the internal locked-read callback. The caller supplies the
@@ -290,8 +291,8 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
     if value == {
         .Paren(inner, _) -> { return sema_shared_access_place_type(inner, environment, program, &scopes) }
         .Ident(name, _) -> {
-            symbol :: sema_scope_resolve(scopes, name) ?? return None
-            return symbol.ty
+            index :: sema_scope_resolve_index(scopes, name) ?? return None
+            return sema_scope_binding_type(environment, scopes, index)
         }
         .Field(base, member, _) -> {
             owner_ty := sema_shared_access_place_type(base, environment, program, &scopes) ?? return None
@@ -321,7 +322,7 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
                 else -> {}
             }
         }
-        else -> { return sema_stmt_return_known_type(value, scopes) }
+        else -> { return sema_stmt_return_known_type(value, environment, scopes) }
     }
     None
 }
@@ -348,11 +349,11 @@ fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvironm
     if target == {
         .Field(base, field, span) -> {
             projected :: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
-            return Val((handle: projected.handle, target: LValue.Field{base: projected.place, field: field, span: span}, span: span))
+            return Val((handle: projected.handle, span: span, target: LValue.Field{base: projected.place, field: field, span: span}))
         }
         .Index(base, index, span, kind) -> {
             projected :: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
-            return Val((handle: projected.handle, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}, span: span))
+            return Val((handle: projected.handle, span: span, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}))
         }
         else -> { return None }
     }

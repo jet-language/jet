@@ -33,7 +33,7 @@ function paths(b) {
   if (/Iter|iter_|list_lazy/.test(b)) return [L + "Iter.jet", L + "Lists.jet", abi];
   if (/Core type|runtime handle/.test(b)) return [L + "Lower.jet", L + "RuntimeRoutes.jet", gen, abi];
   if (/BigInt|constants|constant /.test(b)) return [L + "Statics.jet", L + "Constants.jet", abi];
-  if (/codec|DataTree|Dyn|DataEntriesToMap|encoding/.test(b)) return [L + "Reach.jet", L + "Mono.jet", abi];
+  if (/codec|Dyn|DataEntriesToMap|encoding/.test(b)) return [L + "Reach.jet", L + "Mono.jet", abi];
   if (/Slice|List|list_|View/.test(b)) return [L + "Lists.jet", L + "Iter.jet", L + "Combinators.jet", abi];
   if (/Map|map_/.test(b)) return [L + "Maps.jet", L + "Equal.jet"];
   if (/closure|Closure/.test(b)) return [L + "Closures.jet", L + "Lower.jet", abi];

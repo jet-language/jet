@@ -92,10 +92,10 @@ struct NixAdmission {
         verification :: self.verification
         download_started :: time.start()
         requests :: store_nix_validate_requests(requested)
-        endpoint :: CacheEndpoint.from_roots(self.roots)
+        endpoint :: NixCacheEndpoint.from_roots(self.roots)
         store_dir := "/nix/store"
         if !offline -> store_dir = endpoint.cache_info().store_dir
-        existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, self.roots))
+        existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, self.roots) ?? return Err(store_nix_store_error(err)))
         queue := Rank<String>.new()
         loop request in requests.values() -> &queue.add(request.store_path)
         scheduled := queue.copy()
@@ -189,7 +189,7 @@ struct NixAdmission {
     }
 
     // Planned signed metadata first, else a fresh narinfo lookup, then fetch.
-    fn fetch_pending(self, endpoint: CacheEndpoint, planned_infos: [String: FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
+    fn fetch_pending(self, endpoint: NixCacheEndpoint, planned_infos: [String: FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
         info :: planned_infos.get(store_path) ?? {
             looked :: endpoint.narinfo(store_path, store_dir)
             looked ?? return Err(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
@@ -197,7 +197,7 @@ struct NixAdmission {
         self.fetch_object(endpoint, info, store_dir, progress)
     }
 
-    fn fetch_object(self, endpoint: CacheEndpoint, info: FetchedInfo, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
+    fn fetch_object(self, endpoint: NixCacheEndpoint, info: FetchedInfo, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
         verification :: self.verification
         compression :: info.info.compression
         if compression == .Xz || compression == .Bzip2 {
@@ -238,7 +238,7 @@ struct NixAdmission {
         if actual_nar_hash != expected_nar_hash {
             return Err(NixCacheError.new(.NarCorruption, "Nix NAR bytes do not match signed NarHash"))
         }
-        store_seal_node(tree)
+        store_seal_node(tree) ?? return Err(store_nix_store_error(err))
         hangar_digest :: store_verified_output_hash(&verification, tree, Val(self.roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.NarCorruption, "Nix staged object {store_path} could not be hashed: {err.message()}"))
         references := [String]{}
         loop name in info.info.references -> &references.push("{store_dir}/{name}")
@@ -295,8 +295,8 @@ struct NixAdmission {
             return Err(NixCacheError.new(.Admission, "repaired Nix cache closure disagrees with its original admission receipt"))
         }
 
-        _ :: AdmissionTransaction.recover_unlocked(self.roots)
-        transaction := AdmissionTransaction.new(&verification, self.roots)
+        _ :: AdmissionTransaction.recover_unlocked(self.roots) ?? return Err(store_nix_store_error(err))
+        transaction := AdmissionTransaction.new(&verification, self.roots) ?? return Err(store_nix_store_error(err))
         loop store_path in names {
             object :: fetched[store_path]
             source :: object.stage ?? files.join(objects_dir, object.hangar_digest)
@@ -306,7 +306,7 @@ struct NixAdmission {
                 bytes: object.unpacked_bytes,
                 allow_semantic_xattrs: false,
                 repair_corrupt: object.stage != None,
-            })
+            }) ?? return Err(store_nix_store_error(err))
         }
 
         entries := [StoreEntry]{}
@@ -331,8 +331,8 @@ struct NixAdmission {
                 "nix.compression": object.compression,
                 "nix.output.out": object.store_path,
             }
-            producer_bytes :: store_canonical_producer("nix", object.store_path, object.proof, identity, facts)
-            producer := ProducerRecord.decode(producer_bytes)
+            producer_bytes :: store_canonical_producer("nix", object.store_path, object.proof, identity, facts) ?? return Err(store_nix_store_error(err))
+            producer := ProducerRecord.decode(producer_bytes) ?? return Err(store_nix_store_error(err))
             &producer.bind_cache_provenance(reference, object.hangar_digest, identity, object.direct_reference_digests)
             // File-root and symlink-root NARs have no executable `bin` projection.
             candidate :: files.join(object.hangar_path, "bin")
@@ -362,7 +362,7 @@ struct NixAdmission {
                 last_used_at: now,
             })
         }
-        _ :: &transaction.commit(&entries, [AdmissionReceipt]{AdmissionReceipt{digest: closure_receipt.digest, bytes: closure_receipt.bytes}}, Val(self.stage), RegistrationMode.AdmittedNix, None)
+        _ :: &transaction.commit(&entries, [AdmissionReceipt]{AdmissionReceipt{digest: closure_receipt.digest, bytes: closure_receipt.bytes}}, Val(self.stage), RegistrationMode.AdmittedNix, None) ?? return Err(store_nix_store_error(err))
         Ok(closure_receipt.digest)
     }
 

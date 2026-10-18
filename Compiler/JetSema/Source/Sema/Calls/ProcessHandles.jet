@@ -201,8 +201,10 @@ fn sema_process_check_method_ownership(receiver: Expr, method: String, args: [Ca
 
 fn sema_process_failure_carrier(result: Type) -> TFailureCarrier Never! {
     if result == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(inner) -> TFailureCarrier.Optional{value: inner}
+        // copy: `ok` and `err` are payloads of read parameter `result`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
         .Named(name) -> {
             if name == "Never" -> TFailureCarrier.Diverges{value: result} else -> TFailureCarrier.Infallible
         }
@@ -225,7 +227,7 @@ fn sema_process_record_intrinsic(result: Type, effect_name: String, api: String,
 
 fn sema_process_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_process_record_intrinsic(result, effect_name, api, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     // A call checker's finish: under the dispatcher's success view a
     // `ProcessReceipt IOError!` result meets a `ProcessReceipt` expectation by
     // its success side, and the call root then propagates the failure.
@@ -474,7 +476,7 @@ fn sema_process_child_field(base: TExpr, member: String, span: Span, expected: T
     field_symbol := Symbol{id: field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: Val(owner.key), span: span, ty: Val(field_ty), visibility: 2}
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
     reference := TFieldRef{owner: Val(owner), field: field_id, name: member, ty: field_ty, boxed: false}
-    value := sema_tir_expr(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
+    value := sema_tir_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 

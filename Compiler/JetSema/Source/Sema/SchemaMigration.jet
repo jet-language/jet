@@ -226,7 +226,7 @@ fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, progr
 // Module entry borrows the schema pass's one program graph; it only replaces
 // the selected scope facts and never takes fields from either borrowed owner.
 fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
-    if snapshots.len() == 0 -> return (registration: ^registration, diagnostics: [Diagnostic]{})
+    if snapshots.len() == 0 -> return (diagnostics: [Diagnostic]{}, registration: ^registration)
     module_count :: registration.modules.len()
     types := [TTypeDef]{}
     loop module_row in checked.modules {
@@ -255,5 +255,5 @@ fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, check
     }
     graph_out := ^program.registration_graph
     restored :: ^graph_out ?? panic("a completed schema pass lost its registration graph")
-    (registration: ^restored, diagnostics: ^diagnostics)
+    (diagnostics: ^diagnostics, registration: ^restored)
 }

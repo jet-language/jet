@@ -484,15 +484,7 @@ fn jet_cli_provenance_reports(packages: [JetCLILockPackage], target: String?) ->
         }
         &reports.push(jet_cli_provenance_report(package))
     }
-    loop index in 1..<reports.len() {
-        value :: reports[index].copy()
-        position := index
-        loop position > 0 && (reports[position - 1].name > value.name || (reports[position - 1].name == value.name && reports[position - 1].version > value.version)) {
-            reports[position] = reports[position - 1]
-            position -= 1
-        }
-        reports[position] = value
-    }
+    &reports.sort_by((left: JetCLIProvenanceReport, right: JetCLIProvenanceReport) -> (left.name <=> right.name).then(left.version <=> right.version))
     reports
 }
 
@@ -556,9 +548,10 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
     }
     notices := [String]{}
     entry := ""
-    if jet_cli_find_project_entry(root, "inspect provenance", color, &notices) == {
+    found_entry :: jet_cli_find_project_entry(root, "inspect provenance", color, &notices)
+    if found_entry == {
         .Entry(found) -> entry = found.path
-        .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+        .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
         .Absent -> return jet_cli_with_notices(notices, jet_cli_not_ported("inspect provenance <project without an entry>", color))
     }
     target := String?{None}
@@ -578,16 +571,21 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
 // refused, so the requirement is the default `none`.
 fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !cli_files.is_file(job.file) -> return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(_) -> return jet_cli_not_ported_output("inspect provenance <project the Jet compiler refuses>", job.color)
+        .Refused(_) -> output = jet_cli_not_ported_output("inspect provenance <project the Jet compiler refuses>", job.color)
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
-                return jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color)
-            }
+            checked :: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
+            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_provenance_report(job) else -> jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color))
         }
     }
+    output
+}
+
+// The locked dependencies' provenance of a project that checked.
+fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     packages := [JetCLILockPackage]{}
     if jet_cli_lock_load(job.root) == {
         .Loaded(loaded) -> packages = loaded

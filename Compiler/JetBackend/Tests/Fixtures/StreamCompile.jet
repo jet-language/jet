@@ -1,0 +1,174 @@
+// The streaming per-function back end (Opt/Opt.jet x64_compile_module_owned;
+// SPEED-500K §8 #10 and D6) produces, for any thread count and at every
+// level, exactly the functions, debug rows and errors of the serial
+// pipeline (lir_optimize_module, then x64_compile_module with its one LIR
+// lint), and leaves every function body released. The module is a chain of
+// wrappers deep enough for several call-graph waves, a recursive pair, and
+// enough bulk to admit several threads (X64_COMPILE_MIN_INSTRUCTIONS_PER_THREAD).
+use jet_foundation.[CompilerThreads]
+use jet_backend.[
+    LIRBlockID, LIRCallConv, LIRCallee, LIRData, LIRFunction, LIRFunctionID, LIRInst, LIRLayout, LIRModule, LIRSignature, LIRSignatureID, LIRTerminator, LIRValueID,
+    X64ModuleResult, lir_builder, lir_builder_finish, lir_builder_push, lir_builder_seal, lir_builder_word, lir_layout_word, lir_module_debug_none,
+    lir_optimize_module, x64_compile_module, x64_compile_module_owned, LIRBinaryOp,
+]
+
+FX_STREAM_CHAIN :: 12
+FX_STREAM_BULK :: 600
+FX_STREAM_BULK_ADDS :: 100
+
+// Signature 0: (word) -> word; signature 1: () -> nothing.
+fn fx_stream_signatures() -> [LIRSignature] Never! {
+    [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word()), convention: LIRCallConv.SystemV},
+        LIRSignature{id: LIRSignatureID{value: 1}, params: [LIRLayout]{}, result: None, convention: LIRCallConv.SystemV},
+    }
+}
+
+// `a + adds` as a chain of `adds` additions of 1.
+fn fx_stream_adder(id: Int, name: String, adds: Int) -> LIRFunction Never! {
+    b := lir_builder(LIRFunctionID{value: id}, name, LIRSignatureID{value: 0})
+    a :: lir_builder_word(&b)
+    one :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: one, value: 1})
+    current := a
+    loop _ in 0..<adds {
+        sum :: lir_builder_word(&b)
+        lir_builder_push(&b, LIRInst.Binary{dst: sum, op: LIRBinaryOp.Add, left: current, right: one})
+        current = sum
+    }
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{a}, LIRTerminator.Return{value: Val(current)})
+    lir_builder_finish(b)
+}
+
+// `callee(a) + 1`.
+fn fx_stream_wrapper(id: Int, name: String, callee: Int) -> LIRFunction Never! {
+    b := lir_builder(LIRFunctionID{value: id}, name, LIRSignatureID{value: 0})
+    a :: lir_builder_word(&b)
+    r :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Call{dst: Val(r), signature: LIRSignatureID{value: 0}, callee: LIRCallee.Function{id: LIRFunctionID{value: callee}}, args: [LIRValueID]{a}})
+    one :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: one, value: 1})
+    sum :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Binary{dst: sum, op: LIRBinaryOp.Add, left: r, right: one})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{a}, LIRTerminator.Return{value: Val(sum)})
+    lir_builder_finish(b)
+}
+
+// Function 0 is the leaf; 1..FX_STREAM_CHAIN wrap the one before, each
+// final body holding the chain below it; then a recursive pair, the entry
+// (signature 1) calling the chain's top and the pair, and the bulk adders.
+// `bad`: the entry block of the function at `broken` takes no parameter
+// for its one-parameter signature, a lint finding no pass touches.
+fn fx_stream_module(broken: Int) -> LIRModule Never! {
+    functions := [LIRFunction]{fx_stream_adder(0, "leaf", 1)}
+    loop level in 1..<(FX_STREAM_CHAIN + 1) -> &functions.push(fx_stream_wrapper(level, "wrap{level}", level - 1))
+    pair_a :: FX_STREAM_CHAIN + 1
+    pair_b :: FX_STREAM_CHAIN + 2
+    &functions.push(fx_stream_wrapper(pair_a, "pair_a", pair_b))
+    &functions.push(fx_stream_wrapper(pair_b, "pair_b", pair_a))
+    entry :: FX_STREAM_CHAIN + 3
+    b := lir_builder(LIRFunctionID{value: entry}, "run", LIRSignatureID{value: 1})
+    five :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: five, value: 5})
+    top :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Call{dst: Val(top), signature: LIRSignatureID{value: 0}, callee: LIRCallee.Function{id: LIRFunctionID{value: FX_STREAM_CHAIN}}, args: [LIRValueID]{five}})
+    paired :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Call{dst: Val(paired), signature: LIRSignatureID{value: 0}, callee: LIRCallee.Function{id: LIRFunctionID{value: pair_a}}, args: [LIRValueID]{top}})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &functions.push(lir_builder_finish(b))
+    loop row in 0..<FX_STREAM_BULK -> &functions.push(fx_stream_adder(entry + 1 + row, "bulk{row}", FX_STREAM_BULK_ADDS))
+    if broken >= 0 {
+        b2 := lir_builder(LIRFunctionID{value: broken}, functions[broken].name, LIRSignatureID{value: 0})
+        zero :: lir_builder_word(&b2)
+        lir_builder_push(&b2, LIRInst.Const{dst: zero, value: 0})
+        lir_builder_seal(&b2, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: Val(zero)})
+        functions[broken] = lir_builder_finish(b2)
+    }
+    LIRModule{signatures: fx_stream_signatures(), functions: functions, data: [LIRData]{}, debug: lir_module_debug_none()}
+}
+
+fn fx_stream_threads(cores: Int) -> CompilerThreads Never! {
+    CompilerThreads{cap: Val(cores), cores: cores, memory_available: None}
+}
+
+// Every row of `result`, so two results compare as text.
+fn fx_stream_rows(result: X64ModuleResult) -> [String] Never! {
+    rows := [String]{}
+    loop (index, function) in result.functions {
+        relocs := [String]{}
+        loop reloc in function.relocs -> &relocs.push("{reloc.at}:{reloc.target}")
+        &rows.push("fn {function.id.value} {function.name} code {function.code} relocs {relocs.join(",")}")
+        if index < result.debug.len() {
+            debug :: result.debug[index]
+            ranges := [String]{}
+            loop range in debug.ranges -> &ranges.push("{range.variable}@{range.start}-{range.end}")
+            lines := [String]{}
+            loop line in debug.lines -> &lines.push("{line.at}:{line.line}")
+            &rows.push("debug body {debug.body} cfi {debug.cfi} lines {lines.join(",")} ranges {ranges.join(",")}")
+        }
+    }
+    loop error in result.errors -> &rows.push("error {error}")
+    rows
+}
+
+fn fx_stream_same(name: String, expected: [String], actual: [String]) -> Bool Never! {
+    if expected == actual -> return true
+    print("stream-compile {name}: {actual.len()} rows for {expected.len()} expected")
+    loop (index, row) in expected {
+        if index >= actual.len() || actual[index] != row {
+            shown :: if index < actual.len() -> actual[index] else -> "<absent>"
+            print("stream-compile {name}: first difference at row {index}:\n  expected {row}\n  actual   {shown}")
+            break
+        }
+    }
+    false
+}
+
+// The owned compile at `level` on `cores` threads, checked against the
+// serial rows, with every body released and every header kept.
+fn fx_stream_owned(name: String, level: Int, cores: Int, expected: [String], keep_going: Bool) -> Bool Never! {
+    unit :: fx_stream_module(-1)
+    count :: unit.functions.len()
+    kept :: x64_compile_module_owned(^unit, fx_stream_threads(cores), level, keep_going)
+    if !fx_stream_same(name, expected, fx_stream_rows(kept.compiled)) -> return false
+    if kept.program.functions.len() != count -> return false
+    loop (index, function) in kept.program.functions {
+        if function.id.value != index || function.blocks.len() != 0 || function.values.len() != 0 -> return false
+        if index == 0 && function.name != "leaf" -> return false
+    }
+    true
+}
+
+// A lint finding stops both pipelines at the same finding rows and no
+// functions; with keep-going the owned compile traps the named function and
+// compiles the rest.
+fn fx_stream_lint_stop(level: Int) -> Bool Never! {
+    broken :: FX_STREAM_CHAIN + 1
+    serial :: x64_compile_module(lir_optimize_module(fx_stream_module(broken), level))
+    if serial.errors.len() != 1 || serial.functions.len() != 0 -> return false
+    if !serial.errors[0].starts_with("LIR lint: pair_a b0: entry block has 0 parameters for 1 signature parameters") -> return false
+    stopped :: x64_compile_module_owned(fx_stream_module(broken), fx_stream_threads(4), level, false)
+    if !fx_stream_same("lint-stop O{level}", fx_stream_rows(serial), fx_stream_rows(stopped.compiled)) -> return false
+    kept :: x64_compile_module_owned(fx_stream_module(broken), fx_stream_threads(4), level, true)
+    if kept.compiled.errors != serial.errors -> return false
+    if kept.compiled.functions.len() != stopped.program.functions.len() -> return false
+    trap :: kept.compiled.functions[broken]
+    trap.name == "pair_a" && trap.code.len() == 2 && trap.relocs.len() == 0
+}
+
+fn fx_stream_compile_check() -> Bool Never! {
+    clean := true
+    loop level in 0..<3 {
+        serial :: fx_stream_rows(x64_compile_module(lir_optimize_module(fx_stream_module(-1), level)))
+        if serial.len() == 0 -> return false
+        loop row in serial { if row.starts_with("error ") -> return false }
+        if !fx_stream_owned("O{level} one thread", level, 1, serial, false) -> clean = false
+        if !fx_stream_owned("O{level} four threads", level, 4, serial, false) -> clean = false
+        if !fx_stream_owned("O{level} keep-going four threads", level, 4, serial, true) -> clean = false
+        if !fx_stream_lint_stop(level) {
+            print("stream-compile lint-stop O{level}: the finding rows or the trap differ")
+            clean = false
+        }
+    }
+    clean
+}

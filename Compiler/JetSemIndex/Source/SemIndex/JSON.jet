@@ -1,0 +1,87 @@
+// Stable SemIndex encoding has one canonical codec family. Raw helpers retain
+// source order/nulls/duplicates; inspect boundaries build Foundation StatusValue
+// directly rather than serialize and reparse a recursive checked fact graph.
+
+// Rust: crates/jet-semindex/src/JSON.rs:28 json_instance
+// Rust: crates/jet-semindex/src/JSON.rs:80 json_output
+// Rust: crates/jet-semindex/src/JSON.rs:112 json_definition_fact
+// Rust: crates/jet-semindex/src/JSON.rs:116 json_output_payload
+// Rust: crates/jet-semindex/src/JSON.rs:141 json_optional_str
+use Compiler.JetSemIndex.Source.Codec.Package.[semindex_json_instance, semindex_json_output, semindex_json_definition_fact, semindex_json_output_payload, semindex_json_optional_str]
+// Rust: crates/jet-semindex/src/JSON.rs:145 json_strings
+// Rust: crates/jet-semindex/src/JSON.rs:152 json_string_array
+use Compiler.JetSemIndex.Source.Codec.Facts.[semindex_json_strings, semindex_json_string_array]
+// Rust: crates/jet-semindex/src/JSON.rs:156 json_optional_strings
+// Rust: crates/jet-semindex/src/JSON.rs:162 json_trust_decision
+// Rust: crates/jet-semindex/src/JSON.rs:170 json_package_authority
+// Rust: crates/jet-semindex/src/JSON.rs:230 json_string_map
+// Rust: crates/jet-semindex/src/JSON.rs:238 json_service
+// Rust: crates/jet-semindex/src/JSON.rs:254 json_services
+// Rust: crates/jet-semindex/src/JSON.rs:262 json_environment
+// Rust: crates/jet-semindex/src/JSON.rs:280 json_environments
+// Rust: crates/jet-semindex/src/JSON.rs:288 json_package_output
+// Rust: crates/jet-semindex/src/JSON.rs:306 json_package_outputs
+// Rust: crates/jet-semindex/src/JSON.rs:323 json_config_facts
+// Rust: crates/jet-semindex/src/JSON.rs:346 json_inline_configs
+// Rust: crates/jet-semindex/src/JSON.rs:354 json_members
+// Rust: crates/jet-semindex/src/JSON.rs:371 package_facts_json
+// Rust: crates/jet-semindex/src/JSON.rs:443 workspace_overlay_policy_json
+// BTreeMap wire order is retained by sorting keys once in the canonical codecs;
+// package digests/redaction/authority facts remain owned by PackageModel.
+use Compiler.JetSemIndex.Source.Codec.Package.[semindex_json_optional_strings, semindex_json_trust_decision, semindex_json_package_authority, semindex_json_string_map, semindex_json_service, semindex_json_services, semindex_json_environment, semindex_json_environments, semindex_json_package_output, semindex_json_package_outputs, semindex_json_config_facts, semindex_json_inline_configs, semindex_json_members, package_facts_json, workspace_overlay_policy_json]
+
+// Rust: crates/jet-semindex/src/JSON.rs:521 json_span
+// Rust: crates/jet-semindex/src/JSON.rs:525 json_view_provenance
+// Rust: crates/jet-semindex/src/JSON.rs:568 json_callable_unavailable
+// Rust: crates/jet-semindex/src/JSON.rs:576 json_callable_signature
+// Rust: crates/jet-semindex/src/JSON.rs:711 json_kind
+// Rust: crates/jet-semindex/src/JSON.rs:785 json_def
+// Rust: crates/jet-semindex/src/JSON.rs:832 json_trait_contract
+// Rust: crates/jet-semindex/src/JSON.rs:860 json_ref
+// Rust: crates/jet-semindex/src/JSON.rs:894 json_compiler_fact
+// Rust: crates/jet-semindex/src/JSON.rs:903 json_call
+// Rust: crates/jet-semindex/src/JSON.rs:913 json_effect
+// Rust: crates/jet-semindex/src/JSON.rs:953 json_arithmetic
+// Rust: crates/jet-semindex/src/JSON.rs:964 json_member_kind
+// Rust: crates/jet-semindex/src/JSON.rs:972 json_origin
+// Rust: crates/jet-semindex/src/JSON.rs:987 json_member
+// Rust: crates/jet-semindex/src/JSON.rs:1001 json_state_graph
+use Compiler.JetSemIndex.Source.Codec.Facts.[semindex_json_span, semindex_json_view_provenance, semindex_json_callable_unavailable, semindex_json_callable_signature, semindex_json_kind, semindex_json_def, semindex_json_trait_contract, semindex_json_ref, semindex_json_compiler_fact, semindex_json_call, semindex_json_effect, semindex_json_arithmetic, semindex_json_member_kind, semindex_json_origin, semindex_json_member, semindex_json_state_graph]
+
+// Rust: crates/jet-semindex/src/JSON.rs:1045 impl SemIndex
+// Rust: crates/jet-semindex/src/JSON.rs:1047 SemIndex.to_json
+// Rust: crates/jet-semindex/src/JSON.rs:1053 SemIndex.to_status_envelope
+// Rust: crates/jet-semindex/src/JSON.rs:1058 SemIndex.to_status_envelope_with_expand
+// Rust: crates/jet-semindex/src/JSON.rs:1062 SemIndex.to_status_envelope_inner
+// The complete implementations live in Codec/Envelope.jet. Its
+// status_payload_fields is the private inner assembly, with expansion appended
+// only by the expanded boundary; the original fifteen base fields stay ordered.
+// Rust: crates/jet-semindex/src/JSON.rs:1121 json_expand_projection
+// Rust: crates/jet-semindex/src/JSON.rs:1142 json_expand_value
+use Compiler.JetSemIndex.Source.Codec.Envelope.[semindex_json_expand_projection, semindex_json_expand_value]
+
+// Rust: crates/jet-semindex/src/JSON.rs:1171 impl TypeDossier
+// Rust: crates/jet-semindex/src/JSON.rs:1172 TypeDossier.to_status_envelope
+// Rust: crates/jet-semindex/src/JSON.rs:1199 TypeDossier.to_json
+// Rust: crates/jet-semindex/src/JSON.rs:1203 TypeDossier.render_text
+// Full JSON/text dossier implementation lives in Codec/Dossier.jet, including
+// nominal base, trait/failure contracts, effects, states, references and bypasses.
+// Rust: crates/jet-semindex/src/JSON.rs:1328 bypass_kind_text
+// Rust: crates/jet-semindex/src/JSON.rs:1337 json_bypass
+// Rust: crates/jet-semindex/src/JSON.rs:1348 origin_text
+use Compiler.JetSemIndex.Source.Codec.Dossier.[semindex_bypass_kind_text, semindex_json_bypass, semindex_origin_text]
+
+// Rust: crates/jet-semindex/src/JSON.rs:1357 convert_defs
+// Rust: crates/jet-semindex/src/JSON.rs:1427 contract_metadata
+// Rust: crates/jet-semindex/src/JSON.rs:1475 find_declaration
+// Rust: crates/jet-semindex/src/JSON.rs:1502 trait_contracts_for_owner
+// Rust: crates/jet-semindex/src/JSON.rs:1512 collect_trait_contracts
+// Rust: crates/jet-semindex/src/JSON.rs:1596 member_signatures
+// Rust: crates/jet-semindex/src/JSON.rs:1611 callable_signature
+// Rust: crates/jet-semindex/src/JSON.rs:1698 convert_refs
+// Rust: crates/jet-semindex/src/JSON.rs:1711 convert_kind
+// Rust: crates/jet-semindex/src/JSON.rs:1773 convert_view_provenance
+// Convert owns the entire final function through1808, including Range and
+// provenance.mutable from the next placement. Checked registration and loaded
+// source rows replace ProgramBundle; no duplicate AST/name-ledger producer.
+use Compiler.JetSemIndex.Source.SemIndex.Convert.[semindex_convert_defs, semindex_contract_metadata, semindex_find_declaration, semindex_trait_contracts_for_owner, semindex_collect_trait_contracts, semindex_member_signatures, semindex_callable_signature, semindex_convert_refs, semindex_convert_kind, semindex_convert_view_provenance]

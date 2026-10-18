@@ -196,7 +196,7 @@ fn bootstrap_native_codec_declared_type_matches(graph: SemaRegistrationGraph, mo
     }
     if nominal_name == .Val(name) {
         loop parameter in owner.generic_params {
-            if parameter.name == name -> return actual.identity == Val(expected)
+            if parameter.name == name -> return actual.identity == Val((expected))
         }
         resolved := sema_type_resolve_nominal_row(graph, Type.Named{name: name}, owner.module_identity)
         if resolved == .Val(row) {
@@ -213,7 +213,7 @@ fn bootstrap_native_codec_declared_type_matches(graph: SemaRegistrationGraph, mo
             if count != 1 -> return false
         }
     }
-    actual.identity == Val(expected)
+    actual.identity == Val((expected))
 }
 
 fn bootstrap_native_codec_is_builtin(ty: MIRType, name: String) -> Bool Never! {

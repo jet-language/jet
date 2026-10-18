@@ -7,6 +7,7 @@ use jet_foundation.[
     CanonicalPassRecord,
     AppAuthorizedDirectory,
     CompilerThreads,
+    compiler_threads_single,
     CompilerTraceSink,
     Diagnostic,
     GateLedger,
@@ -258,13 +259,13 @@ struct JetDriverCompileRequest {
     execution_host: JetDriverExecutionHost?{None}
     // Unified host/stop contract (#4720): the comptime lowering session
     // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
-    // for the native execution host. Only the native comptime selection sets
-    // it; the evaluator refuses stop points, so every other compile leaves it
-    // off.
+    // only for a native execution host. Compile-time code runs in the
+    // in-process evaluator until native in-memory O0 lands, and the evaluator
+    // refuses stop points, so every compile leaves it off.
     comptime_stop_points: Bool{false}
     // Ordinary native Program/Test/Doc artifacts use returning-stop MIR.
-    // This is independent of the native comptime session selection above;
-    // evaluator, Rust emission and library assembly leave it disabled.
+    // This is independent of the comptime stop points above; evaluator, Rust
+    // emission and library assembly leave it disabled.
     native_stop_points: Bool{false}
 }
 
@@ -614,6 +615,14 @@ struct JetDriverCompileResult {
     // Checked signature facts retain helper identity order. Realization for
     // check/run/build is a CLI host action, never a compiler process probe.
     rust_foreign: JetDriverRustForeignFacts{jet_driver_rust_foreign_empty()}
+    // The request's trace sink, handed back by the host's compile
+    // (JetCli Request.jet `jet_cli_compile_for_target`) so the host's own
+    // phases after it (the native backend route) trace through the same sink.
+    trace_sink: CompilerTraceSink?{None}
+    // The request's compiler threads, handed back by the host's compile
+    // (JetCli Request.jet `jet_cli_compile_for_target`) so the native backend
+    // route after it compiles on the same threads.
+    compiler_threads: CompilerThreads{compiler_threads_single()}
 }
 
 struct JetDriverSandboxOutput {
@@ -657,6 +666,8 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
 // named relative to that root and any other path keeps its canonical form,
 // so compiler output never depends on where the project is checked out.
 fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
+    // copy: the display path is a new owned String. With no entry root it equals `path`, a read
+    // parameter that the caller keeps (a source-file row), so the result needs its own text.
     if entry_root.len() == 0 -> return path.copy()
     if path == entry_root -> return ""
     prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
@@ -666,7 +677,11 @@ fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
 // The canonical path a display path names (the inverse of
 // `jet_driver_display_path`); authority checks compare physical paths.
 fn jet_driver_physical_path(entry_root: String, display: String) -> String Never! {
+    // copy: the physical path is a new owned String. For an absolute display it equals `display`, a
+    // read parameter that the caller keeps, so the result needs its own text.
     if entry_root.len() == 0 || display.starts_with("/") -> return display.copy()
+    // copy: the physical path is a new owned String. For an empty display it equals `entry_root`, a
+    // read parameter that the caller keeps, so the result needs its own text.
     if display.len() == 0 -> return entry_root.copy()
     if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
 }

@@ -958,6 +958,12 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage"},
     JetCLIFlagSpec{long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact"},
     JetCLIFlagSpec{long: "--rust", help: "With emit: Print generated Rust source"},
+    // Jet-only emit tiers (owner-directed 2026-10-15); the frozen Rust host
+    // table never gains them (Compiler/Bootstrap/check-command-table.mjs).
+    JetCLIFlagSpec{long: "--ast", help: "With emit: Print the parsed syntax tree"},
+    JetCLIFlagSpec{long: "--mir", help: "With emit: Print the checked MIR"},
+    JetCLIFlagSpec{long: "--lir", help: "With emit: Print the LIR the native backend lowers, before its optimization passes"},
+    JetCLIFlagSpec{long: "--fn", help: "With emit --ast/--mir/--lir: Print only the named function"},
     JetCLIFlagSpec{long: "--emit-generated", help: "With build: Copy generated Jet sources into `.jet/generated/`"},
     JetCLIFlagSpec{long: "-u", help: "Short form of --update-snapshots"},
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
@@ -967,6 +973,10 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value"},
     // D-JOBS1=A: the compiler's thread cap; never the program's own threads.
     JetCLIFlagSpec{long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
+    // Jet-only (owner-directed 2026-10-16): the compiler's streaming trace,
+    // the flag form of JET_TRACE_FILE; the frozen Rust host table never gains
+    // it (Compiler/Bootstrap/check-command-table.mjs).
+    JetCLIFlagSpec{long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE"},
     JetCLIFlagSpec{long: "--builder", help: "With build/jobs: Select a previously bound remote builder"},
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     JetCLIFlagSpec{long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics"},

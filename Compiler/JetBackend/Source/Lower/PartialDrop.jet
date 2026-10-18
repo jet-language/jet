@@ -110,14 +110,23 @@ fn lower_partial_field_path(p: MIRProgram, ty: MIRType, projections: [MIRProject
     path := [LowerGlueField]{}
     current := ty
     loop projection in projections {
-        if projection == .Field(id, _) {
-            field :: lower_struct_field(p, current, id) ?? return None
-            storage :: if field.boxed -> lower_option_type(field.ty) else -> field.ty
-            &path.push(LowerGlueField{offset: field.offset, ty: storage})
-            if field.boxed -> &path.push(LowerGlueField{offset: 0, ty: field.ty})
-            current = field.ty
-        } else {
-            return None
+        if projection == {
+            .Field(id, _) -> {
+                field :: lower_struct_field(p, current, id) ?? return None
+                storage :: if field.boxed -> lower_option_type(field.ty) else -> field.ty
+                &path.push(LowerGlueField{offset: field.offset, ty: storage})
+                if field.boxed -> &path.push(LowerGlueField{offset: 0, ty: field.ty})
+                current = field.ty
+            }
+            // A moved match payload (Places.jet lower_payload_info), laid
+            // out as lower_partial_value_path lays out an EnumPayload.
+            .Payload(kind, _) -> {
+                member :: lower_payload_info(p, current, kind) ?? return None
+                &path.push(LowerGlueField{offset: member.offset, ty: if member.boxed -> lower_option_type(member.ty) else -> member.ty})
+                if member.boxed -> &path.push(LowerGlueField{offset: 0, ty: member.ty})
+                current = member.ty
+            }
+            else -> return None
         }
     }
     Val(path)
@@ -147,7 +156,7 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             path := [LowerGlueField]{}
             if instruction.operation == {
                 .MovePlace(place) -> {
-                    row :: lower_place_row(c.mir, place) ?? next
+                    row :: lower_place_row(c.mir, c.place_rows, place) ?? next
                     if row.projections.len() == 0 -> next
                     slot :: c.place_slots.get(place.value) ?? next
                     path = lower_partial_field_path(p, c.slots[slot].ty, row.projections) ?? next
@@ -162,7 +171,9 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
                     if found.boxed -> &path.push(LowerGlueField{offset: 0, ty: found.ty})
                     owner = lower_partial_owner(c, lower_partial_root_value(c, value))
                     fact :: c.fact_index.get(lower_partial_root_value(c, value).value) ?? next
-                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move -> next
+                    // A taken field (lower_payload_takes) leaves its carrier
+                    // like a moved one: the carrier's drop skips that member.
+                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move && c.payload_takes.get(result.value) == None -> next
                 }
                 .OptionValue(value) | .ResultValue(value, _) -> {
                     offset :: if instruction.operation == .OptionValue(_) -> 0 else -> 8
@@ -186,7 +197,9 @@ fn lower_partial_frame(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
                     if member.boxed -> &path.push(LowerGlueField{offset: 0, ty: member.ty})
                     owner = lower_partial_owner(c, lower_partial_root_value(c, value))
                     fact :: c.fact_index.get(lower_partial_root_value(c, value).value) ?? next
-                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move -> next
+                    // A taken payload (lower_payload_takes) leaves its carrier
+                    // like a moved one, as for OptionValue/ResultValue above.
+                    if c.mir.values[fact].ownership.mode != MIROwnershipMode.Move && c.payload_takes.get(result.value) == None -> next
                 }
                 else -> next
             }
@@ -305,6 +318,15 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
         body :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
         lower_start(&f, body, [LIRValueID]{})
+        if lower_repr(p, ty) == .Boxed(_) {
+            // #5041 P2: only the box's last owner drops what is left in it;
+            // a move out of a shared box copied instead of taking.
+            last :: lower_flag(&f)
+            lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{base}, Val(last))
+            owner :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(owner, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, owner, [LIRValueID]{})
+        }
         shapes :: if lower_is_inline(p, ty) -> [LowerGlueShape]{LowerGlueShape{selector: -1, fields: lower_inline_glue_fields(p, ty)}} else -> lower_glue_shapes(p, &m, &f, ty)
         released :: lower_new_block(&f)
         loop shape in shapes {
@@ -352,7 +374,7 @@ fn lower_partial_drop_node(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ba
         }
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(released, [LIRValueID]{})})
         lower_start(&f, released, [LIRValueID]{})
-        if lower_repr(p, ty) == .Boxed(_) -> lower_free_shell(&m, &f, base, lower_box_size(p, ty))
+        if lower_repr(p, ty) == .Boxed(_) -> lower_free_box_bytes(&m, &f, base, lower_box_size(p, ty))
     }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
@@ -433,7 +455,7 @@ fn lower_partial_may_clear(p: MIRProgram, c: LowerContext, f: LowerFunction, own
             .WritePlace(place, value) | .ReplacePlace(place, value) -> {
                 slot :: c.place_slots.get(place.value) ?? next
                 if owner != "slot.{slot}" -> next
-                target :: lower_place_row(c.mir, place) ?? next
+                target :: lower_place_row(c.mir, c.place_rows, place) ?? next
                 prefix :: lower_partial_field_path(p, c.slots[slot].ty, target.projections) ?? next
                 if !lower_partial_prefix(path, prefix) -> next
                 if prefix.len() != 0 -> return false

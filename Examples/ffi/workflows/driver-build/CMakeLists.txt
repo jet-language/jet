@@ -10,7 +10,7 @@ target_link_libraries(driver_app PRIVATE driver_support)
 # that a compilation database proves the complete graph.
 add_custom_command(
     OUTPUT generated/native-action.txt
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/unsupported/native_action.sh" "${CMAKE_CURRENT_BINARY_DIR}/generated/native-action.txt"
+    COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/unsupported/native_action.sh" "${CMAKE_CURRENT_BINARY_DIR}/generated/native-action.txt"
     DEPENDS unsupported/native_action.sh
     VERBATIM
 )

@@ -95,7 +95,7 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, program: Sem
         }
         if trait_name != "Equatable" -> return false
         module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
+        row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
         // Matched in place: a pattern on the indexed path copies the whole item.
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).equatable
@@ -285,7 +285,7 @@ fn sema_comparability_equatable_arguments(environment: SemaScopeEnvironment, pro
         name :: sema_type_graph_base_name(ty) ?? ""
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name)
         if resolved == .Val(symbol) {
-            row :: sema_type_graph_nominal_row(graph, symbol.symbol.id.key)
+            row :: sema_type_graph_resolved_nominal_row(graph, symbol)
             if row == .Val(nominal_row) {
                 nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
                 if nominal.source == .SourceAST(item) {
@@ -377,34 +377,14 @@ fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             }
             return rejected
         }
-        return SemaComparabilityBinary{handled: true, value: Val(sema_tir_expr(Type.Bool, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
+        return SemaComparabilityBinary{handled: true, value: Val(sema_tir_node(Type.Bool, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
     }
     if !sema_type_comparable(environment, program, lhs.ty) {
         &diagnostics.push(sema_error("E0109", span, "{label} can't compare or combine {shown} and {type_name(rhs.ty)}", "{label} is not defined for {shown}", "use an operation supported by {shown}, or call a named method"))
         return rejected
     }
     result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
-    SemaComparabilityBinary{handled: true, value: Val(sema_tir_expr(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
-}
-
-// Rust `check_assert_eq_call`: both sides share one type (E0108) and that type
-// supports `==` (E0312). Reported at the `assert_eq` name; false rejects.
-fn sema_comparability_check_assert_eq(arguments: [TCallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    if arguments.len() != 2 -> return true
-    left :: arguments[0].value.ty
-    right :: arguments[1].value.ty
-    if !type_identity_equal(left, right) {
-        &diagnostics.push(sema_error("E0108", span, "`assert_eq` compared {type_name(left)} and {type_name(right)}, which don't match", "both sides must be the same type to compare them", "convert one side, or compare fields that have the same type"))
-        return false
-    }
-    if sema_type_equatable(environment, program, left) -> return true
-    field :: sema_incomparable_field(environment, program, left)
-    if field == .Val(field_name) {
-        &diagnostics.push(sema_error("E0312", span, "`assert_eq` can't compare values of type `{type_name(left)}` (field `{field_name}` isn't comparable)", "equality needs types whose fields can all be compared", "compare the fields you care about instead"))
-        return false
-    }
-    &diagnostics.push(sema_error("E0312", span, "`assert_eq` can't compare values of type `{type_name(left)}`", "this type doesn't support `==`", "compare fields individually, or use a different check"))
-    false
+    SemaComparabilityBinary{handled: true, value: Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
 }
 
 // Rust `core.math` `min`/`max`/`clamp` (E0905, reported at the first

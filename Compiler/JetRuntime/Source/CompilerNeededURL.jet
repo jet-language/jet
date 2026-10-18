@@ -536,8 +536,8 @@ fn compiler_url_parse_body(input: I64, value: I64, err: I64) -> Bool {
     compiler_url_replace(value, I64{72}, compiler_url_render(value, user, pass, fragment))
     true
 }
-// Rust str::trim uses Unicode White_Space. A trimmed view borrows the input
-// bytes, never copies them, and is freed as a header (not a Text owner).
+// Rust str::trim uses Unicode White_Space. A trimmed input is its own owned
+// text: under shared text storage a clone of it must not alias a borrow.
 fn compiler_url_trim_view(value: I64) -> I64 {
     data :: rt_text_data(value)
     len :: rt_text_len(value)
@@ -554,17 +554,13 @@ fn compiler_url_trim_view(value: I64) -> I64 {
         end = at
     }
     if (start == I64{0} && end == len) -> return value
-    view :: jet_rt_alloc(I64{24}, I64{8})
-    rt_text_store(view, data + start)
-    rt_text_store(view + I64{8}, end - start)
-    rt_text_store(view + I64{16}, I64{0})
-    view
+    rt_text_copy(data + start, end - start)
 }
 #Export(c) fn jet_url_parse(a0: I64, ok: I64, err: I64) -> I64 {
     input :: compiler_url_trim_view(a0)
     value :: compiler_url_new()
     success :: compiler_url_parse_body(input, value, err)
-    if input != a0 -> jet_rt_free(input, I64{24}, I64{8})
+    if input != a0 -> jet_rt_string_drop(input)
     if !success {
         jet_rt_handle_drop_jet_url(value)
         return I64{0}

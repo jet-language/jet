@@ -69,12 +69,12 @@ fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: S
 }
 
 fn sema_loop_value_collect_local_expr(local: TLocal, item_type: Type, span: Span) -> TExpr Never! {
-    sema_tir_expr(Type.List{element: item_type}, TExprKind.Local{local: local}, span)
+    sema_tir_node(Type.List{element: item_type}, TExprKind.Local{local: local}, span)
 }
 
 fn sema_loop_value_collect_push(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt Never! {
     receiver :: sema_loop_value_collect_local_expr(local, item_type, span)
-    call := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{value}}, span)
+    call := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{value}}, span)
     TStmt.ExprStmt{value: call, span: span}
 }
 
@@ -146,7 +146,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 }
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
-            .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
+            .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
                 updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
@@ -159,7 +159,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                     if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, program, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
-                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_else_body := else_body
@@ -254,7 +254,7 @@ fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: S
     collector_type := Type.List{element: item_type}
     local := tir_generated_local("__jet_collect_{span.start}", span)
     local.mutable = true
-    empty := sema_tir_expr(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
+    empty := sema_tir_node(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
     lowered := [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: collector_type, wrapper: TLetWrapper.Plain}, init: empty, gc_promotion: None, gc_transferred: false, span: span}}
     loop statement in body -> &lowered.push(statement)
     if !sema_loop_value_rewrite_collecting_statements(&lowered, local, item_type, environment, program, &diagnostics) -> return None
@@ -333,7 +333,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 }
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
-            .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
+            .EnumMatch(subject, arms, else_body, fallthrough, span) -> {
                 updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
@@ -346,7 +346,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                     if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, program, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
-                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, arms: updated_arms, else_body: updated_else_body, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_else_body := else_body

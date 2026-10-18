@@ -185,12 +185,11 @@ impl PackageFacts {
             MANIFEST_BLOCK_OUTPUTS -> {
                 parsed :: pkg_parse_outputs(value)
                 loop name in pkg_manifest_sorted(parsed.keys().to_list()) {
-                    output :: parsed[name]
                     if self.outputs.get(name) == {
                         .Val(existing) -> {
-                            if existing != output -> return Err(PackageParseError.Composition("output `{name}` is declared with conflicting values: {pkg_debug_output(existing)} and {pkg_debug_output(output)}"))
+                            if existing != parsed[name] -> return Err(PackageParseError.Composition("output `{name}` is declared with conflicting values: {pkg_debug_output(existing)} and {pkg_debug_output(parsed[name])}"))
                         }
-                        .None -> self.outputs[name] = output
+                        .None -> self.outputs[name] = parsed[name]
                     }
                 }
             }

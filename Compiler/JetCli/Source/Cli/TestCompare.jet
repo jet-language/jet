@@ -138,6 +138,8 @@ fn jet_cli_comparison_canonical_data(value: Dyn) -> String Never! {
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Int(number) -> "{number}"
         .Float(number) -> "{number}"
+        // copy: `number` is a payload view of `value` (owner: the caller, a read parameter: no move
+        // out of it, E0201); the canonical text owns its own.
         .Number(number) -> number.copy()
         .Text(text) -> foundation_json_quote(text)
         .Bytes(bytes) -> "bytes:{bytes.len()}"
@@ -165,7 +167,10 @@ fn jet_cli_comparison_observation(value: Dyn, prefix: String, relation: Observat
 }
 
 fn jet_cli_comparison_seed(value: Dyn, inherited: U64?) -> U64? Never! {
+    // copy: `inherited` is the caller's seed (a read parameter it keeps); the case
+    // identity owns the returned seed.
     number :: jet_cli_comparison_int(value, "seed") ?? return inherited.copy()
+    // copy: same two owners as above.
     if number < 0 -> return inherited.copy()
     Val(U64{number})
 }
@@ -254,8 +259,7 @@ fn jet_cli_comparison_render(record: ComparisonRecord, json: Bool) -> String Nev
         }
     }
     if mismatch == .Val(sample) {
-        identity :: sample.identity
-        out = "{out}\nreplay case={identity.case_id} input={identity.input_id} source={identity.source} tool={identity.tool} target={identity.target}\nreference={sample.reference.raw}\ncandidate={sample.candidate.raw}"
+        out = "{out}\nreplay case={sample.identity.case_id} input={sample.identity.input_id} source={sample.identity.source} tool={sample.identity.tool} target={sample.identity.target}\nreference={sample.reference.raw}\ncandidate={sample.candidate.raw}"
     }
     "{out}\n"
 }

@@ -38,7 +38,10 @@ fn sema_units_mention_suffix(rows: &[String:SemaUnitSuffixMention], bytes: [U8],
     if !from && row.digit_span == None -> row.digit_span = Val(Span{start: start, end: end})
     rows[text] = row
 }
-fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Never! {
+// Only identifiers named in `wanted` (the catalog's family names and member
+// type names, the only names ever looked up) are indexed: the maps stay
+// catalog-sized instead of holding every identifier of the source.
+fn sema_units_source_mentions(source: String, wanted: [String:Bool]) -> SemaUnitSourceMentions Never! {
     bytes :: source.bytes()
     identifiers := [String:Span]{}
     unqualified := [String:Bool]{}
@@ -59,8 +62,10 @@ fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Never! {
             at = end
         }
         run :: String.from_bytes(bytes[start..<at]) ?? ""
-        if identifiers.get(run) == None -> identifiers[run] = Span{start: start, end: at}
-        if start == 0 || Int.from_u8(bytes[start - 1]) != 46 -> unqualified[run] = true
+        if wanted.get(run) != None {
+            if identifiers.get(run) == None -> identifiers[run] = Span{start: start, end: at}
+            if (start == 0 || Int.from_u8(bytes[start - 1]) != 46) && unqualified.get(run) == None -> unqualified[run] = true
+        }
         loop offset in starts {
             if offset > 0 && sema_units_ascii_digit(bytes[offset - 1]) && !sema_units_ascii_digit(bytes[offset]) -> sema_units_mention_suffix(&suffixes, bytes, offset, at, false)
             if offset + 5 <= at && Int.from_u8(bytes[offset]) == 102 && Int.from_u8(bytes[offset + 1]) == 114 && Int.from_u8(bytes[offset + 2]) == 111 && Int.from_u8(bytes[offset + 3]) == 109 && Int.from_u8(bytes[offset + 4]) == 95 -> sema_units_mention_suffix(&suffixes, bytes, offset + 5, at, true)
@@ -69,7 +74,7 @@ fn sema_units_source_mentions(source: String) -> SemaUnitSourceMentions Never! {
     sorted := [SemaUnitSuffixMention]{}
     loop (_, row) in suffixes -> &sorted.push(row)
     &sorted.sort_by((left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) -> left.text <=> right.text)
-    SemaUnitSourceMentions{identifiers: identifiers, unqualified: unqualified, suffixes: sorted}
+    SemaUnitSourceMentions{identifiers: ^identifiers, unqualified: ^unqualified, suffixes: ^sorted}
 }
 fn sema_units_identifier(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
     mentions.identifiers.get(name) != None

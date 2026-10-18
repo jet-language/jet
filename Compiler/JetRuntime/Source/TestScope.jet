@@ -4,6 +4,14 @@
 // completed=[scope, ownedCode], timeouts=[scope, seconds, nanos, limit, depth].
 // Strings in rows are owned E4; arguments are borrowed; take transfers ownership.
 
+// Five-byte stop codes as little-endian words, compared and written raw.
+TEST_SCOPE_E3001 :: prep { I64{211261862725} }
+TEST_SCOPE_E3010 :: prep { I64{206983672645} }
+TEST_SCOPE_E3011 :: prep { I64{211278639941} }
+TEST_SCOPE_R0801 :: prep { I64{211262386258} }
+TEST_SCOPE_R0802 :: prep { I64{215557353554} }
+TEST_SCOPE_R0803 :: prep { I64{219852320850} }
+
 fn test_scope_clone(text: I64) -> I64 {
     if (text == I64{0}) -> I64{0} else -> test_text_clone(text)
 }
@@ -162,6 +170,35 @@ fn test_scope_state_drop(state: I64) {
     }
 }
 
+// Raw publication paths already own code/message bytes. Copy once into each
+// unstopped frame rather than constructing temporary text just to clone it.
+fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, length: I64) {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    frames :: state + I64{32}
+    at := I64{0}
+    loop at < trap_word(frames) {
+        row :: trap_word(frames + I64{16}) + at * I64{8}
+        if (trap_word(row + I64{24}) == I64{0}) {
+            code :: jet_rt_string_builder_new()
+            rt_text_push_word(code, code_word, code_length)
+            trap_store(row + I64{24}, code)
+            trap_store(row + I64{32}, rt_text_copy(message, length))
+        }
+        at += I64{5}
+    }
+}
+
+// trap_header numbering: 0 E3001, 1 E3010, 2 E3011 (little-endian words).
+fn test_scope_record_coded_stop(code: I64, message: I64, length: I64) {
+    word :: if {
+        (code == I64{0}) -> TEST_SCOPE_E3001
+        (code == I64{1}) -> TEST_SCOPE_E3010
+        else -> TEST_SCOPE_E3011
+    }
+    test_scope_record_raw_stop(word, I64{5}, message, length)
+}
+
 fn test_scope_stopped_index(state: I64) -> I64 {
     frames :: state + I64{32}
     at := trap_word(frames)
@@ -182,6 +219,63 @@ fn test_scope_stopped_index(state: I64) -> I64 {
     if (at < I64{0}) -> return false
     trap_store(output, trap_word(trap_word(state + I64{48}) + at * I64{8}))
     true
+}
+
+// The five code bytes of a recorded stop as one little-endian word.
+fn test_scope_code_word(code: I64) -> I64 {
+    if (trap_word(code + I64{8}) != I64{5}) -> return I64{0}
+    bytes :: trap_word(code)
+    word := I64{0}
+    at := I64{0}
+    loop at < (I64{5}) {
+        word = word.bit_or(trap_byte(bytes + at) << (at * I64{8}))
+        at += I64{1}
+    }
+    word
+}
+
+// Native stopped MIR has no host unwind to catch. Only a pending panic whose
+// stop the panic rail recorded raw (E3001/E3010/E3011, Sentry R0801-R0803) in
+// the innermost stopped expectation of this scope can consume it. Keep
+// cancellation, deadlines, skip, and unrelated scope probes untouched.
+#Export(c) fn jet_rt_test_catch_for_scope(scope: I64) -> Bool {
+    control :: scheduler_control_current()
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return false
+    state :: test_capture_state()
+    if (state == I64{0} || trap_word(state + I64{80}) != I64{0}) -> return false
+    index :: test_scope_stopped_index(state)
+    if (index < I64{0}) -> return false
+    row :: trap_word(state + I64{48}) + index * I64{8}
+    if (trap_word(row) != scope) -> return false
+    word :: test_scope_code_word(trap_word(row + I64{24}))
+    if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 &&
+        word != TEST_SCOPE_R0801 && word != TEST_SCOPE_R0802 && word != TEST_SCOPE_R0803) -> return false
+    // The original stop stays pending while deeper frames unwind; only a
+    // mismatch replaces it (test_scope_catch native) with E3001 at once.
+    saved :: jet_rt_poll_call_enter()
+    caught :: test_scope_catch(I64{0}, true)
+    jet_rt_poll_call_leave(saved)
+    caught
+}
+
+// The compiler enters the canonical expectation exit after deeper frames
+// unwind. Its own cleanup is outside the caught closure (MIRRust.rs:15056),
+// so the caught stop is cleared here, before that frame's own cleanup.
+#Export(c) fn jet_rt_test_catch_boundary(scope: I64) {
+    control :: scheduler_control_current()
+    if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    completed :: state + I64{56}
+    at := trap_word(completed)
+    loop at > (I64{0}) {
+        at -= I64{2}
+        row :: trap_word(completed + I64{16}) + at * I64{8}
+        if (trap_word(row) == scope) {
+            scheduler_control_discard_stop(control)
+            return
+        }
+    }
 }
 
 fn test_scope_quoted(builder: I64, text: I64) {
@@ -276,7 +370,7 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     completed :: test_scope_push(state + I64{56}, I64{2})
     trap_store(completed, scope)
     trap_store(completed + I64{8}, code)
-    trap_store(output, scope)
+    if (output != I64{0}) -> trap_store(output, scope)
     true
 }
 

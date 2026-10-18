@@ -159,6 +159,8 @@ fn x64_value_boundary(program: MIRProgram, ty: MIRType) -> X64ValueBoundary Neve
 // the delivered-stop guard used by ordinary native callback adapters.
 fn lower_value_callable(program: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature_id :: m.mir_signatures[glue.function].copy()
+    // copy: the callable's signature is read while its body registers signatures and glue in `m`
+    // (`&m`), so a view into m.signatures would be live across those writes.
     signature :: m.signatures[signature_id.value].copy()
     source :: program.functions[m.mir_sources[glue.function]]
     hidden :: if source.capture_params.len() > 0 -> 1 else -> 0

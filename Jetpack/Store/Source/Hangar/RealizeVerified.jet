@@ -565,7 +565,7 @@ fn store_record_receipt_projection(project_root: String, package_name: String, p
         }
     }
     if package_index < 0 -> return Err(StoreError.InvalidData("Hangar receipt `{receipt}` has no matching package in project lock `{lock_path}`"))
-    if lock.packages[package_index].receipt == Val(receipt) -> return Ok(false)
+    if lock.packages[package_index].receipt == Val((receipt)) -> return Ok(false)
     lock.packages[package_index].receipt = Val(receipt)
     pkg_lock_ensure_build_stamp(project_root, &lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) ?? return Err(StoreError.Other(err.message()))

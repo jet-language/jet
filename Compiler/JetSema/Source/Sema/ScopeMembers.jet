@@ -74,10 +74,10 @@ fn sema_scope_members_site_is_known(name: String) -> Bool Never! {
 
 fn sema_scope_members_declared_sites(declaration: MarkerDecl) -> [String]? {
     found := false
-    loop parameter in declaration.params {
-        if parameter.name != "$sites" -> next
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name != "$sites" -> next
         found = true
-        value :: parameter.value ?? return None
+        value :: declaration.params[parameter_index].value ?? return None
         if value == {
             .ListLit(values, _) -> {
                 sites := [String]{}
@@ -96,9 +96,9 @@ fn sema_scope_members_declared_sites(declaration: MarkerDecl) -> [String]? {
 }
 
 fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> Bool? {
-    loop parameter in declaration.params {
-        if parameter.name != "$repeatable" -> next
-        value :: parameter.value ?? return None
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name != "$repeatable" -> next
+        value :: declaration.params[parameter_index].value ?? return None
         if value == {
             .Bool(repeatable, _) -> return Val(repeatable)
             else -> return None
@@ -108,9 +108,9 @@ fn sema_scope_members_declared_repeatable(declaration: MarkerDecl) -> Bool? {
 }
 
 fn sema_scope_members_first_parameter_is_type(declaration: MarkerDecl) -> Bool Never! {
-    loop parameter in declaration.params {
-        if parameter.name.starts_with("$") -> next
-        return parameter.ty == (Val(Type.Named{name: "Type"}))
+    loop parameter_index in 0..<declaration.params.len() {
+        if declaration.params[parameter_index].name.starts_with("$") -> next
+        return declaration.params[parameter_index].ty == (Val(Type.Named{name: "Type"}))
     }
     false
 }
@@ -213,16 +213,16 @@ fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module
     }
     if !sema_scope_members_registry_add_applied_catalog(&registry, catalog) -> return None
     current_module_found := false
-    loop module_row in graph.modules {
+    loop module_row_index in 0..<graph.modules.len() {
         // The current module's rows come from `program`; read either in place.
-        if module_row.module_identity == module_identity {
+        if graph.modules[module_row_index].module_identity == module_identity {
             current_module_found = true
             if !sema_scope_members_registry_add_program(&registry, program) -> return None
         } else {
             // Derive providers retain their existing package scope; marker
             // declarations enter only through the import-qualified rows below.
-            loop item in module_row.program.items {
-                if item == .UserDerive(provider) {
+            loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
+                if graph.modules[module_row_index].program.items[item_index] == .UserDerive(provider) {
                     sema_scope_members_append_name(&registry.derive_provider_names, provider.trait_name)
                     sema_scope_members_append_name(&registry.known_marker_names, provider.trait_name)
                 }
@@ -399,7 +399,7 @@ fn sema_scope_members_check_marker_body(marker: String, body: [Stmt], diagnostic
             sema_scope_members_walk(member_body, true, &diagnostics)
             next
         }
-        loop child in sema_scope_members_child_bodies(statement) -> sema_scope_members_walk(child, true, &diagnostics)
+        sema_scope_members_walk_children(statement, true, &diagnostics)
     }
 }
 
@@ -440,20 +440,19 @@ fn sema_scope_members_walk(body: [Stmt], nested: Bool, diagnostics: &[Diagnostic
             sema_scope_members_walk(member_body, nested, &diagnostics)
             next
         }
-        loop child in sema_scope_members_child_bodies(statement) -> sema_scope_members_walk(child, nested, &diagnostics)
+        sema_scope_members_walk_children(statement, nested, &diagnostics)
     }
 }
 
-// Rust `child_bodies`: every statement block a statement carries.
-fn sema_scope_members_child_bodies(statement: Stmt) -> [[Stmt]] Never! {
+// Rust `child_bodies`: walks every statement block a statement carries, in
+// place (arms in order, then the else body).
+fn sema_scope_members_walk_children(statement: Stmt, nested: Bool, diagnostics: &[Diagnostic]) {
     if statement == {
         .Switch(_, arms, else_body, _) -> {
-            bodies := [[Stmt]]{}
-            loop arm in arms -> &bodies.push(arm.body)
-            if else_body == .Val(body) -> &bodies.push(body)
-            bodies
+            loop arm in arms -> sema_scope_members_walk(arm.body, nested, &diagnostics)
+            if else_body == .Val(body) -> sema_scope_members_walk(body, nested, &diagnostics)
         }
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [[Stmt]]{body}
-        else -> [[Stmt]]{}
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_scope_members_walk(body, nested, &diagnostics)
+        else -> {}
     }
 }

@@ -8,7 +8,7 @@ trap 'rm -rf "$work"' EXIT
 
 cp -R "$root" "$work/project"
 cd "$work/project"
-./native/build.sh
+sh native/build.sh
 "$jet" bind native/callbacks.h --pkg source --quiet >"$work/bind.log" 2>&1
 "$jet" build >"$work/build.log" 2>&1
 output=$("$jet" run 2>"$work/run.err")

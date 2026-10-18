@@ -14,7 +14,7 @@ STORE_TEST_PROJECTION_LEAF :: prep { "/nix/store/1111111111111111111111111111111
 fn store_test_find_entry(entries: [StoreEntry], store_path: String) -> StoreEntry Never! {
     loop entry in entries {
         producer :: ProducerRecord.decode(entry.producer_record) ?? next
-        if producer.facts.get("nix.store-path") == Val(store_path) -> return entry
+        if producer.facts.get("nix.store-path") == Val((store_path)) -> return entry
     }
     panic("missing admitted Nix entry for {store_path}")
 }

@@ -65,7 +65,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     }
     __real_jet_rt_free(ptr,size,align);
 }
-static void text_watch(Text *t) { watch(t,24,8); if(t->cap) watch(t->data,t->cap,1); }
+static void text_watch(Text *t) { watch((char *)(t)-8,32,8); if(t->cap) watch(t->data,t->cap,1); }
 static void value_watch(Value *v) { watch(v,32,8); if(v->tag==3) text_watch(v->value.text); if(v->tag==5 && v->value.blob.cap) watch(v->value.blob.data,v->value.blob.cap*stride,8); }
 static void error_watch(Error *e) { watch(e,8,8); text_watch(e->message); }
 static void expect_bytes(Text *t,const char *s,size_t len) { assert(t && t->len==(int64_t)len && !memcmp(t->data,s,len)); text_watch(t); jet_rt_string_drop(t); }

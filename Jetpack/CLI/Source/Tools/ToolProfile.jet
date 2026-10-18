@@ -105,7 +105,7 @@ fn cli_write_tool_manifest(manifest: ToolManifest) CLIError! -[FS, Env]> {
     if cli_stat_optional(partial) != None -> files.remove(partial)
     cli_write_synced(partial, manifest.format().bytes())
     cli_finalize_profile_pointer(partial, cli_tool_manifest_path())
-    store_sync_store_directory(cli_tools_state_dir())
+    store_sync_store_directory(cli_tools_state_dir()) ?? return Err(CLIError.Store(err))
 }
 
 // Record the installed tools in the manifest: sources merge the old
@@ -300,8 +300,8 @@ fn cli_tool_write_generation_body(verification: &StoreVerification, generation: 
     cli_validate_generation_bins(&verification, generation, generation_tools)
     witness :: cli_tool_generation_record_witness(meta, generation)
     cli_write_synced(files.join(generation_dir, TOOL_PROFILE_COMPLETE_FILE), "{witness}\n".bytes())
-    store_sync_store_directory(generation_dir)
-    store_sync_store_directory(cli_tool_generations_dir())
+    store_sync_store_directory(generation_dir) ?? return Err(CLIError.Store(err))
+    store_sync_store_directory(cli_tool_generations_dir()) ?? return Err(CLIError.Store(err))
     cli_profile_failpoint("after-generation")
     if generation_tools.len() > 0 {
         cli_ensure_tool_generation_roots(&verification, generation, generation_tools, witness)
@@ -336,12 +336,12 @@ fn cli_ensure_tool_generation_roots(verification: &StoreVerification, generation
     prepared := [(roots: HangarRoots, receipt: PreparedProfileGenerationRoot)]{}
     loop root in store_roots {
         roots :: HangarRoots{root: root, dev_mode: true}
-        receipt :: store_reconcile_profile_generation_root(&verification, roots, TOOL_PROFILE_OWNER, TOOL_PROFILE_NAME, generation, witness, authorities[root], cli_now_secs())
+        receipt :: store_reconcile_profile_generation_root(&verification, roots, TOOL_PROFILE_OWNER, TOOL_PROFILE_NAME, generation, witness, authorities[root], cli_now_secs()) ?? return Err(CLIError.Store(err))
         if receipt == .Val(pending) -> &prepared.push((roots: roots, receipt: pending))
     }
     cli_profile_failpoint("after-root-prepare")
     loop index in 0..<prepared.len() {
-        store_commit_profile_generation_root(&verification, prepared[index].roots, prepared[index].receipt, cli_now_secs())
+        store_commit_profile_generation_root(&verification, prepared[index].roots, prepared[index].receipt, cli_now_secs()) ?? return Err(CLIError.Store(err))
         if index + 1 != prepared.len() -> cli_profile_failpoint("between-root-commits")
     }
 }
@@ -365,7 +365,7 @@ fn cli_publish_tool_generation(generation: Int, witness: String, tools: [Install
             cli_install_profile_projection(generation, bin) ?? return Err(cli_managed_tool_write_error(bin, path, err))
         }
     }
-    store_sync_store_directory(cli_user_bin_dir())
+    store_sync_store_directory(cli_user_bin_dir()) ?? return Err(CLIError.Store(err))
     pointer :: ToolProfilePointer{generation: generation, witness: witness}.format()
     cli_atomic_write_current_pointer(pointer.bytes())
     cli_profile_failpoint("after-current-pointer")
@@ -382,7 +382,7 @@ fn cli_publish_tool_generation(generation: Int, witness: String, tools: [Install
             files.remove(path) ?? return Err(cli_managed_tool_write_error(bin, path, CLIError.IO(err)))
         }
     }
-    store_sync_store_directory(cli_user_bin_dir())
+    store_sync_store_directory(cli_user_bin_dir()) ?? return Err(CLIError.Store(err))
 }
 
 // Rust `json_str`: quote with only `\`, `"`, and newline escaped.
@@ -477,8 +477,8 @@ fn cli_migrate_legacy_tool_generations_locked(verification: &StoreVerification) 
         destination :: files.join(archive, "generation-{old.generation}")
         if files.exists(destination) -> return Err(CLIError.Other("legacy profile migration archive collision"))
         files.rename(old.path, destination)
-        store_sync_store_directory(archive)
-        store_sync_store_directory(cli_tool_generations_dir())
+        store_sync_store_directory(archive) ?? return Err(CLIError.Store(err))
+        store_sync_store_directory(cli_tool_generations_dir()) ?? return Err(CLIError.Store(err))
     }
 }
 
@@ -514,7 +514,7 @@ fn cli_parse_legacy_tool_generation_meta(verification: &StoreVerification, text:
     if entries.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("legacy profile tool count exceeds bound"))
     roots :: pkg_resolve_roots()
     if !cli_path_is_normalized_absolute(roots.root) -> return Err(CLIError.Other("profile Store authority is not an absolute normalized path"))
-    store :: store_list_checked(&verification, roots)
+    store :: store_list_checked(&verification, roots) ?? return Err(CLIError.Store(err))
     tools := [InstalledUserTool]{}
     seen_bins := [String]{}
     loop entry in entries {

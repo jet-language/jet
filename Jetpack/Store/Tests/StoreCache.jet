@@ -102,8 +102,8 @@
     }
     projection := [String: String]{}
     loop item in store_nix_store_projection_for_entry(&verification, roots, entry, snapshot) ?? panic("projection") -> projection[item.logical] = item.source
-    assert(projection.get("/nix/store/projection-out") == Val(snapshot))
-    assert(projection.get("/nix/store/projection-dev") == Val(dev_object))
+    assert(projection.get("/nix/store/projection-out") == Val((snapshot)))
+    assert(projection.get("/nix/store/projection-dev") == Val((dev_object)))
     loop item in projection -> assert(!store_path_starts_with(item.value, "/nix/store"))
 
     lease :: store_snapshot_lease(&verification, roots, entry) ?? panic("lease")

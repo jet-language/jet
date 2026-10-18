@@ -106,13 +106,13 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, program: Sema
 fn sema_call_source_import_target(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
     if program.registration_graph == .Val(graph) {
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    loop import in graph.modules[module_index].imports {
-        loop binding in import.bindings {
-            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
-            target_index :: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
+    loop import_index in 0..<graph.modules[module_index].imports.len() {
+        loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+            if graph.modules[module_index].imports[import_index].bindings[binding_index].local != alias || graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind != SymbolKind.Import || graph.modules[module_index].imports[import_index].bindings[binding_index].declaration != None -> next
+            target_index :: sema_registration_module_index(graph, graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity) ?? return None
             module_name :: graph.modules[target_index].module_name
             if sema_core_import_is_core(module_name) -> return None
-            return Val(SemaCallImportTarget{alias: alias, module_identity: binding.target_module_identity, module_name: module_name, item: None, span: binding.symbol.span})
+            return Val(SemaCallImportTarget{alias: alias, module_identity: graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity, module_name: module_name, item: None, span: graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.span})
         }
     }
     return None
@@ -166,7 +166,7 @@ fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, progra
 fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, target) -> return false
     index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
-    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: scopes.bindings[index].symbol, kind: "import_alias"})
+    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, index), kind: "import_alias"})
     true
 }
 
@@ -291,10 +291,10 @@ fn sema_call_import_member_unknown(member: String, span: Span) -> Diagnostic {
 
 fn sema_call_core_module_identity(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String) -> String? {
     if program.registration_graph == .Val(graph) {
-    loop module_row in graph.modules {
-        if module_row.module_name != module_name || !sema_module_is_core_source(module_row.module_identity) -> next
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_name != module_name || !sema_module_is_core_source(graph.modules[module_row_index].module_identity) -> next
         loop owner in CORE_SOURCE_OWNED_ROWS {
-            if owner.module_name == module_name && owner.alias == module_row.core_source_alias && module_row.source_file == "<corelib>/{owner.path}" -> return Val(module_row.module_identity)
+            if owner.module_name == module_name && owner.alias == graph.modules[module_row_index].core_source_alias && graph.modules[module_row_index].source_file == "<corelib>/{owner.path}" -> return Val(graph.modules[module_row_index].module_identity)
         }
     }
     return None
@@ -558,6 +558,30 @@ fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment
     sema_expr_expected(typed, Val(expected), environment, program, &diagnostics)
 }
 
+// Rust core_call.rs `("core.math", "abs")`: `abs` takes Int, Float or F32
+// (D-FLOATW1) and Complex, returning the argument type (Float for Complex).
+// The Int form stays the routed source `abs`; a float or Complex argument is
+// the MathBuiltin `abs` that Rust `lower_core_math_abs` lowers it to, which is
+// the route `Complex.abs` already takes. Anything else is not handled here.
+fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.math" || member != "abs" || args.len() != 1 || type_args.len() != 0 || args[0].label != None -> return unhandled
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return unhandled
+    type_name := ""
+    result_ty := Type.Float
+    if probed.ty == Type.Float -> type_name = "Float"
+    if probed.ty == Type.Float32 {
+        type_name = "F32"
+        result_ty = Type.Float32
+    }
+    if probed.ty == (Type.Named{name: "Complex"}) -> type_name = "Complex"
+    if type_name == "" -> return unhandled
+    value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    magnitude :: sema_tir_node(result_ty, TExprKind.MathBuiltin{type_name: type_name, function: "abs", args: [TExpr]{value}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
+}
+
 // Width selection is the existing checked mathematical normalization; it is
 // separate from source forwarding and never widens F32 values.
 fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
@@ -584,7 +608,7 @@ fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params
         param :: params[index]
         &result.push(TCallArg{value: value, template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
-            mut_borrow: param.convention == AccessConvention.Write, clone: false, arc_clone: false,
+            mut_borrow: param.convention == AccessConvention.Write,
             fn_coerce: None, widen_to_vec: false,
             widen_to_union: sema_call_widen_union(param.ty ?? value.ty, value.ty),
             box_as_trait: sema_call_box_as_trait(param.ty ?? value.ty, value.ty, environment, program),
@@ -603,14 +627,14 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) {
         value :: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment, program) ?? return None
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
         identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
         if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
-            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-            value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
-            return sema_expr_expected(value, expected, environment, program, &diagnostics)
+            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
     normalized :: sema_call_core_normalized_source_record(record, args)
@@ -636,10 +660,10 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
             return None
         }
         source_args :: sema_call_core_source_arguments(record, args, params, span, environment, program)
-        value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
-        return sema_expr_expected(value, expected, environment, program, &diagnostics)
+        value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: source_args}, span)
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
-    value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
+    value := sema_tir_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
     // Rust (fallible.rs `infer_or_fallback`) passes the slot type to a call
     // only as an inference hint: a Core call that returns `Never` produces no
     // value, and the enclosing `??` or branch accepts its divergence.
@@ -897,9 +921,11 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 }
 
 fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: Int, value: TExpr, span: Span) -> TExpr Never! {
+    // copy: the materialized argument is a new owned TExpr. Off the authority boundary it equals
+    // `value`, the caller's checked argument (a read parameter), which the caller keeps.
     if !core_call_authority_boundary_at(record, index) -> return value.copy()
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
-    sema_tir_expr(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
+    sema_tir_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
         source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false},
         data_plan: None, fallibility: TFailureCarrier.Infallible}, span)
 }
@@ -1040,9 +1066,9 @@ fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, typ
     target :: sema_call_resolve_direct(name, [Type]{}, environment, program, &scopes, args[0].span, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
     if target.generic_params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
     same_module := false
-    loop declaration in environment.declarations {
-        if declaration.symbol_id != target.symbol.id -> next
-        if declaration.item == .Func(function) {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].symbol_id != target.symbol.id -> next
+        if environment.declarations[declaration_index].item == .Func(function) {
             same_module = function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
             break
         }
@@ -1064,7 +1090,7 @@ fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, typ
     context.call_facts[before].shared_lifetime = Val(lifetime)
     context.call_facts[before].shared_member = member
     context.call_facts[before].shared_source = environment.module_identity
-    value :: sema_tir_expr(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
+    value :: sema_tir_node(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 

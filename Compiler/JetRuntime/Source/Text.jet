@@ -35,19 +35,47 @@ fn rt_text_data(value: I64) -> I64 { rt_text_word(value) }
 
 fn rt_text_len(value: I64) -> I64 { rt_text_word(value + I64{8}) }
 
+// Whole machine words first (x86 permits unaligned word access), then the
+// byte tail: a string copy is one load/store pair per 8 bytes, not per byte.
+// The ranges never overlap (callers copy into a fresh or grown buffer).
 fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
     at := I64{0}
+    words :: len - len % I64{8}
+    loop at < words {
+        rt_text_store(target + at, rt_text_word(source + at))
+        at += I64{8}
+    }
     loop at < len {
         rt_text_put(target + at, rt_text_byte(source + at))
         at += I64{1}
     }
 }
 
+// P2 (#5041): a heap text block is [count][data, len, cap]; owners hold the
+// address of `data`, so every reader keeps offsets 0/8/16. Clone retains the
+// block and drop releases it. Text is immutable once published; only fresh
+// builders (count 1) are written in place. Only these two helpers know the
+// prefix.
+fn rt_text_header_alloc() -> I64 {
+    block :: alloc_required_valid(I64{32}, I64{8})
+    rc_init(block)
+    block + I64{8}
+}
+
+fn rt_text_header_free(header: I64) { alloc_release_valid(header - I64{8}, I64{32}, I64{8}) }
+
+// rt_static_text headers (Lower/StaticText.jet) are process-lifetime rodata
+// objects without a count word: cap 0 over a real buffer. Heap headers with
+// cap 0 always use the empty sentinel data 1, so the test is exact.
+fn rt_text_immortal(value: I64) -> Bool {
+    rt_text_word(value + I64{16}) == I64{0} && rt_text_data(value) != I64{1}
+}
+
 fn rt_text_copy(ptr: I64, len: I64) -> I64 {
-    header :: alloc_required_valid(I64{24}, I64{8})
+    header :: rt_text_header_alloc()
     data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        alloc_release_valid(header, I64{24}, I64{8})
+        rt_text_header_free(header)
         return I64{0}
     }
     rt_text_bytes_copy(data, ptr, len)
@@ -55,6 +83,16 @@ fn rt_text_copy(ptr: I64, len: I64) -> I64 {
     rt_text_store(header + I64{8}, len)
     rt_text_store(header + I64{16}, len)
     header
+}
+
+// Every in-place writer starts here: a builder is written only while its
+// creator holds the sole reference (clone before finish would share it).
+// False means the stop was published and the writer must not touch target.
+fn rt_text_writable(target: I64) -> Bool {
+    if jet_rt_rc_unique(target - I64{8}) -> return true
+    message :: rt_static_text("internal: shared text written in place")
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    false
 }
 
 fn rt_text_slice(value: I64, start: I64, end: I64) -> I64 {
@@ -132,6 +170,7 @@ fn rt_text_capacity_stop() {
 // Shared growth keeps byte append and registered-report word append exact:
 // a word contains UTF-8 bytes, not scalar values to encode a second time.
 fn rt_text_reserve_extra(target: I64, old: I64, used: I64, extra: I64) -> I64 {
+    if !rt_text_writable(target) -> return I64{0}
     if (extra > I64{9223372036854775807} - used) {
         rt_text_capacity_stop()
         return I64{0}
@@ -187,6 +226,7 @@ fn rt_text_append_raw_word(target: I64, word: I64, count: I64) {
 }
 
 fn rt_text_push_scalar(target: I64, scalar: I64) {
+    if !rt_text_writable(target) -> return
     value :: if (scalar < I64{0} || scalar > I64{1114111} || (scalar >= I64{55296} && scalar <= I64{57343})) -> I64{65533} else -> scalar
     width :: if {
         (value < I64{128}) -> I64{1}
@@ -287,7 +327,8 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
 #Export(c) fn jet_rt_string_byte_len(value: I64) -> I64 { rt_text_len(value) }
 
 #Export(c) fn jet_rt_string_clone(value: I64) -> I64 {
-    rt_text_copy(rt_text_data(value), rt_text_len(value))
+    if !rt_text_immortal(value) -> jet_rt_rc_retain(value - I64{8})
+    value
 }
 
 // Borrow both carriers; publish one fresh owner with exact buffer capacity.
@@ -299,10 +340,10 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
         return I64{0}
     }
     len :: left_len + right_len
-    header :: alloc_required_valid(I64{24}, I64{8})
+    header :: rt_text_header_alloc()
     data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        alloc_release_valid(header, I64{24}, I64{8})
+        rt_text_header_free(header)
         return I64{0}
     }
     rt_text_bytes_copy(data, rt_text_data(left), left_len)
@@ -313,25 +354,39 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     header
 }
 
-// StaticText borrowed headers must never reach this drop: cap=0 still frees the header.
+// Release one owner; the last owner frees the buffer and the block. Static
+// rt_static_text headers are immortal and never freed.
 #Export(c) fn jet_rt_string_drop(value: I64) {
     if (value == I64{0}) {
         return
     }
+    if rt_text_immortal(value) -> return
+    if !jet_rt_rc_release(value - I64{8}) -> return
     cap :: rt_text_word(value + I64{16})
     before :: jet_rt_session_status()
     if (cap != I64{0}) { jet_rt_free(rt_text_data(value), cap, I64{1}) }
     if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
-    alloc_release_valid(value, I64{24}, I64{8})
+    rt_text_header_free(value)
+}
+
+// Equal and ordered comparisons skip equal 8-byte words, then decide on the
+// first differing byte, exactly as the byte-by-byte scan would.
+fn rt_text_first_difference(left: I64, right: I64, len: I64) -> I64 {
+    // Shared owners (and a text compared with itself) hold one buffer.
+    if (left == right) -> return len
+    at := I64{0}
+    words :: len - len % I64{8}
+    loop at < words && rt_text_word(left + at) == rt_text_word(right + at) {
+        at += I64{8}
+    }
+    loop at < len && rt_text_byte(left + at) == rt_text_byte(right + at) {
+        at += I64{1}
+    }
+    at
 }
 
 fn rt_text_equal_bytes(left: I64, right: I64, len: I64) -> Bool {
-    at := I64{0}
-    loop at < len {
-        if rt_text_byte(left + at) != rt_text_byte(right + at) -> return false
-        at += I64{1}
-    }
-    true
+    rt_text_first_difference(left, right, len) == len
 }
 
 #Export(c) fn jet_rt_string_compare(left: I64, right: I64) -> I64 {
@@ -340,13 +395,9 @@ fn rt_text_equal_bytes(left: I64, right: I64, len: I64) -> Bool {
     len :: if left_len < right_len -> left_len else -> right_len
     a :: rt_text_data(left)
     b :: rt_text_data(right)
-    at := I64{0}
-    loop at < len {
-        x :: rt_text_byte(a + at)
-        y :: rt_text_byte(b + at)
-        if x < y -> return I64{-1}
-        if x > y -> return I64{1}
-        at += I64{1}
+    at :: rt_text_first_difference(a, b, len)
+    if (at < len) {
+        return if (rt_text_byte(a + at) < rt_text_byte(b + at)) -> I64{-1} else -> I64{1}
     }
     if {
         left_len < right_len -> I64{-1}
@@ -484,16 +535,36 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
 }
 
 fn rt_text_builder_with_capacity(cap: I64) -> I64 {
-    header :: alloc_required_valid(I64{24}, I64{8})
+    header :: rt_text_header_alloc()
     data :: if (cap == I64{0}) -> I64{1} else -> jet_rt_alloc(cap, I64{1})
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        alloc_release_valid(header, I64{24}, I64{8})
+        rt_text_header_free(header)
         return I64{0}
     }
     rt_text_store(header, data)
     rt_text_store(header + I64{8}, I64{0})
     rt_text_store(header + I64{16}, cap)
     header
+}
+
+// A fresh owned text of `length` bytes in a `capacity`-byte buffer; the
+// caller initializes those bytes before publishing it. Runtime files that
+// render text directly build it here, never as a hand-made header. 0 only
+// after a propagated allocation failure.
+fn rt_text_with_length(length: I64, capacity: I64) -> I64 {
+    header :: rt_text_builder_with_capacity(capacity)
+    if (header == I64{0}) -> return I64{0}
+    rt_text_store(header + I64{8}, length)
+    header
+}
+
+// Hands the caller the byte buffer of a text it uniquely owns (count 1, as
+// every fresh builder is) and frees only the header; capacity is the
+// caller-checked buffer size. A shared text is never taken apart.
+fn rt_text_take_unique_buffer(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    rt_text_header_free(value)
+    data
 }
 
 #Export(c) fn jet_rt_string_builder_new() -> I64 { rt_text_copy(I64{1}, I64{0}) }

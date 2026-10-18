@@ -339,7 +339,7 @@ fn store_certify_registration_unlocked_with_fresh_agreement(verification: &Store
 fn store_repro_certify_registration(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) StoreError! -[FS, Env]> {
     action_key :: store_entry_action_key(entry)
     producer :: store_repro_decode_producer(entry)
-    fresh_agreement :: fresh_action_key == Val(action_key) && (producer.facts.get("cache.reproducibility") ?? "").starts_with(STORE_REPRO_INDEPENDENT_PREFIX)
+    fresh_agreement :: fresh_action_key == Val((action_key)) && (producer.facts.get("cache.reproducibility") ?? "").starts_with(STORE_REPRO_INDEPENDENT_PREFIX)
     if store_reproducibility_blocked(roots, action_key) && !fresh_agreement {
         return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
     }

@@ -11,34 +11,34 @@ fn envmodel_test_write_package(root: String, relative: String, text: String) -[F
     files.write(files.join(directory, PACKAGE_FILE), text) ?? panic("package manifest")
 }
 
-fn envmodel_test_eval(src: String) -[FS, Env]> WorkspacePlan {
+fn envmodel_test_eval(src: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan {
     envmodel_workspace_evaluate(src, sys.temp_dir()) ?? panic("evaluation should succeed")
 }
 
-fn envmodel_test_eval_in(src: String, base_dir: String) -[FS]> WorkspacePlan {
+fn envmodel_test_eval_in(src: String, base_dir: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan {
     envmodel_workspace_evaluate(src, base_dir) ?? panic("evaluation should succeed")
 }
 
-fn envmodel_test_eval_error_in(src: String, base_dir: String) -[FS]> Diagnostic {
+fn envmodel_test_eval_error_in(src: String, base_dir: String) -[FS, Env, Exec, Time.Wait]> Diagnostic {
     if envmodel_workspace_evaluate(src, base_dir) == {
         .Ok(_) -> panic("evaluation should fail")
         .Err(error) -> error.diagnostic
     }
 }
 
-fn envmodel_test_eval_error(src: String) -[FS, Env]> Diagnostic {
+fn envmodel_test_eval_error(src: String) -[FS, Env, Exec, Time.Wait]> Diagnostic {
     envmodel_test_eval_error_in(src, sys.temp_dir())
 }
 
 // The diagnostic of a present-but-failing `load`.
-fn envmodel_test_load_error(cache: &WorkspaceDeclarationCache, dir: String) -[FS]> Diagnostic {
+fn envmodel_test_load_error(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Diagnostic {
     if envmodel_workspace_load(&cache, dir) == {
         .Ok(_) -> panic("the workspace source must be surfaced as an error")
         .Err(error) -> error.diagnostic
     }
 }
 
-fn envmodel_test_load_is_none(cache: &WorkspaceDeclarationCache, dir: String) -[FS]> Bool {
+fn envmodel_test_load_is_none(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Bool {
     loaded :: envmodel_workspace_load(&cache, dir) ?? panic("load must not fail")
     loaded == None
 }

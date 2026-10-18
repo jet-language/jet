@@ -59,6 +59,22 @@ fn s6_ratchet_producer(path: String, line: String) -> Bool {
     if path == "crates/jet-parser/src/Parser/Statements/control.rs" -> return line.contains(s6_ratchet_concat("the `#", "Grant` scope marker is retired"))
     if path == "crates/jet-foundation/src/Syntax/retirements.rs" -> return line.contains(s6_ratchet_concat("retired: \"#", "Grant\""))
     if path == "crates/jet-parser/src/Parser/mod.rs" -> return line.contains(s6_ratchet_concat("#", "Grant"))
+    // Jet counterparts of the producers above: the E0077 registry row (and the
+    // generated DiagnosticRows copies in selfhost_terminators fixtures), the
+    // retirement table, the generated Prelude marker source, the CLI syntax
+    // dictionary rows for the retired markers, and the E0077 parser test.
+    if path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet" ||
+        (path.starts_with("tests/cases/selfhost_terminators/") && path.ends_with("/main.jet")) {
+        return line.trim_start().starts_with(s6_ratchet_concat("what: \"The `#", "Grant` scope marker is retired."))
+    }
+    if path == "Compiler/JetFoundation/Data/Syntax/retirements.jet" -> return line.contains(s6_ratchet_concat("retired: \"#", "Grant\""))
+    if path == "Compiler/JetSema/Source/Sema/Registration/PreludeMarkers.jet" {
+        return line.contains(s6_ratchet_concat("marker Abil", "ities(")) && line.contains(s6_ratchet_concat("marker Cap", "s("))
+    }
+    if path == "Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet" {
+        return line.contains(s6_ratchet_concat("token: \"Abil", "ities\"")) || line.contains(s6_ratchet_concat("token: \"Cap", "s\""))
+    }
+    if path == "Compiler/JetParser/Tests/Parser/Entry02.jet" -> return line.contains("E0077")
     false
 }
 
@@ -66,6 +82,8 @@ fn s6_ratchet_unrelated(path: String, line: String) -> Bool {
     if path == "crates/jet-pkg-model/src/CompilerExtension.rs" ||
         path == "crates/jet-driver/src/CompilerExtensionHook.rs" ||
         path == "crates/jetpack-bin/tests/compiler_extension_e2e.rs" -> return true
+    if path == "Jetpack/PackageModel/Source/CompilerExtension/CompilerExtension.jet" -> return true
+    if path == "Jetpack/Recipe/Source/Build/StagedPlanRun.jet" -> return line.contains(s6_ratchet_concat("Capabil", "ity-limited"))
     if path.starts_with("Docs/spec/reference/surfaces/") -> return true
     if path == "crates/jet-canvas/src/js/inspector-connections.js" -> return line.contains(s6_ratchet_concat("Capabil", "ity mismatch"))
     if path == "crates/jet-devserver/src/WebHost.rs" -> return line.contains(s6_ratchet_concat("Abil", "ity check"))

@@ -45,22 +45,9 @@ fn jet_cli_expand_source(modules: [JetDriverDocModule], path: String) -> String?
     None
 }
 
-fn jet_cli_expand_fact_before(left: JetCLIExpandFact, right: JetCLIExpandFact) -> Ordering Never! {
-    if left.source != right.source -> return left.source <=> right.source
-    if left.offset != right.offset -> return left.offset <=> right.offset
-    left.name <=> right.name
-}
-
 fn jet_cli_expand_sort_facts(facts: &[JetCLIExpandFact]) Never! {
-    loop index in 1..<facts.len() {
-        row :: facts[index].copy()
-        position := index
-        loop position > 0 && jet_cli_expand_fact_before(facts[position - 1], row) == Ordering.Greater {
-            facts[position] = facts[position - 1]
-            position -= 1
-        }
-        facts[position] = row
-    }
+    facts = loop fresh_item in facts -> fresh_item
+    &facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> (left.source <=> right.source).then(left.offset <=> right.offset).then(left.name <=> right.name))
 }
 
 fn jet_cli_expand_inline_function(function: Func, owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
@@ -127,15 +114,7 @@ fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetCLIEx
     loop unit in modules {
         rows := [JetCLIExpandFact]{}
         jet_cli_expand_inline_items(unit.items, None, unit, &rows)
-        loop index in 1..<rows.len() {
-            row :: rows[index].copy()
-            position := index
-            loop position > 0 && rows[position - 1].offset > row.offset {
-                rows[position] = rows[position - 1]
-                position -= 1
-            }
-            rows[position] = row
-        }
+        &rows.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.offset <=> right.offset)
         loop row in rows -> &output.push(row)
     }
     if json -> jet_cli_expand_sort_facts(&output)

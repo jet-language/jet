@@ -174,7 +174,7 @@ fn pkg_data_lex_proto_string(chars: [String], open: Int) -> (value: String, next
     value := [String]{}
     loop index < chars.len() {
         current :: chars[index]
-        if current == quote -> return Ok((value: value.join(""), next_index: index + 1))
+        if current == quote -> return Ok((next_index: index + 1, value: value.join("")))
         if current == "\\" {
             index += 1
             if index >= chars.len() -> return Err(DataBindError{message: "proto string ends after an escape"})
@@ -306,10 +306,10 @@ struct ProtoField {
 
 struct ProtoReserved {
     names: [String]
-    ranges: [(start: Int, end: Int)]
+    ranges: [(end: Int, start: Int)]
 
     fn empty() -> ProtoReserved Never! {
-        ProtoReserved{names: [String]{}, ranges: [(start: Int, end: Int)]{}}
+        ProtoReserved{names: [String]{}, ranges: [(end: Int, start: Int)]{}}
     }
 
     fn covers(self, name: String, number: Int) -> Bool Never! {
@@ -620,11 +620,11 @@ struct ProtoParser {
                     }
                     minimum :: if signed -> PROTO_INT32_MIN else -> 1
                     if start < minimum || end < minimum || start > end || end > maximum -> return Err(DataBindError{message: "proto reserved range is out of range"})
-                    if pkg_data_proto_range_has_prohibited_number((start: start, end: end)) -> return Err(DataBindError{message: "proto reserved range uses prohibited field numbers"})
+                    if pkg_data_proto_range_has_prohibited_number((end: end, start: start)) -> return Err(DataBindError{message: "proto reserved range uses prohibited field numbers"})
                     loop old in reserved.ranges {
-                        if pkg_data_proto_ranges_overlap((start: start, end: end), old) -> return Err(DataBindError{message: "proto reserved ranges overlap"})
+                        if pkg_data_proto_ranges_overlap((end: end, start: start), old) -> return Err(DataBindError{message: "proto reserved ranges overlap"})
                     }
-                    &reserved.ranges.push((start: start, end: end))
+                    &reserved.ranges.push((end: end, start: start))
                 }
             }
             if self.symbol_at(0, ",") {
@@ -652,7 +652,7 @@ struct ProtoParser {
                 }
             }
             if start == 0 || start > end || end > PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto extension range is out of range"})
-            if pkg_data_proto_range_has_prohibited_number((start: start, end: end)) -> return Err(DataBindError{message: "proto extension range uses prohibited field numbers"})
+            if pkg_data_proto_range_has_prohibited_number((end: end, start: start)) -> return Err(DataBindError{message: "proto extension range uses prohibited field numbers"})
             if self.symbol_at(0, ",") {
                 self.pos += 1
                 next

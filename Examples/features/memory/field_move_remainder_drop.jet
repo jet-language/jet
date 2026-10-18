@@ -1,0 +1,73 @@
+// A field consumed at its owner's last read moves out of the owner; the
+// owner's scope-end cleanup is then a remainder drop that releases only the
+// fields still in place. MIR Lint `ownership.move` admits that cleanup after
+// the field move (it is not a second move of the field), exactly as MIR
+// legality does, for a local, an owned (`^`) parameter, a pattern binding
+// and a loop item, with and without a sibling read between the move and
+// the cleanup.
+struct Span {
+    start: Int
+    end: Int
+}
+
+struct Token {
+    kind: Int
+    text: String
+    span: Span
+}
+
+struct Named {
+    name: String
+    span: Span
+}
+
+enum Lexed {
+    One(token: Token)
+    Empty
+}
+
+fn make(k: Int) -> Token {
+    Token{kind: k, text: "t{k}", span: Span{start: k, end: k + 2}}
+}
+
+// A local: `span` moves into the record, `kind` is still read, the rest
+// (`text`) is released by the cleanup.
+fn named(k: Int) -> Named {
+    token :: make(k)
+    out :: Named{name: "n{k}", span: token.span}
+    print("kind {token.kind}")
+    out
+}
+
+// The String field moves, the cleanup releases nothing else that owns.
+fn text_of(k: Int) -> String {
+    token :: make(k)
+    token.text
+}
+
+// An owned parameter: its field moves out, its remainder is released.
+fn take_text(token: ^Token) -> Named {
+    Named{name: token.text, span: Span{start: 0, end: 0}}
+}
+
+// A pattern binding and a loop item are owners of their own.
+fn names(lexed: [Lexed]) -> [Named] {
+    out := [Named]{}
+    loop entry in lexed {
+        if entry == {
+            .One(token) -> &out.push(Named{name: token.text, span: token.span})
+            .Empty -> {}
+        }
+    }
+    out
+}
+
+fn run() {
+    first :: named(3)
+    print("{first.name} {first.span.start}..{first.span.end}")
+    print("text {text_of(4)}")
+    taken :: take_text(make(5))
+    print("taken {taken.name}")
+    rows :: names([Lexed]{Lexed.One{token: make(6)}, Lexed.Empty, Lexed.One{token: make(7)}})
+    loop row in rows -> print("row {row.name} {row.span.start}")
+}

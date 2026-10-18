@@ -49,6 +49,8 @@ fn jet_codegen_auto_derives_impl_selected(ctx: &JetRustEmitContext, definition: 
     declared_type := MIRType{kind: type_kind, identity: Val(definition.id), layout: mir_type_layout(type_kind)}
     rows :: (ctx.impls_by_trait.get(expected_trait.value) ?? [Int]{}).copy()
     loop row in rows {
+        // copy: the impl row is read while the selection check writes the emit context (`&ctx`), so
+        // a view into ctx.program.impls would be live across that write.
         implementation :: ctx.program.impls[row].copy()
         if !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
         reference :: implementation.trait_ref ?? next

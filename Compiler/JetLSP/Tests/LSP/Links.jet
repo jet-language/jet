@@ -1,0 +1,25 @@
+// Packet 0741 contains no original inline tests. The live documentLink /
+// codeLens journey in tests/lsp.rs is separately owned, not registered here.
+#Test("code lenses preserve lexical prefixes byte columns CRLF and line-number arguments") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR")
+    uri :: "file:///a%20b.jet"
+    src :: " fn runner() {{}}{cr}\n\t#Test(\"case\")\nfn other() {{}}\n// fn run\n"
+    lenses :: lsp_code_lenses_for(uri, src)
+    assert_eq(lenses, [String]{lsp_code_lens_json(0, 3, 17, "Run file", "jet.runFile", [String]{uri}), lsp_code_lens_json(1, 1, 14, "Run test", "jet.testFile", [String]{uri, "1"})})
+    assert_eq(lsp_code_lenses_for(uri, ""), [String]{})
+    assert_eq(lsp_code_lenses_for(uri, "fn other() {{}}\n#test lowercase"), [String]{})
+}
+#Test("code lens JSON quotes every title command and argument and preserves argument order") {
+    range :: LSPRange{start: LSPPos{line: 2, character: 3}, end: LSPPos{line: 2, character: 9}}
+    title :: "Run \"quoted\""
+    command :: "jet.\\command"
+    args :: [String]{"line\nbreak", "😀", "true"}
+    expected :: "{{\"range\":{lsp_range_json(range)},\"command\":{{\"title\":\"Run \\\"quoted\\\"\",\"command\":\"jet.\\\\command\",\"arguments\":[\"line\\nbreak\",\"😀\",\"true\"]}}}}"
+    assert_eq(lsp_code_lens_range_json(range, title, command, args), expected)
+    assert_eq(lsp_code_lens_json(2, 3, 9, title, command, args), expected)
+    assert_eq(lsp_code_lens_json(4294967298, 4294967299, 4294967305, title, command, args), expected)
+    assert_eq(lsp_code_lens_range_json(range, "plain", "jet.run", [String]{}), "{{\"range\":{lsp_range_json(range)},\"command\":{{\"title\":\"plain\",\"command\":\"jet.run\",\"arguments\":[]}}}}")
+}
+#Test("reasoning lenses do not manufacture records for an empty semantic index") {
+    assert_eq(lsp_reasoning_code_lenses("file:///main.jet", "/main.jet", "fn run() {{}}", SymbolDB.new()), [String]{})
+}

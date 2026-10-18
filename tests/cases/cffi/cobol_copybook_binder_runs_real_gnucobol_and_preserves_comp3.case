@@ -1,12 +1,10 @@
-# KNOWN-FAILING #4799: original copies missing Examples/interop/cobol/main.jet.
-# Do not rename to run.jet, bless the failure, or omit the later original predicates.
 # PENDING-GRAMMAR: file !~ and quoted newline escape must preserve byte predicates.
 requires: tool:cobc
 step: cobc --version
 exit: 0
 copy: {root}/Examples/interop/cobol/payroll.cob payroll.cob
 copy: {root}/Examples/interop/cobol/payroll.cpy payroll.cpy
-copy: {root}/Examples/interop/cobol/main.jet main.jet
+copy: {root}/Examples/interop/cobol/run.jet run.jet
 copy: {root}/Examples/interop/cobol/expected.out expected.out
 step: jet inspect bind cobol payroll.cob --copybook payroll.cpy --pkg payroll
 exit: 0
@@ -20,6 +18,6 @@ file: .jet/bindings/cobol/payroll.provenance ~ "schema=jet-cobol-bind-v1\n" # or
 file: .jet/bindings/cobol/payroll.provenance ~ "descriptor=jet-ffi-descriptor-v1;" # original predicate
 file: .jet/bindings/cobol/payroll.provenance ~ "program_symbol=JETPAY\n" # original predicate
 file: .jet/bindings/cobol/payroll.provenance ~ "record_width=29\n" # original predicate
-step: jet run main.jet
+step: jet run run.jet
 exit: 0
 stdout: = ../../../Examples/interop/cobol/expected.out

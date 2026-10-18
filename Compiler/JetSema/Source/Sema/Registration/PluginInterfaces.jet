@@ -564,7 +564,7 @@ fn sema_plugin_type_has_never_success(ty: Type) -> Bool Never! {
 
 fn sema_plugin_canonical_fn_signature(function: Func, dimensions: [SemaPluginUnitDimension]) -> String {
     params := [String]{}
-    loop param in function.params -> &params.push("{param.name}: {access_sigil(param.convention)}{sema_plugin_api_type_name(param.ty, dimensions)}")
+    loop param_index in 0..<function.params.len() -> &params.push("{function.params[param_index].name}: {access_sigil(function.params[param_index].convention)}{sema_plugin_api_type_name(function.params[param_index].ty, dimensions)}")
     signature := "fn {function.name}{sema_plugin_type_param_signature(function.type_params)}({params.join(", ")})"
     if function.return_type != None -> signature = "{signature} {sema_plugin_api_type_name(function.return_type ?? Type.Named{name: "Unit"}, dimensions)}"
     if function.return_view_provenance == .Val(provenance) {
@@ -583,7 +583,7 @@ fn sema_plugin_canonical_fn_signature(function: Func, dimensions: [SemaPluginUni
 }
 
 fn sema_plugin_export_from_function(function: Func, dimensions: [SemaPluginUnitDimension]) -> SemaPluginInterfaceExport {
-    params := (loop param in function.params -> SemaPluginExportParam{convention: param.convention, ty: param.ty})
+    params := (loop param_index in 0..<function.params.len() -> SemaPluginExportParam{convention: function.params[param_index].convention, ty: function.params[param_index].ty})
     SemaPluginInterfaceExport{
         name: function.name,
         signature: sema_plugin_canonical_fn_signature(function, dimensions),

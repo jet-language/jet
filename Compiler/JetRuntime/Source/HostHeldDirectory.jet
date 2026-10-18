@@ -56,7 +56,8 @@ fn fs_held_shown(key: I64) -> I64 {
     path
 }
 
-// jet_fs_shown: the held path joined to name, as errors report it; 0 if closed.
+// jet_fs_shown: the held path joined to name, as errors report it; 0 if closed
+// (or after a propagated allocation stop).
 fn fs_held_shown_name(key: I64, name: I64) -> I64 {
     base :: fs_held_shown(key)
     if (base == I64{0}) -> return I64{0}
@@ -65,10 +66,21 @@ fn fs_held_shown_name(key: I64, name: I64) -> I64 {
         jet_rt_string_drop(base)
         return jet_rt_string_clone(name)
     }
-    if (rt_text_len(name) == I64{0}) -> return base
-    if (rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> rt_text_push_word(base, I64{47}, I64{1})
-    jet_rt_string_builder_push(base, name)
-    base
+    name_length :: rt_text_len(name)
+    if (name_length == I64{0}) -> return base
+    // base shares the table's stored path (fs_held_lookup clones it), so the
+    // join is built in a fresh unique text, never appended to base in place.
+    separator :: if (rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> I64{1} else -> I64{0}
+    joined :: rt_text_builder_with_capacity(length + separator + name_length)
+    if (joined == I64{0}) {
+        jet_rt_string_drop(base)
+        return I64{0}
+    }
+    rt_text_append(joined, rt_text_data(base), length)
+    if (separator != I64{0}) -> rt_text_push_word(joined, I64{47}, I64{1})
+    rt_text_append(joined, rt_text_data(name), name_length)
+    jet_rt_string_drop(base)
+    joined
 }
 
 // Takes ownership of the FD72 and the shown path; returns the new key.

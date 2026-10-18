@@ -1,0 +1,52 @@
+// D-EVENT1: synchronous Event registration order, priority, once,
+// unsubscribe, scope cancellation and scope teardown, on every tier.
+package {
+    name: "event_lifecycle"
+    authority: { holds: { allow: [IO, Mem.Alloc] } }
+}
+
+use core.event as event
+
+fn teardown(clicks: Event<Int>) {
+    inner :: event.scope()
+    clicks.on(inner, (n: Int) -> print("inner saw {n}"))
+    print("inner active {inner.active_count()} listeners {clicks.listener_count()}")
+}
+
+fn run() {
+    app :: event.scope()
+    clicks :: event.new<Int>()
+    first :: clicks.on(app, (n: Int) -> print("first {n}"))
+    clicks.once(app, (n: Int) -> print("once {n}"))
+    clicks.on_priority(app, 10, (n: Int) -> print("urgent {n}"))
+    clicks.on(app, (n: Int) -> print("last {n}"))
+    print("listeners {clicks.listener_count()} trace {clicks.trace()}")
+
+    one :: clicks.emit(1)
+    print("{one.summary()} delivered={one.delivered()} queued={one.queued()} dropped={one.dropped()}")
+    two :: clicks.emit(2)
+    print(two.summary())
+    print("active {app.active_count()} first active {first.is_active()}")
+
+    first.unsubscribe()
+    first.unsubscribe()
+    print("first active {first.is_active()} listeners {clicks.listener_count()}")
+    print(clicks.emit(3).summary())
+
+    teardown(clicks)
+    print("after teardown listeners {clicks.listener_count()}")
+    print(clicks.emit(4).summary())
+
+    names :: event.new<String>()
+    names.on(app, (name: String) -> print("hello {name}"))
+    print(names.emit("jet").summary())
+
+    app.cancel()
+    app.cancel()
+    print("after cancel active {app.active_count()} listeners {clicks.listener_count()}")
+    print(clicks.emit(5).summary())
+
+    late :: clicks.on(app, (n: Int) -> print("late {n}"))
+    print("late active {late.is_active()} listeners {clicks.listener_count()}")
+    print(clicks.emit(6).summary())
+}

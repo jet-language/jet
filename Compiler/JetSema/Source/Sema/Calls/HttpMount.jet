@@ -5,7 +5,7 @@ use jet_foundation.[
     LambdaParam, Marker, MarkerCallArg, NamedSpan, Span, Symbol, SymbolKind,
     TExpr, TExprKind, TLetTy, TStmt, Type,
     ast_binding, ast_empty_call_arg_flags, ast_empty_lambda_meta, symbol_id,
-    tir_symbol_local, tir_expr_children, tir_stmt_list_children, type_name,
+    tir_symbol_local, tir_each_expr_child, tir_each_stmt_list_child, type_name,
 ]
 
 fn sema_http_route_marker_verb(marker: Marker, graph: SemaRegistrationGraph, module_identity: String) -> String? {
@@ -74,21 +74,20 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                         params := [LambdaParam]{}
                         call_args := [CallArg]{}
                         loop index in 1..<method.params.len() {
-                            parameter :: method.params[index]
-                            parameter_ty :: sema_type_resolve_declared(graph, parameter.ty, method_environment.module_identity)
-                            &params.push(LambdaParam{name: parameter.name, name_span: parameter.name_span, ty: Val(parameter_ty), ty_span: None})
-                            argument := sema_http_mount_arg(Expr.Ident{name: parameter.name, span: parameter.name_span}, parameter.name_span)
-                            argument.convention = parameter.convention
+                            parameter_ty :: sema_type_resolve_declared(graph, method.params[index].ty, method_environment.module_identity)
+                            &params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None})
+                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span}, method.params[index].name_span)
+                            argument.convention = method.params[index].convention
                             &call_args.push(argument)
                         }
-                        invocation :: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+                        invocation :: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, recv_type: None, resolved_ret: None}
                         meta := ast_empty_lambda_meta()
                         nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
                         loop registered in nominal.methods {
                             if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
                         }
                         handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}}
-                        registration :: sema_call_try_http_router(receiver, sema_tir_expr(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                        registration :: sema_call_try_http_router(receiver, sema_tir_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         if registration.value == .Val(value) -> &body.push(TStmt.ExprStmt{value: value, span: marker.span})
                     }
                 }
@@ -102,7 +101,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
     }
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     sema_scope_leave(&scopes, &state)
-    value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.InlineBlock{body: body}, span)
+    value :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.InlineBlock{body: body}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -117,32 +116,55 @@ fn sema_http_collect_mounted(expression: TExpr, graph: SemaRegistrationGraph, mo
             }
         }
     }
-    loop child in tir_expr_children(expression) -> sema_http_collect_mounted(child, graph, module_identity, &mounted)
+    tir_each_expr_child(expression, (child: TExpr) -> sema_http_collect_mounted(child, graph, module_identity, &mounted))
 }
 
-fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
-    mounted := [String]{}
-    loop module_row in modules {
-        loop function in module_row.functions {
-            loop expression in tir_stmt_list_children(function.body) -> sema_http_collect_mounted(expression, graph, module_row.module_identity, &mounted)
-        }
-    }
-    diagnostics := [Diagnostic]{}
-    loop module_row in graph.modules {
-        diagnostic_start :: diagnostics.len()
-        loop nominal in module_row.nominals {
-            if mounted.contains(nominal.symbol.id.key) -> next
-            loop method in nominal.methods {
-                loop marker in method.declaration.markers {
-                    if sema_http_route_marker_verb(marker, graph, module_row.module_identity) == None -> next
-                    &diagnostics.push(sema_lint("E2818", marker.span,
-                        "HTTP route method `{method.declaration.name}` belongs to a struct that is never mounted.",
-                        "Route markers record facts; only an explicit mux.mount(value) exposes that struct's routes.",
-                        "Pass a value of `{nominal.symbol.name}` to mux.mount, or remove the route marker."))
+// One function body's mounts. Its own function so the visitor closure lends
+// the `mounted` write parameter: the stage-0 Rust tier then lends `graph` to the
+// closure instead of copying the whole registration graph per function.
+fn sema_http_collect_mounted_body(body: [TStmt], graph: SemaRegistrationGraph, identity: String, mounted: &[String]) Never! {
+    tir_each_stmt_list_child(body, (expression: TExpr) -> sema_http_collect_mounted(expression, graph, identity, &mounted))
+}
+
+// Whether any nominal declares a method with a core.http.server route marker.
+fn sema_http_has_route_method(graph: SemaRegistrationGraph) -> Bool {
+    loop module_row_index in 0..<graph.modules.len() {
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
+                loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
+                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) != None -> return true
                 }
             }
         }
-        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, module_row.source_segments)
+    }
+    false
+}
+
+fn sema_http_unmounted_warnings(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+    // Only a route method can be unmounted: a program without one skips the
+    // walk of every checked function body for mounts.
+    if !sema_http_has_route_method(graph) -> return [Diagnostic]{}
+    mounted := [String]{}
+    loop module_row in modules {
+        identity :: module_row.module_identity
+        loop function in module_row.functions -> sema_http_collect_mounted_body(function.body, graph, identity, &mounted)
+    }
+    diagnostics := [Diagnostic]{}
+    loop module_row_index in 0..<graph.modules.len() {
+        diagnostic_start :: diagnostics.len()
+        loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
+            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id.key) -> next
+            loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
+                loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
+                    if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) == None -> next
+                    &diagnostics.push(sema_lint("E2818", graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index].span,
+                        "HTTP route method `{graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.name}` belongs to a struct that is never mounted.",
+                        "Route markers record facts; only an explicit mux.mount(value) exposes that struct's routes.",
+                        "Pass a value of `{graph.modules[module_row_index].nominals[nominal_index].symbol.name}` to mux.mount, or remove the route marker."))
+                }
+            }
+        }
+        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, graph.modules[module_row_index].source_segments)
     }
     diagnostics
 }

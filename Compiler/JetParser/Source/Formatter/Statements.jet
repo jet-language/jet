@@ -246,7 +246,8 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
             Val(JetFmtBlockMarker{name: "Context", negated: false, args: args})
         }
         .Live(_, _) -> Val(JetFmtBlockMarker{name: "Live", negated: false, args: [JetFmtMarkerArgument]{}})
-        .AssumeDet(_, reason_expr, _, _) -> Val(JetFmtBlockMarker{name: "Nondeterministic", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Expr{label: None, value: reason_expr}}})
+        // copy: `reason_expr` is a payload of read parameter `stmt`, which keeps the original; field `value` of the new JetFmtMarkerArgument.Expr owns this one
+        .AssumeDet(_, reason_expr, _, _) -> Val(JetFmtBlockMarker{name: "Nondeterministic", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Expr{label: None, value: reason_expr.copy()}}})
         .Transact(name, _, _, _, _) -> {
             args := [JetFmtMarkerArgument]{}
             if name == .Val(handle) -> &args.push(JetFmtMarkerArgument.Ident{value: handle})
@@ -1515,7 +1516,7 @@ fn jfmt_same_subject(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
 fn jfmt_fmt_refutable_subject(f: &JetFmt, expr: Expr) {
     unwrapped :: jfmt_expr_without_parens(expr)
     postfix :: if unwrapped == {
-        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) | .Field(_, _, _) | .OptField(_, _, _, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) -> true
+        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) | .Field(_, _, _) | .OptField(_, _, _, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) -> true
         else -> false
     }
     if postfix {
@@ -1669,6 +1670,10 @@ fn jfmt_resugar_layout_stmt(layout_name: String, stmt: Stmt) -> Stmt Never! {
             b2.init = jfmt_resugar_layout_expr(layout_name, b.init)
             Stmt.Val{binding: b2}
         }
+        // copy: a read-parameter rewriter returns a statement with no layout to resugar unchanged
+        // as a new tree (owner: the result) while the caller keeps the input (owner: the read
+        // parameter, a payload view of the caller's tree); taking the input would need a consuming
+        // match of every rebuilt variant (children arrive as payload views).
         else -> stmt.copy()
     }
 }
@@ -1684,7 +1689,7 @@ fn jfmt_resugar_layout_args(layout_name: String, args: [CallArg]) -> [CallArg] N
 }
 
 fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
-    if e == .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _, _) {
+    if e == .MethodCall(receiver, method, method_span, _, _, args, _, _) {
         if (method == "h" || method == "v") && args.len() == 2 {
             if receiver == .Ident(recv_name, recv_span) {
                 if recv_name == layout_name {
@@ -1704,12 +1709,17 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
         .Binary(op, l, r, span) -> Expr.Binary{op: op, left: jfmt_resugar_layout_expr(layout_name, l), right: jfmt_resugar_layout_expr(layout_name, r), span: span}
         .Unary(op, x, span) -> Expr.Unary{op: op, operand: jfmt_resugar_layout_expr(layout_name, x), span: span}
         .Field(base, field, span) -> Expr.Field{base: jfmt_resugar_layout_expr(layout_name, base), member: field, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
+        // copy: `recv_type` and `resolved_ret` are payloads of read parameter `e`, which keeps the originals; the new Expr.MethodCall's fields own `recv_type` and `resolved_ret`
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), recv_type: recv_type.copy(), resolved_ret: resolved_ret.copy()}
         .Call(call) -> {
             call2 := call
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)
             Expr.Call{call: call2}
         }
+        // copy: a read-parameter rewriter returns an expression with no layout to resugar unchanged
+        // as a new tree (owner: the result) while the caller keeps the input (owner: the read
+        // parameter, a payload view of the caller's tree); taking the input would need a consuming
+        // match of every rebuilt variant (children arrive as payload views).
         else -> e.copy()
     }
 }

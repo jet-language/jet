@@ -80,7 +80,7 @@ static void watch(void *pointer, int64_t size, int64_t align) {
     watched[watched_count++].frees = 0;
 }
 static void watch_text(Text *text) {
-    watch(text, 24, 8);
+    watch((char *)(text)-8,32,8);
     if (text->capacity) watch(text->data, text->capacity, 1);
 }
 static void watch_tree(Tree *tree) {

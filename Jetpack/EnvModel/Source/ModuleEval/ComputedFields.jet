@@ -43,7 +43,7 @@ fn envmodel_is_ambient_io_builtin(name: String) -> Bool Never! {
 // Scan a field expression for an ambient-I/O call; the first one fires E3402.
 fn envmodel_check_build_io(value: Expr) EnvModelEvalError! {
     loop site in comptime_walk_calls(value) {
-        if envmodel_is_ambient_io_builtin(site.name) -> return Err(EnvModelEvalError{diagnostic: sema_e3402(site.name, Val(site.span))})
+        if envmodel_is_ambient_io_builtin(site.name) -> return Err(EnvModelEvalError{diagnostic: envmodel_e3402(site.name, Val(site.span))})
     }
 }
 
@@ -153,9 +153,8 @@ fn envmodel_evaluate_named_fields(fields: [String: NamedFieldExpr], globals: [St
     source_bytes :: (source ?? "").bytes()
     provenance := [ComputedFieldProvenance]{}
     loop field in names {
-        named :: fields[field]
-        text :: if source == None -> "" else -> pkg_bytes_text(source_bytes, named.span.start, named.span.end)
-        &provenance.push(ComputedFieldProvenance{field: field, dependencies: envmodel_dependencies_for_expression(named.expr, names), pure: true, source: text.trim()})
+        text :: if source == None -> "" else -> pkg_bytes_text(source_bytes, fields[field].span.start, fields[field].span.end)
+        &provenance.push(ComputedFieldProvenance{field: field, dependencies: envmodel_dependencies_for_expression(fields[field].expr, names), pure: true, source: text.trim()})
     }
     Ok(ComputedFields{values: values, provenance: provenance})
 }

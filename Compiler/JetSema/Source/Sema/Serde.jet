@@ -47,12 +47,12 @@ fn sema_serde_implementation(environment: SemaScopeEnvironment, program: SemaPro
     if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
     if program.registration_graph == .Val(graph) {
         wanted :: sema_serde_codec_name(direction)
-        loop module_row in graph.modules {
-            loop implementation in module_row.impls {
-                trait_name :: implementation.trait_name ?? next
+        loop module_row_index in 0..<graph.modules.len() {
+            loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
+                trait_name :: graph.modules[module_row_index].impls[implementation_index].trait_name ?? next
                 if sema_serde_named_leaf(trait_name) != wanted -> next
-                target_module := implementation.target_module_identity ?? implementation.source_module_identity
-                if target_module == definition.module_identity && implementation.target_type_name == definition.name -> return true
+                target_module := graph.modules[module_row_index].impls[implementation_index].target_module_identity ?? graph.modules[module_row_index].impls[implementation_index].source_module_identity
+                if target_module == definition.module_identity && graph.modules[module_row_index].impls[implementation_index].target_type_name == definition.name -> return true
             }
         }
     }
@@ -156,7 +156,12 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, program: SemaPro
 
 fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     resolved := ty
-    if program.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    if program.registration_graph == .Val(graph) {
+        resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+        // D-META-AUTO1 demand: a data codec call requires the codecs of the
+        // types it encodes or decodes.
+        sema_codec_demand_type(graph, sema_serde_codec_name(direction), resolved)
+    }
     return if resolved == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
         .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_type_is_admissible(environment, program, inner, direction)
@@ -170,6 +175,9 @@ fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: Sem
         .Tagged(_, _) -> false
         .Named(name) -> {
             if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
+            // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the
+            // `Dyn.DateTime` payload, a built-in codec with no source impl.
+            if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || name.starts_with("<corelib>/Core/time::")) -> return true
             if sema_serde_core_data_name(environment, program, name, direction) -> return true
             if direction == SemaSerdeDirection.Decode && name == "Secret" -> return true
             if sema_serde_generic_bound(environment, program, name, direction) -> return true

@@ -75,7 +75,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     __real_jet_rt_free(ptr,size,align);
 }
 static void watch_text(Text *t) {
-    watch(t,24,8);
+    watch((char *)(t)-8,32,8);
     if(t->capacity>0) watch(t->data,t->capacity,1);
 }
 static void text_is(Text *t,const char *s) {

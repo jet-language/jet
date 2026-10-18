@@ -46,6 +46,9 @@ fn mir_pass_fixed_reduction_normalize_function(function: &MIRFunction, prelude_c
     loop vector_index < vectors.len() {
         vector := vectors[vector_index]
         if vector.rule == .Reduction && vector.decision == .Eligible && vector.fixed_reduction != None && vector.body_blocks.len() > 0 {
+            // copy: the rollback snapshot (owner: `snapshot`) and the function being rewritten in
+            // place (owner: the write parameter) must both exist: a rejected attempt restores the
+            // snapshot.
             snapshot :: function.copy()
             normalized :: mir_pass_fixed_reduction_attempt(&function, prelude_calls, snapshot, vector)
             if {
@@ -727,10 +730,12 @@ fn mir_pass_fixed_reduction_new_id(used: &[U64], namespace: String, identity: St
 
 fn mir_pass_fixed_reduction_projection(projection: MIRProjection, induction_values: [MIRValueID], lane: MIRValueID) -> MIRProjection Never! {
     if projection == {
-        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: if mir_pass_value_id_seen(induction_values, index) -> lane else -> index, call: call, write_call: write_call, location: location, context: context, span: span}
+        // copy: `write_call` and `context` are payloads of read parameter `projection`, which keeps the originals; the new MIRProjection.Index's fields own `write_call` and `context`
+        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: if mir_pass_value_id_seen(induction_values, index) -> lane else -> index, call: call, write_call: write_call.copy(), location: location, context: context.copy(), span: span}
         .Field(field, span) -> MIRProjection.Field{field: field, span: span}
         .Deref(span) -> MIRProjection.Deref{span: span}
-        .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
+        // copy: `kind` is a payload of read parameter `projection`, which keeps the original; field `kind` of the new MIRProjection.Payload owns this one
+        .Payload(kind, span) -> MIRProjection.Payload{kind: kind.copy(), span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: range, location: location, span: span}
         .MapLookup(lookup, optional, span) -> MIRProjection.MapLookup{lookup: lookup, optional: optional, span: span}
     }

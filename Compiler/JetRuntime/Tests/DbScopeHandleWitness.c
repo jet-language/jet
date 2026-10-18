@@ -12,6 +12,7 @@ extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_clone(Text *);
+extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Policy *jet_rt_handle_clone_jet_row_policy(Policy *);
 extern void jet_rt_handle_drop_jet_row_policy(Policy *);
@@ -33,10 +34,9 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     }
     __real_jet_rt_free(ptr,size,align);
 }
-static void text_watch(Text *t) { watch(t,24,8); if(t->cap) watch(t->data,t->cap,1); }
+static void text_watch(Text *t) { watch((char *)(t)-8,32,8); if(t->cap) watch(t->data,t->cap,1); }
 static Text *text(unsigned empty) {
-    unsigned char bytes[]={'a',0,0xc3,0xa9}; Text input={bytes,empty ? 0 : 4,empty ? 0 : 4};
-    Text *out=jet_rt_string_clone(&input); text_watch(out); return out;
+    unsigned char bytes[]={'a',0,0xc3,0xa9}; Text *out=jet_rt_string_from_static(bytes,empty ? 0 : 4); text_watch(out); return out;
 }
 static void policy_watch(Policy *p) { text_watch(p->table); text_watch(p->expression); }
 static void scope_watch(Scope *s) {

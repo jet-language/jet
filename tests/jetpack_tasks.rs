@@ -285,7 +285,7 @@ fn run() {}
     );
     fs::write(
         dir.join("package.jet"),
-        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n",
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n",
     )
     .unwrap();
     fs::rename(dir.join("main.jet"), dir.join("run.jet")).unwrap();

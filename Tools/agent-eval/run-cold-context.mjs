@@ -552,7 +552,7 @@ async function writeFixtures(task, caseDir) {
   await fs.writeFile(path.join(caseDir, "package.jet"), `name: "cold-agent-case"
 version: "0.1.0"
 edition: "2026"
-authority: { holds: { allow: [Env, Exec, FS, Net, IO, Mem.Alloc, Mem.Rc, Panic, Time] } }
+authority: { holds: { allow: [Env, Exec, FS, Net, IO, Mem.Alloc, Mem.Rc, Time] } }
 `, "utf8");
   for (const [name, value] of Object.entries(task.files ?? {})) {
     const target = path.join(caseDir, name);

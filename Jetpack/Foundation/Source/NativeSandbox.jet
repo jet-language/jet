@@ -11,6 +11,12 @@ NATIVE_SANDBOX_FAKE_ENV :: prep { "JETPACK_FAKE_SANDBOX" }
 NATIVE_SANDBOX_MAX_OUTPUT_BYTES :: prep { 67108864 }
 NATIVE_SANDBOX_MACOS_EXEC :: prep { "/usr/bin/sandbox-exec" }
 NATIVE_SANDBOX_NOT_ENFORCED :: prep { "not-enforced" }
+// Rust ProcessSandbox `DEFAULT_ACTION_TIMEOUT`: every build action has a
+// finite wall-clock budget in every native backend.
+NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS :: prep { 30000 }
+// The backend status probe runs one trivial child; it gets a short fixed
+// budget so a wedged backend reports unavailable instead of hanging.
+NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS :: prep { 5000 }
 
 struct NativeSandboxStatus {
     available: Bool
@@ -82,7 +88,8 @@ fn foundation_linux_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxS
     &argv.push(probe)
     &argv.push("-c")
     &argv.push("exit 0")
-    receipt :: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe failed: {err}")
+    receipt :: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS)).run() ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe failed: {err}")
+    if receipt.timed_out -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe timed out after {NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS}ms")
     if !receipt.success -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe exited with exit status: {receipt.code}")
     NativeSandboxStatus{available: true, mechanism: "linux-bwrap", policy: foundation_native_sandbox_policy(false, false), reason: "bubblewrap completed the isolated backend probe"}
 }
@@ -92,7 +99,8 @@ fn foundation_macos_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxS
         return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS backend `{NATIVE_SANDBOX_MACOS_EXEC}` is unavailable")
     }
     probe_profile :: "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-exec (literal \"/usr/bin/true\"))\n(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n"
-    receipt :: process.cmd([String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", probe_profile, "/usr/bin/true"}).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe failed: {err}")
+    receipt :: process.cmd([String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", probe_profile, "/usr/bin/true"}).env_clear().stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS)).run() ?? return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe failed: {err}")
+    if receipt.timed_out -> return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe timed out after {NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS}ms")
     if !receipt.success -> return NativeSandboxStatus.unavailable("macos-seatbelt-unavailable", "native macOS Seatbelt backend probe exited with exit status: {receipt.code}")
     NativeSandboxStatus{available: true, mechanism: "macos-seatbelt", policy: foundation_native_sandbox_policy(true, false), reason: "native macOS Seatbelt completed the isolated backend probe"}
 }
@@ -108,6 +116,25 @@ fn foundation_run_native_sandboxed(executable: String, args: [String], source_di
 // Run one action with additional immutable host directories projected
 // read-only at their declared destinations.
 fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
+    foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, source_dir, output_dir, env, share_network, mounts, None)
+}
+
+// Rust `run_native_sandboxed_with_timeout_and_mounts`: the same boundary with
+// a finite wall-clock budget. A child that outlives `timeout` is killed with
+// its process group and the run fails with the Rust backend's message.
+//
+// Descendants. Rust also walks `/proc/<pid>/task/*/children` and SIGKILLs
+// every descendant it saw. Core `process` signals only the wrapper's process
+// group, and on Linux that is sufficient: `--unshare-all` puts the action in
+// a private pid namespace, `--die-with-parent` kills the namespace's init
+// when the wrapper dies (timeout), and the init exits with the action
+// (normal exit); either way the kernel kills every process left in the
+// namespace. `--new-session` or `setsid` cannot leave it. The "action
+// timeout" fixture checks that a pipe-holding descendant is reaped on both
+// paths. macOS Seatbelt has no pid namespace: a forked child that leaves the
+// process group survives the group kill there, exactly as in Rust, whose
+// `/proc` walk is Linux-only.
+fn foundation_run_native_sandboxed_with_timeout_and_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount], timeout: Duration?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
@@ -127,7 +154,12 @@ fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String
     source_writable :: !output_is_separate
 
     spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args)
+    if timeout == .Val(limit) -> spec = spec.timeout(limit)
     receipt :: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES).run() ?? return Err(NativeSandboxError.IO("{err}"))
+    if receipt.timed_out {
+        limit :: timeout ?? panic("a timed-out sandbox run had a timeout")
+        return Err(NativeSandboxError.IO("sandbox process timed out after {limit.ns / 1000000}ms"))
+    }
     if receipt.limit_hit == .Val(_) -> return Err(NativeSandboxError.IO("sandbox process output exceeded {NATIVE_SANDBOX_MAX_OUTPUT_BYTES} bytes"))
     mechanism :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
     Ok(NativeSandboxOutput{receipt, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})

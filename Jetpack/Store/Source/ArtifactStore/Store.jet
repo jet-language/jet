@@ -94,6 +94,7 @@ struct ArtifactStoredEntry {
 
 fn store_artifact_sort_entries(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] Never! {
     out := entries
+    out = loop fresh_item in out -> fresh_item
     &out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> store_artifact_entry_order(left, right))
     out
 }
@@ -651,6 +652,7 @@ struct ArtifactStore {
         // Rust orders by (pinned, last_use, key) in one comparator; no reliance
         // on sort stability across two passes.
         order := entries.copy()
+        order = loop fresh_item in order -> fresh_item
         &order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
         after := before
         removed := [ArtifactEntryStatus]{}
@@ -802,6 +804,7 @@ struct ArtifactStore {
         journal_path :: files.join(self.root(), "journal")
         journal :: store_artifact_read_journal(journal_path)
         entries := self.annotated_entries(journal, [String: Bool]{})
+        entries = loop fresh_item in entries -> fresh_item
         &entries.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
         lines := [String]{}
         loop index in 0..<entries.len() {

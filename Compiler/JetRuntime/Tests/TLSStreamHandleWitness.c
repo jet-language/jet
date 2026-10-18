@@ -20,6 +20,7 @@ extern void *jet_rt_alloc(int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern void *jet_fd_adopt_unbuffered_raw(int64_t,Text *);
 extern Text *jet_rt_string_clone(Text *);
+extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern void jet_rt_handle_drop_jet_tls_stream(Stream *);
 extern Text *jet_rt_handle_show_jet_tls_stream(Stream *);
@@ -46,8 +47,8 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     __real_jet_rt_free(ptr,size,align);
 }
 static Text *text(void) {
-    unsigned char bytes[]={'x',0,'y'}; Text input={bytes,3,3}; Text *out=jet_rt_string_clone(&input);
-    watch(out,24,8); watch(out->data,out->cap,1); return out;
+    unsigned char bytes[]={'x',0,'y'}; Text *out=jet_rt_string_from_static(bytes,3);
+    watch((char *)(out)-8,32,8); watch(out->data,out->cap,1); return out;
 }
 static Peer *peer(void) {
     Peer *p=jet_rt_alloc(176,8); memset(p,0,176); watch(p,176,8);
@@ -64,7 +65,7 @@ int main(void) {
         s->id=ids[i]; s->fd=fd_owner; s->read_present=1; s->read_ms=-1; s->write_present=1; s->write_ms=INT64_MAX;
         for(unsigned k=0;k<7;++k) s->callbacks[k]=callback_must_not_run;
         peer_owner=present ? peer() : NULL; s->peer=peer_owner; stream_owner=s; stage=0;
-        Text *shown=jet_rt_handle_show_jet_tls_stream(s); watch(shown,24,8); watch(shown->data,shown->cap,1);
+        Text *shown=jet_rt_handle_show_jet_tls_stream(s); watch((char *)(shown)-8,32,8); watch(shown->data,shown->cap,1);
         char expected[64]; int length=snprintf(expected,sizeof(expected),"TLSStream(%lld)",(long long)ids[i]);
         assert(length>=0 && shown->len==length && !memcmp(shown->data,expected,(size_t)length));
         jet_rt_string_drop(shown); assert(fcntl(fd_number,F_GETFD)!=-1);

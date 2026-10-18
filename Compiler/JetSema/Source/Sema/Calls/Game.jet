@@ -94,7 +94,7 @@ fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args:
         target.type_name == "Replay" -> Type.Named{name: "GameReplay"}
         else -> Type.Named{name: "GameBackend"}
     }
-    receiver_value := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    receiver_value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
     if expected_arity == 1 {
         value :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if target.type_name == "Replay" {
@@ -112,7 +112,7 @@ fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args:
         }
         receiver_value = value
     }
-    tir := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     if !sema_game_record_effect("core.game.{target.type_name}.{method}", result_type, [EffectRowEntry]{}, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
 }
@@ -176,7 +176,7 @@ fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRo
 }
 
 fn sema_game_string_value(text: String, span: Span) -> TExpr Never! {
-    sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
+    sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
 }
 
 
@@ -201,7 +201,7 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
             else -> {}
         }
         operation := THandleOp.GameSceneOnFrame{schedule: schedule, derivation: derivation}
-        tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{callback}}, span)
+        tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{callback}}, span)
         if !sema_game_record_effect("GameScene.on_frame", Type.Named{name: "Unit"}, [EffectRowEntry]{}, span, environment, program, &scopes, &context, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
         return Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)})
     }
@@ -228,7 +228,7 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
     if !sema_ownership_check_call_receiver(&state, receiver, access, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     result_type := if method == "query" -> Type.List{element: Type.String} else -> Type.Named{name: "Unit"}
     operation := if method == "query" -> THandleOp.GameSceneQuery else -> THandleOp.GameSceneComponent
-    tir := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{argument}}, span)
+    tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{argument}}, span)
     if !sema_game_record_effect("GameScene.{method}", result_type, [EffectRowEntry]{}, span, environment, program, &scopes, &context, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)})
 }
@@ -246,7 +246,7 @@ fn sema_game_check_assets_method(receiver: Expr, receiver_value: TExpr, method: 
     asset_type := if method == "image" -> Type.Named{name: "GameImage"} else -> Type.Named{name: "GameSound"}
     result_type := Type.Result{ok: asset_type, err: Type.String}
     operation := if method == "image" -> THandleOp.GameAssetsImage else -> THandleOp.GameAssetsSound
-    tir := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{asset_path}}, span)
+    tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{asset_path}}, span)
     if !sema_game_record_effect("GameAssets.{method}", result_type, [EffectRowEntry]{EffectRowEntry{name: "FS", span: span}}, span, environment, program, &scopes, &context, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)})
 }
@@ -278,7 +278,7 @@ fn sema_game_check_input_method(receiver: Expr, receiver_value: TExpr, method: S
     if !sema_ownership_check_call_receiver(&state, receiver, access, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     operation := if method == "bind" -> THandleOp.GameInputBind else -> THandleOp.GameInputPressed
     result_type := if method == "bind" -> Type.Named{name: "Unit"} else -> Type.Bool
-    tir := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
+    tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
     if !sema_game_record_effect("GameInput.{method}", result_type, [EffectRowEntry]{}, span, environment, program, &scopes, &context, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)})
 }
@@ -295,7 +295,7 @@ fn sema_game_check_backend_method(receiver: Expr, receiver_value: TExpr, method:
     if !sema_ownership_check_call_receiver(&state, receiver, access, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     operation := if method == "present" -> THandleOp.GameBackendPresent else -> THandleOp.GameBackendShouldContinue
     result_type := if method == "present" -> Type.Named{name: "Unit"} else -> Type.Bool
-    tir := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     if !sema_game_record_effect("GameBackend.{method}", result_type, [EffectRowEntry]{}, span, environment, program, &scopes, &context, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)})
 }

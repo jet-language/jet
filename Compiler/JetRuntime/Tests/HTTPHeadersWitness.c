@@ -28,7 +28,7 @@ void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<48); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_headers(Headers *h) {
     watch(h,24,8); if(h->capacity) watch(h->data,h->capacity*16,8);
     for(int64_t i=0;i<h->length;i++) { watch_text(h->data[i].name); watch_text(h->data[i].value); }

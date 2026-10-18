@@ -1,10 +1,12 @@
 // The compiler's streaming trace, reached only through the host. With
 // `JET_TRACE_FILE` set the host writes one Chrome trace event per call and
-// flushes it, stamping wall time and memory itself (resident and peak
-// memory on every `end`; the live heap, `heap_kb`, on a phase's `end`), so a
-// running compile can be watched; without it the request carries no sink
-// and every call site is one `if trace_sink == .Val(sink)` branch. The
-// compiler never formats or buffers events.
+// flushes it, stamping wall time, CPU time and memory itself (on every
+// `end`: resident and peak memory, the span's thread CPU time `cpu_ns`, the
+// whole process's CPU time `proc_cpu_ns` and its major faults `majflt` over
+// the span; the live heap, `heap_kb`, on a phase's `end`), so a running
+// compile can be watched; without it the request carries no sink and every
+// call site is one `if trace_sink == .Val(sink)` branch. The compiler never
+// formats or buffers events.
 //
 // `name` is the stable span kind (`load`, `sema.check`, `sema.module`, ...);
 // `detail` labels one item (a module or function name, "" for a phase);
@@ -13,7 +15,10 @@
 // span an early return left open, and reports how many items it processed.
 // `progress` reports `done` of `total` items of the open phase; the host
 // throttles it. A `progress` kind `counters.<phase>.<counter>` is instead one
-// #4319 scaling counter value (`done`), written once. `functions` says whether
+// counter value (`done`), written once: a #4319 scaling counter or a
+// SPEED-500K work counter (`parse.lines`, `parse.tokens`, `lower.mir_insts`,
+// `native.lower.lir_insts`, `native.object.bytes`, ...) that
+// Tools/perf/budget/check.mjs divides phase time by. `functions` says whether
 // per-function spans were requested (`JET_TRACE_DETAIL=functions`). The host
 // writes the trace file, so each call declares the FS row; an undeclared
 // dynamic dispatch would be the maximal row (D-EFF2).

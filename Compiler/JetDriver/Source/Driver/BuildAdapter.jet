@@ -63,6 +63,9 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBui
         loop index in 1..<args.len() {
             value :: jet_eval_build_session_host_input(args[index].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
             if method == "generate" && index == 2 {
+                // copy: `generated` outlives this loop and is handed to build_session_call, while
+                // `source` is only a view of the `.Text` payload inside `value`; Jet has no
+                // consuming match, so the payload cannot be moved out.
                 if value == .Text(source) -> generated = Val(source.copy())
                 else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
             } else { &values.push(value) }
@@ -77,6 +80,9 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBui
             }
             .Failure(error) -> {
                 if row.fallibility != MIRCallFallibility.Infallible && jet_eval_build_failed_value(error) == .Val(value) {
+                    // copy: the host result owns the failure's data value, but `value` is a view of
+                    // the payload in jet_eval_build_failed_value's result; Jet has no consuming
+                    // match to move it out.
                     return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: value.copy()}}))
                 }
                 return Val(jet_driver_build_host_result(JetEvalHostOutcome.Failure{kind: JetEvalErrorKind.Source, diagnostic: jet_eval_build_session_diagnostic(error)}))
@@ -91,9 +97,15 @@ impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
     // Fork the adapter without changing its invocation-owned session authority.
     // Raw transports remain host-owned; build policy stays in this adapter.
     fn clone_adapter(self) -[]> JetEvalBuildHostAdapter {
+        // copy: clone_adapter exists to fork the adapter: the evaluator keeps this adapter and
+        // installs the fork in a child machine, so each needs its own session handle, inputs and
+        // base_dir.
         JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), network_declared: self.network_declared, base_dir: self.base_dir.copy()}
     }
     fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
+        // copy: build_call has a read `self`, but jet_driver_build_host_call writes its session
+        // (`&`). This call writes a session of its own, and the adapter keeps its session for the
+        // next build_call.
         session := self.session.copy()
         jet_driver_build_host_call(&session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, &machine, target, args, span)
     }
@@ -107,10 +119,15 @@ JET_DRIVER_BUILD_MAX_FETCH_BYTES :: 67108864
 JET_DRIVER_BUILD_NOT_FOUND :: "No such file or directory (os error 2)"
 
 fn jet_driver_build_input_fail(code: String, what: String, why: String, fix: String, span: Span) -> BuildSessionReply Never! {
+    // copy: the reply's BuildSessionDiagnostic owns its four texts. Callers pass literals, the
+    // global JET_DRIVER_BUILD_NOT_FOUND, payload views (root_error.message) and texts shared by
+    // sibling error paths, none of which they can move in.
     BuildSessionReply.Failure{error: BuildSessionDiagnostic{code: code.copy(), what: what.copy(), why: why.copy(), fix: fix.copy(), start: span.start, end: span.end}}
 }
 
 fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String? Never! {
+    // copy: `args` is the caller's read-only argument list, and the returned String outlives this
+    // lookup in the reply that the caller builds.
     if index < args.len() && args[index] == .Text(value) -> return Val(value.copy())
     None
 }
@@ -121,12 +138,18 @@ fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String?
 // importer services, keep the request: the caller refuses it.
 fn jet_driver_build_input_reply(inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
     if method == "fetch" -> return jet_driver_build_fetch(inputs, http_inputs, network_declared, base_dir, args, span)
+    // copy: the HostRequest reply hands method/args back to the host. Here they are payload views
+    // of the caller's `reply`, which this result replaces, and Jet has no consuming match to move
+    // them out.
     host :: inputs ?? return BuildSessionReply.HostRequest{method: method.copy(), args: args.copy()}
     if method == {
         "find" -> return jet_driver_build_find(host, base_dir, args, span)
         "embed" -> return jet_driver_build_embed(host, base_dir, args, span)
         else -> {}
     }
+    // copy: the HostRequest reply hands method/args back to the host. Here they are payload views
+    // of the caller's `reply`, which this result replaces, and Jet has no consuming match to move
+    // them out.
     BuildSessionReply.HostRequest{method: method.copy(), args: args.copy()}
 }
 
@@ -140,6 +163,9 @@ fn jet_driver_build_split_rel(path: String) -> [String] Never! {
 }
 
 fn jet_driver_build_join(directory: String, name: String) -> String Never! {
+    // copy: the joined path is a new owned String. With an empty directory it equals `name`, a read
+    // parameter that the caller keeps (a glob match or a relative path), so the result needs its
+    // own text.
     if directory == "" -> return name.copy()
     if directory.ends_with("/") -> return "{directory}{name}"
     "{directory}/{name}"
@@ -228,6 +254,7 @@ fn jet_driver_build_glob_match(pattern: [String], pi: Int, path: [String], qi: I
 // dispatch.rs `walk_find`: entries in name order, never through a link.
 fn jet_driver_build_walk(host: JetDriverSharedBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
     entries := host.entries(directory) ?? return Val(err.message)
+    entries = loop fresh_item in entries -> fresh_item
     &entries.sort_by((left: JetDriverBuildEntry, right: JetDriverBuildEntry) -> left.name <=> right.name)
     loop entry in entries {
         path :: jet_driver_build_join(logical, entry.name)
@@ -269,15 +296,14 @@ fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, arg
         &prefix.push(segment)
     }
     recursive :: segments.contains("**")
-    root_dir :: if jet_driver_build_checked_path(host, base_dir, ".") == {
+    root := if jet_driver_build_checked_path(host, base_dir, ".") == {
         .Val(root_path) -> root_path
         .None -> { return jet_driver_build_input_fail("E0955", walk_what, JET_DRIVER_BUILD_NOT_FOUND, walk_fix, span) }
         .Err(root_error) -> { return jet_driver_build_input_fail("E0955", walk_what, root_error.message, walk_fix, span) }
     }
     logical :: prefix.join("/")
-    root := root_dir.copy()
     if prefix.len() > 0 {
-        root = if jet_driver_build_checked_path(host, root_dir.path, logical) == {
+        root = if jet_driver_build_checked_path(host, root.path, logical) == {
             .Val(selected_path) -> selected_path
             .None -> { return BuildSessionReply.Value{value: BuildSessionValue.List{values: []}} }
             .Err(selected_error) -> { return jet_driver_build_input_fail("E0955", walk_what, selected_error.message, walk_fix, span) }
@@ -292,9 +318,9 @@ fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, arg
     }
     &matches.sort()
     values := [BuildSessionValue]{}
-    loop relative in matches {
+    loop relative in ^matches {
         _ := host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`find` can't open `{relative}`", "{err.message} (matched while expanding `{raw}`)", "check the path — it is relative to the file's own directory", span)
-        &values.push(BuildSessionValue.Text{value: relative.copy()})
+        &values.push(BuildSessionValue.Text{value: ^relative})
     }
     BuildSessionReply.Value{value: BuildSessionValue.List{values: ^values}}
 }
@@ -412,6 +438,8 @@ fn jet_driver_build_fetch(inputs: JetDriverSharedBuildInputs?, http_inputs: JetD
             root :: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err.message, span)
             if !root.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
             if root.file || root.path != base_dir -> return jet_driver_build_fetch_error(url, "compile-time source directory must be a real directory", span)
+            // copy: `raw` is a view into `url` (a slice), and `requested` must own its path because
+            // it becomes the fetch's cache key and its result path.
             requested :: if raw.starts_with("/") -> { raw.copy() } else -> { jet_driver_build_join(root.path, raw) }
             target :: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err.message, span)
             if !target.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)

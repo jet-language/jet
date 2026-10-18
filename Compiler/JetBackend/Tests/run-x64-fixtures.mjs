@@ -10,7 +10,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) { console.error("usage: run-x64-fixtures.mjs <scratch-outdir>"); process.exit(64); }
 const read = (path) => readFileSync(resolve(repo, path), "utf8");
-const type = read("Compiler/JetFoundation/Source/MIR/MIR.jet").split("\n").find((line) => line.startsWith("pub struct MIRTypeID "));
+const type = read("Compiler/JetFoundation/Source/MIR/MIR.jet").split("\n").find((line) => /^(pub )?struct MIRTypeID /.test(line));
 if (!type) throw new Error("missing MIRTypeID");
 const paths = ["Source/LIR/LIR.jet", "Source/LIR/Lint.jet", "Source/X64/Encoder.jet", "Source/X64/RegAlloc.jet", "Source/X64/Select.jet", "Tests/X64Fixtures.jet"];
 const bodies = paths.map((path) => read(`Compiler/JetBackend/${path}`).replace(/^use jet_\w+.*\n/gm, ""));
@@ -33,7 +33,7 @@ for (const line of (result.stdout ?? "").split(/\r?\n/)) {
   const match = /^X64 EXEC ([\w-]+)$/.exec(line);
   if (match) witnesses.add(match[1]);
 }
-for (const name of ["parallel", "scalar", "spill", "abi-f32", "abi-f64", "entry", "memory-address", "address-arithmetic"]) {
+for (const name of ["parallel", "scalar", "spill", "abi-f32", "abi-f64", "entry", "memory-address", "address-arithmetic", "frame-branch", "split-loop", "fused-overflow", "fused-overflow-cold", "call-loop", "critical-edge-then", "critical-edge-else", "edge-store", "shared-slot"]) {
   const path = resolve(out, `${name}.elf`);
   if (!witnesses.has(name) || !existsSync(path)) { console.error(`missing machine witness ${name}`); failed = true; continue; }
   const run = spawnSync(path, [], { encoding: "utf8", timeout: 10000 });

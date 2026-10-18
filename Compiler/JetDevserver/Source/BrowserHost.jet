@@ -1,0 +1,580 @@
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1
+// Typed projection of the shared session; no wire decoder or renderer lives here.
+use std.collections.[VecDeque]
+use std.fmt as fmt
+use jet_devserver.Devtools.catalog.[descriptors]
+// Rust: crates/jet-devserver/src/BrowserHost.rs:13
+BROWSER_DEVTOOLS_PROTOCOL :: "jet.devtools.v1"
+// Rust: crates/jet-devserver/src/BrowserHost.rs:15
+JET_DEVTOOLS_PROTOCOL :: BROWSER_DEVTOOLS_PROTOCOL
+// Rust: crates/jet-devserver/src/BrowserHost.rs:18
+MAX_RECONNECT_EVENTS :: 256
+// Rust: crates/jet-devserver/src/BrowserHost.rs:20
+MAX_BROWSER_PANELS :: 128
+// Rust: crates/jet-devserver/src/BrowserHost.rs:22
+MAX_BROWSER_NODES :: 4096
+// Rust: crates/jet-devserver/src/BrowserHost.rs:24
+MAX_BROWSER_NODE_DEPTH :: 64
+// Rust: crates/jet-devserver/src/BrowserHost.rs:26
+MAX_BROWSER_TEXT :: 256
+// Rust: crates/jet-devserver/src/BrowserHost.rs:28
+MAX_BROWSER_VALUE :: 4096
+// Rust: crates/jet-devserver/src/BrowserHost.rs:32
+enum BrowserPlacement { InApp; Workbench }
+impl BrowserPlacement {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:42
+    fn as_str(self) -> String { if self == {
+        .InApp -> "in-app"
+        .Workbench -> "workbench"
+    } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:49
+    fn index(self) -> USize { if self == {
+        .InApp -> 0
+        .Workbench -> 1
+    } }
+    fn default() -> BrowserPlacement { .InApp }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:59
+enum BrowserNodeKind { Text; Status; Table; Tree; Chart; Action }
+impl BrowserNodeKind {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:76
+    fn as_str(self) -> String {
+        if self == {
+            .Text -> "text"
+            .Status -> "status"
+            .Table -> "table"
+            .Tree -> "tree"
+            .Chart -> "chart"
+            .Action -> "action"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:90
+enum BrowserDock { Left; Right; Bottom; Floating }
+impl BrowserDock {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:104
+    fn as_str(self) -> String { if self == {
+        .Left -> "left"
+        .Right -> "right"
+        .Bottom -> "bottom"
+        .Floating -> "floating"
+    } }
+    fn default() -> BrowserDock { .Left }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:116
+enum BrowserSessionState { Idle; Building; BuildFailed; RuntimeFailure; HotReload; TestsFailing }
+impl BrowserSessionState {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:134
+    fn as_str(self) -> String {
+        if self == {
+            .Idle -> "idle"
+            .Building -> "building"
+            .BuildFailed -> "build-failed"
+            .RuntimeFailure -> "runtime-failure"
+            .HotReload -> "hot-reload"
+            .TestsFailing -> "tests-failing"
+        }
+    }
+    fn default() -> BrowserSessionState { .Idle }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:148
+struct BrowserSourceLocation { source_id: String; line: U32; column: U32; function: String? }
+impl BrowserSourceLocation {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:162
+    fn new(source_id: String, line: U32, column: U32, function: String?) -> BrowserSourceLocation {
+        BrowserSourceLocation { source_id: ^source_id, line: line, column: column, function: ^function }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:177
+    fn validate(self) BrowserHostError! {
+        _ :: validate_source_id(self.source_id) ?? return .Err(err)
+        if self.line == 0 -> return .Err(.InvalidSource("source line must be one-based"))
+        if self.function == .Val(function) -> _ :: validate_text(function, "source function", MAX_BROWSER_TEXT) ?? return .Err(err)
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:193
+struct BrowserSourceGrant {
+    session_id: String; revision: U64; panel_id: String; node_id: String; source: BrowserSourceLocation
+}
+impl BrowserSourceGrant {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:208
+    fn new(session_id: String, revision: U64, panel_id: String, node_id: String, source: BrowserSourceLocation) -> BrowserSourceGrant {
+        BrowserSourceGrant { session_id: ^session_id, revision: revision, panel_id: ^panel_id, node_id: ^node_id, source: ^source }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:226
+alias SourceNavigationGrant :: BrowserSourceGrant
+// Rust: crates/jet-devserver/src/BrowserHost.rs:228
+alias BrowserNavigationGrant :: BrowserSourceGrant
+// Rust: crates/jet-devserver/src/BrowserHost.rs:232
+struct BrowserActionGrant { session_id: String; revision: U64; panel_id: String; node_id: String; action_id: String }
+impl BrowserActionGrant {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:247
+    fn new(session_id: String, revision: U64, panel_id: String, node_id: String, action_id: String) -> BrowserActionGrant {
+        BrowserActionGrant { session_id: ^session_id, revision: revision, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:265
+alias ActionGrant :: BrowserActionGrant
+// Rust: crates/jet-devserver/src/BrowserHost.rs:269
+struct BrowserNode { id: String; kind: BrowserNodeKind; label: String; value: String?; status: String?; children: [BrowserNode] }
+impl BrowserNode {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:286
+    fn new(id: String, kind: BrowserNodeKind, label: String) -> BrowserNode {
+        BrowserNode { id: ^id, kind: kind, label: ^label, value: None, status: None, children: [] }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:298
+    fn with_value(self: BrowserNode, value: String) -> BrowserNode {
+        self := ^self
+        self.value = .Val(^value)
+        return self
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:304
+    fn with_status(self: BrowserNode, status: String) -> BrowserNode {
+        self := ^self
+        self.status = .Val(^status)
+        return self
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:310
+    fn with_children(self: BrowserNode, children: [BrowserNode]) -> BrowserNode {
+        self := ^self
+        self.children = ^children
+        return self
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:318
+struct BrowserPanelFact {
+    panel_id: String; title: String; freshness_ms: U64; status: String; cursor: U64?; nodes: [BrowserNode]
+}
+impl BrowserPanelFact {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:337
+    fn new(panel_id: String, title: String, freshness_ms: U64, status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
+        BrowserPanelFact { panel_id: ^panel_id, title: ^title, freshness_ms: freshness_ms, status: ^status, cursor: None, nodes: ^nodes }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:355
+    fn with_cursor(self: BrowserPanelFact, cursor: U64?) -> BrowserPanelFact {
+        self := ^self
+        self.cursor = cursor
+        return self
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:361
+    fn identity(self) -> String { self.panel_id }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:368
+struct BrowserHostEvent {
+    protocol: String; session_id: String; revision: U64; sequence: U64; observed_at_ms: U64; panels: [BrowserPanelFact]
+}
+impl BrowserHostEvent {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:385
+    fn new(session_id: String, revision: U64, sequence: U64, observed_at_ms: U64, panels: [BrowserPanelFact]) -> BrowserHostEvent {
+        BrowserHostEvent { protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: ^session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: ^panels }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:403
+    fn validate(self) BrowserHostError! {
+        if self.protocol != BROWSER_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEvent("browser event protocol does not match jet.devtools.v1"))
+        _ :: validate_text(self.session_id, "event session", MAX_BROWSER_TEXT) ?? return .Err(err)
+        if self.panels.len() > MAX_BROWSER_PANELS -> return .Err(.InvalidEvent("browser event exceeds the panel bound"))
+        panel_ids := [String:Bool]{}
+        node_count := USize{0}
+        loop panel in self.panels {
+            _ :: validate_panel(panel, &node_count) ?? return .Err(err)
+            if panel_ids.contains(panel.panel_id) -> return .Err(.InvalidEvent("browser event repeats panel `{panel.panel_id}`"))
+            &panel_ids.insert(panel.panel_id, true)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:432
+struct BrowserReconnectCursor { sequence: U64 }
+impl BrowserReconnectCursor {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:439
+    fn new(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor { sequence: sequence } }
+    fn default() -> BrowserReconnectCursor { BrowserReconnectCursor.new(0) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:445
+impl From[U64] for BrowserReconnectCursor {
+    fn from(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor.new(sequence) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:452
+struct BrowserReconnect {
+    session_id: String; from: BrowserReconnectCursor?; cursor: BrowserReconnectCursor?; events: [BrowserHostEvent]; complete: Bool
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:467
+struct BrowserSelection { panel_id: String; node_id: String? }
+// Rust: crates/jet-devserver/src/BrowserHost.rs:479
+enum BrowserHostAction {
+    OpenPanel { placement: BrowserPlacement, panel_id: String }
+    ClosePanel { placement: BrowserPlacement, panel_id: String }
+    DockPanel { placement: BrowserPlacement, panel_id: String, dock: BrowserDock }
+    NavigateSource { placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant }
+    InvokeAction { placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant }
+}
+impl BrowserHostAction {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:530
+    fn open(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .OpenPanel { placement: placement, panel_id: ^panel_id } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:538
+    fn close(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .ClosePanel { placement: placement, panel_id: ^panel_id } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:546
+    fn dock(placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostAction { .DockPanel { placement: placement, panel_id: ^panel_id, dock: dock } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:559
+    fn navigate_source(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostAction { .NavigateSource { placement: placement, panel_id: ^panel_id, node_id: ^node_id, grant: ^grant } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:574
+    fn invoke_action(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostAction { .InvokeAction { placement: placement, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id, grant: ^grant } }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:595
+enum BrowserHostEffect {
+    PanelOpened { placement: BrowserPlacement, panel_id: String }
+    PanelClosed { placement: BrowserPlacement, panel_id: String }
+    PanelDocked { placement: BrowserPlacement, panel_id: String, dock: BrowserDock }
+    SourceNavigated { placement: BrowserPlacement, panel_id: String, node_id: String, source: BrowserSourceLocation }
+    ActionInvoked { placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:646
+struct BrowserHtmlElement {
+    id: String; kind: String; panel_id: String?; node_id: String?; label: String; value: String?; status: String?
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:665
+struct BrowserHtmlViewModel {
+    placement: BrowserPlacement; route: String; protocol: String; session_id: String;
+    revision: U64?; sequence: U64?; cursor: BrowserReconnectCursor?; state: BrowserSessionState;
+    selection: BrowserSelection?; panels: [BrowserPanelView]; elements: [BrowserHtmlElement]
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:693
+struct BrowserPanelView {
+    panel_id: String; title: String; freshness_ms: U64; status: String; cursor: U64?;
+    open: Bool; dock: BrowserDock; nodes: [BrowserNode]
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:714
+#Error
+enum BrowserHostError {
+    InvalidEvent(String)
+    WrongSession { expected: String, received: String }
+    StaleRevision { current: U64, received: U64 }
+    StaleSequence { current: U64, received: U64 }
+    CursorExpired { cursor: U64, earliest: U64 }
+    CursorAhead { cursor: U64, current: U64 }
+    UnknownPanel(String)
+    UnknownNode { panel_id: String, node_id: String }
+    ActionNotGranted(String)
+    InvalidSource(String)
+    InvalidAction(String)
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:738
+impl BrowserHostError.Display {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:739
+    fn fmt(self, formatter: &fmt.Formatter) -> fmt.Result {
+        message :: if self == {
+            .InvalidEvent(message) -> "invalid browser event: {message}"
+            .WrongSession { expected, received } -> "browser event belongs to session `{received}`, expected `{expected}`"
+            .StaleRevision { current, received } -> "stale browser revision {received}; current revision is {current}"
+            .StaleSequence { current, received } -> "stale browser sequence {received}; current sequence is {current}"
+            .CursorExpired { cursor, earliest } -> "browser reconnect cursor {cursor} predates retained sequence {earliest}"
+            .CursorAhead { cursor, current } -> "browser reconnect cursor {cursor} is ahead of current sequence {current}"
+            .UnknownPanel(panel_id) -> "unknown browser panel `{panel_id}`"
+            .UnknownNode { panel_id, node_id } -> "unknown browser node `{node_id}` in panel `{panel_id}`"
+            .ActionNotGranted(message) -> "browser action not granted: {message}"
+            .InvalidSource(message) -> "invalid browser source: {message}"
+            .InvalidAction(message) -> "invalid browser action: {message}"
+        }
+        return &formatter.write_str(message)
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:777
+struct PanelState { fact: BrowserPanelFact; layout: [PanelLayout] }
+// Rust: crates/jet-devserver/src/BrowserHost.rs:783
+struct PanelLayout { open: Bool; dock: BrowserDock }
+impl PanelLayout { fn default() -> PanelLayout { PanelLayout { open: false, dock: .Left } } }
+// Rust: crates/jet-devserver/src/BrowserHost.rs:791
+struct BrowserHost {
+    session_id: String; revision: U64?; sequence: U64?; observed_at_ms: U64?; state: BrowserSessionState;
+    cursor: BrowserReconnectCursor?; selection: BrowserSelection?; panels: [String:PanelState]; history: VecDeque<BrowserHostEvent>
+}
+impl BrowserHost {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:805
+    fn new(session_id: String) -> BrowserHost {
+        BrowserHost { session_id: ^session_id, revision: None, sequence: None, observed_at_ms: None, state: .Idle, cursor: None, selection: None, panels: {}, history: VecDeque[BrowserHostEvent].new() }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:820
+    fn for_session(session_id: String) -> BrowserHost { BrowserHost.new(^session_id) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:825
+    fn session_id(self) -> String { self.session_id }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:830
+    fn revision(self) -> U64? { self.revision }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:835
+    fn sequence(self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:840
+    fn observed_at_ms(self) -> U64? { self.observed_at_ms }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:845
+    fn state(self) -> BrowserSessionState { self.state }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:851
+    fn cursor(self) -> BrowserReconnectCursor? { self.cursor }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:856
+    fn selection(self) -> BrowserSelection? { self.selection }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:861
+    fn apply_event(&self, event: BrowserHostEvent) BrowserHostError! {
+        _ :: event.validate() ?? return .Err(err)
+        if event.session_id != self.session_id -> return .Err(.WrongSession { expected: self.session_id.copy(), received: ^event.session_id })
+        if self.revision == .Val(current) && event.revision < current -> return .Err(.StaleRevision { current: current, received: event.revision })
+        if self.sequence == .Val(current) && event.sequence <= current -> return .Err(.StaleSequence { current: current, received: event.sequence })
+        next_ids := [String:Bool]{}
+        loop panel in event.panels { &next_ids.insert(panel.panel_id, true) }
+        &self.panels.retain((panel_id, _) -> next_ids.contains(panel_id))
+        loop fact in event.panels {
+            if self.panels.get_mut(fact.panel_id) == .Val(panel) {
+                panel.fact = fact.copy()
+            } else {
+                &self.panels.insert(fact.panel_id.copy(), PanelState { fact: fact.copy(), layout: [PanelLayout.default(), PanelLayout.default()] })
+            }
+        }
+        self.revision = .Val(event.revision)
+        self.sequence = .Val(event.sequence)
+        self.observed_at_ms = .Val(event.observed_at_ms)
+        self.state = derive_session_state(event.panels)
+        self.cursor = .Val(BrowserReconnectCursor.new(event.sequence))
+        if self.selection == .Val(selection) && !self.node_exists(selection.panel_id, selection.node_id) -> self.selection = None
+        if self.history.len() == MAX_RECONNECT_EVENTS -> _ :: &self.history.pop_front()
+        &self.history.push_back(^event)
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:923
+    fn apply(&self, event: BrowserHostEvent) BrowserHostError! { &self.apply_event(^event) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:928
+    fn resume_from(self, cursor: BrowserReconnectCursor?) -> BrowserReconnect BrowserHostError! {
+        if cursor == .Val(requested) && self.sequence == .Val(current) && requested.sequence > current -> return .Err(.CursorAhead { cursor: requested.sequence, current: current })
+        if cursor == .Val(requested) {
+            if self.history.front() == .Val(first) {
+                earliest :: first.sequence
+                if requested.sequence.saturating_add(1) < earliest -> return .Err(.CursorExpired { cursor: requested.sequence, earliest: earliest })
+            } else if requested.sequence > 0 -> return .Err(.CursorExpired { cursor: requested.sequence, earliest: 0 })
+        }
+        events :: self.history.iter().filter((event) -> cursor == None || cursor.is_some_and((from) -> event.sequence > from.sequence)).cloned().collect[[BrowserHostEvent]]()
+        return BrowserReconnect { session_id: self.session_id.copy(), from: cursor, cursor: self.sequence.map(BrowserReconnectCursor.new), events: ^events, complete: true }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:972
+    fn events_since(self, sequence: U64?) -> [BrowserHostEvent] BrowserHostError! {
+        resumed :: self.resume_from(sequence.map(BrowserReconnectCursor.new)) ?? return .Err(err)
+        return ^resumed.events
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:979
+    fn set_cursor(&self, cursor: BrowserReconnectCursor?) BrowserHostError! {
+        if cursor == .Val(value) -> _ :: self.resume_from(.Val(value)) ?? return .Err(err)
+        self.cursor = cursor
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:988
+    fn scrub(&self, sequence: U64?) BrowserHostError! { &self.set_cursor(sequence.map(BrowserReconnectCursor.new)) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:993
+    fn panel_catalog(self) -> [BrowserPanelFact] {
+        keys := self.panels.keys().collect[[String]]()
+        &keys.sort()
+        panels := keys.iter().map((key) -> self.panels[key].fact.copy()).collect[[BrowserPanelFact]]()
+        catalog :: descriptors()
+        ranks := [String:USize]{}
+        loop (index, descriptor) in catalog.iter().enumerate() {
+            if !ranks.contains(descriptor.id.as_str()) -> &ranks.insert(descriptor.id.as_str(), index)
+        }
+        // Stable rank sort preserves BTree identity order for unlisted panels.
+        &panels.sort_by_key((panel) -> ranks.get(panel.panel_id) ?? USize.MAX)
+        return panels
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1010
+    fn panel(self, panel_id: String) -> BrowserPanelFact? { self.panels.get(panel_id).map((panel) -> panel.fact) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1015
+    fn is_open(self, placement: BrowserPlacement, panel_id: String) -> Bool { self.panels.get(panel_id).is_some_and((panel) -> panel.layout[placement.index()].open) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1022
+    fn dock(self, placement: BrowserPlacement, panel_id: String) -> BrowserDock? { self.panels.get(panel_id).map((panel) -> panel.layout[placement.index()].dock) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1029
+    fn open_panel(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
+        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+        panel.layout[placement.index()].open = true
+        return .PanelOpened { placement: placement, panel_id: ^panel_id }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1044
+    fn close_panel(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
+        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+        panel.layout[placement.index()].open = false
+        if self.selection.is_some_and((selection) -> selection.panel_id == panel_id) -> self.selection = None
+        return .PanelClosed { placement: placement, panel_id: ^panel_id }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1066
+    fn dock_panel(&self, placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostEffect BrowserHostError! {
+        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+        panel.layout[placement.index()].dock = dock
+        return .PanelDocked { placement: placement, panel_id: ^panel_id, dock: dock }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1084
+    fn select(&self, panel_id: String, node_id: String?) BrowserHostError! {
+        _ :: &self.require_panel(panel_id) ?? return .Err(err)
+        if node_id == .Val(id) -> _ :: self.require_node(panel_id, id) ?? return .Err(err)
+        self.selection = .Val(BrowserSelection { panel_id: ^panel_id, node_id: ^node_id })
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1100
+    fn clear_selection(&self) { self.selection = None }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1105
+    fn dispatch(&self, action: BrowserHostAction) -> BrowserHostEffect BrowserHostError! {
+        if action == {
+            .OpenPanel { placement, panel_id } -> &self.open_panel(placement, ^panel_id)
+            .ClosePanel { placement, panel_id } -> &self.close_panel(placement, ^panel_id)
+            .DockPanel { placement, panel_id, dock } -> &self.dock_panel(placement, ^panel_id, dock)
+            .NavigateSource { placement, panel_id, node_id, grant } -> self.navigate_source(placement, panel_id, node_id, ^grant)
+            .InvokeAction { placement, panel_id, node_id, action_id, grant } -> self.invoke_action(placement, panel_id, node_id, action_id, ^grant)
+        }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1138
+    fn navigate_source(self, placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostEffect BrowserHostError! {
+        _ :: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
+        if grant.panel_id != panel_id || grant.node_id != node_id -> return .Err(.ActionNotGranted("source grant does not name the requested panel/node"))
+        _ :: grant.source.validate() ?? return .Err(err)
+        return .SourceNavigated { placement: placement, panel_id: panel_id.to_string(), node_id: node_id.to_string(), source: ^grant.source }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1162
+    fn invoke_action(self, placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostEffect BrowserHostError! {
+        _ :: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
+        if grant.panel_id != panel_id || grant.node_id != node_id || grant.action_id != action_id -> return .Err(.ActionNotGranted("action grant does not name the requested panel/node/action"))
+        _ :: validate_text(action_id, "action identity", MAX_BROWSER_TEXT) ?? return .Err(.ActionNotGranted(err.to_string()))
+        node :: self.require_node(panel_id, node_id) ?? return .Err(err)
+        if node.kind != .Action || node.id != action_id -> return .Err(.ActionNotGranted("the requested node is not an explicitly granted Action node"))
+        return .ActionInvoked { placement: placement, panel_id: panel_id.to_string(), node_id: node_id.to_string(), action_id: action_id.to_string() }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1193
+    fn view_model(self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
+        keys := self.panels.keys().collect[[String]]()
+        &keys.sort()
+        panels := keys.iter().map((key) -> {
+            panel :: self.panels[key]
+            BrowserPanelView { panel_id: panel.fact.panel_id.copy(), title: panel.fact.title.copy(), freshness_ms: panel.fact.freshness_ms, status: panel.fact.status.copy(), cursor: panel.fact.cursor, open: panel.layout[placement.index()].open, dock: panel.layout[placement.index()].dock, nodes: panel.fact.nodes.copy() }
+        }).collect[[BrowserPanelView]]()
+        catalog :: descriptors()
+        ranks := [String:USize]{}
+        loop (index, descriptor) in catalog.iter().enumerate() {
+            if !ranks.contains(descriptor.id.as_str()) -> &ranks.insert(descriptor.id.as_str(), index)
+        }
+        &panels.sort_by_key((panel) -> ranks.get(panel.panel_id) ?? USize.MAX)
+        elements := [BrowserHtmlElement {
+            id: "jet-devtools-{placement.as_str()}", kind: "host", panel_id: None, node_id: None,
+            label: self.state.as_str(), value: self.sequence.map((sequence) -> sequence.to_string()), status: .Val(self.state.as_str())
+        }]
+        loop panel in panels {
+            &elements.push(BrowserHtmlElement { id: element_id(placement, panel.panel_id, None), kind: "panel", panel_id: .Val(panel.panel_id.copy()), node_id: None, label: panel.title.copy(), value: None, status: .Val(panel.status.copy()) })
+            flatten_nodes(placement, panel.panel_id, panel.nodes, &elements)
+        }
+        return BrowserHtmlViewModel {
+            placement: placement, route: if placement == {
+                .InApp -> "/__jet_devtools"
+                .Workbench -> "/__jet_devtools/workbench"
+            },
+            protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: self.session_id.copy(), revision: self.revision, sequence: self.sequence,
+            cursor: self.cursor, state: self.state, selection: self.selection.copy(), panels: ^panels, elements: ^elements
+        }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1260
+    fn require_panel(&self, panel_id: String) -> PanelState BrowserHostError! {
+        self.panels.get_mut(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1266
+    fn require_node(self, panel_id: String, node_id: String) -> BrowserNode BrowserHostError! {
+        panel :: self.panels.get(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
+        find_node(panel.fact.nodes, node_id) ?? return .Err(.UnknownNode { panel_id: panel_id.to_string(), node_id: node_id.to_string() })
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1277
+    fn node_exists(self, panel_id: String, node_id: String?) -> Bool {
+        if node_id == {
+            .Val(id) -> self.require_node(panel_id, id).is_ok()
+            .None -> self.panels.contains(panel_id)
+        }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1284
+    fn validate_grant_context(self, panel_id: String, node_id: String, grant_session: String, grant_revision: U64) BrowserHostError! {
+        current_revision :: self.revision ?? return .Err(.ActionNotGranted("no canonical event has established a current revision"))
+        if grant_session != self.session_id -> return .Err(.WrongSession { expected: self.session_id.copy(), received: grant_session.to_string() })
+        if grant_revision != current_revision -> return .Err(.StaleRevision { current: current_revision, received: grant_revision })
+        _ :: self.require_node(panel_id, node_id) ?? return .Err(err)
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1314
+    fn default() -> BrowserHost { BrowserHost.new("") }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1319
+fn validate_panel(panel: BrowserPanelFact, node_count: &USize) BrowserHostError! {
+    _ :: validate_text(panel.panel_id, "panel identity", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _ :: validate_text(panel.title, "panel title", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _ :: validate_text(panel.status, "panel status", MAX_BROWSER_TEXT) ?? return .Err(err)
+    node_ids := [String:Bool]{}
+    loop node in panel.nodes { _ :: validate_node(node, 0, node_count, &node_ids) ?? return .Err(err) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1330
+fn validate_node(node: BrowserNode, depth: USize, node_count: &USize, node_ids: &[String:Bool]) BrowserHostError! {
+    if depth > MAX_BROWSER_NODE_DEPTH -> return .Err(.InvalidEvent("browser node tree exceeds the depth bound"))
+    node_count = node_count.saturating_add(1)
+    if node_count > MAX_BROWSER_NODES -> return .Err(.InvalidEvent("browser event exceeds the node bound"))
+    _ :: validate_text(node.id, "node identity", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _ :: validate_text(node.label, "node label", MAX_BROWSER_TEXT) ?? return .Err(err)
+    if node.value == .Val(value) -> _ :: validate_text(value, "node value", MAX_BROWSER_VALUE) ?? return .Err(err)
+    if node.status == .Val(status) -> _ :: validate_text(status, "node status", MAX_BROWSER_TEXT) ?? return .Err(err)
+    if node_ids.contains(node.id) -> return .Err(.InvalidEvent("browser panel repeats node `{node.id}`"))
+    &node_ids.insert(node.id, true)
+    loop child in node.children { _ :: validate_node(child, depth + 1, node_count, node_ids) ?? return .Err(err) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1367
+fn validate_text(value: String, label: String, limit: USize) BrowserHostError! {
+    if value.is_empty() || value.len() > limit || value.chars().any((c) -> c.is_control()) -> return .Err(.InvalidEvent("{label} is empty, too long, or contains control text"))
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1376
+fn validate_source_id(source_id: String) BrowserHostError! {
+    if source_id.is_empty() || source_id.len() > MAX_BROWSER_TEXT || source_id.chars().any((c) -> c.is_control()) || source_id.starts_with('/') || source_id.starts_with('\\') || source_id.contains('\\') || source_id.split('/').any((part) -> part == ".." || part.is_empty()) || source_id.contains("://") -> return .Err(.InvalidSource("source identity must be a non-empty project-relative path"))
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1393
+fn derive_session_state(panels: [BrowserPanelFact]) -> BrowserSessionState {
+    state := BrowserSessionState.Idle
+    loop panel in panels {
+        value := panel.status.trim() // #4303
+        value = value.to_ascii_lowercase()
+        candidate :: if value == {
+            "building" -> .Building
+            "build_failed" | "build-failed" | "build failed" -> .BuildFailed
+            "runtime_failure" | "runtime-failure" | "runtime failure" -> .RuntimeFailure
+            "hot_reload" | "hot-reload" | "hot reload" -> .HotReload
+            "tests_failing" | "tests-failing" | "tests failing" -> .TestsFailing
+            else -> { next }
+        }
+        state = prefer_state(state, candidate)
+    }
+    return state
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1414
+fn prefer_state(current: BrowserSessionState, candidate: BrowserSessionState) -> BrowserSessionState {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1415
+    fn rank(state: BrowserSessionState) -> U8 {
+        if state == {
+            .Idle -> 0
+            .HotReload -> 1
+            .Building -> 2
+            .TestsFailing -> 3
+            .RuntimeFailure -> 4
+            .BuildFailed -> 5
+        }
+    }
+    if rank(candidate) >= rank(current) -> candidate else -> current
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1432
+fn find_node(nodes: [BrowserNode], node_id: String) -> BrowserNode? {
+    loop node in nodes {
+        if node.id == node_id -> return .Val(node)
+        if find_node(node.children, node_id) == .Val(found) -> return .Val(found)
+    }
+    return None
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1442
+fn element_id(placement: BrowserPlacement, panel_id: String, node_id: String?) -> String {
+    id := "jet-devtools-{placement.as_str()}-panel-{stable_fragment(panel_id)}"
+    if node_id == .Val(node_id) { &id.push_str("-node-"); &id.push_str(stable_fragment(node_id)) }
+    return id
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1455
+fn stable_fragment(value: String) -> String {
+    output := String.with_capacity(value.len())
+    loop character in value.chars() { &output.push(if character.is_ascii_alphanumeric() || character == '_' || character == '-' -> character else -> '-') }
+    if output.is_empty() -> "item" else -> output
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1471
+fn flatten_nodes(placement: BrowserPlacement, panel_id: String, nodes: [BrowserNode], elements: &[BrowserHtmlElement]) {
+    loop node in nodes {
+        &elements.push(BrowserHtmlElement { id: element_id(placement, panel_id, .Val(node.id)), kind: node.kind.as_str(), panel_id: .Val(panel_id.to_string()), node_id: .Val(node.id.copy()), label: node.label.copy(), value: node.value.copy(), status: node.status.copy() })
+        flatten_nodes(placement, panel_id, node.children, elements)
+    }
+}

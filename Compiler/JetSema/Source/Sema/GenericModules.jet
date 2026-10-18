@@ -75,10 +75,10 @@ struct SemaGenericModuleNode {
 // an expanded instance (`sema_generic_modules_expand`).
 fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) {
     per_module :: sema_generic_modules_collect(graph, inputs)
-    loop (module_index, diagnostics) in per_module {
-        loop diagnostic in diagnostics {
-            &graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
-        }
+    module_index := 0
+    loop diagnostics in ^per_module {
+        loop diagnostic in ^diagnostics -> &graph.diagnostics.push(sema_diagnostic_with_source_location(^diagnostic, graph.modules[module_index].source_segments))
+        module_index += 1
     }
 }
 
@@ -87,10 +87,10 @@ fn sema_generic_modules_collect(graph: SemaRegistrationGraph, inputs: [SemaRegis
     // value parameter reports once however often the template is used.
     templates_by_module := [[SemaGenericModuleTemplate]]{}
     output := [[Diagnostic]]{}
-    loop module_row in graph.modules {
-        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
+    loop module_row_index in 0..<graph.modules.len() {
+        check := SemaGenericModuleCheck{module_identity: graph.modules[module_row_index].module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
         templates := [SemaGenericModuleTemplate]{}
-        if sema_genmod_written_input(inputs, module_row.module_identity) == .Val(index) {
+        if sema_genmod_written_input(inputs, graph.modules[module_row_index].module_identity) == .Val(index) {
             templates = sema_genmod_collect_templates(inputs[index].program.items, &check)
         }
         &templates_by_module.push(templates)
@@ -119,9 +119,11 @@ fn sema_genmod_written_input(inputs: [SemaRegistrationModuleInput], module_ident
 fn sema_generic_modules_written(inputs: [SemaRegistrationModuleInput]) -> [SemaRegistrationModuleInput] {
     written := [SemaRegistrationModuleInput]{}
     loop input in inputs {
-        if sema_genmod_declares_modules(input.program.items) -> &written.push(input)
+        // copy: the alias check reads these programs as written after
+        // registration moves every input's program into its row.
+        if sema_genmod_declares_modules(input.program.items) -> &written.push(input.copy())
     }
-    written
+    ^written
 }
 
 fn sema_genmod_declares_modules(items: [Item]) -> Bool {
@@ -157,13 +159,13 @@ fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegist
     // template was refused by import registration (E0609); its aliases stay
     // silent rather than also reporting an unknown template.
     denied := [String:Bool]{}
-    loop import in module_row.imports {
-        if import.declaration.kind == .Unqualified(_, _, imported, _, _) {
-            target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? next
+    loop import_index in 0..<module_row.imports.len() {
+        if module_row.imports[import_index].declaration.kind == .Unqualified(_, _, imported, _, _) {
+            target_index :: sema_registration_module_index(graph, module_row.imports[import_index].target_module_identity) ?? next
             loop entry in imported {
                 source :: sema_genmod_find_template(templates_by_module[target_index], entry.original) ?? next
                 bound_local := String?{None}
-                loop binding in import.bindings {
+                loop binding in module_row.imports[import_index].bindings {
                     if binding.original == entry.original -> bound_local = Val(binding.local)
                 }
                 if bound_local == {
@@ -1267,6 +1269,9 @@ fn sema_genmod_folded_consts(items: [Item], inherited: [String:Expr], enums: [St
 fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool]) -> Expr? {
     if expression == {
         .Int(number, span, _, _) -> Val(Expr.Int{value: number, span: span, width: None, raw: None})
+        // copy: the folded literal is a new owned Expr. A Bool/Char literal equals `expression`,
+        // the generic template's node (a read parameter), which stays in the template for other
+        // instances.
         .Bool(_, _) | .Char(_, _) -> Val(expression.copy())
         .Str(_, span) -> {
             text :: sema_genmod_text(expression) ?? return None

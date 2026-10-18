@@ -243,6 +243,8 @@ fn jet_rust_emit_hardware_interrupt_runtime(ctx: &JetRustEmitContext, lines: &[S
 }
 
 fn jet_rust_emit_hardware_facts(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    // copy: the hardware profile is read while the facts are emitted through the write-borrowed
+    // `ctx` (its emit caches), so a view into ctx.program.facts would be live across those writes.
     profile :: ctx.program.facts.hardware_profile.copy() ?? return
     root :: ctx.config.root_prefix.copy()
     loop (block_index, block) in profile.register_blocks {
@@ -322,6 +324,8 @@ fn jet_rust_emit_hardware_setups(ctx: &JetRustEmitContext, indent: String, lines
 }
 
 fn jet_rust_emit_hardware_register_checked(ctx: &JetRustEmitContext, function: MIRFunction, operation: String, profile_id: String, block: String, register: String, width: MIRRegisterWidth) -> String Never! {
+    // copy: the hardware profile is read while the register check emits through the write-borrowed
+    // `ctx`, so a view into ctx.program.facts would be live across those writes.
     profile :: ctx.program.facts.hardware_profile.copy() ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR hardware register has no checked profile", "register access requires the package hardware profile facts", Val(function.span))
         return "unreachable!(\"hardware profile missing\")"

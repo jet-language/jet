@@ -7,7 +7,7 @@
 
 CLI_TEST_IMAGE_SERVICE_E1336 :: prep { embed_file("../../../tests/cli/image_service_projection_e1336.txt") }
 
-fn cli_test_eval_error(src: String, dir: String) -[FS, Env]> EnvModelEvalError {
+fn cli_test_eval_error(src: String, dir: String) -[FS, Env, Exec, Time.Wait]> EnvModelEvalError {
     if envmodel_evaluate_env(src, dir) == {
         .Ok(_) -> panic("the environment must be refused")
         .Err(error) -> error
@@ -55,7 +55,7 @@ fn cli_test_eval_error(src: String, dir: String) -[FS, Env]> EnvModelEvalError {
     src :: files.read(files.join(scratch, "env.jet")) ?? panic("read env.jet")
     error :: cli_test_eval_error(src, scratch)
     assert_eq(error.diagnostic.code, "E1267")
-    rendered :: diagnostics_render_colored(error.diagnostic, "env.jet", src, false)
+    rendered :: diagnostic_render(error.diagnostic, "env.jet", src, false)
     assert(rendered.contains("non-executable package `app`"), rendered)
     assert(rendered.contains("declared `library`"), rendered)
     files.remove_all(scratch).drop("scratch cleanup is best-effort")

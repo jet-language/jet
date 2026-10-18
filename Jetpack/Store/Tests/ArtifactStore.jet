@@ -506,7 +506,7 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: prep { `{"schema":"jet.build-record/v0","
     })
     _ :: store.publish_last_build_record(workspace, "checked-record", record) ?? panic("publish latest")
     found :: store.last_build_record(workspace, "run.jet") ?? panic("read latest")
-    assert(found == Val(record))
+    assert(found == Val((record)))
     missing :: store.last_build_record(other, "run.jet") ?? panic("read other workspace")
     assert(missing == None)
     different :: store.last_build_record(workspace, "other.jet") ?? panic("read other program")

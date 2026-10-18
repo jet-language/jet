@@ -43,7 +43,7 @@ struct CTypeCatalog {
         catalog := CTypeCatalog{aliases: [String: String]{}, records: [String: CStructDef]{}, names: [String: String]{}}
         used_names := [String]{}
         loop handle in handles.handles -> &used_names.push(handle.jet_name)
-        raw_records := [(record: CRawRecord, jet_name: String)]{}
+        raw_records := [(jet_name: String, record: CRawRecord)]{}
 
         loop declaration in declarations {
             if pkg_cbind_parse_complete_record(declaration) == {
@@ -61,7 +61,7 @@ struct CTypeCatalog {
                         }
                         .None -> {}
                     }
-                    &raw_records.push((record: record, jet_name: jet_name))
+                    &raw_records.push((jet_name: jet_name, record: record))
                     next
                 }
                 .None -> {}
@@ -450,10 +450,10 @@ fn pkg_cbind_split_param_type_and_name(input: String, idx: Int) -> (ty: String, 
         // leaves an empty tail and a lone type keyword is not a name.
         if pkg_cbind_is_ident(tail) && (separator == 42 || pkg_cbind_is_ascii_space(separator)) {
             ty :: pkg_bytes_text(bytes, 0, position + 1).trim()
-            if ty != "" -> return (ty: ty, name: tail)
+            if ty != "" -> return (name: tail, ty: ty)
         }
     }
-    (ty: raw, name: "arg{idx}")
+    (name: "arg{idx}", ty: raw)
 }
 
 // Collapse whitespace and drop the qualifiers the binder ignores.

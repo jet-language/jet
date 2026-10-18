@@ -2109,7 +2109,11 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLi
     startup :: link_has_startup(c)
     link_define_names(&c, layout, startup)
     entry :: link_global_addr(c, entry_g)
+    // The unloaded debug tail (`.debug_*`, `.symtab`, section headers) follows
+    // the loaded image, so profilers and debuggers name the code.
+    debug :: link_debug_sections(&c)
     image := link_write(&c, layout, entry)
+    link_write_sections(&c, &image, layout, debug)
     if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
     facts := X64ResidentLinkFacts?{None}
     if request == .Val(wanted) {

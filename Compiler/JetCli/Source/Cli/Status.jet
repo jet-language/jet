@@ -107,6 +107,8 @@ fn jet_cli_status_json(value: JetCLIStatusValue) -> String Never! {
         .Null -> "null"
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Integer(number) -> "{number}"
+        // copy: `text` is a payload view of `value` (owner: the caller, a read parameter: no move
+        // out of it, E0201); the rendered string owns its own.
         .Float(text) -> text.copy()
         .Text(text) -> jet_cli_json_string(text)
         .Array(values) -> {

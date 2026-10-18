@@ -33,7 +33,7 @@ fn assert_nest_p001_form_stages() {
     fs::write(scratch.join("run.jet"), NEST_P001_FORM).expect("write NEST-P001 fixture");
     fs::write(
         scratch.join("package.jet"),
-        "name: \"nest-p001\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n",
+        "name: \"nest-p001\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n",
     )
     .expect("write NEST-P001 authority");
     let stages: &[(&str, &[&str])] = &[

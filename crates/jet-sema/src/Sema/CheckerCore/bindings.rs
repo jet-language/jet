@@ -718,11 +718,8 @@ fn project_fragment_module(
         };
         let row = match item {
             crate::AST::Item::Enum(def) => {
-                let mut row = def.clone();
+                let mut row = enum_row_without_members(def);
                 row.name = identity.clone();
-                row.methods.clear();
-                row.trait_impls.clear();
-                row.derives.clear();
                 for variant in &mut row.variants {
                     match &mut variant.payload {
                         crate::AST::VariantPayload::Unit => {}
@@ -737,11 +734,8 @@ fn project_fragment_module(
                 FragmentNominalRow::Enum(row)
             }
             crate::AST::Item::Struct(def) => {
-                let mut row = def.clone();
+                let mut row = struct_row_without_members(def);
                 row.name = identity.clone();
-                row.methods.clear();
-                row.trait_impls.clear();
-                row.derives.clear();
                 for field in &mut row.fields {
                     canonicalize(&mut field.ty);
                 }
@@ -786,6 +780,48 @@ pub(crate) fn checked_comptime_nominals_for_context(
         facts.name_ledger = name_ledger.body_snapshot();
         facts
     }))
+}
+
+/// A struct row for fragment facts: every field but its methods, trait impls
+/// and derives, which the facts never carry. Built field by field so those
+/// members (whole function bodies) are never deep-cloned only to be cleared;
+/// exhaustive destructuring keeps a new field from being silently dropped.
+fn struct_row_without_members(def: &crate::AST::StructDef) -> crate::AST::StructDef {
+    let crate::AST::StructDef {
+        span, compiler_builtin_error, is_pub, is_package_pub, name, name_span, type_params, fields, state,
+        methods: _, cli_bindings, trait_impls: _, derives: _, auto_derive_default, is_published_schema,
+        published_schema_span, is_single_use, single_use_span, is_must_use, must_use_span, layout, layout_span,
+        serde_markers, type_markers, validate_block, validate_span,
+    } = def;
+    crate::AST::StructDef {
+        span: span.clone(), compiler_builtin_error: *compiler_builtin_error, is_pub: *is_pub,
+        is_package_pub: *is_package_pub, name: name.clone(), name_span: name_span.clone(),
+        type_params: type_params.clone(), fields: fields.clone(), state: state.clone(), methods: Vec::new(),
+        cli_bindings: cli_bindings.clone(), trait_impls: Vec::new(), derives: Vec::new(),
+        auto_derive_default: *auto_derive_default, is_published_schema: *is_published_schema,
+        published_schema_span: published_schema_span.clone(), is_single_use: *is_single_use,
+        single_use_span: single_use_span.clone(), is_must_use: *is_must_use, must_use_span: must_use_span.clone(),
+        layout: layout.clone(), layout_span: layout_span.clone(), serde_markers: serde_markers.clone(),
+        type_markers: type_markers.clone(), validate_block: validate_block.clone(), validate_span: validate_span.clone(),
+    }
+}
+
+/// An enum row for fragment facts: every field but its methods, trait impls
+/// and derives (see struct_row_without_members).
+fn enum_row_without_members(def: &crate::AST::EnumDef) -> crate::AST::EnumDef {
+    let crate::AST::EnumDef {
+        span, is_pub, is_package_pub, name, name_span, type_params, variants, methods: _, trait_impls: _,
+        derives: _, auto_derive_default, is_single_use, single_use_span, is_must_use, must_use_span,
+        serde_markers, type_markers, groups,
+    } = def;
+    crate::AST::EnumDef {
+        span: span.clone(), is_pub: *is_pub, is_package_pub: *is_package_pub, name: name.clone(),
+        name_span: name_span.clone(), type_params: type_params.clone(), variants: variants.clone(),
+        methods: Vec::new(), trait_impls: Vec::new(), derives: Vec::new(), auto_derive_default: *auto_derive_default,
+        is_single_use: *is_single_use, single_use_span: single_use_span.clone(), is_must_use: *is_must_use,
+        must_use_span: must_use_span.clone(), serde_markers: serde_markers.clone(), type_markers: type_markers.clone(),
+        groups: groups.clone(),
+    }
 }
 
 fn project_comptime_nominals(
@@ -867,21 +903,15 @@ fn project_comptime_nominals(
                 fragment_signature(function, module_idx, modules, source_paths, &fragment_identities));
         }
         if let crate::AST::Item::Enum(def) = item {
-            let mut row = def.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
+            let row = enum_row_without_members(def);
             facts.enums.insert(row.name.clone(), row);
         }
         if let crate::AST::Item::Struct(def) = item {
             let Some(identity) = struct_identities.get(module_idx, &def.name).map(str::to_owned) else {
                 continue;
             };
-            let mut row = def.clone();
+            let mut row = struct_row_without_members(def);
             row.name = identity.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
             for field in &mut row.fields {
                 field.ty = canonical_fragment_type(
                     &field.ty,

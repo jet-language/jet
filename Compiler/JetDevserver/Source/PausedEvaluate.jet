@@ -1,0 +1,694 @@
+// Typed paused-session inspection/evaluation adapter. It never executes an
+// expression, closure, interpreter, process or host command: real evaluators
+// inject checked results, then this boundary checks identity, authority and budgets.
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, json_int, parse_json_with_limit]
+use jet_foundation.SHA256.[sha256_hex]
+use std.fmt
+
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:15
+PAUSED_EVALUATE_PROTOCOL :: prep { String{"jet.devtools.v1"} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:16
+PAUSED_EVALUATE_SCHEMA_VERSION :: prep { U32{1} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:17
+INSPECT_AUTHORITY :: prep { String{"devtools.inspect"} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:18
+EVALUATE_AUTHORITY :: prep { String{"devtools.evaluate"} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:19
+MUTATE_AUTHORITY :: prep { String{"devtools.mutate"} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:21
+MAX_REQUEST_BYTES :: prep { USize{64 * 1024} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:22
+MAX_EXPRESSION_BYTES :: prep { USize{16 * 1024} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:23
+MAX_SCOPES :: prep { USize{256} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:24
+MAX_VALUE_DEPTH :: prep { U32{64} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:25
+MAX_VALUE_NODES :: prep { U64{4096} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:26
+MAX_VALUE_BYTES :: prep { U64{1024 * 1024} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:27
+MAX_EVALUATION_STEPS :: prep { U64{1_000_000} }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:30
+enum SessionState { Running; Paused; Finished; Stale; Cancelled }
+impl SessionState {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:39
+    fn as_str(self) -> String { if self == {
+        .Running -> "running"
+        .Paused -> "paused"
+        .Finished -> "finished"
+        .Stale -> "stale"
+        .Cancelled -> "cancelled"
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:51
+enum EvaluationMode { ReadOnly; Mutate }
+impl EvaluationMode {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:57
+    fn as_str(self) -> String { if self == {
+        .ReadOnly -> "read_only"
+        .Mutate -> "mutate"
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:66
+enum Publication { Published; Redacted; Absent }
+impl Publication {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:73
+    fn as_str(self) -> String { if self == {
+        .Published -> "published"
+        .Redacted -> "redacted"
+        .Absent -> "absent"
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:83
+enum AggregateKind { Record; List; Map; Set; Tuple; Variant }
+impl AggregateKind {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:93
+    fn as_str(self) -> String { if self == {
+        .Record -> "record"
+        .List -> "list"
+        .Map -> "map"
+        .Set -> "set"
+        .Tuple -> "tuple"
+        .Variant -> "variant"
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:109
+enum TypedValue {
+    Unit; Bool(Bool); Int(I64); FloatBits(U64); Text(String)
+    Bytes { length: U64; sha256: String }
+    Aggregate { kind: AggregateKind; length: U64 }
+}
+impl TypedValue {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:120
+    fn validate(self: &Self) Err! {
+        if self == {
+            .Text(value) -> valid_text(value, "typed text", USize{MAX_VALUE_BYTES})
+            .Bytes { sha256, .. } -> {
+                if sha256.len() != 64 || !sha256.bytes().all((byte) -> byte.is_ascii_hexdigit()) -> return .Err("typed bytes must carry a 64-character SHA-256 digest")
+            }
+            .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Aggregate { .. } -> {}
+        }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:137
+    fn json(self: Self) -> String {
+        if self == {
+            .Unit -> "{{\"kind\":\"unit\"}}"
+            .Bool(value) -> "{{\"kind\":\"bool\",\"value\":{value}}}"
+            .Int(value) -> "{{\"kind\":\"int\",\"value\":{value}}}"
+            .FloatBits(bits) -> "{{\"kind\":\"float_bits\",\"bits\":{bits}}}"
+            .Text(value) -> "{{\"kind\":\"text\",\"value\":\"{foundation_json_escape(value)}\"}}"
+            .Bytes { length, sha256 } -> "{{\"kind\":\"bytes\",\"length\":{length},\"sha256\":\"{foundation_json_escape(sha256)}\"}}"
+            .Aggregate { kind, length } -> "{{\"kind\":\"{kind.as_str()}\",\"length\":{length}}}"
+        }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:160
+    fn bytes(self: Self) -> U64 {
+        if self == {
+            .Unit | .Bool(_) -> 1
+            .Int(_) | .FloatBits(_) -> 8
+            .Text(value) -> U64{value.len()}
+            .Bytes { .. } -> 32
+            .Aggregate { .. } -> 8
+        }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:171
+    fn is_aggregate(self: Self) -> Bool { if self == {
+        .Aggregate { .. } -> true
+        else -> false
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:177
+struct SourceLocation { source_id: String; source_revision: String; start: U64; end: U64 }
+impl SourceLocation {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:185
+    fn new(source_id: String, source_revision: String, start: U64, end: U64) -> Self Err! {
+        location :: Self { source_id: ^source_id, source_revision: ^source_revision, start, end }
+        location.validate()
+        location
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:201
+    fn validate(self: &Self) Err! {
+        valid_id(self.source_id, "source id")
+        valid_id(self.source_revision, "source revision")
+        if self.end < self.start -> return .Err("source location ends before it starts")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:210
+    fn json(self: Self) -> String { "{{\"source_id\":\"{foundation_json_escape(self.source_id)}\",\"source_revision\":\"{foundation_json_escape(self.source_revision)}\",\"start\":{self.start},\"end\":{self.end}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:222
+struct SessionIdentity { session_id: String; source_id: String; source_revision: String; pause_id: String; frame_id: String }
+impl SessionIdentity {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:231
+    fn new(session_id: String, source_id: String, source_revision: String, pause_id: String, frame_id: String) -> Self Err! {
+        identity :: Self { session_id: ^session_id, source_id: ^source_id, source_revision: ^source_revision, pause_id: ^pause_id, frame_id: ^frame_id }
+        identity.validate()
+        identity
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:249
+    fn validate(self: &Self) Err! {
+        valid_id(self.session_id, "session id")
+        valid_id(self.source_id, "source id")
+        valid_id(self.source_revision, "source revision")
+        valid_id(self.pause_id, "pause id")
+        valid_id(self.frame_id, "frame id")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:257
+    fn source_matches(self: Self, location: SourceLocation) -> Bool { self.source_id == location.source_id && self.source_revision == location.source_revision }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:261
+    fn json(self: Self) -> String {
+        "{{\"session_id\":\"{foundation_json_escape(self.session_id)}\",\"source_id\":\"{foundation_json_escape(self.source_id)}\",\"source_revision\":\"{foundation_json_escape(self.source_revision)}\",\"pause_id\":\"{foundation_json_escape(self.pause_id)}\",\"frame_id\":\"{foundation_json_escape(self.frame_id)}\"}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:274
+struct AuthorityRequirement { capability: String; scope_id: String }
+impl AuthorityRequirement {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:280
+    fn new(capability: String, scope_id: String) -> Self Err! {
+        requirement :: Self { capability: ^capability, scope_id: ^scope_id }
+        requirement.validate()
+        requirement
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:289
+    fn validate(self: &Self) Err! { valid_id(self.capability, "authority capability")?; valid_id(self.scope_id, "authority scope") }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:294
+    fn json(self: Self) -> String { "{{\"capability\":\"{foundation_json_escape(self.capability)}\",\"scope_id\":\"{foundation_json_escape(self.scope_id)}\"}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:304
+struct AuthorityGrant { capability: String; scope_id: String }
+impl AuthorityGrant {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:310
+    fn new(capability: String, scope_id: String) -> Self Err! {
+        grant :: Self { capability: ^capability, scope_id: ^scope_id }
+        grant.validate()
+        grant
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:319
+    fn validate(self: &Self) Err! { valid_id(self.capability, "authority capability")?; valid_id(self.scope_id, "authority scope") }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:326
+struct AuthoritySet { grants: [AuthorityGrant] }
+impl AuthoritySet.Default { fn default() -> Self { Self { grants: [] } } }
+impl AuthoritySet {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:331
+    fn new(grants: [AuthorityGrant]) -> Self { grants.sort(); grants.dedup(); Self { grants: ^grants } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:337
+    fn allows(self: Self, requirement: AuthorityRequirement) -> Bool {
+        self.grants.iter().any((grant) -> grant.capability == requirement.capability && grant.scope_id == requirement.scope_id)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:343
+    fn validate(self: &Self) Err! { loop grant in self.grants -> grant.validate() }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:353
+struct EvaluationBudget { max_depth: U32; max_nodes: U64; max_bytes: U64; max_steps: U64 }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:360
+DEFAULT_EVALUATION_BUDGET :: prep { EvaluationBudget { max_depth: 32, max_nodes: 1024, max_bytes: 256 * 1024, max_steps: 100_000 } }
+impl EvaluationBudget {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:368
+    fn new(max_depth: U32, max_nodes: U64, max_bytes: U64, max_steps: U64) -> Self Err! {
+        budget :: Self { max_depth, max_nodes, max_bytes, max_steps }
+        budget.validate()
+        budget
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:384
+    fn validate(self: &Self) Err! {
+        if self.max_depth == 0 || self.max_depth > MAX_VALUE_DEPTH || self.max_nodes == 0 || self.max_nodes > MAX_VALUE_NODES ||
+            self.max_bytes == 0 || self.max_bytes > MAX_VALUE_BYTES || self.max_steps == 0 || self.max_steps > MAX_EVALUATION_STEPS -> return .Err("paused evaluation budget is outside its bounded range")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:399
+    fn contains(self: Self, other: Self) -> Bool {
+        other.max_depth <= self.max_depth && other.max_nodes <= self.max_nodes && other.max_bytes <= self.max_bytes && other.max_steps <= self.max_steps
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:406
+    fn fits(self: Self, usage: EvaluationUsage) -> Bool { usage.depth <= self.max_depth && usage.nodes <= self.max_nodes && usage.bytes <= self.max_bytes && usage.steps <= self.max_steps }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:413
+    fn json(self: Self) -> String { "{{\"max_depth\":{self.max_depth},\"max_nodes\":{self.max_nodes},\"max_bytes\":{self.max_bytes},\"max_steps\":{self.max_steps}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:422
+struct EvaluationUsage { depth: U32; nodes: U64; bytes: U64; steps: U64 }
+impl EvaluationUsage.Default { fn default() -> Self { Self { depth: 0, nodes: 0, bytes: 0, steps: 0 } } }
+impl EvaluationUsage {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:430
+    fn new(depth: U32, nodes: U64, bytes: U64, steps: U64) -> Self { Self { depth, nodes, bytes, steps } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:439
+    fn json(self) -> String { "{{\"depth\":{self.depth},\"nodes\":{self.nodes},\"bytes\":{self.bytes},\"steps\":{self.steps}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:448
+struct Cancellation { requested: Bool; reason: String? }
+impl Cancellation.Default { fn default() -> Self { Self.none() } }
+impl Cancellation {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:454
+    fn none() -> Self { Self { requested: false, reason: .None } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:461
+    fn requested(reason: String) -> Self Err! { valid_text(reason, "cancellation reason", 256)?; Self { requested: true, reason: .Val(^reason) } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:470
+    fn validate(self: &Self) Err! {
+        if self.reason == .Val(reason) -> valid_text(reason, "cancellation reason", 256)
+        if !self.requested && self.reason.is_some() -> return .Err("a non-requested cancellation cannot carry a reason")
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:482
+struct ValueProjection {
+    id: String; name: String; type_name: String; source: SourceLocation
+    publication: Publication; value: TypedValue?; children: [ValueProjection]; truncated: Bool
+}
+impl ValueProjection {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:494
+    fn published(id: String, name: String, type_name: String, source: SourceLocation, value: TypedValue) -> Self {
+        Self { id: ^id, name: ^name, type_name: ^type_name, source: ^source, publication: .Published, value: .Val(^value), children: [], truncated: false }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:513
+    fn redacted(id: String, name: String, type_name: String, source: SourceLocation) -> Self {
+        Self { id: ^id, name: ^name, type_name: ^type_name, source: ^source, publication: .Redacted, value: .None, children: [], truncated: false }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:531
+    fn absent(id: String, name: String, type_name: String, source: SourceLocation) -> Self {
+        Self { id: ^id, name: ^name, type_name: ^type_name, source: ^source, publication: .Absent, value: .None, children: [], truncated: false }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:549
+    fn with_children(self: Self, children: [ValueProjection]) -> Self { self.children = ^children; self }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:554
+    fn validate(self: &Self) Err! {
+        ids := [String:Bool]{}
+        nodes := U64{0}
+        self.validate_inner(.None, 1, &ids, &nodes)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:560
+    fn validate_for_session(self: &Self, identity: &SessionIdentity) Err! {
+        ids := [String:Bool]{}
+        nodes := U64{0}
+        self.validate_inner(.Val(identity), 1, &ids, &nodes)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:566
+    fn validate_inner(self: &Self, identity: &SessionIdentity?, depth: U32, ids: &[String:Bool], nodes: &U64) Err! {
+        if depth > MAX_VALUE_DEPTH -> return .Err("paused value exceeds the maximum projection depth")
+        nodes = nodes.saturating_add(1)
+        if nodes > MAX_VALUE_NODES -> return .Err("paused value exceeds the maximum projection node count")
+        valid_id(self.id, "value id")
+        valid_text(self.name, "value name", 256)
+        valid_id(self.type_name, "value type")
+        self.source.validate()
+        if ids.insert(self.id.copy(), true).is_some() -> return .Err("paused value ids must be unique within a projection")
+        if identity == .Val(identity) {
+            if !identity.source_matches(&self.source) -> return .Err("paused value source identity does not match the session")
+        }
+        if self.publication == {
+            .Published -> {
+                value :: self.value.as_ref() ?? return .Err("published value is missing its typed payload")
+                value.validate()
+                if !value.is_aggregate() && !self.children.is_empty() -> return .Err("only aggregate values may carry projected children")
+            }
+            .Redacted | .Absent -> {
+                if self.value.is_some() || !self.children.is_empty() -> return .Err("redacted or absent values cannot carry a payload")
+            }
+        }
+        loop child in self.children -> child.validate_inner(identity, depth.saturating_add(1), ids, nodes)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:615
+    fn metadata_bytes(self: Self) -> U64 {
+        U64{self.id.len().saturating_add(self.name.len()).saturating_add(self.type_name.len())
+            .saturating_add(self.source.source_id.len()).saturating_add(self.source.source_revision.len()).saturating_add(48)}
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:625
+    fn measure_inner(self: Self, depth: U32, usage: EvaluationUsage) -> Unit {
+        if self.publication == .Absent -> return
+        usage.depth = usage.depth.max(depth)
+        usage.nodes = usage.nodes.saturating_add(1)
+        usage.bytes = usage.bytes.saturating_add(self.metadata_bytes()).saturating_add(self.value.as_ref().map_or(0, (value) -> value.bytes()))
+        loop child in self.children -> child.measure_inner(depth.saturating_add(1), usage)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:640
+    fn measure(self: Self) -> EvaluationUsage { usage := EvaluationUsage.default(); self.measure_inner(1, &usage); usage }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:646
+    fn json(self: Self) -> String? {
+        if self.publication == .Absent -> return .None
+        value :: self.value.as_ref().map((value) -> ",\"value\":{value.json()}").unwrap_or("")
+        children :: array_json(self.children.iter().filter_map((child) -> child.json()))
+        .Val("{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"type\":\"{foundation_json_escape(self.type_name)}\",\"source\":{self.source.json()},\"publication\":\"{self.publication.as_str()}\"{value} ,\"children\":{children},\"truncated\":{self.truncated}}}")
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:672
+struct LexicalScope { id: String; name: String; parent_id: String?; source: SourceLocation; bindings: [ValueProjection] }
+impl LexicalScope {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:681
+    fn new(id: String, name: String, parent_id: String?, source: SourceLocation, bindings: [ValueProjection]) -> Self Err! {
+        scope :: Self { id: ^id, name: ^name, parent_id: ^parent_id, source: ^source, bindings: ^bindings }
+        scope.validate(.None)
+        scope
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:699
+    fn validate(self: &Self, identity: &SessionIdentity?) Err! {
+        valid_id(self.id, "scope id")
+        valid_text(self.name, "scope name", 256)
+        if self.parent_id == .Val(parent) -> valid_id(parent, "parent scope id")
+        self.source.validate()
+        if identity == .Val(identity) {
+            if !identity.source_matches(&self.source) -> return .Err("lexical scope source identity does not match the session")
+        }
+        ids := [String:Bool]{}
+        nodes := U64{0}
+        loop binding in self.bindings -> binding.validate_inner(identity, 1, &ids, &nodes)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:719
+    fn visible_bindings(self: Self) -> Iterator<ValueProjection> { self.bindings.iter().filter((binding) -> binding.publication != .Absent) }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:727
+struct ScopeProjection { id: String; name: String; parent_id: String?; source: SourceLocation; bindings: [ValueProjection] }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:736
+struct ProjectionStats { usage: EvaluationUsage; truncated: Bool; published: U64; redacted: U64 }
+impl ProjectionStats.Default { fn default() -> Self { Self { usage: EvaluationUsage.default(), truncated: false, published: 0, redacted: 0 } } }
+impl ScopeProjection {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:744
+    fn project(scope: LexicalScope, identity: SessionIdentity, budget: EvaluationBudget, selected_value: String?) -> (Self, ProjectionStats) Err! {
+        stats := ProjectionStats.default()
+        bindings := scope.visible_bindings().filter((binding) -> selected_value.is_none_or((id) -> id == binding.id)).collect[[&ValueProjection]]()
+        bindings.sort_by((left, right) -> left.name.cmp(right.name).then(left.id.cmp(right.id)))
+        projected := [ValueProjection]{[].with_capacity(bindings.len())}
+        loop binding in bindings {
+            if binding.publication == .Published -> stats.published = stats.published.saturating_add(1) else -> stats.redacted = stats.redacted.saturating_add(1)
+            value :: project_root(binding, identity, budget, &stats)
+            projected.push(^value)
+        }
+        (_0: Self { id: scope.id.copy(), name: scope.name.copy(), parent_id: scope.parent_id.copy(), source: scope.source.copy(), bindings: ^projected }, _1: ^stats)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:778
+    fn json(self: Self) -> String {
+        bindings :: array_json(self.bindings.iter().filter_map((value) -> value.json()))
+        parent_id :: self.parent_id.as_ref().map((id) -> "\"{foundation_json_escape(id)}\"").unwrap_or("null")
+        "{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"parent_id\":{parent_id},\"source\":{self.source.json()},\"bindings\":{bindings}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:795
+struct PausedSession {
+    identity: SessionIdentity; state: SessionState; scopes: [LexicalScope]
+    authority: AuthoritySet; budget: EvaluationBudget; cancellation: Cancellation
+}
+impl PausedSession {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:805
+    fn new(identity: SessionIdentity, state: SessionState, scopes: [LexicalScope], authority: AuthoritySet, budget: EvaluationBudget) -> Self Err! {
+        identity.validate()
+        budget.validate()
+        authority.validate()
+        if scopes.len() > MAX_SCOPES -> return .Err("paused session exceeds the lexical scope limit")
+        ids := [String:Bool]{}
+        loop scope in scopes {
+            scope.validate(.Val(&identity))
+            if ids.insert(scope.id.copy(), true).is_some() -> return .Err("paused session scope ids must be unique")
+        }
+        loop scope in scopes {
+            if scope.parent_id == .Val(parent) {
+                if !ids.contains_key(parent) -> return .Err("paused lexical scope refers to a missing parent")
+            }
+        }
+        Self { identity: ^identity, state, scopes: ^scopes, authority: ^authority, budget, cancellation: Cancellation.none() }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:842
+    fn paused(identity: SessionIdentity, scopes: [LexicalScope], authority: AuthoritySet, budget: EvaluationBudget) -> Self Err! { Self.new(^identity, .Paused, ^scopes, ^authority, budget) }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:851
+    fn cancel(self: &Self, reason: String) Err! { self.cancellation = Cancellation.requested(^reason)?; self.state = .Cancelled }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:857
+    fn scope(self: Self, id: String) -> LexicalScope? { self.scopes.iter().find((scope) -> scope.id == id) }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:863
+struct InspectRequest {
+    request_id: String; identity: SessionIdentity; scope_id: String; value_id: String?
+    budget: EvaluationBudget; authority: [AuthorityRequirement]; cancellation: Cancellation
+}
+impl InspectRequest {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:874
+    fn new(request_id: String, identity: SessionIdentity, scope_id: String, budget: EvaluationBudget, authority: [AuthorityRequirement]) -> Self Err! {
+        request :: Self { request_id: ^request_id, identity: ^identity, scope_id: ^scope_id, value_id: .None, budget, authority: ^authority, cancellation: Cancellation.none() }
+        request.validate_shape()
+        request
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:894
+    fn validate_shape(self: &Self) Err! {
+        valid_id(self.request_id, "request id")
+        self.identity.validate()
+        valid_id(self.scope_id, "scope id")
+        if self.value_id == .Val(value_id) -> valid_id(value_id, "value id")
+        self.budget.validate()
+        self.cancellation.validate()
+        loop requirement in self.authority -> requirement.validate()
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:909
+    fn from_json(raw: String) -> Self Err! { parse_inspect_request(raw) }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:913
+    fn json(self: Self) -> String {
+        value_id :: self.value_id.as_ref().map((id) -> "\"{foundation_json_escape(id)}\"").unwrap_or("null")
+        authority :: array_json(self.authority.iter().map((requirement) -> requirement.json()))
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.inspect\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"value_id\":{value_id},\"budget\":{self.budget.json()},\"authority\":{authority},\"cancelled\":{self.cancellation.requested}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:934
+struct EvaluateRequest {
+    request_id: String; identity: SessionIdentity; scope_id: String; expression: String
+    mode: EvaluationMode; effects: [String]; authority: [AuthorityRequirement]
+    budget: EvaluationBudget; cancellation: Cancellation
+}
+impl EvaluateRequest {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:946
+    fn new(request_id: String, identity: SessionIdentity, scope_id: String, expression: String, mode: EvaluationMode, effects: [String], authority: [AuthorityRequirement], budget: EvaluationBudget) -> Self Err! {
+        request :: Self { request_id: ^request_id, identity: ^identity, scope_id: ^scope_id, expression: ^expression, mode, effects: ^effects, authority: ^authority, budget, cancellation: Cancellation.none() }
+        request.validate_shape()
+        request
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:971
+    fn validate_shape(self: &Self) Err! {
+        valid_id(self.request_id, "request id")
+        self.identity.validate()
+        valid_id(self.scope_id, "scope id")
+        valid_text(self.expression, "evaluation expression", MAX_EXPRESSION_BYTES)
+        if self.mode == .Mutate && self.effects.is_empty() -> return .Err("mutating evaluation requires at least one checked effect")
+        loop effect_ref in self.effects -> valid_id(effect_ref, "evaluation effect")
+        self.budget.validate()
+        self.cancellation.validate()
+        loop requirement in self.authority -> requirement.validate()
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:990
+    fn from_json(raw: String) -> Self Err! { parse_evaluate_request(raw) }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:994
+    fn json(self: Self) -> String {
+        effects :: array_json(self.effects.iter().map((effect_ref) -> "\"{foundation_json_escape(effect_ref)}\""))
+        authority :: array_json(self.authority.iter().map((requirement) -> requirement.json()))
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.evaluate\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"expression\":\"{foundation_json_escape(self.expression)}\",\"mode\":\"{self.mode.as_str()}\",\"effects\":{effects},\"authority\":{authority},\"budget\":{self.budget.json()},\"cancelled\":{self.cancellation.requested}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1015
+enum EvaluatorStatus { Completed; Failed; Cancelled }
+impl EvaluatorStatus {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1022
+    fn as_str(self) -> String { if self == {
+        .Completed -> "completed"
+        .Failed -> "failed"
+        .Cancelled -> "cancelled"
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1032
+struct ObservationFact {
+    event_id: String; kind: String; session_id: String; source_id: String
+    source_revision: String; scope_id: String; target_id: String; effect_ref: String
+}
+impl ObservationFact {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1044
+    fn new(event_id: String, kind: String, session_id: String, source_id: String, source_revision: String, scope_id: String, target_id: String, effect_ref: String) -> Self Err! {
+        fact :: Self { event_id: ^event_id, kind: ^kind, session_id: ^session_id, source_id: ^source_id, source_revision: ^source_revision, scope_id: ^scope_id, target_id: ^target_id, effect_ref: ^effect_ref }
+        fact.validate_shape()
+        fact
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1068
+    fn validate_shape(self: &Self) Err! {
+        valid_id(self.event_id, "observation id")
+        valid_id(self.kind, "observation kind")
+        valid_id(self.session_id, "observation session id")
+        valid_id(self.source_id, "observation source id")
+        valid_id(self.source_revision, "observation source revision")
+        valid_id(self.scope_id, "observation scope id")
+        valid_id(self.target_id, "observation target id")
+        valid_id(self.effect_ref, "observation effect")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1079
+    fn matches(self: Self, session: PausedSession, request: EvaluateRequest) -> Bool {
+        self.session_id == session.identity.session_id && self.source_id == session.identity.source_id &&
+            self.source_revision == session.identity.source_revision && self.scope_id == request.scope_id && request.effects.iter().any((effect_ref) -> effect_ref == self.effect_ref)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1087
+    fn json(self: Self) -> String {
+        "{{\"event_id\":\"{foundation_json_escape(self.event_id)}\",\"kind\":\"{foundation_json_escape(self.kind)}\",\"session_id\":\"{foundation_json_escape(self.session_id)}\",\"source_id\":\"{foundation_json_escape(self.source_id)}\",\"source_revision\":\"{foundation_json_escape(self.source_revision)}\",\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"target_id\":\"{foundation_json_escape(self.target_id)}\",\"effect\":\"{foundation_json_escape(self.effect_ref)}\"}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1105
+struct EvaluatorResult {
+    identity: SessionIdentity; scope_id: String; status: EvaluatorStatus; value: ValueProjection?
+    usage: EvaluationUsage; changed: Bool; observation: ObservationFact?; error: String?
+}
+impl EvaluatorResult {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1117
+    fn completed(identity: SessionIdentity, scope_id: String, value: ValueProjection?, usage: EvaluationUsage) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Completed, value: ^value, usage, changed: false, observation: .None, error: .None }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1135
+    fn failed(identity: SessionIdentity, scope_id: String, message: String, usage: EvaluationUsage) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Failed, value: .None, usage, changed: false, observation: .None, error: .Val(^message) }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1153
+    fn cancelled(identity: SessionIdentity, scope_id: String, usage: EvaluationUsage) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Cancelled, value: .None, usage, changed: false, observation: .None, error: .None }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1170
+    fn mutated(identity: SessionIdentity, scope_id: String, value: ValueProjection?, usage: EvaluationUsage, observation: ObservationFact) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Completed, value: ^value, usage, changed: true, observation: .Val(^observation), error: .None }
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1191
+enum AuditOutcome { Accepted; Rejected }
+impl AuditOutcome {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1197
+    fn as_str(self) -> String { if self == {
+        .Accepted -> "accepted"
+        .Rejected -> "rejected"
+    } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1206
+enum RejectReason {
+    InvalidRequest; SessionNotPaused; StaleSession; SessionIdentityMismatch; SourceIdentityMismatch; PauseIdentityMismatch
+    FrameIdentityMismatch; ScopeNotFound; ValueNotFound; ValueNotPublished; InsufficientAuthority; BudgetExceeded
+    Cancelled; EvaluatorFailed; MutationNotAllowed; ObservationMissing; InvalidEvaluatorResult
+}
+impl RejectReason {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1227
+    fn as_str(self) -> String {
+        if self == {
+            .InvalidRequest -> "invalid_request", .SessionNotPaused -> "session_not_paused", .StaleSession -> "stale_session"
+            .SessionIdentityMismatch -> "session_identity_mismatch", .SourceIdentityMismatch -> "source_identity_mismatch"
+            .PauseIdentityMismatch -> "pause_identity_mismatch", .FrameIdentityMismatch -> "frame_identity_mismatch"
+            .ScopeNotFound -> "scope_not_found", .ValueNotFound -> "value_not_found", .ValueNotPublished -> "value_not_published"
+            .InsufficientAuthority -> "insufficient_authority", .BudgetExceeded -> "budget_exceeded", .Cancelled -> "cancelled"
+            .EvaluatorFailed -> "evaluator_failed", .MutationNotAllowed -> "mutation_not_allowed", .ObservationMissing -> "observation_missing"
+            .InvalidEvaluatorResult -> "invalid_evaluator_result"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1251
+struct AuditReceipt {
+    receipt_id: String; operation: String; request_id: String; outcome: AuditOutcome; reason: RejectReason?
+    identity: SessionIdentity; scope_id: String; authority: [AuthorityRequirement]; usage: EvaluationUsage
+    truncated: Bool; published_values: U64; redacted_values: U64; observation_id: String?
+}
+impl AuditReceipt {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1268
+    fn new(operation: String, request_id: String, identity: &SessionIdentity, scope_id: String, authority: &[AuthorityRequirement], outcome: AuditOutcome, reason: RejectReason?, usage: EvaluationUsage, truncated: Bool, published_values: U64, redacted_values: U64, observation_id: String?) -> Self {
+        authority := authority.copy()
+        authority.sort()
+        authority.dedup()
+        authority_key :: authority.iter().map((requirement) -> "{requirement.capability}@{requirement.scope_id}").collect[[String]]().join(",")
+        reason_text :: reason.map((reason) -> reason.as_str()).unwrap_or("")
+        observation_text :: observation_id.as_ref().unwrap_or("")
+        canonical :: "paused-audit-v1|{operation}|{request_id}|{identity.session_id}|{identity.source_id}|{identity.source_revision}|{identity.pause_id}|{identity.frame_id}|{scope_id}|{outcome.as_str()}|{reason_text}|{authority_key}|{usage.depth}|{usage.nodes}|{usage.bytes}|{usage.steps}|{truncated}|{published_values}|{redacted_values}|{observation_text}"
+        digest :: sha256_hex(canonical.as_bytes())
+        Self { receipt_id: "paused-audit-{digest.slice(0..<24)}", operation: operation.copy(), request_id: request_id.copy(), outcome, reason,
+            identity: identity.copy(), scope_id: scope_id.copy(), authority: ^authority, usage, truncated, published_values, redacted_values, observation_id: observation_id.copy() }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1329
+    fn json(self: Self) -> String {
+        reason :: self.reason.map((reason) -> "\"{reason.as_str()}\"").unwrap_or("null")
+        authority :: array_json(self.authority.iter().map((requirement) -> requirement.json()))
+        observation_id :: self.observation_id.as_ref().map((id) -> "\"{foundation_json_escape(id)}\"").unwrap_or("null")
+        "{{\"receipt_id\":\"{foundation_json_escape(self.receipt_id)}\",\"operation\":\"{foundation_json_escape(self.operation)}\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"outcome\":\"{self.outcome.as_str()}\",\"reason\":{reason},\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"authority\":{authority},\"usage\":{self.usage.json()},\"truncated\":{self.truncated},\"published_values\":{self.published_values},\"redacted_values\":{self.redacted_values},\"observation_id\":{observation_id}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1358
+#Error
+struct RequestError { reason: RejectReason; audit: AuditReceipt }
+impl RequestError {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1363
+    fn json(self: Self) -> String { "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"{self.reason.as_str()}\",\"audit\":{self.audit.json()}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1374
+impl RequestError.Display {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1375
+    fn fmt(self: Self, formatter: fmt.Formatter) -> fmt.Result { formatter.write_str(self.reason.as_str()) }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1380
+// #Error supplies RequestError's std.error.Error contract.
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1384
+struct InspectResponse { identity: SessionIdentity; scope: ScopeProjection; selected_value_id: String?; truncated: Bool; audit: AuditReceipt }
+impl InspectResponse {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1392
+    fn json(self: Self) -> String {
+        selected_value_id :: self.selected_value_id.as_ref().map((id) -> "\"{foundation_json_escape(id)}\"").unwrap_or("null")
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":true,\"kind\":\"paused.inspect\",\"identity\":{self.identity.json()},\"scope\":{self.scope.json()},\"selected_value_id\":{selected_value_id},\"truncated\":{self.truncated},\"audit\":{self.audit.json()}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1411
+struct EvaluateResponse {
+    identity: SessionIdentity; scope_id: String; expression_hash: String; mode: EvaluationMode
+    value: ValueProjection?; changed: Bool; observation: ObservationFact?; truncated: Bool; audit: AuditReceipt
+}
+impl EvaluateResponse {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1423
+    fn json(self: Self) -> String {
+        value :: self.value.as_ref().and_then((value) -> value.json()).unwrap_or("null")
+        observation :: self.observation.as_ref().map((fact) -> fact.json()).unwrap_or("null")
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":true,\"kind\":\"paused.evaluate\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"expression_hash\":\"{foundation_json_escape(self.expression_hash)}\",\"mode\":\"{self.mode.as_str()}\",\"value\":{value},\"changed\":{self.changed},\"observation\":{observation},\"truncated\":{self.truncated},\"audit\":{self.audit.json()}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1452
+fn inspect(session: PausedSession, request: InspectRequest) -> InspectResponse RequestError! {
+    authority :: inspect_authority(request)
+    _ :: validate_common(session, &request.identity, request.request_id, request.scope_id, &request.budget, &request.cancellation, &authority) ?? return .Err(reject(
+        "paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, err, EvaluationUsage.default()))
+    scope :: session.scope(request.scope_id) ?? return .Err(reject("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .ScopeNotFound, EvaluationUsage.default()))
+    if request.value_id == .Val(value_id) {
+        binding :: scope.bindings.iter().find((binding) -> binding.id == value_id) ?? return .Err(reject("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .ValueNotFound, EvaluationUsage.default()))
+        if binding.publication == .Absent -> return .Err(reject("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .ValueNotPublished, EvaluationUsage.default()))
+    }
+    (projection, stats) :: ScopeProjection.project(scope, &session.identity, request.budget, request.value_id) ?? return .Err(reject(
+        "paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, EvaluationUsage.default()))
+    audit :: AuditReceipt.new("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .Accepted, .None, stats.usage, stats.truncated, stats.published, stats.redacted, .None)
+    InspectResponse { identity: request.identity.copy(), scope: ^projection, selected_value_id: request.value_id.copy(), truncated: stats.truncated, audit: ^audit }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1557
+fn evaluate(session: PausedSession, request: EvaluateRequest, result: EvaluatorResult) -> EvaluateResponse RequestError! {
+    authority :: evaluate_authority(request)
+    _ :: validate_common(session, &request.identity, request.request_id, request.scope_id, &request.budget, &request.cancellation, &authority) ?? return .Err(reject(
+        "paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, err, result.usage))
+    if result.identity != request.identity || result.scope_id != request.scope_id -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    invalid_result_shape :: if result.status == {
+        .Completed -> result.error.is_some()
+        .Failed -> result.value.is_some() || result.changed || result.observation.is_some() || result.error.as_ref().is_none_or((message) -> message.is_empty() || valid_text(message, "evaluator error", 4 * 1024).is_err())
+        .Cancelled -> result.value.is_some() || result.changed || result.observation.is_some() || result.error.is_some()
+    }
+    if invalid_result_shape -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    if result.status == .Failed -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .EvaluatorFailed, result.usage))
+    if result.status == .Cancelled -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .Cancelled, result.usage))
+    if !request.budget.fits(result.usage) -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .BudgetExceeded, result.usage))
+    if result.changed || result.observation.is_some() {
+        if request.mode != .Mutate -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .MutationNotAllowed, result.usage))
+        if result.changed && result.observation.is_none() -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .ObservationMissing, result.usage))
+        if !result.changed && result.observation.is_some() -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    }
+    if result.observation.as_ref() == .Val(observation) {
+        if !observation.matches(session, request) -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    }
+    stats := ProjectionStats.default()
+    value := ValueProjection?{.None}
+    if result.value.as_ref() == .Val(supplied) {
+        _ :: supplied.validate_for_session(&session.identity) ?? return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+        if supplied.publication != .Absent {
+            if supplied.publication == .Published -> stats.published = 1 else -> stats.redacted = 1
+            projected :: project_root(supplied, &session.identity, request.budget, &stats) ?? return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+            value = .Val(^projected)
+        }
+    }
+    observation_id :: result.observation.as_ref().map((observation) -> observation.event_id)
+    audit :: AuditReceipt.new("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .Accepted, .None, result.usage, stats.truncated, stats.published, stats.redacted, observation_id)
+    EvaluateResponse { identity: request.identity.copy(), scope_id: request.scope_id.copy(), expression_hash: "sha256-{sha256_hex(request.expression.as_bytes())}", mode: request.mode,
+        value: ^value, changed: result.changed, observation: ^result.observation, truncated: stats.truncated, audit: ^audit }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1777
+#Error
+enum PausedEvaluateHostError { SessionUnavailable; EvaluatorUnavailable; InvalidRequest(String); Rejected(RequestError) }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1791
+// PausedEvaluateHostError's bounded JSON error projection continues in PausedEvaluate02.

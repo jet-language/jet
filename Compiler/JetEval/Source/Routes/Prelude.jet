@@ -715,6 +715,8 @@ fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, 
             _ := jet_eval_list_position(&machine, first, items.len(), span) ?? return None
             _ := jet_eval_list_position(&machine, second, items.len(), span) ?? return None
             // Evaluator values own no user resource; writeback preserves the parent.
+            // copy: a two-slot swap of items[first] and items[second] (both owned by `items`); an
+            // element cannot be moved out of its list (E0225).
             value :: items[first].copy()
             items[first] = items[second]
             items[second] = value
@@ -769,12 +771,11 @@ fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, 
                 if position < 0 -> return jet_eval_route_mutation_fail(member, "index is not a nonnegative Int", &machine, span)
                 if position >= items.len() -> return jet_eval_route_mutation_fail(member, "index is out of bounds", &machine, span)
             }
-            removed :: items[position]
             kept := [TComptimeValue]{}
             loop index in 0..<items.len() {
                 if index != position -> &kept.push(items[index])
             }
-            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: kept}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: removed}}})
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: kept}, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Present{value: items[position]}}})
         }
         else -> jet_eval_route_mutation_fail(member, "is not a receiver-writing collection route", &machine, span)
     }

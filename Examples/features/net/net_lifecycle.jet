@@ -34,8 +34,8 @@ fn run() {
     // TCP: half-close the client's write side.
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.listener_local_socket_addr(listener) ?? panic("listener addr")
-    client :: net.tcp_connect_addr(address) ?? panic("connect")
-    server :: net.tcp_accept(listener) ?? panic("accept")
+    client := net.tcp_connect_addr(address) ?? panic("connect")
+    server := net.tcp_accept(listener) ?? panic("accept")
     client.write_text("ping") ?? panic("client write")
     net.tcp_shutdown(&client, NetShutdown.Write) ?? panic("shutdown")
     first :: net.tcp_read_text(&server, 64) ?? panic("server read")

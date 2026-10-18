@@ -16,6 +16,8 @@ fn jet_cli_gate_entries_at(ledger: GateLedger, source: String, span: Span) -> [G
     loop entry in ledger.rows {
         if entry.source != source -> next
         site :: entry.span ?? next
+        // copy: `entry` stays in the iterated collection (`entry` is a view of its element; no move
+        // out of an element, E0225) and the pushed row owns its own.
         if span.start <= site.start && site.end <= span.end -> &rows.push(entry.copy())
     }
     rows

@@ -5,6 +5,7 @@ use jet_foundation.[
     CLICommandBinding,
     CallLabel,
     ConstAttr,
+    ContractClause,
     ConstDef,
     CtValue,
     DeriveBodyItem,
@@ -63,6 +64,7 @@ use jet_foundation.[
     ast_func,
     ast_struct,
     diagnostic_from_registry,
+    expr_span,
     diagnostic_with_edit,
 ]
 use jet_lexer.[
@@ -1200,9 +1202,13 @@ fn parser_marker_is_c_guest_import(marker: Marker) -> Bool Never! {
 fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
     symbol := ""
     error_span := func.span
-    if func.body.len() == 1 && func.body[0] == .Expr(value) && value == .Str(parts, span) {
-        error_span = span
-        if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
+    if func.body.len() == 1 {
+        if func.body[0] == .Expr(value) && value == .Str(parts, span) {
+            error_span = span
+            if parts.len() == 1 {
+                if parts[0] == .Lit(text) -> symbol = text
+            }
+        }
     }
     if symbol == "" {
         parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) -> Return = \"c_symbol\"`")
@@ -1215,6 +1221,21 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
         }
     }
     func.body = [Stmt]{}
+}
+
+// Rust Sema `guest_import_symbol`: the fixed C symbol the parser bound as the
+// `#Import(c)` marker's compile-time fact. A missing or empty value is an
+// invalid declaration (E3212 above), never an import. Sema and the Jetpack
+// bridge read the binding through this one reader.
+fn parser_guest_import_symbol(function: Func) -> String? Never! {
+    loop marker in function.markers {
+        if !parser_marker_is_c_guest_import(marker) -> next
+        if marker.ct == .Val(value) {
+            if value == .Str(symbol) && symbol != "" -> return Val(symbol)
+        }
+        return None
+    }
+    None
 }
 
 struct ParsedFuncEffects {
@@ -1469,7 +1490,7 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
             parser_add_error_code(&state, "E0003", parsed.span, "this unit-fallible signature uses the retired arrow-and-unit form", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
-    ParsedCallableResult{return_type: return_type, return_type_span: return_type_span, effects: effects.effects, via: effects.via, prefix_effect: prefix_effect, retired_shape: retired_shape, plain_arrow: plain_arrow}
+    ParsedCallableResult{return_type: ^return_type, return_type_span: ^return_type_span, effects: effects.effects, via: effects.via, prefix_effect: ^prefix_effect, retired_shape: retired_shape, plain_arrow: plain_arrow}
 }
 
 // The marker that opens a recovered one-line function body. A `->` here is
@@ -1697,7 +1718,9 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             }
             // D-TAG-SURFACE1=A: `#Scrub(Tag)` names the one fact tag removed.
             "Scrub" -> {
-                if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) && values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
+                if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) {
+                    if values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
+                }
             }
             // D-METHODMACRO1=A: bare `#Inline` is a hint; `#Inline(Always)`
             // is the checked promise. A written `Hint` or `Never` mode is
@@ -1719,6 +1742,11 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
                     else -> func.is_inline = true
                 }
             }
+            // D-PREPOST1 (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
+            // `#Post(cond, msg)` become the function's contract clauses; both
+            // arguments are required.
+            "Pre" -> parser_project_contract_marker(&state, &func, marker, true)
+            "Post" -> parser_project_contract_marker(&state, &func, marker, false)
             else -> {}
         }
     }
@@ -1726,20 +1754,33 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
     _ := parser_project_function_job_markers(&state, &func, markers)
 }
 
+fn parser_project_contract_marker(state: &JetParserState, func: &Func, marker: Marker, pre: Bool) {
+    values :: parser_marker_bindings(marker, [String]{"condition", "message"}) ?? [Expr?]{}
+    if values.len() == 2 && values[0] == .Val(condition) && values[1] == .Val(message) {
+        clause :: ContractClause{cond: condition, message_expr: message, message_span: expr_span(message), span: marker.span}
+        if pre {
+            &func.pre.push(clause)
+        } else {
+            &func.post.push(clause)
+        }
+        return
+    }
+    parser_marker_shape_error(&state, marker)
+}
+
 fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -> StructDef {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `struct`")
     value := ast_struct(parser_value(state, name), name.span, start.span)
-    // D-AUTODERIVE1=E: a parsed declaration starts on the package default
-    // (Rust parser `auto_derive_default: true`); signed markers decide each trait.
-    value.auto_derive_default = true
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
-    value.type_markers = modifiers.markers
+    // Rust `attach_type_markers`: the markers, the derives and serde markers
+    // they request, the package auto-derive default (D-AUTODERIVE1=E) and the
+    // SingleUse/MustUse/PublishedSchema facts.
+    parser_apply_struct_type_markers(&value, modifiers.markers)
     value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
     value.layout_span = parser_layout_marker_span(modifiers.markers, modifiers.grouped_markers, value.layout)
-    parser_apply_type_markers(&value, modifiers.markers)
     if parser_current_kind(&state) != TOKEN_LBRACE {
         parser_add_error_here(&state, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
         return value
@@ -1770,6 +1811,16 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
             target :: parser_parse_expression(&state, 1, 0)
             &value.cli_bindings.push(CLICommandBinding{name: parser_value(state, command_name), name_span: command_name.span, markers: member_modifiers.markers, target: target.expr})
             if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+            next
+        }
+        // D-VALIDATE1 (Rust `at_validate_block` / `validate_block`):
+        // `validate { … }` holds the struct's rule statements as an ordinary
+        // block; sema restricts and synthesizes them (sema_validate_blocks).
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_value(state, parser_current(&state)) == "validate" {
+            keyword :: parser_bump(&state)
+            block :: parser_parse_block(&state)
+            value.validate_block = block.statements
+            value.validate_span = Val(parser_cover(keyword.span, block.span))
             next
         }
         if parser_current_kind(&state) == {
@@ -1819,7 +1870,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                     }
                     marker_index += 1
                 }
-                &value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: computed, default: default, default_ct: None})
+                &value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: ^computed, default: ^default, default_ct: None})
                 separator_kind := parser_current_kind(&state)
                 if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(&state)
             }
@@ -1840,26 +1891,13 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `enum`")
     value := ast_enum(parser_value(state, name), name.span, start.span)
-    // D-AUTODERIVE1=E: as for structs, the package default applies.
-    value.auto_derive_default = true
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
-    value.type_markers = modifiers.markers
+    // Rust `attach_type_markers`, as for structs: markers, derives, serde
+    // markers, the package auto-derive default and SingleUse/MustUse.
+    parser_apply_enum_type_markers(&value, modifiers.markers)
     _ := parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, true)
-    index := 0
-    loop index < modifiers.markers.len() {
-        marker :: modifiers.markers[index]
-        if marker.name == "SingleUse" {
-            value.is_single_use = true
-            value.single_use_span = Val(marker.span)
-        }
-        if marker.name == "MustUse" {
-            value.is_must_use = true
-            value.must_use_span = Val(marker.span)
-        }
-        index += 1
-    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before enum variants")
     // A fatal error ends the whole enum, as Rust's `?` does; the item loop
     // resynchronizes.
@@ -2254,7 +2292,7 @@ fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifier
         else -> parser_parse_type(&state, 0)
     }
     parser_finish_statement(&state)
-    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: ^type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
 }
 
 fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
@@ -2312,7 +2350,7 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 method := parsed.value
                 default_body := [Stmt]?{None}
                 if parsed.has_body -> default_body = Val(method.body)
-                &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
+                &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: ^default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
             }
             else -> {
                 parser_add_error_here(&state, "expected a trait method or associated type", "trait bodies declare callable requirements and associated types", "write `fn name(...)` or `type Name;`")
@@ -2550,27 +2588,32 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef? {
     }
     parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
     trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
-    parser_expect(&state, TOKEN_LBRACE, "`{{` before derive methods")
-    // Rust `derive_body_items`: template depth covers the whole body.
-    state.derive_template_depth += 1
-    body := [DeriveBodyItem]{}
-    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
-        parser_skip_semicolons(&state)
-        if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        if {
-            parser_template_loop_ahead(&state) -> &body.push(parser_marker_template_loop(&state))
-            parser_current_kind(&state) == TOKEN_KW_FN -> {
-                modifiers := ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
-                parsed :: parser_parse_function(&state, modifiers, true)
-                &body.push(DeriveBodyItem.Item{value: Item.Func{value: parsed.value}})
+    // Rust `derive_body_items`: a derive body is the shared template body —
+    // items, statements and `prep loop` templates (parser_marker_body).
+    body :: parser_marker_body(&state)
+    end :: parser_lookahead(&state, -1).span
+    if parser_derive_nested_impl_span(body) == .Val(span) {
+        parser_add_fatal_code(&state, "E0003", span, "`derive {parser_value(state, type_name)}.{parser_value(state, trait_token)}` already names its implementation", "a derive provider body is the member list; a nested `impl` repeats the target and trait", "remove the `impl` wrapper and keep its members directly in the derive body")
+        return None
+    }
+    Val(DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, end)})
+}
+
+// Rust `derive_nested_impl_span`: the first `impl` or error conversion a
+// derive body (or one of its template loops) wraps its members in.
+fn parser_derive_nested_impl_span(body: [DeriveBodyItem]) -> Span? Never! {
+    loop body_item in body {
+        if body_item == {
+            .Item(item) -> if item == {
+                .Impl(implementation) -> return Val(implementation.span)
+                .ErrorConv(conversion) -> return Val(conversion.from_span)
+                else -> {}
             }
-            else -> {
-                parser_add_error_here(&state, "expected a derive method", "user derive bodies contain method declarations", "write a method with `fn`")
-                parser_recover_statement(&state)
+            .Loop(_, _, _, nested, _) -> {
+                if parser_derive_nested_impl_span(nested) == .Val(span) -> return Val(span)
             }
+            .Stmt(_) -> {}
         }
     }
-    state.derive_template_depth -= 1
-    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after derive methods")
-    Val(DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, close.span)})
+    None
 }

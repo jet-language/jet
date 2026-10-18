@@ -29,7 +29,7 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
             ast_visit_expr(right, visitor)
         }
         .Call(call) -> ast_visit_call_args(call.args, visitor)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
             ast_visit_expr(receiver, visitor)
             ast_visit_call_args(args, visitor)
         }
@@ -73,6 +73,13 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
 }
 fn ast_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
     loop statement in body -> ast_visit_statement(statement, visitor, nested_expression)
+}
+// Each arm is read in place.
+fn ast_visit_switch_arms(arms: [SwitchArm], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
+    loop arm in arms {
+        ast_visit_expr(arm.cond, visitor)
+        ast_visit_body(arm.body, visitor, nested_expression)
+    }
 }
 fn ast_visit_call_args(args: [CallArg], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop argument in args -> ast_visit_expr(argument.expr, visitor)
@@ -160,10 +167,7 @@ fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, T
         }
         .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
             ast_visit_expr(subject, visitor)
-            loop arm in arms {
-                ast_visit_expr(arm.cond, visitor)
-                ast_visit_body(arm.body, visitor, nested_expression)
-            }
+            ast_visit_switch_arms(arms, visitor, nested_expression)
             if else_body == .Val(body) -> ast_visit_body(body, visitor, nested_expression)
         }
         .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> ast_visit_expr(value, visitor)

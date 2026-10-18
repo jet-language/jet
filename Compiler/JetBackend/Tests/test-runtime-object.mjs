@@ -132,7 +132,8 @@ if (mode === '--verify') {
   if (!unit.includes(entry)) throw new Error('ABI fixture entry changed; update the object regression adapter');
   const witness = `fn run() {
     abi_fixtures()
-    loop plain in [Bool]{false, true} {
+    plains :: [Bool]{false, true}
+    loop plain in plains {
         program := abi_alignment_module(true)
         if plain {
             program.data = [LIRData]{}

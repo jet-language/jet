@@ -643,13 +643,21 @@ function moduleItems() {
   return out;
 }
 
+// A `__` member is a reserved machine-space seam (D-NAME-SIGIL1): Core.jet
+// exports it only so embedded Core modules and compiler lowering can reach it
+// across modules, and the lexer rejects the spelling in every user program
+// (E0067). No conformance program can call it, so it is not public surface.
+function isReservedSeam(name) {
+  return name.startsWith("__");
+}
+
 function inventory() {
   const modules = moduleItems();
   const moduleNames = new Set(modules.keys());
   const rows = [];
   for (const [module, names] of modules) {
     for (const name of names) {
-      if (/^[A-Z]/.test(name)) continue;
+      if (/^[A-Z]/.test(name) || isReservedSeam(name)) continue;
       if (VALUE_NAMES.has(name) || moduleNames.has(`${module}.${name}`)) continue;
       rows.push(`${module}.${name}`);
     }
@@ -902,6 +910,10 @@ function sourceErrors(key, source) {
     )
     : new RegExp(`(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\(`, "g");
   const calls = Array.from(code.matchAll(call));
+  if (calls.length !== 1) {
+    errors.push(`expected one ${module}.${name} call, found ${calls.length}`);
+    return errors;
+  }
 
   const callStart = calls[0].index;
   const callOpen = callStart + calls[0][0].lastIndexOf("(");

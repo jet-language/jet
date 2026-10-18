@@ -113,7 +113,7 @@ fn store_quota_fits(hangar: String, incoming_bytes: Int, limit: Int, excluded: S
 }
 
 fn store_quota_footprint(path: String, excluded: String?) -> Int StoreError! {
-    if excluded == Val(path) -> return Ok(0)
+    if excluded == Val((path)) -> return Ok(0)
     metadata :: files.stat(path)
     if metadata.is_symlink || metadata.is_file -> return Ok(metadata.size)
     if !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar footprint contains an unsupported node: {path}"))

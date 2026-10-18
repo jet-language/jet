@@ -75,14 +75,19 @@ struct NixCacheError {
     fn message(self) -> String Never! { self.what() }
 }
 
-// Store-area failures raised inside admission are atomic-admission failures,
-// exactly as Rust's `io_error(NixCacheErrorKind::Admission, error)`.
-impl StoreError -> NixCacheError { NixCacheError.new(NixCacheErrorKind.Admission, self.message()) }
-
 impl IOError -> NixCacheError { NixCacheError.new(NixCacheErrorKind.Admission, "{self}") }
 
 fn store_nix_io_error(kind: NixCacheErrorKind, error: IOError) -> NixCacheError Never! {
     NixCacheError.new(kind, "{error}")
+}
+
+// Store-area failures raised inside admission are atomic-admission failures,
+// exactly as Rust's `io_error(NixCacheErrorKind::Admission, error)`. StoreError
+// has no declared route here: it already carries IOError, so a second edge
+// would give IOError two routes (E2419); Store calls wrap their failure with
+// this at the call site.
+fn store_nix_store_error(error: StoreError) -> NixCacheError Never! {
+    NixCacheError.new(NixCacheErrorKind.Admission, error.message())
 }
 
 // Signed narinfo plus the exact bytes that were verified for it.
@@ -101,12 +106,12 @@ struct CacheInfo {
 // and a client restricted to public (HTTPS) or loopback (HTTP) destinations.
 // The client pins each host's checked addresses for its lifetime, which is the
 // DNS-rebinding defence Rust implemented with pre-resolved socket addresses.
-struct CacheEndpoint {
+struct NixCacheEndpoint {
     endpoint: String
     trusted_keys: [NixPublicKey]
     priv client: HTTPClient
 
-    fn from_roots(roots: HangarRoots) -[FS]> CacheEndpoint NixCacheError! {
+    fn from_roots(roots: HangarRoots) -[FS]> NixCacheEndpoint NixCacheError! {
         endpoint_path :: files.join(roots.root, STORE_NIX_ENDPOINT_CONFIG)
         key_path :: files.join(roots.root, STORE_NIX_TRUST_KEY_CONFIG)
         endpoint_present :: store_nix_optional_path_present(endpoint_path)
@@ -129,7 +134,7 @@ struct CacheEndpoint {
             .destinations(destinations)
             .redirects(.Disabled)
             .timeouts(total: time.duration_ms(STORE_NIX_TRANSPORT_TIMEOUT_MS))
-        Ok(CacheEndpoint{endpoint, trusted_keys: [NixPublicKey]{key}, client})
+        Ok(NixCacheEndpoint{endpoint, trusted_keys: [NixPublicKey]{key}, client})
     }
 
     fn cache_info(self) -[Net, Time.Wait]> CacheInfo NixCacheError! {

@@ -198,7 +198,7 @@ fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedTyp
         text :: parser_tokens_text(state, first_index, end_index)
         parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only its last member as the error contract", "the `!` mark follows one type, so a union of error types is grouped for the mark to cover every member", "write `({text})!`", "({text})!")
     }
-    ParsedType{ty: error_type.ty, span: span}
+    ParsedType{ty: error_type.ty, span: ^span}
 }
 
 fn parser_type_starts(kind: Int) -> Bool Never! {
@@ -291,7 +291,7 @@ fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
         parser_add_error_code(&state, "E0309", mark.span, "`??` isn't allowed on a type", "an optional value is written `T?` once; there is no optional optional", "use a single `?`, like `Int?`")
     }
     if already_optional -> return ParsedType{ty: base.ty, span: span}
-    ParsedType{ty: Type.Option{inner: base.ty}, span: span}
+    ParsedType{ty: Type.Option{inner: base.ty}, span: ^span}
 }
 
 fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
@@ -308,7 +308,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
             span :: parser_cover(start.span, inner.span)
             text :: parser_marked_type_text(state, inner.ty, first_index, state.position)
             parser_add_type_mark_error(&state, "E-TYPE-PREFIX", span, "`?{text}` is a retired prefix type mark", "a type mark follows the type it marks; `{text}?` may be absent", "write `{text}?`", "{text}?")
-            ParsedType{ty: Type.Option{inner: inner.ty}, span: span}
+            ParsedType{ty: Type.Option{inner: inner.ty}, span: ^span}
         }
         // D-TYPE-SUFFIX1=A: the retired prefix contract `!E` teaches `E!`.
         TOKEN_BANG -> {
@@ -389,7 +389,7 @@ fn parser_parse_collection_type(state: &JetParserState, depth: Int) -> ParsedTyp
         parser_bump(&state)
         measure :: parser_parse_measure(&state, "length", depth + 1)
         close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the fixed-list length")
-        return ParsedType{ty: Type.FixedList{elem: first.ty, len: measure}, span: parser_cover(open.span, close.span)}
+        return ParsedType{ty: Type.FixedList{elem: first.ty, len: ^measure}, span: parser_cover(open.span, close.span)}
     }
     close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the list element type")
     ParsedType{ty: Type.List{element: first.ty}, span: parser_cover(open.span, close.span)}

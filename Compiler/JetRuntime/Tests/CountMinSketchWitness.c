@@ -29,7 +29,7 @@ static void count(CMS *value, const Text *key, int64_t expected) {
     assert(jet_int_owned_to_i64(result) == expected); jet_rt_int_drop(result);
 }
 static void *adds(void *pointer) {
-    Text shared = {"shared", 6, 6};
+    Text shared = {"shared", 6, 0};
     for (unsigned i = 0; i < 1000; ++i) jet_rt_native_cms_add(pointer, &shared);
     return NULL;
 }
@@ -68,7 +68,7 @@ int main(void) {
     pthread_t threads[3];
     for (unsigned i = 0; i < 3; ++i) assert(pthread_create(&threads[i], NULL, adds, a) == 0);
     for (unsigned i = 0; i < 3; ++i) assert(pthread_join(threads[i], NULL) == 0);
-    Text shared = {"shared",6,6}; count(b, &shared, 3000);
+    Text shared = {"shared",6,0}; count(b, &shared, 3000);
     jet_rt_handle_drop_jet_count_min_sketch(a); assert(frees == 0 && b->refs == 1);
     jet_rt_handle_drop_jet_count_min_sketch(NULL); assert(frees == 0);
     jet_rt_handle_drop_jet_count_min_sketch(b); assert(frees == 1); watched = NULL;

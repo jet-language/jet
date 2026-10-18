@@ -18,8 +18,7 @@ fn cli_cmd_explain(verification: &StoreVerification, theme: Theme, parsed: CLIPa
     cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
     if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(&cache, theme, parsed, query)
-    if syntax_lookup(query) != None {
-        explanation :: explain_lookup(query) ?? panic("the syntax and explain dictionaries must be one table")
+    if jet_cli_syntax_explanation(query) == .Val(explanation) {
         if parsed.flags.json {
             fields := StatusFields.new()
             fields = fields.with("code", Dyn.Text(explanation.code))
@@ -32,15 +31,12 @@ fn cli_cmd_explain(verification: &StoreVerification, theme: Theme, parsed: CLIPa
             print(text)
         } else {
             stdout_handle := term.stdout()
-            &stdout_handle.write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
+            &stdout_handle.write(diagnostic_explanation_render(explanation, theme.color)).drop("explain output is best-effort")
         }
         return EXIT_OK
     }
-    if syntax_looks_like_query(query) {
-        closest :: if syntax_nearest(query) == {
-            .Val(entry) -> syntax_display(entry)
-            .None -> "a registered syntax token"
-        }
+    if jet_cli_syntax_query(query) {
+        closest :: jet_cli_syntax_nearest(query)
         rendered :: pkg_manifest_diagnostic_from_row("E2106", [ManifestEntry]{ManifestEntry{key: "token", value: query}, ManifestEntry{key: "closest", value: closest}}, None)
         return cli_explain_error(theme, parsed, rendered.code, rendered.what, rendered.why, rendered.fix)
     }
@@ -144,7 +140,7 @@ fn cli_explain_workspace_failure(parsed: CLIParsed, diagnostic: Diagnostic) -[IO
         stdout_handle := term.stdout()
         &stdout_handle.write(line).drop("status output is best-effort")
     } else {
-        terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
+        terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))
     }
     EXIT_USAGE
 }

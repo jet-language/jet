@@ -1,0 +1,12 @@
+// #5037 case 1 (V p1, null field): V once accepted a struct literal that left
+// a reference field null. Jet has no null: a record literal names every field
+// that has no declared default, so the missing `owner` is a compile error.
+struct Account {
+    owner: String
+    balance: Int
+}
+
+fn run() {
+    account :: Account{balance: 10}
+    print(account.owner)
+}

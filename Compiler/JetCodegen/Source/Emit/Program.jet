@@ -315,7 +315,11 @@ fn jet_rust_emit_ordinary_constant_definition(ctx: &JetRustEmitContext, definiti
         if !listed -> init = jet_rust_emit_constant(&ctx, definition.value, definition.ty)
         &chunks.push("thread_local! {{\n    static {name}_SHARED: std::rc::Rc<{ty}> = std::rc::Rc::new({init});\n}}\n")
         &chunks.push("#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_SHARED.with(|value| (**value).clone()) }}\n")
-        &chunks.push("#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}")
+        &chunks.push("#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}\n")
+        // #5001: a `Static` place borrows the thread's one shared value for
+        // the thread's life: one retained handle per thread, no copy.
+        &chunks.push("thread_local! {{\n    static {name}_STATIC: &'static std::rc::Rc<{ty}> = {name}_SHARED.with(|value| &*Box::leak(Box::new(std::rc::Rc::clone(value))));\n}}\n")
+        &chunks.push("#[inline]\n#[allow(dead_code)]\n{visibility}fn {name}_static() -> &'static {ty} {{ let shared: &'static std::rc::Rc<{ty}> = {name}_STATIC.with(|value| *value); &**shared }}")
         return chunks.join("\n")
     }
     value :: jet_rust_emit_constant(&ctx, definition.value, definition.ty)
@@ -468,6 +472,10 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
                     if trace_sink != None -> global_instructions_scanned += 1
                     if instruction.operation == .Global(name) -> global_reads[name] = true
                 }
+            }
+            // #5001: a constant read in place keeps its item too.
+            loop place in function.places {
+                if place.base == .Static(name) -> global_reads[name] = true
             }
         }
         loop constant in ctx.program.constants {
@@ -759,7 +767,8 @@ fn jet_rust_emit_slots(slots: [Shared<JetRustEmitSlot>], from: Int, shared_ctx: 
 // only its own. The lines are held last-first, so draining pops them in
 // program order.
 fn jet_rust_emit_slot(slot: Shared<JetRustEmitSlot>, shared_ctx: Shared<JetRustEmitContext>) -> Int {
-    // A copy: every worker reads the one shared context, so none may move it out.
+    // copy: each emit worker edits its own context (failure, kept failures, caches), while the
+    // shared context behind the read guard stays intact for every other worker.
     worker := shared_ctx.guard_read().value.copy()
     worker.failure = None
     worker.kept_failures = [JetRustEmitKeptFailure]{}

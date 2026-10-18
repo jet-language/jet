@@ -81,10 +81,14 @@ fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shar
         permit.value.indexed_rows += indexed_rows
         permit.value.index_key_utf8_bytes += index_key_utf8_bytes
     }
+    // copy: a handle copy (a Shared work cell, refcount bump): the frozen publication and the
+    // caller's context both count work in the same cell.
     if length == 0 -> return SemaComptimeBodyValues{work: work.copy()}
     SemaComptimeBodyValues{
         facts: Val(shared SemaComptimeBodyFacts{values: ^values, modules: ^modules, first_rows: ^first_rows, second_rows: ^second_rows, indexed_rows: indexed_rows}),
         length: length,
+        // copy: a handle copy (a Shared work cell, refcount bump): the frozen publication and the
+        // caller's context both count work in the same cell.
         work: work.copy(),
     }
 }
@@ -105,7 +109,7 @@ fn sema_comptime_body_facts_append_items(facts: Shared<SemaComptimeBodyFacts>, v
         permit.value.indexed_rows += 1
         appended += 1
     }
-    (length: permit.value.values.len(), rows: appended, key_utf8_bytes: key_utf8_bytes)
+    (key_utf8_bytes: key_utf8_bytes, length: permit.value.values.len(), rows: appended)
 }
 
 fn sema_comptime_body_values_append_items(publication: &SemaComptimeBodyValues, values: [SemaComptimeItemValue], from: Int) {
@@ -114,6 +118,8 @@ fn sema_comptime_body_values_append_items(publication: &SemaComptimeBodyValues, 
         if publication.length != 0 -> panic("a body prefix lost its facts owner")
         publication.facts = Val(shared SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [String:Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0})
     }
+    // copy: a handle copy (Shared facts, refcount bump): the append runs through `facts` while the
+    // write-borrowed publication still owns its handle.
     facts :: publication.facts.copy() ?? panic("body publication has no facts owner")
     count_key_bytes :: if publication.work == .Val(_) -> true else -> false
     added :: sema_comptime_body_facts_append_items(facts, values, from, publication.length, count_key_bytes)
@@ -138,6 +144,8 @@ fn sema_comptime_body_values_truncate(context: &SemaCheckContext, length: Int) N
 }
 
 fn sema_comptime_body_values_prefix(values: SemaComptimeBodyValues, length: Int) -> SemaComptimeBodyValues Never! {
+    // copy: a handle copy (Shared facts plus ints): the prefix narrows its own `length`, while
+    // `values` (the caller's publication) keeps its full length.
     prefix := values.copy()
     if prefix.length > length -> prefix.length = length
     ^prefix
@@ -207,6 +215,8 @@ fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
     permit :: facts.guard_read()
     if values.length < permit.value.values.len() {
         prefix := [SemaComptimeBodyValue]{}
+        // copy: the debug list owns its rows, while the published rows stay in the shared facts,
+        // readable only through this read guard.
         loop row in 0..<values.length -> &prefix.push(permit.value.values[row].copy())
         return "{prefix:Debug}"
     }
@@ -270,6 +280,8 @@ fn sema_comptime_body_value_find(
         if second < context.comptime_body_values.length -> return None
     }
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.OwnedRowReturned)
+    // copy: the caller gets an owned body value, while the published row stays in the shared facts
+    // for every other reader. It is reachable only through this read guard.
     Val(permit.value.values[row].copy())
 }
 

@@ -3258,6 +3258,19 @@ fn expression_variables(expression: &str) -> Vec<&str> {
     names
 }
 
+/// Whether every mention of `name` in `expression` is the lent read capture
+/// of a borrowing closure (`let __jet_capture_N = &(*name);`, see
+/// `plain_closure`): a shared reborrow of a borrowed Read parameter that
+/// copies nothing and shares with the consumer's own reads of it, so folding
+/// the closure past those reads reorders nothing.
+fn lent_read_mentions_only(expression: &str, name: &str) -> bool {
+    let mut mentions = variable_mentions(expression, name).peekable();
+    mentions.peek().is_some()
+        && mentions.all(|at| {
+            expression[..at].ends_with("= &(*") && expression[at + name.len()..].starts_with(");")
+        })
+}
+
 /// Whether byte `at` of a statement line sits inside a closure body, where a
 /// moved expression would run later or not at all. `||` counts as a closure.
 fn inside_closure(line: &str, at: usize) -> bool {
@@ -3322,10 +3335,11 @@ fn attributed_statement(lines: &[String], index: usize) -> bool {
 /// pure definitions between), as a clone or take of the slot, takes `(E)` in
 /// place of that read when nothing else in the consumer or in between names a
 /// variable of `E` (an assignment target local excepted, since the right side
-/// runs first) and the read is not inside a closure. A hoisted slot defined
-/// by a borrowing closure carrier (`borrowing_closure_expression`) folds the
-/// same way, as a block typed like the slot. The definition and its top
-/// declaration go away. Attributed (debug-only) statements never fold.
+/// runs first; a parameter `E` only lends as a read capture excepted, see
+/// `lent_read_mentions_only`) and the read is not inside a closure. A hoisted
+/// slot defined by a borrowing closure carrier (`borrowing_closure_expression`)
+/// folds the same way, as a block typed like the slot. The definition and its
+/// top declaration go away. Attributed (debug-only) statements never fold.
 /// Returns where the declarations end afterwards.
 fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) -> usize {
     let mut mentions: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
@@ -3394,6 +3408,9 @@ fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) -> u
             .map(|(target, _)| target)
             .filter(|target| numbered_slot_access(target, "__jet_l_", ""));
         let conflict = expression_variables(&expression).into_iter().any(|variable| {
+            if lent_read_mentions_only(&expression, variable) {
+                return false;
+            }
             let allowed = usize::from(Some(variable) == target);
             variable_mentions(&rest, variable).count() > allowed
                 || lines[index + 1..consumer]
@@ -5400,6 +5417,44 @@ mod emit_misc_regression_tests {
             );
             assert!(!rust.contains(".__jet_file).clone()"), "Ok(^entry.file) copied the field:\n{rust}");
             assert!(rust.contains("MIR field move"), "Ok(^entry.file) did not move the field:\n{rust}");
+        });
+    }
+
+    /// A closure that lends a written parameter cannot outlive its frame, so
+    /// its read parameter captures lend `&(*param)` too instead of cloning
+    /// the whole value on every closure built (the in-place TIR visitors
+    /// build one per node; copying the program per node hung the stage-0
+    /// factory). A closure with no `&mut` loan still owns its captures.
+    #[test]
+    fn borrowing_closure_lends_its_read_parameter_captures() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let rust = emitted_rust(
+                "fn each(items: [Int], visit: fn(Int)) {\n    loop item in items -> visit(item)\n}\nfn tally(items: [Int], names: [String], total: &Int) {\n    each(items, (item: Int) -> {\n        total = total + names.len() + item\n    })\n}\nfn first(items: [Int], names: [String]) -> fn(Int) -> Int {\n    (item: Int) -> names.len() + items.len() + item\n}\nfn run() {\n    total := 0\n    tally([0, 1], [\"a\", \"b\"], &total)\n    print(total)\n    _ :: first([1], [\"a\", \"b\"])\n}\n",
+            );
+            let closure_in = |function: &str| {
+                let start = rust
+                    .find(&format!("fn {function}("))
+                    .unwrap_or_else(|| panic!("{function} is emitted:\n{rust}"));
+                let body = &rust[start..];
+                let body = &body[..body.find("\n}\n").map_or(body.len(), |end| end + 3)];
+                body.lines()
+                    .find(|line| line.contains("move |"))
+                    .unwrap_or_else(|| panic!("{function} builds a closure:\n{body}"))
+            };
+            let tally = closure_in("tally");
+            assert!(
+                tally.contains("= &(*__jet_names);") && tally.contains("= &mut (*__jet_total);"),
+                "the borrowing closure lends both parameters: {tally}\n{rust}"
+            );
+            assert!(
+                !tally.contains("__jet_names).clone()"),
+                "the borrowing closure copied its read parameter: {tally}\n{rust}"
+            );
+            let first = closure_in("first");
+            assert!(
+                !first.contains("= &"),
+                "the escaping closure must own its captures (moved here, copied when still live): {first}\n{rust}"
+            );
         });
     }
 
@@ -35141,6 +35196,18 @@ impl<'a> RustEmitter<'a> {
             capture.access != MirAccess::Read || self.capture_move_required(target, capture.slot)
         });
         let mut environment = Vec::with_capacity(if locked { captures.len() } else { 0 });
+        // A closure that lends a `&mut` place (a written parameter or an
+        // unshared written local) cannot outlive the creating frame: its
+        // carrier's lifetime is that loan's. Its read place captures of
+        // borrowed parameters then lend too (`lent_read_capture`) instead
+        // of copying the place on every closure built.
+        let lends = !send
+            && captures.iter().zip(&target.capture_params).any(|(operand, capture)| {
+                capture.access == MirAccess::Write
+                    && matches!(operand, MirCaptureOperand::Place(_))
+                    && !self.capture_move_required(target, capture.slot)
+                    && self.shared_capture_local(outer, operand).is_none()
+            });
         for (index, (operand, capture)) in captures.iter().zip(&target.capture_params).enumerate() {
             if capture.slot != index {
                 panic!("MIR closure capture slots are not ordered");
@@ -35148,14 +35215,26 @@ impl<'a> RustEmitter<'a> {
             let name = self.capture_param_name(capture.slot);
             let move_required = capture.access == MirAccess::Move
                 || self.capture_move_required(target, capture.slot);
+            let lent = match operand {
+                MirCaptureOperand::Place(place)
+                    if lends && capture.access == MirAccess::Read && !move_required =>
+                {
+                    self.lent_read_capture(outer, *place)
+                }
+                _ => None,
+            };
+            let lent_reference = lent.is_some();
             let captured = match (capture.access, operand) {
+                (_, MirCaptureOperand::Place(_)) if lent_reference => {
+                    lent.expect("lent read capture was checked")
+                }
                 (_, MirCaptureOperand::Place(place)) if move_required => {
                     self.move_place_for_capture(outer, *place)
                 }
                 (_, MirCaptureOperand::Value(value)) if move_required => self.value_move(*value),
-                // The carrier is a `'static` `Box<dyn FnMut>`, so a read
-                // capture owns a copy of the place; a borrow could not
-                // outlive the creating frame.
+                // The carrier is a `'static` `Box<dyn FnMut>` unless another
+                // capture lends, so a read capture owns a copy of the place;
+                // a borrow could not outlive the creating frame.
                 (MirAccess::Read, MirCaptureOperand::Place(place)) => self.place_read(outer, *place),
                 // S47/M2: the environment shares the owner's cell and borrows
                 // it mutably only for the duration of each call.
@@ -35211,6 +35290,8 @@ impl<'a> RustEmitter<'a> {
                 format!("{name}.take().expect(\"MIR move capture\")")
             } else {
                 match (capture.access, operand) {
+                    // A lent read capture is already the `&T` the callee takes.
+                    (MirAccess::Read, _) if lent_reference => name,
                     (MirAccess::Read, _) => self.read_trait_referent(&capture.ty, format!("&{name}"), false),
                     (MirAccess::Write, MirCaptureOperand::Value(_)) => format!("&mut {name}"),
                     (MirAccess::Write, MirCaptureOperand::Place(_))
@@ -38881,6 +38962,49 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// The reference a borrowing closure (`plain_closure`, one that lends a
+    /// `&mut` place) hands a read place capture instead of a copy. The place
+    /// is a whole borrowed Read parameter or Read capture of `function`:
+    /// already a `&T` the frame cannot write, so the reborrow outlives the
+    /// closure (bounded by its `&mut` loan) and conflicts with nothing.
+    /// `None` keeps the copy: `Copy` carriers and text views cost nothing,
+    /// a trait object's capture ABI is its boxed owner, and locals, windows,
+    /// partially moved roots and projected places keep their read paths.
+    fn lent_read_capture(&self, function: &MirFunction, id: MirPlaceId) -> Option<String> {
+        let place = self.place_row(function, id)?;
+        if !place.projections.is_empty()
+            || self.rust_copy_carrier(&place.ty)
+            || is_string_view_type(&place.ty)
+            || self.read_trait_type(&place.ty).is_some()
+            || self.partial_move_root(function, &place.base).is_some()
+        {
+            return None;
+        }
+        let value = match &place.base {
+            MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => *value,
+            MirPlaceBase::Local(_) | MirPlaceBase::Temporary(_) | MirPlaceBase::Static(_) => {
+                return None;
+            }
+        };
+        let lendable = match self.value_definition(function, value) {
+            Some(MirOperation::Parameter { index, .. }) => function
+                .params
+                .iter()
+                .find(|param| param.index == *index)
+                .is_some_and(|param| {
+                    param.access == MirAccess::Read
+                        && (self.is_receiver(function, param) || self.parameter_borrowed(param))
+                        && !self.window_parameter_value(function, value)
+                }),
+            Some(MirOperation::Capture { slot }) => {
+                self.capture_binding_access(function, *slot) == MirAccess::Read
+                    && !self.is_scalar(&self.capture_param(function, *slot).ty)
+            }
+            _ => false,
+        };
+        lendable.then(|| self.place_reference(function, id, MirAccess::Read))
+    }
+
     fn move_base(&self, function: &MirFunction, base: &MirPlaceBase) -> String {
         if let Some(node) = self.partial_move_root(function, base) {
             return format!("{{ {} {}.take().expect(\"MIR whole move\") }}",
@@ -40431,8 +40555,8 @@ fn main() {
 
 #[cfg(test)]
 mod borrow_storage_regressions {
-    use super::{borrowing_closure_expression, fold_value_slots, localize_slots,
-                map_store_callback, plain_callable_type, split_local_field_borrows};
+    use super::{borrowing_closure_expression, fold_value_slots, lent_read_mentions_only,
+                localize_slots, map_store_callback, plain_callable_type, split_local_field_borrows};
     use std::collections::BTreeMap;
 
     fn compile_run(source: &str) {
@@ -40452,6 +40576,31 @@ mod borrow_storage_regressions {
         source.push_str(&format!("    for _ in 0..3 {{\n        __jet_v_0 = Some({expression});\n        consume(__jet_v_0.take().expect(\"MIR value\"));\n        *__jet_l_0.as_mut().unwrap() += 10;\n    }}\n    assert_eq!(__jet_l_0, Some(33));\n}}\n"));
         fold_value_slots(&mut source, start, end);
         assert!(!source.contains("let mut __jet_v_0"));
+        compile_run(&source);
+    }
+
+    /// The shape `plain_closure` emits for a closure lending a written
+    /// parameter: its read `Vec` parameter capture is a reborrow too, the
+    /// callee takes it as the `&Vec` it already is, and the hoisted carrier
+    /// still folds to its consumer with no `.clone()` in the setup, even when
+    /// the consumer reads that lent parameter itself (the walked value is
+    /// commonly also captured).
+    #[test]
+    fn borrowing_closure_lends_a_read_vector_parameter() {
+        let carrier = plain_callable_type("", "usize", "()", "'_");
+        let bound = plain_callable_type("", "usize", "()", "'capture");
+        let expression = "std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let __jet_capture_0 = &(*__jet_names); let mut __jet_capture_1 = &mut (*__jet_seen); move |__jet_item: usize| lambda(__jet_capture_0, &mut *__jet_capture_1, __jet_item) }))))";
+        assert!(borrowing_closure_expression(expression));
+        assert!(!expression.contains(".clone()"));
+        assert!(lent_read_mentions_only(expression, "__jet_names"));
+        assert!(!lent_read_mentions_only(expression, "__jet_seen"));
+        assert!(!lent_read_mentions_only(expression, "__jet_items"));
+        let mut source = format!("fn lambda(names: &Vec<String>, seen: &mut Vec<String>, item: usize) {{ seen.push(names[item].clone()); }}\nfn each<'capture>(items: &Vec<usize>, visit: {bound}, expected: usize) {{ for item in items {{ assert!(*item < expected); visit.borrow_mut().as_mut().unwrap()(*item); }} }}\nfn tally(__jet_items: &Vec<usize>, __jet_names: &Vec<String>, __jet_seen: &mut Vec<String>) {{\n    let mut __jet_v_0: Option<{carrier}> = None;\n");
+        let start = source.find("    let mut __jet_v_0").unwrap();
+        let end = source.len();
+        source.push_str(&format!("    __jet_v_0 = Some({expression});\n    each(__jet_items, __jet_v_0.take().expect(\"MIR value\"), __jet_names.len());\n    __jet_seen.push(__jet_names.len().to_string());\n}}\nfn main() {{\n    let mut seen = Vec::new();\n    tally(&vec![0, 1], &vec![\"a\".to_string(), \"b\".to_string()], &mut seen);\n    assert_eq!(seen, vec![\"a\", \"b\", \"2\"]);\n}}\n"));
+        fold_value_slots(&mut source, start, end);
+        assert!(!source.contains("let mut __jet_v_0"), "the carrier did not fold:\n{source}");
         compile_run(&source);
     }
 

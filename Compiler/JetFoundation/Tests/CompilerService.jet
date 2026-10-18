@@ -1,0 +1,84 @@
+// The compiler service wire (Encoding/CompilerService.jet): every config
+// value shape and every response row survives the JSON round trip exactly,
+// and anything else is refused rather than guessed.
+use core.math as math
+
+fn compiler_service_test_round_trip(value: CtValue) Never! {
+    wire :: compiler_service_value_wire(value) ?? panic("a config value has a wire spelling")
+    text :: compiler_service_render(wire)
+    parsed :: foundation_parse_protocol_json(text) ?? panic("the wire spelling is protocol JSON")
+    back :: compiler_service_value_from_wire(parsed) ?? panic("the wire spelling reads back")
+    assert(back == value, "round trip changed {text}")
+}
+
+fn compiler_service_test_response(text: String) -> Dyn Never! {
+    foundation_parse_protocol_json(text) ?? panic("a service response is protocol JSON")
+}
+
+fn run() {
+    // comptime-evaluate values: scalars, floats by bit pattern, and nesting.
+    compiler_service_test_round_trip(CtValue.Int(-9223372036854775807))
+    compiler_service_test_round_trip(CtValue.BigInt("123456789012345678901234567890"))
+    compiler_service_test_round_trip(CtValue.Bool(true))
+    compiler_service_test_round_trip(CtValue.Char('\n'))
+    compiler_service_test_round_trip(CtValue.Str("quote \" brace {{ tab \t"))
+    compiler_service_test_round_trip(CtValue.Float(CtFloat.F64(0.1)))
+    compiler_service_test_round_trip(CtValue.Float(CtFloat.F64(-math.infinity())))
+    compiler_service_test_round_trip(CtValue.Float(CtFloat.F32(1.5)))
+    compiler_service_test_round_trip(CtValue.Bytes([U8]{U8{0}, U8{255}}))
+    compiler_service_test_round_trip(CtValue.Unit)
+    compiler_service_test_round_trip(CtValue.Present(CtValue.Str("set")))
+    compiler_service_test_round_trip(CtValue.List([CtValue]{CtValue.Int(1), CtValue.List([CtValue]{CtValue.Str("nested")})}))
+    compiler_service_test_round_trip(CtValue.Map([CtMapEntry]{
+        CtMapEntry{key: CtKey.Str("a"), value: CtValue.Int(1)},
+        CtMapEntry{key: CtKey.Tuple([NamedCtKey]{NamedCtKey{name: "0", value: CtKey.Int(2)}}), value: CtValue.Bool(false)},
+        CtMapEntry{key: CtKey.Enum("Mode", "Fast"), value: CtValue.Unit},
+    }))
+    compiler_service_test_round_trip(CtValue.Struct("Env", [NamedCtValue]{NamedCtValue{name: "port", value: CtValue.Int(8080)}}))
+    compiler_service_test_round_trip(CtValue.Enum("Mode", "Port", [CtEnumArg]{CtEnumArg{label: Val("number"), value: CtValue.Int(1)}, CtEnumArg{label: None, value: CtValue.Str("x")}}))
+    assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Int\":\"1\"}}")) == None, "a mistyped payload is refused")
+    assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Int\":1,\"Str\":\"x\"}}")) == None, "two tags are refused")
+    assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Bytes\":[256]}}")) == None, "an out-of-range byte is refused")
+
+    // comptime-evaluate request and responses.
+    request :: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE :: prep {{ 1 + 2 }}\n", "/tmp/project"))
+    fields :: compiler_service_comptime_request_from(request) ?? panic("the comptime request reads back")
+    assert_eq(fields.program, "JET_CONFIG_VALUE :: prep {{ 1 + 2 }}\n")
+    assert_eq(fields.base_dir, "/tmp/project")
+    assert(compiler_service_comptime_request_from(compiler_service_test_response("{{\"program\":\"x\"}}")) == None, "a request without base_dir is refused")
+    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Int(3)}))) == {
+        .Val(.Value(value)) -> assert(value == CtValue.Int(3))
+        else -> panic("a value response reads back as the value")
+    }
+    refusal :: jet_config_eval_diagnostic(None, "this config value produced no build-time value")
+    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Refused{diagnostic: refusal}))) == {
+        .Val(.Refused(diagnostic)) -> {
+            assert_eq(diagnostic.code, "E0956")
+            assert_eq(diagnostic.span, None)
+            assert_eq(diagnostic.severity, refusal.severity)
+            assert_eq(diagnostic.what, refusal.what)
+            assert_eq(diagnostic.why, refusal.why)
+            assert_eq(diagnostic.fix, refusal.fix)
+        }
+        else -> panic("a refusal response reads back as the refusal")
+    }
+    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Failed(CtReport.Told(CtValue.Str("boom")))}))) == {
+        .Val(.Refused(diagnostic)) -> assert_eq(diagnostic.code, "E0956")
+        else -> panic("a value no wire spelling carries is refused as an unreadable result")
+    }
+    assert(compiler_service_comptime_outcome(compiler_service_test_response("{{}}")) == None, "an empty response is not an outcome")
+
+    // check-entry request and responses.
+    check :: compiler_service_check_request_from(compiler_service_test_response(compiler_service_check_request("/p/main.jet", "fn run() {{ }}\n"))) ?? panic("the check request reads back")
+    assert_eq(check.file, "/p/main.jet")
+    assert_eq(check.source, "fn run() {{ }}\n")
+    placed :: diagnostic_from_registry("E2105", Val(Span{start: 3, end: 9}), "first", "why", "fix")
+    rows :: compiler_service_check_diagnostics(compiler_service_test_response(compiler_service_check_response([Diagnostic]{placed, refusal}))) ?? panic("the check response reads back")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].code, "E2105")
+    assert_eq(rows[0].span, Val(Span{start: 3, end: 9}))
+    assert_eq(rows[0].what, placed.what)
+    assert_eq(rows[1].code, "E0956")
+    assert_eq(compiler_service_check_diagnostics(compiler_service_test_response(compiler_service_check_response([Diagnostic]{}))) ?? panic("an empty check reads back"), [Diagnostic]{})
+    assert(compiler_service_check_diagnostics(compiler_service_test_response("{{\"diagnostics\":[{{\"code\":\"E0001\"}}]}}")) == None, "a partial diagnostic row is refused")
+}

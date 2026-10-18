@@ -14,11 +14,10 @@ fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
     families
 }
 
-fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef]) Never! {
-    if input.program.no_prelude -> return
-    occupied := [String:Bool]{}
-    local_families := [String:Bool]{}
-    loop item in input.program.items {
+// The names `items` declares (`occupied`) and the unit families it declares
+// itself (`local_families`); each item is read in place.
+fn sema_units_local_names(items: [Item], occupied: &[String:Bool], local_families: &[String:Bool]) Never! {
+    loop item in items {
         if item == {
             .UnitFamily(family) -> {
                 local_families[family.family] = true
@@ -31,7 +30,29 @@ fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDe
             else -> {}
         }
     }
-    mentions :: sema_units_source_mentions(input.source)
+}
+
+// The names a source mention scan looks up (sema_units_source_mentions):
+// every catalog family name and member type name. Built once per graph,
+// sorted first so each insert appends to the sorted entry list.
+fn sema_units_catalog_names(catalog: [UnitFamilyDef]) -> [String:Bool] Never! {
+    names := [String]{}
+    loop family in catalog {
+        &names.push(family.family)
+        loop member in family.members -> &names.push(sema_registration_unit_type_name(member.name))
+    }
+    &names.sort_by((left: String, right: String) -> left <=> right)
+    wanted := [String:Bool]{}
+    loop name in names -> wanted[name] = true
+    wanted
+}
+
+fn sema_units_inject(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], wanted: [String:Bool]) Never! {
+    if input.program.no_prelude -> return
+    occupied := [String:Bool]{}
+    local_families := [String:Bool]{}
+    sema_units_local_names(input.program.items, &occupied, &local_families)
+    mentions :: sema_units_source_mentions(input.source, wanted)
     rows := [String:Int]{}
     selected := [String:Bool]{}
     queue := [Int]{}

@@ -49,7 +49,7 @@ fn sema_call_distinct_raw_finish(receiver_value: TExpr, args: [CallArg], span: S
     if args.len() > 0 {
         &diagnostics.push(sema_error("E0103", span, "`.raw()` takes no arguments", "`.raw()` simply unwraps the base value — no arguments needed", "write `.raw()` with no arguments"))
     }
-    value :: sema_tir_expr(facts.base, TExprKind.DistinctRaw{value: receiver_value}, span)
+    value :: sema_tir_node(facts.base, TExprKind.DistinctRaw{value: receiver_value}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -103,7 +103,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
     handle_name :: if receiver == {.Ident(name, _) -> name else -> ""}
     if handle_name == "" -> return SemaMethodSpecialCheck{handled: true, value: None}
     kind :: if method == "on_commit" -> TCoreClosureKind.OnCommit{handle_name: handle_name, executable: executable} else -> TCoreClosureKind.OnRollback{handle_name: handle_name, executable: executable}
-    value :: sema_tir_expr(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
+    value :: sema_tir_node(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
     checked_value :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked_value}
 }
@@ -158,7 +158,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
     callback_value.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty))
     callback_name :: sema_shared_access_host_method_name(receiver_value.ty, method)
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, callback_name, span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value :: sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
+    value :: sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -261,8 +261,8 @@ fn sema_call_append_local_methods(output: &[SemaCallMethodCandidate], methods: [
 fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, program: SemaProgramTables, method: String, owner_type_args: [Type], type_args: [Type]) -> [SemaCallMethodCandidate] Never! {
     module_name :: environment.module_identity
     candidates := [SemaCallMethodCandidate]{}
-    loop declaration in environment.declarations {
-        if declaration.item == {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 owner_type :: sema_call_method_owner_type(value.name, owner_type_args)
                 sema_call_append_local_methods(&candidates, value.methods, module_name, value.name, owner_type, None, type_args, environment.source_file, environment.source_origin, environment.source_segments)
@@ -283,8 +283,8 @@ fn sema_call_local_method_candidates(environment: SemaScopeEnvironment, program:
 }
 
 fn sema_call_method_function_for_symbol(target: SymbolID, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Func? {
-    loop declaration in environment.declarations {
-        if declaration.item == {
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 loop method in value.methods {
                     candidate :: symbol_id(SymbolKind.Function, environment.module_identity, value.name, method.name)
@@ -643,10 +643,10 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         local.mutable = access == AccessConvention.Write
         local.deref = borrowed
         init := receiver_value
-        if borrowed -> init = sema_tir_expr(init.ty, TExprKind.Borrow{place: init, access: access}, init.span)
+        if borrowed -> init = sema_tir_node(init.ty, TExprKind.Borrow{place: init, access: access}, init.span)
         &pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
-        value :: sema_tir_expr(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
-        pinned_receiver = if access == AccessConvention.Move -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        value :: sema_tir_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
+        pinned_receiver = if access == AccessConvention.Move -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
     }
     loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, program, scopes, span) -> &pins.push(pin)
     lowered = sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return None
@@ -661,7 +661,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     contract_callee := Func?{None}
     if sema_contract_function_has_pre(environment, program, resolved_candidate.method.symbol) -> contract_callee = sema_contract_function_for_symbol(environment, program, resolved_candidate.method.symbol)
     if contract_callee == .Val(contract) {
-        receiver_arg :: TCallArg{value: call_receiver, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(call_receiver.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, call_receiver.ty, environment, program), label: None, spread: false}
+        receiver_arg :: TCallArg{value: call_receiver, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(call_receiver.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, call_receiver.ty, environment, program), label: None, spread: false}
         all_args := [TCallArg]{receiver_arg}
         loop argument in lowered -> &all_args.push(argument)
         receiver_slot :: resolved_candidate.receiver_offset - 1
@@ -674,7 +674,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts
     }
-    call_value := sema_tir_expr(result_type, TExprKind.MethodCall{receiver: call_receiver, method: resolved_candidate.method, type_args: resolved_candidate.type_args, args: lowered}, span)
+    call_value := sema_tir_node(result_type, TExprKind.MethodCall{receiver: call_receiver, method: resolved_candidate.method, type_args: resolved_candidate.type_args, args: lowered}, span)
     if host_method && lowered.len() > 0 {
         callback := lowered[0].value
         if host_stored {
@@ -686,14 +686,14 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         }
         callback.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty))
         callback_name :: sema_shared_access_host_method_name(receiver_value.ty, resolved_candidate.method.name)
-        call_value = sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
+        call_value = sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
             &wrapped.push(TStmt.ExprStmt{value: call_value, span: span})
-            sema_tir_expr(result_type, TExprKind.InlineBlock{body: wrapped}, span)
+            sema_tir_node(result_type, TExprKind.InlineBlock{body: wrapped}, span)
         }
         else -> call_value
     }
@@ -829,15 +829,15 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
                 &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }}
-            if method != "mount" -> value = sema_tir_expr(checked.ty, TExprKind.HostBorrowCallback{callable: checked, params: params}, checked.span)
-            value = sema_tir_expr(value.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: value}}, value.span)
+            if method != "mount" -> value = sema_tir_node(checked.ty, TExprKind.HostBorrowCallback{callable: checked, params: params}, checked.span)
+            value = sema_tir_node(value.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: value}}, value.span)
             if has_binding -> binding = sema_app_route_binding(method, argument.expr, environment, program, scopes, context.host_hooks)
         }
         &values.push(value)
     }
     if has_binding -> &values.push(sema_call_http_core_string(binding, span))
     result :: if method == "facts_json" -> Type.String else -> if method == "serve" || method == "serve_on" -> Type.Named{name: "Unit"} else -> receiver_value.ty
-    value :: sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AppMethod{method: method, args_len: args.len()}, args: values}, span)
+    value :: sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AppMethod{method: method, args_len: args.len()}, args: values}, span)
     if method == "serve" || method == "serve_on" {
         if !sema_network_handle_effect_fact(environment, program, &scopes, &context, "App.{method}", span, result, Val("Net"), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }

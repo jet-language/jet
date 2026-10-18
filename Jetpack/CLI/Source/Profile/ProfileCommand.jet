@@ -248,7 +248,7 @@ fn cli_load_package_profile_plan(cache: &WorkspaceDeclarationCache, theme: Theme
         return None
     }
     plan :: envmodel_evaluate_package_profile(source, project_dir, name) ?? {
-        terminal_write_output(diagnostics_render_all(ENV_FILE, source, [Diagnostic]{err.diagnostic}))
+        terminal_write_output(diagnostic_render_all(ENV_FILE, source, [Diagnostic]{err.diagnostic}, false))
         return None
     }
     Val(PackageProfileLoad{project_dir: project_dir, source: source, plan: plan})

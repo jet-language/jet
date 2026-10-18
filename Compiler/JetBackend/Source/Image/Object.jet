@@ -143,7 +143,9 @@ fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never
 }
 
 // Compile `program` into a relocatable object whose `main` runs `entry`,
-// which takes no parameters and returns nothing.
+// which takes no parameters and returns nothing, on the calling thread
+// (x64_compile_module). The native route's object, on the threads it admits
+// and at its level, is x64_relocatable_object_owned (Opt/Opt.jet).
 fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
     if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
@@ -159,28 +161,6 @@ fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Execut
     loop row in compiled.debug -> &debug.push(row)
 
     x64_object_functions(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
-}
-
-// JET_KEEP_GOING (the bootstrap native feed): x64_relocatable_object over
-// x64_compile_module_keep_going, whose every function is present (a trap
-// where compiling it failed), so the object is written whenever its own
-// writer succeeds. The result keeps the compile errors before the writer's;
-// it is never shipped. The module moves through the compile, uncopied.
-fn x64_relocatable_object_keep_going(program: ^LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
-    if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
-    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
-    if signature.params.len() != 0 || signature.result != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
-    kept :: x64_compile_module_keep_going(^program)
-    main :: x64_object_main(entry)
-    functions := [X64CompiledFunction]{main}
-    loop function in kept.compiled.functions -> &functions.push(function)
-    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
-    loop row in kept.compiled.debug -> &debug.push(row)
-    written := x64_object_functions(kept.program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
-    errors := kept.compiled.errors.copy()
-    loop error in written.errors -> &errors.push(error)
-    written.errors = errors
-    written
 }
 
 // Shared section/relocation writer for hosted program and runtime objects.

@@ -89,6 +89,8 @@ fn cli_rust_foreign_test_environment() {
         loop index in 0..<args.len() {
             if args[index] == "--setenv" && index + 2 < args.len() && args[index + 1] == "CARGO_NET_OFFLINE" {
                 assert(offline == None)
+                // copy: the argument stays in `args` (no move out of an element, E0225) and
+                // `offline` owns its own text.
                 offline = Val(args[index + 2].copy())
             }
         }

@@ -33,6 +33,8 @@ const fixtures = [
     ["export-boundary", "Compiler/JetSema/Tests/ExportBoundary.jet"],
     ["view-field-provenance", "Compiler/JetSema/Tests/ViewFieldProvenance.jet"],
     ["named-tuple-identity", "Compiler/JetSema/Tests/NamedTupleIdentityFixtures.jet"],
+    ["recovered-frozen", "Compiler/JetSema/Tests/FrozenFixtures.jet"],
+    ["recovered-policy-guest", "Compiler/JetSema/Tests/BurnDownFixtures.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);

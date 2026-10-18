@@ -1,7 +1,8 @@
 // D-FACT-GATE1: one compile-time read model for source and policy gates.
 // Adapted from origin/port/compiler GateLedger.jet and current Rust writers.
 use jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_scope_rank, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement, expr_span]
-use jet_foundation.[Type, PolicyDeclaration, Token, StrPart, ast_program]
+use jet_foundation.[Type, PolicyDeclaration, StrPart, ast_program]
+use jet_lexer.Token
 use jet_sema.[SemaGateModule, UnsafeGateInspection, sema_unsafe_inspect, sema_unsafe_nested_bodies, sema_error_optional]
 use jet_parser.jfmt_format_program_with_tokens
 
@@ -24,7 +25,7 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
         }
         provenance := gate.provenance
         &provenance.push("{gate.source}:{gate.span.start}..{gate.span.end}")
-        gate_ledger_push(&ledger, GateEntry{kind: GateKind.Unsafe, domain: "security", scope: "source", source: gate.source, span: Val(gate.span), subject: "#Unsafe", reason: gate.reason, status: Val(if discharged -> "discharged" else -> "missing"), detail: "mode={gate.mode}", provenance: provenance, operations: operations})
+        gate_ledger_push(&ledger, GateEntry{kind: GateKind.Unsafe, domain: "security", scope: "source", source: gate.source, span: Val(gate.span), subject: "#Unsafe", reason: gate.reason, status: Val(if discharged -> "discharged" else -> "missing"), detail: "mode={gate.mode}", provenance: provenance, operations: ^operations})
     }
     loop entry in inspection.diagnostics {
         &ledger.diagnostic_rows.push(GateDiagnostic{source: entry.source, diagnostic: entry.diagnostic})
@@ -45,6 +46,8 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
         }
     }
     sema_gate_append_structure(&ledger, names)
+    // copy: the ledger owns its entries, while `external` is the caller's read-only gate list,
+    // which it keeps for the next module's ledger.
     loop entry in external -> gate_ledger_push(&ledger, entry.copy())
     if gates.build_flag -> sema_gate_invocation(&ledger, GateKind.BuildFlag, "build")
     if gates.session_flag -> sema_gate_invocation(&ledger, GateKind.SessionFlag, "session")
@@ -197,8 +200,8 @@ fn sema_gate_function(source: String, function: Func, ledger: &GateLedger, conte
     if !function.compiler_generated {
         sema_gate_structure_name(source, function.name, function.name_span, &ledger)
     }
-    loop parameter in function.params {
-        sema_gate_structure_name(source, parameter.name, parameter.name_span, &ledger)
+    loop parameter_index in 0..<function.params.len() {
+        sema_gate_structure_name(source, function.params[parameter_index].name, function.params[parameter_index].name_span, &ledger)
     }
     if function.state_transition == .Val(transition) {
         from :: transition.from ?? "_"
@@ -274,7 +277,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, call.name, None, detail, "recorded"))
             }
         }
-        .MethodCall(receiver, method, span, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, span, _, _, args, _, _) -> {
             if {
                 sema_gate_rounded_conversion(method, args) -> {
                     gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, method, None, "unit conversion rounded with an explicit mode", "recorded"))
@@ -353,7 +356,8 @@ fn sema_gate_rounded_conversion(method: String, args: [CallArg]) -> Bool Never! 
 fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
     if position >= marker.args.len() -> return None
     if marker.args[position] == {
-        .Expr(value) -> Val(value)
+        // copy: `value` is a payload of read parameter `marker`, which keeps the original; the Val carrier owns this one
+        .Expr(value) -> Val(value.copy())
         else -> None
     }
 }

@@ -544,6 +544,7 @@ fn pkg_path_under_any(relative: String, directories: [String]) -> Bool Never! {
 
 fn pkg_sorted_checked_files(input: ^[CheckedFile]) -> [CheckedFile] Never! {
     out := ^input
+    out = loop fresh_item in out -> fresh_item
     &out.sort_by((a, b) -> a.relative <=> b.relative)
     out
 }

@@ -140,8 +140,8 @@ fn sema_call_not_callable_value(name: String, ty: Type, environment: SemaScopeEn
     }
     found := [String]{}
     if owner != "" {
-        loop declaration in environment.declarations {
-            if declaration.item == {
+        loop declaration_index in 0..<environment.declarations.len() {
+            if environment.declarations[declaration_index].item == {
                 .Struct(value) -> {
                     if value.name == owner {
                         loop method in value.methods -> &found.push(method.name)
@@ -241,7 +241,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
         return None
     }
     index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
-    symbol :: scopes.bindings[index].symbol
+    symbol :: sema_scope_binding_symbol(environment, scopes, index)
     if symbol.kind != SymbolKind.Function {
         ty :: symbol.ty ?? {
             &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
@@ -516,9 +516,14 @@ fn sema_call_trait_signature_with_receiver(signature: Type, receiver_type: Type)
 // an implicit `Err` in the caller. With no written return the call keeps the
 // registered `Unit Err!` (or a raw protocol's `Unit`).
 fn sema_call_trait_dispatch_signature(signature: Type, declared_return: Type?) -> Type Never! {
+    // copy: the dispatch signature is a new owned Type. Without a declared return it equals
+    // `signature`, the trait method's signature (a read parameter), which stays in the trait.
     declared :: declared_return ?? return signature.copy()
     if signature == {
-        .Fn(params, _, effects, contract, metadata, provenance) -> Type.Fn{params: params, ret: Val(declared), effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+        // copy: `metadata` and `provenance` are payloads of read parameter `signature`, which keeps the originals; the new Type.Fn's fields own `metadata` and `provenance`
+        .Fn(params, _, effects, contract, metadata, provenance) -> Type.Fn{params: params, ret: Val(declared), effect_bound: effects, param_contract: contract, call_metadata: metadata.copy(), return_view_provenance: provenance.copy()}
+        // copy: the dispatch signature is a new owned Type. For other kinds it equals `signature`,
+        // the trait method's signature (a read parameter), which stays in the trait.
         else -> signature.copy()
     }
 }
@@ -601,12 +606,12 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
 // and the delegation forwarding.
 fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     candidates := [SemaCallMethodCandidate]{}
-    loop graph_module in graph.modules {
-        loop implementation in graph_module.impls {
-            if implementation.target_identity_key != nominal.identity_key -> next
-            trait_symbol :: implementation.trait_symbol ?? next
-            written :: loop function in implementation.methods {
-                if function.symbol.name == method {
+    loop graph_module_index in 0..<graph.modules.len() {
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+            if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != nominal.identity_key -> next
+            trait_symbol :: graph.modules[graph_module_index].impls[implementation_index].trait_symbol ?? next
+            written :: loop function_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
+                if graph.modules[graph_module_index].impls[implementation_index].methods[function_index].symbol.name == method {
                     break true
                 }
             } ?? false
@@ -616,7 +621,7 @@ fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, n
             if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) -> next
             loop trait_method in trait_nominal.trait_methods {
                 if trait_method.declaration.name != method -> next
-                if implementation.delegation_field == .None && trait_method.declaration.default_body == .None {
+                if graph.modules[graph_module_index].impls[implementation_index].delegation_field == .None && trait_method.declaration.default_body == .None {
                     next
                 }
                 candidate :: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, &diagnostics) ?? next

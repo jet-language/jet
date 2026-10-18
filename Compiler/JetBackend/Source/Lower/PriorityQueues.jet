@@ -69,7 +69,7 @@ fn lower_priority_queue_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
 fn lower_priority_queue_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
     ty :: lower_checked_type(c, instruction) ?? return false
     if lower_priority_queue_element(ty) == None -> return false
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_runtime_symbol(row)
     if symbol == "jet_priority_queue_from" && args.len() == 1 {
         lower_priority_queue_from(p, c, &m, &f, instruction, args[0].value)
@@ -257,8 +257,13 @@ fn lower_priority_queue_sift_down(p: MIRProgram, m: &LowerModule, f: &LowerFunct
 fn lower_helper_priority_queue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_priority_queue_element(glue.ty) ?? panic("PriorityQueue helper has no checked element")
     layouts := [LIRLayout]{lir_layout_pointer()}
-    if glue.helper == "priority_queue.push" -> &layouts.push(lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer())
-    f := lower_helper_start(&m, glue, layouts, if glue.helper == "priority_queue.pop" -> Val(lir_layout_pointer()) else -> None)
+    // push takes the offered value over (lower_helper_start_taking).
+    taken := [LIRDrop]{LIRDrop.Trivial}
+    if glue.helper == "priority_queue.push" {
+        &layouts.push(lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer())
+        &taken.push(lower_drop(&m, lower_repr(p, elem), true))
+    }
+    f := lower_helper_start_taking(&m, glue, layouts, taken, if glue.helper == "priority_queue.pop" -> Val(lir_layout_pointer()) else -> None)
     heap :: f.open_params[0].copy()
     incoming :: if layouts.len() == 2 -> Val(f.open_params[1].copy()) else -> None
     if glue.helper == "priority_queue.push" {

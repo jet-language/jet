@@ -1,0 +1,43 @@
+// #5031: a pattern on an indexed place rooted at a read alias (`parts` is
+// a payload binding of a read parameter) in a non-first `&&` operand. The
+// operand's block does not dominate the arm, so its payload binding is an
+// ordinary slot, never an alias over an index evaluated in that block. The
+// nested form tests the same element under a dominating condition.
+enum Part {
+    Lit(text: String)
+    Hole
+}
+
+enum Expr {
+    Str(parts: [Part])
+    Other
+}
+
+fn short_circuit_shape(value: Expr) -> String? {
+    if value == {
+        .Str(parts) -> {
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn nested_shape(value: Expr) -> String? {
+    if value == {
+        .Str(parts) -> {
+            if parts.len() == 1 {
+                if parts[0] == .Lit(text) -> return Val(text)
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn run() {
+    one :: Expr.Str{parts: [Part]{Part.Lit{text: "alpha"}}}
+    two :: Expr.Str{parts: [Part]{Part.Lit{text: "beta"}, Part.Hole}}
+    print("{short_circuit_shape(one) ?? "-"} {short_circuit_shape(two) ?? "-"}")
+    print("{nested_shape(one) ?? "-"} {nested_shape(two) ?? "-"}")
+}

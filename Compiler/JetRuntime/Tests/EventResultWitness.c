@@ -65,8 +65,8 @@ int main(int argc, char **argv) {
         assert(*a == ordinal && !jet_rt_handle_eq_jet_event_result(a, b));
         assert(!jet_rt_handle_eq_jet_event_result(b, a) && jet_rt_handle_eq_jet_event_result(b, b));
         watch(a, 8, 8); watch(b, 8, 8);
-        watch(first, 24, 8); watch(first->data, first->capacity, 1);
-        watch(second, 24, 8); watch(second->data, second->capacity, 1);
+        watch((char *)(first)-8,32,8); watch(first->data, first->capacity, 1);
+        watch((char *)(second)-8,32,8); watch(second->data, second->capacity, 1);
         unsigned before = intercepted;
         jet_rt_handle_drop_jet_event_result(a); jet_rt_handle_drop_jet_event_result(b);
         jet_rt_string_drop(first); jet_rt_string_drop(second);

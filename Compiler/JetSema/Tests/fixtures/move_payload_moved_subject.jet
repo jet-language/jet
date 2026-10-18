@@ -1,0 +1,32 @@
+// `^p` of a payload bound from a moved subject (`^subject == .V(p)`): the
+// subject moved into the match, so `p` owns its payload and `^p` is an
+// ordinary move of a local, never a take out of a subject that stays live.
+struct Def {
+    name: String
+    marked: Bool
+}
+
+enum Item {
+    Struct(value: Def)
+    Other
+}
+
+fn drain(source: ^[Item]) -> Int {
+    items := ^source
+    marked := 0
+    out := [Item]{}
+    loop items.len() > 0 {
+        item := &items.pop() ?? panic("drain lost a row")
+        if ^item == .Struct(source_definition) {
+            definition := ^source_definition
+            if definition.name == "Err" {
+                definition.marked = true
+                marked += 1
+            }
+            &out.push(Item.Struct{value: ^definition})
+        }
+    }
+    marked + out.len()
+}
+
+fn run() { print(drain([Item]{Item.Struct{value: Def{name: "Err", marked: false}}, Item.Other})) }

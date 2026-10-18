@@ -366,7 +366,7 @@ fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: 
                 jet_codegen_cost_stmts(arm.body, function, depth, &sites)
             }
         }
-        .EnumMatch(subject, _, arms, otherwise, _, _) -> {
+        .EnumMatch(subject, arms, otherwise, _, _) -> {
             jet_codegen_cost_expr(subject, function, depth, &sites, true)
             loop arm in arms {
                 jet_codegen_cost_pattern(arm.pattern, function, depth, &sites)
@@ -407,7 +407,7 @@ fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: 
         }
         .Let(_, _, init, _, _, _) | .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _)
         | .ListDestructure(_, init, _, _, _, _, _) | .DeferClose(init, _, _, _) | .BreakValue(_, init, _) -> jet_codegen_cost_expr(init, function, depth, &sites)
-        .Assign(place, _, child, _, _, _) -> {
+        .Assign(place, _, child, _, _) -> {
             if place == .Expr(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
             jet_codegen_cost_expr(child, function, depth, &sites)
         }
@@ -419,7 +419,7 @@ fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: 
             jet_codegen_cost_expr(index, function, depth, &sites)
             jet_codegen_cost_expr(child, function, depth, &sites)
         }
-        .MathSwizzleAssign(base, _, _, child, _, _) -> {
+        .MathSwizzleAssign(base, _, _, child, _) -> {
             jet_codegen_cost_expr(base, function, depth, &sites)
             jet_codegen_cost_expr(child, function, depth, &sites)
         }

@@ -34,9 +34,9 @@ static void adapters(void){
  Text *arg=text("echo"),*name=text("A"),*ignored=text("ignored"),*value=text("v"),*wire=text("policy");
  Text *cmd[]={arg},*names[]={name,ignored},*values[]={value}; Spec *s=fields(cmd,names,values,wire);
  assert(s->clear==1&&s->cmd->len==1&&s->set->len==1&&s->remove->len==0&&!s->directories);
- assert(((Text **)s->cmd->data)[0]!=arg);equal(((Text **)s->cmd->data)[0],"echo");
+ assert(((Text **)s->cmd->data)[0]==arg);equal(((Text **)s->cmd->data)[0],"echo");
  assert(s->in&&*s->in==1&&s->out==2&&s->err==1&&*s->timeout==23&&*s->output==99&&!s->cpu&&!s->memory&&!s->files&&!s->terminal);
- assert(s->wire!=wire);equal(s->wire,"policy");
+ assert(s->wire==wire);equal(s->wire,"policy");
  int fd=open("/tmp",O_RDONLY|O_DIRECTORY|O_CLOEXEC);assert(fd>=0);
  struct { unsigned char before; bool value; unsigned char after; } supported={0x5a,false,0xa5};
  Spec *attached=NULL;int64_t assigned=-2,error=-3;

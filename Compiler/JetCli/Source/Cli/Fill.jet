@@ -1,8 +1,8 @@
 // Source/CmdFill.rs: typed goal cards and proposals validated by the same
 // checker that checked the original module. The checked TIR owns goal types.
 use core.files as cli_files
-use jet_driver.[JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.[Func, Item, Span, TExpr, TFunc, diagnostic_line_at, diagnostic_render_all, tir_expr_children, tir_stmt_children, type_name]
+use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
+use jet_foundation.[Func, Item, Span, TExpr, TFunc, diagnostic_line_at, diagnostic_render_all, tir_each_expr_child, tir_each_stmt_child, type_name]
 
 struct JetCLIFillFunction {
     name: String
@@ -46,11 +46,11 @@ fn jet_cli_fill_function_infos(items: [Item], infos: &[JetCLIFillFunction]) Neve
     }
 }
 
-fn jet_cli_fill_expr(expression: TExpr, goals: &[JetCLIFillGoal]) {
+fn jet_cli_fill_expr(expression: TExpr, goals: &[JetCLIFillGoal]) Never! {
     if expression.kind == .Never(reason) && reason == "todo" {
         &goals.push(JetCLIFillGoal{span: expression.span, expected: expression.goal_expected_type ?? "(unknown)"})
     }
-    loop child in tir_expr_children(expression) -> jet_cli_fill_expr(child, &goals)
+    tir_each_expr_child(expression, (child: TExpr) -> jet_cli_fill_expr(child, &goals))
 }
 
 fn jet_cli_fill_function_name(function: TFunc) -> String Never! {
@@ -82,7 +82,7 @@ fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillG
     }
     bytes :: source.bytes()
     replacement :: "{jet_cli_doc_text(bytes, 0, goal.span.start)}{candidate}{jet_cli_doc_text(bytes, goal.span.end, bytes.len())}"
-    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(replacement)) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
+    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(replacement), None) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
     if compiled == {
         .Refused(_) -> return false
         .Compiled(result, _) -> {
@@ -135,9 +135,7 @@ fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?
             if function.synthetic -> next
             goals := [JetCLIFillGoal]{}
             loop statement in function.body {
-                loop expression in tir_stmt_children(statement) {
-                    jet_cli_fill_expr(expression, &goals)
-                }
+                tir_each_stmt_child(statement, (expression: TExpr) -> jet_cli_fill_expr(expression, &goals))
             }
             loop goal in goals {
                 goal_line :: diagnostic_line_at(unit.source, goal.span.start)
@@ -190,24 +188,29 @@ fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDriverVer
             line = Val(number)
         }
     }
-    if jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc) == {
-        .Refused(refusal) -> return refusal.copy()
-        .Compiled(result, snapshot) -> {
-            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            if jet_cli_errors(diagnostics).len() > 0 {
-                source :: cli_files.read(file) ?? ""
-                if json {
-                    return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-                }
-                return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-            }
-            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-            checked_report :: if jet_cli_fill_report(result, Val(file), line, true, json) == {
-                .Ok(value) -> value
-                .Err(error) -> { return jet_cli_ice(error.message) }
-            }
-            report :: checked_report ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
-            return JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-        }
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> output = ^refusal
+        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_fill_result(file, line, json, color, result, snapshot))
     }
+    output
+}
+
+fn jet_cli_fill_result(file: String, line: Int?, json: Bool, color: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    if jet_cli_errors(result.diagnostics).len() > 0 {
+        diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+        source :: cli_files.read(file) ?? ""
+        if json {
+            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    checked_report :: if jet_cli_fill_report(result, Val(file), line, true, json) == {
+        .Ok(value) -> value
+        .Err(error) -> { return jet_cli_ice(error.message) }
+    }
+    report :: checked_report ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
+    JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

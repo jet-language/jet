@@ -1,0 +1,336 @@
+// Canonical action identities, ported 1:1 from crates/jet-comptime
+// Build/errors_keys.rs `canonical_action_key` / `canonical_effective_action_key`.
+// Plugins, generated modules and fact contributions are not part of the
+// ported surface (see Model.jet), so they encode in their empty form exactly
+// as Rust writes them for a plan with none.
+
+// The Rust key embeds `env!("CARGO_PKG_VERSION")` and
+// `CARGO_PKG_NAME@CARGO_PKG_VERSION` of the jet-comptime crate; the same
+// spellings keep one key per action across both implementations.
+BUILD_KEY_COMPILER_VERSION :: prep { "0.0.1" }
+BUILD_KEY_COMPILER_IDENTITY :: prep { "jet-comptime@0.0.1" }
+
+// Rust `KeyWriter`: u64 big-endian lengths, raw bytes, one-byte booleans.
+struct BuildKeyWriter {
+    bytes: [U8]
+
+    fn new() -> BuildKeyWriter Never! { BuildKeyWriter{bytes: [U8]{}} }
+
+    fn number(&self, value: Int) Never! {
+        shift := 56
+        loop shift >= 0 {
+            &self.bytes.push(U8{(value >> shift).bit_and(255)})
+            shift -= 8
+        }
+    }
+
+    fn text(&self, value: String) Never! {
+        raw :: value.bytes()
+        &self.number(raw.len())
+        loop byte in raw -> &self.bytes.push(byte)
+    }
+
+    fn flag(&self, value: Bool) Never! {
+        &self.bytes.push(if value -> U8{1} else -> U8{0})
+    }
+
+    fn texts(&self, values: [String]) Never! {
+        &self.number(values.len())
+        loop value in values -> &self.text(value)
+    }
+
+    // Rust `BTreeMap<String, String>`: entries in key order.
+    fn map(&self, values: [String: String]) Never! {
+        keys := values.keys().to_list()
+        &keys.sort()
+        &self.number(keys.len())
+        loop key in keys {
+            &self.text(key)
+            &self.text(values[key])
+        }
+    }
+
+    fn finish(self) -> String Never! {
+        "act-sha256:{crypto.sha256(self.bytes).hex()}"
+    }
+}
+
+fn build_canonical_action_key(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot]) -> String Never! {
+    w := BuildKeyWriter.new()
+    &w.text("jet.action-key.v2")
+    &w.text("kind")
+    &w.text(action.kind.as_str())
+    observes :: action.kind.observes_exact_source()
+    &w.text("observe-exact-source")
+    &w.flag(observes)
+    &w.text("compiler-owned")
+    &w.flag(false)
+    &w.text("argv")
+    &w.texts(action.argv)
+    &w.text("env-allowlist")
+    &w.map(build_allowlisted_env(action))
+    &w.text("inputs")
+    &w.texts(action.inputs)
+    &w.text("input-snapshots")
+    snapshots := inputs
+    &snapshots.sort_by((left: ActionInputSnapshot, right: ActionInputSnapshot) -> left.path <=> right.path)
+    if observes {
+        // Every declared input contributes a digest when the action surface
+        // can observe source.
+        loop path in action.inputs {
+            present := false
+            loop snapshot in snapshots {
+                if snapshot.path == path -> present = true
+            }
+            &w.text(path)
+            &w.flag(present)
+        }
+    }
+    &w.number(snapshots.len())
+    loop snapshot in snapshots {
+        &w.text(snapshot.path)
+        &w.text(snapshot.digest.as_str())
+        &w.number(snapshot.byte_len)
+    }
+    &w.text("outputs")
+    &w.texts(action.outputs)
+    &w.text("dep-outputs")
+    &w.texts(build_declared_dep_outputs(plan, action))
+    &w.text("caps")
+    loop cap in action.caps -> &w.text(cap.flag())
+    &w.text("cache")
+    &w.text(if action.cache == ActionCache.Cached -> "cached" else -> "uncached-phony")
+    &w.text("compiler-version")
+    &w.text(BUILD_KEY_COMPILER_VERSION)
+    &w.text("helper-versions")
+    &w.map(action.helper_versions)
+    &w.text("generated-modules")
+    &w.text("build-fact-contributions")
+    &w.text("target")
+    owner :: plan.action_targets().get(action.id)
+    target :: if owner == {
+        .Val(id) -> plan.targets.get(id)
+        .None -> None
+    }
+    if target == {
+        .Val(selected) -> {
+            &w.flag(true)
+            &w.text(selected.name)
+            &w.text(selected.kind.debug_name())
+            &w.map(selected.metadata)
+            &w.texts(selected.sources)
+        }
+        .None -> &w.flag(false)
+    }
+    &w.text("toolchain")
+    build_key_toolchain(&w, plan.toolchains[action.toolchain.id])
+    &w.text("probes")
+    loop probe in action.probes -> build_key_probe(&w, plan, plan.probes[probe.id])
+    &w.text("signing")
+    if action.signing_identity == {
+        .Val(identity) -> {
+            &w.flag(true)
+            selected :: plan.signing_identities[identity.id]
+            &w.text(selected.name)
+            &w.text(selected.label)
+            build_key_provenance(&w, selected.provenance)
+        }
+        .None -> &w.flag(false)
+    }
+    &w.text("variant")
+    if action.variant_identity == {
+        .Val(identity) -> {
+            &w.flag(true)
+            &w.text(identity)
+        }
+        .None -> &w.flag(false)
+    }
+    &w.text("labels")
+    &w.map(action.labels)
+    &w.text("resource-pools")
+    loop pool in build_action_pools(action) {
+        if pool == {
+            .Custom(name) -> {
+                &w.text("custom")
+                &w.text(name)
+            }
+            else -> &w.text(pool.as_str())
+        }
+    }
+    &w.text("legacy")
+    &w.flag(false)
+    &w.text("plugin")
+    &w.flag(false)
+    w.finish()
+}
+
+// Rust `allowlisted_env`: the whole env map when the allowlist is empty.
+fn build_allowlisted_env(action: HermeticBuildAction) -> [String: String] Never! {
+    if action.env_allowlist.len() == 0 -> return action.env
+    out := [String: String]{}
+    loop key in action.env.keys() {
+        if action.env_allowlist.contains(key) -> out[key] = action.env[key]
+    }
+    out
+}
+
+// Rust `declared_dep_outputs`: outputs and inputs of every dependency target
+// of the owning target, plus their actions' outputs, sorted and unique.
+fn build_declared_dep_outputs(plan: HermeticBuildPlan, action: HermeticBuildAction) -> [String] Never! {
+    owner :: plan.action_targets().get(action.id) ?? return [String]{}
+    target :: plan.targets.get(owner) ?? return [String]{}
+    outs := [String]{}
+    loop dep in target.deps {
+        dep_target :: plan.targets.get(dep.id) ?? next
+        loop path in dep_target.outputs -> build_insert_sorted_text(&outs, path)
+        loop path in dep_target.inputs -> build_insert_sorted_text(&outs, path)
+        loop dep_action in dep_target.actions {
+            found :: plan.actions.get(dep_action.id) ?? next
+            loop path in found.outputs -> build_insert_sorted_text(&outs, path)
+        }
+    }
+    outs
+}
+
+// Rust `canonical_effective_action_key`: the canonical key plus the
+// effective grants, resolved executable digest and actual probe facts.
+fn build_canonical_effective_action_key(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, probe_facts: [BuildProbeFact]) -> String Never! {
+    base :: build_canonical_action_key(plan, action, inputs)
+    w := BuildKeyWriter.new()
+    &w.text("jet.effective-action-key.v1")
+    &w.text(base)
+    &w.text("effective-policy")
+    loop grant in build_effect_set(grants) -> &w.text(grant.flag())
+    // The resolved host path never splits an identity; the executable bytes
+    // stay in the key through their digest.
+    &w.text("resolved-executable-digest")
+    &w.text(executable_digest.as_str())
+    &w.text("actual-probe-facts")
+    loop fact in probe_facts {
+        &w.text(fact.name)
+        &w.flag(fact.success)
+        &w.text(fact.detail)
+        &w.text(fact.reproducibility.debug_name())
+        &w.text("{fact.toolchain.context}:{fact.toolchain.id}")
+        &w.text(fact.toolchain_provenance.as_str())
+    }
+    &w.text("compiler-identity")
+    &w.text(BUILD_KEY_COMPILER_IDENTITY)
+    w.finish()
+}
+
+// Rust `BTreeSet<BuildCapability>`: canonical order, each effect once.
+fn build_effect_set(effects: [BuildEffect]) -> [BuildEffect] Never! {
+    out := [BuildEffect]{}
+    loop ability in effects -> build_insert_effect(&out, ability)
+    out
+}
+
+fn build_key_toolchain(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
+    &w.text(toolchain.name)
+    &w.text(if toolchain.role == ToolchainRole.Host -> "host" else -> "target")
+    &w.text(toolchain.host_triple)
+    &w.text(toolchain.target_triple)
+    if toolchain.sdk == {
+        .Val(sdk) -> {
+            &w.flag(true)
+            &w.text(sdk.name)
+            &w.text(sdk.version)
+            build_key_provenance(&w, sdk.provenance)
+        }
+        .None -> &w.flag(false)
+    }
+    if toolchain.linker == {
+        .Val(linker) -> {
+            &w.flag(true)
+            &w.text(linker.name)
+            build_key_provenance(&w, linker.provenance)
+        }
+        .None -> &w.flag(false)
+    }
+    if toolchain.sysroot == {
+        .Val(sysroot) -> {
+            &w.flag(true)
+            &w.text(sysroot.name)
+            &w.text(sysroot.path_digest)
+            build_key_provenance(&w, sysroot.provenance)
+        }
+        .None -> &w.flag(false)
+    }
+    &w.text("tools")
+    &w.map(toolchain.tools)
+    &w.text("resolution")
+    &w.text(if toolchain.resolution == ToolchainResolution.Ambient -> "ambient" else -> "declared-only")
+    &w.text("mounts")
+    loop mount in toolchain.mounts {
+        &w.text(mount.destination)
+        if mount.identity == "" {
+            &w.text("path")
+            &w.text(mount.source)
+        } else {
+            &w.text("identity")
+            &w.text(mount.identity)
+        }
+    }
+    build_key_provenance(&w, toolchain.provenance)
+}
+
+fn build_key_probe(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
+    &w.text(probe.name)
+    if probe.kind == {
+        .FindProgram(program) -> {
+            &w.text("find-program")
+            &w.text(program)
+        }
+        .PkgConfig(package, min_version) -> {
+            &w.text("pkg-config")
+            &w.text(package)
+            if min_version == {
+                .Val(version) -> {
+                    &w.flag(true)
+                    &w.text(version)
+                }
+                .None -> &w.flag(false)
+            }
+        }
+        .HeaderCheck(header) -> {
+            &w.text("header-check")
+            &w.text(header)
+        }
+        .CompileCheck(name, includes, code) -> {
+            &w.text("compile-check")
+            &w.text(name)
+            &w.texts(includes)
+            &w.text(code)
+        }
+    }
+    &w.text(if probe.reproducibility == ReproducibilityClass.Reproducible -> "reproducible" else -> "ambient")
+    build_key_provenance(&w, probe.provenance)
+    build_key_toolchain(&w, plan.toolchains[probe.toolchain.id])
+}
+
+fn build_key_provenance(w: &BuildKeyWriter, provenance: BuildProvenance) Never! {
+    if provenance.source == {
+        .InferredHost -> &w.text("inferred-host")
+        .JetpackDependency(dep) -> {
+            &w.text("jetpack-dependency")
+            &w.text(dep)
+        }
+        .AmbientRecord(record) -> {
+            &w.text("ambient-record")
+            &w.text(record)
+        }
+        .UserDeclared(source) -> {
+            &w.text("user-declared")
+            &w.text(source)
+        }
+    }
+    if provenance.lock == {
+        .Val(lock) -> {
+            &w.flag(true)
+            &w.text(lock.key)
+            &w.text(lock.digest)
+        }
+        .None -> &w.flag(false)
+    }
+}

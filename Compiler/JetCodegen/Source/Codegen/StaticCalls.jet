@@ -58,7 +58,7 @@ fn jet_codegen_static_method_key(builder: JetCodegenBuilder, program: JetCodegen
     return method.name
 }
 
-fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg]) -> [MIRCallArg] {
+fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], takes_owned: Bool) -> [MIRCallArg] {
     // Intrinsic checking already bound these arguments. Its unmarked
     // convention is Read; there is no language variadic slot on this route.
     conventions := [AccessConvention]{}
@@ -71,17 +71,34 @@ fn jet_codegen_lower_static_prelude_args(builder: &JetCodegenBuilder, program: J
         lowered[index].spread = false
         lowered[index].fn_coercion = None
         lowered[index].widen_fixed_to_list = false
-        if source_argument.value.kind == {
-            .ResourceTake(_) -> {
-                if !source_argument.borrow && !source_argument.mut_borrow {
-                    lowered[index].access = MIRAccess.Move
-                    lowered[index].owned_last_use = true
-                }
-            }
-            else -> {}
+        owned_slot :: !source_argument.borrow && !source_argument.mut_borrow
+        // A resource take always moves. A route that takes its owned
+        // operand (`shared value`) also takes a checked move or a fresh
+        // value by Move: passed as a Read, the native lowering would clone
+        // the whole value into the cell and drop the original.
+        if owned_slot && (source_argument.value.kind == .ResourceTake(_) || (takes_owned && jet_codegen_static_prelude_owned_operand(source_argument.value))) {
+            lowered[index].access = MIRAccess.Move
+            lowered[index].owned_last_use = true
         }
     }
     return lowered
+}
+
+// The prelude statics whose native lowering takes an owned operand when MIR
+// moves it (JetBackend Tasks.jet lower_shared_taken_slot).
+fn jet_codegen_static_prelude_takes_owned(symbol: String) -> Bool Never! {
+    symbol == "jet_std::JetShared::new"
+}
+
+// An operand that is already the caller's own value: a checked move
+// (TExprKind.Move) or a freshly built one. A bare place read is not: an
+// unmarked `shared x` that sema settled as a share copies its source.
+fn jet_codegen_static_prelude_owned_operand(value: TExpr) -> Bool Never! {
+    if jet_codegen_collection_owned_temporary(value) -> return true
+    if value.kind == {
+        .StructLit(_, _) | .Tuple(_) | .Map(_) | .MapLit(_) | .EnumCtor(_, _, _) | .Present(_) | .Ok(_) | .Err(_) -> true
+        else -> false
+    }
 }
 
 fn jet_codegen_intern_static_call_route(builder: &JetCodegenBuilder, program: JetCodegenProgram, family: MIRPreludeFamily, module_name: String, member: String, symbol: MIRSymbol, borrow_mask: [Bool], route_effect: Effect?, carrier: TFailureCarrier) -> MIRPreludeCallID Never! {
@@ -142,12 +159,12 @@ fn jet_codegen_lower_prelude_owner_type_args(builder: JetCodegenBuilder, program
 fn jet_codegen_lower_prelude_static_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, rooted: Bool, path: String, generics: [TPreludeArg], method: TMethodRef, type_args: [Type], args: [TCallArg]) -> MIRValueID {
     borrow_mask := [Bool]{}
     loop argument in args -> &borrow_mask.push(argument.borrow || argument.mut_borrow)
-    lowered_args := jet_codegen_lower_static_prelude_args(&builder, program, args)
+    member := jet_codegen_static_method_key(builder, program, method)
+    lowered_args := jet_codegen_lower_static_prelude_args(&builder, program, args, jet_codegen_static_prelude_takes_owned("{path}::{member}"))
     owner_type_args := jet_codegen_lower_prelude_owner_type_args(builder, program, generics)
     lowered_type_args := [MIRType]{}
     loop ty in type_args -> &lowered_type_args.push(jet_codegen_lower_type_for_function(ty, builder, program))
 
-    member := jet_codegen_static_method_key(builder, program, method)
     module_name := if rooted -> "::{path}" else -> path
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
 

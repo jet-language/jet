@@ -68,7 +68,8 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Neve
 // Shared, resource handles and cursor requests rather than fabricating data.
 fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? Never! {
     if value == {
-        .Data(data) -> return Val(data)
+        // copy: `data` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+        .Data(data) -> return Val(data.copy())
         .Present(inner) -> return Val(TComptimeValue.Present{value: jet_eval_build_host_data(inner) ?? return None})
         .List(values) -> {
             output := [TComptimeValue]{}

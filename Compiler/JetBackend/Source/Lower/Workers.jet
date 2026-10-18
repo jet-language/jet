@@ -1,0 +1,728 @@
+// Native lowering of the function bodies on several threads (D-JOBS1,
+// compiler_threads_admit).
+//
+// The inventory is cut into consecutive parts of about equal MIR instruction
+// count (compiler_threads_partition), and each thread claims the next
+// unclaimed part until none is left. A thread lowers its parts against a
+// module of its own: a copy of the module taken after every signature was
+// pre-registered (lower_selected_in_place), so each body reads the program,
+// the inventory and that copy, and writes only the copy and its part.
+//
+// A body registers module rows as it lowers (signatures, glue and helpers,
+// interned text, frozen statics and their fixups, debug files and types,
+// issues) and names them by position, so the parts are merged in part order
+// (lower_workers_merge): every row a part registered is replayed into the one
+// module. A keyed row whose key an earlier part (or the same thread, earlier)
+// already registered resolves to that row; so do the keyed rows inside the
+// extent of such a registration, and its other rows are dropped, because the
+// serial lowering found the registration and created none of them (a debug
+// type's member and variant rows, a frozen static's objects and fixups).
+// Every other row is appended. The part's functions are then renumbered to
+// the merged rows (lower_workers_renumber). The merged module, functions,
+// issues and failed set are those the calling thread produces alone, for any
+// thread count and any partition.
+//
+// JET_KEEP_GOING: every claiming thread is a task whose stop is caught at its
+// join. A stopped thread leaves its part open at the function it was
+// lowering; lower_workers_finish then traps that function (one issue and a
+// trap of its signature, as lower_keep_going_functions does) and lowers the
+// rest of the part on the same module, and lowers any part no thread claimed
+// on one more module of its own.
+use jet_foundation.[
+    CompilerThreads,
+    MIRFunction,
+    MIRProgram,
+    compiler_take_rows,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
+]
+
+// A thread is admitted for at least this many MIR instructions, so a small
+// program lowers on the calling thread (lower_selected_in_place's own loop).
+LOWER_WORKERS_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+
+// Parts per admitted thread: enough that a thread which drew light parts
+// claims more while another finishes a heavy one.
+LOWER_WORKERS_PARTS_PER_THREAD :: 8
+
+// Row counts of the registries a body appends to, at one point of a module's
+// lowering. A part's rows are those between its start and end counts.
+struct LowerMarks {
+    signatures: Int
+    data: Int
+    debug_types: Int
+    debug_files: Int
+    glue: Int
+    issues: Int
+    fixups: Int
+    extents: Int
+    keys: Int
+}
+
+// A keyed registration that creates other rows while it registers: a debug
+// type (its key in debug_type_rows; describing it reserves members, variant
+// payloads and the types they name) or a frozen static (`frozen`: its key in
+// static_rows names data row `root`, with the "box:" payload offset `addend`
+// beside it, or 0). The rows it created lie between `start` and `end`.
+struct LowerExtent {
+    frozen: Bool
+    key: String
+    root: Int
+    addend: Int
+    start: LowerMarks
+    end: LowerMarks
+}
+
+// A constant of function `function` (its LIR value `value`) holding the ID
+// of a module function as a dispatch key, never as a code address, so no
+// instruction names the function it carries (lower_function_key).
+struct LowerFunctionKey {
+    function: Int
+    value: Int
+}
+
+fn lower_marks(m: LowerModule) -> LowerMarks Never! {
+    LowerMarks{signatures: m.signatures.len(), data: m.data.len(), debug_types: m.debug_types.len(), debug_files: m.debug_files.len(), glue: m.glue.len(), issues: m.issues.len(), fixups: m.static_fixups.len(), extents: m.extents.len(), keys: m.function_keys.len()}
+}
+
+// Records that the registration of `key`, begun at `start`, created every
+// row since (only in a thread's module; the serial lowering records nothing).
+fn lower_extent_record(m: &LowerModule, frozen: Bool, key: String, root: Int, addend: Int, start: LowerMarks) Never! {
+    if !m.parted -> return
+    &m.extents.push(LowerExtent{frozen: frozen, key: key.copy(), root: root, addend: addend, start: start, end: lower_marks(m)})
+}
+
+// A constant holding function `id` as a dispatch key (a trait box's payload
+// drop helper, an iterator cursor's release helper). Under parallel lowering
+// it is recorded, so the merge renumbers it with the function table.
+fn lower_function_key(m: &LowerModule, f: &LowerFunction, id: LIRFunctionID) -> LIRValueID Never! {
+    key :: lower_const(&f, id.value)
+    if m.parted -> &m.function_keys.push(LowerFunctionKey{function: f.builder.id.value, value: key.value})
+    key
+}
+
+// Stores function `id` as a dispatch key (lower_function_key) at boxed + offset.
+fn lower_store_function_key(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, offset: Int, id: LIRFunctionID) Never! {
+    key :: lower_function_key(&m, &f, id)
+    lower_emit(&f, LIRInst.Store{base: boxed, offset: offset, value: key})
+}
+
+// Each inventory function's MIR instructions (and one per block), in
+// inventory order: the work the partition balances.
+fn lower_workers_weights(program: MIRProgram, functions: [LowerPreparedFunction], instances: [MIRFunction]) -> [Int] Never! {
+    weights := [Int]{}
+    loop descriptor in functions {
+        size := 1
+        if descriptor.instance_row >= 0 {
+            loop block in instances[descriptor.instance_row].blocks -> size += block.instructions.len() + 1
+        } else {
+            loop block in program.functions[descriptor.source_row].blocks -> size += block.instructions.len() + 1
+        }
+        &weights.push(size)
+    }
+    weights
+}
+
+// The threads `threads` admits for lowering bodies of these weights.
+fn lower_workers_admit(threads: CompilerThreads, weights: [Int]) -> Int Never! {
+    total := 0
+    loop weight in weights -> total += weight
+    compiler_threads_admit(threads, weights.len(), total, LOWER_WORKERS_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+}
+
+struct LowerWorkersInputs {
+    // The one (indexed) program, moved in and handed back out after.
+    programs: [MIRProgram]
+    functions: [LowerPreparedFunction]
+    instances: [MIRFunction]
+    // The module after the signature pre-registration, which every thread
+    // copies, and which the merge replays every part into.
+    modules: [LowerModule]
+    // The preparation's failed concrete functions.
+    failed: [U64:Bool]
+}
+
+// One thread's module (none until its first part) and failed functions.
+struct LowerWorker {
+    modules: [LowerModule]
+    failed: [U64:Bool]
+}
+
+// One claimable part: its consecutive inventory rows [position, last) still
+// to lower, the thread module that lowers it (-1 until claimed), the counts
+// of that module's registries when the part began and when it ended, and its
+// lowered functions, in order.
+struct LowerWorkersPart {
+    position: Int
+    last: Int
+    worker: Int
+    start: LowerMarks
+    end: LowerMarks
+    functions: [LIRFunction]
+}
+
+// The next unclaimed part.
+struct LowerWorkersQueue {
+    next: Int
+}
+
+// Lowers every inventory function (lower_selected_function) on `workers`
+// threads; returns what lower_keep_going_lower returns, in the same form.
+fn lower_workers_lower(program: ^MIRProgram, m: ^LowerModule, functions: ^[LowerPreparedFunction], instances: ^[MIRFunction], failed: ^[U64:Bool], weights: [Int], workers: Int, keep_going: Bool) -> LowerKeepGoingLowered {
+    count := workers * LOWER_WORKERS_PARTS_PER_THREAD
+    if count > weights.len() -> count = weights.len()
+    if count < 1 -> count = 1
+    bounds :: compiler_threads_partition(weights, count)
+    bases :: lower_marks(m)
+    inputs :: shared LowerWorkersInputs{programs: [MIRProgram]{^program}, functions: ^functions, instances: ^instances, modules: [LowerModule]{^m}, failed: ^failed}
+    parts := [Shared<LowerWorkersPart>]{}
+    loop part in 0..<count {
+        row :: shared LowerWorkersPart{position: bounds[part], last: bounds[part + 1], worker: -1, start: bases, end: bases, functions: [LIRFunction]{}}
+        &parts.push(row)
+    }
+    // Module 0 is the calling thread's (or, with JET_KEEP_GOING, the one for
+    // the parts no thread claimed); each claiming task has one of 1..workers.
+    slots := [Shared<LowerWorker>]{}
+    loop _ in 0..<(workers + 1) {
+        slot :: shared LowerWorker{modules: [LowerModule]{}, failed: [U64:Bool]{}}
+        &slots.push(slot)
+    }
+    queue :: shared LowerWorkersQueue{next: 0}
+    // Without JET_KEEP_GOING a stop stops the compile, so the calling thread
+    // claims parts too; with it every claiming thread is a task whose stop is
+    // caught at its join, and lower_workers_finish completes its part.
+    if keep_going {
+        _ := lower_workers_claimers(inputs, slots, parts, queue, workers, false, true)
+        lower_workers_finish(inputs, slots, parts)
+    } else {
+        _ := lower_workers_claimers(inputs, slots, parts, queue, workers - 1, true, false)
+    }
+    lower_workers_merge(inputs, slots, parts, bases)
+}
+
+// Runs `tasks` claiming threads (modules tasks..1), one task each, and one
+// more on this thread (module 0) when `inline`; returns how many functions
+// they lowered. A claiming task that stops re-raises its panic here unless
+// `keep_going`.
+fn lower_workers_claimers(inputs: Shared<LowerWorkersInputs>, slots: [Shared<LowerWorker>], parts: [Shared<LowerWorkersPart>], queue: Shared<LowerWorkersQueue>, tasks: Int, inline: Bool, keep_going: Bool) -> Int {
+    if tasks <= 0 {
+        if inline -> return lower_workers_claimed(inputs, slots, 0, parts, queue)
+        return 0
+    }
+    lowered := 0
+    task.group lower_native {
+        head :: task lower_workers_claimed(inputs, slots, tasks, parts, queue)
+        lowered = lower_workers_claimers(inputs, slots, parts, queue, tasks - 1, inline, keep_going)
+        lowered += head.join() ?? lower_workers_stopped(keep_going, err)
+    }
+    lowered
+}
+
+// A stopped claiming thread: its panic text, re-raised unchanged so an
+// internal error reads the same with any thread count; under JET_KEEP_GOING
+// its part is left open for lower_workers_finish.
+fn lower_workers_stopped(keep_going: Bool, failure: TaskFailure) -> Int Never! {
+    if !keep_going -> panic(compiler_threads_failure_text(failure))
+    0
+}
+
+// One thread (module `slot`): lowers the parts it claims until none is left.
+fn lower_workers_claimed(inputs: Shared<LowerWorkersInputs>, slots: [Shared<LowerWorker>], slot: Int, parts: [Shared<LowerWorkersPart>], queue: Shared<LowerWorkersQueue>) -> Int {
+    lowered := 0
+    loop {
+        index :: lower_workers_claim(queue)
+        if index >= parts.len() -> break
+        lowered += lower_workers_part_run(inputs, slots[slot], slot, parts[index])
+    }
+    lowered
+}
+
+fn lower_workers_claim(queue: Shared<LowerWorkersQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
+}
+
+fn lower_workers_part_run(inputs: Shared<LowerWorkersInputs>, worker: Shared<LowerWorker>, slot: Int, part: Shared<LowerWorkersPart>) -> Int {
+    read :: inputs.guard_read()
+    held := worker.guard_edit()
+    permit := part.guard_edit()
+    if held.value.modules.len() == 0 -> lower_workers_open(read.value.modules[0], read.value.failed, &held.value)
+    // Passed straight through: a local binding of the guarded program would copy it.
+    lower_workers_rows(read.value.programs[0], read.value.functions, read.value.instances, &held.value, slot, &permit.value)
+}
+
+// A thread's first part: its own module, copied from the pre-registered one.
+fn lower_workers_open(base: LowerModule, failed: [U64:Bool], worker: &LowerWorker) Never! {
+    // copy: each thread registers into a module of its own, whose rows the merge replays.
+    own := base.copy()
+    own.parted = true
+    &worker.modules.push(^own)
+    // copy: the preparation's failures, which every thread's bodies test.
+    worker.failed = failed.copy()
+}
+
+// Lowers `part`'s functions from its position to its last against module
+// `slot`, writing each function and the next position into `part` as it
+// goes, so a stop leaves the position at the function it was lowering.
+fn lower_workers_rows(program: MIRProgram, functions: [LowerPreparedFunction], instances: [MIRFunction], worker: &LowerWorker, slot: Int, part: &LowerWorkersPart) -> Int Never! {
+    if part.worker < 0 {
+        part.worker = slot
+        part.start = lower_marks(worker.modules[0])
+    }
+    first :: part.position
+    loop part.position < part.last {
+        index :: part.position
+        function :: lower_selected_function(program, &worker.modules[0], functions[index], instances, index, &worker.failed)
+        &part.functions.push(function)
+        part.position = index + 1
+    }
+    part.end = lower_marks(worker.modules[0])
+    part.last - first
+}
+
+// JET_KEEP_GOING: in part order, each part a stopped thread left open
+// resumes on its module, one task at a time, from the function it stopped
+// at, which becomes one issue and a trap of its signature; a part no thread
+// claimed lowers on module 0.
+fn lower_workers_finish(inputs: Shared<LowerWorkersInputs>, slots: [Shared<LowerWorker>], parts: [Shared<LowerWorkersPart>]) {
+    loop part in parts {
+        loop lower_workers_part_open(part) {
+            slot :: lower_workers_part_slot(part)
+            reason :: lower_workers_attempt(inputs, slots[slot], slot, part)
+            if !lower_workers_part_open(part) -> break
+            lower_workers_trap(inputs, slots[slot], part, reason)
+        }
+    }
+}
+
+fn lower_workers_part_open(part: Shared<LowerWorkersPart>) -> Bool {
+    permit :: part.guard_read()
+    permit.value.position < permit.value.last
+}
+
+fn lower_workers_part_slot(part: Shared<LowerWorkersPart>) -> Int {
+    permit :: part.guard_read()
+    if permit.value.worker < 0 -> 0 else -> permit.value.worker
+}
+
+// The stop text when the task stopped, else "".
+fn lower_workers_attempt(inputs: Shared<LowerWorkersInputs>, worker: Shared<LowerWorker>, slot: Int, part: Shared<LowerWorkersPart>) -> String {
+    stopped := ""
+    task.group lower_native {
+        head :: task lower_workers_part_task(inputs, worker, slot, part)
+        stopped = head.join() ?? compiler_threads_failure_text(err)
+    }
+    stopped
+}
+
+fn lower_workers_part_task(inputs: Shared<LowerWorkersInputs>, worker: Shared<LowerWorker>, slot: Int, part: Shared<LowerWorkersPart>) -> String {
+    _ := lower_workers_part_run(inputs, worker, slot, part)
+    ""
+}
+
+fn lower_workers_trap(inputs: Shared<LowerWorkersInputs>, worker: Shared<LowerWorker>, part: Shared<LowerWorkersPart>, reason: String) {
+    read :: inputs.guard_read()
+    held := worker.guard_edit()
+    permit := part.guard_edit()
+    lower_workers_trap_row(read.value.functions, &held.value, &permit.value, reason)
+}
+
+// The function at `part.position` stopped: one issue, and its trap
+// (lower_keep_going_trap_row on the part's module).
+fn lower_workers_trap_row(functions: [LowerPreparedFunction], worker: &LowerWorker, part: &LowerWorkersPart, reason: String) Never! {
+    index :: part.position
+    descriptor :: functions[index]
+    if worker.failed.get(descriptor.id.value) == None -> &worker.failed.add(descriptor.id.value, true).drop("checked absent above")
+    &worker.modules[0].issues.push(LIRLoweringIssue{function: descriptor.name, message: "keep-going trap: native lowering stopped: {reason}"})
+    signature :: worker.modules[0].mir_signatures[index].copy()
+    trap :: lower_failed_function(worker.modules[0], LIRFunctionID{value: index}, descriptor.name, signature)
+    &part.functions.push(trap)
+    part.position = index + 1
+    part.end = lower_marks(worker.modules[0])
+}
+
+// ---------------------------------------------------------------------------
+// The merge.
+
+// Per thread module: the merged row of each of its rows past the
+// pre-registered ones (-1 for a row the merge dropped), and the key each of
+// those rows was registered under, read once from its registries.
+struct LowerRemap {
+    ready: Bool
+    signatures: [Int]
+    data: [Int]
+    debug_types: [Int]
+    debug_files: [Int]
+    glue: [Int]
+    signature_keys: [String]
+    glue_keys: [String]
+    data_keys: [String?]
+    debug_keys: [String?]
+    file_keys: [U64]
+}
+
+fn lower_remap_empty() -> LowerRemap Never! {
+    LowerRemap{ready: false, signatures: [Int]{}, data: [Int]{}, debug_types: [Int]{}, debug_files: [Int]{}, glue: [Int]{}, signature_keys: [String]{}, glue_keys: [String]{}, data_keys: [String?]{}, debug_keys: [String?]{}, file_keys: [U64]{}}
+}
+
+fn lower_workers_unmapped(count: Int) -> [Int] Never! {
+    rows := [Int]{}
+    loop _ in 0..<count -> &rows.push(-1)
+    rows
+}
+
+// The keys of module `local`'s rows past `bases`, by row.
+fn lower_remap_open(local: LowerModule, bases: LowerMarks, remap: &LowerRemap) Never! {
+    remap.ready = true
+    remap.signatures = lower_workers_unmapped(local.signatures.len() - bases.signatures)
+    remap.data = lower_workers_unmapped(local.data.len() - bases.data)
+    remap.debug_types = lower_workers_unmapped(local.debug_types.len() - bases.debug_types)
+    remap.debug_files = lower_workers_unmapped(local.debug_files.len() - bases.debug_files)
+    remap.glue = lower_workers_unmapped(local.glue.len() - bases.glue)
+    signature_keys := [String]{}
+    loop _ in bases.signatures..<local.signatures.len() -> &signature_keys.push("")
+    loop (key, row) in local.signature_rows {
+        if row >= bases.signatures -> signature_keys[row - bases.signatures] = key.copy()
+    }
+    remap.signature_keys = ^signature_keys
+    glue_keys := [String]{}
+    loop _ in bases.glue..<local.glue.len() -> &glue_keys.push("")
+    loop (key, row) in local.glue_rows {
+        if row >= bases.glue -> glue_keys[row - bases.glue] = key.copy()
+    }
+    remap.glue_keys = ^glue_keys
+    data_keys := [String?]{}
+    loop _ in bases.data..<local.data.len() -> &data_keys.push(None)
+    loop (text, row) in local.data_rows {
+        if row >= bases.data -> data_keys[row - bases.data] = Val(text.copy())
+    }
+    remap.data_keys = ^data_keys
+    debug_keys := [String?]{}
+    loop _ in bases.debug_types..<local.debug_types.len() -> &debug_keys.push(None)
+    loop (key, row) in local.debug_type_rows {
+        if row >= bases.debug_types -> debug_keys[row - bases.debug_types] = Val(key.copy())
+    }
+    remap.debug_keys = ^debug_keys
+    file_keys := [U64]{}
+    loop _ in bases.debug_files..<local.debug_files.len() -> &file_keys.push(U64{0})
+    loop (file, row) in local.debug_file_rows {
+        if row >= bases.debug_files -> file_keys[row - bases.debug_files] = file
+    }
+    remap.file_keys = ^file_keys
+}
+
+// Replays every part into the pre-registered module, in part order, and
+// moves the program, inventory and instances back out of the inputs.
+fn lower_workers_merge(inputs: Shared<LowerWorkersInputs>, slots: [Shared<LowerWorker>], parts: [Shared<LowerWorkersPart>], bases: LowerMarks) -> LowerKeepGoingLowered {
+    held := inputs.guard_edit()
+    m := &held.value.modules.pop() ?? panic("the native lowering module left its shared inputs")
+    failed := held.value.failed.copy()
+    remaps := [LowerRemap]{}
+    loop _ in 0..<slots.len() -> &remaps.push(lower_remap_empty())
+    functions := [LIRFunction]{}
+    loop part in parts -> lower_workers_merge_part(&m, slots, part, bases, &remaps, &functions)
+    loop slot in slots -> lower_workers_merge_failed(slot, &failed)
+    LowerKeepGoingLowered{state: ^m, failed: ^failed, functions: ^functions, inventory: compiler_take_rows<LowerPreparedFunction>(&held.value.functions), instances: compiler_take_rows<MIRFunction>(&held.value.instances), programs: compiler_take_rows<MIRProgram>(&held.value.programs)}
+}
+
+fn lower_workers_merge_failed(slot: Shared<LowerWorker>, failed: &[U64:Bool]) {
+    permit :: slot.guard_read()
+    loop (id, _) in permit.value.failed {
+        if failed.get(id) == None -> &failed.add(id, true).drop("checked absent above")
+    }
+}
+
+fn lower_workers_merge_part(m: &LowerModule, slots: [Shared<LowerWorker>], part: Shared<LowerWorkersPart>, bases: LowerMarks, remaps: &[LowerRemap], functions: &[LIRFunction]) {
+    permit := part.guard_edit()
+    if permit.value.worker < 0 {
+        if permit.value.functions.len() > 0 -> panic("a native lowering part has functions but no module")
+        return
+    }
+    slot :: permit.value.worker
+    held := slots[slot].guard_edit()
+    if !remaps[slot].ready -> lower_remap_open(held.value.modules[0], bases, &remaps[slot])
+    lower_workers_replay(&m, held.value.modules[0], permit.value.start, permit.value.end, bases, &remaps[slot])
+    keys :: lower_workers_keys(held.value.modules[0], permit.value.start.keys, permit.value.end.keys)
+    rows := compiler_take_rows<LIRFunction>(&permit.value.functions)
+    glue_base :: m.glue_base
+    loop at in 0..<rows.len() -> lower_workers_renumber(&rows[at], remaps[slot], bases, glue_base, keys)
+    &functions.extend(^rows)
+}
+
+// The part's function-key constants, as function * 2^32 + LIR value.
+fn lower_workers_keys(local: LowerModule, start: Int, end: Int) -> [Int:Bool] Never! {
+    keys := [Int:Bool]{}
+    loop at in start..<end {
+        row :: local.function_keys[at]
+        keys[row.function * 4294967296 + row.value] = true
+    }
+    keys
+}
+
+fn lower_workers_mask(count: Int) -> [Bool] Never! {
+    mask := [Bool]{}
+    loop _ in 0..<count -> &mask.push(false)
+    mask
+}
+
+// Marks rows [from, to) of a registry whose part rows start at `start`.
+fn lower_workers_drop(mask: &[Bool], start: Int, from: Int, to: Int) Never! {
+    loop at in from..<to -> mask[at - start] = true
+}
+
+// Replays one part's rows of thread module `local` (its rows between `start`
+// and `end`) into `m`, recording where each row went in `remap`.
+fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, end: LowerMarks, bases: LowerMarks, remap: &LowerRemap) Never! {
+    // The extents of registrations an earlier part already made: the serial
+    // lowering found each of them and created none of their rows. A dropped
+    // frozen static's own root resolves through its key.
+    dropped_data := lower_workers_mask(end.data - start.data)
+    dropped_debug := lower_workers_mask(end.debug_types - start.debug_types)
+    dropped_fixups := lower_workers_mask(end.fixups - start.fixups)
+    dropped_issues := lower_workers_mask(end.issues - start.issues)
+    dropped_roots := [Int:Int]{}
+    loop at in start.extents..<end.extents {
+        extent :: local.extents[at]
+        found := -1
+        if extent.frozen {
+            found = m.static_rows.get(extent.key) ?? -1
+        } else {
+            found = m.debug_type_rows.get(extent.key) ?? -1
+        }
+        if found < 0 -> next
+        if extent.frozen && extent.root >= extent.start.data && extent.root < extent.end.data -> dropped_roots[extent.root] = found
+        lower_workers_drop(&dropped_data, start.data, extent.start.data, extent.end.data)
+        lower_workers_drop(&dropped_debug, start.debug_types, extent.start.debug_types, extent.end.debug_types)
+        lower_workers_drop(&dropped_fixups, start.fixups, extent.start.fixups, extent.end.fixups)
+        lower_workers_drop(&dropped_issues, start.issues, extent.start.issues, extent.end.issues)
+    }
+    loop at in start.signatures..<end.signatures {
+        key :: remap.signature_keys[at - bases.signatures].copy()
+        row := m.signature_rows.get(key) ?? -1
+        if row < 0 {
+            row = m.signatures.len()
+            signature :: local.signatures[at]
+            &m.signatures.push(LIRSignature{id: LIRSignatureID{value: row}, convention: signature.convention, params: signature.params.copy(), result: signature.result.copy()})
+            &m.signature_rows.add(key, row).drop("checked absent above")
+        }
+        remap.signatures[at - bases.signatures] = row
+    }
+    loop at in start.glue..<end.glue {
+        key :: remap.glue_keys[at - bases.glue].copy()
+        row := m.glue_rows.get(key) ?? -1
+        if row < 0 {
+            row = m.glue.len()
+            glue :: local.glue[at]
+            &m.glue.push(LowerGlue{key: glue.key.copy(), ty: glue.ty.copy(), id: LIRFunctionID{value: m.glue_base + row}, clone: glue.clone, helper: glue.helper.copy(), function: glue.function})
+            &m.glue_rows.add(key, row).drop("checked absent above")
+        }
+        remap.glue[at - bases.glue] = row
+    }
+    loop at in start.debug_files..<end.debug_files {
+        file :: remap.file_keys[at - bases.debug_files]
+        row := m.debug_file_rows.get(file) ?? -1
+        if row < 0 {
+            row = m.debug_files.len()
+            &m.debug_files.push(local.debug_files[at].copy())
+            &m.debug_file_rows.add(file, row).drop("checked absent above")
+        }
+        remap.debug_files[at - bases.debug_files] = row
+    }
+    // Debug types: rows first (a row's members may name later rows), then
+    // the contents of the appended ones.
+    appended_debug := [Int]{}
+    loop at in start.debug_types..<end.debug_types {
+        key := ""
+        keyed := false
+        if remap.debug_keys[at - bases.debug_types] == .Val(text) {
+            key = lower_workers_debug_key(text, remap, bases)
+            keyed = true
+        }
+        row := -1
+        if keyed -> row = m.debug_type_rows.get(key) ?? -1
+        if row < 0 && dropped_debug[at - start.debug_types] && !keyed {
+            remap.debug_types[at - bases.debug_types] = -1
+            next
+        }
+        if row < 0 {
+            row = m.debug_types.len()
+            &m.debug_types.push(LIRDebugType{name: "", size: 0, kind: LIRDebugTypeKind.Opaque})
+            if keyed -> &m.debug_type_rows.add(key, row).drop("checked absent above")
+            &appended_debug.push(at)
+        }
+        remap.debug_types[at - bases.debug_types] = row
+    }
+    // Data: interned text resolves by its text, a dropped frozen root by its
+    // key; relocations are renumbered once every row has its place.
+    appended_data := [Int]{}
+    loop at in start.data..<end.data {
+        text :: remap.data_keys[at - bases.data].copy()
+        row := -1
+        if text == .Val(found) -> row = m.data_rows.get(found) ?? -1
+        if row < 0 && dropped_data[at - start.data] {
+            row = dropped_roots.get(at) ?? -1
+            if row < 0 && text == None {
+                remap.data[at - bases.data] = -1
+                next
+            }
+        }
+        if row < 0 {
+            row = m.data.len()
+            source :: local.data[at]
+            &m.data.push(LIRData{id: LIRDataID{value: row}, bytes: source.bytes.copy(), align: source.align, relocs: [LIRDataReloc]{}})
+            if text == .Val(interned) -> &m.data_rows.add(interned.copy(), row).drop("checked absent above")
+            &appended_data.push(at)
+        }
+        remap.data[at - bases.data] = row
+    }
+    loop at in appended_debug {
+        row :: remap.debug_types[at - bases.debug_types]
+        m.debug_types[row] = lower_workers_debug_type(local.debug_types[at], remap, bases)
+    }
+    loop at in appended_data {
+        row :: remap.data[at - bases.data]
+        relocs := [LIRDataReloc]{}
+        loop reloc in local.data[at].relocs -> &relocs.push(LIRDataReloc{offset: reloc.offset, target: lower_workers_data(remap, bases, reloc.target), addend: reloc.addend})
+        m.data[row].relocs = ^relocs
+    }
+    // The frozen statics this part registered first.
+    loop at in start.extents..<end.extents {
+        extent :: local.extents[at]
+        if !extent.frozen || m.static_rows.get(extent.key) != None -> next
+        root :: if extent.root < bases.data -> extent.root else -> remap.data[extent.root - bases.data]
+        if root < 0 -> next
+        &m.static_rows.add(extent.key.copy(), root).drop("checked absent above")
+        if extent.addend != 0 -> &m.static_rows.add("box:{extent.key}", extent.addend).drop("cached with its row")
+    }
+    loop at in start.fixups..<end.fixups {
+        if dropped_fixups[at - start.fixups] -> next
+        &m.static_fixups.push(lower_workers_fixup(local.static_fixups[at], remap, bases))
+    }
+    loop at in start.issues..<end.issues {
+        if dropped_issues[at - start.issues] -> next
+        &m.issues.push(local.issues[at].copy())
+    }
+}
+
+// A debug type key that names a row by number (a pointer's target) names
+// the merged row.
+fn lower_workers_debug_key(key: String, remap: LowerRemap, bases: LowerMarks) -> String Never! {
+    if !key.starts_with("pointer:") -> return key.copy()
+    target :: Int.parse(key.removeprefix("pointer:")) ?? panic("a native debug pointer key names no row: {key}")
+    "pointer:{lower_workers_debug(remap, bases, target)}"
+}
+
+fn lower_workers_debug_type(ty: LIRDebugType, remap: LowerRemap, bases: LowerMarks) -> LIRDebugType Never! {
+    kind :: if ty.kind == {
+        .Pointer(target) -> LIRDebugTypeKind.Pointer{target: lower_workers_debug(remap, bases, target)}
+        .Typedef(target) -> LIRDebugTypeKind.Typedef{target: lower_workers_debug(remap, bases, target)}
+        .Struct(members) -> LIRDebugTypeKind.Struct{members: lower_workers_members(members, remap, bases)}
+        .Union(members) -> LIRDebugTypeKind.Union{members: lower_workers_members(members, remap, bases)}
+        else -> ty.kind.copy()
+    }
+    LIRDebugType{name: ty.name.copy(), size: ty.size, kind: kind}
+}
+
+fn lower_workers_members(members: [LIRDebugMember], remap: LowerRemap, bases: LowerMarks) -> [LIRDebugMember] Never! {
+    loop member in members -> LIRDebugMember{name: member.name.copy(), offset: member.offset, ty: lower_workers_debug(remap, bases, member.ty)}
+}
+
+fn lower_workers_fixup(fixup: LowerStaticFixup, remap: LowerRemap, bases: LowerMarks) -> LowerStaticFixup Never! {
+    object :: lower_workers_data(remap, bases, fixup.object)
+    constructor :: if fixup.constructor == {
+        .Runtime(text, symbol) -> LowerStaticConstructor.Runtime{text: lower_workers_data(remap, bases, text), symbol: symbol.copy()}
+        .Map(ty, entries, capacity) -> LowerStaticConstructor.Map{ty: ty.copy(), entries: entries.copy(), capacity: lower_workers_data(remap, bases, capacity)}
+    }
+    LowerStaticFixup{object: object, offset: fixup.offset, constructor: constructor}
+}
+
+fn lower_workers_signature(remap: LowerRemap, bases: LowerMarks, id: LIRSignatureID) -> LIRSignatureID Never! {
+    if id.value < bases.signatures -> return LIRSignatureID{value: id.value}
+    LIRSignatureID{value: remap.signatures[id.value - bases.signatures]}
+}
+
+fn lower_workers_function(remap: LowerRemap, bases: LowerMarks, glue_base: Int, id: LIRFunctionID) -> LIRFunctionID Never! {
+    row :: id.value - glue_base
+    if row < bases.glue -> return LIRFunctionID{value: id.value}
+    LIRFunctionID{value: glue_base + remap.glue[row - bases.glue]}
+}
+
+fn lower_workers_data(remap: LowerRemap, bases: LowerMarks, id: LIRDataID) -> LIRDataID Never! {
+    if id.value < bases.data -> return LIRDataID{value: id.value}
+    row :: remap.data[id.value - bases.data]
+    if row < 0 -> panic("parallel native lowering: a kept row names data row {id.value}, which the merge dropped")
+    LIRDataID{value: row}
+}
+
+// -1 (no type) and the pre-registered rows stay.
+fn lower_workers_debug(remap: LowerRemap, bases: LowerMarks, id: Int) -> Int Never! {
+    if id < bases.debug_types -> return id
+    row :: remap.debug_types[id - bases.debug_types]
+    if row < 0 -> panic("parallel native lowering: a kept row names debug type {id}, which the merge dropped")
+    row
+}
+
+fn lower_workers_file(remap: LowerRemap, bases: LowerMarks, file: Int) -> Int Never! {
+    if file < bases.debug_files -> return file
+    remap.debug_files[file - bases.debug_files]
+}
+
+// Renumbers one lowered function to the merged rows: called signatures,
+// called, addressed and dropping glue, data addresses, function-key
+// constants, its debug file and its variables' debug types.
+fn lower_workers_renumber(function: &LIRFunction, remap: LowerRemap, bases: LowerMarks, glue_base: Int, keys: [Int:Bool]) Never! {
+    function.signature = lower_workers_signature(remap, bases, function.signature)
+    loop at in 0..<function.values.len() {
+        if function.values[at].drop == .Function(id) {
+            to :: lower_workers_function(remap, bases, glue_base, id)
+            if to.value != id.value -> function.values[at].drop = LIRDrop.Function{id: to}
+        }
+    }
+    owner :: function.id.value * 4294967296
+    loop block in 0..<function.blocks.len() {
+        loop at in 0..<function.blocks[block].insts.len() {
+            replaced :: lower_workers_inst(function.blocks[block].insts[at], owner, remap, bases, glue_base, keys) ?? next
+            function.blocks[block].insts[at] = replaced
+        }
+    }
+    if function.debug.file >= 0 -> function.debug.file = lower_workers_file(remap, bases, function.debug.file)
+    loop at in 0..<function.debug.variables.len() {
+        function.debug.variables[at].ty = lower_workers_debug(remap, bases, function.debug.variables[at].ty)
+    }
+}
+
+// `inst` renumbered, or None when it names no row that moved.
+fn lower_workers_inst(inst: LIRInst, owner: Int, remap: LowerRemap, bases: LowerMarks, glue_base: Int, keys: [Int:Bool]) -> LIRInst? Never! {
+    if inst == {
+        .Call(dst, signature, callee, args) -> {
+            to_signature :: lower_workers_signature(remap, bases, signature)
+            if callee == .Function(id) {
+                to :: lower_workers_function(remap, bases, glue_base, id)
+                if to.value == id.value && to_signature.value == signature.value -> return None
+                return Val(LIRInst.Call{dst: dst.copy(), signature: to_signature, callee: LIRCallee.Function{id: to}, args: args.copy()})
+            }
+            if to_signature.value == signature.value -> return None
+            Val(LIRInst.Call{dst: dst.copy(), signature: to_signature, callee: callee.copy(), args: args.copy()})
+        }
+        .DataAddress(dst, data) -> {
+            to :: lower_workers_data(remap, bases, data)
+            if to.value == data.value -> return None
+            Val(LIRInst.DataAddress{dst: LIRValueID{value: dst.value}, data: to})
+        }
+        .FunctionAddress(dst, target) -> {
+            to :: lower_workers_function(remap, bases, glue_base, target)
+            if to.value == target.value -> return None
+            Val(LIRInst.FunctionAddress{dst: LIRValueID{value: dst.value}, function: to})
+        }
+        .Const(dst, value) -> {
+            if keys.len() == 0 || keys.get(owner + dst.value) == None -> return None
+            to :: lower_workers_function(remap, bases, glue_base, LIRFunctionID{value: value})
+            if to.value == value -> return None
+            Val(LIRInst.Const{dst: LIRValueID{value: dst.value}, value: to.value})
+        }
+        else -> None
+    }
+}

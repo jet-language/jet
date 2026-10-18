@@ -1,0 +1,232 @@
+// The build session that declares the graph, ported 1:1 from crates/jet-comptime
+// Build/context.rs (see Model.jet for the ported surface).
+
+// Rust `NEXT_CONTEXT` hands every context a process-unique id so a handle
+// from another context is refused. The Jetpack unit has no process-global
+// counter; a 48-bit operating-system random id gives every context the same
+// distinct identity.
+fn build_next_context_id() -[Rand]> Int Never! {
+    bytes :: random.bytes(6) ?? panic("operating-system randomness is unavailable for a build context id: {err}")
+    id := 0
+    loop byte in bytes -> id = id * 256 + Int.from_u8(byte)
+    id + 1
+}
+
+struct HermeticBuildContext {
+    context: Int
+    targets: [HermeticBuildTarget]
+    actions: [HermeticBuildAction]
+    toolchains: [HermeticBuildToolchain]
+    signing_identities: [HermeticBuildSigningIdentity]
+    probes: [HermeticBuildProbe]
+    target_names: [String]
+    action_names: [String]
+    toolchain_names: [String]
+    signing_identity_names: [String]
+    probe_names: [String]
+    default_toolchain: ToolchainHandle
+
+    fn new() -[Rand]> HermeticBuildContext Never! {
+        context :: build_next_context_id()
+        host :: HermeticBuildToolchain{
+            id: 0, name: "host", role: ToolchainRole.Host, host_triple: "host", target_triple: "host",
+            sdk: None, linker: None, sysroot: None, tools: [String: String]{},
+            resolution: ToolchainResolution.Ambient, mounts: [BuildMount]{}, provenance: BuildProvenance.inferred_host(),
+        }
+        HermeticBuildContext{
+            context: context,
+            targets: [HermeticBuildTarget]{},
+            actions: [HermeticBuildAction]{},
+            toolchains: [HermeticBuildToolchain]{host},
+            signing_identities: [HermeticBuildSigningIdentity]{},
+            probes: [HermeticBuildProbe]{},
+            target_names: [String]{},
+            action_names: [String]{},
+            toolchain_names: [String]{"host"},
+            signing_identity_names: [String]{},
+            probe_names: [String]{},
+            default_toolchain: ToolchainHandle{id: 0, context: context},
+        }
+    }
+
+    fn default_host_toolchain(self) -> ToolchainHandle Never! {
+        self.default_toolchain
+    }
+
+    fn toolchain(&self, name: String, spec: ToolchainSpec) -> ToolchainHandle HermeticBuildError! {
+        checked :: build_check_name(name, .Toolchain)
+        if self.toolchain_names.contains(checked) -> return Err(HermeticBuildError.DuplicateToolchainName(checked))
+        build_validate_toolchain(checked, spec)
+        &self.toolchain_names.push(checked)
+        id :: self.toolchains.len()
+        &self.toolchains.push(HermeticBuildToolchain{
+            id: id, name: checked, role: spec.role, host_triple: spec.host_triple, target_triple: spec.target_triple,
+            sdk: spec.sdk, linker: spec.linker, sysroot: spec.sysroot, tools: spec.tools,
+            resolution: spec.resolution, mounts: spec.mounts, provenance: spec.provenance,
+        })
+        Ok(ToolchainHandle{id: id, context: self.context})
+    }
+
+    fn signing_identity(&self, name: String, spec: SigningIdentitySpec) -> SigningIdentityHandle HermeticBuildError! {
+        checked :: build_check_name(name, .SigningIdentity)
+        if self.signing_identity_names.contains(checked) -> return Err(HermeticBuildError.DuplicateSigningIdentityName(checked))
+        build_validate_identity(checked, spec.label, spec.provenance)
+        &self.signing_identity_names.push(checked)
+        id :: self.signing_identities.len()
+        &self.signing_identities.push(HermeticBuildSigningIdentity{id: id, name: checked, label: spec.label, provenance: spec.provenance})
+        Ok(SigningIdentityHandle{id: id, context: self.context})
+    }
+
+    fn probe(&self, name: String, spec: ProbeSpec) -> ProbeHandle HermeticBuildError! {
+        checked :: build_check_name(name, .Probe)
+        if self.probe_names.contains(checked) -> return Err(HermeticBuildError.DuplicateProbeName(checked))
+        toolchain :: spec.toolchain ?? self.default_toolchain
+        self.check_toolchain_ref(toolchain)
+        build_validate_probe(checked, spec)
+        &self.probe_names.push(checked)
+        id :: self.probes.len()
+        &self.probes.push(HermeticBuildProbe{id: id, name: checked, kind: spec.kind, reproducibility: spec.reproducibility, provenance: spec.provenance, toolchain: toolchain})
+        Ok(ProbeHandle{id: id, context: self.context})
+    }
+
+    fn find_program(&self, name: String, program: String) -> ProbeHandle HermeticBuildError! {
+        &self.probe(name, ProbeSpec.find_program(program))
+    }
+
+    fn pkg_config(&self, name: String, package: String) -> ProbeHandle HermeticBuildError! {
+        &self.probe(name, ProbeSpec.pkg_config(package))
+    }
+
+    fn header_check(&self, name: String, header: String) -> ProbeHandle HermeticBuildError! {
+        &self.probe(name, ProbeSpec.header_check(header))
+    }
+
+    fn compile_check(&self, name: String, check_name: String, includes: [String], code: String) -> ProbeHandle HermeticBuildError! {
+        &self.probe(name, ProbeSpec.compile_check(check_name, includes, code))
+    }
+
+    fn add_executable(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Executable, spec)
+    }
+
+    fn add_library(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Library, spec)
+    }
+
+    fn add_test(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Test, spec)
+    }
+
+    fn add_asset_bundle(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .AssetBundle, spec)
+    }
+
+    fn add_doc(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Doc, spec)
+    }
+
+    fn add_install(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Install, spec)
+    }
+
+    fn add_package(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Package, spec)
+    }
+
+    fn add_publish(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        &self.push_target(name, .Publish, spec)
+    }
+
+    fn action(&self, name: String, spec: ActionSpec) -> HermeticActionHandle HermeticBuildError! {
+        if self.actions.len() >= BUILD_MAX_ACTIONS -> return Err(HermeticBuildError.PackagedPlugin("action graph exceeds {BUILD_MAX_ACTIONS} actions"))
+        checked :: build_check_name(name, .Action)
+        if self.action_names.contains(checked) -> return Err(HermeticBuildError.DuplicateActionName(checked))
+        self.validate_action_spec(checked, spec)
+        &self.action_names.push(checked)
+        toolchain :: spec.toolchain ?? self.default_toolchain
+        id :: self.actions.len()
+        &self.actions.push(HermeticBuildAction{
+            id: id, name: checked, inputs: spec.inputs, outputs: spec.outputs, argv: spec.argv, env: spec.env,
+            env_allowlist: spec.env_allowlist, caps: spec.caps, cache: spec.cache, kind: spec.kind,
+            toolchain: toolchain, probes: spec.probes, signing_identity: spec.signing_identity, labels: spec.labels,
+            helper_versions: spec.helper_versions, resource_pools: spec.resource_pools, variant_identity: spec.variant_identity,
+        })
+        Ok(HermeticActionHandle{id: id, context: self.context})
+    }
+
+    fn plan(self) -> HermeticBuildPlan HermeticBuildError! {
+        self.snapshot(None)
+    }
+
+    fn plan_with_default(self, default: TargetRef) -> HermeticBuildPlan HermeticBuildError! {
+        self.check_target_ref(default)
+        self.snapshot(Val(default))
+    }
+
+    fn push_target(&self, name: String, kind: TargetKind, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+        checked :: build_check_name(name, .Target)
+        if self.target_names.contains(checked) -> return Err(HermeticBuildError.DuplicateTargetName(checked))
+        self.validate_target_spec(spec)
+        &self.target_names.push(checked)
+        toolchain :: spec.toolchain ?? self.default_toolchain
+        id :: self.targets.len()
+        &self.targets.push(HermeticBuildTarget{
+            id: id, name: checked, kind: kind, sources: spec.sources, inputs: spec.inputs, outputs: spec.outputs,
+            deps: spec.deps, actions: spec.actions, probes: spec.probes, toolchain: toolchain,
+            signing_identity: spec.signing_identity, metadata: spec.metadata,
+        })
+        Ok(TargetRef{id: id, context: self.context})
+    }
+
+    fn snapshot(self, default: TargetRef?) -> HermeticBuildPlan HermeticBuildError! {
+        if self.actions.len() > BUILD_MAX_ACTIONS -> return Err(HermeticBuildError.PackagedPlugin("action graph exceeds {BUILD_MAX_ACTIONS} actions"))
+        loop target in self.targets -> self.validate_refs(target.deps, target.actions)
+        build_validate_action_output_owners(self.actions)
+        Ok(HermeticBuildPlan{
+            context: self.context, targets: self.targets, actions: self.actions, toolchains: self.toolchains,
+            signing_identities: self.signing_identities, probes: self.probes, default: default,
+        })
+    }
+
+    fn validate_target_spec(self, spec: TargetSpec) HermeticBuildError! {
+        build_validate_paths(spec.sources)
+        build_validate_paths(spec.inputs)
+        build_validate_paths(spec.outputs)
+        self.validate_refs(spec.deps, spec.actions)
+        loop probe in spec.probes -> self.check_probe_ref(probe)
+        if spec.toolchain == .Val(toolchain) -> self.check_toolchain_ref(toolchain)
+        if spec.signing_identity == .Val(identity) -> self.check_signing_identity_ref(identity)
+    }
+
+    fn validate_action_spec(self, name: String, spec: ActionSpec) HermeticBuildError! {
+        build_validate_action(name, spec)
+        if spec.toolchain == .Val(toolchain) -> self.check_toolchain_ref(toolchain)
+        loop probe in spec.probes -> self.check_probe_ref(probe)
+        if spec.signing_identity == .Val(identity) -> self.check_signing_identity_ref(identity)
+    }
+
+    fn validate_refs(self, deps: [TargetRef], actions: [HermeticActionHandle]) HermeticBuildError! {
+        loop dep in deps -> self.check_target_ref(dep)
+        loop action in actions -> self.check_action_ref(action)
+    }
+
+    fn check_target_ref(self, target: TargetRef) HermeticBuildError! {
+        if target.context != self.context || target.id >= self.targets.len() -> return Err(HermeticBuildError.UnknownTarget(target.id))
+    }
+
+    fn check_action_ref(self, action: HermeticActionHandle) HermeticBuildError! {
+        if action.context != self.context || action.id >= self.actions.len() -> return Err(HermeticBuildError.UnknownAction(action.id))
+    }
+
+    fn check_toolchain_ref(self, toolchain: ToolchainHandle) HermeticBuildError! {
+        if toolchain.context != self.context || toolchain.id >= self.toolchains.len() -> return Err(HermeticBuildError.UnknownToolchain(toolchain.id))
+    }
+
+    fn check_signing_identity_ref(self, identity: SigningIdentityHandle) HermeticBuildError! {
+        if identity.context != self.context || identity.id >= self.signing_identities.len() -> return Err(HermeticBuildError.UnknownSigningIdentity(identity.id))
+    }
+
+    fn check_probe_ref(self, probe: ProbeHandle) HermeticBuildError! {
+        if probe.context != self.context || probe.id >= self.probes.len() -> return Err(HermeticBuildError.UnknownProbe(probe.id))
+    }
+}

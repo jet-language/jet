@@ -84,7 +84,7 @@ fn sema_string_view_push_copies_policy(table: &SemaScopeTable, declarations: [Po
 fn sema_string_view_call_sources(init: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _, _) -> {
             arity_ok :: (method == "trim" && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1)
             if !arity_ok -> return none
             if receiver == {
@@ -144,8 +144,8 @@ fn sema_string_view_owner(scopes: SemaScopeTable, state: SemaOwnershipState, nam
     index :: sema_scope_resolve_index(scopes, name) ?? return "its owner"
     key :: scopes.bindings[index].symbol.id.key
     owner := "its owner"
-    loop fact in state.views {
-        if fact.active && fact.carrier_key == key -> owner = fact.source.root
+    loop fact_index in 0..<state.views.len() {
+        if state.views[fact_index].active && state.views[fact_index].carrier_key == key -> owner = state.views[fact_index].source.root
     }
     owner
 }
@@ -179,7 +179,7 @@ fn sema_string_view_materialize(name: String, span: Span, expected: Type?, envir
     facts := sema_copy_classify(checked.ty, SemaCopyIntent.Materialize, environment, program, context.generic_params, true)
     if !facts.accepted -> return sema_expr_expected(checked, expected, environment, program, &diagnostics)
     if sema_copy_effect_name(facts) != None || sema_copy_memory_operation(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
-    sema_expr_expected(sema_tir_expr(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_node(facts.target, TExprKind.MaterializeView{value: checked}, span), expected, environment, program, &diagnostics)
 }
 
 // The owning `String` destinations that materialize a string view.
@@ -208,9 +208,9 @@ fn sema_read_view_owning_read(name: String, destination: Type, scopes: SemaScope
 fn sema_string_view_stable_owner(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> Bool Never! {
     index :: sema_scope_resolve_index(scopes, name) ?? return false
     key :: scopes.bindings[index].symbol.id.key
-    loop fact in state.views {
-        if !fact.active || fact.carrier_key != key -> next
-        owner :: sema_scope_resolve(scopes, fact.source.root) ?? return false
+    loop fact_index in 0..<state.views.len() {
+        if !state.views[fact_index].active || state.views[fact_index].carrier_key != key -> next
+        owner :: sema_scope_resolve(scopes, state.views[fact_index].source.root) ?? return false
         return owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant
     }
     false

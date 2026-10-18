@@ -27,6 +27,12 @@ fn lower_render_clean_report(p: MIRProgram, ty: MIRType) -> Bool Never! {
 
 
 fn lower_render_impl_selected(p: MIRProgram, implementation: MIRImplDef, ty: MIRType, show: Bool) -> Bool Never! {
+    lower_render_impl_applies(p, implementation, show) && lower_render_impl_matches(p, implementation, ty)
+}
+
+// The facts of a render selection that do not depend on the rendered type:
+// the trait (Printable for show, else Display) and the target.
+fn lower_render_impl_applies(p: MIRProgram, implementation: MIRImplDef, show: Bool) -> Bool Never! {
     trait_ref :: implementation.trait_ref ?? return false
     if trait_ref.name != (if show -> "Printable" else -> "Display") -> return false
     if !implementation.target_applicability.rust_aot -> return false
@@ -38,7 +44,35 @@ fn lower_render_impl_selected(p: MIRProgram, implementation: MIRImplDef, ty: MIR
         }
         if os_name != p.facts.active_os -> return false
     }
+    true
+}
+
+fn lower_render_impl_matches(p: MIRProgram, implementation: MIRImplDef, ty: MIRType) -> Bool Never! {
     mir_type_same_checked_type(implementation.self_type, ty) || lower_nominal_impl_template(p, implementation.self_type, ty)
+}
+
+// The p.impls rows a render may select, in program order: [0] Display,
+// [1] Printable (lower_render_impl_applies). Built once per module
+// (LowerModule.render_rows), so a render tests only those implementations
+// against its type instead of every implementation of the program.
+fn lower_render_rows(p: MIRProgram) -> [[Int]] Never! {
+    display := [Int]{}
+    show := [Int]{}
+    loop (row, implementation) in p.impls {
+        if lower_render_impl_applies(p, implementation, false) -> &display.push(row)
+        if lower_render_impl_applies(p, implementation, true) -> &show.push(row)
+    }
+    [[Int]]{display, show}
+}
+
+// The first p.functions row of each function id, built once per module
+// (LowerModule.function_rows).
+fn lower_render_function_rows(p: MIRProgram) -> [U64:Int] Never! {
+    rows := [U64:Int]{}
+    loop (row, function) in p.functions {
+        if rows.get(function.id.value) == None -> &rows.add(function.id.value, row).drop("checked absent above")
+    }
+    rows
 }
 
 // A generic implementation `impl Printable for Box<T>` renders every
@@ -74,6 +108,22 @@ fn lower_render_method(p: MIRProgram, implementation: MIRImplDef, show: Bool) ->
     None
 }
 
+// lower_render_method through `rows` (lower_render_function_rows): the first
+// row of a method's id answers unless its name differs, when a later row with
+// the same id still may (the scan's answer either way).
+fn lower_render_method_by_rows(p: MIRProgram, rows: [U64:Int], implementation: MIRImplDef, show: Bool) -> MIRFunctionID? {
+    method_name :: if show -> "show" else -> "display"
+    loop id in implementation.methods {
+        row :: rows.get(id.value) ?? next
+        if p.functions[row].name == method_name -> return Val(id)
+        start :: row + 1
+        loop later in start..<p.functions.len() {
+            if p.functions[later].id == id && p.functions[later].name == method_name -> return Val(id)
+        }
+    }
+    None
+}
+
 fn lower_render_name(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return name.copy()
     bytes :: name.bytes()
@@ -102,10 +152,16 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         lower_emit(&f, LIRInst.Call{dst: Val(text), signature: m.mir_signatures[index], callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{operand}})
         return Val(LowerText{value: text, owned: true})
     }
-    loop implementation in p.impls {
-        if mode == .Debug -> next
-        if !lower_render_impl_selected(p, implementation, ty, mode == .Show) -> next
-        id :: lower_render_method(p, implementation, mode == .Show) ?? {
+    if mode != .Debug && m.render_rows.len() == 0 {
+        m.render_rows = lower_render_rows(p)
+        m.function_rows = lower_render_function_rows(p)
+    }
+    // copy: the candidate rows are read while a selected render writes `&m` (lower_fail).
+    candidates :: if mode == .Debug -> [Int]{} else -> m.render_rows[if mode == .Show -> 1 else -> 0].copy()
+    loop row in candidates {
+        implementation :: p.impls[row]
+        if !lower_render_impl_matches(p, implementation, ty) -> next
+        id :: lower_render_method_by_rows(p, m.function_rows, implementation, mode == .Show) ?? {
             lower_fail(&m, &f, "selected display implementation has no reachable method")
             return None
         }

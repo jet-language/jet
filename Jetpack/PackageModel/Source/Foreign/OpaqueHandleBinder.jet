@@ -156,7 +156,7 @@ struct OpaqueHandleDiscovery {
     // Opaque typedefs that cannot safely become owned handles, with the
     // reason, so the binder reports them instead of pretending they are
     // scalars.
-    unresolved: [(typedef_name: String, reason: String)]
+    unresolved: [(reason: String, typedef_name: String)]
     priv opaque: [String: OpaqueHandleShape]
     priv handle_indices: [String: Int]
 
@@ -187,7 +187,7 @@ struct OpaqueHandleDiscovery {
         }
         used_names := [String]{}
         handles := [HandleFact]{}
-        unresolved := [(typedef_name: String, reason: String)]{}
+        unresolved := [(reason: String, typedef_name: String)]{}
         links :: LinkClosure.new(lib, overlay.links)
         loop typedef_name in pkg_opaque_sorted_keys(opaque.keys().to_list()) {
             shape :: opaque[typedef_name]
@@ -203,7 +203,7 @@ struct OpaqueHandleDiscovery {
             if overlay.close_for(typedef_name, jet_name, shape.struct_tag) == {
                 .Val(symbol) -> {
                     if !pkg_opaque_is_ident(symbol) {
-                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
+                        &unresolved.push((reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier", typedef_name: typedef_name.copy()))
                         next
                     }
                     close = symbol
@@ -211,7 +211,7 @@ struct OpaqueHandleDiscovery {
                 }
                 .None -> {
                     if candidates.len() == 0 {
-                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
+                        &unresolved.push((reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping", typedef_name: typedef_name.copy()))
                         next
                     }
                     if candidates.len() > 1 {
@@ -445,7 +445,7 @@ fn pkg_opaque_parse_typedef(declaration: String) -> (name: String, decl: OpaqueA
         type_tokens.len() == 1 && pkg_opaque_is_ident(type_tokens[0]) -> base = OpaqueAliasBase.Alias(type_tokens[0])
         else -> {}
     }
-    Val((name: tokens[alias_position], decl: OpaqueAliasDecl{base: base, pointer_depth: pointer_depth}))
+    Val((decl: OpaqueAliasDecl{base: base, pointer_depth: pointer_depth}, name: tokens[alias_position]))
 }
 
 fn pkg_opaque_only_void_pointer(tokens: [String]) -> Bool Never! {

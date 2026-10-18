@@ -11,7 +11,10 @@ use jet_foundation.[
     AppAuthorizedDirectory,
     AppAuthorizedDirectoryEntry,
     CompilerThreads,
+    CompilerTraceSink,
     CORE_SOURCE_OWNED_ROWS,
+    MIRArtifactBuildMode,
+    foundation_json_quote,
 ]
 use jet_driver.[
     JetDriverAuthorizedSourceFile,
@@ -44,7 +47,8 @@ use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runt
 
 // The production CLI and bootstrap observer share the driver's all-phases
 // implementation. A diagnostic trap is a failed compile, never an artifact.
-fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -> JetDriverCompileResult {
+// `trace_sink` traces the keep-going report write (`keepgoing.report`).
+fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
     if !jet_cli_keep_going_enabled() {
         return if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
     }
@@ -54,7 +58,9 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool) -
     }
     result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, emit_rust)
     if result.keep_going_rows.len() > 0 -> result.complete = false
+    if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem :: jet_cli_keep_going_report(result.keep_going_rows)
+    if trace_sink == .Val(sink) -> sink.end("keepgoing.report", result.keep_going_rows.len())
     if problem != "" -> return jet_driver_compile_escaped_failure(problem)
     result
 }
@@ -118,8 +124,18 @@ fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> J
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
 JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
-// Raw build identity supplied by the packaging host, never a guessed version.
+// This compiler's identity override (`name@version#<source id>`), for tests and
+// for compilers built before the identity was embedded; else the embedded one.
 JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
+
+// The running compiler's identity: JET_COMPILER_IDENTITY when set, else the
+// identity its assembly embedded (JET_CLI_BUILT_COMPILER_IDENTITY); None in an
+// unassembled tree with no override.
+fn jet_cli_compiler_identity() -> String? Never! {
+    if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
+    if JET_CLI_BUILT_COMPILER_IDENTITY == "" -> return None
+    Val(JET_CLI_BUILT_COMPILER_IDENTITY)
+}
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
@@ -615,12 +631,16 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
         core_sources: core_sources,
-        host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV)},
+        host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity()},
         eval_config: jet_eval_default_config(),
         target: JetDriverCompileTarget.Native,
         record_store: None,
         trace_sink: None,
-        mir_lint_every_pass: false,
+        // Dev verification knob (the bootstrap host's
+        // JET_BOOTSTRAP_MIR_LINT_EVERY_PASS): JET_MIR_LINT_EVERY_PASS=1 checks
+        // legality and MIR Lint after every optimizer pass, and a failure names
+        // the pass and carries the rejected function's MIR.
+        mir_lint_every_pass: (cli_sys.get("JET_MIR_LINT_EVERY_PASS") ?? "") == "1",
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
@@ -833,12 +853,13 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRead
 // (`--threads N`; `None` admits threads automatically). `emit_rust` asks for
 // explicit Rust emission queries; native builds/runs/tests stop at checked MIR
 // with the same diagnostics, then use the native backend's existing optimizer.
+// Untraced: only the compiling verbs trace (`jet_cli_compile_entry`).
 // `jet_driver_compile` declares no effect row or failure (its Eval host
 // adapter makes dynamic calls with no effect bound), so this function and the
 // host verbs above it stay unannotated, like the bootstrap entry
 // (Compiler/Bootstrap/Host/Entry.jet).
 fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
-    jet_cli_compile_entry(file, color, emit_rust, threads, mode, None)
+    jet_cli_compile_entry(file, color, emit_rust, threads, mode, None, None)
 }
 
 // One file's bytes as a compile sees them in place of the disk copy, or as a
@@ -850,11 +871,13 @@ struct JetCLIOverlay {
 
 // `jet_cli_compile_file` with the entry file's bytes replaced by
 // `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
-// policy-marked copy of the entry; nothing is written).
-fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?) -> JetCLICompiled {
+// policy-marked copy of the entry; nothing is written), traced through
+// `trace_sink`: the process's one sink, which `jet_cli_main` opens for
+// `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
+fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, emit_rust, threads, mode)
+    jet_cli_compile_overlays(file, file, overlays, color, emit_rust, threads, mode, trace_sink)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -930,23 +953,52 @@ fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrep
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
-fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
-    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native)
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native, false, trace_sink)
 }
 
-// Sandbox and native targets use the same authorized source snapshot.
-fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget) -> JetCLICompiled {
+// Sandbox and native targets use the same authorized source snapshot. The
+// source walk is the `sources` span; the request carries `trace_sink` into
+// the driver's phases, and its result back to the native backend.
+// `release` is Rust CmdCompile `select_native_profile` for `--release` (or
+// `--profile release`): the compile runs under the `release` profile, whose
+// MIR artifact mode is Release (Driver `mir_artifact_build_mode_for`).
+fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, release: Bool, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
-        .Refused(output) -> { return JetCLICompiled.Refused{output: output} }
+        .Refused(output) -> {
+            if trace_sink == .Val(sink) -> sink.end("sources", -1)
+            return JetCLICompiled.Refused{output: output}
+        }
         .Prepared(request, snapshot) -> {
+            if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_snapshot_file_count(snapshot))
             selected := request
             selected.target = target
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            if release {
+                selected.profile = "release"
+                selected.build_mode = MIRArtifactBuildMode.Release
+            }
             library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
-            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None)
+            // copy: a three-field row; the request moves into the compiler below.
+            compiler_threads :: selected.compiler_threads.copy()
+            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None, trace_sink)
             if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
+            // The host's phases after the compile (Host.jet's native backend
+            // route) trace through the same sink, which the result carries,
+            // and compile on the request's threads.
+            result.trace_sink = jet_cli_trace_boxed(trace_sink)
+            result.compiler_threads = compiler_threads
             return JetCLICompiled.Compiled{result: result, snapshot: snapshot}
         }
     }
+}
+
+// How many source files the snapshot authorizes, over every root.
+fn jet_cli_snapshot_file_count(snapshot: JetDriverAuthorizedSourceSnapshot) -> Int Never! {
+    count := 0
+    loop root in snapshot.roots -> count += root.files.len()
+    count
 }
 
 // The authorized request `jet_cli_compile_overlays` compiles, without
@@ -1034,3 +1086,454 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
     }
     JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
 }
+
+// ---- The compiler's streaming trace: `--trace[=FILE]` and JET_TRACE_FILE ----
+//
+// The native `jet` implements the driver's CompilerTraceSink
+// (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives
+// the Chrome trace-event lines the Rust host's writer produces
+// (crates/jet-driver/src/Trace.rs): the `[` header, `process_name`,
+// `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per span with
+// `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time (`cpu_ns` of
+// its thread, `proc_cpu_ns` of every thread, `majflt` major faults; this
+// writer only) on every close and a `memory` counter after a phase,
+// throttled `C` progress events, `<phase>.<name>`
+// counter events, and `JET_PHASE_COUNTERS` stderr lines when that variable is
+// set, so Tools/perf and Tools/agent read either compiler's trace. `-` or
+// `stderr` streams one readable line per event to stderr instead. Every line
+// is written as soon as its event happens, so a running compile can be
+// followed. A failed write stops the trace, never the compile. The sink's
+// calls stay inside the trait's FS row: monotonic time is `/proc/uptime`
+// (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as `/dev/stderr`.
+JET_CLI_TRACE_FILE_ENV :: "JET_TRACE_FILE"
+JET_CLI_TRACE_DETAIL_ENV :: "JET_TRACE_DETAIL"
+JET_CLI_PHASE_COUNTERS_ENV :: "JET_PHASE_COUNTERS"
+JET_CLI_TRACE_STDERR :: "/dev/stderr"
+// Minimum spacing of the progress events of one kind; the last item is
+// always written (Trace.rs `PROGRESS_INTERVAL`).
+JET_CLI_TRACE_PROGRESS_MS :: 200
+
+// One open span: its kind, the label it shows, when it began (µs), and the
+// CPU clocks and fault count when it began.
+struct JetCLITraceSpan {
+    kind: String
+    label: String
+    start_us: Int
+    start: JetCLITraceUsage
+}
+
+// CPU time in ns of the calling thread (`/proc/thread-self/schedstat`: the
+// scheduler's exact run time) and of the whole process (`/proc/self/stat`
+// utime + stime, in 10 ms clock ticks), and the process's major page faults;
+// -1 where unreadable. A span reports the difference between its end and its
+// begin; begin and end run on the same thread (spans nest per thread).
+struct JetCLITraceUsage {
+    cpu_ns: Int
+    proc_cpu_ns: Int
+    majflt: Int
+}
+
+struct JetCLITraceState {
+    // False after a failed write: the trace stops, the compile does not.
+    writing: Bool
+    // Open spans per thread (kernel thread id), innermost last.
+    stacks: [Int:[JetCLITraceSpan]]
+    // When each progress kind was last written (uptime ms).
+    progress_at: [String:Int]
+}
+
+struct JetCLITraceSink {
+    // The trace file, or `/dev/stderr` for the readable stream.
+    target: String
+    human: Bool
+    // Uptime (ms) when the trace opened: the origin of every timestamp.
+    start_ms: Int
+    pid: Int
+    // The thread that opened the trace; the readable stream marks others.
+    main_thread: Int
+    functions: Bool
+    phase_counters: Bool
+    // Shared by every copy of the sink and every compiler thread.
+    state: Shared<JetCLITraceState>
+}
+
+// Resident and peak resident set size in kB (`VmRSS`, `VmHWM`).
+struct JetCLITraceMemory {
+    rss_kb: Int
+    peak_kb: Int
+}
+
+// The process's one sink, opened by `jet_cli_main` for a compiling verb:
+// the target `requested` (`--trace` passes `-`, `--trace=FILE` the file)
+// selects, else JET_TRACE_FILE; `None` when neither asks for a trace or the
+// target cannot be written (the reason goes to stderr, the compile goes on).
+// A file target is truncated and starts with the trace header.
+fn jet_cli_trace_sink(requested: String?) -> JetCLITraceSink? {
+    chosen := cli_sys.get(JET_CLI_TRACE_FILE_ENV) ?? ""
+    if requested == .Val(flag) -> chosen = flag
+    if chosen == "" -> return None
+    human :: chosen == "-" || chosen == "stderr"
+    target :: if human -> JET_CLI_TRACE_STDERR else -> chosen
+    start_ms :: jet_cli_trace_uptime_ms()
+    pid :: cli_sys.pid()
+    executable :: cli_sys.executable().split("/").to_list()
+    process := "jet"
+    if executable.len() > 0 && executable[executable.len() - 1] != "" -> process = executable[executable.len() - 1]
+    functions :: (cli_sys.get(JET_CLI_TRACE_DETAIL_ENV) ?? "") == "functions"
+    detail :: if functions -> "true" else -> "false"
+    opening :: if human -> "[{jet_cli_trace_clock(0)}] trace: {process} pid {pid}, functions {detail}\n" else -> "[\n{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":0,\"args\":{{\"name\":{foundation_json_quote(process)}}}}},\n"
+    opened :: if human -> jet_cli_trace_append(target, opening) else -> jet_cli_trace_create(target, opening)
+    if opened == .Val(problem) {
+        _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
+        return None
+    }
+    if !human {
+        // The wall-clock anchor readers align the trace with: the
+        // modification time the header write just set (no clock read).
+        unix_ms :: if cli_files.stat(target) == .Ok(info) -> info.modified.to_unix_ms() else -> 0
+        started :: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail}}}}},\n")
+        if started == .Val(problem) {
+            _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
+            return None
+        }
+    }
+    Val(JetCLITraceSink{
+        target: target,
+        human: human,
+        start_ms: start_ms,
+        pid: pid,
+        main_thread: jet_cli_trace_thread(),
+        functions: functions,
+        phase_counters: (cli_sys.get(JET_CLI_PHASE_COUNTERS_ENV) ?? "") != "",
+        state: shared JetCLITraceState{writing: true, stacks: [Int:[JetCLITraceSpan]]{}, progress_at: [String:Int]{}},
+    })
+}
+
+// A driver trait object over the sink. Trait objects cannot be copied, so
+// each owner (the request, the result) gets its own; every one writes
+// through the sink's one shared state.
+fn jet_cli_trace_boxed(sink: JetCLITraceSink?) -> CompilerTraceSink? Never! {
+    opened :: sink ?? return None
+    // copy: the caller's sink (owner: the request's option, boxed again for the result) and
+    // this trait object (owner: the boxed sink) each hold the sink; the copy shares its one
+    // traced state cell (a refcount bump plus flags).
+    Val(jet_cli_trace_object(opened.copy()))
+}
+
+fn jet_cli_trace_object(sink: ^JetCLITraceSink) -> CompilerTraceSink Never! {
+    ^sink
+}
+
+impl JetCLITraceSink.CompilerTraceSink {
+    fn begin(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]> {
+        ts :: jet_cli_trace_micros(self.start_ms)
+        thread :: jet_cli_trace_thread()
+        label :: if detail == "" -> name else -> detail
+        start :: jet_cli_trace_usage()
+        permit := self.state.guard_edit()
+        if !permit.value.writing -> return
+        stack := permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}
+        line := ""
+        if self.human {
+            item :: if detail == "" -> "" else -> " {detail}"
+            line = "{jet_cli_trace_prefix(self, ts, thread, stack.len())}> {name}{item}{jet_cli_trace_place(index, total)}\n"
+        } else {
+            if !permit.value.stacks.has_key(thread) -> line = jet_cli_trace_thread_name(self.pid, thread)
+            args :: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
+            line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, self.pid, thread)}{args}}},\n"
+        }
+        &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start})
+        permit.value.stacks[thread] = stack
+        jet_cli_trace_write(self.target, &permit.value, line)
+    }
+
+    // Closes the innermost open span of kind `name` on this thread, and any
+    // deeper span an early return left open; no open span of that kind on
+    // this thread writes nothing.
+    fn end(self, name: String, items: Int) Never! -[FS]> {
+        usage :: jet_cli_trace_usage()
+        memory :: jet_cli_trace_memory()
+        ts :: jet_cli_trace_micros(self.start_ms)
+        thread :: jet_cli_trace_thread()
+        permit := self.state.guard_edit()
+        if !permit.value.writing -> return
+        stack := permit.value.stacks.get(thread) ?? return
+        position := stack.len() - 1
+        loop position >= 0 && stack[position].kind != name -> position -= 1
+        if position < 0 -> return
+        line := ""
+        loop stack.len() > position + 1 {
+            abandoned :: &stack.pop() ?? break
+            line = "{line}{jet_cli_trace_close_line(self, abandoned, false, -1, None, None, ts, thread, stack.len())}"
+        }
+        closed :: &stack.pop() ?? return
+        spent :: jet_cli_trace_usage_since(closed.start, usage)
+        line = "{line}{jet_cli_trace_close_line(self, closed, true, items, memory, Val(spent), ts, thread, stack.len())}"
+        permit.value.stacks[thread] = stack
+        jet_cli_trace_write(self.target, &permit.value, line)
+    }
+
+    fn progress(self, name: String, done: Int, total: Int) Never! -[FS]> {
+        if name.starts_with("counters.") {
+            self.counter(name, done)
+            return
+        }
+        now :: jet_cli_trace_uptime_ms()
+        thread :: jet_cli_trace_thread()
+        permit := self.state.guard_edit()
+        if !permit.value.writing -> return
+        last_item :: total > 0 && done + 1 >= total
+        if permit.value.progress_at.get(name) == .Val(previous) {
+            if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS -> return
+        }
+        permit.value.progress_at[name] = now
+        ts :: if now > self.start_ms -> (now - self.start_ms) * 1000 else -> 0
+        line := ""
+        if self.human {
+            depth :: (permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}).len()
+            of :: if total > 0 -> "/{total}" else -> ""
+            line = "{jet_cli_trace_prefix(self, ts, thread, depth)}~ {name} {done}{of}{jet_cli_trace_resident(jet_cli_trace_memory())}\n"
+        } else {
+            line = "{jet_cli_trace_head(name, None, "C", ts, self.pid, thread)},\"args\":{{\"done\":{done},\"total\":{total}}}}},\n"
+        }
+        jet_cli_trace_write(self.target, &permit.value, line)
+    }
+
+    fn functions(self) -[]> Bool Never! {
+        self.functions
+    }
+}
+
+impl JetCLITraceSink {
+    // A `counters.<phase>.<name>` progress kind: one #4319 scaling counter
+    // value, written unthrottled as the `<phase>.<name>` counter event and,
+    // with JET_PHASE_COUNTERS set, as a `JET_PHASE_COUNTERS` stderr line.
+    fn counter(self, kind: String, value: Int) Never! {
+        parts := kind.split(".").to_list()
+        if parts.len() < 3 -> return
+        counter_name :: &parts.pop() ?? return
+        phase := parts[1]
+        loop index in 2..<parts.len() -> phase = "{phase}.{parts[index]}"
+        counter :: "{phase}.{counter_name}"
+        ts :: jet_cli_trace_micros(self.start_ms)
+        thread :: jet_cli_trace_thread()
+        permit := self.state.guard_edit()
+        if permit.value.writing {
+            depth :: (permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}).len()
+            line :: if self.human -> "{jet_cli_trace_prefix(self, ts, thread, depth)}# {counter} = {value}\n" else -> "{jet_cli_trace_head(counter, None, "C", ts, self.pid, thread)},\"args\":{{\"value\":{value}}}}},\n"
+            jet_cli_trace_write(self.target, &permit.value, line)
+        }
+        if self.phase_counters {
+            _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "JET_PHASE_COUNTERS {{\"phase\":{foundation_json_quote(phase)},{foundation_json_quote(counter_name)}:{value}}}\n")
+        }
+    }
+}
+
+// A span's close. Machine form: its `E` event (with args only for the span
+// `end` named), then a phase's `memory` counter; readable form: one line
+// with the span's duration, CPU time, item count and memory.
+fn jet_cli_trace_close_line(sink: JetCLITraceSink, span: JetCLITraceSpan, named: Bool, items: Int, memory: JetCLITraceMemory?, spent: JetCLITraceUsage?, ts: Int, thread: Int, depth: Int) -> String Never! {
+    if sink.human {
+        item :: if span.label == span.kind -> "" else -> " {span.label}"
+        counted :: if items >= 0 -> " items={items}" else -> ""
+        abandoned :: if named -> "" else -> " (left open)"
+        cpu := ""
+        if spent == .Val(usage) {
+            if usage.cpu_ns >= 0 -> cpu = " cpu={jet_cli_trace_seconds(usage.cpu_ns /% 1000)}s"
+        }
+        return "{jet_cli_trace_prefix(sink, ts, thread, depth)}< {span.kind}{item} {jet_cli_trace_seconds(ts - span.start_us)}s{cpu}{counted}{jet_cli_trace_resident(memory)}{abandoned}\n"
+    }
+    head :: jet_cli_trace_head(span.label, Val(span.kind), "E", ts, sink.pid, thread)
+    if !named -> return "{head}}},\n"
+    args := [String]{}
+    if items >= 0 -> &args.push("\"items\":{items}")
+    if memory == .Val(kb) -> &args.push("\"rss_kb\":{kb.rss_kb},\"peak_rss_kb\":{kb.peak_kb}")
+    if spent == .Val(usage) {
+        if usage.cpu_ns >= 0 -> &args.push("\"cpu_ns\":{usage.cpu_ns}")
+        if usage.proc_cpu_ns >= 0 -> &args.push("\"proc_cpu_ns\":{usage.proc_cpu_ns}")
+        if usage.majflt >= 0 -> &args.push("\"majflt\":{usage.majflt}")
+    }
+    joined :: args.join(",")
+    line := "{head},\"args\":{{{joined}}}}},\n"
+    if span.label == span.kind && memory == .Val(kb) {
+        rss_mb :: kb.rss_kb /% 1024
+        peak_mb :: kb.peak_kb /% 1024
+        line = "{line}{jet_cli_trace_head("memory", None, "C", ts, sink.pid, thread)},\"args\":{{\"rss_mb\":{rss_mb},\"peak_rss_mb\":{peak_mb}}}}},\n"
+    }
+    line
+}
+
+// `{"name":..,"cat":..,"ph":..,"ts":..,"pid":..,"tid":..` without the
+// closing brace, so the caller appends `args` (Trace.rs `push_event_head`).
+fn jet_cli_trace_head(name: String, kind: String?, phase: String, ts: Int, pid: Int, thread: Int) -> String Never! {
+    category :: if kind == .Val(text) -> ",\"cat\":{foundation_json_quote(text)}" else -> ""
+    "{{\"name\":{foundation_json_quote(name)}{category},\"ph\":\"{phase}\",\"ts\":{ts},\"pid\":{pid},\"tid\":{thread}"
+}
+
+// The `thread_name` metadata event a thread's first span is preceded by.
+fn jet_cli_trace_thread_name(pid: Int, thread: Int) -> String Never! {
+    "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":{thread},\"args\":{{\"name\":\"thread {thread}\"}}}},\n"
+}
+
+// The readable stream's line prefix: elapsed seconds, a non-main thread's
+// id, and two spaces per open span.
+fn jet_cli_trace_prefix(sink: JetCLITraceSink, ts: Int, thread: Int, depth: Int) -> String Never! {
+    lane :: if thread == sink.main_thread -> "" else -> "[t{thread}] "
+    indent := ""
+    loop indent.len() < depth * 2 -> indent = "{indent}  "
+    "[{jet_cli_trace_clock(ts)}] {lane}{indent}"
+}
+
+// Elapsed microseconds as right-aligned seconds, `   12.345s`.
+fn jet_cli_trace_clock(us: Int) -> String Never! {
+    text := jet_cli_trace_seconds(us)
+    loop text.len() < 9 -> text = " {text}"
+    "{text}s"
+}
+
+fn jet_cli_trace_seconds(us: Int) -> String Never! {
+    seconds :: us /% 1000000
+    millis :: (us %% 1000000) /% 1000
+    pad :: if millis < 10 -> "00" else if millis < 100 -> "0" else -> ""
+    "{seconds}.{pad}{millis}"
+}
+
+// ` (3/120)` for an item's place in its phase; ` (#3)` when uncounted.
+fn jet_cli_trace_place(index: Int, total: Int) -> String Never! {
+    if index < 0 -> return ""
+    position :: index + 1
+    if total > 0 -> return " ({position}/{total})"
+    " (#{position})"
+}
+
+fn jet_cli_trace_resident(memory: JetCLITraceMemory?) -> String Never! {
+    if memory == .Val(kb) {
+        rss_mb :: kb.rss_kb /% 1024
+        peak_mb :: kb.peak_kb /% 1024
+        return " rss={rss_mb}MB peak={peak_mb}MB"
+    }
+    ""
+}
+
+// Microseconds since the trace opened (`/proc/uptime` resolution).
+fn jet_cli_trace_micros(start_ms: Int) -> Int Never! {
+    elapsed :: jet_cli_trace_uptime_ms() - start_ms
+    if elapsed < 0 -> return 0
+    elapsed * 1000
+}
+
+// Milliseconds since boot from `/proc/uptime` (`12345.67 …`, CLOCK_BOOTTIME),
+// the trace's monotonic clock; 0 when it cannot be read.
+fn jet_cli_trace_uptime_ms() -> Int Never! {
+    text :: cli_files.read("/proc/uptime") ?? return 0
+    loop field in text.split(" ") {
+        parts :: field.split(".").to_list()
+        if parts.len() != 2 -> return 0
+        fraction := parts[1]
+        loop fraction.len() < 3 -> fraction = "{fraction}0"
+        seconds :: Int.parse(parts[0]) ?? return 0
+        millis :: Int.parse(fraction.slice(0..<3)) ?? return 0
+        return seconds * 1000 + millis
+    }
+    0
+}
+
+// The calling thread's kernel id, from `/proc/thread-self` (`<pid>/task/<tid>`).
+fn jet_cli_trace_thread() -> Int Never! {
+    link :: cli_files.read_link("/proc/thread-self") ?? return 0
+    parts :: link.split("/").to_list()
+    if parts.len() == 0 -> return 0
+    Int.parse(parts[parts.len() - 1]) ?? 0
+}
+
+fn jet_cli_trace_memory() -> JetCLITraceMemory? Never! {
+    text :: cli_files.read("/proc/self/status") ?? return None
+    rss := -1
+    peak := -1
+    loop line in text.lines() {
+        if line.starts_with("VmRSS:") -> rss = jet_cli_trace_status_kb(line)
+        if line.starts_with("VmHWM:") -> peak = jet_cli_trace_status_kb(line)
+    }
+    if rss < 0 || peak < 0 -> return None
+    Val(JetCLITraceMemory{rss_kb: rss, peak_kb: peak})
+}
+
+// The kB count of one `/proc/self/status` line (`VmRSS:\t  1234 kB`), or -1.
+fn jet_cli_trace_status_kb(line: String) -> Int Never! {
+    parts :: line.split(":").to_list()
+    if parts.len() != 2 -> return -1
+    loop word in parts[1].trim().split(" ") {
+        if word == "" -> next
+        return Int.parse(word) ?? -1
+    }
+    -1
+}
+
+// `/proc/self/stat` counts CPU time in clock ticks of USER_HZ (100 on every
+// Linux ABI): 10 ms each.
+JET_CLI_TRACE_NS_PER_TICK :: 10000000
+
+// The CPU clocks and major fault count a span starts from and ends at.
+fn jet_cli_trace_usage() -> JetCLITraceUsage Never! {
+    usage := JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1}
+    // `<run ns> <wait ns> <timeslices>`: the first field is the thread's CPU time.
+    if cli_files.read("/proc/thread-self/schedstat") == .Ok(schedstat) {
+        loop field in schedstat.trim().split(" ") {
+            usage.cpu_ns = Int.parse(field) ?? -1
+            break
+        }
+    }
+    // `pid (comm) state …`: the fields after the last `)` start at field 3
+    // (state), so majflt (12), utime (14) and stime (15) are 9, 11 and 12.
+    text :: cli_files.read("/proc/self/stat") ?? return usage
+    parts :: text.split(")").to_list()
+    if parts.len() < 2 -> return usage
+    fields := [String]{}
+    loop word in parts[parts.len() - 1].trim().split(" ") {
+        if word != "" -> &fields.push(word)
+    }
+    if fields.len() < 13 -> return usage
+    usage.majflt = Int.parse(fields[9]) ?? -1
+    utime :: Int.parse(fields[11]) ?? return usage
+    stime :: Int.parse(fields[12]) ?? return usage
+    usage.proc_cpu_ns = (utime + stime) * JET_CLI_TRACE_NS_PER_TICK
+    usage
+}
+
+// What a span spent between `start` and `now`; -1 where either is unknown.
+fn jet_cli_trace_usage_since(start: JetCLITraceUsage, now: JetCLITraceUsage) -> JetCLITraceUsage Never! {
+    JetCLITraceUsage{
+        cpu_ns: if start.cpu_ns < 0 || now.cpu_ns < 0 -> -1 else -> now.cpu_ns - start.cpu_ns,
+        proc_cpu_ns: if start.proc_cpu_ns < 0 || now.proc_cpu_ns < 0 -> -1 else -> now.proc_cpu_ns - start.proc_cpu_ns,
+        majflt: if start.majflt < 0 || now.majflt < 0 -> -1 else -> now.majflt - start.majflt,
+    }
+}
+
+// Writes one event's text; the first failure stops the trace.
+fn jet_cli_trace_write(target: String, state: &JetCLITraceState, text: String) Never! {
+    problem :: jet_cli_trace_append(target, text) ?? return
+    state.writing = false
+    _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: the compiler trace stopped: writing `{target}` failed: {problem}\n")
+}
+
+// Appends `text` (each call opens, writes, flushes and closes, so every event
+// is in the file when the call returns); the failure, or `None`. Writes go
+// through an append-mode `FileWriter` (the native runtime pack exports the
+// writer routes; it has no whole-file append route).
+fn jet_cli_trace_append(target: String, text: String) -> String? Never! {
+    writer :: cli_files.append(target) ?? return Val("{err}")
+    writer.write_all(text.bytes()) ?? return Val("{err}")
+    writer.flush() ?? return Val("{err}")
+    None
+}
+
+fn jet_cli_trace_create(target: String, text: String) -> String? Never! {
+    cli_files.write(target, text) ?? return Val("{err}")
+    None
+}
+
+// The identity (`name@version#<compiler_source_id>`) of the source this compiler
+// was built from. The native assembler (Tools/agent/native-compiler.mjs) writes
+// it into the assembled unit; "" in a tree it did not assemble. It stays the
+// last line of this file, so that rewrite moves no other byte of this file.
+JET_CLI_BUILT_COMPILER_IDENTITY :: ""

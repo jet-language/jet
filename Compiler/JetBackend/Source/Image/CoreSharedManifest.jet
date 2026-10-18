@@ -65,6 +65,7 @@ struct CoreSharedLayoutBuilder {
 // owned-member lists are changed. Length-framed JSON prevents delimiter aliases.
 fn core_shared_source_seal(sources: [CoreSharedSource]) -> String Never! {
     ordered := sources.copy()
+    ordered = loop fresh_item in ordered -> fresh_item
     &ordered.sort_by((a: CoreSharedSource, b: CoreSharedSource) -> (a.module_owner_key <=> b.module_owner_key).then(a.path <=> b.path))
     rows := [String]{}
     loop source in ordered {
@@ -248,7 +249,9 @@ fn core_shared_expected_manifest(program: MIRProgram, sources: [CoreSharedSource
             }
         }
     }
+    manifest.sorted_sites = loop fresh_item in manifest.sorted_sites -> fresh_item
     &manifest.sorted_sites.sort_by((a: CoreSharedSiteSchema, b: CoreSharedSiteSchema) -> a.canonical_site_key <=> b.canonical_site_key)
+    state.layouts = loop fresh_item in state.layouts -> fresh_item
     &state.layouts.sort_by((a: CoreSharedNativeLayout, b: CoreSharedNativeLayout) -> a.type_key <=> b.type_key)
     manifest.keyed_native_layout_inventory = state.layouts
     loop error in state.errors -> &manifest.errors.push(error)
@@ -400,6 +403,7 @@ fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: Core
         }
         &binding.callables.push(CoreSharedCallableBinding{semantic_identity: row.semantic_identity, role: row.role, type_key: row.type_key, symbol: symbol, function: row.function, signature: signature, linked_offset: offset})
     }
+    binding.callables = loop fresh_item in binding.callables -> fresh_item
     &binding.callables.sort_by((a: CoreSharedCallableBinding, b: CoreSharedCallableBinding) -> a.semantic_identity <=> b.semantic_identity)
     binding.callable_digest = core_shared_callable_rows_digest(binding.callables)
     error :: core_shared_callable_inventory_error(binding)

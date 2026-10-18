@@ -81,6 +81,7 @@ enum BuildEffect {
     // The effects in canonical table order, keeping repeats.
     fn sorted(effects: [BuildEffect]) -> [BuildEffect] Never! {
         out := effects
+        out = loop fresh_item in out -> fresh_item
         &out.sort_by(written -> written.rank())
         out
     }

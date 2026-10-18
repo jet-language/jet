@@ -340,20 +340,24 @@ fn pkg_ffi_collect_externs(program: RustBridgeProgram, target: String) -> [Exter
     out
 }
 
-// A per-callable `#Import(c)` guest import or an inline `#FFI` body.
+// A per-callable `#Import(c)` guest import or an inline `#FFI` body. The
+// import row is Rust Sema `guest_import_function_signature`: the parser-bound
+// C symbol, the written parameters and return; its wrapper is Rust
+// `guest_import_wrapper_name` (`jet_ffi_guest.<owner|root>.<name>`, mangled).
 fn pkg_ffi_collect_function(function: Func, owner: String, target: String, out: &[ExternEntry]) Never! {
-    if sema_guest_import_function_signature(function) == .Val(import) {
+    if parser_guest_import_symbol(function) == .Val(symbol) {
         names := [String]{}
-        loop index in 0..<import.params.len() -> &names.push("arg{index}")
+        loop index in 0..<function.params.len() -> &names.push("arg{index}")
+        wrapper_owner :: if owner == "" -> "root" else -> owner
         &out.push(ExternEntry{
-            jet_name: import.name,
-            rust_path: import.symbol,
-            wrapper_name: sema_guest_import_wrapper_name(owner, import.name),
-            params: import.params,
+            jet_name: function.name,
+            rust_path: symbol,
+            wrapper_name: pkg_ffi_mangle_path("jet_ffi_guest.{wrapper_owner}.{function.name}"),
+            params: pkg_ffi_param_shapes(function.params),
             param_names: names,
-            return_type: import.return_type,
+            return_type: function.return_type,
             crate_spec: "std",
-            line_hint: "`#Import(c) fn {import.name}`",
+            line_hint: "`#Import(c) fn {function.name}`",
             inline: None,
             c_abi: true,
             generated: false,

@@ -214,16 +214,14 @@ fn scan_binary_validate(data: I64, len: I64, stride: I64, parts: I64, count: I64
 }
 fn scan_text_copy(data: I64, len: I64, stride: I64) -> I64 {
     if (stride == I64{1}) { return rt_text_copy(data, len) }
-    header :: jet_rt_alloc(I64{24}, I64{8})
-    target :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    header :: rt_text_with_length(len, len)
+    if (header == I64{0}) -> return I64{0}
+    target :: rt_text_data(header)
     at := I64{0}
     loop at < len {
         rt_text_put(target + at, scan_byte(data, stride, at))
         at += I64{1}
     }
-    rt_text_store(header, target)
-    rt_text_store(header + I64{8}, len)
-    rt_text_store(header + I64{16}, len)
     header
 }
 fn scan_bytes_copy(data: I64, len: I64, stride: I64, target_stride: I64) -> I64 {

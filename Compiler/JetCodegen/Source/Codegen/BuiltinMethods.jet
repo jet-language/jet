@@ -77,6 +77,8 @@ fn jet_codegen_builtin_route(member: String, symbol: String, arity: Int, borrow_
 fn jet_codegen_builtin_untag(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_builtin_untag(inner)
+        // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on the TIR node.
         else -> return ty.copy()
     }
 }
@@ -466,8 +468,11 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         }
         .LenString -> return jet_codegen_builtin_route("len_string", "jet_char_len", 1, [Bool]{true}, None)
         .LenList | .IsEmpty | .GetMap | .GetList | .First | .Last | .Contains | .ContainsKey | .DequeCapacity | .SetCapacity | .MapFromKeys | .SetShuffle | .ListUnion | .ListIntersection | .ListDifference | .ListRandom -> return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
-        .Max(fixed) -> {
-            if !fixed -> return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
+        // D-FLOATSORT1: Float extrema use the collection sort order, so a NaN
+        // item is the greatest value and never the least.
+        .Max(float) -> {
+            if float -> return jet_codegen_builtin_route("max_float", "jet_list_max_float", 1, [Bool]{false}, None)
+            return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
         }
         .Push -> {
             is_priority_queue := if jet_codegen_builtin_untag(receiver) == {
@@ -524,8 +529,9 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .Product(fixed) -> {
             if !fixed -> return jet_codegen_builtin_route("product", "jet_list_product", 1, [Bool]{false}, None)
         }
-        .Min(fixed) -> {
-            if !fixed -> return jet_codegen_builtin_route("min", "jet_list_min", 1, [Bool]{false}, None)
+        .Min(float) -> {
+            if float -> return jet_codegen_builtin_route("min_float", "jet_list_min_float", 1, [Bool]{false}, None)
+            return jet_codegen_builtin_route("min", "jet_list_min", 1, [Bool]{false}, None)
         }
         .Flatten -> {
             if jet_codegen_builtin_iter_receiver(receiver) -> return jet_codegen_builtin_route("iter_flatten", "jet_iter_flatten", 1, [Bool]{false}, None)
@@ -726,14 +732,12 @@ fn jet_codegen_byte_buffer_native_int_operand(method: String) -> Bool Never! {
 
 fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, receiver: TExpr, mutating: Bool) -> (value: MIRValueID, place: MIRPlaceID?) {
     if !mutating {
-        if jet_codegen_builtin_iter_receiver(receiver.ty) {
-            place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Move)
-            if place != None -> return (value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.MovePlace{place: place ?? panic("checked iterator receiver place disappeared")}), place: None)
-        }
-        return (value: jet_codegen_lower_expr(&builder, program, receiver), place: None)
+        // An owned iterator receiver is consumed by the builtin.
+        if jet_codegen_builtin_iter_receiver(receiver.ty) -> return (place: None, value: jet_codegen_lower_consuming_value(&builder, program, receiver))
+        return (place: None, value: jet_codegen_lower_expr(&builder, program, receiver))
     }
     place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Write)
-    if place == None -> return (value: jet_codegen_lower_expr(&builder, program, receiver), place: None)
+    if place == None -> return (place: None, value: jet_codegen_lower_expr(&builder, program, receiver))
     collection_value := false
     if receiver.kind == {
         .Index(_, _, _, _, _, _) | .Field(_, _) -> {
@@ -747,8 +751,8 @@ fn jet_codegen_lower_builtin_receiver(builder: &JetCodegenBuilder, program: JetC
         }
         else -> {}
     }
-    if collection_value -> return (value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.ReadPlace{place: place ?? panic("checked indexed collection receiver place disappeared")}), place: Val(place ?? panic("checked indexed collection receiver place disappeared")))
-    (value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.AddressOf{place: place ?? panic("checked mutating builtin receiver place disappeared"), access: MIRAccess.Write}), place: Val(place ?? panic("checked mutating builtin receiver place disappeared")))
+    if collection_value -> return (place: Val(place ?? panic("checked indexed collection receiver place disappeared")), value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.ReadPlace{place: place ?? panic("checked indexed collection receiver place disappeared")}))
+    (place: Val(place ?? panic("checked mutating builtin receiver place disappeared")), value: jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.AddressOf{place: place ?? panic("checked mutating builtin receiver place disappeared"), access: MIRAccess.Write}))
 }
 
 fn jet_codegen_builtin_native_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, source: Type, span: Span) -> MIRValueID Never! {
@@ -893,7 +897,7 @@ fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, program: Je
             target_inner
         }
         .Named(name) -> {
-            if !jet_codegen_trait_bound_is_declared(program.modules, name, builder.function.module_identity) -> panic("checked Option.zip trait field names an undeclared trait")
+            if !jet_codegen_trait_bound_is_declared(program.nominals, name, builder.function.module_identity) -> panic("checked Option.zip trait field names an undeclared trait")
             Type.TraitObject{bounds: [String]{name}}
         }
         else -> panic("checked Option.zip tuple field has no coercion fact")
@@ -901,7 +905,7 @@ fn jet_codegen_builtin_option_zip_value(builder: &JetCodegenBuilder, program: Je
     if source_inner == {
         .TraitObject(_) -> panic("checked Option.zip trait field has no canonical upcast")
         .Named(name) -> {
-            if jet_codegen_trait_bound_is_declared(program.modules, name, builder.function.module_identity) -> panic("checked Option.zip trait field has no canonical upcast")
+            if jet_codegen_trait_bound_is_declared(program.nominals, name, builder.function.module_identity) -> panic("checked Option.zip trait field has no canonical upcast")
         }
         else -> {}
     }
@@ -991,7 +995,7 @@ fn jet_codegen_lower_builtin_list_min_max(builder: &JetCodegenBuilder, program: 
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, carrier)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, false)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(aggregate_fields)}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: ^call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(^aggregate_fields)}})
 }
 
 // `map.to_list()` / `map.items()`: the Prelude fills one `(key, value)` named
@@ -1009,7 +1013,7 @@ fn jet_codegen_lower_builtin_map_to_list(builder: &JetCodegenBuilder, program: J
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, carrier)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, false)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(aggregate_fields)}})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: ^call, receiver: lowered_receiver.value, receiver_place: lowered_receiver.place, args: [MIRValueID]{}, aggregate_fields: Val(^aggregate_fields)}})
 }
 
 fn jet_codegen_lower_builtin_indexes(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, args: [TExpr]) -> MIRValueID {
@@ -1031,7 +1035,7 @@ fn jet_codegen_lower_builtin_dynamic_remove(builder: &JetCodegenBuilder, program
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, true)
     item := jet_codegen_lower_expr(&builder, program, args[0])
     selector := jet_codegen_lower_expr(&builder, program, args[1])
-    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     by_value := jet_codegen_emit_value(&builder, program, args[1].span, Type.Bool, MIROperation.EnumIs{subject: selector, owner: owner, variant: "Val"})
     value_block := jet_codegen_new_block(&builder, program, expression.span, "list-remove-value")
     slot_block := jet_codegen_new_block(&builder, program, expression.span, "list-remove-slot")
@@ -1064,7 +1068,7 @@ fn jet_codegen_lower_builtin_dynamic_priority_queue_remove(builder: &JetCodegenB
     lowered_receiver := jet_codegen_lower_builtin_receiver(&builder, program, receiver, true)
     item := jet_codegen_lower_expr(&builder, program, args[0])
     selector := jet_codegen_lower_expr(&builder, program, args[1])
-    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    owner := jet_codegen_type_instance_id(Type.Named{name: "RemoveBy"}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     by_value := jet_codegen_emit_value(&builder, program, args[1].span, Type.Bool, MIROperation.EnumIs{subject: selector, owner: owner, variant: "Val"})
     value_block := jet_codegen_new_block(&builder, program, expression.span, "priority-queue-remove-value")
     slot_block := jet_codegen_new_block(&builder, program, expression.span, "priority-queue-remove-slot")

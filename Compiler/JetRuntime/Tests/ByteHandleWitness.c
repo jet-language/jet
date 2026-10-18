@@ -66,7 +66,7 @@ static void watch(void *p,int64_t size,int64_t align) {
     watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0;
 }
 static void freed(unsigned before) { assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0; }
-static void watch_text(Text *t) { watch(t,24,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8);if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_sequence(Sequence *s,int64_t stride) { watch(s,24,8);if(s->capacity) watch(s->data,s->capacity*stride,8); }
 static void expect(Text *t,const void *bytes,size_t n) { assert(t->length==(int64_t)n);assert(memcmp(t->data,bytes,n)==0);jet_rt_string_drop(t); }
 static void expect_s(Text *t,const char *s) { expect(t,s,strlen(s)); }

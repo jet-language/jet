@@ -43,7 +43,7 @@ fn run() {
     batch := [Diagnostic]{}
     sema_effect_check_node(caller, [String]{"IO"}, false, Val(located), &batch)
     all := [Diagnostic]{}
-    sema_effect_publish_diagnostics(&all, inputs[0].source_segments, batch)
+    sema_effect_publish_diagnostics(&all, inputs[0].source_segments, ^batch)
     if all.len() != 1 || all[0].code != "E0743" || all[0].source_path != Val("worker.jet") -> panic("publication rebound the foreign dispatch to main")
     entry_site :: SemaEffectDispatchSite{dispatch: site.dispatch, module_index: 0}
     entry_located :: sema_effect_locate_dispatch(entry_site, inputs)
@@ -61,7 +61,7 @@ fn run() {
     sema_effect_check_node(bounded, [String]{"IO"}, false, None, &boundary)
     inputs[1] = effect_origin_input(1, "worker.jet")
     boundary_all := [Diagnostic]{}
-    sema_effect_publish_diagnostics(&boundary_all, inputs[1].source_segments, boundary)
+    sema_effect_publish_diagnostics(&boundary_all, inputs[1].source_segments, ^boundary)
     if boundary_all.len() != 1 || boundary_all[0].code != "E0740" || boundary_all[0].source_path != Val("worker.jet") -> panic("effect boundary lost its declaring module")
     // Unlocated diagnostics still acquire the declaring module's source;
     // already located foreign diagnostics above must never be rebound.

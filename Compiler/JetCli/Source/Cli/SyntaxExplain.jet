@@ -14,86 +14,6 @@ use jet_foundation.[
     policy_key_name,
 ]
 
-fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
-    wanted :: jet_cli_ascii_lower(query.trim())
-    loop (index, row) in JET_CLI_SYNTAX_ROWS {
-        if wanted == row.query || wanted == row.display_query -> return Val(index)
-    }
-    None
-}
-
-fn jet_cli_syntax_display(row: JetCLISyntaxRow) -> String Never! {
-    if row.kind == JetCLISyntaxKind.Marker -> "#{row.token}" else -> row.token
-}
-
-fn jet_cli_syntax_plain_text(row: JetCLISyntaxRow) -> String Never! {
-    text := ""
-    loop (index, meaning) in row.meanings {
-        if index > 0 -> text = "{text}\n"
-        indent := ""
-        if meaning.position != "" {
-            text = "{text}{meaning.position}:\n"
-            indent = "  "
-        }
-        text = "{text}{indent}{meaning.text}\n{indent}Example:\n"
-        loop line in meaning.example.lines() -> text = "{text}{indent}  {line}\n"
-        if meaning.afterwards != "" -> text = "{text}{indent}Afterwards: {meaning.afterwards}\n"
-        if meaning.related_codes.len() > 0 -> text = "{text}{indent}Related: {meaning.related_codes.join(", ")}\n"
-    }
-    text
-}
-
-fn jet_cli_syntax_ascii_alphanumeric(code: Int) -> Bool Never! {
-    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
-}
-
-// Syntax/dictionary.rs looks_like_query: package references are not typo queries.
-fn jet_cli_syntax_query(query: String) -> Bool Never! {
-    text :: query.trim()
-    if text.starts_with("package-overlay:") -> return false
-    if text.contains("@") && !text.starts_with("@") -> return false
-    raw :: text.bytes()
-    colon := -1
-    loop (index, byte) in raw {
-        if byte == (U8{58}) {
-            colon = index
-            break
-        }
-    }
-    if colon > 0 && colon + 1 < raw.len() {
-        prefix := true
-        loop index in 0..<colon {
-            code :: Int.from_u8(raw[index])
-            if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 -> prefix = false
-        }
-        if prefix {
-            loop index in (colon + 1)..<raw.len() {
-                if jet_cli_syntax_ascii_alphanumeric(Int.from_u8(raw[index])) -> return false
-            }
-        }
-    }
-    if text.starts_with("@") || text.starts_with("#") || text.starts_with("::") || text.starts_with(":=") -> return true
-    loop byte in raw {
-        code :: Int.from_u8(byte)
-        if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 46 && code != 45 && code != 47 && code != 64 -> return true
-    }
-    false
-}
-
-fn jet_cli_syntax_nearest(query: String) -> String Never! {
-    wanted :: jet_cli_ascii_lower(query.trim())
-    best := -1
-    closest := -1
-    loop (index, row) in JET_CLI_SYNTAX_ROWS {
-        distance :: jet_cli_edit_distance(wanted, row.display_query)
-        if best < 0 || distance < best {
-            best = distance
-            closest = index
-        }
-    }
-    if closest < 0 -> "a registered syntax token" else -> jet_cli_syntax_display(JET_CLI_SYNTAX_ROWS[closest])
-}
-
 // Source queries must be selected before syntax typo classification.
 // Explain.rs build_fact_name: these names resolve against a loader-owned writer chain.
 fn jet_cli_explain_build_fact_name(query: String) -> String? Never! {
@@ -120,8 +40,7 @@ fn jet_cli_explain_build_fact_name(query: String) -> String? Never! {
 fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     if jet_cli_syntax_lookup(query) == .Val(index) {
         row :: JET_CLI_SYNTAX_ROWS[index]
-        meaning :: if row.meanings.len() > 0 -> row.meanings[0].text else -> ""
-        explanation :: DiagnosticExplanation{code: query.trim(), stage: "syntax registry", meaning: meaning, what: Val(jet_cli_syntax_plain_text(row).trim_end()), why: None, fix: None, example: None, retired: false}
+        explanation :: jet_cli_syntax_explanation(query) ?? panic("a syntax row has its explanation")
         if verbose && !json {
             text :: "{diagnostic_explanation_render(explanation, color)}\nRegistry name: {row.registry_name}\nDecision: {row.decision}\n"
             return Val(jet_cli_renderable(text, false))

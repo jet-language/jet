@@ -1,0 +1,567 @@
+// Fixtures for the build executor ported from crates/jet-comptime
+// Build/*.rs. Every boundary check has the allowed case and the refused
+// neighbour beside it.
+
+fn build_test_root(label: String) -[FS, Env]> String Never! {
+    home :: sys.get("HOME") ?? panic("build executor fixtures require HOME")
+    root :: files.join(home, ".cache/jet-dev/scratch/jet-build-executor-{label}-{sys.pid()}")
+    files.remove_all(root).drop("a stale build executor fixture may be absent")
+    files.create_dir_all(root) ?? panic("create fixture root")
+    files.canonicalize(root) ?? panic("canonical fixture root")
+}
+
+fn build_test_restore_env(name: String, previous: String?) -[Env]> {
+    if previous == {
+        .Val(value) -> sys.set(name, value)
+        .None -> { sys.unset(name) ?? panic("restore environment") }
+    }
+}
+
+// The sandbox PATH is `/nix/store`, a directory of store paths rather than a
+// bin directory, so `cp`, `sleep` and other host tools are not commands inside
+// it (Rust execution_runtime.rs tests). Sandboxed fixture scripts use shell
+// builtins only.
+BUILD_TEST_COPY_SCRIPT :: prep { "read -r line < input.txt; printf %s \"$line\" > out.txt" }
+
+// A fixture that exercises the native boundary fails when the backend is
+// missing; it never passes without running anything.
+fn build_test_require_sandbox() -[FS, Env, Exec, Time.Wait]> {
+    status :: foundation_native_sandbox_status()
+    if !status.available -> panic("this fixture needs the native sandbox backend ({status.mechanism}): {status.reason}")
+}
+
+// Rust `delayed_descendant_script`: a background descendant that holds the
+// output pipes for two seconds of Bash's builtin `SECONDS` clock, then writes
+// `marker`; `rest` runs in the foreground.
+fn build_test_delayed_descendant(marker: String, rest: String) -> String Never! {
+    "(start=$SECONDS; while [ $((SECONDS-start)) -lt 2 ]; do :; done; printf leaked > {marker}) & {rest}"
+}
+
+// Rust `assert_descendant_reaped`: the descendant's marker never appears.
+fn build_test_assert_descendant_reaped(marker: String) -[FS, Time]> {
+    time.sleep(time.duration_ms(3000))
+    assert(!files.exists(marker))
+}
+
+// One host action `sh -c <script>` reading `input.txt` and writing `out.txt`.
+fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPlan Never! {
+    build := HermeticBuildContext.new()
+    spec := ActionSpec.cached([String]{"sh", "-c", script}).with_inputs([String]{"input.txt"}).with_outputs([String]{"out.txt"})
+    loop cap in caps -> spec = spec.with_cap(cap)
+    action :: &build.action("write", spec) ?? panic("declare action")
+    target :: &build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("declare target")
+    build.plan_with_default(target) ?? panic("plan")
+}
+
+#Test("declared build paths: relative paths are accepted, absolute and parent paths are refused") {
+    assert_eq(build_path_new("src/main.c") ?? panic("relative path"), "src/main.c")
+    if build_path_new("/etc/passwd") == {
+        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("/etc/passwd"))
+        .Ok(_) -> panic("an absolute build path must be refused")
+    }
+    if build_path_new("../outside") == {
+        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../outside"))
+        .Ok(_) -> panic("a parent build path must be refused")
+    }
+    if build_path_new("  ") == {
+        .Err(error) -> assert(error == HermeticBuildError.EmptyPath)
+        .Ok(_) -> panic("a blank build path must be refused")
+    }
+    build := HermeticBuildContext.new()
+    if &build.action("escape", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
+        .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../escape.o"))
+        .Ok(_) -> panic("an escaping output must be refused")
+    }
+    assert(&build.action("inside", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"build/inside.o"})) == .Ok(_))
+}
+
+#Test("resolve under: normal components join under the base, parent and root components are refused") {
+    assert_eq(build_resolve_under("/base", "a/./b") ?? panic("normal path"), "/base/a/b")
+    if build_resolve_under("/base", "a/../../etc") == {
+        .Ok(_) -> panic("a parent component must not resolve")
+        .Err(error) -> assert(error.kind == BuildIOKind.InvalidInput)
+    }
+    assert(build_resolve_under("/base", "/etc/passwd") == .Err(_))
+}
+
+#Test("ability grants: a granted ability passes the grant gate, an ungranted one is refused before any action runs") {
+    root :: build_test_root("grants")
+    files.write(files.join(root, "input.txt"), "input") ?? panic("input")
+    store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    marker :: files.join(root, "ran")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, "printf ran > '{marker}'; {BUILD_TEST_COPY_SCRIPT}")
+    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+        .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "write", capability: BuildEffect.Net})
+        .Ok(_) -> panic("an ungranted Net ability must be refused")
+    }
+    assert(!files.exists(marker))
+    assert(!files.exists(files.join(root, ".jet/build-sandbox")))
+    // With both abilities granted the gate passes; the fake-sandbox override
+    // then stops the action at the sandbox boundary instead.
+    previous :: sys.get("JETPACK_FAKE_SANDBOX")
+    sys.set("JETPACK_FAKE_SANDBOX", "1")
+    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net})
+    build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+    if result == {
+        .Err(error) -> assert(error == BuildExecutionError.SandboxUnavailable)
+        .Ok(_) -> panic("the fake sandbox must stop the action")
+    }
+    assert(!files.exists(marker))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("probe grants: probes run only with the Exec grant") {
+    root :: build_test_root("probe-grant")
+    store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    build := HermeticBuildContext.new()
+    probe :: &build.find_program("has-sh", "sh") ?? panic("probe")
+    target :: &build.add_executable("probed", TargetSpec.new().with_probe(probe)) ?? panic("target")
+    plan :: build.plan_with_default(target) ?? panic("plan")
+    if build_execute_build_plan(plan, root, store, [BuildEffect]{}) == {
+        .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "probe has-sh", capability: BuildEffect.Exec})
+        .Ok(_) -> panic("a probe without the Exec grant must be refused")
+    }
+    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("an Exec-granted find_program probe needs no child")
+    assert_eq(result.probes.len(), 1)
+    assert(result.probes[0].success)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("network sharing: shared only when the root grants Net and the action declares it") {
+    with_net :: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_cap(BuildEffect.Net)
+    without_net :: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_cap(BuildEffect.Exec)
+    assert(build_action_shares_network([BuildEffect]{BuildEffect.Net}, with_net.caps))
+    assert(!build_action_shares_network([BuildEffect]{BuildEffect.Exec}, with_net.caps))
+    assert(!build_action_shares_network([BuildEffect]{BuildEffect.Net}, without_net.caps))
+}
+
+#Test("no unsandboxed fallback: an unavailable backend refuses the action and nothing is published") {
+    root :: build_test_root("unavailable")
+    files.write(files.join(root, "input.txt"), "input") ?? panic("input")
+    store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
+    previous :: sys.get("JETPACK_FAKE_SANDBOX")
+    sys.set("JETPACK_FAKE_SANDBOX", "1")
+    refused :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec})
+    build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+    if refused == {
+        .Err(error) -> assert(error == BuildExecutionError.SandboxUnavailable)
+        .Ok(_) -> panic("an unavailable sandbox must refuse")
+    }
+    assert(!files.exists(files.join(root, "out.txt")))
+    assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.Unsupported("x")) == BuildExecutionError.SandboxUnavailable)
+    assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.IO("disk")) == BuildExecutionError.IO{action: "write", detail: "disk"})
+    // The allowed neighbour: with the native backend available the same plan
+    // runs and publishes only its declared output.
+    build_test_require_sandbox()
+    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
+    assert_eq(result.report.metrics.actions_total, 1)
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("declared output"), "input")
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("action work tree: a real sandbox root is used, a symlinked sandbox root is refused") {
+    root :: build_test_root("sandbox-root")
+    outside :: build_test_root("sandbox-root-outside")
+    files.write(files.join(root, "input.txt"), "input") ?? panic("input")
+    store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("state dir")
+    files.symlink(outside, files.join(root, ".jet/build-sandbox")) ?? panic("link sandbox root")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
+    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+        .Err(error) -> if error == {
+            .IO(action, detail) -> {
+                assert_eq(action, "write")
+                assert(detail.contains("is a symlink"))
+            }
+            else -> panic("a symlinked sandbox root must be an I/O refusal")
+        }
+        .Ok(_) -> panic("a symlinked sandbox root must be refused")
+    }
+    assert_eq((files.list_dir(outside) ?? panic("list outside")).len(), 0)
+    files.remove(files.join(root, ".jet/build-sandbox")) ?? panic("unlink")
+    build_ensure_real_directory(files.join(root, ".jet/build-sandbox")) ?? panic("a real sandbox root is created")
+    assert(files.is_dir(files.join(root, ".jet/build-sandbox")))
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(outside).drop("test cleanup")
+}
+
+#Test("secure read: a regular file is read, a final link, a linked parent and a directory are refused") {
+    root :: build_test_root("secure-read")
+    outside :: build_test_root("secure-read-outside")
+    files.create_dir_all(files.join(root, "dir")) ?? panic("dir")
+    files.write(files.join(root, "dir/file.txt"), "inside") ?? panic("file")
+    files.write(files.join(outside, "secret.txt"), "secret") ?? panic("secret")
+    assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt"), BUILD_MAX_ACTION_FILE_BYTES) ?? panic("regular file"), "inside".bytes())
+    assert_eq(build_secure_read_file(root, files.join(root, "dir/file.txt"), 6) ?? panic("a file at its exact limit"), "inside".bytes())
+    if build_secure_read_file(root, files.join(root, "dir/file.txt"), 5) == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        .Ok(_) -> panic("a file over its limit must be refused")
+    }
+    files.symlink(files.join(outside, "secret.txt"), files.join(root, "dir/link.txt")) ?? panic("final link")
+    assert(build_secure_read_file(root, files.join(root, "dir/link.txt"), BUILD_MAX_ACTION_FILE_BYTES) == .Err(_))
+    files.symlink(outside, files.join(root, "linked")) ?? panic("parent link")
+    assert(build_secure_read_file(root, files.join(root, "linked/secret.txt"), BUILD_MAX_ACTION_FILE_BYTES) == .Err(_))
+    if build_secure_read_file(root, files.join(root, "dir"), BUILD_MAX_ACTION_FILE_BYTES) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("a directory is not a regular file")
+    }
+    if build_secure_read_file(root, "/etc/hostname", BUILD_MAX_ACTION_FILE_BYTES) == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidInput, "cache path escapes root"))
+        .Ok(_) -> panic("a path outside the base must be refused")
+    }
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(outside).drop("test cleanup")
+}
+
+// One cached action `cc` declaring `outputs`, for the work-tree publication
+// fixtures.
+fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Never! {
+    build := HermeticBuildContext.new()
+    handle :: &build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
+    plan :: build.plan() ?? panic("plan")
+    plan.actions[handle.id]
+}
+
+#Test("sandbox outputs: regular outputs publish, a FIFO output is refused at once and nothing is published") {
+    root :: build_test_root("fifo-output")
+    sandbox :: build_test_root("fifo-output-sandbox")
+    action :: build_test_output_action([String]{"a.o", "b.o"})
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
+    files.write(files.join(sandbox, "b.o"), "second") ?? panic("second output")
+    build_publish_sandbox_outputs(sandbox, root, action) ?? panic("regular outputs publish")
+    assert_eq(files.read(files.join(root, "b.o")) ?? panic("published output"), "second")
+    files.remove(files.join(root, "a.o")) ?? panic("reset first output")
+    files.remove(files.join(root, "b.o")) ?? panic("reset second output")
+    // A FIFO with no writer would block a plain open forever.
+    files.remove(files.join(sandbox, "b.o")) ?? panic("drop second output")
+    made :: process.cmd([String]{"mkfifo", files.join(sandbox, "b.o")}).run() ?? panic("run host mkfifo")
+    assert(made.success)
+    started :: time.instant()
+    if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Err(error) -> assert(error == BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+        .Ok(_) -> panic("a FIFO output must be refused")
+    }
+    assert(started.elapsed_millis() < 3000)
+    assert(!files.exists(files.join(root, "a.o")))
+    assert(!files.exists(files.join(root, "b.o")))
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(sandbox).drop("test cleanup")
+}
+
+#Test("sandbox outputs: an output at its limit is read, an oversized sparse output is refused without being read") {
+    root :: build_test_root("sparse-output")
+    sandbox :: build_test_root("sparse-output-sandbox")
+    action :: build_test_output_action([String]{"a.o", "big.o"})
+    files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
+    // One byte past the per-file limit after a hole: no disk is used, and a
+    // reader that read it would allocate the whole limit.
+    big :: files.join(sandbox, "big.o")
+    files.write(big, "") ?? panic("sparse output")
+    files.write_at(big, BUILD_MAX_ACTION_FILE_BYTES, "x".bytes()) ?? panic("extend sparse output")
+    assert_eq((files.stat(big) ?? panic("sparse size")).size, BUILD_MAX_ACTION_FILE_BYTES + 1)
+    started :: time.instant()
+    if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+        .Ok(_) -> panic("an oversized output must be refused")
+    }
+    assert(started.elapsed_millis() < 3000)
+    assert(!files.exists(files.join(root, "a.o")))
+    // The per-action limit lowers the next file's limit.
+    assert_eq(build_read_budget(0), BUILD_MAX_ACTION_FILE_BYTES)
+    assert_eq(build_read_budget(BUILD_MAX_ACTION_TOTAL_BYTES - 5), 5)
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(sandbox).drop("test cleanup")
+}
+
+#Test("atomic restore: outputs land under real parents, a linked parent is refused without writing outside") {
+    root :: build_test_root("restore")
+    outside :: build_test_root("restore-outside")
+    build_atomic_restore_file(root, files.join(root, "build/obj/a.o"), "object".bytes()) ?? panic("restore under fresh parents")
+    assert_eq(files.read(files.join(root, "build/obj/a.o")) ?? panic("restored"), "object")
+    files.symlink(outside, files.join(root, "linked")) ?? panic("parent link")
+    assert(build_atomic_restore_file(root, files.join(root, "linked/a.o"), "object".bytes()) == .Err(_))
+    assert(!files.exists(files.join(outside, "a.o")))
+    names :: loop entry in files.list_dir(files.join(root, "build/obj")) ?? panic("list") -> entry.name
+    assert_eq(names, [String]{"a.o"})
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(outside).drop("test cleanup")
+}
+
+#Test("output destination: real parents are prepared, a linked parent is refused and a final link is removed, not followed") {
+    root :: build_test_root("destination")
+    outside :: build_test_root("destination-outside")
+    build_prepare_output_destination(root, files.join(root, "out/bin/app")) ?? panic("prepare real parents")
+    assert(files.is_dir(files.join(root, "out/bin")))
+    files.symlink(outside, files.join(root, "linked")) ?? panic("parent link")
+    if build_prepare_output_destination(root, files.join(root, "linked/app")) == {
+        .Err(error) -> assert(error == BuildIOError.new(.PermissionDenied, "build output parent `{files.join(root, "linked")}` is a symlink"))
+        .Ok(_) -> panic("a linked output parent must be refused")
+    }
+    files.write(files.join(outside, "victim"), "keep") ?? panic("victim")
+    files.symlink(files.join(outside, "victim"), files.join(root, "out/bin/app")) ?? panic("final link")
+    build_prepare_output_destination(root, files.join(root, "out/bin/app")) ?? panic("final link is removed")
+    assert(!files.exists(files.join(root, "out/bin/app")))
+    assert_eq(files.read(files.join(outside, "victim")) ?? panic("victim kept"), "keep")
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(outside).drop("test cleanup")
+}
+
+#Test("tool resolution: declared tools resolve, a declared-only toolchain refuses undeclared tools and a foreign target refuses PATH") {
+    sh :: build_find_program_path("sh") ?? panic("host sh on PATH")
+    build := HermeticBuildContext.new()
+    declared :: &build.toolchain("declared", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None)).with_tool("sh", sh).declared_only()) ?? panic("declared toolchain")
+    foreign :: &build.toolchain("foreign", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None))) ?? panic("foreign toolchain")
+    plan :: build.plan() ?? panic("plan")
+    assert_eq(build_resolve_program_path(plan, declared, "sh") ?? panic("declared tool"), sh)
+    assert(build_resolve_program_path(plan, declared, "cat") == None)
+    assert(build_resolve_program_path(plan, foreign, "sh") == None)
+    assert_eq(build_resolve_program_path(plan, ToolchainHandle{id: 0, context: plan.context}, "sh") ?? panic("host PATH tool"), sh)
+}
+
+#Test("PATH resolution: an absolute PATH entry resolves, empty and relative entries never resolve to the working directory") {
+    root :: build_test_root("path-cwd")
+    tool :: "jet-build-cwd-tool-{sys.pid()}"
+    files.write(files.join(root, tool), "#!/bin/sh\n") ?? panic("tool in the working directory")
+    previous_path :: sys.get("PATH")
+    previous_cwd :: sys.current_dir() ?? panic("working directory")
+    sys.set_current_dir(root) ?? panic("enter the fixture root")
+    sys.set("PATH", ":.:relative/bin:")
+    from_cwd :: build_find_program_path(tool)
+    sys.set("PATH", "/nonexistent-jet-path:{root}")
+    from_absolute :: build_find_program_path(tool)
+    sys.set_current_dir(previous_cwd) ?? panic("restore the working directory")
+    build_test_restore_env("PATH", previous_path)
+    assert(from_cwd == None)
+    assert_eq(from_absolute ?? panic("absolute PATH entry"), files.join(root, tool))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("mounted tools: a tool under a mount maps to its source by path components; `..`, `//` escapes and partial components are refused") {
+    root :: build_test_root("mounted-tool")
+    files.create_dir_all(files.join(root, "bin")) ?? panic("bin")
+    files.write(files.join(root, "bin/cc"), "#!/bin/sh\n") ?? panic("tool")
+    toolchain :: HermeticBuildToolchain{
+        id: 1, name: "cc", role: ToolchainRole.Target, host_triple: "host", target_triple: "x", sdk: None, linker: None, sysroot: None,
+        tools: [String: String]{}, resolution: ToolchainResolution.DeclaredOnly,
+        mounts: [BuildMount]{BuildMount{source: root, destination: "/toolchain", identity: ""}}, provenance: BuildProvenance.inferred_host(),
+    }
+    assert_eq(build_canonical_tool_path(toolchain, "/toolchain/bin/cc") ?? panic("mounted tool"), files.join(root, "bin/cc"))
+    assert(build_canonical_tool_path(toolchain, "/toolchain/../etc/passwd") == None)
+    // `//` and `.` after the destination stay under the mount source; a
+    // string join would have made `/toolchain//etc/passwd` the host file.
+    assert_eq(build_canonical_tool_path(toolchain, "/toolchain//bin/cc") ?? panic("`//` mounted tool"), files.join(root, "bin/cc"))
+    assert_eq(build_canonical_tool_path(toolchain, "/toolchain/./bin//cc") ?? panic("`.` mounted tool"), files.join(root, "bin/cc"))
+    assert(build_canonical_tool_path(toolchain, "/toolchain//etc/passwd") == None)
+    // A destination is matched by whole components, never by string prefix.
+    assert(build_canonical_tool_path(toolchain, "/toolchainx/bin/cc") == None)
+    // A non-normalized destination still matches its normalized tool paths.
+    nested :: HermeticBuildToolchain{
+        id: 2, name: "nested", role: ToolchainRole.Target, host_triple: "host", target_triple: "x", sdk: None, linker: None, sysroot: None,
+        tools: [String: String]{}, resolution: ToolchainResolution.DeclaredOnly,
+        mounts: [BuildMount]{BuildMount{source: root, destination: "/tc//nested/", identity: ""}}, provenance: BuildProvenance.inferred_host(),
+    }
+    assert_eq(build_canonical_tool_path(nested, "/tc/nested/bin/cc") ?? panic("non-normalized destination"), files.join(root, "bin/cc"))
+    assert(build_canonical_tool_path(nested, "/tc/nested//etc/passwd") == None)
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("context handles: same-context handles are accepted, another context's handles are refused") {
+    build := HermeticBuildContext.new()
+    other := HermeticBuildContext.new()
+    own :: &build.toolchain("own", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("own toolchain")
+    foreign :: &other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
+    assert(&build.action("own", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) == .Ok(_))
+    if &build.action("foreign", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownToolchain(foreign.id))
+        .Ok(_) -> panic("another context's toolchain must be refused")
+    }
+    foreign_action :: &other.action("x", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"c.o"})) ?? panic("foreign action")
+    if &build.add_executable("bad", TargetSpec.new().with_action(foreign_action)) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownAction(foreign_action.id))
+        .Ok(_) -> panic("another context's action must be refused")
+    }
+    foreign_target :: &other.add_executable("t", TargetSpec.new()) ?? panic("foreign target")
+    if build.plan_with_default(foreign_target) == {
+        .Err(error) -> assert(error == HermeticBuildError.UnknownTarget(foreign_target.id))
+        .Ok(_) -> panic("another context's target must be refused")
+    }
+}
+
+#Test("action environment: allowlisted variables reach the action, others and undeclared allowlist names are refused") {
+    spec :: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_env("PATH", "/toolchain/bin").with_env("SECRET", "x").with_env_allowlist([String]{"PATH"})
+    build := HermeticBuildContext.new()
+    handle :: &build.action("env", spec) ?? panic("action")
+    plan :: build.plan() ?? panic("plan")
+    env :: build_action_environment(plan.actions[handle.id])
+    assert_eq(env.keys().to_list(), [String]{"PATH"})
+    if &build.action("undeclared", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_env_allowlist([String]{"HOME"})) == {
+        .Err(error) -> assert(error == HermeticBuildError.UndeclaredEnvName{action: "undeclared", key: "HOME"})
+        .Ok(_) -> panic("an allowlist name without a declared value must be refused")
+    }
+}
+
+#Test("output ownership: distinct outputs plan, a second owner of one output is refused") {
+    build := HermeticBuildContext.new()
+    &build.action("first", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("first")
+    &build.action("second", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"})) ?? panic("second")
+    assert(build.plan() == .Ok(_))
+    &build.action("third", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("third")
+    if build.plan() == {
+        .Err(error) -> assert(error == HermeticBuildError.DuplicateBuildOutput{output: "a.o", first_action: "first", second_action: "third"})
+        .Ok(_) -> panic("a second owner of one output must be refused")
+    }
+}
+
+#Test("cache records: a matching record restores, a record for another key or with mismatched outputs is refused") {
+    root :: build_test_root("records")
+    store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    build := HermeticBuildContext.new()
+    handle :: &build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
+    plan :: build.plan() ?? panic("plan")
+    action :: plan.actions[handle.id]
+    digest :: store.put_blob("object".bytes()) ?? panic("blob")
+    record :: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
+    build_write_action_record(store, "act-sha256:k", record) ?? panic("write record")
+    read :: build_read_action_record(store, "act-sha256:k") ?? panic("read record")
+    found :: read ?? panic("record present")
+    build_restore_action_outputs(store, root, action, found) ?? panic("restore matching record")
+    assert_eq(files.read(files.join(root, "a.o")) ?? panic("restored output"), "object")
+    store.put_record("act-sha256:other", "act-sha256:k\noutcome=succeeded:0\n".bytes()) ?? panic("forged record")
+    if build_read_action_record(store, "act-sha256:other") == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "action record key does not match its cache path"))
+        .Ok(_) -> panic("a record naming another key must be refused")
+    }
+    mismatched := found
+    mismatched.outputs = [ActionOutputRecord]{ActionOutputRecord{path: "b.o", digest, byte_len: 6}}
+    if build_restore_action_outputs(store, root, action, mismatched) == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
+        .Ok(_) -> panic("a record with other outputs must be refused")
+    }
+    store.put_record("act-sha256:failed", "act-sha256:failed\noutcome=failed:1\n".bytes()) ?? panic("failed record")
+    if build_read_action_record(store, "act-sha256:failed") == {
+        .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "failed action record and failure report disagree"))
+        .Ok(_) -> panic("a failed record without its report must be refused")
+    }
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("failure reports: the canonical wire round-trips, a non-canonical spelling is refused") {
+    report :: build_action_failure_report("cc", 1, "error: \"x\"")
+    wire :: build_report_to_json(report)
+    assert_eq(wire, "{{\"schema\":\"jet.err/v1\",\"message\":\"build action `cc` exited with status 1\",\"code\":\"E3505\",\"cause\":null,\"typed_identity\":\"BuildAction::Failed\",\"details\":{{\"variant\":\"BuildActionFailure\",\"fields\":{{\"action\":\"cc\",\"exit_code\":1,\"stderr\":\"error: \\\"x\\\"\"}},\"source_span\":null}}}}")
+    decoded :: build_report_from_json(wire) ?? panic("canonical report")
+    assert_eq(build_report_to_json(decoded), wire)
+    if build_report_from_json(wire.replace(",\"cause\":null", ", \"cause\":null")) == {
+        .Err(error) -> assert_eq(error, "error report is not canonical")
+        .Ok(_) -> panic("a non-canonical report must be refused")
+    }
+    rendered :: build_report_render(report)
+    assert(rendered.starts_with("Error [E3015]: Entry returned an unhandled error: build action `cc` exited with status 1\n"))
+    assert(rendered.contains("error code: E3505\ntype: BuildAction::Failed\n  variant: BuildActionFailure\n  action: \"cc\"\n"))
+    assert(rendered.ends_with("More: jet-lang.dev/e/E3015\n"))
+}
+
+#Test("cached failures: a recorded failed action replays its report without running again") {
+    root :: build_test_root("failure-replay")
+    files.write(files.join(root, "input.txt"), "input") ?? panic("input")
+    store :: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, "exit 3")
+    action :: plan.actions[0]
+    inputs :: build_snapshot_declared_inputs(store, root, action) ?? panic("snapshot")
+    // The captured bytes are the hashed bytes the work tree receives.
+    assert_eq(inputs.len(), 1)
+    assert_eq(inputs[0].bytes, "input".bytes())
+    assert(inputs[0].snapshot.digest == ContentDigest.from_bytes("input".bytes()))
+    snapshots :: loop input in inputs -> input.snapshot
+    executable :: build_resolve_program_path(plan, action.toolchain, "sh") ?? panic("sh")
+    key :: build_canonical_effective_action_key(plan, action, snapshots, [BuildEffect]{BuildEffect.Exec}, ContentDigest.from_bytes(files.read_bytes(executable) ?? panic("sh bytes")), [BuildProbeFact]{})
+    report :: build_action_failure_report("write", 3, "")
+    build_write_action_record(store, key, ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: 3}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(.NoLocalActionRecord)}) ?? panic("record")
+    previous :: sys.get("JETPACK_FAKE_SANDBOX")
+    sys.set("JETPACK_FAKE_SANDBOX", "1")
+    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec})
+    build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+    if result == {
+        .Err(error) -> assert(error == BuildExecutionError.Reported{report})
+        .Ok(_) -> panic("a recorded failure must replay")
+    }
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("action timeout: a child inside its budget completes, one past it is killed, and a pipe-holding descendant is reaped on both paths") {
+    build_test_require_sandbox()
+    root :: build_test_root("timeout")
+    bash :: build_find_program_path("bash") ?? panic("bash is required for the sandbox descendant fixtures")
+    exit_started :: time.instant()
+    quick :: foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("exit-marker", "exit 0")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(5000))) ?? panic("quick child")
+    assert(quick.receipt.success)
+    assert(exit_started.elapsed_millis() < 3000)
+    build_test_assert_descendant_reaped(files.join(root, "exit-marker"))
+    timeout_started :: time.instant()
+    if foundation_run_native_sandboxed_with_timeout_and_mounts(bash, [String]{"-c", build_test_delayed_descendant("timeout-marker", "while :; do :; done")}, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(time.duration_ms(500))) == {
+        .Err(error) -> assert(error == NativeSandboxError.IO("sandbox process timed out after 500ms"))
+        .Ok(_) -> panic("a child past its budget must be killed")
+    }
+    assert(timeout_started.elapsed_millis() < 3000)
+    build_test_assert_descendant_reaped(files.join(root, "timeout-marker"))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("probe budget: a probe inside its budget completes, one past it is killed and fails") {
+    build_test_require_sandbox()
+    bash :: build_find_program_path("bash") ?? panic("bash is required for the sandbox probe fixture")
+    quick :: build_run_probe_sandboxed(bash, [String]{"-c", "exit 0"}, None, time.duration_ms(5000)) ?? panic("quick probe")
+    assert(quick.success)
+    started :: time.instant()
+    if build_run_probe_sandboxed(bash, [String]{"-c", "while :; do :; done"}, None, time.duration_ms(500)) == {
+        .Err(error) -> assert(error == BuildExecutionError.IO{action: "build probe sandbox", detail: "sandbox process timed out after 500ms"})
+        .Ok(_) -> panic("a probe past its budget must be killed")
+    }
+    assert(started.elapsed_millis() < 3000)
+}
+
+#Test("cache observation: an event path inside $HOME/.cache is appended, a `..` path is refused") {
+    home :: sys.get("HOME") ?? panic("build executor fixtures require HOME")
+    root :: build_test_root("observe")
+    // The same directory spelled under $HOME, as the prefix check sees it.
+    spelled :: files.join(home, ".cache/jet-dev/scratch/jet-build-executor-observe-{sys.pid()}")
+    name :: "JET_COMPTIME_CACHE_OBSERVATION_PATH"
+    previous :: sys.get(name)
+    sys.set(name, "{spelled}/sub/../escaped.jsonl")
+    build_record_cache_event("cc", "act-sha256:k", ActionCacheStatus.Miss(.NoLocalActionRecord), "lookup", None)
+    sys.set(name, "{spelled}/events.jsonl")
+    build_record_cache_event("cc", "act-sha256:k", ActionCacheStatus.Miss(.NoLocalActionRecord), "lookup", None)
+    build_test_restore_env(name, previous)
+    assert(!files.exists(files.join(root, "escaped.jsonl")))
+    assert(!files.exists(files.join(root, "sub")))
+    assert((files.read(files.join(root, "events.jsonl")) ?? panic("appended event")).contains("\"schema\":\"jet.comptime-cache-event.v1\""))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("action keys: identical declarations share a key, a changed grant or input digest splits it") {
+    plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, "true")
+    action :: plan.actions[0]
+    input :: ActionInputSnapshot{path: "input.txt", digest: ContentDigest.from_bytes("a".bytes()), byte_len: 1}
+    changed :: ActionInputSnapshot{path: "input.txt", digest: ContentDigest.from_bytes("b".bytes()), byte_len: 1}
+    tool :: ContentDigest.from_bytes("sh".bytes())
+    base :: build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, [BuildProbeFact]{})
+    assert(base.starts_with("act-sha256:") && base.len() == 75)
+    assert_eq(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec}, tool, [BuildProbeFact]{}), base)
+    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{input}, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, tool, [BuildProbeFact]{}) != base)
+    assert(build_canonical_effective_action_key(plan, action, [ActionInputSnapshot]{changed}, [BuildEffect]{BuildEffect.Exec}, tool, [BuildProbeFact]{}) != base)
+}
+
+#Test("toolchain mounts: an absolute mount is accepted, relative and parent destinations are refused") {
+    provenance :: BuildProvenance.user_declared("fixture", None)
+    build := HermeticBuildContext.new()
+    accepted :: &build.toolchain("absolute", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", "/toolchain", "sha256:x"))
+    assert(accepted == .Ok(_))
+    destinations :: [String]{"toolchain", "/toolchain/../etc"}
+    loop destination in destinations {
+        if &build.toolchain("bad-{destination.len()}", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", destination, "sha256:x")) == {
+            .Err(error) -> assert(error == HermeticBuildError.InvalidPath("toolchain `bad-{destination.len()}` has an invalid read-only mount"))
+            .Ok(_) -> panic("mount destination `{destination}` must be refused")
+        }
+    }
+}

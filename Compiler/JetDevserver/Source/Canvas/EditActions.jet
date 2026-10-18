@@ -1,0 +1,807 @@
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1
+// Deep Canvas edit transaction: JSON decode through atomic source commit.
+// apply_transaction_json is the sibling-facing seam.
+use core.files.[OSPath]
+use std.fmt.[format]
+use std.io.[ErrorKind]
+use jet_driver.Diagnostics.[Diagnostic, Severity, Span, TextEdit]
+use jet_driver.[FixEngine, Driver, run_compiler_work]
+use jet_driver.AST as AST
+use jet_driver.AST.[Expr, Item, Stmt]
+use jet_driver.Formatter.[format_source]
+use jet_driver.Syntax as Syntax
+use jet_driver.Sema as Sema
+use jet_driver.SHA256.[sha256_hex]
+use jet_semindex.[SourceSpan, SemIndex]
+use jet_semindex as semindex
+use jet_devserver.Canvas.DebugSourceGit.[canonical_path]
+use jet_devserver.Canvas.GraphHelpers.[canvas_action_preview_ok, diagnostics_error, edit, edit_conflict, edit_error, edit_ok, edit_ok_source, function_signature_span, graph_id_name_span, indentation_at, line_after, line_start, preview_ok, snippet, span_through_closing_parens]
+use jet_devserver.Canvas.GraphJson.[canvas_collapse_hints, func_source_span]
+use jet_devserver.Canvas.GraphProjection.[trait_method_signature, GraphEditAnchor, Projection]
+use jet_devserver.Canvas.ProjectScan.[project_file]
+use jet_devserver.Canvas.QueryActions.[default_arg_for_type]
+use jet_devserver.Canvas.SourceModel.[read_source_without_symlinks, source_revision, write_new_file_without_symlinks, write_source_if_unchanged, SourceWriteError, ensure_no_symlink_directory]
+use jet_devserver.Canvas.ValidationJson.[extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str, json_string_array, json_string_field, json_usize_field, normalize_bounds, parse_simple_call, quoted_attr, replace_ident, required_string, validate_comment_alpha, validate_comment_color, validate_function_signature, validate_ident, validate_qualified_name, validate_signature_fragment, validate_single_line_fragment, validate_type_fragment, wire_span_from_json_chunk]
+use jet_devserver.Canvas.EditActions02.[apply_reorder_statements, apply_add_pattern_arm, apply_edit_pattern_arm, apply_remove_pattern_arm, apply_toggle_switch_state, apply_append_multi_input, apply_remove_multi_input_element, apply_exec_convergence, write_checked_source, write_checked_formatted, find_func_by_name_span, collect_statement_locs]
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:35
+EDIT_SCHEMA_VERSION :: U32{1}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:37
+fn apply_transaction_json(path: OSPath, request: String) -> String Err! {
+    run_compiler_work(() -> apply_transaction_json_on_compiler_stack(path, request))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:41
+fn apply_transaction_json_on_compiler_stack(path: OSPath, request: String) -> String Err! {
+    src :: read_source_without_symlinks(path) ?? return .Err(edit_error("io", err.to_string()))
+    revision :: required_string(request, "revision")
+    current_revision :: source_revision(src)
+    if revision != current_revision -> return .Err(edit_conflict("source changed since this Canvas graph was drawn", current_revision))
+    schema :: json_usize_field(request, "schema_version").unwrap_or(0)
+    if schema != (Usize{EDIT_SCHEMA_VERSION}) -> return .Err(edit_error("schema", "Canvas edit schema_version must be 1"))
+    op :: required_string(request, "op")
+    return if op == {
+        "noop" -> apply_noop(path, src)
+        "rename_binding" | "rename_function" -> {
+            from :: required_string(request, "from")
+            to :: required_string(request, "to")
+            validate_ident(from)
+            validate_ident(to)
+            apply_rename(path, src, from, to)
+        }
+        "create_function" -> {
+            name :: required_string(request, "name")
+            validate_ident(name)
+            params :: json_string_field(request, "params").unwrap_or_default()
+            validate_signature_fragment(params)
+            ret_type :: json_string_field(request, "ret_type").unwrap_or("Int")
+            validate_type_fragment(ret_type)
+            apply_create_function(path, src, name, params, ret_type)
+        }
+        "edit_function_signature" -> {
+            graph_id :: required_string(request, "graph_id")
+            signature :: required_string(request, "signature")
+            validate_function_signature(signature)
+            apply_edit_function_signature(path, src, graph_id, signature)
+        }
+        "edit_inline_expr" -> {
+            inline_id :: required_string(request, "inline_expr_id")
+            new_expr :: required_string(request, "new_expr")
+            apply_inline_edit(path, src, inline_id, new_expr)
+        }
+        "promote_to_binding" -> {
+            inline_id :: required_string(request, "inline_expr_id")
+            name :: required_string(request, "name")
+            validate_ident(name)
+            apply_promote_inline(path, src, inline_id, name)
+        }
+        "insert_visible_conversion" -> {
+            inline_id :: required_string(request, "inline_expr_id")
+            callee :: required_string(request, "callee")
+            validate_qualified_name(callee)
+            apply_visible_conversion(path, src, inline_id, callee)
+        }
+        "break_link" -> {
+            wire_id :: required_string(request, "wire_id")
+            apply_break_link(path, src, wire_id)
+        }
+        "move_link" -> {
+            wire_id :: required_string(request, "wire_id")
+            replacement :: required_string(request, "replacement")
+            validate_qualified_name(replacement)
+            apply_move_link(path, src, wire_id, replacement)
+        }
+        "reorder_statements" -> {
+            graph_id :: required_string(request, "graph_id")
+            moved :: SourceSpan {
+                start: json_usize_field(request, "moved_start").ok_or_else(() -> edit_error("bad_request", "missing `moved_start`")),
+                end: json_usize_field(request, "moved_end").ok_or_else(() -> edit_error("bad_request", "missing `moved_end`"))?
+            }
+            anchor :: SourceSpan {
+                start: json_usize_field(request, "anchor_start").ok_or_else(() -> edit_error("bad_request", "missing `anchor_start`"))?,
+                end: json_usize_field(request, "anchor_end").ok_or_else(() -> edit_error("bad_request", "missing `anchor_end`"))?
+            }
+            position :: json_string_field(request, "position").unwrap_or("after")
+            apply_reorder_statements(path, src, graph_id, moved, anchor, position)
+        }
+        "add_pattern_arm" -> {
+            graph_id :: required_string(request, "graph_id")?
+            pattern :: required_string(request, "pattern")?
+            validate_single_line_fragment(pattern, "pattern arm text must stay on one line")?
+            node :: SourceSpan {
+                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+            }
+            apply_add_pattern_arm(path, src, graph_id, node, pattern)
+        }
+        "edit_pattern_arm" -> {
+            graph_id :: required_string(request, "graph_id")?
+            pattern :: required_string(request, "pattern")?
+            validate_single_line_fragment(pattern, "pattern arm text must stay on one line")?
+            pattern_span :: SourceSpan {
+                start: json_usize_field(request, "pattern_start").ok_or_else(() -> edit_error("bad_request", "missing `pattern_start`"))?,
+                end: json_usize_field(request, "pattern_end").ok_or_else(() -> edit_error("bad_request", "missing `pattern_end`"))?
+            }
+            apply_edit_pattern_arm(path, src, graph_id, pattern_span, pattern)
+        }
+        "remove_pattern_arm" -> {
+            graph_id :: required_string(request, "graph_id")?
+            pattern_span :: SourceSpan {
+                start: json_usize_field(request, "pattern_start").ok_or_else(() -> edit_error("bad_request", "missing `pattern_start`"))?,
+                end: json_usize_field(request, "pattern_end").ok_or_else(() -> edit_error("bad_request", "missing `pattern_end`"))?
+            }
+            apply_remove_pattern_arm(path, src, graph_id, pattern_span)
+        }
+        "toggle_switch_state" -> {
+            graph_id :: required_string(request, "graph_id")?
+            node_span :: SourceSpan {
+                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+            }
+            apply_toggle_switch_state(path, src, graph_id, node_span)
+        }
+        "append_multi_input" -> {
+            element :: json_string_field(request, "element").unwrap_or("1")
+            validate_single_line_fragment(element, "multi-input element must stay on one line")?
+            node :: SourceSpan {
+                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+            }
+            apply_append_multi_input(path, src, node, element)
+        }
+        "remove_multi_input_element" -> {
+            node :: SourceSpan {
+                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+            }
+            element :: SourceSpan {
+                start: json_usize_field(request, "element_start").ok_or_else(() -> edit_error("bad_request", "missing `element_start`"))?,
+                end: json_usize_field(request, "element_end").ok_or_else(() -> edit_error("bad_request", "missing `element_end`"))?
+            }
+            apply_remove_multi_input_element(path, src, node, element)
+        }
+        "replace_source" -> {
+            if json_string_field(request, "source_edit") == "exec_convergence" {
+                graph_id :: required_string(request, "graph_id")?
+                from_pin_name :: required_string(request, "from_pin_name")?
+                strategy :: required_string(request, "strategy")?
+                function :: required_string(request, "function")?
+                from_span :: SourceSpan {
+                    start: json_usize_field(request, "from_start").ok_or_else(() -> edit_error("bad_request", "missing `from_start`"))?,
+                    end: json_usize_field(request, "from_end").ok_or_else(() -> edit_error("bad_request", "missing `from_end`"))?
+                }
+                target_span :: SourceSpan {
+                    start: json_usize_field(request, "target_start").ok_or_else(() -> edit_error("bad_request", "missing `target_start`"))?,
+                    end: json_usize_field(request, "target_end").ok_or_else(() -> edit_error("bad_request", "missing `target_end`"))?
+                }
+                return apply_exec_convergence(path, src, graph_id, from_span, target_span, from_pin_name, strategy, function, json_string_field(request, "helper_name"))
+            }
+            source :: required_string(request, "source")?
+            if json_string_field(request, "undo_restore").is_some() -> write_checked_source(path, src, source) else -> write_checked_formatted(path, src, source)
+        }
+        "insert_branch" | "insert_switch" | "insert_loop" | "insert_fallible_rail" -> {
+            graph_id :: required_string(request, "graph_id")?
+            apply_insert_structural(path, src, graph_id, op, json_string_field(request, "wire_origin_pin_id"), json_string_field(request, "wire_target_pin"))
+        }
+        "create_comment_region" -> {
+            graph_id :: required_string(request, "graph_id")?
+            title :: required_string(request, "title")?
+            color :: json_string_field(request, "color").unwrap_or("#2563eb")
+            alpha :: json_string_field(request, "alpha").unwrap_or("0.18")
+            start :: json_usize_field(request, "start").unwrap_or(0)
+            end :: json_usize_field(request, "end").unwrap_or(start)
+            bounds :: json_string_field(request, "bounds").unwrap_or("0,0,360,180")
+            apply_create_comment_region(path, src, graph_id, start, end, title, color, alpha, bounds)
+        }
+        "edit_comment_region" | "move_comment_region" | "resize_comment_region" -> {
+            region_id :: required_string(request, "region_id")?
+            apply_update_comment_region(path, src, region_id, json_string_field(request, "title"), json_string_field(request, "color"), json_string_field(request, "alpha"), json_string_field(request, "bounds"))
+        }
+        "delete_comment_region" -> {
+            region_id :: required_string(request, "region_id")?
+            apply_delete_comment_region(path, src, region_id)
+        }
+        "create_collapsed_region" -> {
+            graph_id :: required_string(request, "graph_id")?
+            title :: required_string(request, "title")?
+            start :: json_usize_field(request, "start").unwrap_or(0)
+            end :: json_usize_field(request, "end").unwrap_or(start)
+            apply_create_collapse_region(path, src, graph_id, start, end, title)
+        }
+        "expand_collapsed_region" -> {
+            region_id :: required_string(request, "region_id")?
+            apply_delete_hint_region(path, src, region_id, "collapse")
+        }
+        "extract_inline_expr" | "preview_extract_inline_expr" -> {
+            inline_id :: required_string(request, "inline_expr_id")?
+            function :: required_string(request, "function")?
+            validate_ident(function)?
+            ret_type :: json_string_field(request, "ret_type").unwrap_or("Int")
+            candidate :: extract_inline_candidate(path, src, inline_id, function, ret_type)?
+            if op == "preview_extract_inline_expr" -> .Ok(preview_ok(src, candidate)) else -> write_checked_formatted(path, src, candidate)
+        }
+        "inline_helper_call" -> {
+            inline_id :: json_string_field(request, "inline_expr_id")
+            start :: json_usize_field(request, "start")
+            end :: json_usize_field(request, "end")
+            candidate :: inline_helper_candidate(path, src, inline_id, start, end)?
+            write_checked_formatted(path, src, candidate)
+        }
+        "insert_call" -> {
+            graph_id :: required_string(request, "graph_id")?
+            callee :: required_string(request, "callee")?
+            validate_qualified_name(callee)?
+            args :: json_string_array(request, "args")
+            bind :: json_string_field(request, "bind")
+            wire_inline_expr_id :: json_string_field(request, "wire_inline_expr_id")
+            wire_expr :: json_string_field(request, "wire_expr")
+            wire_origin_pin_id :: json_string_field(request, "wire_origin_pin_id")
+            wire_target_pin :: json_string_field(request, "wire_target_pin")
+            module_path :: json_string_field(request, "module_path")
+            if bind == .Val(name) -> validate_ident(name)?
+            if wire_expr == .Val(expr) -> validate_qualified_name(expr)?
+            if module_path == .Val(module_ref) -> validate_qualified_name(module_ref)?
+            apply_insert_call(path, src, graph_id, callee, args, bind, wire_inline_expr_id, wire_expr, wire_origin_pin_id, wire_target_pin, module_path)
+        }
+        "create_trait_impl" -> {
+            type_name :: required_string(request, "type_name")?
+            trait_name :: required_string(request, "trait_name")?
+            validate_qualified_name(type_name)?
+            validate_qualified_name(trait_name)?
+            apply_create_trait_impl(path, src, type_name, trait_name)
+        }
+        "preview_canvas_action" -> {
+            graph_id :: required_string(request, "graph_id")?
+            action_id :: required_string(request, "action_id")?
+            callee :: required_string(request, "callee")?
+            validate_qualified_name(callee)?
+            args :: json_string_array(request, "args")
+            candidate :: canvas_action_candidate(path, src, graph_id, action_id, callee, args)?
+            .Ok(canvas_action_preview_ok(path, src, candidate, action_id, callee))
+        }
+        else -> .Err(edit_error("unsupported", "unknown Canvas edit operation"))
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:375
+fn apply_noop(path: OSPath, _src: String) -> String Err! { .Ok(edit_ok(false, path)) }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:379
+fn apply_rename(path: OSPath, src: String, from: String, to: String) -> String Err! {
+    idx :: semindex.open(path) ?? return .Err(edit_error("check", err.to_string()))
+    edits := []
+    loop def in idx.definitions().iter().filter((d) -> d.name == from) -> edits.push(edit(def.def_span, to))
+    loop r in idx.references().iter().filter((r) -> r.name == from) -> edits.push(edit(r.span, to))
+    if edits.is_empty() -> return .Err(edit_error("not_found", "Canvas rename found no matching binding"))
+    changed :: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas rename edits overlapped"))
+    formatted :: format_source(changed) ?? return .Err(diagnostics_error(path, changed, err))
+    result :: write_checked_source(path, src, formatted)
+    if formatted != src -> record_canvas_rename(path, src, formatted, from, to, idx)
+    return .Ok(^result)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:405
+fn record_canvas_rename(path: &OSPath, before: String, after: String, from: String, to: String, index: &SemIndex) Err! {
+    // GATE #4494: symlink-safe exclusive creation; #4409: AlreadyExists receipt collision.
+    project :: path.parent().unwrap_or_else(() -> OSPath.new("."))
+    directory :: project.join(".jet/codemods")
+    ensure_no_symlink_directory(directory) ?? return .Err(edit_error("io", "could not record semantic rename: {err}"))
+    before_hash :: sha256_hex(before.as_bytes())
+    after_hash :: sha256_hex(after.as_bytes())
+    targets :: index.definition_facts().iter().filter((fact) -> fact.name == from).map((fact) ->
+        "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}::{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
+    file :: "{{\"path\":{json_str(path.display().to_string())},\"before_hash\":{json_str(before_hash)},\"after_hash\":{json_str(after_hash)}}}"
+    op :: "{{\"kind\":\"rename\",\"from\":{json_str(from)},\"to\":{json_str(to)},\"targets\":[{targets}],\"files\":[{file}]}}"
+    hash_prefix := after_hash[0..<12] // #4303
+    base :: "CanvasRename-{hash_prefix}"
+    receipt := directory.join("{base}.log.json")
+    suffix := 0
+    log :: "{{\"schema\":2,\"name\":{json_str(base)},\"project\":{json_str(project.display().to_string())},\"semantic_ops\":[{op}],\"files\":[{file}]}}\n"
+    loop {
+        if write_new_file_without_symlinks(receipt, log.as_bytes()) == {
+            .Ok(_) -> { return .Ok(_) }
+            .Err(error) -> {
+                if error.kind() == ErrorKind.AlreadyExists {
+                    suffix += 1
+                    receipt = directory.join("{base}-{suffix}.log.json")
+                } else { return .Err(edit_error("io", "could not record semantic rename: {error}")) }
+            }
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:475
+fn apply_create_function(path: OSPath, src: String, name: String, params: String, ret_type: String) -> String Err! {
+    body :: if ret_type == "Void" -> "" else -> "    return {default_arg_for_type(ret_type)}\n"
+    // D-SIG-AFTER1=A: one mandatory arrow even when the return type is absent.
+    ret :: if ret_type == "Void" -> " ->" else -> " -> {ret_type}"
+    function :: "fn {name}({params}){ret} {{\n{body}}}\n\n"
+    changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: 0, end: 0 }, function)]) ?? return .Err(edit_error("overlap", "Canvas create function edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:498
+fn apply_create_trait_impl(path: OSPath, src: String, type_name: String, trait_name: String) -> String Err! {
+    path_str :: path.to_string_lossy()
+    (diags, bundle) :: Driver.check_file(path_str, .None, true)
+    errors :: diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
+    bundle :: bundle ?? return .Err(edit_error("check", "Canvas could not read checked trait facts"))
+    location :: find_trait_location(bundle, path, trait_name) ?? return .Err(edit_error("not_found", "Canvas trait was not found in source"))
+    trait_def :: location.trait_def
+    if !trait_def.assoc_types.is_empty() -> return .Err(edit_error("needs_associated_types", "Canvas will not guess associated type implementations; add each associated type in source first"))
+    body := ""
+    loop method in trait_def.methods.iter().filter((method) -> method.default_body.is_none()) {
+        sig :: trait_method_signature(src, method)
+        body.push_str("    ")
+        body.push_str(sig)
+        // The canonical signature owns the single arrow (including effect rows).
+        body.push_str(" {{\n")
+        if method.return_type.as_ref() == .Val(ret) {
+            if ret.name() != "Void" {
+                body.push_str("        return ")
+                body.push_str(default_arg_for_type(ret.name()))
+                body.push('\n')
+            }
+        }
+        body.push_str("    }}\n")
+    }
+    local_trait_name :: trait_name.rsplit('.').next().unwrap_or(trait_name)
+    insert_at :: if location.scope.is_empty() -> src.len() else -> line_start(src, location.module_close)
+    item_indent :: if location.scope.is_empty() -> "" else -> indentation_at(src, trait_def.span.start)
+    prefix_view := src[0..<insert_at] // #4303
+    prefix :: if insert_at == 0 || prefix_view.ends_with('\n') -> "" else -> "\n"
+    method_body :: body.lines().map((line) -> "{item_indent}{line}\n").collect[String]()
+    impl_block :: "{prefix}{item_indent}impl {type_name}.{local_trait_name} {{\n{method_body}{item_indent}}}\n"
+    changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: insert_at, end: insert_at }, impl_block)]) ?? return .Err(edit_error("overlap", "Canvas trait impl edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:598
+struct TraitLocation { trait_def: &AST.TraitDef; scope: [String]; module_close: Usize }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:604
+fn source_trait_path(bundle: AST.ProgramBundle, module_idx: Usize, module_alias: String, name: String, span: Span, fallback_scope: [String]) -> String? {
+    ledger :: &bundle.name_ledger
+    path :: ["{module_alias}.{name}", if fallback_scope.is_empty() -> "{module_alias}.{name}" else -> "{module_alias}.{fallback_scope.join(".")}.{name}"]
+        .into_iter().find_map((candidate) -> ledger.display_path(module_idx, candidate, .Val(module_idx)))
+        .or_else(() -> ledger.canonical_path_at(module_idx, span.start, span.end))
+    return .Val(path.strip_prefix(module_alias).and_then((rest) -> rest.strip_prefix('.')).unwrap_or(path).to_string())
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:632
+fn enclosing_inline_module(items: [Item], position: Usize) -> ([String], Usize)? {
+    loop item in items {
+        module_ref :: if item == .CodeModule(module_ref) -> module else -> next
+        body :: module_ref.body.as_ref() ?? next
+        if !(module_ref.span.start <= position && position < module_ref.span.end) -> next
+        if enclosing_inline_module(body, position) == .Val(tuple_3) {
+            scope :: tuple_3._0
+            close :: tuple_3._1
+            scope.insert(0, module_ref.name.copy())
+            return .Val((_0: ^scope, _1: close))
+        }
+        return .Val((_0: [module_ref.name.copy()], _1: module_ref.span.end.saturating_sub(1)))
+    }
+    return .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:652
+fn find_trait_location(bundle: AST.ProgramBundle, path: OSPath, trait_name: String) -> TraitLocation? {
+    parts :: trait_name.split('.').collect()
+    local_name :: parts.last().copied().unwrap_or(trait_name)
+    requested_scope := parts[0..<parts.len().saturating_sub(1)]
+    source_path :: canonical_path(path)
+    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:662
+    fn find_in_items(items: &[Item], scope: &[String], requested_scope: &[String], requested_name: String, local_name: String,
+        module_idx: Usize, module_alias: String, root_items: &[Item], source_len: Usize, bundle: &AST.ProgramBundle) -> TraitLocation? {
+        loop item in items {
+            if item == {
+                .Trait(t) -> {
+                    display_path :: source_trait_path(bundle, module_idx, module_alias, t.name, t.name_span, scope)
+                    fallback_match :: t.name == local_name && scope.iter().map((s) -> s.as_str()).eq(requested_scope.iter().copied())
+                    if display_path != .Val(requested_name) && !fallback_match -> next
+                    (found_scope, module_close) :: enclosing_inline_module(root_items, t.name_span.start).unwrap_or_else(() -> (scope.copy(), source_len))
+                    found_scope :: display_path.as_ref().and_then((path) -> path.rsplit_once('.')).map(((scope, _)) -> scope.split('.').map((s) -> s.to_string()).collect()).unwrap_or(^found_scope)
+                    return .Val(TraitLocation { trait_def: t, scope: ^found_scope, module_close: module_close })
+                }
+                .CodeModule(m) -> {
+                    if m.body.as_ref() == .Val(body) {
+                        scope.push(m.name.copy())
+                        if find_in_items(body, scope, requested_scope, requested_name, local_name, module_idx, module_alias, root_items, source_len, bundle) == .Val(t) -> return .Val(t)
+                        _ :: scope.pop()
+                    }
+                }
+                else -> {}
+            }
+        }
+        return .None
+    }
+    loop (module_idx, module_ref) in bundle.modules.iter().enumerate() {
+        if canonical_path(module_ref.path) != source_path -> next
+        scope := []
+        if find_in_items(module_ref.items, &scope, requested_scope, trait_name, local_name, module_idx, module_ref.alias, module_ref.items, module_ref.source.len(), bundle) == .Val(t) -> return .Val(t)
+    }
+    return .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:754
+fn apply_edit_function_signature(path: OSPath, src: String, graph_id: String, signature: String) -> String Err! {
+    name_span :: graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
+    span :: function_signature_span(src, name_span)
+    changed :: FixEngine.apply_edits(src, [edit(span, signature)]) ?? return .Err(edit_error("overlap", "Canvas function signature edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:772
+fn apply_inline_edit(path: OSPath, src: String, inline_id: String, new_expr: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    changed :: FixEngine.apply_edits(src, [edit(inline.span, new_expr)]) ?? return .Err(edit_error("overlap", "Canvas inline edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:790
+fn apply_promote_inline(path: OSPath, src: String, inline_id: String, name: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    expr :: snippet(src, Span.new(inline.span.start, inline.span.end))
+    line :: line_start(src, inline.span.start)
+    indent :: indentation_at(src, inline.span.start)
+    insert :: "{indent}{name} :: {expr}\n"
+    edits :: [edit(SourceSpan { start: line, end: line }, insert), edit(inline.span, name)]
+    changed :: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas promote edits overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:822
+fn apply_visible_conversion(path: OSPath, src: String, inline_id: String, callee: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    expr :: snippet(src, Span.new(inline.span.start, inline.span.end))
+    replacement :: "{callee}({expr})"
+    changed :: FixEngine.apply_edits(src, [edit(inline.span, replacement)]) ?? return .Err(edit_error("overlap", "Canvas conversion edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:842
+fn apply_break_link(path: OSPath, src: String, wire_id: String) -> String Err! { rewrite_wire_expr(path, src, wire_id, "#Todo") }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:846
+fn apply_move_link(path: OSPath, src: String, wire_id: String, replacement: String) -> String Err! { rewrite_wire_expr(path, src, wire_id, replacement) }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:855
+fn rewrite_wire_expr(path: OSPath, src: String, wire_id: String, replacement: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    span :: projection.json.split("\"wire_id\":").skip(1).find_map((chunk) -> wire_span_from_json_chunk(chunk, wire_id))
+        ?? return .Err(edit_error("not_found", "Canvas wire no longer maps to a source expression"))
+    changed :: FixEngine.apply_edits(src, [edit(span, replacement)]) ?? return .Err(edit_error("overlap", "Canvas wire edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:878
+fn apply_insert_call(path: OSPath, src: String, graph_id: String, callee: String, args: [String], bind: String?, wire_inline_expr_id: String?, wire_expr: String?, wire_origin_pin_id: String?, wire_target_pin: String?, module_path: String?) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    final_args :: if args.is_empty() -> wire_expr.map((expr) -> [expr.copy()]).unwrap_or_default() else -> args.to_vec()
+    plan := insert_call_plan(src, callee, final_args, module_path)
+    call :: if plan.fallible -> "{plan.callee}({plan.args.join(", ")}) ?? panic(\"canvas\")" else -> "{plan.callee}({plan.args.join(", ")})"
+    if wire_inline_expr_id == .Val(inline_id) {
+        inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+        edits := [edit(inline.span, call)]
+        if plan.import == .Val(import) -> edits.push(^import)
+        changed :: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas wired insert edit overlapped"))
+        return write_checked_formatted(path, src, changed)
+    }
+    anchor :: projection.graph_anchors.iter().find((a) -> a.graph_id == graph_id) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    (insert_offset, indent) :: call_insert_target(src, graph_id, projection, anchor, wire_origin_pin_id, wire_target_pin)
+    stmt :: if bind == {
+        .Val(name) -> "{indent}{name} :: {call}\n"
+        .None -> "{indent}{call}\n"
+    }
+    edits := [edit(SourceSpan { start: insert_offset, end: insert_offset }, stmt)]
+    if plan.import == .Val(import) -> edits.push(^import)
+    changed :: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas insert edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:958
+fn call_insert_target(src: String, graph_id: String, projection: &Projection, anchor: &GraphEditAnchor, wire_origin_pin_id: String?, _wire_target_pin: String?) -> (Usize, String) Err! {
+    pin_id :: wire_origin_pin_id ?? return .Ok((_0: anchor.insert_offset, _1: "    "))
+    (node_id, direction) :: pin_id.rsplit_once(":input:").map(((_0: node, _1: _)) -> (node, "input"))
+        .or_else(() -> pin_id.rsplit_once(":output:").map(((node, _)) -> (node, "output")))
+        ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    node :: projection.node_refs.iter().filter((node) -> node.graph_id == graph_id)
+        .filter((node) -> node.node_id == node_id || node.node_id.ends_with(":{node_id}"))
+        .max_by_key((node) -> node.span.end.saturating_sub(node.span.start))
+        ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    if node.node_id.ends_with(":entry") -> return .Ok((_0: anchor.insert_offset, _1: "    "))
+    indent :: indentation_at(src, node.span.start)
+    statement_indent :: if indent.is_empty() -> "    " else -> indent
+    line :: line_start(src, node.span.start)
+    node_end :: node.span.end.min(src.len())
+    tail := src[node_end..<src.len()] // #4303
+    line_end :: tail.find('\n').map((offset) -> node_end + offset).unwrap_or(src.len())
+    inline_body :: line == line_start(src, anchor.insert_offset) && src.get(line..node.span.start.min(src.len())).is_some_and((prefix) -> prefix.contains('{')) && src.get(node_end..line_end).is_some_and((suffix) -> suffix.contains('}'))
+    if inline_body {
+        body_tail := src[node_end..line_end] // #4303
+        insert :: if direction == "input" -> anchor.insert_offset else -> body_tail.find('}').map((offset) -> node_end + offset).unwrap_or(line_end)
+        return .Ok((_0: insert, _1: "\n{statement_indent}"))
+    }
+    insert :: if direction == "input" -> line else -> line_after(src, node.span.end)
+    return .Ok((_0: insert, _1: statement_indent))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1026
+struct InsertCallPlan { callee: String; args: [String]; fallible: Bool; import: TextEdit? }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1033
+fn insert_call_plan(src: String, callee: String, args: &[String], module_path: String?) -> InsertCallPlan {
+    target :: core_target_for_callee(src, callee, module_path) ?? return InsertCallPlan { callee: callee.copy(), args: args.to_vec(), fallible: false, import: .None }
+    module_ref :: normalize_core_module(target.module_ref, target.member)
+    (prefix, import) :: core_call_prefix_and_import(src, module_ref)
+    final_args :: if args.is_empty() -> core_default_args(module_ref, target.member) else -> args.to_vec()
+    return InsertCallPlan { callee: "{prefix}.{target.member}", args: ^final_args, fallible: core_call_is_fallible(module_ref, target.member), import: ^import }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1062
+struct CoreCallTarget { module_ref: String; member: String }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1067
+fn core_target_for_callee(src: String, callee: String, module_path: String?) -> CoreCallTarget? {
+    parts :: callee.split('.').collect()
+    if parts.len() < 2 -> return .None
+    member :: parts.last()?.to_string()
+    if module_path == .Val(module_ref) {
+        alias :: default_core_alias(module_ref)
+        if module_ref.starts_with("core.") && parts.len() == 2 && parts.first().copied() == .Val(alias.as_str()) {
+            return .Val(CoreCallTarget { module_ref: module_ref.copy(), member: ^member })
+        }
+    }
+    if parts.first() == "core" && parts.len() >= 3 -> return .Val(CoreCallTarget { module_ref: parts[0..<parts.len() - 1].join("."), member: ^member })
+    loop import in core_imports(src) {
+        if import.alias != parts[0] -> next
+        suffix :: if parts.len() > 2 -> ".{parts[1..parts.len() - 1].join(".")}" else -> ""
+        return .Val(CoreCallTarget { module_ref: "{import.module_ref}{suffix}", member: ^member })
+    }
+    alias :: parts[0]
+    if Syntax.core_module_for_alias(alias) == .Val(module_ref) {
+        suffix :: if parts.len() > 2 -> ".{parts[1..parts.len() - 1].join(".")}" else -> ""
+        return .Val(CoreCallTarget { module_ref: "{module_ref}{suffix}", member: ^member })
+    }
+    return .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1124
+fn normalize_core_module(module_ref: String, member: String) -> String { Syntax.core_module_for_call(module_ref, member).unwrap_or(module_ref).to_string() }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1130
+fn core_call_prefix_and_import(src: String, module_ref: String) -> (String, TextEdit?) {
+    if imported_core_prefix(src, module_ref) == .Val(prefix) -> return (_0: prefix, _1: .None)
+    alias :: default_core_alias(module_ref)
+    (offset, joins_use_block) :: core_import_insert_point(src)
+    suffix :: if joins_use_block -> "\n" else -> "\n\n"
+    import :: edit(SourceSpan { start: offset, end: offset }, "use {module_ref} as {alias}{suffix}")
+    return (_0: alias, _1: .Val(import))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
+fn imported_core_prefix(src: String, module_ref: String) -> String? {
+    best := (_0: Usize, _1: String)?{.None}
+    loop import in core_imports(src) {
+        if import.module_ref == module_ref -> return .Val(^import.alias)
+        prefix :: "{import.module_ref}."
+        if module_ref.starts_with(prefix) {
+            suffix := module_ref[prefix.len()..<module_ref.len()] // #4303
+            candidate :: "{import.alias}.{suffix}"
+            if best.as_ref().map_or(true, ((_0: len, _1: _)) -> import.module_ref.len() > len) -> best = .Val((import.module_ref.len(), ^candidate))
+        }
+    }
+    return best.map(((_0: _, _1: alias)) -> ^alias)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1168
+struct CoreImport { module_ref: String; alias: String }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
+fn core_imports(src: String) -> [CoreImport] {
+    imports := []
+    loop line in src.lines() {
+        code := line.split("//").next().unwrap_or("").trim() // #4303
+        rest :: code.strip_prefix("use core.") ?? next
+        full :: "core.{rest}"
+        module_ref: String
+        alias: String
+        if full.split_once(" as ") == .Val(tuple_4) {
+            found_module :: tuple_4._0
+            found_alias :: tuple_4._1
+            module_ref = found_module.trim() // #4303
+            alias_text := found_alias.trim() // #4303
+            alias = ident_prefix(alias_text)
+        } else {
+            module_ref = full.trim() // #4303
+            alias = default_core_alias(module_ref)
+        }
+        if !module_ref.is_empty() && !alias.is_empty() -> imports.push(CoreImport { module_ref: module_ref.to_string(), alias: ^alias })
+    }
+    return ^imports
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1197
+fn ident_prefix(text: String) -> String { text.chars().take_while((c) -> c.is_ascii_alphanumeric() || c == '_').collect() }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1203
+fn default_core_alias(module_ref: String) -> String { module_ref.rsplit('.').next().unwrap_or("core").to_string() }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1207
+fn core_import_insert_point(src: String) -> (Usize, Bool) {
+    offset := 0
+    insert_at := 0
+    saw_use := false
+    loop line in src.split_inclusive('\n') {
+        trimmed := line.trim() // #4303
+        if trimmed.starts_with("use ") {
+            saw_use = true
+            insert_at = offset + line.len()
+        } else if saw_use -> break
+        else if trimmed.is_empty() || trimmed.starts_with("//") -> insert_at = offset + line.len()
+        else -> { break }
+        offset += line.len()
+    }
+    return (_0: insert_at, _1: saw_use)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1228
+fn core_default_args(module_ref: String, member: String) -> [String] {
+    core_call_signature(module_ref, member).map(((_0: params, _1: _)) -> params.into_iter().map(((_, ty)) -> default_arg_for_type(ty.name())).collect()).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1239
+fn core_call_signature(module_ref: String, member: String) -> ([(AST.AccessConvention, AST.Type)], AST.Type?)? {
+    if Syntax.core_call(module_ref, member) == .Val(row) {
+        if Sema.core_fixed_sig_for_row(row) == .Val(signature) -> return .Val(signature)
+    }
+    return Sema.core_call_surface_signature(module_ref, member)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1251
+fn core_call_is_fallible(module_ref: String, member: String) -> Bool {
+    if Syntax.core_call(module_ref, member) == .Val(row) {
+        if Sema.core_fixed_sig_for_row(row) == .Val((_, ret)) -> return ret.is_some_and((ret) -> ret.is_fallible())
+    }
+    return Sema.core_call_is_fallible(module_ref, member)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1260
+fn check_canvas_candidate(path: OSPath, overlay_path: OSPath, source: String) -> [Diagnostic] {
+    path_str :: path.to_string_lossy()
+    Driver.check_file(path_str, .Val((_0: overlay_path, _1: source)), true)._0
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1265
+fn canvas_action_candidate(path: OSPath, src: String, graph_id: String, action_id: String, callee: String, args: [String]) -> String Err! {
+    overlay_path :: canonical_path(path)
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    anchor :: projection.graph_anchors.iter().find((a) -> a.graph_id == graph_id) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    if !action_id.starts_with("canvas.action:") -> return .Err(edit_error("bad_request", "Canvas action id must be a package Canvas action"))
+    (_, descriptor_callee) :: action_id.rsplit_once(':') ?? return .Err(edit_error("bad_request", "Canvas action id has no checked source callee"))
+    if descriptor_callee != callee -> return .Err(edit_error("bad_request", "Canvas action callee does not match its checked descriptor"))
+    stmt :: "    {callee}({args.join(", ")})\n"
+    changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: anchor.insert_offset, end: anchor.insert_offset }, stmt)]) ?? return .Err(edit_error("overlap", "Canvas action edit overlapped"))
+    formatted :: format_source(changed) ?? return .Err(diagnostics_error(path, src, err))
+    // In-memory overlay avoids a scratch pathname race before Driver reopens it.
+    check :: check_canvas_candidate(path, overlay_path, formatted)
+    errors :: check.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> return .Err(diagnostics_error(path, formatted, errors))
+    return .Ok(^formatted)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1328
+fn apply_insert_structural(path: OSPath, src: String, graph_id: String, op: String, wire_origin_pin_id: String?, wire_target_pin: String?) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    anchor :: projection.graph_anchors.iter().find((a) -> a.graph_id == graph_id) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    (insert, indent) :: structural_insert_target(src, graph_id, projection, anchor, wire_origin_pin_id, wire_target_pin)
+    stmt :: if op == {
+        "insert_branch" -> format("{{0}}if true {{\n{{0}}    print(\"branch\")\n{{0}}}} else {{\n{{0}}    print(\"else\")\n{{0}}}}\n", indent)
+        "insert_switch" -> format("{{0}}if 0 == {{\n{{0}}    0 -> {{ print(\"case\") }}\n{{0}}    else -> {{ print(\"else\") }}\n{{0}}}}\n", indent)
+        "insert_loop" -> format("{{0}}loop {{\n{{0}}    break\n{{0}}}}\n", indent)
+        "insert_fallible_rail" -> {
+            if !anchor.fallible -> return .Err(edit_error("unavailable", "needs a fallible function"))
+            "{indent}fallible_value :: Int.parse(\"1\")\n{indent}unwrapped :: fallible_value ?? 0\n"
+        }
+        else -> { return .Err(edit_error("unsupported", "unknown Canvas structural operation")) }
+    }
+    changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, stmt)]) ?? return .Err(edit_error("overlap", "Canvas structural insert overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1384
+fn structural_insert_target(src: String, graph_id: String, projection: &Projection, anchor: &GraphEditAnchor, wire_origin_pin_id: String?, wire_target_pin: String?) -> (Usize, String) Err! {
+    pin_id :: wire_origin_pin_id ?? {
+        if wire_target_pin.is_some() -> return .Err(edit_error("bad_request", "Canvas structural wire origin is missing"))
+        return .Ok((_0: anchor.insert_offset, _1: "    "))
+    }
+    target :: wire_target_pin ?? return .Err(edit_error("bad_request", "Canvas structural wire target is missing"))
+    if target != "exec" -> return .Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
+    (node_id, direction) :: pin_id.rsplit_once(":input:").map(((_0: node, _1: _)) -> (node, "input"))
+        .or_else(() -> pin_id.rsplit_once(":output:").map(((node, _)) -> (node, "output")))
+        ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    pin_marker :: "\"pin_id\":{json_str(pin_id)}"
+    if !projection.json.contains(pin_marker) -> return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    pin_is_exec :: projection.json.split(pin_marker).skip(1).any((chunk) -> chunk.split("\"pin_id\":").next().is_some_and((pin) -> pin.contains("\"type\":\"exec\"")))
+    if !pin_is_exec -> return .Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
+    node :: projection.node_refs.iter().filter((node) -> node.graph_id == graph_id).filter((node) -> node.node_id == node_id)
+        .max_by_key((node) -> node.span.end.saturating_sub(node.span.start)) ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    if node.node_id.ends_with(":entry") -> return .Ok((_0: anchor.insert_offset, _1: "    "))
+    insert :: if direction == "input" -> line_start(src, node.span.start) else -> line_after(src, node.span.end)
+    indent :: indentation_at(src, node.span.start)
+    indent :: if indent.is_empty() -> "    " else -> indent
+    return .Ok((_0: insert, _1: indent))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1465
+fn apply_create_comment_region(path: OSPath, src: String, graph_id: String, start: Usize, end: Usize, title: String, color: String, alpha: String, bounds: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    if !projection.graph_anchors.iter().any((a) -> a.graph_id == graph_id) -> return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    validate_comment_color(color)
+    validate_comment_alpha(alpha)
+    bounds :: normalize_bounds(bounds)
+    anchor :: SourceSpan { start: start, end: end }
+    insert_at :: line_after(src, end.min(src.len()))
+    indent :: indentation_at(src, insert_at.min(src.len()))
+    comment :: "{indent}// canvas:comment span={anchor.start}..{anchor.end} title={quoted_attr(title)} color={quoted_attr(color)} alpha={alpha} bounds=({bounds})\n"
+    changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: insert_at, end: insert_at }, comment)]) ?? return .Err(edit_error("overlap", "Canvas comment insert overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1513
+fn apply_update_comment_region(path: OSPath, src: String, region_id: String, title: String?, color: String?, alpha: String?, bounds: String?) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    hint :: find_comment_hint(src, projection.json, region_id) ?? return .Err(edit_error("not_found", "Canvas comment region no longer exists"))
+    color :: color.unwrap_or(hint.color)
+    alpha :: alpha.unwrap_or(hint.alpha)
+    validate_comment_color(color)
+    validate_comment_alpha(alpha)
+    fallback_bounds :: "{hint.bounds._0},{hint.bounds._1},{hint.bounds._2},{hint.bounds._3}"
+    bounds :: normalize_bounds(bounds.unwrap_or(fallback_bounds))?
+    title :: title.unwrap_or(hint.title)
+    replacement :: "// canvas:comment span={hint.anchor.start}..{hint.anchor.end} title={quoted_attr(title)} color={quoted_attr(color)} alpha={alpha} bounds=({bounds})"
+    changed :: FixEngine.apply_edits(src, [edit(hint.hint_span, replacement)]) ?? return .Err(edit_error("overlap", "Canvas comment edit overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1553
+fn apply_delete_comment_region(path: OSPath, src: String, region_id: String) -> String Err! { apply_delete_hint_region(path, src, region_id, "comment") }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1561
+fn apply_delete_hint_region(path: OSPath, src: String, region_id: String, kind: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    hint :: find_hint_region(src, projection.json, region_id, kind) ?? return .Err(edit_error("not_found", "Canvas source hint no longer exists"))
+    span := hint.hint_span
+    if span.end < src.len() && src.as_bytes().get(span.end) == 10 -> span.end += 1
+    changed :: FixEngine.apply_edits(src, [edit(span, "")]) ?? return .Err(edit_error("overlap", "Canvas source hint delete overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1583
+fn apply_create_collapse_region(path: OSPath, src: String, graph_id: String, start: Usize, end: Usize, title: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    if !projection.graph_anchors.iter().any((a) -> a.graph_id == graph_id) -> return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    if start >= end || end > src.len() -> return .Err(edit_error("bad_request", "Canvas collapse needs one valid source span"))
+    selected :: validated_collapse_selection(path, src, graph_id, SourceSpan { start: start, end: end })
+    if canvas_collapse_hints(src).iter().any((hint) -> hint.anchor.start == selected.start && hint.anchor.end == selected.end) -> return .Err(edit_error("conflict", "Canvas selection is already collapsed"))
+    insert_at :: selected.end
+    indent :: indentation_at(src, insert_at.min(src.len()))
+    comment :: "{indent}// canvas:collapse span={selected.start}..{selected.end} title={quoted_attr(title)}\n"
+    changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: insert_at, end: insert_at }, comment)]) ?? return .Err(edit_error("overlap", "Canvas collapse insert overlapped"))
+    return write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1637
+fn validated_collapse_selection(path: OSPath, src: String, graph_id: String, requested: SourceSpan) -> SourceSpan Err! {
+    name_span :: graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
+    path_str :: path.to_string_lossy()
+    (diags, bundle) :: Driver.check_file(path_str, .None, true)
+    errors :: diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
+    bundle :: bundle ?? return .Err(edit_error("check", "Canvas could not read checked statement facts"))
+    func :: find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    locs := []
+    block := []
+    collect_statement_locs(src, func.body, &block, &locs)
+    first :: locs.iter().find((loc) -> requested.start == loc.anchor.start || requested.start == loc.source.start || requested.start == loc.full.start)
+        .or_else(() -> locs.iter().find((loc) -> loc.is_guard && loc.guard_span.is_some_and((span) -> requested.start >= span.start && requested.start < span.end)))
+    last :: locs.iter().find((loc) -> requested.end == loc.anchor.end || requested.end == loc.source.end || requested.end == loc.full.end)
+        .or_else(() -> locs.iter().find((loc) -> loc.is_expr && requested.end > loc.source.start && requested.end <= loc.source.end))
+    first :: first ?? return .Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
+    last :: last ?? return .Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
+    if first.block != last.block || first.index > last.index -> return .Err(edit_error("cross_block", "Canvas collapse cannot cross a block boundary"))
+    return .Ok(SourceSpan { start: first.full.start, end: last.full.end })
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1721
+fn extract_inline_candidate(path: OSPath, src: String, inline_id: String, function: String, ret_type: String) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    expr :: snippet(src, Span.new(inline.span.start, inline.span.end))
+    if expr.contains("#Unsafe") -> return .Err(edit_error("diagnostic", "Error [E2203]: Canvas extract cannot cross an unsafe source span"))
+    params :: extract_params(projection.json, expr)
+    signature :: params.iter().map(((_0: name, _1: ty)) -> "{name}: {ty}").collect().join(", ")
+    args :: params.iter().map(((_0: name, _1: _)) -> name.copy()).collect().join(", ")
+    helper :: "fn {function}({signature}) -> {ret_type} {{\n    return {expr}\n}}\n\n"
+    replacement :: "{function}({args})"
+    return FixEngine.apply_edits(src, [edit(SourceSpan { start: 0, end: 0 }, helper), edit(inline.span, replacement)]).map_err((_) -> edit_error("overlap", "Canvas extract edits overlapped"))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1765
+fn inline_helper_candidate(path: OSPath, src: String, inline_id: String?, start: Usize?, end: Usize?) -> String Err! {
+    projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
+    span: SourceSpan
+    if inline_id == .Val(inline_id) {
+        inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+        span = inline.span
+    } else { span = SourceSpan { start: start.unwrap_or(0), end: end.unwrap_or(0) } }
+    call :: snippet(src, Span.new(span.start, span.end))
+    (name, args) :: parse_simple_call(call) ?? return .Err(edit_error("diagnostic", "Canvas inline needs a direct helper call expression"))
+    (params, body) :: find_simple_helper(src, name) ?? return .Err(edit_error("diagnostic", "Canvas inline could not find a simple helper return body"))
+    if params.len() != args.len() -> return .Err(edit_error("diagnostic", "Canvas inline helper argument count changed"))
+    expr := ^body
+    loop (param, arg) in params.iter().zip(args.iter()) -> expr = replace_ident(expr, param, arg)
+    return FixEngine.apply_edits(src, [edit(span, expr)]).map_err((_) -> edit_error("overlap", "Canvas inline helper edit overlapped"))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1814
+// Clone annotation belongs to the following slice's StatementLoc declaration.

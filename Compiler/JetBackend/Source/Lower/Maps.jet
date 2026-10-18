@@ -7,13 +7,14 @@
 use jet_foundation.[
     MIRAccess, MIRInstruction, MIRLocalID, MIRMapEntry, MIROperation, MIRPlace, MIRPlaceID,
     MIRPreludeCall, MIRProgram, MIRProjection, MIRTupleField, MIRType,
-    MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type,
+    MIRTypeKind, MIRValueID, mir_type_canonical_key, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type,
 ]
 
 // The entry tuple of a Map type, None for any other type.
 fn lower_map_entry(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .Map(key, value) -> Val(mir_type_from_kind(MIRTypeKind.Tuple{fields: [MIRTupleField]{MIRTupleField{name: "key", ty: key}, MIRTupleField{name: "value", ty: value}}}))
+        // copy: `key` and `value` are payloads of read parameter `ty`, which keeps the originals; the new MIRTupleField's fields own `key` and `value`
+        .Map(key, value) -> Val(mir_type_from_kind(MIRTypeKind.Tuple{fields: [MIRTupleField]{MIRTupleField{name: "key", ty: key.copy()}, MIRTupleField{name: "value", ty: value.copy()}}}))
         .Tagged(_, inner) -> lower_map_entry(inner)
         else -> None
     }
@@ -21,7 +22,8 @@ fn lower_map_entry(ty: MIRType) -> MIRType? {
 
 fn lower_map_value_type(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .Map(_, value) -> Val(value)
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .Map(_, value) -> Val(value.copy())
         .Tagged(_, inner) -> lower_map_value_type(inner)
         else -> None
     }
@@ -308,13 +310,7 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     if count == 0 -> return false
     if row.projections[count - 1] == .Index(kind, index, _, _, _, _, _) {
         if kind != .Map -> return false
-        held := LIRValueID?{None}
-        if c.slots[slot].cell {
-            held = lower_slot_root(p, c, &m, &f, slot)
-        } else {
-            held = f.current[slot].copy()
-        }
-        root :: held ?? {
+        root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? {
             lower_fail(&m, &f, "Map entry of place {row.id.value} is written before the place has a value")
             return true
         }
@@ -325,7 +321,7 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
             loop (position, projection) in row.projections {
                 if position < count - 1 -> &prefix.push(projection)
             }
-            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, prefix) ?? return true
+            walked :: lower_walk_place(p, c, &m, &f, root, c.slots[slot].ty, prefix, true) ?? return true
             if walked.borrowed {
                 lower_fail(&m, &f, "writing through a field of runtime handle is not lowered at O0 yet")
                 return true
@@ -341,6 +337,8 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         key_layout :: lower_value_layout(f, key)
         owned_key :: lower_new_value(&f, key_layout, LIRDrop.Trivial, None)
         lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+        // map.set writes the entry list in place: it must own it alone.
+        lower_list_make_unique(p, &m, &f, header, map_ty)
         lower_call_helper(&m, &f, "map.set", map_ty, [LIRValueID]{header, owned_key, value}, None)
         return true
     }
@@ -349,11 +347,11 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 
 // Owned key operands consumed by Map insertion and Tally add/remove:
 // owned place reads copy before the helper stores or retires the offered key.
-fn lower_map_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_map_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(semantic) {
         if semantic == .BuiltinMethod(call, _, _, args, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             symbol :: lower_runtime_symbol(row)
             if symbol == "jet_map_insert" || symbol == "jet_bag_add" || symbol == "jet_bag_remove" {
                 loop arg in args -> &stored.push(arg)
@@ -363,13 +361,175 @@ fn lower_map_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValu
     stored
 }
 
+// Map.to_list / items (core.map.to_list: Core.rs jet_map_to_list over
+// jet_map_entries_kernel) and top_n (Collections.rs jet_map_top_n): the
+// entries as `(key, value)` tuples. The Map's ascending entry buffer already
+// is that List (lower_map_entry), so the result shares it (copy-on-write,
+// #5041 P2). top_n detaches it, orders it by descending value then ascending
+// key (list.rank_entries) and keeps the first max(n, 0) entries. False when
+// `row` is neither.
+fn lower_map_entry_list(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID], ty: MIRType) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    to_list :: row.module_name == "core.map" && row.member == "to_list" && symbol == "jet_map_to_list"
+    top_n :: row.module_name == "core.builtin" && row.member == "map_top_n" && symbol == "jet_map_top_n"
+    if !to_list && !top_n -> return false
+    if args.len() != (if top_n -> 1 else -> 0) {
+        lower_fail(&m, &f, "Map {row.member} with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    shape :: lower_map_shape(p, ty) ?? return false
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "Map {row.member} without a checked result is not lowered at O0 yet")
+        return true
+    }
+    elem :: lower_list_element(result_ty) ?? {
+        lower_fail(&m, &f, "Map {row.member} into {mir_type_display_name(result_ty)} is not lowered at O0 yet")
+        return true
+    }
+    if !lower_map_entry_layout(p, shape, elem) {
+        lower_fail(&m, &f, "Map {row.member} entries as {mir_type_display_name(elem)} are not lowered at O0 yet")
+        return true
+    }
+    if top_n && (lower_map_key_kind(p, shape.value) == "" || shape.stride %% 8 != 0) {
+        lower_fail(&m, &f, "Map top_n over {mir_type_display_name(shape.value)} values is not lowered at O0 yet")
+        return true
+    }
+    limit := LIRValueID?{None}
+    if top_n -> limit = Val(lower_list_native_index(c, &m, &f, args[0]) ?? return true)
+    map :: lower_use(&m, &f, receiver) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_storage_into(p, &f, dst, result_ty)
+    lower_copy_bytes(&f, dst, 0, map, 0, 24)
+    lower_list_retain(&m, &f, dst)
+    if limit == .Val(count) {
+        lower_list_make_unique(p, &m, &f, dst, result_ty)
+        lower_call_helper(&m, &f, "list.rank_entries", result_ty, [LIRValueID]{dst, count}, None)
+    }
+    true
+}
+
+// Whether `elem` stores exactly the entry tuple of `shape`: the same two
+// members (key, value) at the same offsets and the same element stride.
+fn lower_map_entry_layout(p: MIRProgram, shape: LowerMapShape, elem: MIRType) -> Bool Never! {
+    if !lower_is_inline(p, elem) || lower_list_stride(p, elem) != shape.stride -> return false
+    members :: lower_inline_members(p, elem)
+    if members.len() != 2 -> return false
+    if members[0].name != "key" || members[1].name != "value" -> return false
+    if members[0].offset != shape.key_offset || members[1].offset != shape.value_offset -> return false
+    mir_type_canonical_key(members[0].ty) == mir_type_canonical_key(shape.key) && mir_type_canonical_key(members[1].ty) == mir_type_canonical_key(shape.value)
+}
+
+// list.rank_entries(list, limit): orders the `(key, value)` entries of a
+// List the header owns alone by descending value, ties by ascending key
+// (Collections.rs jet_map_top_n's rank: insertion order of a total order, so
+// the same sequence), then drops every entry past max(limit, 0).
+fn lower_helper_list_rank_entries(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("list.rank_entries helper has no List type")
+    members :: lower_inline_members(p, elem)
+    if members.len() != 2 -> panic("list.rank_entries helper has no (key, value) entry")
+    key :: members[0].copy()
+    value :: members[1].copy()
+    stride :: lower_list_stride(p, elem)
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, None)
+    list :: f.open_params[0].copy()
+    limit :: f.open_params[1].copy()
+    length :: lower_list_word(&f, list, 0)
+    data :: lower_list_data(&f, list)
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    outer :: lower_new_block(&f)
+    inner :: lower_new_block(&f)
+    weigh :: lower_new_block(&f)
+    tie :: lower_new_block(&f)
+    by_key :: lower_new_block(&f)
+    swap :: lower_new_block(&f)
+    advance :: lower_new_block(&f)
+    ranked :: lower_new_block(&f)
+    at :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(outer, [LIRValueID]{one})})
+    lower_start(&f, outer, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(inner, [LIRValueID]{at}), else_target: lower_target(ranked, [LIRValueID]{})})
+    slot :: lower_word(&f)
+    lower_start(&f, inner, [LIRValueID]{slot})
+    above :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: above, condition: LIRCondition.Gt, left: slot, right: zero})
+    lower_seal(&f, LIRTerminator.Branch{condition: above, then_target: lower_target(weigh, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
+    lower_start(&f, weigh, [LIRValueID]{})
+    before :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: before, op: LIRBinaryOp.Sub, left: slot, right: one})
+    current :: lower_list_address(&f, data, slot, stride)
+    previous :: lower_list_address(&f, data, before, stride)
+    current_value :: lower_read_at(p, &f, current, value.offset, value.ty) ?? panic("an entry value has a layout")
+    previous_value :: lower_read_at(p, &f, previous, value.offset, value.ty) ?? panic("an entry value has a layout")
+    // The current entry ranks first when its value is greater.
+    values :: lower_map_key_order(p, &m, &f, value.ty, previous_value, current_value)
+    lower_seal(&f, LIRTerminator.Branch{condition: values.less, then_target: lower_target(swap, [LIRValueID]{}), else_target: lower_target(tie, [LIRValueID]{})})
+    lower_start(&f, tie, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Branch{condition: values.same, then_target: lower_target(by_key, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
+    lower_start(&f, by_key, [LIRValueID]{})
+    current_key :: lower_read_at(p, &f, current, key.offset, key.ty) ?? panic("an entry key has a layout")
+    previous_key :: lower_read_at(p, &f, previous, key.offset, key.ty) ?? panic("an entry key has a layout")
+    keys :: lower_map_key_order(p, &m, &f, key.ty, current_key, previous_key)
+    lower_seal(&f, LIRTerminator.Branch{condition: keys.less, then_target: lower_target(swap, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
+    lower_start(&f, swap, [LIRValueID]{})
+    // The whole padded entry moves; no owner is cloned or dropped.
+    loop word in 0..<(stride /% 8) {
+        offset :: word * 8
+        mine :: lower_list_word(&f, current, offset)
+        theirs :: lower_list_word(&f, previous, offset)
+        lower_emit(&f, LIRInst.Store{base: current, offset: offset, value: theirs})
+        lower_emit(&f, LIRInst.Store{base: previous, offset: offset, value: mine})
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(inner, [LIRValueID]{before})})
+    lower_start(&f, advance, [LIRValueID]{})
+    next_at :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(outer, [LIRValueID]{next_at})})
+    // keep = min(max(limit, 0), length); the entries past it are dropped.
+    lower_start(&f, ranked, [LIRValueID]{})
+    negative :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: limit, right: zero})
+    bounded :: lower_new_block(&f)
+    cut :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: negative, then_target: lower_target(cut, [LIRValueID]{zero}), else_target: lower_target(bounded, [LIRValueID]{})})
+    lower_start(&f, bounded, [LIRValueID]{})
+    over :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: over, condition: LIRCondition.Gt, left: limit, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: over, then_target: lower_target(cut, [LIRValueID]{length}), else_target: lower_target(cut, [LIRValueID]{limit})})
+    keep :: lower_word(&f)
+    lower_start(&f, cut, [LIRValueID]{keep})
+    drop_head :: lower_new_block(&f)
+    drop_body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(drop_head, [LIRValueID]{keep})})
+    dropping :: lower_word(&f)
+    lower_start(&f, drop_head, [LIRValueID]{dropping})
+    past :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: past, condition: LIRCondition.Lt, left: dropping, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: past, then_target: lower_target(drop_body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, drop_body, [LIRValueID]{})
+    gone :: lower_list_address(&f, data, dropping, stride)
+    lower_drop_stored(p, &m, &f, gone, 0, elem)
+    next_drop :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_drop, op: LIRBinaryOp.Add, left: dropping, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(drop_head, [LIRValueID]{next_drop})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: keep})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
 // Map builtin methods by runtime route (Collections.rs / Core.rs jet_map_*):
 // len, is_empty, get (an owned copy of the value), has_key, insert (the
 // replaced value) and remove (jet_map_pop_kernel: the removed value).
 fn lower_map_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID]) -> Bool Never! {
     ty :: lower_value_type(c, receiver) ?? return false
     if lower_map_entry(ty) == None -> return false
-    if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
+    if row.family != .BuiltinMethod -> return false
+    if lower_map_entry_list(p, c, &m, &f, instruction, row, receiver, args, ty) -> return true
+    if row.module_name != "core.builtin" -> return false
     symbol :: lower_runtime_symbol(row)
     if lower_map_method_more(p, c, &m, &f, instruction, row, symbol, receiver, receiver_place, args, ty) -> return true
     counted :: symbol == "jet_map_len" || symbol == "jet_map_is_empty"
@@ -432,7 +592,7 @@ fn lower_map_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // shared Iter runtime by value.
 fn lower_map_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, symbol: String, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID], ty: MIRType) -> Bool Never! {
     if lower_map_method_query(p, c, &m, &f, instruction, row, symbol, receiver, receiver_place, args, ty) -> return true
-    if symbol == "jet_map_slice" -> return lower_map_slice(p, c, &m, &f, instruction, row, receiver, args, ty)
+    if symbol == "jet_map_slice_keys_kernel" -> return lower_map_slice(p, c, &m, &f, instruction, row, receiver, args, ty)
     viewing :: symbol == "jet_map_keys" || symbol == "jet_map_values"
     merging :: symbol == "jet_map_merge" || symbol == "jet_map_update_all"
     resolving :: symbol == "jet_map_merge_with"
@@ -979,13 +1139,16 @@ fn lower_helper_map_find(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape:
 // Moves the key and value in: an existing key keeps its entry key (the
 // incoming one is dropped) and its value is replaced, dropped by map.set and
 // returned in an Option box by map.insert (null when the key was new).
+// map.increment's count is a word it adds; the key is taken.
 fn lower_helper_map_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape: LowerMapShape, returns_old: Bool) -> LIRFunction Never! {
     result :: if returns_old -> Val(lir_layout_pointer()) else -> None
-    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape), lower_map_value_layout(p, shape)}, result)
+    increments :: glue.helper == "map.increment"
+    taken := [LIRDrop]{LIRDrop.Trivial, lower_drop(&m, lower_repr(p, shape.key), true)}
+    if !increments -> &taken.push(lower_drop(&m, lower_repr(p, shape.value), true))
+    f := lower_helper_start_taking(&m, glue, [LIRLayout]{lir_layout_pointer(), lower_map_key_layout(p, shape), lower_map_value_layout(p, shape)}, taken, result)
     map :: f.open_params[0].copy()
     key :: f.open_params[1].copy()
     value :: f.open_params[2].copy()
-    increments :: glue.helper == "map.increment"
     index :: lower_word(&f)
     lower_call_helper(&m, &f, "map.find", glue.ty, [LIRValueID]{map, key}, Val(index))
     zero :: lower_const(&f, 0)
@@ -1027,26 +1190,19 @@ fn lower_helper_map_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shap
     lower_emit(&f, LIRInst.Binary{dst: point, op: LIRBinaryOp.Sub, left: minus_one, right: index})
     length :: lower_list_reserve(p, &m, &f, map, shape.entry)
     room :: lower_list_data(&f, map)
-    // Shift the entries at and after the insertion point up by one.
-    head :: lower_new_block(&f)
-    body :: lower_new_block(&f)
-    place :: lower_new_block(&f)
-    at :: lower_word(&f)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{length})})
-    lower_start(&f, head, [LIRValueID]{at})
-    more :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Gt, left: at, right: point})
-    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(place, [LIRValueID]{})})
-    lower_start(&f, body, [LIRValueID]{})
-    one :: lower_const(&f, 1)
-    previous :: lower_word(&f)
-    lower_emit(&f, LIRInst.Binary{dst: previous, op: LIRBinaryOp.Sub, left: at, right: one})
-    from :: lower_list_address(&f, room, previous, shape.stride)
-    to :: lower_list_address(&f, room, at, shape.stride)
-    lower_list_move(p, &f, to, from, shape.entry)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{previous})})
-    lower_start(&f, place, [LIRValueID]{})
+    // Shift the entries at and after the insertion point up by one: a single
+    // overlapping byte move of their (length - point) * stride bytes.
     target :: lower_list_address(&f, room, point, shape.stride)
+    one :: lower_const(&f, 1)
+    after :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: after, op: LIRBinaryOp.Add, left: point, right: one})
+    shifted :: lower_list_address(&f, room, after, shape.stride)
+    tail :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: tail, op: LIRBinaryOp.Sub, left: length, right: point})
+    stride :: lower_const(&f, shape.stride)
+    bytes :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: LIRBinaryOp.Mul, left: tail, right: stride})
+    lower_call_runtime(&m, &f, "jet_rt_mem_move", [LIRValueID]{shifted, target, bytes}, None)
     lower_write_at(p, &f, target, shape.key_offset, key, shape.key)
     lower_write_at(p, &f, target, shape.value_offset, value, shape.value)
     grown :: lower_word(&f)
@@ -1132,24 +1288,17 @@ fn lower_helper_map_take(p: MIRProgram, m: &LowerModule, glue: LowerGlue, shape:
     one :: lower_const(&f, 1)
     last :: lower_word(&f)
     lower_emit(&f, LIRInst.Binary{dst: last, op: LIRBinaryOp.Sub, left: length, right: one})
-    // Shift the entries after the removed one down by one.
-    head :: lower_new_block(&f)
-    body :: lower_new_block(&f)
-    done :: lower_new_block(&f)
-    at :: lower_word(&f)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{index})})
-    lower_start(&f, head, [LIRValueID]{at})
-    more :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: last})
-    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
-    lower_start(&f, body, [LIRValueID]{})
-    next_at :: lower_word(&f)
-    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
-    from :: lower_list_address(&f, data, next_at, shape.stride)
-    to :: lower_list_address(&f, data, at, shape.stride)
-    lower_list_move(p, &f, to, from, shape.entry)
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
-    lower_start(&f, done, [LIRValueID]{})
+    // Shift the entries after the removed one down by one: a single
+    // overlapping byte move of their (last - index) * stride bytes.
+    after :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: after, op: LIRBinaryOp.Add, left: index, right: one})
+    from :: lower_list_address(&f, data, after, shape.stride)
+    tail :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: tail, op: LIRBinaryOp.Sub, left: last, right: index})
+    stride :: lower_const(&f, shape.stride)
+    bytes :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: LIRBinaryOp.Mul, left: tail, right: stride})
+    lower_call_runtime(&m, &f, "jet_rt_mem_move", [LIRValueID]{entry, from, bytes}, None)
     lower_emit(&f, LIRInst.Store{base: map, offset: 0, value: last})
     lower_seal(&f, LIRTerminator.Return{value: taken})
     lir_builder_finish(f.builder)

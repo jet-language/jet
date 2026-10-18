@@ -95,6 +95,22 @@ fn source_payload_size(schema: I64) -> I64 {
     if (size == I64{0}) -> I64{1} else -> size
 }
 
+// An inline SourceData E4 slot owns its bytes but no heap header: the slot
+// itself is the [data, len, cap] text triple (050bdb324 Text.jet).
+fn rt_e4_slot_clone(source: I64, target: I64) {
+    len :: rt_text_len(source)
+    data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    rt_text_bytes_copy(data, rt_text_data(source), len)
+    rt_text_store(target, data)
+    rt_text_store(target + I64{8}, len)
+    rt_text_store(target + I64{16}, len)
+}
+
+fn rt_e4_slot_drop(slot: I64) {
+    capacity :: rt_text_word(slot + I64{16})
+    if (capacity != I64{0}) { jet_rt_free(rt_text_data(slot), capacity, I64{1}) }
+}
+
 #Export(c) fn jet_rt_source_data_clone(source: I64, target: I64, schema: I64) {
     kind :: trap_word(schema + I64{32})
     size :: trap_word(schema + I64{16})

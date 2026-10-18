@@ -1,0 +1,77 @@
+// Packet 0810 extends the existing SemIndex owner; every body in this window
+// already lives in the canonical shared walker below. No aliases or duplicate
+// AST walkers are introduced. These anchors map the Rust items to those bodies.
+
+// Rust: crates/jet-semindex/src/Build.rs:1776
+// normalize_definition -> Structure.jet:339 semindex_normalize_definition.
+// Preserves quoted text/escaped scalars; drops // comments and outside whitespace.
+// Rust: crates/jet-semindex/src/Build.rs:1810
+// structural_nodes_from_parsed -> Structure.jet:375 semindex_structural_nodes_from_parsed.
+// Sorts copied block spans and traverses the loaded Program using the same
+// semindex_collect_item; an empty parsed name ledger is intentional Rust behavior.
+// Rust: crates/jet-semindex/src/Build.rs:1835
+// add_breadcrumb_hints -> Structure.jet:385–410 semindex_breadcrumb_label and
+// semindex_add_breadcrumb_hints. Remote methods filter by owner/origin, then sort
+// by origin label/name/module/start and retain the exact + signature [path:span].
+// Rust: crates/jet-semindex/src/Build.rs:1885
+// build_index -> Structure.jet:415 semindex_build_index, with the checked
+// registration/source/effect inputs forwarded to Finalize.semindex_build_symbol_db.
+
+// Rust: crates/jet-semindex/src/Build.rs:1889
+// collect_item -> Items.jet:81–222 semindex_collect_item plus
+// ItemFacts.jet:17–166 semindex_collect_item_facts/semindex_extern_callable_kind.
+// Items owns record/push/state references/pop; its Func/Struct/Enum/Trait/Tag/Impl
+// arms retain params, public labels, policies, bypasses, fields, states, payload
+// types, member origins, trait requirements and method caller/slot context.
+// Remaining arms are ItemFacts' MarkerDecl/FactDecl/Const/Test/ExternRust/Module/
+// CodeModule/Distinct/TypeAlias/UnitFamily/ProtocolDecl/UserDerive/TemplateLoop/
+// GenericModule/ModuleAlias. CodeModule restores its prior scope; derive loops
+// inspect nested sources without inventing recursive expansion. EffectDecl,
+// CModule, ErrorConv and Migration are original deliberate no-index arms.
+// ExternRust indexes the wrapper contract only, marks failure/generic facts
+// unavailable at Typed, and never treats rust_path as a source location.
+// Rust: crates/jet-semindex/src/Build.rs:2821
+// hover_for_fn -> ItemFacts.jet:170 semindex_hover_for_fn. Preserves public label
+// head, / and * zones, convention/rest/default text, effective return before
+// effect arrow, via, explicit empty effect row, policies and failure source.
+
+// Rust: crates/jet-semindex/src/Build.rs:2901
+// collect_stmts -> Statements.jet:12 semindex_collect_stmts.
+// Rust: crates/jet-semindex/src/Build.rs:2907
+// collect_loop_label_def -> Statements.jet:16 semindex_collect_loop_label_def.
+// Rust: crates/jet-semindex/src/Build.rs:2923
+// collect_loop_label_ref -> Statements.jet:23–29 semindex_loop_label_span and
+// semindex_collect_loop_label_ref; reference length is UTF-8 bytes, not scalars.
+// Rust: crates/jet-semindex/src/Build.rs:2930
+// collect_stmt -> Statements.jet:31–133 semindex_collect_stmt. Every statement
+// arm shares structural slots; runtime/comptime switch arm boundaries, loop
+// labels, range/stride/afterthought, unsafe bypasses and context fields retain
+// their original traversal order. Break/Continue have no reference payload.
+// Rust: crates/jet-semindex/src/Build.rs:3155
+// collect_lvalue -> Statements.jet:135 semindex_collect_lvalue.
+// Rust: crates/jet-semindex/src/Build.rs:3179
+// collect_binding -> Statements.jet:149 semindex_collect_binding. Destructured
+// initializer precedes named definitions; only inferred annotations get inlays.
+// Rust: crates/jet-semindex/src/Build.rs:3247
+// collect_call_inlay_hints -> Statements.jet:170 semindex_collect_call_inlay_hints.
+// Uses a binder-slot map; explicit/missing/empty labels and repeated tails skip.
+
+// Rust: crates/jet-semindex/src/Build.rs:3274
+// collect_expr -> Expressions.jet:89–319 semindex_collect_expr. Preserves ghost
+// copies, arithmetic facts, calls/member references, explicit drop reason,
+// all operand/list/map/tuple/type/fallback slots, lambda/if binding traversal,
+// checked origin sentinel AND original source bytes, and all literal leaf arms.
+// Canonical optional-call projection at Expressions.jet:68–87 represents Rust's
+// CallValue/OptField shape through the same node/slot/reference producers.
+// Rust: crates/jet-semindex/src/Build.rs:3638
+// format_arithmetic_hover -> Expressions.jet:31 semindex_format_arithmetic_hover.
+// Rust: crates/jet-semindex/src/Build.rs:3650
+// collect_expr_stmt -> Expressions.jet:323 semindex_collect_expr_stmt; only Expr
+// and DeferClose recurse, not unrelated statement forms.
+
+// No inline original tests occur in 1776–3654. Behavioral normalization and
+// arithmetic-render controls are paired in Tests/SemIndex/Build02.jet.
+// No new module imports/manifest hunk: canonical Structure, Items, ItemFacts,
+// Statements and Expressions already contain and call every mapped declaration.
+// #4494/#4483/#4499/#4409: no native/target/composite-key/IO primitive in this
+// window; typed AST/name-ledger producer integration remains canonical-owned.

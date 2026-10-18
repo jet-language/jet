@@ -1,0 +1,38 @@
+// Build-graph value types shared by the build executor and the build-plugin
+// host, ported from crates/jet-comptime Build/cache_cas.rs. (Rust
+// `BuildCapability` is `crate::BuildEffect`: Jet uses Foundation `BuildEffect`
+// directly.)
+
+// A content address: `sha256:` and 64 lowercase hex digits.
+struct ContentDigest {
+    value: String
+
+    fn from_bytes(bytes: [U8]) -> ContentDigest Never! {
+        ContentDigest{value: "sha256:{crypto.sha256(bytes).hex()}"}
+    }
+
+    fn as_str(self) -> String Never! {
+        self.value
+    }
+
+    // Rust `ContentDigest::parse`: the `sha256:` prefix and exactly 64 hex
+    // digits, normalized to lowercase.
+    fn parse(value: String) -> ContentDigest ContentDigestError! {
+        if !value.starts_with("sha256:") -> return Err(ContentDigestError{message: "digest must start with `sha256:`"})
+        hex :: value.removeprefix("sha256:")
+        raw :: hex.bytes()
+        valid := raw.len() == 64
+        loop byte in raw {
+            code :: Int.from_u8(byte)
+            if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> valid = false
+        }
+        if !valid -> return Err(ContentDigestError{message: "sha256 digest must contain exactly 64 hexadecimal digits"})
+        Ok(ContentDigest{value: "sha256:{hex.to_ascii_lower()}"})
+    }
+}
+
+// Rust `io::Error` (InvalidData) of `ContentDigest::parse`: its message.
+#Error
+struct ContentDigestError {
+    message: String
+}

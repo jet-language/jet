@@ -435,19 +435,19 @@ fn jet_eval_shared_runtime_entry_read_loan_remove(machine: JetEvalMachine, loan:
     }
 }
 
-fn jet_eval_shared_runtime_allocate_transaction(machine: JetEvalMachine, transaction: JetEvalSharedTransaction) -> Int {
+fn jet_eval_shared_runtime_allocate_transaction(machine: JetEvalMachine, transaction: ^JetEvalSharedTransaction) -> Int {
     runtime := machine.registry.shared_runtime
     permit := runtime.storage.guard_edit()
     loop index in 0..<permit.value.transactions.len() {
         entry := permit.value.transactions[index]
         state :: entry.storage.guard_read()
         if !state.value.active {
-            permit.value.transactions[index] = transaction.copy()
+            permit.value.transactions[index] = ^transaction
             return index
         }
     }
     index :: permit.value.transactions.len()
-    &permit.value.transactions.push(transaction)
+    &permit.value.transactions.push(^transaction)
     index
 }
 
@@ -2103,8 +2103,7 @@ fn jet_eval_shared_runtime_owner_alias_retain(machine: &JetEvalMachine, index: I
     }
     row := (loop {
         permit :: metadata.guard_read()
-        result :: permit.value.create_row
-        break result
+        break permit.value.create_row
     })
     retained :: jet_eval_shared_runtime_physical(
         &machine,
@@ -2141,8 +2140,7 @@ fn jet_eval_shared_runtime_owner_alias_adopt(machine: &JetEvalMachine, index: In
     entry :: jet_eval_shared_runtime_value(machine, index) ?? return false
     row := (loop {
         permit :: entry.metadata.guard_read()
-        result :: permit.value.create_row
-        break result
+        break permit.value.create_row
     })
     result :: jet_eval_shared_runtime_physical(
         &machine,
@@ -2162,8 +2160,7 @@ fn jet_eval_shared_runtime_owner_alias_release(machine: &JetEvalMachine, index: 
     entry :: jet_eval_shared_runtime_value(machine, index) ?? return false
     row := (loop {
         permit :: entry.metadata.guard_read()
-        result :: permit.value.create_row
-        break result
+        break permit.value.create_row
     })
     result :: jet_eval_shared_runtime_physical(
         &machine,
@@ -2200,8 +2197,7 @@ fn jet_eval_shared_runtime_abandon_value(machine: &JetEvalMachine, index: Int, s
     if has_root {
         create_row := (loop {
             permit := metadata.guard_read()
-            result :: permit.value.create_row
-            break result
+            break permit.value.create_row
         })
         root_release :: jet_eval_shared_runtime_physical(
             &machine,
@@ -2468,8 +2464,7 @@ fn jet_eval_shared_runtime_release_shared(machine: &JetEvalMachine, index: Int, 
     if payload != JetEvalRuntimeValue.Moved -> payload_ok = jet_eval_drop_value(&machine, payload, span)
     create_row := (loop {
         permit := metadata.guard_read()
-        result :: permit.value.create_row
-        break result
+        break permit.value.create_row
     })
     physical :: jet_eval_shared_runtime_physical(
         &machine,
@@ -2516,8 +2511,7 @@ fn jet_eval_shared_runtime_release_condition(machine: &JetEvalMachine, index: In
     if released == JetEvalSharedRefRelease.Remaining || loan_active -> return true
     create_row := (loop {
         permit :: metadata.guard_read()
-        result :: permit.value.create_row
-        break result
+        break permit.value.create_row
     })
     physical :: jet_eval_shared_runtime_physical(
         &machine,
@@ -2559,8 +2553,7 @@ fn jet_eval_shared_runtime_release_weak(machine: &JetEvalMachine, index: Int, sp
     if released == JetEvalSharedRefRelease.Remaining || loan_active -> return true
     create_row := (loop {
         permit :: metadata.guard_read()
-        result :: permit.value.create_row
-        break result
+        break permit.value.create_row
     })
     physical :: jet_eval_shared_runtime_physical(
         &machine,
@@ -3034,7 +3027,7 @@ fn jet_eval_shared_runtime_callback(machine: &JetEvalMachine, frame_index: Int, 
         jet_eval_drop_value(&machine, cell, span)
         return None
     }
-    result :: jet_eval_invoke_host_callback(&machine, callback.copy(), [JetEvalRuntimeValue]{callback_alias}, span) ?? {
+    result :: jet_eval_invoke_host_callback(&machine, ^callback, [JetEvalRuntimeValue]{callback_alias}, span) ?? {
         jet_eval_drop_value(&machine, cell, span)
         return None
     }
@@ -3096,8 +3089,7 @@ fn jet_eval_shared_runtime_physical_identity(machine: JetEvalMachine, index: Int
     entry :: jet_eval_shared_runtime_value(machine, index) ?? return None
     root := (loop {
         permit :: entry.metadata.guard_read()
-        result :: permit.value.physical_root
-        break result
+        break permit.value.physical_root
     })
     capability :: root ?? return None
     Val(capability.physical_identity)
@@ -4044,8 +4036,14 @@ fn jet_eval_shared_runtime_transaction_store_write(machine: &JetEvalMachine, tra
         loop index in 0..<permit.value.participants.len() {
             if jet_eval_shared_runtime_same_shared_root(machine, permit.value.participants[index].shared, shared) {
                 old = permit.value.participants[index].value
+                // copy: the written value is stored in the participant (owner: the transaction)
+                // while the caller keeps its own (a read parameter: one caller passes a list
+                // element, which cannot be moved, E0225).
                 permit.value.participants[index].value = value.copy()
                 permit.value.participants[index].writes = true
+                // copy: the route row is stored in the participant (owner: the transaction) while
+                // the caller keeps its own (a read parameter: one caller passes a list element row,
+                // which cannot be moved, E0225).
                 permit.value.participants[index].row = row.copy()
                 snapshots = permit.value.participants[index].snapshots
                 found = true
@@ -4392,8 +4390,7 @@ fn jet_eval_shared_runtime_try_replace(machine: &JetEvalMachine, shared: Int, ro
     })
     snapshot_owner_root := (loop {
         permit := snapshot_entry.metadata.guard_read()
-        result :: permit.value.owner_root
-        break result
+        break permit.value.owner_root
     })
     shared_entry :: jet_eval_shared_runtime_value(machine, shared) ?? {
         jet_eval_shared_runtime_guard_release(&machine, guard_index, span)

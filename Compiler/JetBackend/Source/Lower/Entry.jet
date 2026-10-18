@@ -28,6 +28,8 @@ fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
     lower_static_fixups(p, &m, &f)
     signature :: m.mir_signatures[glue.function].copy()
+    // copy: the target signature is read while the entry body pushes signatures and glue into `m`
+    // (`&m`), so a view into m.signatures would be live across those writes.
     target :: m.signatures[signature.value].copy()
     entry :: LIRFunctionID{value: glue.function}
     ty :: glue.ty

@@ -20,7 +20,6 @@ use jet_foundation.[
     TagMarker,
     Type,
     expr_span,
-    tir_call_arg_copy_fact,
     type_identity_equal,
     type_name,
 ]
@@ -43,7 +42,7 @@ fn sema_call_shared_owner_host_value(receiver_value: TExpr, method: String, args
         else -> type_name(receiver_value.ty)
     }
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
+    value := sema_tir_node(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -65,11 +64,6 @@ fn sema_call_shared_owner_lexical_tail_len(tail_store: SemaStatementTailStore, c
 
 fn sema_call_shared_owner_param(name: String, convention: AccessConvention, ty: Type) -> SemaCallParam Never! {
     SemaCallParam{label: name, name: name, zone: ParamZone.Either, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
-}
-
-fn sema_call_shared_owner_owned_arg(value: TExpr, argument: CallArg) -> TExpr Never! {
-    if argument.flags.implicit_clone || argument.flags.shared_auto_clone -> return sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(argument.flags.shared_auto_clone)}, value.span)
-    value.copy()
 }
 
 // D-SHARED-REVISION1=A: capture either the whole cloneable payload or one
@@ -134,7 +128,7 @@ fn sema_call_shared_owner_try_replace(receiver: Expr, receiver_value: TExpr, inn
     params :: [SemaCallParam]{sema_call_shared_owner_param("snapshot", AccessConvention.Move, snapshot.ty), sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
     ownership := sema_ownership_check_method_call(&state, "Shared.try_replace", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    values :: [TExpr]{sema_call_shared_owner_owned_arg(snapshot, updated_args[0]), sema_call_shared_owner_owned_arg(replacement, updated_args[1])}
+    values :: [TExpr]{snapshot, replacement}
     result :: Type.Result{ok: Type.Bool, err: Type.Named{name: SEMA_SHARED_REVISION_ERROR_TYPE}}
     sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, environment, program, &scopes, &context, &diagnostics)
 }

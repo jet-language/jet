@@ -17,7 +17,7 @@ fn lower_ptr_element(ty: MIRType) -> MIRType? {
 // `*place`: the registered address of the place's storage, as a Ptr word or
 // an exact Int.
 fn lower_raw_address_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID) Never! {
-    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if !c.slots[slot].cell -> return lower_fail(&m, &f, "raw address of a place without storage is not lowered at O0 yet")
     walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return
@@ -164,8 +164,12 @@ fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never
 }
 
 fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    // copy: the sentry frame is read while leaving the function emits into `&f` and clears
+    // f.sentry_stack_frame, so a view would be live across that write.
     stack_frame :: f.sentry_stack_frame.copy()
     if stack_frame == .Val(frame) -> lower_call_runtime(&m, &f, "jet_rt_sentry_frame_leave", [LIRValueID]{frame}, None)
+    // copy: the saved sentry function is read while leaving emits into `&f` and clears
+    // f.sentry_function, so a view would be live across that write.
     function_save :: f.sentry_function.copy()
     if function_save == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
 }

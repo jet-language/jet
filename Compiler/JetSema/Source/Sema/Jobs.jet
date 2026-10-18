@@ -203,8 +203,8 @@ fn sema_job_doc(function: Func) -> String? {
 
 fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] Never! {
     arguments := [TJobArgumentFact]{}
-    loop parameter in function.params {
-        if parameter.name != "self" -> &arguments.push(sema_job_parameter_fact(parameter))
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name != "self" -> &arguments.push(sema_job_parameter_fact(function.params[parameter_index]))
     }
     arguments
 }

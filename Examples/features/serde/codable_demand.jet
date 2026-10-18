@@ -1,0 +1,47 @@
+// D-META-AUTO1 demand: every plain struct and enum here is Codable, but a
+// generated codec body exists only for a type an Encode/Decode requirement
+// reaches: `Shape` through a codec trait bound and a decode, `Point` and
+// `Kind` as wire fields of `Shape`, `Box<Point>` through the bound at a
+// generic type. `Unused` is Codable too and never gets a codec body.
+use core.encoding.json as json
+
+struct Point {
+    x: Int
+    y: Int
+}
+
+enum Kind {
+    Circle
+    Square
+}
+
+struct Shape {
+    kind: Kind
+    origin: Point
+    size: Int
+}
+
+struct Box<T> {
+    label: String
+    item: T
+}
+
+struct Unused {
+    name: String
+    count: Int
+}
+
+fn show<T: Encode>(value: T) -> String {
+    json.to_string(value) ?? "?"
+}
+
+fn run() [FieldError]! {
+    shape :: Shape{kind: Kind.Square, origin: Point{x: 1, y: 2}, size: 3}
+    print(show(shape))
+    print(show(Box<Point>{label: "p", item: Point{x: 5, y: 6}}))
+    back :: json.decode<Shape>("{{\"kind\":\"Circle\",\"origin\":{{\"x\":0,\"y\":-1}},\"size\":9}}")
+    print(back.origin.y)
+    print(back.kind == Kind.Circle)
+    unused :: Unused{name: "u", count: 1}
+    print(unused.count)
+}

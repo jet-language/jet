@@ -45,7 +45,7 @@ fn pkg_test_plan_wrapper_body(source: String, name: String, generic: Bool) -> St
 fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
     lexed :: lex_generated(source.bytes())
     if lexed.diagnostics.len() != 0 -> return false
-    parsed :: parse_lexed(lexed)
+    parsed :: parse_lexed(^lexed)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == 1 -> return false
     }

@@ -9,6 +9,7 @@ use jet_foundation.[
     canonical_pass_record,
     canonical_pass_mir_snapshot,
     CompilerThreads,
+    CompilerTraceSink,
     MIRAccelerationFact,
     MIRBoundsFact,
     MIRDecisionRow,
@@ -26,7 +27,6 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_part_of,
     compiler_threads_partition,
-    mir_program_digest,
 ]
 
 enum MIROptimizationErrorKind {
@@ -127,27 +127,19 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // program every pass produces; an ordinary compile trusts the passes after the
 // entry check (Rust MIROptimization `validate_after`). The per-function
 // passes run in waves on up to `threads` compiler threads (mir_pass_wave);
-// the result is the same for every thread count.
-fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
+// the result is the same for every thread count. Nothing here digests the
+// program: the MIR digest is computed by its consumers (Web provenance, the
+// Core-shared manifest). With a trace, the checks are their own spans inside
+// the caller's `optimize` (SPEED-500K P9): `optimize.legality` and
+// `optimize.lint`.
+fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal, trace_sink: CompilerTraceSink?) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     pipeline_before :: mir_pass_journal_before(program, journal, "mir.optimize-pipeline")
+    if trace_sink == .Val(sink) -> sink.begin("optimize.legality", "", -1, -1)
     validation := mir_pass_check(&program, .LegalityVerification, full_verification, threads)
+    if trace_sink == .Val(sink) -> sink.end("optimize.legality", program.functions.len())
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     mir_pass_journal_check(program, &journal, "mir.legality-verification")
-    if mir_optimizer_has_complete_seal(program) {
-        report.completed = mir_optimizer_production_order()
-        loop function in program.functions {
-            report.bounds_facts += function.optimization.bounds_facts.len()
-            report.loop_facts += function.optimization.loop_facts.len()
-            report.vector_facts += function.optimization.vector_facts.len()
-            report.acceleration_facts += function.optimization.acceleration_facts.len()
-            report.decision_rows += function.optimization.decision_rows.len()
-        }
-        validation = mir_pass_lint_wave(&program, .CanonicalLoopFacts, threads)
-        if validation == .Val(error) -> return mir_optimizer_failed(error, report)
-        mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
-        return mir_optimizer_succeeded(report)
-    }
 
     mir_pass_clear_batch_facts(&program)
 
@@ -232,12 +224,12 @@ fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: 
         validation = mir_pass_validate_wave(&program, .CanonicalLoopFacts, threads)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     }
+    if trace_sink == .Val(sink) -> sink.begin("optimize.lint", "", -1, -1)
     validation = mir_pass_lint_wave(&program, .CanonicalLoopFacts, threads)
+    if trace_sink == .Val(sink) -> sink.end("optimize.lint", program.functions.len())
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&program)
     mir_pass_sort_decision_rows_for_program(&program)
-    digest :: mir_program_digest(program)
-    loop index in 0..<program.functions.len() -> program.functions[index].optimization.derived_from_digest = Val(digest)
     mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
     mir_optimizer_succeeded(report)
 }
@@ -514,11 +506,33 @@ fn mir_pass_wave_slots(slots: [Shared<MIRPassWaveSlot>], from: Int, first: Int, 
     counts
 }
 
-// Legality, then MIR Lint when `lint` is set: the entry check.
+// Legality, then MIR Lint when `lint` is set: the entry check. Under full
+// verification a failure also names the pass whose output was rejected and
+// carries the rejected function's MIR (mir_pass_debug_failure).
 fn mir_pass_check(program: &MIRProgram, pass: MIROptimizationPassID, lint: Bool, threads: CompilerThreads) -> MIROptimizationError? {
     validation :: mir_pass_validate_wave(&program, pass, threads)
-    if validation != None || !lint -> return validation
-    mir_pass_lint_wave(&program, pass, threads)
+    if validation == .Val(error) {
+        if !lint -> return validation
+        return Val(mir_pass_debug_failure(program, error))
+    }
+    if !lint -> return None
+    linted :: mir_pass_lint_wave(&program, pass, threads) ?? return None
+    Val(mir_pass_debug_failure(program, linted))
+}
+
+// Dev tooling (JET_MIR_LINT_EVERY_PASS=1 sets full verification): `error`
+// with the pass that produced the rejected program and the MIR text of the
+// function it names, so a lowering or pass defect is read where it failed.
+fn mir_pass_debug_failure(program: MIRProgram, error: MIROptimizationError) -> MIROptimizationError Never! {
+    failed := error.copy()
+    function_id :: error.function ?? return failed
+    loop function in program.functions {
+        if function.id == function_id {
+            failed.message = "{error.message}\nrejected after pass {mir_pass_name(error.pass)}:\n{mir_pass_debug_function_text(function)}"
+            return failed
+        }
+    }
+    failed
 }
 
 // The check after `pass`: legality and MIR Lint, only under full
@@ -553,7 +567,9 @@ fn mir_pass_lint_wave(program: &MIRProgram, pass: MIROptimizationPassID, threads
 // One thread: lints its slot's functions on its own copy of the index; the
 // part stops at its first failure (at most one is returned).
 fn mir_pass_lint_slot(slot: Shared<MIRPassWaveSlot>, shared_index: Shared<MIRLintIndex>) -> [MIRLintError] {
-    // A copy: every worker reads the one shared index, so none may move it out.
+    // copy: every worker lints with its own index (owner: this worker, moved into
+    // mir_lint_owned_part) built from the one shared index (owner: the Shared cell, read by all
+    // workers); a read guard only lends a view, so none may move it out.
     index := shared_index.guard_read().value.copy()
     permit := slot.guard_edit()
     mir_lint_owned_part(^index, &permit.value.functions, false)
@@ -662,26 +678,6 @@ fn mir_pass_name(pass: MIROptimizationPassID) -> String Never! {
         .DeadPureValueElimination -> "dead-pure-value-elimination"
         .CanonicalLoopFacts -> "canonical-loop-facts"
     }
-}
-
-
-// Only a program whose every function carries the complete pass order and a
-// seal can skip the pipeline, so the program is digested only then.
-fn mir_optimizer_has_complete_seal(program: MIRProgram) -> Bool {
-    if program.functions.len() == 0 -> return false
-    expected :: mir_optimizer_production_order()
-    loop function in program.functions {
-        if function.optimization.derived_from_digest == None -> return false
-        if function.optimization.pass_ids.len() != expected.len() -> return false
-        loop (index, pass_id) in expected {
-            if function.optimization.pass_ids[index] != pass_id -> return false
-        }
-    }
-    digest :: mir_program_digest(program)
-    loop function in program.functions {
-        if function.optimization.derived_from_digest != Val(digest) -> return false
-    }
-    true
 }
 
 fn mir_pass_clear_batch_facts(program: &MIRProgram) Never! {

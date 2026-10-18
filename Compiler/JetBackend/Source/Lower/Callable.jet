@@ -5,6 +5,8 @@ use jet_foundation.[MIRFunction, MIRProgram]
 
 fn lower_callable_init(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature_id :: m.mir_signatures[glue.function].copy()
+    // copy: the callable's signature is read while its body registers signatures and glue in `m`
+    // (`&m`), so a view into m.signatures would be live across those writes.
     signature :: m.signatures[signature_id.value].copy()
     f := lower_helper_start(&m, glue, signature.params, signature.result)
     params :: f.open_params.copy()
@@ -69,6 +71,8 @@ fn lower_has_narrow_params(source: MIRFunction) -> Bool Never! {
 // initializer when the callable has one).
 fn lower_export_entry(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature_id :: m.mir_signatures[glue.function].copy()
+    // copy: the export's signature is read while its body registers signatures and glue in `m`
+    // (`&m`), so a view into m.signatures would be live across those writes.
     signature :: m.signatures[signature_id.value].copy()
     source :: lower_row_source(p, m, glue.function)
     f := lower_helper_start(&m, glue, signature.params, signature.result)

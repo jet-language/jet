@@ -191,17 +191,17 @@ fn sema_copy_copyable_scalar(ty: Type) -> Bool Never! {
 }
 
 fn sema_copy_owned_view_type(ty: Type, string_view: Bool) -> (ty: Type, materialized: Bool) Never! {
-    if string_view && ty == Type.String -> return (ty: Type.String, materialized: true)
+    if string_view && ty == Type.String -> return (materialized: true, ty: Type.String)
     if ty == {
         .Apply(name, args) -> {
             if name == "View" && args.len() == 1 {
-                if args[0] == (Type.Named{name: "str"}) -> return (ty: Type.String, materialized: true)
-                return (ty: Type.List{element: args[0]}, materialized: true)
+                if args[0] == (Type.Named{name: "str"}) -> return (materialized: true, ty: Type.String)
+                return (materialized: true, ty: Type.List{element: args[0]})
             }
         }
         else -> {}
     }
-    (ty: ty, materialized: false)
+    (materialized: false, ty: ty)
 }
 
 fn sema_copy_generic_bindings(nominal: SemaRegistrationNominal, actual: Type) -> (bindings: [SemaInferenceBinding], complete: Bool) Never! {
@@ -252,8 +252,8 @@ fn sema_copy_nominal_has_impl(
     graph: SemaRegistrationGraph?,
     nominal: SemaRegistrationNominal,
     trait_name: String,
-) -> (value: Bool, known: Bool) Never! {
-    if graph == None -> return (value: false, known: false)
+) -> (known: Bool, value: Bool) Never! {
+    if graph == None -> return (known: false, value: false)
     registered :: graph
     loop graph_module in registered.modules {
         loop implementation in graph_module.impls {
@@ -266,10 +266,10 @@ fn sema_copy_nominal_has_impl(
             }
             if !trait_matches -> next
             target_matches :: sema_type_graph_impl_matches_nominal(registered, implementation, nominal) ?? next
-            if target_matches -> return (value: true, known: true)
+            if target_matches -> return (known: true, value: true)
         }
     }
-    (value: false, known: registered.complete)
+    (known: registered.complete, value: false)
 }
 
 fn sema_copy_generic_bound(param: TGenericParam, bound_name: String) -> Bool Never! {
@@ -546,25 +546,24 @@ fn sema_copy_classify(
     string_view: Bool,
 ) -> SemaCopyFacts Never! {
     owned :: sema_copy_owned_view_type(source, string_view)
-    target :: owned.ty
     materializes_view :: owned.materialized
     source_walk := sema_copy_walk()
     source_facts :: sema_copy_type_facts(source, program.registration_graph, env.module_identity, generic_params, &source_walk)
     target_walk := sema_copy_walk()
-    target_facts :: sema_copy_type_facts(target, program.registration_graph, env.module_identity, generic_params, &target_walk)
+    target_facts :: sema_copy_type_facts(owned.ty, program.registration_graph, env.module_identity, generic_params, &target_walk)
     lowering :: if {
         materializes_view -> SemaCopyLowering.MaterializeView
         intent == SemaCopyIntent.Explicit -> SemaCopyLowering.ExplicitCopy
         else -> SemaCopyLowering.Clone
     }
     accepted :: source_facts.complete && target_facts.complete && !source_facts.resource && (source_facts.copyable || target_facts.cloneable)
-    memory :: if target == {
+    memory :: if owned.ty == {
         .Shared(_) -> SemaCopyMemoryKind.RetainRelease
         else -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
     }
     SemaCopyFacts{
         source: source,
-        target: target,
+        target: owned.ty,
         intent: intent,
         lowering: lowering,
         materializes_view: materializes_view,

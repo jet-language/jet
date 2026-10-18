@@ -179,6 +179,15 @@ enum CargoDependencyKind {
             .Build -> "build"
         }
     }
+
+    // The table suffix (`[target.<cfg>.<suffix>]` or bare `[<suffix>]`).
+    fn suffix(self) -> String Never! {
+        if self == {
+            .Runtime -> ".dependencies"
+            .Dev -> ".dev-dependencies"
+            .Build -> ".build-dependencies"
+        }
+    }
 }
 
 // Every `key = value` line with the `[section]` or `[[section]]` it sits in.

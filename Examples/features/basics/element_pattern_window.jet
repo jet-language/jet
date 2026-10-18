@@ -1,0 +1,58 @@
+// A pattern over a list element below a read parameter (`rows[i]`,
+// `rows[i].shape`) tests the element in place: the parameter cannot change
+// while the function runs, so a payload binding that is only read borrows
+// the element's payload, and a consuming use copies just that payload. The
+// parameter's rows stay whole afterwards.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+enum Shape {
+    Circle(blob: Blob, size: Int)
+    Line(size: Int)
+    Empty
+}
+
+struct Row {
+    shape: Shape
+    name: String
+}
+
+fn size_at(rows: [Row], index: Int) -> Int {
+    if rows[index].shape == {
+        .Circle(blob, size) -> blob.data.len() + size
+        .Line(size) -> size
+        .Empty -> 0
+    }
+}
+
+fn text_at(shapes: [Shape], index: Int) -> String {
+    if shapes[index] == .Circle(blob, _) -> return blob.text
+    "none"
+}
+
+// A consuming use copies the payload; the row keeps its own.
+fn blob_at(rows: [Row], index: Int) -> Blob? {
+    if rows[index].shape == {
+        .Circle(blob, _) -> Val(blob)
+        else -> None
+    }
+}
+
+fn run() {
+    rows :: [Row]{
+        Row{shape: Shape.Circle{blob: Blob{data: [Int]{1, 2, 3}, text: "c"}, size: 7}, name: "a"},
+        Row{shape: Shape.Line{size: 5}, name: "b"},
+        Row{shape: Shape.Empty, name: "c"},
+    }
+    total := 0
+    loop index in 0..<rows.len() -> total += size_at(rows, index)
+    print("total {total}")
+    shapes :: [Shape]{Shape.Empty, Shape.Circle{blob: Blob{data: [Int]{}, text: "s"}, size: 1}}
+    print("{text_at(shapes, 0)} {text_at(shapes, 1)}")
+    copied := blob_at(rows, 0) ?? panic("row 0 has a blob")
+    copied.text = "changed"
+    &copied.data.push(9)
+    print("{copied.text} {copied.data.len()} {size_at(rows, 0)} {rows[0].name}")
+}

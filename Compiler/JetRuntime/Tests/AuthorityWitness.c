@@ -54,7 +54,7 @@ static void authority_watch(Authority *value) {
     if(value->cap) watch(value->data,value->cap*8,8);
     for(int64_t i=0;i<value->len;++i) {
         Text *text=value->data[i];
-        watch(text,24,8);
+        watch((char *)(text)-8,32,8);
         if(text->cap) watch(text->data,text->cap,1);
         if(i) assert(compare(value->data[i-1],text)<0);
     }

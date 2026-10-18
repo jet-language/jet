@@ -1,0 +1,485 @@
+// Private continuation of jet_devserver.WebHost.
+use jet_devserver.WebHost.[LIVE_RELOAD_POLL_MS, MAX_STATIC_RESPONSE_BYTES, WebHost]
+use jet_devserver.[CanvasAsset, ResidentDevSession, static_relative_path, content_type_for, read_static_file_bounded, write_response]
+use jet_devserver.Canvas as Canvas
+use jet_devserver.PausedEvaluate.[PausedEvaluateHostError]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[parse_json]
+use std.io.[Write, Error, ErrorKind]
+use std.sync.atomic.[AtomicU64, Ordering]
+use core.files.[OSPath]
+// Rust: crates/jet-devserver/src/WebHost.rs:5926
+fn inject_canvas_session(asset: CanvasAsset, session_secret: String) -> CanvasAsset {
+    asset := ^asset
+    if asset.content_type == "text/html; charset=utf-8" {
+        if asset.body.find("app.js?") == .Val(index) {
+            insert_at :: index + "app.js?".len()
+            asset.body.insert_str(insert_at, "session={session_secret}&")
+        }
+    }
+    return ^asset
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5941
+fn method_not_allowed(stream: &impl Write) Err! {
+    write_response(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed".bytes())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5950
+fn web_stream_path(path: String) -> Bool { path == "/__jet_web/stream" }
+// Rust: crates/jet-devserver/src/WebHost.rs:5957
+// Same Canvas handlers, not a second editor.
+fn source_tool_path(path: String) -> Bool {
+    path == "/__jet_canvas/project".bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5967
+fn devtools_path(path: String) -> Bool {
+    path == "/__jet_devtools".bit_or("/__jet_devtools/workbench").bit_or("/__jet_devtools/commands").bit_or("/__jet_devtools/assets").bit_or("/__jet_devtools/state").bit_or("/__jet_devtools/reconnect").bit_or("/__jet_devtools/action").bit_or("/__jet_devtools/selection").bit_or("/__jet_devtools/cursor").bit_or("/__jet_devtools/swap").bit_or("/__jet_devtools/recording").bit_or("/__jet_devtools/error").bit_or("/__jet_devtools/paused/inspect").bit_or("/__jet_devtools/paused/evaluate").bit_or("/__jet_devtools/style").bit_or("/__jet_canvas/devtools").bit_or("/canvas/devtools").bit_or("/panel/devtools")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5991
+fn is_application_control_path(path: String) -> Bool {
+    devtools_path(path) || web_stream_path(path) || source_tool_path(path)
+        || path == "/__jet_dev_status".bit_or("/__jet_dev_version").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6004
+WEB_ERROR_REQUEST_COUNTER :: AtomicU64.new(1) // GATE #4494: process-local atomic.
+// Rust: crates/jet-devserver/src/WebHost.rs:6009
+fn next_web_error_request_id() -> String { "werr-{WEB_ERROR_REQUEST_COUNTER.fetch_add(1, Ordering.SeqCst)}" }
+// Rust: crates/jet-devserver/src/WebHost.rs:6019
+fn paused_evaluate_error_status(error: PausedEvaluateHostError) -> String {
+    if error == {
+        .SessionUnavailable | .EvaluatorUnavailable -> "409 Conflict"
+        .InvalidRequest(_) -> "400 Bad Request"
+        .Rejected(_) -> "403 Forbidden"
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6030
+fn session_response(session: ResidentDevSession) -> String {
+    "{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{session.json()}}}"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6037
+fn with_session(body: String, session: &ResidentDevSession) -> String {
+    marker :: "\"canvas\":{{"
+    index :: body.find(marker) ?? return ^body
+    insert_at :: index + marker.len()
+    decorated := String.with_capacity(body.len() + session.json().len() + 16)
+    decorated.push_str(body[0..<insert_at])
+    decorated.push_str("\"session\":")
+    decorated.push_str(session.json())
+    decorated.push(',')
+    decorated.push_str(body[insert_at..<body.len()])
+    return ^decorated
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6052
+fn current_revision_for_request(canvas_file: String, request: String) -> String {
+    source_id :: parse_json(request).ok().and_then((value) -> if value == {
+        .Object(object) -> object.into_iter().find_map(((name, value)) -> {
+            if name != "source_id" -> return .None
+            if value == {
+                .Text(id) | .TypedText(id) -> .Val(^id)
+                else -> .None
+            }
+        })
+        else -> .None
+    }).unwrap_or_default()
+    return current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6075
+fn source_id_from_payload(payload: String) -> String {
+    value :: if parse_json(payload) == {
+        .Ok(value) -> value
+        .Err(_) -> { return "" }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:6080
+    fn find(value: Dyn) -> String? {
+        return if value == {
+            .Object(object) -> {
+                if object.iter().find_map(((name, value)) -> {
+                    if name != "source_id" -> return .None
+                    if value == {
+                        .Text(id) | .TypedText(id) -> .Val(id.clone())
+                        else -> .None
+                    }
+                }) == .Val(source_id) -> return .Val(^source_id)
+                object.iter().find_map(((_, value)) -> find(value))
+            }
+            .Array(values) -> values.iter().find_map(find)
+            else -> .None
+        }
+    }
+    return find(&value).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6105
+fn current_revision_for_source_id(canvas_file: String, source_id: String?) -> String {
+    source_path :: source_id.and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
+    return Canvas.read_source_without_symlinks(&source_path).map((source) -> Canvas.source_revision(source)).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6116
+fn serve_static_from_root(stream: impl Write, root: OSPath, path: String, nonce: String, session_secret: String) -> U16 Err! {
+    // The generated output root is the complete preview boundary. No source fallback.
+    relative :: if static_relative_path(path) == {
+        .Ok(path) -> path
+        .Err(_) -> { write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())?; return .Ok(400) }
+    }
+    content_type :: content_type_for(&relative)
+    is_html :: relative.extension().and_then((extension) -> extension.to_str()).is_some_and((extension) -> extension.eq_ignore_ascii_case("html"))
+    reload_script := is_html.then(() -> live_reload_script(nonce, session_secret))
+    raw_limit :: if reload_script.as_mut() == {
+        .Val(script) -> {
+            script.shrink_to_fit()
+            if !html_script_fits_budget(script.capacity()) {
+                write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "live-reload script exceeds the response budget".bytes())?
+                return .Ok(500)
+            }
+            html_raw_response_limit(script.capacity())
+        }
+        .None -> MAX_STATIC_RESPONSE_BYTES
+    }
+    bytes :: if read_static_file_bounded(root, &relative, raw_limit) == {
+        .Ok(b) -> b
+        .Err(error) -> {
+            (status, code, body) :: if error.kind() == {
+                .NotFound | .InvalidData -> ("404 Not Found", 404, "not found: {path}")
+                else -> ("400 Bad Request", 400, "bad path")
+            }
+            write_response(stream, status, "text/plain; charset=utf-8", body.as_bytes())?
+            return .Ok(code)
+        }
+    }
+    if reload_script == .Val(script) {
+        html :: if decode_html(^bytes) == {
+            .Ok(html) -> html
+            .Err(_) -> { write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "static HTML is not valid UTF-8".bytes())?; return .Ok(500) }
+        }
+        injected :: inject_live_reload_with_script(html, script) ?? {
+            write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "static HTML response is too large".bytes())?
+            return .Ok(500)
+        }
+        write_response(stream, "200 OK", content_type, injected.as_bytes())?
+        return .Ok(200)
+    }
+    write_response(stream, "200 OK", content_type, &bytes)?
+    return .Ok(200)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6203
+fn read_source_without_symlinks(path: OSPath) -> String Err! { Canvas.read_source_without_symlinks(path) }
+// Rust: crates/jet-devserver/src/WebHost.rs:6207
+fn read_web_manifest(root: OSPath) -> String? {
+    bytes :: read_static_file_bounded(root, &OSPath.new("web.manifest.json"), MAX_STATIC_RESPONSE_BYTES).ok()?
+    return String.from_utf8(^bytes).ok()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6217
+fn decode_html(bytes: [U8]) -> String Err! {
+    String.from_utf8(^bytes).map_err((_) -> Error.new(ErrorKind.InvalidData, "static HTML is not valid UTF-8")) // GATE #4409
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6226
+fn html_raw_response_limit(script_capacity: USize) -> U64 {
+    script_bytes :: U64.try_from(script_capacity).unwrap_or(U64.MAX)
+    MAX_STATIC_RESPONSE_BYTES.saturating_sub(script_bytes.saturating_mul(2)) / 2
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6231
+fn html_script_fits_budget(script_capacity: USize) -> Bool {
+    script_bytes :: U64.try_from(script_capacity).unwrap_or(U64.MAX)
+    script_bytes.saturating_mul(2) <= MAX_STATIC_RESPONSE_BYTES
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6251
+fn live_reload_script(nonce: String, session_secret: String) -> String {
+    perf_script :: if nonce.is_empty() { "" } else {
+        format("""  var jetPerfNonce = "{}";
+  self.__jetPerfNow = function () {{ return performance.now(); }};
+  self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
+    if (!symbol || typeof performance === "undefined") return;
+    var endMs = performance.now();
+    var body = new URLSearchParams({{
+      class: String(eventClass), symbol: String(symbol),
+      start_ns: String(Math.max(0, Math.floor(startMs * 1000000))),
+      duration_ns: String(Math.max(0, Math.floor((endMs - startMs) * 1000000))),
+      clock_ns: String(Math.max(0, Math.floor(endMs * 1000000)))
+    }});
+    try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce + "&session=" + encodeURIComponent(jetDevSession), body); }} catch (_) {{}}
+  }};
+""", nonce)
+    }
+    return format("""<script>
+(function () {{
+  var jetDevSession = "{session_secret}";
+  self.__jetDevSession = jetDevSession;
+{perf_script}
+  var jetDevVersion = null, reconnectAttempt = 0;
+  var ui = null, lastStatus = null;
+  var dismissedDiagnostic = null, errorFace = false, autoOpened = false;
+  var jetDevClient = null;
+  try {{ jetDevClient = sessionStorage.getItem("jet-dev-client"); }} catch (_) {{}}
+  if (!jetDevClient) {{
+    jetDevClient = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() :
+      String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+    try {{ sessionStorage.setItem("jet-dev-client", jetDevClient); }} catch (_) {{}}
+  }}
+  addEventListener("pagehide", function () {{
+    try {{ navigator.sendBeacon("/__jet_dev_disconnect?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession)); }} catch (_) {{}}
+  }});
+  // One container, three depths. The ring pattern and accessible name carry state.
+  function devtoolsUrl(route) {{ return route + "?session=" + encodeURIComponent(jetDevSession); }}
+  function ensureUi() {{
+    if (ui) return;
+    var style = document.createElement("style");
+    style.textContent =
+      "#jet-dev-lens{{position:fixed;left:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:2147483647;display:flex;flex-direction:column;width:76px;height:76px;aspect-ratio:1/1;max-width:calc(100vw - 32px);color:#F6F5F2;font:13px/1.4 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;background:#101114;border:2px solid var(--ring);border-radius:26px;box-shadow:0 0 0 1px rgba(255,255,255,.05),0 0 24px var(--glow),0 12px 30px rgba(0,0,0,.44);overflow:hidden;box-sizing:border-box;--ring:#56C271;--glow:rgba(86,194,113,.34)}}" +
+      "#jet-dev-lens::after{{content:'';position:absolute;inset:5px;border:1px solid transparent;border-radius:20px;pointer-events:none}}" +
+      "#jet-dev-lens[data-state=building]{{--ring:#E3A43B;--glow:rgba(227,164,59,.36);border-style:dashed}}" +
+      "#jet-dev-lens[data-state=building]::after{{border-color:rgba(227,164,59,.56);border-style:dashed}}" +
+      "#jet-dev-lens[data-state=error],#jet-dev-lens[data-state=unavailable],#jet-dev-lens[data-state=stopped]{{--ring:#E8232A;--glow:rgba(232,35,42,.42);border-style:double}}" +
+      "#jet-dev-lens[data-state=error]::after,#jet-dev-lens[data-state=unavailable]::after,#jet-dev-lens[data-state=stopped]::after{{border-color:rgba(232,35,42,.65)}}" +
+      "#jet-dev-lens[data-state=reconnecting],#jet-dev-lens[data-state=starting]{{--ring:#9B9EA8;--glow:rgba(155,158,168,.25);border-style:dotted}}" +
+      "#jet-dev-lens[data-state=reconnecting]::after,#jet-dev-lens[data-state=starting]::after{{border-color:rgba(155,158,168,.48);border-style:dotted}}" +
+      "#jet-dev-lens[data-depth=lens]{{width:min(560px,calc(100vw - 32px));height:auto;aspect-ratio:auto;max-height:min(78vh,720px);border-radius:24px}}" +
+      "#jet-dev-lens[data-depth=workbench]{{inset:16px;left:16px;right:16px;top:16px;bottom:16px;width:auto;height:auto;max-width:none;max-height:none;aspect-ratio:auto;border-radius:24px}}" +
+      "#jet-dev-pill{{display:flex;align-items:stretch;flex:none;position:relative;z-index:1}}" +
+      "#jet-dev-pill .head{{display:flex;align-items:center;justify-content:center;width:100%;height:72px;margin:0;padding:0;border:0;border-radius:22px;background:none;color:inherit;font:inherit;cursor:pointer}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .head{{flex:1 1 auto;justify-content:flex-start;gap:11px;width:auto;height:52px;padding:0 16px;min-width:0}}" +
+      "#jet-dev-pill .logo{{display:flex;flex:none;width:49px;height:28px;align-items:center;justify-content:center}}" +
+      "#jet-dev-pill .logo svg{{display:block;width:49px;height:27px}}" +
+      "#jet-dev-pill .word{{display:none;font-size:13px;font-weight:650;letter-spacing:.01em;line-height:1}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .word{{display:inline}}" +
+      "#jet-dev-pill .read{{display:none;font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#9B9EA8}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .read:not(:empty){{display:inline}}" +
+      "#jet-dev-lens .sr{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}" +
+      "#jet-dev-pill .tools{{display:none;align-items:center;gap:2px;padding-right:8px;flex:none;position:relative;z-index:1}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .tools{{display:flex}}" +
+      "#jet-dev-pill .tool{{margin:0;padding:6px 9px;border:1px solid transparent;border-radius:8px;background:none;color:#9B9EA8;font:inherit;font-size:12px;line-height:1.2;cursor:pointer;text-decoration:none;white-space:nowrap}}" +
+      "#jet-dev-pill .tool:hover{{color:#F6F5F2;background:#1D2026}}" +
+      "#jet-dev-lens[data-depth=lens] .tool[data-depth=lens],#jet-dev-lens[data-depth=workbench] .tool[data-depth=workbench]{{display:none}}" +
+      "#jet-dev-lens :focus-visible{{outline:2px solid #E8232A;outline-offset:-2px}}" +
+      "#jet-dev-body{{display:none;flex:1 1 auto;min-height:0;flex-direction:column;border-top:1px solid #30343C;background:#101114;position:relative;z-index:1}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-body{{display:flex}}" +
+      "#jet-dev-overlay{{display:none;flex:1 1 auto;min-height:0;flex-direction:column;overflow:auto}}" +
+      "#jet-dev-overlay h3{{margin:0;padding:17px 18px 8px;font-family:inherit;font-size:14px;font-weight:650;line-height:1.3;color:#F6F5F2}}" +
+      "#jet-dev-overlay h3::before{{content:'';display:inline-block;width:9px;height:9px;border:2px solid #E8232A;border-radius:3px;margin-right:9px;vertical-align:0}}" +
+      "#jet-dev-overlay pre{{flex:0 1 auto;margin:0 18px;padding:13px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#F6F5F2;background:#0A0B0D;border:1px solid #30343C;border-radius:10px}}" +
+      "#jet-dev-overlay footer{{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:13px 18px;color:#9B9EA8;font-size:11px}}" +
+      "#jet-dev-overlay footer .parity{{flex:1 1 100%;overflow-wrap:anywhere}}" +
+      "#jet-dev-overlay footer .act{{margin:0;padding:7px 12px;border:1px solid #30343C;border-radius:9px;background:#17191D;color:#F6F5F2;font:inherit;font-size:12px;cursor:pointer;text-decoration:none}}" +
+      "#jet-dev-overlay footer .act.primary{{border-color:#E8232A}}#jet-dev-overlay footer .act:hover{{background:#1D2026}}#jet-dev-overlay footer .act[disabled]{{opacity:.5;cursor:default}}" +
+      "#jet-dev-overlay footer .result{{flex:1 1 100%;min-height:1.4em;overflow-wrap:anywhere}}" +
+      "#jet-dev-panels{{flex:1 1 auto;min-height:0;height:min(62vh,640px);width:100%;border:0;background:#101114}}" +
+      "#jet-dev-panels[hidden]{{display:none}}" +
+      "#jet-dev-shade{{position:fixed;inset:0;z-index:2147483645;display:none;pointer-events:none;background:rgba(16,17,20,.32)}}" +
+      "@media(max-width:560px){{#jet-dev-lens[data-depth=lens]{{left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-width:none;max-height:82vh;border-radius:22px}}#jet-dev-lens[data-depth=lens] #jet-dev-panels{{height:68vh}}#jet-dev-lens[data-depth=workbench]{{inset:0;max-width:none;border-radius:0}}#jet-dev-lens[data-depth=workbench] #jet-dev-panels{{height:auto}}}}" +
+      "@media(prefers-reduced-motion:no-preference){{#jet-dev-lens{{transition:width .22s cubic-bezier(.2,.7,.2,1),height .22s cubic-bezier(.2,.7,.2,1),border-radius .22s,box-shadow .22s}}#jet-dev-body{{animation:jet-dev-in .18s ease}}@keyframes jet-dev-in{{from{{opacity:0}}to{{opacity:1}}}}#jet-dev-lens[data-state=building]::after{{animation:jet-dev-ring 1.2s ease-in-out infinite alternate}}@keyframes jet-dev-ring{{to{{opacity:.35}}}}}}" +
+      "@media(prefers-reduced-motion:reduce){{#jet-dev-lens,#jet-dev-body{{transition:none!important;animation:none!important}}}}";
+    document.head.appendChild(style);
+    var root = document.createElement("div");
+    root.id = "jet-dev-lens";
+    root.setAttribute("data-depth", "pill");
+    root.setAttribute("data-state", "ready");
+    root.innerHTML =
+      "<div id=\\"jet-dev-pill\\">" +
+        "<button class=\\"head\\" type=\\"button\\" aria-expanded=\\"false\\" aria-controls=\\"jet-dev-body\\" title=\\"Open Jet development status (Alt+J)\\">" +
+          "<span class=\\"logo\\" aria-hidden=\\"true\\"><svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 120 64\\" focusable=\\"false\\"><path fill=\\"#E8232A\\" d=\\"M112 32 L52 6 L66 32 L52 58 Z\\"></path><rect fill=\\"#E8232A\\" x=\\"26\\" y=\\"14\\" width=\\"18\\" height=\\"6\\" rx=\\"3\\"></rect><rect fill=\\"#E8232A\\" x=\\"4\\" y=\\"29\\" width=\\"36\\" height=\\"6\\" rx=\\"3\\"></rect><rect fill=\\"#E8232A\\" x=\\"16\\" y=\\"44\\" width=\\"24\\" height=\\"6\\" rx=\\"3\\"></rect></svg></span>" +
+          "<span class=\\"word\\" aria-hidden=\\"true\\"></span><span class=\\"read\\" aria-hidden=\\"true\\"></span>" +
+        "</button>" +
+        "<span class=\\"tools\\">" +
+          "<button class=\\"tool\\" type=\\"button\\" data-depth=\\"workbench\\">Open workbench</button>" +
+          "<button class=\\"tool\\" type=\\"button\\" data-depth=\\"lens\\">Lens</button>" +
+          "<button class=\\"tool\\" type=\\"button\\" data-depth=\\"pill\\" aria-label=\\"Close Jet development status (Escape)\\" title=\\"Close (Escape)\\">&#215;</button>" +
+        "</span>" +
+      "</div>" +
+      "<span class=\\"sr\\" id=\\"jet-dev-status\\" role=\\"status\\" aria-live=\\"polite\\"></span>" +
+      "<div id=\\"jet-dev-body\\">" +
+        "<div id=\\"jet-dev-overlay\\"><h3></h3><pre></pre><footer><span class=\\"parity\\"></span>" +
+          "<button class=\\"act primary\\" type=\\"button\\" data-act=\\"source\\">Fix in source</button>" +
+          "<button class=\\"act\\" type=\\"button\\" data-act=\\"rebuild\\">Rebuild</button>" +
+          "<a class=\\"act\\" target=\\"_blank\\" rel=\\"noopener\\">Open error details</a><span class=\\"result\\" role=\\"status\\"></span></footer></div>" +
+        "<iframe id=\\"jet-dev-panels\\" title=\\"Jet devtools\\" hidden></iframe>" +
+      "</div>";
+    document.body.appendChild(root);
+    var shade = document.createElement("div");
+    shade.id = "jet-dev-shade";
+    shade.setAttribute("aria-hidden", "true");
+    document.body.appendChild(shade);
+    ui = {{
+      root: root, shade: shade,
+      head: root.querySelector(".head"), word: root.querySelector(".word"), read: root.querySelector(".read"),
+      status: root.querySelector("#jet-dev-status"), overlay: root.querySelector("#jet-dev-overlay"), frame: root.querySelector("#jet-dev-panels")
+    }};
+    ui.overlayTitle = ui.overlay.querySelector("h3");
+    ui.overlayBody = ui.overlay.querySelector("pre");
+    ui.overlayFooter = ui.overlay.querySelector("footer .parity");
+    ui.overlayResult = ui.overlay.querySelector("footer .result");
+    ui.overlay.querySelector("footer a").href = devtoolsUrl("/__jet_devtools/error");
+    ui.head.addEventListener("click", toggleLens);
+    root.querySelectorAll(".tool[data-depth]").forEach(function (button) {{
+      button.addEventListener("click", function () {{
+        if (button.dataset.depth === "pill") back(true, true); else setDepth(button.dataset.depth, true);
+      }});
+    }});
+    ui.overlay.querySelector("[data-act=source]").addEventListener("click", openSourceTool);
+    ui.overlay.querySelector("[data-act=rebuild]").addEventListener("click", function (event) {{ rebuild(event.currentTarget); }});
+    document.addEventListener("keydown", onKey);
+    addEventListener("message", function (event) {{
+      if (event.origin === location.origin && event.data && event.data.jet === "devtools") onKey(event.data);
+    }});
+  }}
+  function onKey(event) {{
+    if (event.key === "Escape") {{ back(true); return; }}
+    if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "j" || event.key === "J")) {{
+      if (event.preventDefault) event.preventDefault();
+      toggleLens();
+    }}
+  }}
+  function depth() {{ return ui ? ui.root.getAttribute("data-depth") : "pill"; }}
+  function toggleLens() {{
+    if (depth() !== "pill") {{ back(true, true); return; }}
+    dismissedDiagnostic = null;
+    errorFace = !!lastStatus && lastStatus.state === "error";
+    setDepth("lens", true);
+  }}
+  function back(byUser, toPill) {{
+    var current = depth();
+    if (current === "pill") return;
+    if (current === "workbench" && !toPill) {{ setDepth("lens", byUser); return; }}
+    if (errorFace) dismissedDiagnostic = ui.overlayBody.textContent;
+    errorFace = false;
+    autoOpened = false;
+    setDepth("pill", byUser);
+  }}
+  function frameRoute(next, extra) {{
+    var route = next === "workbench" ? "/__jet_devtools/workbench" : "/__jet_devtools";
+    if (extra || ui.frame.getAttribute("data-route") !== route) {{
+      ui.frame.setAttribute("data-route", route);
+      ui.frame.src = devtoolsUrl(route) + (extra || "");
+    }}
+  }}
+  function setDepth(next, byUser) {{
+    ensureUi();
+    var current = depth();
+    if (next === current) return;
+    ui.root.setAttribute("data-depth", next);
+    ui.head.setAttribute("aria-expanded", next === "pill" ? "false" : "true");
+    if (next === "pill") {{
+      ui.frame.removeAttribute("data-route");
+      ui.frame.src = "about:blank";
+    }} else frameRoute(next);
+    renderFaces();
+    if (byUser) {{
+      if (next === "pill") ui.head.focus();
+      else ui.root.querySelector(".tool[data-depth=pill]").focus();
+    }}
+  }}
+  function openSourceTool() {{
+    dismissedDiagnostic = ui.overlayBody.textContent;
+    errorFace = false;
+    autoOpened = false;
+    frameRoute(depth() === "workbench" ? "workbench" : "lens", "&tool=source");
+    renderFaces();
+    ui.frame.focus();
+  }}
+  function rebuild(button) {{
+    button.disabled = true;
+    ui.overlayResult.textContent = "Requesting rebuild…";
+    fetch(devtoolsUrl("/__jet_devtools/state"), {{ cache: "no-store" }})
+      .then(function (r) {{ if (!r.ok) throw new Error("devtools state unavailable (HTTP " + r.status + ")"); return r.json(); }})
+      .then(function (st) {{
+        if (st.tools && st.tools.rebuild && !st.tools.rebuild.available) throw new Error(st.tools.rebuild.reason || "rebuild is not available on this host");
+        var id = "rebuild-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+        return fetch(devtoolsUrl("/__jet_devtools"), {{
+          method: "POST", cache: "no-store", headers: {{ "content-type": "application/json" }},
+          body: JSON.stringify({{ protocol: "jet.devtools.v1", session_id: st.session_id, started_at_ms: Date.now(), direction: "host_to_runtime",
+            commands: [{{ kind: "ProjectRebuild", payload: {{ session_id: st.session_id, request_id: id, expected_revision: st.revision }} }}] }})
+        }});
+      }})
+      .then(function (r) {{
+        if (!r.ok) return r.text().then(function (t) {{ throw new Error(t || ("rebuild refused (HTTP " + r.status + ")")); }});
+        ui.overlayResult.textContent = "Rebuild queued — this tile follows the build";
+      }})
+      .catch(function (e) {{ ui.overlayResult.textContent = String(e.message || e); }})
+      .finally(function () {{ button.disabled = false; }});
+  }}
+  function renderFaces() {{
+    var open = depth() !== "pill";
+    ui.overlay.style.display = open && errorFace ? "flex" : "none";
+    ui.frame.hidden = !(open && !errorFace);
+  }}
+  function renderStatus(s) {{
+    ensureUi();
+    lastStatus = s;
+    var state = s.state || "ready";
+    ui.root.setAttribute("data-state", state);
+    // The hidden status is the non-color equivalent of the ring.
+    ui.head.setAttribute("aria-label", "Jet development status: " + (s.message || state));
+    ui.status.textContent = (s.message || state) + (s.diagnostic ? "\\n" + s.diagnostic : "");
+    ui.word.textContent = state;
+    ui.read.textContent = state === "error" ? (s.code || "") :
+      (state === "ready" && s.last_build_ms > 0 ? (s.last_build_ms / 1000).toFixed(1) + "s" : "");
+    var stale = state === "building" || state === "reconnecting" || state === "error";
+    ui.shade.style.display = stale ? "block" : "none";
+    if (state === "error") {{
+      var diagnostic = s.diagnostic || "";
+      ui.overlayBody.textContent = diagnostic;
+      ui.overlayTitle.textContent = "Build failed — " + (s.file || "Jet source");
+      ui.overlayFooter.textContent = (s.message || state) + " — clears on the next clean build";
+      if (diagnostic !== dismissedDiagnostic) {{
+        if (depth() === "pill") {{ errorFace = true; autoOpened = true; setDepth("lens", false); }} else if (errorFace) {{ ui.overlayResult.textContent = ""; }}
+        else dismissedDiagnostic = diagnostic;
+      }}
+    }} else {{
+      errorFace = false;
+      dismissedDiagnostic = null;
+      if (autoOpened) {{ autoOpened = false; setDepth("pill", false); }}
+    }}
+    renderFaces();
+  }}
+  function notifyWebSwap() {{
+    var snapshot = typeof globalThis.__jetWebSwapSnapshot === "function"
+      ? globalThis.__jetWebSwapSnapshot() : null;
+    var publish = snapshot
+      ? fetch("/__jet_devtools/swap?session=" + encodeURIComponent(jetDevSession), {{
+          method: "POST", cache: "no-store", headers: {{"content-type":"application/json"}}, body: JSON.stringify(snapshot)
+        }})
+      : Promise.resolve(null);
+    publish
+      .then(function (r) {{ if (r && !r.ok) throw new Error("web DOM snapshot rejected"); }})
+      .then(function () {{ return fetch("/__jet_devtools/swap?session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }}); }})
+      .then(function (r) {{ if (!r.ok) throw new Error("web swap rejected"); return r.json(); }})
+      .then(function (swap) {{
+        dispatchEvent(new CustomEvent("jet:web-swap", {{ detail: swap }}));
+        document.dispatchEvent(new CustomEvent("jet:web-swap", {{ detail: swap }}));
+      }})
+      .catch(function () {{}});
+  }}
+  function poll() {{
+    fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (s) {{
+        var recoveredConnection = reconnectAttempt > 0;
+        reconnectAttempt = 0;
+        renderStatus(s);
+        var v = String(s.version || "");
+        if (jetDevVersion === null) {{
+          jetDevVersion = v;
+          if (recoveredConnection) notifyWebSwap();
+          return;
+        }}
+        if (recoveredConnection || v !== jetDevVersion) {{ jetDevVersion = v; notifyWebSwap(); }}
+      }})
+      .catch(function () {{
+        reconnectAttempt += 1;
+        renderStatus({{ state: "reconnecting", message: "reconnecting · waiting for connection" }});
+      }})
+      .finally(function () {{ setTimeout(poll, {poll_ms}); }});
+  }}
+  setTimeout(poll, 0);
+}})();
+</script>
+""", poll_ms: LIVE_RELOAD_POLL_MS, perf_script: perf_script, session_secret: jet_foundation.JSON.json_escape(session_secret))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6566
+fn inject_live_reload_with_script(html: String, script: String) -> String? {
+    output_len :: html.len().checked_add(script.len())?
+    // ASCII case-insensitive scan preserves byte offsets without a lowercase allocation.
+    insertion :: html.as_bytes().windows("</body>".bytes().len()).position((tag_ref) -> tag_ref.iter().zip("</body>".bytes()).all(((left, right)) -> left.eq_ignore_ascii_case(right)))
+    out := String.with_capacity(output_len)
+    if insertion == .Val(index) {
+        out.push_str(html[0..<index]); out.push_str(script); out.push_str(html[index..<html.len()])
+    } else { out.push_str(html); out.push_str(script) }
+    return .Val(^out)
+}
+

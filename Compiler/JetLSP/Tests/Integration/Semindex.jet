@@ -1,0 +1,27 @@
+// Rust: tests/semindex.rs:1
+// D-SEMINDEX1 integration tests for the stable semantic-index API.
+use jet_semindex.[SemanticProvenance, SemanticSymbol, SemanticSymbolKind]
+use std.[fs, env, process]
+// GATE #4494: native filesystem and process identity.
+
+// Rust: tests/semindex.rs:12
+fn fixture(name: String) -> OSPath { OSPath.from(env.manifest_dir()).join("Examples/features").join(name) }
+
+// Rust: tests/semindex.rs:18
+fn temp_fixture(name: String, src: String) -> OSPath {
+    dir :: env.temp_dir().join("jet_semindex_{process.id()}")
+    fs.create_dir_all(dir).expect("semindex temp dir")
+    path :: dir.join(name)
+    fs.write(path, src).expect("write semindex fixture")
+    ^path
+}
+
+// Rust: tests/semindex.rs:26
+fn fact(identity: String, name: String, qualified_name: String, kind: SemanticSymbolKind, provenance: SemanticProvenance) -> SemanticSymbol {
+    SemanticSymbol {
+        identity: identity.clone(), name: name.clone(), qualified_name: qualified_name.clone(),
+        owner: qualified_name.split_once('.').map((owner, _) -> owner.to_string()),
+        module_path: "test", kind: kind, signature: identity.clone(), summary: String.new(), examples: [],
+        provenance: ^provenance, span: none, lexical_scope: none
+    }
+}

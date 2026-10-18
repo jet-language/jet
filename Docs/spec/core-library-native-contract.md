@@ -89,10 +89,12 @@ boundary's panic-to-TaskFailure catch rather than letting an ordinary native
 task panic abort its whole process. Plain/no-task MIR production uses the
 same false-mode implementation; its output is expected to remain byte-identical.
 
-Native cleanup frames lend TCB64 bit4 through `jet_rt_cleanup_enter/leave`,
-saving/restoring the whole word for nesting. The first owned Stop stays in the
-control slot, while Check/Propagate delivery is masked even inside deferred
-thunks and resource closes. Cancellation and deadlines do not interrupt those
+Native cleanup frames bracket their actions with `jet_rt_cleanup_enter/leave`:
+one runtime cleanup scope (`jet_rt_session_cleanup_enter/leave`, whose owned
+token restores the control's scope flags for nesting) plus Shield. The first
+owned Stop stays in the control slot, while Check/Propagate delivery of it is
+masked even inside deferred thunks and resource closes. Cancellation and
+deadlines do not interrupt those
 closes. A new panic during cleanup with a pending Stop is process-fatal (70),
 matching the Rust seed's panic-during-unwinding abort semantics
 (`crates/jet-codegen/src/Prelude/Scheduler.rs:234–244`). No additional TLS state
@@ -107,7 +109,11 @@ and the plain no-task output against its existing byte golden. Its
 source parsing alone is not a behavioral receipt.
 
 Native expectation probes consume only a pending panic with a recorded raw
-`E3001` or `R0801`–`R0803` stop in the innermost matching scope. A successful
+`E3001`, `E3010`, `E3011` or `R0801`–`R0803` stop in the innermost matching
+scope. The panic rail records that code and raw message on every active
+expectation frame before publishing, as `Core.rs` `jet_test_record_stop` does,
+so a frame's first recorded stop is the code its expectation is matched against.
+A successful
 `jet_rt_test_catch_for_scope` completes that expectation but retains the original
 scheduler stop while deeper frames unwind. `jet_rt_test_catch_boundary` clears it
 at the canonical expectation exit, before that frame's own cleanup: the Rust
@@ -692,6 +698,16 @@ Private unpublished arithmetic workspaces use their unique-owner discard.
 Rust-tier seed/verification transport uses the identical C layout, with its
 allocator paired at construction and release; that registered transport dies
 at the Rust cutover, rather than defining a second numeric representation.
+`Atomic<Int>` (`AtomicInt.jet`) owns one exact publication per cell; `add`
+returns the independently owned previous exact value. Compare-exchange uses
+numeric equality while retaining the observed node through publication, not
+pointer equality. Fallible add leaves the cell unchanged on refusal and reports
+the physical failed native request in `AllocError.requested_bytes` with
+allocator `"exact-int"`; those byte counts reflect native node/limb layout, not
+Rust temporary-vector layout. An inline fast path allocates nothing and takes
+no allocation fault probe. A spilling operation probes once even if its CAS
+retries, then separately allocates a node and limbs; a limb-capacity refusal
+frees the already allocated node.
 
 
 Native iterator operations preserve the delivered stop rail. A stopped callback

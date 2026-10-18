@@ -1,8 +1,9 @@
 // S31: outside an `if` condition a pattern test is a Bool value, and a name
 // in its pattern is a fresh binding that nothing can read. It never compares
-// against an outer binding of the same name: `root == .Val(name)` is true for
-// any present value. Compare with a value by writing it as an expression,
-// `root == (Val(name))`.
+// against an outer binding: `root == .Val(other)` is true for any present
+// value, and reusing a name that already holds a value there is E0118
+// (#4713). Compare with a value by writing a parenthesized payload,
+// `root == Val((name))`.
 enum Shape {
     Circle(Int)
     Pair(left: Int, right: Int)
@@ -14,12 +15,12 @@ fn even_successor(n: Int) -> Int Err! {
 }
 
 fn same_label_pattern(label: String?, root: String?) -> Bool {
-    if label == .Val(name) -> return name != "" && root == .Val(name)
+    if label == .Val(name) -> return name != "" && root == .Val(other)
     false
 }
 
 fn same_label_value(label: String?, root: String?) -> Bool {
-    if label == .Val(name) -> return root == (Val(name))
+    if label == .Val(name) -> return root == Val((name))
     false
 }
 

@@ -12,7 +12,7 @@ enum JetCLIFixQuery {
 
 fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuery {
     diagnostics := [Diagnostic]{}
-    if jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source)) == {
+    if jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source), None) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
         .Compiled(result, snapshot) -> {
             if result.internal_problem == .Val(problem) -> return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}

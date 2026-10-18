@@ -21,12 +21,13 @@
 // and a scripted session rail (check-stop-points.c) that stops it at chosen
 // polls and counts the String the program owns.
 use jet_foundation.[
-    MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant,
-    MIRDropKind, MIRFunction, MIRFunctionID, MIROperation, MIRPollKind, MIRProgram, MIRScope,
-    MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRUnsafeGate,
-    mir_function_id,
+    MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRCaptureOperand, MIRConstant,
+    MIRDropKind, MIRFunction, MIRFunctionID, MIRFunctionSignature, MIROperation, MIRPollKind,
+    MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRScope, MIRScopeFact, MIRScopeID, MIRScopeKind,
+    MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRUnsafeGate, MIRValueID,
+    mir_function_id, mir_type_from_kind,
 ]
-use jet_backend.[lir_lower_callables]
+use jet_backend.[LIRModule, lir_lower_callables, lir_optimize_module, x64_compile_module]
 
 // The exact predicate used by Builder and Legality: a raw Source Deref gets
 // Propagate; Shared/ref reads and missing operand metadata do not.
@@ -110,6 +111,147 @@ fn fx_stop_points() -> MIRProgram Never! {
     run := fx_function("run", r, fx_unit())
     run.scopes = [MIRScope]{MIRScope{id: shield, kind: MIRScopeKind.Shield, span: fx_span(), name: None, deadline: None, facts: [MIRScopeFact]{}}}
     fx_program([MIRFunction]{fx_function("twice", t, fx_int()), fx_function("label", l, fx_string()), run}, [MIRTypeDef]{})
+}
+
+// [ThreadWord(16) reads, jet_rt_session_poll calls, jet_rt_session_propagate
+// calls, rail calls in a block that also reads the thread word].
+fn fx_stop_poll_counts(program: LIRModule) -> [Int] Never! {
+    words := 0
+    polls := 0
+    propagates := 0
+    shared := 0
+    loop function in program.functions {
+        loop block in function.blocks {
+            reads := false
+            calls := 0
+            loop instruction in block.insts {
+                if instruction == .ThreadWord(_, offset) {
+                    if offset == 16 {
+                        words += 1
+                        reads = true
+                    }
+                }
+                if instruction == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_session_poll" {
+                            polls += 1
+                            calls += 1
+                        }
+                        if symbol == "jet_rt_session_propagate" {
+                            propagates += 1
+                            calls += 1
+                        }
+                    }
+                }
+            }
+            if reads -> shared += calls
+        }
+    }
+    [Int]{words, polls, propagates, shared}
+}
+
+// The same stop points lowered for the runtime pack (Lower.jet lower_poll):
+// each of the 7 Polls reads the current control with one ThreadWord(16) and
+// calls the session rail only from its own slow block, never from the block
+// that reads the control; the freestanding lowering keeps one call per Poll
+// and no thread word. Writes each function's O0 and O1 x86-64 as
+// `<name>-o<level>.<function>.bin` for disassembly.
+fn fx_report_stop_points_pack(name: String) -> Bool {
+    print("== {name}")
+    program := fx_stop_points()
+    roots :: [MIRFunctionID]{mir_function_id("twice"), mir_function_id("label"), mir_function_id("run")}
+    plain :: lir_lower_callables(program, roots)
+    program.native_pack = true
+    packed :: lir_lower_callables(program, roots)
+    loop issue in plain.issues -> print("issue freestanding {issue.function}: {issue.message}")
+    loop issue in packed.issues -> print("issue pack {issue.function}: {issue.message}")
+    if plain.issues.len() > 0 || packed.issues.len() > 0 -> return false
+    print(lir_print_module(packed.lir))
+    plain_counts :: fx_stop_poll_counts(plain.lir)
+    packed_counts :: fx_stop_poll_counts(packed.lir)
+    clean := plain_counts == [Int]{0, 4, 3, 0} && packed_counts == [Int]{7, 4, 3, 0}
+    print("{name}: freestanding {plain_counts}, runtime pack {packed_counts}")
+    loop level in 0..<2 {
+        lowered := packed.lir.copy()
+        optimized :: lir_optimize_module(^lowered, level)
+        if level > 0 {
+            counts :: fx_stop_poll_counts(optimized)
+            print("{name}: O{level} {counts}")
+            if counts[0] != 7 || counts[3] != 0 -> clean = false
+        }
+        compiled :: x64_compile_module(optimized)
+        loop error in compiled.errors -> print("x64 {name} O{level}: {error}")
+        if compiled.errors.len() > 0 -> return false
+        loop function in compiled.functions {
+            path :: "{name}-o{level}.{function.name}.bin"
+            files.write_bytes(path, function.code) ?? panic("cannot write {path}")
+            print("{name}: O{level} {function.name} {function.code.len()} bytes")
+        }
+    }
+    clean
+}
+
+// An inline ClosureMethod in a stop-point module (Combinators.jet
+// lower_callback_guard):
+//
+// fn double(n: Int) -> Int { n + n }      // its own entry Check
+// fn run() { xs :: [1, 2, 3]; print(xs.map(double)) }
+//
+// The map's element loop tests the delivered stop after every callback; a
+// stopped callback leaves the partial result and the moved closure released
+// and takes the call's Propagate edge (which drops `xs`).
+// expect-stdout stop-points-map: "[2, 4, 6]\n"
+// expect-static-only stop-points-map
+fn fx_stop_points_map() -> MIRProgram Never! {
+    ints :: fx_list_type(fx_int())
+    d := fx_builder()
+    n :: fx_param(&d, "n", fx_int(), mir_copy_ownership())
+    fx_block(&d, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    doubled :: fx_int_op(&d, MIRBinaryOp.Add, "add", n, n)
+    fx_block(&d, 1, MIRTerminator.Return{value: Val(doubled)})
+    fx_block(&d, 2, MIRTerminator.Stopped)
+    r := fx_builder()
+    items := [MIRValueID]{}
+    loop value in ([Int]{1, 2, 3}) -> &items.push(fx_int_const(&r, value))
+    xs :: fx_owned(&r, ints, MIROperation.BuildList{values: items, trait_coercion: None})
+    fn_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_int()}, ret: Val(fx_int()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    callback :: fx_owned(&r, fn_ty, MIROperation.Closure{function: mir_function_id("double"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+    mapped :: fx_owned(&r, ints, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: xs, args: [MIRCallArg]{fx_arg(callback, MIRAccess.Move)}, call: fx_prelude_id("core.list", "map")}})
+    fx_block(&r, 0, MIRTerminator.Poll{kind: MIRPollKind.Propagate, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    fx_print(&r, mapped)
+    fx_do(&r, MIROperation.Drop{value: mapped, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
+    fx_block(&r, 1, MIRTerminator.Return{value: None})
+    fx_do(&r, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
+    fx_block(&r, 2, MIRTerminator.Stopped)
+    p := fx_program([MIRFunction]{fx_function("double", d, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+    row := fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "map", "jet_list_map", 2, MIRPreludeABI.Value)
+    row.signature.borrow_mask[0] = true
+    &p.prelude_calls.push(row)
+    p
+}
+
+// The map loop's callback is followed by a delivered-stop test in both
+// lowerings: the session rail call (freestanding) or the inline control read
+// (runtime pack), never an unguarded element loop.
+fn fx_stop_points_map_check() -> Bool Never! {
+    program := fx_stop_points_map()
+    roots :: [MIRFunctionID]{mir_function_id("double"), mir_function_id("run")}
+    clean := true
+    loop pack in ([Bool]{false, true}) {
+        program.native_pack = pack
+        lowered :: lir_lower_callables(program, roots)
+        loop issue in lowered.issues -> print("stop-points-map: {issue.function}: {issue.message}")
+        if lowered.issues.len() > 0 -> return false
+        counts :: fx_stop_poll_counts(lowered.lir)
+        // Polls: double's Check, run's Propagate, and the map loop's guard.
+        expected :: if pack -> [Int]{3, 1, 2, 0} else -> [Int]{0, 1, 2, 0}
+        if counts != expected {
+            print("stop-points-map: native_pack {pack} counts {counts}, expected {expected}")
+            clean = false
+        }
+    }
+    clean
 }
 
 // A poll can leave nested sentry scopes through either cleanup edge. The

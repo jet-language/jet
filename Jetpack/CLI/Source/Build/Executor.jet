@@ -1,0 +1,584 @@
+// The sandboxed build executor, ported 1:1 from crates/jet-comptime
+// Build/execution_runtime.rs `execute_build_plan` (front end complete, no
+// remote binding, no compiler runner: the entry `jet cc` / `jet c++` use).
+// Every action and probe runs through the one native child boundary
+// (Foundation NativeSandbox: Linux Bubblewrap, macOS Seatbelt); there is no
+// unsandboxed fallback. Actions of one batch run one after another here
+// rather than on scoped threads; every member still runs and the batch
+// reports its first error in action order, as the Rust join does.
+
+struct BuildProbeFact {
+    name: String
+    success: Bool
+    detail: String
+    reproducibility: ReproducibilityClass
+    toolchain: ToolchainHandle
+    toolchain_provenance: ContentDigest
+}
+
+struct BuildExecutionResult {
+    report: BuildExecutionReport
+    probes: [BuildProbeFact]
+}
+
+#Error
+enum BuildExecutionError {
+    MissingGrant(action: String, capability: BuildEffect)
+    SandboxUnavailable
+    IO(action: String, detail: String)
+    ProbeFailed(probe: String, detail: String)
+    // The one structured action-failure route, retained whether the action
+    // ran now or its failure was restored from the cache.
+    Reported(report: DiagnosticBuildError)
+    InvalidGraph(HermeticBuildError)
+
+    fn report(self) -> DiagnosticBuildError? Never! {
+        if self == {
+            .Reported(report) -> Val(report)
+            else -> None
+        }
+    }
+
+    fn is_reported_action_failure(self) -> Bool Never! {
+        self.report() != None
+    }
+}
+
+// Rust `action_failure_report`: E3505 with the `BuildActionFailure` details.
+fn build_action_failure_report(action: String, exit_code: Int, stderr: String) -> DiagnosticBuildError Never! {
+    DiagnosticBuildError{
+        code: Val("E3505"),
+        message: "build action `{action}` exited with status {exit_code}",
+        typed_identity: Val("BuildAction::Failed"),
+        details: Val(DiagnosticErrorDetails{
+            variant: "BuildActionFailure",
+            fields: [DiagnosticErrorField]{
+                DiagnosticErrorField{name: "action", value: foundation_json_quote(action)},
+                DiagnosticErrorField{name: "exit_code", value: "{exit_code}"},
+                DiagnosticErrorField{name: "stderr", value: foundation_json_quote(stderr)},
+            },
+            source_span: None,
+        }),
+    }
+}
+
+// Execute the canonical action graph through the platform-native child
+// boundary. Every selected action's declared abilities must be granted
+// before anything runs; probes need the Exec grant.
+fn build_execute_build_plan(plan: HermeticBuildPlan, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect]) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildExecutionResult BuildExecutionError! {
+    selected_actions :: plan.selected_action_ids() ?? return Err(BuildExecutionError.InvalidGraph(err))
+    loop action in plan.actions {
+        if !selected_actions.contains(action.id) -> next
+        loop cap in action.caps {
+            if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+        }
+    }
+    selected_probes :: plan.selected_probe_ids() ?? return Err(BuildExecutionError.InvalidGraph(err))
+    if selected_probes.len() > 0 && !grants.contains(BuildEffect.Exec) {
+        probe :: plan.probes[selected_probes[0]]
+        return Err(BuildExecutionError.MissingGrant{action: "probe {probe.name}", capability: BuildEffect.Exec})
+    }
+    probes :: build_execute_probes(plan, selected_probes)
+    model :: plan.execution_model() ?? return Err(BuildExecutionError.InvalidGraph(err))
+    outcomes := [BuildActionOutcomeRow]{}
+    loop stage in model.stages {
+        loop batch in build_execution_batches(plan, stage.actions) {
+            loop action_id in batch {
+                action :: plan.actions[action_id]
+                loop cap in action.caps {
+                    if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: action.name, capability: cap})
+                }
+            }
+            results := [BuildExecutionError?]{}
+            completed := [BuildActionOutcomeRow]{}
+            loop action_id in batch {
+                action :: plan.actions[action_id]
+                handle :: HermeticActionHandle{id: action.id, context: plan.context}
+                if build_execute_one_action(plan, action, handle, project_root, artifact_store, grants, probes) == {
+                    .Ok(outcome) -> {
+                        &completed.push(BuildActionOutcomeRow{action: handle, outcome})
+                        &results.push(None)
+                    }
+                    .Err(error) -> &results.push(Val(error))
+                }
+            }
+            loop result in results {
+                if result == .Val(error) -> return Err(error)
+            }
+            &completed.sort_by((left: BuildActionOutcomeRow, right: BuildActionOutcomeRow) -> left.action.id <=> right.action.id)
+            loop row in completed -> &outcomes.push(row)
+        }
+    }
+    report :: plan.execution_report(outcomes) ?? return Err(BuildExecutionError.InvalidGraph(err))
+    Ok(BuildExecutionResult{report, probes})
+}
+
+// Rust `execution_batches`: deterministic resource-pool packing. CPU and
+// memory have automatic capacity; linker, console, GPU and custom pools
+// serialize by name.
+fn build_execution_batches(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] Never! {
+    batches := [[Int]]{}
+    limits := [String: Int]{}
+    loop spec in plan.resource_pools() -> limits[spec.pool.as_str()] = spec.slots
+    held := [[String: Int]]{}
+    loop action_id in actions {
+        pools := [String]{}
+        loop pool in build_action_pools(plan.actions[action_id]) -> build_insert_sorted_text(&pools, pool.as_str())
+        slot := -1
+        loop index in 0..<held.len() {
+            used :: held[index]
+            fits := true
+            loop pool in pools {
+                limit :: limits.get(pool) ?? 1
+                if !(limit == 0 || (used.get(pool) ?? 0) < limit) -> fits = false
+            }
+            if fits {
+                slot = index
+                break
+            }
+        }
+        if slot < 0 {
+            &batches.push([Int]{})
+            &held.push([String: Int]{})
+            slot = batches.len() - 1
+        }
+        counts := held[slot]
+        loop pool in pools -> counts[pool] = (counts.get(pool) ?? 0) + 1
+        held[slot] = counts
+        batch := batches[slot]
+        &batch.push(action_id)
+        batches[slot] = batch
+    }
+    batches
+}
+
+fn build_io_action(action: HermeticBuildAction, error: BuildIOError) -> BuildExecutionError Never! {
+    BuildExecutionError.IO{action: action.name, detail: error.message}
+}
+
+fn build_native_sandbox_error(action: HermeticBuildAction, error: NativeSandboxError) -> BuildExecutionError Never! {
+    if error == {
+        .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
+        .IO(detail) -> BuildExecutionError.IO{action: action.name, detail}
+    }
+}
+
+fn build_rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason Never! {
+    if status == {
+        .Miss(reason) -> reason
+        .Hit(_) -> CacheMissReason.NoLocalActionRecord
+    }
+}
+
+// The environment an action child receives: only its declared variables,
+// filtered to the allowlist when one is declared. Nothing ambient enters.
+fn build_action_environment(action: HermeticBuildAction) -> [String: String] Never! {
+    env := [String: String]{}
+    loop name in action.env.keys() {
+        if action.env_allowlist.len() == 0 || action.env_allowlist.contains(name) -> env[name] = action.env[name]
+    }
+    env
+}
+
+// Network is shared only when the root grants Net and the action declares it.
+fn build_action_shares_network(grants: [BuildEffect], caps: [BuildEffect]) -> Bool Never! {
+    grants.contains(BuildEffect.Net) && caps.contains(BuildEffect.Net)
+}
+
+// Rust `execute_one_action` on the local path: snapshot inputs, key the
+// action, restore a cached record, else run it in a fresh private work tree
+// under the native sandbox and publish only its declared outputs. The work
+// tree receives exactly the input bytes the key hashed.
+fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction, handle: HermeticActionHandle, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact]) -[FS, Env, Exec, Time, Time.Wait, Rand]> ActionOutcome BuildExecutionError! {
+    inputs :: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
+    snapshots :: loop input in inputs -> input.snapshot
+    executable :: build_resolve_program_path(plan, action.toolchain, action.argv[0]) ?? return Err(BuildExecutionError.IO{action: action.name, detail: "tool {action.argv[0]} was not found"})
+    executable_bytes :: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
+    executable_digest :: ContentDigest.from_bytes(executable_bytes)
+    action_probe_names := [String]{}
+    loop probe in action.probes -> &action_probe_names.push(plan.probes[probe.id].name)
+    effective_probe_facts := [BuildProbeFact]{}
+    loop fact in probe_facts {
+        if action_probe_names.contains(fact.name) -> &effective_probe_facts.push(fact)
+    }
+    if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
+    key :: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, effective_probe_facts)
+    restore_failure := CacheMissReason?{None}
+    if action.cache == ActionCache.Cached {
+        if build_read_action_record(artifact_store, key) == {
+            .Ok(.Val(record)) -> {
+                if record.failure_report == .Val(report) {
+                    build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "terminal", Val(record.outcome))
+                    return Err(BuildExecutionError.Reported{report})
+                }
+                if build_restore_action_outputs(artifact_store, project_root, action, record) == {
+                    .Ok(_) -> {
+                        build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "restore", Val(ActionOutcome.RestoredFromCache))
+                        return Ok(ActionOutcome.RestoredFromCache)
+                    }
+                    .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
+                }
+            }
+            .Ok(.None) -> {}
+            .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
+        }
+    }
+    rebuild_status :: if action.cache == ActionCache.UncachedPhony -> ActionCacheStatus.Miss(.UncachedAction) else -> ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
+    build_record_cache_event(action.name, key, rebuild_status, "lookup", None)
+
+    sandbox :: files.join(files.join(project_root, ".jet/build-sandbox"), "{sys.pid()}-{action.id}-{key.removeprefix("act-sha256:")}")
+    build_ensure_real_directory(files.dirname(sandbox)) ?? return Err(build_io_action(action, err))
+    if files.stat(sandbox) == {
+        .Ok(info) -> {
+            if info.is_symlink || !info.is_dir -> return Err(build_io_action(action, BuildIOError.new(.PermissionDenied, "action sandbox is not a real directory")))
+            files.remove_all(sandbox) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        }
+        .Err(_) -> {}
+    }
+    build_ensure_real_directory(sandbox) ?? return Err(build_io_action(action, err))
+    loop input in inputs {
+        to :: build_resolve_under(sandbox, input.snapshot.path) ?? return Err(build_io_action(action, err))
+        parent :: files.dirname(to)
+        if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        files.write_bytes(to, input.bytes) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+    }
+    loop output in action.outputs {
+        path :: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
+        parent :: files.dirname(path)
+        if parent != "" -> files.create_dir_all(parent) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+    }
+
+    runtime_args :: build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
+    runtime_env :: build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
+    mounts := [NativeSandboxMount]{}
+    if plan.toolchain(action.toolchain) == .Val(toolchain) {
+        loop mount in toolchain.mounts -> &mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+    }
+    share_network :: build_action_shares_network(grants, action.caps)
+    timeout :: time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
+    ran :: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
+        _ := files.remove_all(sandbox)
+        return Err(build_native_sandbox_error(action, err))
+    }
+    receipt :: ran.receipt
+    code :: if receipt.signal != None -> 1 else -> receipt.code
+    if !receipt.success {
+        _ := files.remove_all(sandbox)
+        report :: build_action_failure_report(action.name, code, receipt.errors.trim())
+        if action.cache == ActionCache.Cached {
+            record :: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(rebuild_status))}
+            build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
+            build_record_cache_event(action.name, key, rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
+        }
+        return Err(BuildExecutionError.Reported{report})
+    }
+    build_publish_sandbox_outputs(sandbox, project_root, action) ?? return Err(build_io_action(action, err))
+    outcome :: ActionOutcome.Succeeded{exit_code: code}
+    if action.cache == ActionCache.Cached {
+        record :: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
+        build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
+        build_record_cache_event(action.name, key, ActionCacheStatus.Miss(.NoLocalActionRecord), "publish", Val(outcome))
+    }
+    files.remove_all(sandbox) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+    Ok(outcome)
+}
+
+// Rust `execute_one_action` output publication: every declared output is
+// read from the work tree through the bounded no-follow reader (a FIFO or
+// other special file is refused before any blocking open; the per-file and
+// per-action limits are checked against the opened file's size before a byte
+// is read). Only when all of them are read are they restored atomically
+// under the project root, so a refused output publishes nothing.
+fn build_publish_sandbox_outputs(sandbox: String, project_root: String, action: HermeticBuildAction) BuildIOError! -[FS, Rand]> {
+    contents := [[U8]]{}
+    total := 0
+    loop declared in action.outputs {
+        from :: build_resolve_under(sandbox, declared)
+        bytes :: build_secure_read_file(sandbox, from, build_read_budget(total))
+        total += bytes.len()
+        &contents.push(bytes)
+    }
+    loop index in 0..<action.outputs.len() {
+        to :: build_resolve_under(project_root, action.outputs[index])
+        build_prepare_output_destination(project_root, to)
+        build_atomic_restore_file(project_root, to, contents[index])
+    }
+}
+
+// Rust `execute_probes`: each selected probe resolves through its toolchain
+// and runs inside the sandbox; the first failure stops the build.
+fn build_execute_probes(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Exec, Time.Wait, Rand]> [BuildProbeFact] BuildExecutionError! {
+    facts := [BuildProbeFact]{}
+    loop probe in plan.probes {
+        if !selected.contains(probe.id) -> next
+        result :: if probe.kind == {
+            .FindProgram(program) -> if build_resolve_program_path(plan, probe.toolchain, program) == {
+                .Val(path) -> (success: true, detail: path)
+                .None -> (success: false, detail: "program `{program}` not found")
+            }
+            .PkgConfig(package, min_version) -> {
+                pkg_config :: build_resolve_program_path(plan, probe.toolchain, "pkg-config") ?? return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: "pkg-config not found"})
+                requirement :: if min_version == {
+                    .Val(version) -> "{package} >= {version}"
+                    .None -> package
+                }
+                receipt :: build_run_probe_sandboxed(pkg_config, [String]{"--exists", requirement}, None, time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
+                (success: receipt.success, detail: "pkg-config exit {build_receipt_code(receipt)}")
+            }
+            .HeaderCheck(header) -> build_run_compile_probe(plan, probe.toolchain, "#include <{header}>\nint main(void) {{ return 0; }}\n")
+            .CompileCheck(_, includes, code) -> {
+                source := ""
+                loop header in includes -> source = "{source}#include <{header}>\n"
+                source = "{source}int main(void) {{\n{code}\nreturn 0;\n}}\n"
+                build_run_compile_probe(plan, probe.toolchain, source)
+            }
+        }
+        &facts.push(BuildProbeFact{name: probe.name, success: result.success, detail: result.detail, reproducibility: probe.reproducibility, toolchain: probe.toolchain, toolchain_provenance: build_toolchain_provenance_digest(plan, probe.toolchain)})
+        if !result.success -> return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: result.detail})
+    }
+    Ok(facts)
+}
+
+fn build_receipt_code(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.signal != None -> 1 else -> receipt.code
+}
+
+// Rust `run_probe_sandboxed`: a private temporary root, the optional probe
+// source written into it, one sandboxed run with an empty environment and
+// no network, then the root removed. Unlike Rust, the run has the same
+// finite wall-clock budget as an action: a probe past `timeout` is killed and
+// fails the build.
+fn build_run_probe_sandboxed(executable: String, args: [String], source: (path: String, contents: String)?, timeout: Duration) -[FS, Env, Exec, Time.Wait, Rand]> ProcessReceipt BuildExecutionError! {
+    nonce :: random.bytes(8) ?? return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{err}"})
+    root :: files.join(sys.temp_dir(), "jet-build-probe-{sys.pid()}-{build_hex_encode(nonce)}")
+    if files.create_dir_all(root) == .Err(error) {
+        _ := files.remove_all(root)
+        return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{error}"})
+    }
+    if source == .Val(probe_source) {
+        if files.write(files.join(root, probe_source.path), probe_source.contents) == .Err(error) {
+            _ := files.remove_all(root)
+            return Err(BuildExecutionError.IO{action: "build probe input", detail: "{error}"})
+        }
+    }
+    result :: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(timeout))
+    _ := files.remove_all(root)
+    if result == {
+        .Ok(output) -> Ok(output.receipt)
+        .Err(error) -> Err(if error == {
+            .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
+            .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
+        })
+    }
+}
+
+// Rust `run_compile_probe`: the first declared `cc`, `clang` or `gcc` checks
+// the probe source's syntax inside the sandbox.
+fn build_run_compile_probe(plan: HermeticBuildPlan, toolchain: ToolchainHandle, source: String) -[FS, Env, Exec, Time.Wait, Rand]> (success: Bool, detail: String) BuildExecutionError! {
+    compiler := String?{None}
+    names :: [String]{"cc", "clang", "gcc"}
+    loop name in names {
+        if compiler == None -> compiler = build_resolve_program_path(plan, toolchain, name)
+    }
+    found :: compiler ?? return Ok((success: false, detail: "no C compiler (`cc`, `clang`, or `gcc`) was found"))
+    receipt :: build_run_probe_sandboxed(found, [String]{"-x", "c", "-fsyntax-only", "probe.c"}, Val((path: "probe.c", contents: source)), time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS))
+    if receipt.success -> return Ok((success: true, detail: "{found} accepted the syntax probe"))
+    detail :: receipt.errors.trim()
+    Ok((success: false, detail: if detail == "" -> "{found} rejected the syntax probe" else -> "{found}: {detail}"))
+}
+
+// Rust `Path::components().count()`.
+fn build_path_component_count(path: String) -> Int Never! {
+    count := if path.starts_with("/") -> 1 else -> 0
+    parts :: path.split("/").to_list()
+    loop index in 0..<parts.len() {
+        part :: parts[index]
+        if part == "" -> next
+        if part == "." && !(index == 0 && !path.starts_with("/")) -> next
+        count += 1
+    }
+    count
+}
+
+fn build_canonical_executable_path(program: String) -[FS, Env]> String? Never! {
+    if !files.is_file(program) -> return None
+    files.canonicalize(program) ?? None
+}
+
+// Rust `find_program_path`: a path with several components directly, else
+// the first regular file of that name in an absolute PATH directory,
+// canonicalized. Unlike Rust, an empty or relative PATH entry is skipped,
+// so the working directory never supplies a tool, and the result must be
+// absolute.
+fn build_find_program_path(program: String) -[FS, Env]> String? Never! {
+    if build_path_component_count(program) > 1 && files.is_file(program) -> return files.canonicalize(program) ?? None
+    paths :: sys.get("PATH") ?? return None
+    loop directory in paths.split(":") {
+        if !directory.starts_with("/") -> next
+        candidate :: files.join(directory, program)
+        if files.is_file(candidate) {
+            resolved :: files.canonicalize(candidate) ?? return None
+            return if resolved.starts_with("/") -> Val(resolved) else -> None
+        }
+    }
+    None
+}
+
+// Rust `resolve_program_path`: the toolchain's declared tool (by name, then
+// basename) through its mounts; a declared-only toolchain stops there. Only
+// the host toolchain, or a target that is the running host, may fall back to
+// an explicit path or PATH.
+fn build_resolve_program_path(plan: HermeticBuildPlan, toolchain_handle: ToolchainHandle, program: String) -[FS, Env]> String? Never! {
+    toolchain :: plan.toolchain(toolchain_handle) ?? return None
+    if toolchain.tools.get(program) == .Val(declared) -> return build_canonical_tool_path(toolchain, declared)
+    basename :: files.basename(program)
+    if basename != "" {
+        if toolchain.tools.get(basename) == .Val(declared) -> return build_canonical_tool_path(toolchain, declared)
+    }
+    if toolchain.resolution == ToolchainResolution.DeclaredOnly -> return None
+    if build_path_component_count(program) > 1 {
+        if build_canonical_executable_path(program) == .Val(path) -> return Val(path)
+    }
+    if toolchain.role == ToolchainRole.Host -> return build_find_program_path(program)
+    if build_target_matches_running_host(toolchain.target_triple) -> return build_find_program_path(program)
+    None
+}
+
+// Rust `target_matches_running_host`.
+fn build_target_matches_running_host(triple: String) -[Env]> Bool Never! {
+    arch :: sys.arch()
+    candidates :: if {
+        sys.is_linux() -> [String]{"{arch}-linux", "{arch}-linux-gnu", "{arch}-unknown-linux-gnu"}
+        sys.is_macos() -> [String]{"{arch}-macos", "{arch}-apple-darwin"}
+        sys.is_windows() -> [String]{"{arch}-windows", "{arch}-pc-windows-msvc", "{arch}-pc-windows-gnu"}
+        else -> [String]{}
+    }
+    candidates.contains(triple)
+}
+
+// Rust `canonical_tool_path`: a declared tool under a mount destination maps
+// to the mount source (a `..` component refuses it); otherwise the declared
+// path itself. Matching and joining use path components, so `//` or `.`
+// after a destination stays under its source.
+fn build_canonical_tool_path(toolchain: HermeticBuildToolchain, declared: String) -[FS, Env]> String? Never! {
+    loop mount in toolchain.mounts {
+        relative :: build_strip_path_prefix(declared, mount.destination) ?? next
+        if relative.contains("..") -> return None
+        source := mount.source
+        loop part in relative -> source = files.join(source, part)
+        return build_canonical_executable_path(source)
+    }
+    build_canonical_executable_path(declared)
+}
+
+// Rust `Path::components` of a `/`-separated path: empty and `.` parts
+// dropped, `..` kept for the caller to refuse.
+fn build_path_parts(path: String) -> [String] Never! {
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        &parts.push(part)
+    }
+    parts
+}
+
+// Rust `Path::strip_prefix` over whole components: the components of
+// `path` after `prefix`, or None when `prefix`'s components do not lead
+// `path` (an absolute and a relative path never match).
+fn build_strip_path_prefix(path: String, prefix: String) -> [String]? Never! {
+    if path.starts_with("/") != prefix.starts_with("/") -> return None
+    path_parts :: build_path_parts(path)
+    prefix_parts :: build_path_parts(prefix)
+    if prefix_parts.len() > path_parts.len() -> return None
+    loop index in 0..<prefix_parts.len() {
+        if path_parts[index] != prefix_parts[index] -> return None
+    }
+    Val(path_parts.slice(prefix_parts.len(), path_parts.len()))
+}
+
+// Rust `runtime_toolchain_arguments`: Linux keeps declared virtual paths
+// (the sandbox projects the mounts); macOS and Windows translate only the
+// declared mount paths at the adapter boundary.
+fn build_runtime_toolchain_arguments(plan: HermeticBuildPlan, handle: ToolchainHandle, args: [String]) -[Env]> [String] Never! {
+    if sys.is_linux() -> return args
+    toolchain :: plan.toolchain(handle) ?? return args
+    loop argument in args -> build_runtime_toolchain_argument(toolchain, argument)
+}
+
+fn build_runtime_toolchain_environment(plan: HermeticBuildPlan, handle: ToolchainHandle, env: [String: String]) -[Env]> [String: String] Never! {
+    if sys.is_linux() -> return env
+    toolchain :: plan.toolchain(handle) ?? return env
+    out := [String: String]{}
+    loop key in env.keys() -> out[key] = build_runtime_toolchain_argument(toolchain, env[key])
+    out
+}
+
+fn build_runtime_toolchain_argument(toolchain: HermeticBuildToolchain, argument: String) -> String Never! {
+    if build_runtime_mount_path(toolchain, argument) == .Val(path) -> return path
+    prefixes :: [String]{"--sysroot=", "-isysroot=", "-I", "-L", "-include", "-isystem", "-iquote", "-idirafter", "-imacros"}
+    loop prefix in prefixes {
+        if !argument.starts_with(prefix) -> next
+        if build_runtime_mount_path(toolchain, argument.removeprefix(prefix)) == .Val(path) -> return "{prefix}{path}"
+    }
+    argument
+}
+
+fn build_runtime_mount_path(toolchain: HermeticBuildToolchain, value: String) -> String? Never! {
+    loop mount in toolchain.mounts {
+        destination := mount.destination
+        loop destination.ends_with("/") || destination.ends_with("\\") -> destination = destination.slice(0, destination.len() - 1)
+        if value == destination -> return Val(mount.source)
+        if !value.starts_with(destination) -> next
+        suffix :: value.removeprefix(destination)
+        relative :: if suffix.starts_with("/") -> suffix.removeprefix("/") else if suffix.starts_with("\\") -> suffix.removeprefix("\\") else -> next
+        return Val(files.join(mount.source, relative))
+    }
+    None
+}
+
+// Rust `toolchain_provenance_digest`: SHA-256 of the toolchain's derived
+// `Debug` text.
+fn build_toolchain_provenance_digest(plan: HermeticBuildPlan, handle: ToolchainHandle) -> ContentDigest Never! {
+    identity :: if plan.toolchain(handle) == {
+        .Val(toolchain) -> build_debug_toolchain(toolchain)
+        .None -> "missing-toolchain"
+    }
+    ContentDigest.from_bytes(identity.bytes())
+}
+
+// Rust derived `Debug` of `BuildToolchain` and the types inside it.
+fn build_debug_toolchain(t: HermeticBuildToolchain) -> String Never! {
+    role :: if t.role == ToolchainRole.Host -> "Host" else -> "Target"
+    sdk :: if t.sdk == {
+        .Val(value) -> "Some(SdkIdentity {{ name: {build_debug_quote(value.name)}, version: {build_debug_quote(value.version)}, provenance: {build_debug_provenance(value.provenance)} }})"
+        .None -> "None"
+    }
+    linker :: if t.linker == {
+        .Val(value) -> "Some(LinkerIdentity {{ name: {build_debug_quote(value.name)}, provenance: {build_debug_provenance(value.provenance)} }})"
+        .None -> "None"
+    }
+    sysroot :: if t.sysroot == {
+        .Val(value) -> "Some(SysrootIdentity {{ name: {build_debug_quote(value.name)}, path_digest: {build_debug_quote(value.path_digest)}, provenance: {build_debug_provenance(value.provenance)} }})"
+        .None -> "None"
+    }
+    tool_keys := t.tools.keys().to_list()
+    &tool_keys.sort()
+    tools :: loop key in tool_keys -> "{build_debug_quote(key)}: {build_debug_quote(t.tools[key])}"
+    resolution :: if t.resolution == ToolchainResolution.Ambient -> "Ambient" else -> "DeclaredOnly"
+    mounts :: loop mount in t.mounts -> "BuildMount {{ source: {build_debug_quote(mount.source)}, destination: {build_debug_quote(mount.destination)}, identity: {build_debug_quote(mount.identity)} }}"
+    "BuildToolchain {{ id: ToolchainId({t.id}), name: {build_debug_quote(t.name)}, role: {role}, host_triple: {build_debug_quote(t.host_triple)}, target_triple: {build_debug_quote(t.target_triple)}, sdk: {sdk}, linker: {linker}, sysroot: {sysroot}, tools: {{{tools.join(", ")}}}, resolution: {resolution}, mounts: [{mounts.join(", ")}], provenance: {build_debug_provenance(t.provenance)} }}"
+}
+
+fn build_debug_provenance(provenance: BuildProvenance) -> String Never! {
+    source :: if provenance.source == {
+        .InferredHost -> "InferredHost"
+        .JetpackDependency(dep) -> "JetpackDependency({build_debug_quote(dep)})"
+        .AmbientRecord(record) -> "AmbientRecord({build_debug_quote(record)})"
+        .UserDeclared(value) -> "UserDeclared({build_debug_quote(value)})"
+    }
+    lock :: if provenance.lock == {
+        .Val(record) -> "Some(LockRecord {{ key: {build_debug_quote(record.key)}, digest: {build_debug_quote(record.digest)} }})"
+        .None -> "None"
+    }
+    "BuildProvenance {{ source: {source}, lock: {lock} }}"
+}

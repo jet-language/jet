@@ -1,0 +1,29 @@
+// No inline original tests in Server5467–5575. These are behavioral controls,
+// not duplicate W36 Position/URI tests or the separately owned live LSP suite.
+#Test("folding preserves lexical nesting excludes single-line and ignores unmatched closing braces") {
+    src :: "}}\n😀{{\n  {{ x }}\n  {{\n  }}\n}}\n{{unclosed"
+    folds :: lsp_brace_folding_ranges(src)
+    assert_eq(folds, [LSPFoldingRange]{LSPFoldingRange{start_line: 3, start_character: 2, end_line: 4, end_character: 2, kind: Val("region")}, LSPFoldingRange{start_line: 1, start_character: 2, end_line: 5, end_character: 0, kind: Val("region")}})
+    assert_eq(lsp_brace_folding_ranges("{{same line}}"), [LSPFoldingRange]{})
+    // Reference deliberately scans braces even in strings/comments.
+    assert_eq(lsp_brace_folding_ranges("// {{\n// }}").len(), 1)
+}
+#Test("folding line groups keep scalar columns CRLF final flush and singleton rejection") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR")
+    src :: " // one{cr}\n // 😀{cr}\n\nimport alpha\nimport β\n"
+    folds :: lsp_compute_folding_ranges(src)
+    assert_eq(folds, [LSPFoldingRange]{LSPFoldingRange{start_line: 0, start_character: 1, end_line: 1, end_character: 5, kind: Val("comment")}, LSPFoldingRange{start_line: 3, start_character: 0, end_line: 4, end_character: 8, kind: Val("imports")}})
+    assert_eq(lsp_compute_folding_ranges("// alone\nx\nimport alone\n"), [LSPFoldingRange]{})
+    assert_eq(lsp_compute_folding_ranges(""), [LSPFoldingRange]{})
+    assert_eq(lsp_line_group_folds("// a\n// b", lsp_is_comment_line, "comment").len(), 1)
+}
+#Test("folding sorting is stable across brace and overlapping line groups and optional JSON kind") {
+    folds :: lsp_compute_folding_ranges("// {{\n// }}\n")
+    assert_eq(folds.len(), 2)
+    assert_eq(folds[0].kind, Val("comment"))
+    assert_eq(folds[1].kind, Val("region"))
+    fold :: LSPFoldingRange{start_line: 1, start_character: 2, end_line: 3, end_character: 4, kind: None}
+    assert_eq(lsp_folding_range_json(fold), "{{\"startLine\":1,\"startCharacter\":2,\"endLine\":3,\"endCharacter\":4}}")
+    tagged :: LSPFoldingRange{start_line: 1, start_character: 2, end_line: 3, end_character: 4, kind: Val("region")}
+    assert_eq(lsp_folding_range_json(tagged), "{{\"startLine\":1,\"startCharacter\":2,\"endLine\":3,\"endCharacter\":4,\"kind\":\"region\"}}")
+}

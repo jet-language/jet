@@ -1,0 +1,727 @@
+// D-BPE-* source-backed graph, formatter round-trip and write transactions.
+use jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, apply_transaction_json, source_revision, source_control_json_for_file]
+use jet.[format_source]
+use jet_foundation.[read_machine_line, MachineRecord, PAYLOAD_FILE]
+use std.[fs, env, process]
+
+// Rust: tests/canvas.rs:11
+// GATE #4494: filesystem/process primitives retain actual providers.
+fn temp_dir(tag_ref: String) -> OSPath {
+    dir :: env.temp_dir().join("jet_canvas_{tag_ref}_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).expect("create canvas directory")
+    dir
+}
+// Rust: tests/canvas.rs:18
+fn write_fixture(tag_ref: String, src: String) -> OSPath {
+    path :: temp_dir(tag_ref).join("main.jet")
+    fs.write(path, src).expect("write canvas fixture")
+    path
+}
+// Rust: tests/canvas.rs:25
+fn ast_enum_variants(path: String, enum_name: String) -> [String] {
+    src :: fs.read_to_string(OSPath(path)).expect("read {path}")
+    marker :: "enum {enum_name}"
+    variants := [String]{}
+    in_enum := false
+    depth := 0
+    loop line in src.lines() {
+        code := line.split("//")[0] // #4303
+        if !in_enum {
+            if code.find(marker) == .Val(pos) {
+                in_enum = true
+                loop ch in code.slice(pos, code.bytes().len()).chars() {
+                    if ch == '{' -> depth += 1
+                    else if ch == '}' -> depth -= 1
+                }
+            }
+            next
+        }
+        if depth == 1 {
+            if variant_name(code) == .Val(name) -> &variants.push(name)
+        }
+        loop ch in code.chars() {
+            if ch == {
+                '{' | '(' | '[' -> depth += 1
+                '}' | ')' | ']' -> depth -= 1
+                else -> {}
+            }
+        }
+        if depth == 0 -> break
+    }
+    assert(!variants.is_empty(), "missing {marker} variants in {path}")
+    variants
+}
+// Rust: tests/canvas.rs:66
+fn variant_name(chunk: String) -> String? {
+    loop raw in chunk.lines() {
+        line := raw.trim() // #4303
+        if line.is_empty() || line.starts_with("///") || line.starts_with("//") || line.starts_with("#[") -> next
+        if !line.chars().first().is_some_and((ch) -> ch.is_uppercase()) -> next
+        end :: line.find((ch) -> !(ch.is_ascii_alphanumeric() || ch == '_')) ?? line.bytes().len()
+        return Val(line.slice(0, end))
+    }
+    None
+}
+
+// Rust: tests/canvas.rs:88
+CANVAS_FIXTURE :: prep { String{"fn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn summarize(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{ return total }} else {{ return total + 1 }}\n}}\n\nfn run() {{\n    print(summarize(4))\n}}\n"} }
+// Rust: tests/canvas.rs:102
+CANVAS_COVERAGE_FIXTURE :: prep { String{"fn coverage(limit: Int) -> Int {{\n    total := 0\n    loop i in 0..<limit {{\n        if i == 2 {{\n            next\n        }}\n        total += i\n    }}\n    if total == {{\n        0 -> {{ return 1 }}\n        else -> {{ return total }}\n    }}\n}}\n\nfn run() {{\n    print(coverage(4))\n}}\n"} }
+// Rust: tests/canvas.rs:121
+CANVAS_DATA_FIXTURE :: prep { String{"struct Point {{\n    x: Int\n    y: Int\n}}\n\nenum Choice {{\n    Pick(Int)\n    Skip\n}}\n\nfn make(n: Int) -> Int {{\n    p :: Point{{x: n, y: n + 1}}\n    c :: Choice.Pick(p.x)\n    return p.y\n}}\n\nfn run() {{\n    print(make(3))\n}}\n"} }
+// Rust: tests/canvas.rs:142
+CANVAS_PIN_AUTHORING_FIXTURE :: prep { String{"fn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn choose(limit: Int) -> Int {{\n    if limit > 1 {{\n        return limit\n    }} else {{\n        return 0\n    }}\n}}\n\nfn run() {{\n    print(choose(3))\n}}\n"} }
+// Rust: tests/canvas.rs:159
+CANVAS_WIRE_FIXTURE :: prep { String{"fn pick(a: Int, b: Int) -> Int {{\n    return a\n}}\n\nfn run() {{\n    print(pick(1, 2))\n}}\n"} }
+// Rust: tests/canvas.rs:168
+CANVAS_REORDER_FIXTURE :: prep { String{"fn order() {{\n    a :: 1\n    b :: 2\n    c :: 3\n    print(a + b + c)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
+// Rust: tests/canvas.rs:180
+CANVAS_REORDER_BINDING_FIXTURE :: prep { String{"fn order() {{\n    a :: 1\n    b :: 2\n    c :: a + b\n    print(c)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
+// Rust: tests/canvas.rs:192
+CANVAS_REORDER_CROSS_BLOCK_FIXTURE :: prep { String{"fn order() {{\n    a :: 1\n    if true {{\n        c :: 3\n    }} else {{\n        print(a)\n    }}\n    b :: 2\n    print(a + b)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
+// Rust: tests/canvas.rs:208
+CANVAS_PATTERN_MULTI_FIXTURE :: prep { String{"fn first_or_zero(x: Int?) -> Int {{\n    if x == Val(n) {{\n        return n\n    }} else {{\n        return 0\n    }}\n}}\n\nfn list_total() -> Int {{\n    xs :: [1, 2, 3]\n    ys :: [to_int(1), to_int(2)]\n    return xs[0] + ys[0]\n}}\n\nfn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn run() {{\n    print(first_or_zero(Val(4)))\n    print(list_total())\n}}\n"} }
+// Rust: tests/canvas.rs:232
+CANVAS_FUNCTION_EVENT_FIXTURE :: prep { String{"/// Starts the scene.\npub fn on_start(limit: Int{{1}}) -> Int {{\n    total := limit + 1\n    return total\n}}\n\nfn run() {{\n    print(on_start())\n}}\n"} }
+// Rust: tests/canvas.rs:243
+CANVAS_COMMENT_FIXTURE :: prep { String{"fn run() {{\n    print(\"damage\")\n}}\n"} }
+// Rust: tests/canvas.rs:249
+#Test("canvas_parity_matrix_tracks_ast_language_forms") {
+    matrix :: fs.read_to_string(OSPath("Docs/spec/reference/canvas-parity.md")).expect("Canvas parity matrix must exist")
+    loop (enum_name, path) in [(_0: "Item", _1: "crates/jet-foundation/src/AST/items.rs"), (_0: "Stmt", _1: "crates/jet-foundation/src/AST/statements.rs"), (_0: "Expr", _1: "crates/jet-foundation/src/AST/expressions.rs"), (_0: "Type", _1: "crates/jet-foundation/src/AST/types.rs"), (_0: "Pattern", _1: "crates/jet-foundation/src/AST/patterns.rs"), (_0: "BindPattern", _1: "crates/jet-foundation/src/AST/patterns.rs"), (_0: "LValue", _1: "crates/jet-foundation/src/AST/lvalues.rs")] {
+        loop variant in ast_enum_variants(path, enum_name) {
+            token :: "[{enum_name}::{variant}]"
+            assert(matrix.contains(token), "Canvas parity matrix missing {token} from {path}")
+        }
+    }
+}
+// Rust: tests/canvas.rs:271
+CANVAS_COLLAPSE_FIXTURE :: prep { String{"fn compute(limit: Int) -> Int {{\n    return limit + 1\n}}\n\nfn run() {{\n    print(compute(4))\n}}\n"} }
+// Rust: tests/canvas.rs:280
+CANVAS_STRUCTURAL_WRITE_FIXTURE :: prep { String{"fn run() {{\n    print(\"start\")\n}}\n"} }
+// Rust: tests/canvas.rs:285
+CANVAS_RAILS_FIXTURE :: prep { String{"use core.mem as mem\n\nfn maybe() -> Int String! {{\n    return Ok(1)\n}}\n\nfn checked() -> Int String! {{\n    n :: maybe()\n    return Ok(n)\n}}\n\nfn run() {{\n    #Unsafe(\"Canvas proof rail fixture\") {{\n        marker := 1\n    }}\n    print(checked())\n}}\n"} }
+// Rust: tests/canvas.rs:304
+CANVAS_SHIELD_FIXTURE :: prep { String{"fn run() {{\n    #Shield {{\n        print(\"before\")\n    }}\n}}\n"} }
+// Rust: tests/canvas.rs:311
+CANVAS_POLICY_FIXTURE :: prep { String{"fn run() {{\n    #Policy(copies: .Explicit) {{\n        print(\"bounded\")\n    }}\n}}\n"} }
+// Rust: tests/canvas.rs:318
+CANVAS_TASK_RAIL_FIXTURE :: prep { String{"fn worker() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    task.group g {{\n        t :: task {{\n            worker()\n        }}\n        result :: (task.all {{ worker() }}) ?? panic(\"task.all failed\")\n        print(result[0])\n    }}\n}}\n"} }
+// Rust: tests/canvas.rs:333
+CANVAS_EVENT_DISPATCHER_FIXTURE :: prep { String{"use core.event as event\n\nstruct Resource {{\n    id: Int\n\n    fn on(&self) {{}}\n    fn close(&self) {{}}\n    fn cancel(&self) {{}}\n}}\n\nfn run() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(&clicked.emit(1).summary())\n    before_save :: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs :: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report :: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nfn show_publish(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
+// Rust: tests/canvas.rs:377
+CANVAS_TRAIT_INTERFACE_FIXTURE :: prep { String{"trait Drawable {{\n    fn render(self) -[IO]> String\n    fn label(self) -> String {{\n        return \"drawable\"\n    }}\n}}\n\nstruct Badge {{\n    text: String\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
+// Rust: tests/canvas.rs:393
+CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE :: prep { String{"module ui {{\n    trait Drawable {{\n        fn render(self) -[IO]> String\n        fn label(self) -> String {{\n            return \"drawable\"\n        }}\n    }}\n\n    struct Badge {{\n        text: String\n    }}\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
+// Rust: tests/canvas.rs:411
+CANVAS_TRAIT_ASSOC_TYPE_FIXTURE :: prep { String{"trait Indexed {{\n    type Elem\n    fn at(self, i: Int) -> Elem\n}}\n\nstruct Nums {{\n    values: [Int]\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
+// Rust: tests/canvas.rs:425
+CANVAS_TASK_FLOW_FIXTURE :: prep { String{"use core.tasks as tasks\n\nfn work() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    (sender, ch) :: channel<Int>()\n    task.group g {{\n        t :: task {{\n            sender.send(work())\n        }}\n        print(ch.receive() ?? panic(\"channel closed\"))\n    }}\n}}\n"} }
+// Rust: tests/canvas.rs:442
+CANVAS_DEBUG_FIXTURE :: prep { String{"fn run() {{\n    total := 1\n    print(total)\n    print(\"program finished\")\n}}\n"} }
+
+// Rust: tests/canvas.rs:449
+fn field_before(haystack: String, marker: String, field: String) -> String {
+    end :: haystack.find(marker) ?? panic("marker in graph JSON: {marker}")
+    prefix := haystack.slice(0, end) // #4303
+    key :: "\"{field}\":\""
+    start :: (prefix.rfind(key) ?? panic("field before marker")) + key.bytes().len()
+    rest := prefix.slice(start, prefix.bytes().len()) // #4303
+    rest.slice(0, rest.find('"') ?? panic("field terminator"))
+}
+// Rust: tests/canvas.rs:460
+fn first_source_wire_id(graph: String) -> String {
+    loop chunk in graph.split("\"wire_id\":\"").skip(1) {
+        if chunk.contains("\"source_span\":{{\"") -> return chunk.slice(0, chunk.find('"') ?? panic("wire id terminator"))
+    }
+    panic("source-backed wire in graph JSON")
+}
+// Rust: tests/canvas.rs:469
+fn first_node_id_containing(graph: String, needle: String) -> String {
+    loop chunk in graph.split("\"node_id\":\"").skip(1) {
+        id := chunk.slice(0, chunk.find('"') ?? panic("node id terminator")) // #4303
+        if id.contains(needle) -> return id
+    }
+    panic("node id containing {needle}")
+}
+// Rust: tests/canvas.rs:479
+fn count_occurrences(haystack: String, needle: String) -> Int { haystack.match_indices(needle).count() }
+// Rust: tests/canvas.rs:483
+fn json_quote(value: String) -> String {
+    out := "\""
+    loop ch in value.chars() {
+        if ch == {
+            '\\' -> out += "\\\\"
+            '"' -> out += "\\\""
+            '\n' -> out += "\\n"
+            Char{13} -> out += "\\r"
+            '\t' -> out += "\\t"
+            else -> {
+                if ch.is_control() -> out += "\\u{ch.to_u32():04x}" else -> out.push(ch)
+            }
+        }
+    }
+    out += "\""
+    out
+}
+// Rust: tests/canvas.rs:500
+fn json_field(haystack: String, field: String) -> String {
+    key :: "\"{field}\":\""
+    start :: (haystack.find(key) ?? panic("json field")) + key.bytes().len()
+    rest := haystack.slice(start, haystack.bytes().len()) // #4303
+    rest.slice(0, rest.find('"') ?? panic("json field terminator"))
+}
+// Rust: tests/canvas.rs:507
+fn json_array_field(haystack: String, field: String) -> String {
+    marker :: "\"{field}\":["
+    start :: (haystack.find(marker) ?? panic("missing JSON array `{field}`")) + marker.bytes().len()
+    depth := 1
+    in_string := false
+    escaped := false
+    bytes :: haystack.bytes()
+    loop offset in start..<bytes.len() {
+        byte :: bytes[offset]
+        if in_string {
+            if escaped -> escaped = false
+            else if byte == 92 -> escaped = true
+            else if byte == 34 -> in_string = false
+            next
+        }
+        if byte == {
+            34 -> in_string = true
+            91 -> depth += 1
+            93 -> { depth -= 1; if depth == 0 -> return haystack.slice(start, offset) } else -> {}
+        }
+    }
+    panic("unterminated JSON array `{field}`")
+}
+// Rust: tests/canvas.rs:542
+fn json_top_level_objects(array: String) -> [String] {
+    objects := [String]{}
+    start := Int?{None}
+    depth := 0
+    in_string := false
+    escaped := false
+    bytes :: array.bytes()
+    loop offset in 0..<bytes.len() {
+        byte :: bytes[offset]
+        if in_string {
+            if escaped -> escaped = false
+            else if byte == 92 -> escaped = true
+            else if byte == 34 -> in_string = false
+            next
+        }
+        if byte == {
+            34 -> in_string = true
+            123 -> { if depth == 0 -> start = Val(offset); depth += 1 }
+            125 -> {
+                depth -= 1
+                if depth == 0 {
+                    object_start :: start ?? panic("top-level JSON object start")
+                    start = None
+                    &objects.push(array.slice(object_start, offset + 1))
+                }
+            }
+            else -> {}
+        }
+    }
+    assert_eq(depth, 0, "unterminated top-level JSON object: {array}")
+    objects
+}
+// Rust: tests/canvas.rs:581
+fn source_span_near(haystack: String, marker: String) -> (Int, Int) {
+    pos :: haystack.find(marker) ?? panic("marker near source span")
+    rest := haystack.slice(pos, haystack.bytes().len()) // #4303
+    key :: "\"source_span\":{{\"start\":"
+    start_pos :: (rest.find(key) ?? panic("source span after marker")) + key.bytes().len()
+    rest = rest.slice(start_pos, rest.bytes().len())
+    start :: rest.slice(0, rest.find(',') ?? panic("span comma")).parse<Int>().expect("span start")
+    end_key :: "\"end\":"
+    end_pos :: (rest.find(end_key) ?? panic("span end")) + end_key.bytes().len()
+    rest = rest.slice(end_pos, rest.bytes().len())
+    end_text :: rest.chars().take_while((ch) -> ch.is_ascii_digit()).collect<String>()
+    (_0: start, _1: end_text.parse<Int>().expect("span end number"))
+}
+// Rust: tests/canvas.rs:601
+fn source_span_at_or_after(haystack: String, marker: String, minimum_start: Int) -> (Int, Int) {
+    search_from := 0
+    loop {
+        found :: haystack.slice(search_from, haystack.bytes().len()).find(marker) ?? break
+        pos :: search_from + found
+        (start, end) :: source_span_near(haystack.slice(pos, haystack.bytes().len()), marker)
+        if start >= minimum_start -> return (_0: start, _1: end)
+        search_from = pos + marker.bytes().len()
+    }
+    panic("marker has no source span at or after {minimum_start}: {marker}")
+}
+// Rust: tests/canvas.rs:614
+fn graph_id_for_title(graph: String, title: String) -> String { field_before(graph, "\"title\":\"{title}\"", "graph_id") }
+// Rust: tests/canvas.rs:618
+fn graph_object_for_title(graph: String, title: String) -> String {
+    loop candidate in json_top_level_objects(json_array_field(graph, "graphs")) {
+        if candidate.contains("\"title\":\"{title}\"") -> return candidate
+    }
+    panic("graph object for {title}")
+}
+// Rust: tests/canvas.rs:625
+fn name_span(src: String, name: String) -> (Int, Int) {
+    start :: src.find("{name} ::") ?? panic("binding name span")
+    (_0: start, _1: start + name.bytes().len())
+}
+// Rust: tests/canvas.rs:630
+fn source_order(src: String, names: [String]) -> [Int] {
+    out := [Int]{}
+    loop name in names -> &out.push(src.find("{name} ::") ?? panic("source name"))
+    out
+}
+
+// Rust: tests/canvas.rs:638
+#Test("canvas_graph_json_is_stable_and_typed") {
+    path :: write_fixture("graph", CANVAS_FIXTURE)
+    json :: graph_json_for_file(path).expect("canvas graph")
+    assert(json.starts_with("{{\"schema\":\"jet.status/v1\""), json)
+    assert_eq(read_machine_line(json), Ok(MachineRecord.Status))
+    loop field in ["\"protocol\":\"jet.canvas.graph\"", "\"schema_version\":1", "\"node_descriptors\":[", "\"node_descriptor_id\":\"branch\"", "\"source_id\"", "\"fmt_fingerprint\":\"sha256-", "\"graph_id\":\"fn:", "\"title\":\"summarize\"", "\"kind\":\"branch\"", "\"kind\":\"function\"", "\"archetype\":\"entry\"", "\"archetype\":\"control\"", "\"archetype\":\"function_exec\"", "\"archetype\":\"function_pure\"", "\"archetype\":\"value\"", "\"kind\":\"variable_get\"", "\"kind\":\"constant\"", "\"type\":\"Int\"", "\"wire_kind\":\"data\"", "\"wire_kind\":\"control\"", "\"from_source_span\":", "\"to_source_span\":", "\"type\":\"exec\"", "\"ability\":\"control\"", "\"inline_exprs\"", "total > 10"] -> assert(json.contains(field), json)
+    square_call :: first_node_id_containing(json, ":call:square")
+    binding :: first_node_id_containing(json, ":stmt:1:binding")
+    assert(json.contains("\"from_pin\":\"{square_call}:output:result\",\"to_pin\":\"{binding}:input:value\",\"wire_kind\":\"data\""), "pure function calls should feed data pins: {json}")
+    assert(!json.contains("\"pin_id\":\"{square_call}:input:exec\""), "pure expression call must not carry exec pin: {json}")
+    again :: graph_json_for_file(path).expect("canvas graph again")
+    assert_eq(json, again, "Canvas layout/projection must be deterministic")
+}
+// Rust: tests/canvas.rs:694
+#Test("canvas_projects_labeled_execution_outputs_for_loops_and_early_returns") {
+    path :: write_fixture("multi_exec_outputs", "fn paths(limit: Int) -> Int {{\n    loop i in 0..<limit {{\n        if i == 1 {{\n            return i\n        }} else {{\n            print(i)\n        }}\n    }}\n    return 0\n}}\n\nfn run() {{\n    print(paths(3))\n}}\n")
+    graph :: graph_json_for_file(path).expect("multi-exec graph")
+    paths :: graph_object_for_title(graph, "paths")
+    loop (name, role) in [(_0: "body", _1: "loop_body"), (_0: "done", _1: "loop_done"), (_0: "return", _1: "early_return")] {
+        field :: "\"name\":\"{name}\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"{role}\""
+        assert(paths.contains(field), "paths graph missing {field}: {paths}")
+        pin :: json_top_level_objects(json_array_field(paths, "pins")).find((pin) -> pin.contains("\"name\":\"{name}\"")).expect("missing {name} pin: {paths}")
+        assert(pin.contains("\"role\":\"{role}\""), "pin role drift: {pin}")
+        assert(pin.contains("\"source_span\":{{\"start\":"), "pin provenance missing: {pin}")
+    }
+    assert(paths.contains("\"name\":\"then\""), "branch then output missing: {paths}")
+    assert(paths.contains("\"name\":\"else\""), "branch else output missing: {paths}")
+}
+// Rust: tests/canvas.rs:755
+#Test("canvas_projects_switch_arm_outputs_with_source_provenance") {
+    path :: write_fixture("multi_exec_switch_outputs", "fn choose(value: Int) -> Int {{\n    if value == {{\n        0 -> {{ return 0 }}\n        1 -> {{ return 1 }}\n        else -> {{ return 2 }}\n    }}\n}}\n\nfn run() {{ print(choose(1)) }}\n")
+    source :: fs.read_to_string(path).unwrap()
+    assert_eq(format_source(source).unwrap(), source)
+    graph :: graph_json_for_file(path).expect("switch multi-exec graph")
+    choose :: graph_object_for_title(graph, "choose")
+    pins :: json_top_level_objects(json_array_field(choose, "pins"))
+    loop (name, pattern) in [(_0: "arm1", _1: "0"), (_0: "arm2", _1: "1")] {
+        pin :: pins.find((pin) -> pin.contains("\"name\":\"{name}\"")).expect("missing {name} pin: {choose}")
+        loop field in ["\"direction\":\"output\"", "\"type\":\"exec\"", "\"role\":\"arm\""] -> assert(pin.contains(field), pin)
+        assert(pin.contains("\"pattern_source\":\"{pattern}\""), "pattern provenance missing: {pin}")
+        offset :: source.find("{pattern} ->").expect("arm source span")
+        assert(pin.contains("\"source_span\":{{\"start\":{offset},\"end\":"), "source span does not identify {pattern} arm: {pin}")
+    }
+    else_pin :: pins.find((pin) -> pin.contains("\"name\":\"else\"")).expect("missing else pin")
+    loop field in ["\"direction\":\"output\"", "\"type\":\"exec\"", "\"role\":\"else\"", "\"source_span\":{{\"start\":"] -> assert(else_pin.contains(field), else_pin)
+    assert(!source.contains("=>"), "retired arrow spelling leaked: {source}")
+}
+// Rust: tests/canvas.rs:814
+#Test("canvas_projects_switch_arm_labels_with_exact_source_spans") {
+    path :: write_fixture("multi_exec_switch_pin_provenance", "fn choose(value: Int) -> Int {{\n    if value == {{\n        0 -> {{ return 0 }}\n        1 -> {{ return 1 }}\n        else -> {{ return 2 }}\n    }}\n}}\n\nfn run() {{\n    print(choose(1))\n}}\n")
+    source :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("switch multi-exec graph")
+    choose :: graph_object_for_title(graph, "choose")
+    pins :: json_top_level_objects(json_array_field(choose, "pins"))
+    loop (name, pattern) in [(_0: "arm1", _1: "0"), (_0: "arm2", _1: "1")] {
+        pin :: pins.find((pin) -> pin.contains("\"name\":\"{name}\"")).expect("missing {name} pin: {choose}")
+        assert(pin.contains("\"pattern_source\":\"{pattern}\""), pin)
+        offset :: source.find("{pattern} ->").expect("arm source span")
+        assert(pin.contains("\"source_span\":{{\"start\":{offset},\"end\":"), "source span does not identify {pattern} arm: {pin}")
+    }
+}
+// Rust: tests/canvas.rs:855
+#Test("canvas_rejects_ambiguous_package_facts_before_projection") {
+    dir :: temp_dir("graph_ambiguous_package")
+    fs.write(dir.join("package.jet"), "name: \"canonical\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join(PAYLOAD_FILE), "name: \"legacy\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{}}\n").unwrap()
+    diagnostics :: graph_json_for_file(entry).expect_err("Canvas must reject ambiguous package facts")
+    assert(diagnostics.find((diagnostic) -> diagnostic.code == "E1206") != None, "{diagnostics}")
+}
+// Rust: tests/canvas.rs:882
+#Test("canvas_project_uses_shared_package_diagnostic") {
+    dir :: temp_dir("project_ambiguous_package")
+    fs.write(dir.join("package.jet"), "name: \"canonical\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join(PAYLOAD_FILE), "name: \"legacy\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{}}\n").unwrap()
+    diagnostics :: graph_json_for_file(entry).expect_err("Canvas must reject ambiguous package facts")
+    diagnostic :: diagnostics.find((diagnostic) -> diagnostic.code == "E1206").expect("ambiguous package facts must use the shared E1206 diagnostic")
+    project :: project_json_for_entry(entry)
+    assert(project.contains("\"code\":\"E1206\""), project)
+    assert(!project.contains("\"code\":\"package\""), project)
+    assert(project.contains("one typed Package fact graph must own this projection"), project)
+    loop field in [diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix] -> assert(project.contains(field), "project omitted diagnostic field: {field}\n{project}")
+}
+// Rust: tests/canvas.rs:924
+#Test("canvas_node_descriptor_catalog_is_complete_and_transaction_matched") {
+    projection_fixtures :: [(_0: "node_descriptor_coverage", _1: CANVAS_COVERAGE_FIXTURE), (_0: "node_descriptor_data", _1: CANVAS_DATA_FIXTURE), (_0: "node_descriptor_patterns", _1: CANVAS_PATTERN_MULTI_FIXTURE), (_0: "node_descriptor_fallible", _1: CANVAS_RAILS_FIXTURE), (_0: "node_descriptor_yield", _1: fs.read_to_string(OSPath("Examples/features/streams/generators.jet")).unwrap()), (_0: "node_descriptor_scope", _1: fs.read_to_string(OSPath("Examples/features/tooling/test_members.jet")).unwrap())]
+    path :: write_fixture(projection_fixtures[0]._0, projection_fixtures[0]._1)
+    json :: graph_json_for_file(path).expect("canvas graph")
+    catalog :: json_array_field(json, "node_descriptors")
+    descriptors :: json_top_level_objects(catalog)
+    assert(!descriptors.is_empty(), "descriptor catalog is empty: {catalog}")
+    catalog_ids := [String:Bool]{}
+    catalog_projected_ids := [String:Bool]{}
+    catalog_insertable_ids := [String:Bool]{}
+    descriptors_by_id := [String:String]{}
+    loop descriptor in descriptors {
+        id :: json_field(descriptor, "id")
+        assert(catalog_ids.get(id) == None, "duplicate descriptor id `{id}`: {catalog}")
+        catalog_ids[id] = true
+        descriptors_by_id[id] = descriptor
+        loop field in ["\"kind\":\"", "\"archetype\":\"", "\"presentation\":{{", "\"palette\":{{", "\"default_editor\":"] -> assert(descriptor.contains(field), "descriptor facts incomplete for {id}: {descriptor}")
+        projected :: descriptor.contains("\"projected\":true")
+        insertable :: descriptor.contains("\"insertable\":true")
+        assert(projected || insertable, "orphaned descriptor `{id}`: {descriptor}")
+        if projected -> catalog_projected_ids[id] = true
+        if insertable -> catalog_insertable_ids[id] = true
+        assert_eq(insertable, !descriptor.contains("\"transaction\":null"), "insertable/transaction mismatch for `{id}`: {descriptor}")
+    }
+    projected_ids := [String:Bool]{}
+    loop (fixture_name, fixture_src) in projection_fixtures {
+        fixture_path :: write_fixture(fixture_name, fixture_src)
+        projection :: graph_json_for_file(fixture_path).expect("descriptor coverage graph")
+        loop graph in json_top_level_objects(json_array_field(projection, "graphs")) {
+            loop node in json_top_level_objects(json_array_field(graph, "nodes")) {
+                assert_eq(count_occurrences(node, "\"node_descriptor_id\":"), 1, "projected node must carry exactly one descriptor id: {node}")
+                id :: json_field(node, "node_descriptor_id")
+                assert(catalog_ids.get(id) != None, "projected node references missing descriptor `{id}`: {node}")
+                projected_ids[id] = true
+            }
+        }
+    }
+    assert_eq(projected_ids, catalog_projected_ids, "catalog/projector coverage must be exactly bidirectional")
+    src :: fs.read_to_string(path).unwrap()
+    actions_request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(src)}\"}}"
+    actions :: query_json_for_file(path, actions_request).expect("Canvas actions")
+    action_objects := json_top_level_objects(json_array_field(actions, "project_functions"))
+    loop action in json_top_level_objects(json_array_field(actions, "actions")) {
+        if !action.contains("\"kind\":\"canvas.command\"") -> &action_objects.push(action)
+    }
+    assert(!action_objects.is_empty(), "insertable actions need descriptors: {actions}")
+    exported_insertable_ids := [String:Bool]{}
+    loop action in action_objects {
+        assert_eq(count_occurrences(action, "\"node_descriptor_id\":"), 1, "served insertable action must carry exactly one descriptor id: {action}")
+        id :: json_field(action, "node_descriptor_id")
+        descriptor :: descriptors_by_id.get(id).expect("action references missing descriptor `{id}`: {action}")
+        assert(descriptor.contains("\"insertable\":true"), "action exports non-insertable descriptor `{id}`: {action}")
+        exported_insertable_ids[id] = true
+        transaction :: json_field(descriptor, "transaction")
+        action_transaction :: if action.contains("\"insert_op\":\"") -> json_field(action, "insert_op") else -> json_field(action, "op")
+        assert_eq(action_transaction, transaction, "action/descriptor transaction mismatch for `{id}`: {action}")
+    }
+    assert_eq(exported_insertable_ids, catalog_insertable_ids, "catalog/action export coverage must be exactly bidirectional")
+}
+// Rust: tests/canvas.rs:1063
+#Test("canvas_noop_round_trip_is_formatter_stable") {
+    path :: write_fixture("noop", CANVAS_FIXTURE)
+    before :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    revision :: source_revision(before)
+    edit :: "{{\"schema_version\":1,\"op\":\"noop\",\"revision\":\"{revision}\"}}"
+    out :: apply_transaction_json(path, edit).expect("noop transaction")
+    assert(out.contains("\"changed\":false"), out)
+    assert(out.contains("\"schema_version\":1"), out)
+    assert_eq(fs.read_to_string(path).unwrap(), before)
+    after_graph :: graph_json_for_file(path).expect("canvas graph after noop")
+    assert_eq(graph, after_graph, "no-op write must reproject without drift")
+}
+// Rust: tests/canvas.rs:1086
+#Test("canvas_edit_transactions_write_source_and_reproject") {
+    path :: write_fixture("edit", CANVAS_FIXTURE)
+    revision :: source_revision(fs.read_to_string(path).unwrap())
+    rename :: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"score\"}}"
+    rename_out :: apply_transaction_json(path, rename).expect("rename transaction")
+    assert(rename_out.contains("\"changed\":true"), rename_out)
+    renamed :: fs.read_to_string(path).unwrap()
+    assert(renamed.contains("score := square(limit)"))
+    assert(renamed.contains("if score > 10"))
+    assert(!renamed.contains("total"))
+    receipts :: path.parent().unwrap().join(".jet/codemods")
+    receipt_path :: fs.read_dir(receipts).unwrap().filter_map((entry) -> entry.ok()).map((entry) -> entry.path()).find((candidate) -> candidate.extension().and_then((value) -> value.to_str()) == Val("json")).expect("Canvas rename receipt")
+    receipt :: fs.read_to_string(receipt_path).unwrap()
+    loop field in ["\"kind\":\"rename\"", "\"from\":\"total\"", "\"to\":\"score\""] -> assert(receipt.contains(field), receipt)
+    scm :: source_control_json_for_file(path)
+    assert(scm.contains("\"semantic_ops\":[{{\"kind\":\"rename\""), scm)
+    graph :: graph_json_for_file(path).expect("canvas graph after rename")
+    assert(graph.contains("\"title\":\"score\""))
+    revision :: source_revision(renamed)
+    inline_id :: field_before(graph, "\"source\":\"score > 10\"", "inline_expr_id")
+    edit_inline :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{inline_id}\",\"new_expr\":\"score >= 16\"}}"
+    inline_out :: apply_transaction_json(path, edit_inline).expect("inline transaction")
+    assert(inline_out.contains("\"changed\":true"), inline_out)
+    changed :: fs.read_to_string(path).unwrap()
+    assert(changed.contains("if score >= 16"))
+    revision :: source_revision(changed)
+    graph :: graph_json_for_file(path).expect("canvas graph before insert")
+    run_graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{revision}\",\"graph_id\":\"{run_graph_id}\",\"callee\":\"print\",\"args\":[\"\\\"canvas\\\"\"]}}"
+    insert_out :: apply_transaction_json(path, insert).expect("insert transaction")
+    assert(insert_out.contains("\"changed\":true"), insert_out)
+    inserted :: fs.read_to_string(path).unwrap()
+    assert(inserted.contains("print(\"canvas\")"))
+    final_graph :: graph_json_for_file(path).expect("canvas graph final")
+    assert(final_graph.contains("\"title\":\"print\""))
+}
+// Rust: tests/canvas.rs:1149
+#Test("canvas_source_paste_is_renamed_checked_and_stale_atomic") {
+    path :: write_fixture("paste_clone", CANVAS_FIXTURE)
+    before :: fs.read_to_string(path).unwrap()
+    stale_revision :: source_revision(before)
+    clone :: before.replace("    total := square(limit)\n", "    total := square(limit)\n    total_copy := square(limit)\n")
+    escaped_clone :: clone.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    paste :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{stale_revision}\",\"source_edit\":\"paste_clone\",\"source\":\"{escaped_clone}\"}}"
+    paste_out :: apply_transaction_json(path, paste).expect("paste clone transaction")
+    assert(paste_out.contains("\"changed\":true"), paste_out)
+    pasted :: fs.read_to_string(path).unwrap()
+    original_offset :: pasted.find("total := square(limit)").expect("original binding")
+    clone_offset :: pasted.find("total_copy := square(limit)").expect("renamed clone")
+    assert(clone_offset > original_offset, "paste must insert after the selected source line")
+    assert(graph_json_for_file(path).expect("reproject pasted graph").contains("\"title\":\"total_copy\""))
+    invalid_revision :: source_revision(pasted)
+    invalid :: pasted.replace("total_copy := square(limit)", "total_copy := missing(limit)")
+    escaped_invalid :: invalid.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    invalid_request :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{invalid_revision}\",\"source\":\"{escaped_invalid}\"}}"
+    error :: apply_transaction_json(path, invalid_request).unwrap_err()
+    assert(error.contains("Error [") || error.contains("diagnostic"), error)
+    assert_eq(fs.read_to_string(path).unwrap(), pasted, "invalid paste must not write source")
+    stale_request :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{stale_revision}\",\"source\":\"{escaped_clone}\"}}"
+    stale_error :: apply_transaction_json(path, stale_request).unwrap_err()
+    assert(stale_error.contains("source changed since this Canvas graph was drawn"), stale_error)
+    assert_eq(fs.read_to_string(path).unwrap(), pasted, "stale paste must not write source")
+}
+// Rust: tests/canvas.rs:1224
+#Test("canvas_pin_authoring_transactions_write_visible_source") {
+    path :: write_fixture("pin_authoring", CANVAS_PIN_AUTHORING_FIXTURE)
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    cond_id :: field_before(graph, "\"source\":\"limit > 1\"", "inline_expr_id")
+    revision :: source_revision(fs.read_to_string(path).unwrap())
+    promote :: "{{\"schema_version\":1,\"op\":\"promote_to_binding\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{cond_id}\",\"name\":\"is_large\"}}"
+    promote_out :: apply_transaction_json(path, promote).expect("promote transaction")
+    assert(promote_out.contains("\"changed\":true"), promote_out)
+    promoted :: fs.read_to_string(path).unwrap()
+    assert(promoted.contains("is_large :: limit > 1"))
+    assert(promoted.contains("if is_large"))
+    graph :: graph_json_for_file(path).expect("canvas graph after promote")
+    literal_id :: field_before(graph, "\"source\":\"0\"", "inline_expr_id")
+    revision :: source_revision(promoted)
+    convert :: "{{\"schema_version\":1,\"op\":\"insert_visible_conversion\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{literal_id}\",\"callee\":\"to_int\"}}"
+    convert_out :: apply_transaction_json(path, convert).expect("conversion transaction")
+    assert(convert_out.contains("\"changed\":true"), convert_out)
+    converted :: fs.read_to_string(path).unwrap()
+    assert(converted.contains("return to_int(0)"), "visible conversion must be ordinary source: {converted}")
+    final_graph :: graph_json_for_file(path).expect("canvas graph final")
+    assert(final_graph.contains("\"title\":\"to_int\""))
+}
+// Rust: tests/canvas.rs:1260
+#Test("canvas_link_transactions_break_and_move_source_wires") {
+    break_path :: write_fixture("break_link", CANVAS_WIRE_FIXTURE)
+    graph :: graph_json_for_file(break_path).expect("canvas graph")
+    wire_id :: first_source_wire_id(graph)
+    revision :: source_revision(fs.read_to_string(break_path).unwrap())
+    break_req :: "{{\"schema_version\":1,\"op\":\"break_link\",\"revision\":\"{revision}\",\"wire_id\":\"{wire_id}\"}}"
+    break_out :: apply_transaction_json(break_path, break_req).expect("break link")
+    assert(break_out.contains("\"changed\":true"), break_out)
+    broken :: fs.read_to_string(break_path).unwrap()
+    assert(broken.contains("return #Todo"), broken)
+    move_path :: write_fixture("move_link", CANVAS_WIRE_FIXTURE)
+    graph :: graph_json_for_file(move_path).expect("canvas graph")
+    wire_id :: first_source_wire_id(graph)
+    revision :: source_revision(fs.read_to_string(move_path).unwrap())
+    move_req :: "{{\"schema_version\":1,\"op\":\"move_link\",\"revision\":\"{revision}\",\"wire_id\":\"{wire_id}\",\"replacement\":\"b\"}}"
+    move_out :: apply_transaction_json(move_path, move_req).expect("move link")
+    assert(move_out.contains("\"changed\":true"), move_out)
+    moved :: fs.read_to_string(move_path).unwrap()
+    assert(moved.contains("return b"), moved)
+    wrong_path :: write_fixture("wrong_link", CANVAS_WIRE_FIXTURE)
+    graph :: graph_json_for_file(wrong_path).expect("canvas graph")
+    wire_id :: first_source_wire_id(graph)
+    before :: fs.read_to_string(wrong_path).unwrap()
+    revision :: source_revision(before)
+    wrong_req :: "{{\"schema_version\":1,\"op\":\"move_link\",\"revision\":\"{revision}\",\"wire_id\":\"{wire_id}\",\"replacement\":\"missing\"}}"
+    err :: apply_transaction_json(wrong_path, wrong_req).unwrap_err()
+    assert(err.contains("\"kind\":\"diagnostic\""), err)
+    assert(err.contains("Error [E0107]"), err)
+    assert_eq(fs.read_to_string(wrong_path).unwrap(), before)
+}
+// Rust: tests/canvas.rs:1304
+#Test("canvas_exec_rewire_reorders_statements_and_guards_scope_and_dataflow") {
+    path :: write_fixture("reorder_exec", CANVAS_REORDER_FIXTURE)
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    graph_id :: graph_id_for_title(graph, "order")
+    assert(graph.contains("\"wire_kind\":\"control\"") && graph.contains("\"from_source_span\":{{\"start\":") && graph.contains("\"to_source_span\":{{\"start\":"), "control wires must carry endpoint statement spans: {graph}")
+    src :: fs.read_to_string(path).unwrap()
+    (moved_start, moved_end) :: name_span(src, "c")
+    (anchor_start, anchor_end) :: name_span(src, "a")
+    req :: "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"moved_start\":{moved_start},\"moved_end\":{moved_end},\"anchor_start\":{anchor_start},\"anchor_end\":{anchor_end},\"position\":\"after\"}}"
+    apply_transaction_json(path, req).expect("reorder statements")
+    after :: fs.read_to_string(path).unwrap()
+    order :: source_order(after, ["a", "c", "b"])
+    assert(order[0] < order[1] && order[1] < order[2], after)
+    formatted :: format_source(after).expect("format reordered source")
+    assert_eq(after, formatted, "reorder must be formatter-stable")
+    cross :: write_fixture("reorder_cross_block", CANVAS_REORDER_CROSS_BLOCK_FIXTURE)
+    graph :: graph_json_for_file(cross).expect("cross graph")
+    graph_id :: graph_id_for_title(graph, "order")
+    src :: fs.read_to_string(cross).unwrap()
+    (moved_start, moved_end) :: name_span(src, "c")
+    (anchor_start, anchor_end) :: name_span(src, "a")
+    req :: "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"moved_start\":{moved_start},\"moved_end\":{moved_end},\"anchor_start\":{anchor_start},\"anchor_end\":{anchor_end},\"position\":\"after\"}}"
+    err :: apply_transaction_json(cross, req).unwrap_err()
+    assert(err.contains("can't move a step into a different branch yet"), err)
+    assert_eq(fs.read_to_string(cross).unwrap(), src)
+    binding :: write_fixture("reorder_binding_order", CANVAS_REORDER_BINDING_FIXTURE)
+    graph :: graph_json_for_file(binding).expect("binding graph")
+    graph_id :: graph_id_for_title(graph, "order")
+    src :: fs.read_to_string(binding).unwrap()
+    (moved_start, moved_end) :: name_span(src, "c")
+    (anchor_start, anchor_end) :: name_span(src, "a")
+    req :: "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"moved_start\":{moved_start},\"moved_end\":{moved_end},\"anchor_start\":{anchor_start},\"anchor_end\":{anchor_end},\"position\":\"after\"}}"
+    err :: apply_transaction_json(binding, req).unwrap_err()
+    assert(err.contains("\"kind\":\"diagnostic\""), err)
+    assert(err.contains("E0107"), err)
+    assert(err.contains("`b`"), err)
+    assert_eq(fs.read_to_string(binding).unwrap(), src)
+}
+// Rust: tests/canvas.rs:1378
+#Test("canvas_exec_convergence_is_checked_source_and_refuses_scope_drift") {
+    path :: write_fixture("convergence_checked", "fn converge(flag: Bool) {{\n    value :: 1\n    done :: value\n    if flag {{\n        print(value)\n        finish(done)\n    }} else {{\n        print(value)\n    }}\n}}\n\nfn finish(value: Int) {{\n    print(value)\n}}\n\nfn run() {{\n    converge(true)\n}}\n")
+    graph :: graph_json_for_file(path).expect("convergence graph")
+    graph_id :: graph_id_for_title(graph, "converge")
+    (from_start, from_end) :: source_span_near(graph, "\"title\":\"if\"")
+    (target_start, target_end) :: source_span_near(graph, "\"title\":\"finish\"")
+    source :: fs.read_to_string(path).unwrap()
+    request :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{source_revision(source)}\",\"graph_id\":\"{graph_id}\",\"from_pin_name\":\"else\",\"from_start\":{from_start},\"from_end\":{from_end},\"target_start\":{target_start},\"target_end\":{target_end},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}"
+    result :: apply_transaction_json(path, request).expect("checked convergence")
+    assert(result.contains("\"changed\":true"), result)
+    after :: fs.read_to_string(path).unwrap()
+    assert(after.contains("fn shared_finish(done: Int)"), after)
+    assert_eq(after.matches("shared_finish(done)").count(), 2, after)
+    assert_eq(after, format_source(after).expect("formatted convergence"))
+    refused :: write_fixture("convergence_scope_refusal", "fn converge(flag: Bool) {{\n    value :: 1\n    if flag {{\n        branch_value :: value\n        finish(branch_value)\n    }} else {{\n        print(value)\n    }}\n}}\n\nfn finish(value: Int) {{\n    print(value)\n}}\n\nfn run() {{\n    converge(true)\n}}\n")
+    graph :: graph_json_for_file(refused).expect("refusal graph")
+    graph_id :: graph_id_for_title(graph, "converge")
+    (from_start, from_end) :: source_span_near(graph, "\"title\":\"if\"")
+    (target_start, target_end) :: source_span_near(graph, "\"title\":\"finish\"")
+    before :: fs.read_to_string(refused).unwrap()
+    request :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"from_pin_name\":\"else\",\"from_start\":{from_start},\"from_end\":{from_end},\"target_start\":{target_start},\"target_end\":{target_end},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}"
+    error :: apply_transaction_json(refused, request).unwrap_err()
+    assert(error.contains("E0107") || error.contains("diagnostic"), error)
+    assert_eq(fs.read_to_string(refused).unwrap(), before)
+}
+// Rust: tests/canvas.rs:1469
+#Test("canvas_exec_convergence_preserves_selected_statement_span_and_helper_formatting") {
+    path :: write_fixture("convergence_selected_span", "fn shared_work(value: Int) {{\n    notify ( value )\n    bump_metric ( )\n}}\n\nfn converge(flag: Bool) {{\n    value :: 1\n    if flag {{\n        notify(value)\n        bump_metric()\n        print(value)\n    }} else {{\n        print(value)\n    }}\n}}\n\nfn notify(value: Int) {{\n    print(value)\n}}\n\nfn bump_metric() {{\n    print(\"metric\")\n}}\n\nfn run() {{\n    converge(true)\n}}\n")
+    graph :: graph_json_for_file(path).expect("selected convergence graph")
+    graph_id :: graph_id_for_title(graph, "converge")
+    (from_start, from_end) :: source_span_near(graph, "\"title\":\"if\"")
+    source :: fs.read_to_string(path).unwrap()
+    target_start :: source.find("notify(value)").expect("selected span start")
+    target_end :: source.find("bump_metric()\n        print(value)").map((offset) -> offset + "bump_metric()".bytes().len()).expect("selected span end")
+    request :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{source_revision(source)}\",\"graph_id\":\"{graph_id}\",\"from_pin_name\":\"else\",\"from_start\":{from_start},\"from_end\":{from_end},\"target_start\":{target_start},\"target_end\":{target_end},\"strategy\":\"helper\",\"function\":\"shared_work\",\"helper_name\":\"shared_work\"}}"
+    result :: apply_transaction_json(path, request).expect("selected convergence helper")
+    assert(result.contains("\"changed\":true"), result)
+    after :: fs.read_to_string(path).unwrap()
+    assert_eq(after.matches("shared_work(value)").count(), 2, after)
+    assert(after.contains("fn shared_work(value: Int)"), after)
+    assert(!after.contains("notify(value)\n    bump_metric()\n        print(value)"), after)
+    assert_eq(after, format_source(after).expect("formatted selected convergence"))
+}
+// Rust: tests/canvas.rs:1536
+#Test("canvas_exec_convergence_accepts_formatter_collapsed_inline_branch_body") {
+    path :: write_fixture("convergence_inline_branch", "fn converge(flag: Bool) {{\n    value :: 1\n    done :: value\n    if flag {{\n        print(value)\n        finish(done)\n    }} else {{\n        print(value)\n    }}\n}}\n\nfn finish(value: Int) {{\n    print(value)\n}}\n\nfn run() {{\n    converge(true)\n}}\n")
+    formatted :: format_source(fs.read_to_string(path).unwrap()).expect("format fixture")
+    fs.write(path, formatted).unwrap()
+    graph :: graph_json_for_file(path).expect("inline convergence graph")
+    graph_id :: graph_id_for_title(graph, "converge")
+    (from_start, from_end) :: source_span_near(graph, "\"title\":\"if\"")
+    (target_start, target_end) :: source_span_near(graph, "\"title\":\"finish\"")
+    source :: fs.read_to_string(path).unwrap()
+    request :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{source_revision(source)}\",\"graph_id\":\"{graph_id}\",\"from_pin_name\":\"else\",\"from_start\":{from_start},\"from_end\":{from_end},\"target_start\":{target_start},\"target_end\":{target_end},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}"
+    apply_transaction_json(path, request).expect("inline convergence")
+    after :: fs.read_to_string(path).unwrap()
+    assert_eq(after.matches("shared_finish(done)").count(), 2, after)
+    assert_eq(after, format_source(after).expect("formatted inline convergence"))
+}
+// Rust: tests/canvas.rs:1586
+#Test("canvas_projection_dedupes_variable_getters_with_fanout") {
+    path :: write_fixture("getter_fanout", "fn run() {{\n    x :: 1\n    print(x)\n    print(x)\n    print(x)\n}}\n")
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    assert_eq(count_occurrences(graph, "\"node_descriptor_id\":\"variable_get\""), 1, graph)
+    getter_pin_chunk :: graph.split("\"pin_id\":\"").skip(1).find((chunk) -> chunk.contains(":value:get:x:output:x")).expect("getter output pin")
+    getter_pin := getter_pin_chunk.slice(0, getter_pin_chunk.find('"').unwrap()) // #4303
+    assert_eq(count_occurrences(graph, "\"from_pin\":\"{getter_pin}\""), 3, graph)
+}
+// Rust: tests/canvas.rs:1617
+#Test("canvas_projects_pattern_arm_and_multi_input_pin_metadata") {
+    path :: write_fixture("pattern_multi", CANVAS_PATTERN_MULTI_FIXTURE)
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    loop field in ["\"role\":\"arm\"", "\"pattern_source\":\"== Val(n)\"", "\"pattern_source_span\":", "\"name\":\"arm1\"", "\"name\":\"else\"", "\"add_pattern_arm\"", "\"title\":\"list\"", "\"append_multi_input\"", "\"append_op\":\"remove_multi_input_element\"", "\"name\":\"item1\"", "\"name\":\"item2\"", "\"name\":\"item3\""] -> assert(graph.contains(field), "pattern/multi-input graph missing {field}: {graph}")
+}
+// Rust: tests/canvas.rs:1643
+#Test("canvas_pattern_arm_and_multi_input_transactions_write_source") {
+    path :: write_fixture("pattern_arm_tx", "enum Choice {{\n    A(Int)\n    B(Int)\n    C(Int)\n}}\n\nfn choose(x: Choice) -> Int {{\n    if x == {{\n        .A(n) -> {{ return n }}\n        else -> {{ return 0 }}\n    }}\n}}\n\nfn run() {{\n    print(choose(Choice.A(1)))\n}}\n")
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    graph_id :: graph_id_for_title(graph, "choose")
+    (node_start, node_end) :: source_span_near(graph, "\"title\":\"if ==\"")
+    revision :: source_revision(fs.read_to_string(path).unwrap())
+    add :: "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{revision}\",\"graph_id\":\"{graph_id}\",\"node_start\":{node_start},\"node_end\":{node_end},\"pattern\":\"== .B(n)\"}}"
+    out :: apply_transaction_json(path, add).expect("add arm")
+    assert(out.contains("\"changed\":true"), out)
+    added :: fs.read_to_string(path).unwrap()
+    assert(added.contains(".B(n) ->"), added)
+    assert(added.contains("return 1"), "fresh arm uses sema-safe default return body: {added}")
+    graph :: graph_json_for_file(path).expect("graph after add")
+    (pat_start, pat_end) :: source_span_near(graph, "\"pattern_source\":\"B(n)\"")
+    revision :: source_revision(added)
+    edit :: "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{revision}\",\"graph_id\":\"{graph_id}\",\"pattern_start\":{pat_start},\"pattern_end\":{pat_end},\"pattern\":\"== .C(n)\"}}"
+    apply_transaction_json(path, edit).expect("edit arm")
+    edited :: fs.read_to_string(path).unwrap()
+    assert(edited.contains(".C(n) ->"), edited)
+    assert(!edited.contains(".B(n) ->"), edited)
+    graph :: graph_json_for_file(path).expect("graph after edit")
+    (pat_start, pat_end) :: source_span_near(graph, "\"pattern_source\":\"C(n)\"")
+    revision :: source_revision(edited)
+    remove :: "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{revision}\",\"graph_id\":\"{graph_id}\",\"pattern_start\":{pat_start},\"pattern_end\":{pat_end}}}"
+    apply_transaction_json(path, remove).expect("remove arm")
+    removed :: fs.read_to_string(path).unwrap()
+    assert(!removed.contains(".C(n) ->"), removed)
+    invalid_path :: write_fixture("pattern_arm_invalid_tx", "enum Choice {{\n    A(Int)\n}}\n\nfn choose(x: Choice) -> Int {{\n    if x == {{\n        .A(n) -> {{ return n }}\n    }}\n}}\n\nfn run() {{\n    print(choose(Choice.A(1)))\n}}\n")
+    graph :: graph_json_for_file(invalid_path).expect("invalid graph")
+    graph_id :: graph_id_for_title(graph, "choose")
+    (pat_start, pat_end) :: source_span_near(graph, "\"pattern_source\":\"A(n)\"")
+    before :: fs.read_to_string(invalid_path).unwrap()
+    revision :: source_revision(before)
+    remove_last :: "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{revision}\",\"graph_id\":\"{graph_id}\",\"pattern_start\":{pat_start},\"pattern_end\":{pat_end}}}"
+    err :: apply_transaction_json(invalid_path, remove_last).unwrap_err()
+    assert(err.contains("can't remove the last pattern arm"), err)
+    assert_eq(fs.read_to_string(invalid_path).unwrap(), before)
+    multi_path :: write_fixture("multi_input_tx", "fn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn demo() -> Int {{\n    xs :: [1, 2, 3,]\n    return xs[0] + to_int(1)\n}}\n\nfn run() {{\n    print(demo())\n}}\n")
+    graph :: graph_json_for_file(multi_path).expect("multi graph")
+    (list_start, list_end) :: source_span_near(graph, "\"title\":\"list\"")
+    revision :: source_revision(fs.read_to_string(multi_path).unwrap())
+    append :: "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{revision}\",\"node_start\":{list_start},\"node_end\":{list_end},\"element\":\"4\"}}"
+    apply_transaction_json(multi_path, append).expect("append list")
+    appended :: fs.read_to_string(multi_path).unwrap()
+    assert(appended.contains("[1, 2, 3, 4]"), appended)
+    graph :: graph_json_for_file(multi_path).expect("multi graph after append")
+    (list_start, list_end) :: source_span_near(graph, "\"title\":\"list\"")
+    (item_start, item_end) :: source_span_near(graph, "\"name\":\"item4\"")
+    revision :: source_revision(appended)
+    remove :: "{{\"schema_version\":1,\"op\":\"remove_multi_input_element\",\"revision\":\"{revision}\",\"node_start\":{list_start},\"node_end\":{list_end},\"element_start\":{item_start},\"element_end\":{item_end}}}"
+    apply_transaction_json(multi_path, remove).expect("remove list item")
+    removed :: fs.read_to_string(multi_path).unwrap()
+    assert(removed.contains("[1, 2, 3]"), removed)
+    assert(!removed.contains("[1, 2, 3, 4]"), removed)
+}

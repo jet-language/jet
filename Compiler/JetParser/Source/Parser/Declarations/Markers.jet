@@ -213,7 +213,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
                         }
                         else -> {}
                     }
-                    &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: default, variadic: variadic})
+                    &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: ^default, variadic: variadic})
                 }
             }
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
@@ -286,10 +286,12 @@ fn parser_parse_template_loop(state: &JetParserState) -> ItemTemplateLoop {
     parser_expect(&state, TOKEN_KW_LOOP, "after `prep` in a declaration loop")
     variable :: parser_expect_name(&state, "for a declaration loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a declaration loop binding and source")
-    source :: parser_parse_expression(&state, 1, 0)
+    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens
+    // the loop body instead of a struct literal.
+    source :: parser_parse_expression_no_struct_lit(&state, 0)
     body :: parser_marker_body(&state)
     end :: parser_lookahead(&state, -1).span
-    ItemTemplateLoop{var: parser_value(state, variable), var_span: variable.span, source: source.expr, body: body, span: parser_cover(start.span, end)}
+    ItemTemplateLoop{var: parser_value(state, variable), var_span: variable.span, source: source.expr, body: ^body, span: parser_cover(start.span, end)}
 }
 
 fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
@@ -405,9 +407,9 @@ fn parser_parse_marker_args(state: &JetParserState) -> ParsedMarkerArgs {
 fn parser_marker_written_text(state: &JetParserState, marker: Marker) -> String? {
     start := marker.span.start
     end :: marker.span.end
-    if start < 0 || end > state.source.len() || end <= start -> return None
-    if state.source[start] == (U8{35}) -> start += 1
-    text :: String.from_bytes(state.source.slice(start, end)) ?? return None
+    if start < 0 || end > state.sources[0].len() || end <= start -> return None
+    if state.sources[0][start] == (U8{35}) -> start += 1
+    text :: String.from_bytes(state.sources[0].slice(start, end)) ?? return None
     Val(text)
 }
 

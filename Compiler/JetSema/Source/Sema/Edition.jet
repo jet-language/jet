@@ -123,13 +123,13 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
     payloads := [String:CoreMarkerApplication]{}
     editions := [String:String]{}
     loop policy in policies -> editions[policy.package_identity] = policy.edition
-    loop graph_module in graph.modules {
-        sema_lifecycle_functions(graph_module.functions, &payloads)
-        loop implementation in graph_module.impls -> sema_lifecycle_functions(implementation.methods, &payloads)
-        loop nominal in graph_module.nominals {
-            sema_lifecycle_functions(nominal.methods, &payloads)
+    loop graph_module_index in 0..<graph.modules.len() {
+        sema_lifecycle_functions(graph.modules[graph_module_index].functions, &payloads)
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() -> sema_lifecycle_functions(graph.modules[graph_module_index].impls[implementation_index].methods, &payloads)
+        loop nominal_index in 0..<graph.modules[graph_module_index].nominals.len() {
+            sema_lifecycle_functions(graph.modules[graph_module_index].nominals[nominal_index].methods, &payloads)
             markers := [Marker]{}
-            if nominal.source == .SourceAST(item) {
+            if graph.modules[graph_module_index].nominals[nominal_index].source == .SourceAST(item) {
                 if item == {
                     .Struct(value) -> markers = value.type_markers
                     .Enum(value) -> markers = value.type_markers
@@ -137,8 +137,8 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
                     else -> {}
                 }
             }
-            payload :: sema_lifecycle_marker(markers, nominal.symbol.name) ?? next
-            payloads[nominal.symbol.id.key] = payload
+            payload :: sema_lifecycle_marker(markers, graph.modules[graph_module_index].nominals[nominal_index].symbol.name) ?? next
+            payloads[graph.modules[graph_module_index].nominals[nominal_index].symbol.id.key] = payload
         }
     }
     seen := [String:Bool]{}

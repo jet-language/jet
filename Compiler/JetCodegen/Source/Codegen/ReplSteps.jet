@@ -27,9 +27,10 @@ fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[Sem
     module_rows := modules
     executable := program
     field_symbols :: jet_codegen_field_symbol_index(module_rows)
+    nominals :: jet_codegen_nominal_index(module_rows)
     source_index :: jet_codegen_source_index(executable.source_files)
     function_index :: jet_codegen_function_index(^rows)
-    inputs :: jet_codegen_new_program(^function_index, ^module_rows, ^field_symbols, executable.source_files, ^source_index, executable.facts.edition)
+    inputs :: jet_codegen_new_program(^function_index, ^module_rows, ^nominals, ^field_symbols, executable.source_files, ^source_index, executable.facts.edition)
     builder :: jet_codegen_new_builder(jet_codegen_executable_function(root), inputs)
     Ok(JetCodegenReplSession{builder: ^builder, inputs: ^inputs, program: ^executable, root: jet_codegen_function_id(root)})
 }

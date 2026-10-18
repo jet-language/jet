@@ -1,0 +1,577 @@
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1792
+// Continuation of the canonical GraphProjection module.
+use std.fmt.[format]
+use jet_parser.AST as AST
+use jet_parser.AST.[Expr, Stmt]
+use jet_foundation.[Span]
+use jet_parser.Syntax.[INTERNAL_TASK_SURFACE_TYPE, INTERNAL_TASK_GROUP_SURFACE_TYPE]
+use jet_semindex.[SemIndex, SourceSpan, CallableEffectsFact]
+use jet_devserver.Canvas.GraphProjection.[GraphBuilder, game_assets_receiver]
+use jet_devserver.Canvas.GraphHelpers.[assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title, expr_type, lvalue_type, pure_leaf, snippet, span_through_closing_parens, starts_uppercase, wire_ident_refs]
+use jet_devserver.Canvas.GraphJson.[add_arm_pin, add_authority_region, add_inline, add_node, add_pin, add_region, add_wire, add_wire_with_span, meta_attr_json, set_pin_append, set_pin_source_span]
+use jet_devserver.Canvas.ValidationJson.[json_str, span_json]
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1792
+fn project_stmt_block(g: &GraphBuilder, index: &SemIndex, src: String, stmts: &[Stmt], base: USize, x: I32, y: I32) {
+    cursor_y := y
+    loop (i, stmt) in stmts.iter().enumerate() {
+        project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y)
+        cursor_y += stmt_row_step(stmt)
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1808
+// A list initializer's multi-input body grows with item count; retain enough
+// spacing for its data providers before the next sibling statement.
+fn stmt_row_step(stmt: Stmt) -> I32 {
+    items :: if stmt is {
+        .Val(b) -> multi_input_item_count(b.init)
+        .Assign(value: value, ..) -> multi_input_item_count(value)
+        _ -> 0
+    }
+    130 + (I32{items.saturating_sub(2)}) * 55
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1823
+fn multi_input_item_count(expr: Expr) -> USize {
+    if expr is { .ListLit(items, _) -> items.len(); _ -> 0 }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1830
+fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, ordinal: USize, x: I32, y: I32) {
+    if stmt is {
+        .Val(b) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:binding"
+            ty :: binding_type(g, b.name, b)
+            add_node(g, node_id, "binding", b.name, binding_source_span(src, b), x, y, ["local"], ["rename_binding", "edit_inline_expr", "source_jump"])
+            if g.nodes.iter_mut().find((node) == .Val(node) -> node.id == node_id) { node.meta_json = meta_attr_json(b.meta.as_ref()) }
+            input_pin :: add_pin(g, node_id, "value", "input", ty, "", false)
+            output_pin :: add_pin(g, node_id, b.name, "output", ty, "", false)
+            g.local_pins.insert(b.name.clone(), ^output_pin)
+            g.local_types.insert(b.name.clone(), ^ty)
+            init_span :: if b.pattern.is_none() -> binding_init_span(src, b) else -> b.init.span()
+            connect_expr_to_input_with_span(g, index, src, b.init, init_span, ordinal, "init", node_id, input_pin, x - 220, y)
+        }
+        .Assign(target: target, op: op, value: value, ..) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:assign"
+            title :: assignment_title(target, op)
+            ty :: lvalue_type(g, target)
+            add_node(g, node_id, "assignment", title, target.span().into(), x, y, ["write"], ["edit_inline_expr", "source_jump"])
+            input :: add_pin(g, node_id, "value", "input", ty, "", false)
+            output :: add_pin(g, node_id, "target", "output", ty, "&", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+            if target == .Local(name: name, ..) {
+                g.local_pins.insert(name.clone(), ^output)
+                g.local_types.insert(name.clone(), ^ty)
+            }
+        }
+        .Expr(e) -> { _ :: project_expr_node(g, index, src, e, ordinal, x, y, true) }
+        .DeferClose(close: close, span: span) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:defer_close"
+            add_node(g, node_id, "defer_close", "defer close", span.into(), x, y, ["cleanup"], ["source_jump"])
+            add_inline(g, node_id, ordinal, "close", src, close.span())
+        }
+        .Return(expr, span) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:return"
+            add_node(g, node_id, "return", "return", span.into(), x, y, ["exit"], ["source_jump"])
+            if expr == .Val(e) {
+                ty :: expr_type(g, index, e)
+                input :: add_pin(g, node_id, "value", "input", ty, "", false)
+                connect_expr_to_input(g, index, src, e, ordinal, "value", node_id, input, x - 220, y)
+            }
+        }
+        .While(cond: cond, body: body, span: span, ..) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:loop"
+            add_node(g, node_id, "loop", "loop", span.into(), x, y, ["control"], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "cond", src, cond.span())
+            project_stmt_block(g, index, src, body, ordinal * 100 + 15, x + 230, y + 70)
+        }
+        .Loop(body: body, span: span, ..) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:loop"
+            add_node(g, node_id, "loop", "loop", span.into(), x, y, ["control"], ["source_jump"])
+            project_stmt_block(g, index, src, body, ordinal * 100 + 20, x + 230, y + 70)
+        }
+        .CountedLoop(init: init, cond: cond, step: step, body: body, span: span, ..) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:counted_loop"
+            add_node(g, node_id, "loop", "counted loop", span.into(), x, y, ["control"], ["add_pattern_arm", "edit_inline_expr", "source_jump"])
+            initializer_span :: Span.new(init.name_span.start, init.init.span().end)
+            init_pin :: add_pin(g, node_id, "initializer", "input", "Value", "", false)
+            connect_expr_to_input_with_span(g, index, src, init.init, initializer_span, ordinal * 10, "initializer", node_id, init_pin, x - 220, y)
+            cond_pin :: add_pin(g, node_id, "condition", "input", "Bool", "", false)
+            connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", node_id, cond_pin, x - 220, y + 30)
+            add_inline(g, node_id, ordinal, "cond", src, cond.span())
+            if step == .Val(step_value) {
+                afterthought :: if step_value.as_ref() is {
+                    .Assign(target: target, value: value, ..) -> .Some((value, Span.new(target.span().start, expr_source_end(value))))
+                    .Expr(value) -> .Some((value, value.span()))
+                    _ -> .None
+                }
+                if (value, value_span) :: afterthought {
+                    pin :: add_pin(g, node_id, "afterthought", "input", "Value", "", false)
+                    connect_expr_to_input_with_span(g, index, src, value, value_span, ordinal * 10 + 2, "afterthought", node_id, pin, x - 220, y + 60)
+                }
+            }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200)
+        }
+        .For(var: var, var2: var2, kind: kind, body: body, span: span, ..) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:for"
+            add_node(g, node_id, "loop", "loop {var}", span.into(), x, y, ["control"], ["source_jump"])
+            iter_ty :: if kind is { .Range(..) -> "Int"; .In(..) -> "iterable" }
+            output :: add_pin(g, node_id, var, "output", iter_ty, "", false)
+            g.local_pins.insert(var.clone(), ^output)
+            g.local_types.insert(var.clone(), iter_ty.to_string())
+            if (second, _) :: var2 {
+                second_output :: add_pin(g, node_id, second, "output", iter_ty, "", false)
+                g.local_pins.insert(second.clone(), ^second_output)
+                g.local_types.insert(second.clone(), iter_ty.to_string())
+            }
+            if kind is {
+                .Range(start: start, end: end, step: step, exclusive: _) -> {
+                    start_pin :: add_pin(g, node_id, "range_start", "input", "Int", "", false)
+                    connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", node_id, start_pin, x - 220, y)
+                    end_pin :: add_pin(g, node_id, "range_end", "input", "Int", "", false)
+                    connect_expr_to_input(g, index, src, end, ordinal * 10 + 1, "range_end", node_id, end_pin, x - 220, y + 30)
+                    if step == .Val(stride) {
+                        stride_pin :: add_pin(g, node_id, "stride", "input", "Int", "", false)
+                        connect_expr_to_input(g, index, src, stride, ordinal * 10 + 2, "stride", node_id, stride_pin, x - 220, y + 60)
+                    }
+                }
+                .In(collection: collection, step: step) -> {
+                    source_pin :: add_pin(g, node_id, "source", "input", "Iterable", "", false)
+                    connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", node_id, source_pin, x - 220, y)
+                    if step == .Val(stride) {
+                        stride_pin :: add_pin(g, node_id, "stride", "input", "Int", "", false)
+                        connect_expr_to_input(g, index, src, stride, ordinal * 10 + 1, "stride", node_id, stride_pin, x - 220, y + 30)
+                    }
+                }
+            }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 40, x + 230, y + 70)
+        }
+        .Switch(subject: subject, arms: arms, else_body: else_body, span: span) | .ComptimeSwitch(subject: subject, arms: arms, else_body: else_body, span: span) -> {
+            subjectless :: AST.is_subjectless_guard(subject, span)
+            if subjectless && switch_was_classic_if(src, arms, span) {
+                arm :: arms.first() ?? return
+                node_id :: "{g.graph_id}:stmt:{ordinal}:branch"
+                affordances := [String]{["edit_inline_expr", "source_jump"]}
+                is_pattern_test :: arm.cond == .PatternTest(..)
+                if is_pattern_test { affordances.push("add_pattern_arm") }
+                add_node(g, node_id, "branch", if is_pattern_test -> "if ==" else -> "if", span.into(), x, y, ["control"], ^affordances)
+                if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) { set_pattern_node_type(g, node_id, pattern_type) }
+                cond :: add_pin(g, node_id, "cond", "input", "Bool", "", false)
+                if is_pattern_test { _ :: add_arm_pin(g, node_id, "arm1", pattern_pin_label(src, arm.cond), pattern_arm_edit_span(src, arm.cond)) }
+                connect_expr_to_input(g, index, src, arm.cond, ordinal, "cond", node_id, cond, x - 220, y)
+                project_stmt_block(g, index, src, arm.body, ordinal * 100 + 10, x + 230, y + 70)
+                project_classic_switch_else(g, index, src, else_body.as_ref(), ordinal, x + 460, y + 70)
+                return
+            }
+            node_id :: "{g.graph_id}:stmt:{ordinal}:dispatch"
+            add_node(g, node_id, "dispatch", if subjectless -> "if guards" else -> "if ==", span.into(), x, y, ["control"], ["add_pattern_arm", "edit_inline_expr", "source_jump"])
+            pattern_type :: if subjectless -> arms.first().and_then((arm) -> pattern_subject_type(g, index, arm.cond)) else -> .Some(expr_type(g, index, subject))
+            if pattern_type == .Val(ty) { set_pattern_node_type(g, node_id, ty) }
+            if !subjectless {
+                ty :: expr_type(g, index, subject)
+                subject_pin :: add_pin(g, node_id, "subject", "input", ty, "", false)
+                connect_expr_to_input(g, index, src, subject, ordinal, "subject", node_id, subject_pin, x - 220, y)
+            }
+            loop (i, arm) in arms.iter().enumerate() {
+                _ :: add_arm_pin(g, node_id, "arm{i + 1}", dispatch_arm_pattern_label(src, arm.cond), dispatch_arm_pattern_span(src, arm.cond))
+                add_inline(g, node_id, ordinal, "arm{i + 1}", src, arm.cond.span())
+                project_stmt_block(g, index, src, arm.body, ordinal * 100 + 50 + i * 20, x + 230 + I32{i} * 180, y + 100)
+            }
+            if else_body == .Val(body) { project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230) }
+        }
+        .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:flow"
+            title :: snippet(src, span)
+            add_node(g, node_id, "flow", title, span.into(), x, y, ["control"], ["source_jump"])
+        }
+        .BreakValue(value, span) | .BreakLabelValue(_, _, value, span) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:flow"
+            add_node(g, node_id, "flow", "break", span.into(), x, y, ["control"], ["source_jump"])
+            ty :: expr_type(g, index, value)
+            input :: add_pin(g, node_id, "value", "input", ty, "", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+        }
+        .Unsafe(span: span, audit: audit, body: body, ..) -> {
+            g.regions.push("{{\"region_id\":{json_str(format("{}:region:{}:unsafe", g.graph_id, ordinal))},\"kind\":\"unsafe\",\"title\":{json_str(audit.as_ref().unwrap_or("#Unsafe"))},\"source_span\":{span_json(span.into())}}}")
+            project_stmt_block(g, index, src, body, ordinal * 100 + 95, x + 230, y + 70)
+        }
+        .Impure(reason: reason, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "impure", reason.as_ref().unwrap_or("#Impure"), span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 100, x + 230, y + 70)
+        }
+        .Reactive(body: body, span: span) -> {
+            add_region(g, ordinal, "reactive", "#Reactive", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 110, x + 230, y + 70)
+        }
+        .Shield(body: body, span: span) -> {
+            add_region(g, ordinal, "shield", "#Shield", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70)
+        }
+        .Switched(marker: marker, body: body, span: span) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:switched"
+            badge :: "#{marker.name}"
+            add_node(g, node_id, "switched", badge, span.into(), x, y, [badge], ["toggle_switch_state", "source_jump"])
+            project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70)
+        }
+        .Region(name: name, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "region", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70)
+        }
+        .Policy(declarations: declarations, body: body, span: span) -> {
+            label :: declarations.iter().map((d) -> d.key.name()).collect().join(", ")
+            add_region(g, ordinal, "policy", "#Policy({label})", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70)
+        }
+        .TaskGroup(name: name, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "task.group", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 140, x + 230, y + 70)
+        }
+        .Layout(name: name, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "layout", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70)
+        }
+        .AuthorityScope(caps: caps, binding: binding, body: body, span: span, ..) -> {
+            title :: caps.iter().map(((cap, _)) -> cap.as_str()).collect().join(", ")
+            granted :: caps.iter().map(((cap, _)) -> cap.clone()).collect()
+            add_authority_region(g, ordinal, "authority: {title}", [], granted, [], binding.as_ref(), span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70)
+        }
+        .ComptimeIf(cond: cond, then_body: then_body, else_body: else_body, span: span, ..) -> {
+            add_region(g, ordinal, "comptime_if", "prep if", span)
+            node_id :: "{g.graph_id}:stmt:{ordinal}:comptime_if"
+            add_node(g, node_id, "branch", "prep if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "cond", src, cond.span())
+            project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
+            if else_body == .Val(body) { project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70) }
+        }
+        .ComptimeBlock(body: body, span: span, ..) -> {
+            add_region(g, ordinal, "comptime", "comptime", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 190, x + 230, y + 70)
+        }
+        .ContextBlock(body: body, span: span, ..) | .Live(body: body, span: span) | .AssumeDet(body: body, span: span, ..) | .Transact(body: body, span: span, ..) -> {
+            add_region(g, ordinal, "scope", "scope", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 200, x + 230, y + 70)
+        }
+        .Yield(expr, span) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:yield"
+            add_node(g, node_id, "yield", "yield", span.into(), x, y, ["stream"], ["source_jump"])
+            ty :: expr_type(g, index, expr)
+            input :: add_pin(g, node_id, "value", "input", ty, "", false)
+            connect_expr_to_input(g, index, src, expr, ordinal, "value", node_id, input, x - 220, y)
+        }
+        .ScopeMember(name: name, args: args, body: body, span: span, ..) -> {
+            node_id :: "{g.graph_id}:stmt:{ordinal}:scope_member:{name}"
+            add_node(g, node_id, "function_exec", ".{name}", span.into(), x, y, ["scope"], ["source_jump"])
+            loop (i, arg) in args.iter().enumerate() { add_inline(g, node_id, ordinal, "arg{i + 1}", src, arg.span()) }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 210, x + 230, y + 70)
+        }
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2593
+fn switch_was_classic_if(src: String, arms: &[AST.SwitchArm], span: Span) -> Bool {
+    first :: arms.first() ?? return false
+    AST.uses_classic_if_spelling(src, span, first.cond.span())
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2600
+fn pattern_subject_type(g: GraphBuilder, index: SemIndex, cond: Expr) -> String? {
+    if cond is { .PatternTest(subject: subject, ..) -> .Some(expr_type(g, index, subject)); _ -> .None }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2607
+fn set_pattern_node_type(g: &GraphBuilder, node_id: String, pattern_type: String) {
+    if g.nodes.iter_mut().find((node) == .Val(node) -> node.id == node_id) { node.meta_json = .Some("{{\"pattern_type\":{json_str(pattern_type)}}}") }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2613
+fn pattern_pin_label(src: String, expr: &Expr) -> String {
+    raw :: snippet(src, expr.span())
+    text := raw.trim() // #4303
+    balanced :: balance_closing_parens(text)
+    if expr == .PatternTest(..) {
+        if balanced.find("==") == .Val(pos) {
+            label := balanced[pos..<balanced.len()].trim() // #4303
+            return label.to_string()
+        }
+        label := balanced.trim() // #4303
+        return "== {label}"
+    }
+    balanced
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2625
+// Dispatch arm labels omit the leading enum-variant dot and carry no ==.
+fn dispatch_arm_pattern_label(src: String, expr: &Expr) -> String {
+    (raw, _) :: dispatch_arm_pattern_fragment(src, expr)
+    text := raw.trim() // #4303
+    balanced :: balance_closing_parens(text)
+    balanced.strip_prefix('.').unwrap_or(balanced).to_string()
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2634
+fn dispatch_arm_pattern_span(src: String, expr: &Expr) -> SourceSpan {
+    span :: SourceSpan{expr.span().into()}
+    (pattern, offset) :: dispatch_arm_pattern_fragment(src, expr)
+    SourceSpan(start: span.start + offset, end: span.start + offset + pattern.trim_end().len())
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2643
+fn dispatch_arm_pattern_fragment(src: String, expr: &Expr) -> (String, USize) {
+    span :: SourceSpan{expr.span().into()}
+    source :: src.get(span.start..span.end).unwrap_or("")
+    trimmed := source.trim_start() // #4303
+    offset := source.len() - trimmed.len()
+    fragment := trimmed
+    dispatch_open :: fragment.find("==").and_then((pos) -> {
+        after_cmp :: fragment[pos + 2..<fragment.len()]
+        after_space := after_cmp.trim_start() // #4303
+        if after_space.starts_with('{') { .Some((pos + 2, after_cmp.len() - after_space.len())) } else { .None }
+    })
+    if (comparator, whitespace) :: dispatch_open {
+        offset += comparator + whitespace
+        fragment = fragment[comparator + whitespace..<fragment.len()]
+    } else {
+        after_space := fragment.trim_start() // #4303
+        offset += fragment.len() - after_space.len()
+        fragment = after_space
+    }
+    if fragment.strip_prefix('{') == .Val(after_open) {
+        offset += 1
+        fragment = after_open.trim_start() // #4303
+        offset += after_open.len() - fragment.len()
+    }
+    if fragment.rfind("->") == .Val(arrow) {
+        after_arrow :: fragment[arrow + 2..<fragment.len()]
+        if after_arrow.rfind('}') == .Val(close) {
+            after_body :: after_arrow[close + 1..<after_arrow.len()]
+            offset += arrow + 2 + close + 1
+            fragment = after_body.trim_start() // #4303
+            offset += after_body.len() - fragment.len()
+        }
+    }
+    text := fragment.trim_end() // #4303
+    (text.to_string(), offset)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2684
+fn pattern_arm_edit_span(src: String, expr: &Expr) -> SourceSpan {
+    if expr is {
+        .PatternTest(pattern: pattern, ..) -> span_through_closing_parens(src, pattern.span())
+        _ -> expr.span().into()
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2691
+fn balance_closing_parens(s: String) -> String {
+    out := s.to_string()
+    opens :: s.chars().filter((c) -> c == '(').count()
+    closes :: s.chars().filter((c) -> c == ')').count()
+    loop _ in closes..opens { out.push(')') }
+    out
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2702
+fn project_classic_switch_else(g: &GraphBuilder, index: &SemIndex, src: String, else_body: &[Stmt]?, ordinal: USize, x: I32, y: I32) {
+    body :: else_body ?? return
+    if body.len() == 1 {
+        stmt :: &body[0]
+        if stmt == .Switch(subject: subject, arms: arms, span: span, ..) {
+            if AST.is_subjectless_guard(subject, span) && switch_was_classic_if(src, arms, span) {
+                project_stmt(g, index, src, stmt, ordinal * 100 + 60, x, y)
+                return
+            }
+        }
+    }
+    project_stmt_block(g, index, src, body, ordinal * 100 + 70, x, y)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2732
+fn connect_expr_to_input(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) {
+    connect_expr_to_input_with_span(g, index, src, expr, expr.span(), ordinal, role, owner_node_id, input_pin, x, y)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2759
+fn expr_source_end(expr: Expr) -> USize {
+    if expr is {
+        // Compound-assignment sema gives the binary node the target span;
+        // its original RHS retains the actual source end.
+        .Binary(_, left, right, _) -> expr_source_end(left).max(expr_source_end(right))
+        _ -> expr.span().end
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2768
+fn binding_source_span(src: String, binding: &AST.Binding) -> SourceSpan {
+    init_end := expr_source_end(binding.init)
+    loop src.as_bytes().get(init_end).is_some_and((byte) -> byte.is_ascii_whitespace()) { init_end += 1 }
+    if src.as_bytes().get(init_end) == .Some(40) { init_end += 1 }
+    init_span :: span_through_closing_parens(src, Span.new(binding.init.span().start, init_end))
+    SourceSpan(start: binding.name_span.start, end: init_span.end)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2788
+fn binding_init_span(src: String, binding: &AST.Binding) -> Span {
+    end :: expr_source_end(binding.init)
+    start := binding.sigil_span.map((span) -> span.end).unwrap_or_else(() -> binding.init.span().start)
+    loop start < end && src.as_bytes()[start].is_ascii_whitespace() { start += 1 }
+    Span.new(start, end)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2801
+fn connect_expr_to_input_with_span(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, inline_span: Span, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) {
+    provider_y :: data_provider_y(y, ordinal)
+    if project_value_node(g, index, src, expr, ordinal, role, x, provider_y) == .Val(out) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+        add_wire_with_span(g, out, input_pin, "data", .Some(expr.span().into()))
+    } else if pure_leaf(expr) && !(expr == .Binary(..)) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+        wire_ident_refs(g, expr, input_pin)
+    } else if project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) == .Val(out) {
+        variant_method :: if expr is { .MethodCall(method: method, ..) -> starts_uppercase(method); _ -> false }
+        if details_composite_expr(expr) || expr == .EnumLit(..) || variant_method { add_inline(g, owner_node_id, ordinal, role, src, inline_span) }
+        add_wire_with_span(g, out, input_pin, "data", .Some(expr.span().into()))
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2833
+fn details_composite_expr(expr: Expr) -> Bool {
+    if expr is {
+        .ListLit(_, _) | .MapLit(_, _) | .StructLit(..) | .TypedLit(..) | .TupleLit(_, _, _) | .Present(_, _) | .Ok(_, _) | .Err(_, _) -> true
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2847
+fn data_provider_y(y: I32, ordinal: USize) -> I32 { y + 96 + (I32{(ordinal % 2)} * 18) }
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2851
+fn project_value_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: USize, role: String, x: I32, y: I32) -> String? {
+    if expr == .Place(inner, _, _) -> return project_value_node(g, index, src, inner, ordinal, role, x, y)
+    if expr == .Ident(name, span) {
+        source_span :: SourceSpan{span.into()}
+        key :: getter_key(index, name, source_span)
+        if g.getter_pins.get(key).cloned() == .Val(pin) -> return .Some(pin)
+        ty :: expr_type(g, index, expr)
+        base_node_id :: "{g.graph_id}:value:get:{canvas_ident_fragment(name)}"
+        node_id :: if g.nodes.iter().any((node) -> node.id == base_node_id && node.span != source_span) -> "{base_node_id}:{span.start}-{span.end}" else -> base_node_id
+        add_node(g, node_id, "variable_get", name, source_span, x, y, ["read"], ["edit_inline_expr", "source_jump"])
+        pin :: add_pin(g, node_id, name, "output", ty, "", false)
+        g.getter_pins.insert(^key, pin.clone())
+        return .Some(pin)
+    }
+    (title, badges) :: if expr is {
+        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Str(_, _) | .Char(_, _) | .Absent(_) | .Todo(..) -> (snippet(src, expr.span()), ["const"])
+        _ -> return .None
+    }
+    span :: SourceSpan{expr.span().into()}
+    node_id :: "{g.graph_id}:value:{ordinal}:{role}:{span.start}-{span.end}"
+    add_node(g, node_id, "constant", title, span, x, y, badges, ["edit_inline_expr", "source_jump"])
+    .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2933
+fn getter_key(index: SemIndex, name: String, span: SourceSpan) -> String {
+    reference :: index.references().iter().find((reference) -> reference.span == span && reference.name == name) ?? return "{name}@{span.start}:{span.end}"
+    target :: reference.target.as_ref() ?? return "{name}@{span.start}:{span.end}"
+    "{name}@{target.module_path}:{target.def_span.start}:{target.def_span.end}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2950
+fn method_is_pure(index: SemIndex, span: SourceSpan) -> Bool {
+    reference :: index.references().iter().find((reference) -> reference.span == span) ?? return false
+    target :: reference.target.as_ref() ?? return false
+    definition :: index.definitions().iter().find((definition) -> definition.module_path == target.module_path && definition.def_span == target.def_span) ?? return false
+    signature :: definition.callable_signature.as_ref() ?? return false
+    if signature.effects is { .Checked(effects) -> effects.is_empty(); _ -> false }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2975
+fn canvas_ident_fragment(name: String) -> String {
+    name.chars().map((c) -> if c.is_ascii_alphanumeric() || c == '_' -> c else -> '_').collect()
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2987
+fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: USize, x: I32, y: I32, exec_context: Bool) -> String? {
+    if expr is {
+        .Binary(op, left, right, span) -> {
+            node_id :: "{g.graph_id}:expr:{ordinal}:operator:{span.start}-{span.end}"
+            add_node(g, node_id, "expression", op.spell(), span.into(), x, y, [], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "value", src, span)
+            left_ty :: expr_type(g, index, left)
+            left_input :: add_pin(g, node_id, "left", "input", left_ty, "", false)
+            connect_expr_to_input(g, index, src, left, ordinal * 1000 + 1, "left", node_id, left_input, x - 220, y)
+            right_ty :: expr_type(g, index, right)
+            right_input :: add_pin(g, node_id, "right", "input", right_ty, "", false)
+            connect_expr_to_input(g, index, src, right, ordinal * 1000 + 2, "right", node_id, right_input, x - 220, y + 74)
+            result_ty :: expr_type(g, index, expr)
+            .Some(add_pin(g, node_id, "result", "output", result_ty, "", false))
+        }
+        .Call(c) -> {
+            node_id :: "{g.graph_id}:expr:{ordinal}:call:{c.name}"
+            archetype :: if exec_context || call_has_effects(index, c.name) -> "function_exec" else -> "function_pure"
+            add_node(g, node_id, archetype, c.name, c.name_span.into(), x, y, effect_badges(index, c.name), ["insert_call", "source_jump"])
+            loop (i, arg) in c.args.iter().enumerate() {
+                ty :: expr_type(g, index, arg.expr)
+                input :: add_pin(g, node_id, "arg{i + 1}", "input", ty, arg.convention.sigil(), false)
+                connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 1, "arg{i + 1}", node_id, input, x - 220, y + I32{i} * 74)
+            }
+            ret :: call_ret(index, c.name).unwrap_or("Void")
+            .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
+        }
+        .MethodCall(receiver: receiver, method: method, method_span: method_span, args: args, recv_type: recv_type, resolved_ret: resolved_ret, ..) -> {
+            node_id :: "{g.graph_id}:expr:{ordinal}:method:{method}"
+            variant_like :: starts_uppercase(method)
+            pure :: method_is_pure(index, method_span.into())
+            archetype :: if variant_like || pure -> "function_pure" else -> "function_exec"
+            // Checked task desugaring may replace the internal receiver with
+            // the lexical group name. The private recv_type tags survive that
+            // rewrite and distinguish authored task syntax from ordinary methods.
+            is_task_surface :: recv_type.as_ref() == .Some(INTERNAL_TASK_SURFACE_TYPE) || recv_type.as_ref() == .Some(INTERNAL_TASK_GROUP_SURFACE_TYPE)
+            title :: if is_task_surface { if method == "spawn" -> "task" else -> "task.{method}" } else if variant_like { method.clone() } else { ".{method}" }
+            is_game_asset :: (method == "image" || method == "sound") && game_assets_receiver(receiver)
+            is_game_component :: method == "component"
+            affordances := [String]{["insert_call", "source_jump"]}
+            if is_game_asset || is_game_component { affordances.push("edit_game_selection") }
+            add_node(g, node_id, if variant_like -> "variant" else -> archetype, title, method_span.into(), x, y, [], ^affordances)
+            recv_ty :: expr_type(g, index, receiver)
+            recv_pin :: add_pin(g, node_id, "self", "input", recv_ty, "", false)
+            connect_expr_to_input(g, index, src, receiver, ordinal * 1000 + 1, "self", node_id, recv_pin, x - 220, y)
+            loop (i, arg) in args.iter().enumerate() {
+                ty :: expr_type(g, index, arg.expr)
+                input :: add_pin(g, node_id, "arg{i + 1}", "input", ty, arg.convention.sigil(), false)
+                connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 2, "arg{i + 1}", node_id, input, x - 220, y + (I32{i} + 1) * 74)
+            }
+            ret :: resolved_ret.as_ref().map((ty) -> ty.name()).unwrap_or("unknown")
+            .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
+        }
+        .Try(inner, span, _, _) -> {
+            node_id :: "{g.graph_id}:expr:{ordinal}:fallible"
+            add_node(g, node_id, "fallible", "?", span.into(), x, y, ["fallible"], ["add_fallback_rail", "source_jump"])
+            input :: add_pin(g, node_id, "value", "input", expr_type(g, index, inner), "", true)
+            if project_expr_node(g, index, src, inner, ordinal, x - 180, y, false) == .Val(out) { add_wire(g, out, input, "fallible") }
+            .Some(add_pin(g, node_id, "ok", "output", "unknown", "", false))
+        }
+        .OrFallback(value: value, ..) -> project_expr_node(g, index, src, value, ordinal, x, y, exec_context)
+        .ListLit(items, span) -> {
+            node_id :: "{g.graph_id}:expr:{ordinal}:list"
+            add_node(g, node_id, "expression", "list", span.into(), x, y, ["multi-input"], ["append_multi_input", "edit_inline_expr", "source_jump"])
+            loop (i, item) in items.iter().enumerate() {
+                ty :: expr_type(g, index, item)
+                input :: add_pin(g, node_id, "item{i + 1}", "input", ty, "", false)
+                set_pin_source_span(g, input, item.span().into())
+                set_pin_append(g, input, "remove_multi_input_element", i)
+                connect_expr_to_input(g, index, src, item, ordinal * 1000 + i + 1, "item{i + 1}", node_id, input, x - 220, y + I32{i} * 74)
+            }
+            .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
+        }
+        _ -> {
+            node_id :: "{g.graph_id}:expr:{ordinal}:expr"
+            title :: expr_title(expr)
+            add_node(g, node_id, "expression", title, expr.span().into(), x, y, ["expression"], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "value", src, expr.span())
+            .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
+        }
+    }
+}

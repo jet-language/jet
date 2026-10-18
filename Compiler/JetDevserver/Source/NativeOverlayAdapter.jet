@@ -1,0 +1,454 @@
+// Typed resident-session/native-overlay bridge. Keeps canonical event identity
+// and body intact. Never parses devtools_json, selects panel policy or executes actions.
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:8
+use std.collections.[VecDeque]
+use std.fmt as fmt
+use jet_foundation.Devtools.[JetDevtoolsEvent]
+use jet_devserver.NativeOverlayHost.[NativeOverlayAction, NativeOverlayEvent, NativeOverlayGrant, NativeOverlayNode, NativeOverlayNodeKind, NativeOverlayPanelFact, JET_DEVTOOLS_PROTOCOL, MAX_OVERLAY_DEPTH, MAX_OVERLAY_NODES, MAX_OVERLAY_PANELS, MAX_OVERLAY_TEXT_BYTES]
+use jet_devserver.Session.[DevtoolsProjection, ResidentDevSession]
+use jet_devserver.TerminalHost.[panel_availability as project_panel_availability, JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
+use jet_devserver.Devtools.catalog.[descriptors]
+
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:23
+NATIVE_OVERLAY_EVENT_LOG_PANEL_ID :: "event-log"
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:25
+NATIVE_OVERLAY_EVENT_LOG_TITLE :: "Event Log"
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:27
+NATIVE_OVERLAY_EVENT_LOG_STATUS :: "canonical events"
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:29
+MAX_NATIVE_OVERLAY_EVENTS :: Usize{256}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:32
+EVENT_LOG_NODES_PER_EVENT :: Usize{7}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:34
+struct NativeOverlayCursor { sequence: U64 }
+impl NativeOverlayCursor {
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:41
+    fn new(sequence: U64) -> Self { return Self { sequence } }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:46
+struct NativeOverlayIdentity {
+    protocol: String; session_id: String; revision: String
+    cursor: NativeOverlayCursor?
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:55
+enum NativeOverlayUnavailableReason {
+    EmptyStream; Reset; Truncated; EventLimit; NodeLimit; SelectionPanelUnavailable; NoCursor
+}
+impl NativeOverlayUnavailableReason {
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:68
+    fn as_str(self: Self) -> String {
+        return if self == {
+            .EmptyStream -> "empty-stream"
+            .Reset -> "reset"
+            .Truncated -> "truncated"
+            .EventLimit -> "event-limit"
+            .NodeLimit -> "node-limit"
+            .SelectionPanelUnavailable -> "selection-panel-unavailable"
+            .NoCursor -> "no-cursor"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:81
+struct NativeOverlayUnavailableFact { subject: String; reason: NativeOverlayUnavailableReason }
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:88
+struct NativeOverlayActionRequest {
+    protocol: String; session_id: String; revision: String; sequence: U64
+    panel_id: String; node_id: String; action_id: String; required_grant: NativeOverlayGrant
+}
+impl NativeOverlayActionRequest {
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:102
+    fn new(protocol: String, session_id: String, revision: String, sequence: U64, panel_id: String, node_id: String, action_id: String, required_grant: NativeOverlayGrant) -> Self {
+        return Self { protocol, session_id, revision, sequence, panel_id, node_id, action_id, required_grant }
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:124
+    fn cursor(self: Self) -> NativeOverlayCursor { return NativeOverlayCursor.new(self.sequence) }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:129
+struct NativeOverlaySelectionRequest {
+    protocol: String; session_id: String; revision: String; sequence: U64
+    panel_id: String; item_key: String
+}
+impl NativeOverlaySelectionRequest {
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:141
+    fn new(protocol: String, session_id: String, revision: String, sequence: U64, panel_id: String, item_key: String) -> Self {
+        return Self { protocol, session_id, revision, sequence, panel_id, item_key }
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:159
+    fn cursor(self: Self) -> NativeOverlayCursor { return NativeOverlayCursor.new(self.sequence) }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:164
+// Event is absent only for an empty canonical cursor; never synthesize a sequence.
+struct NativeOverlayUpdate {
+    identity: NativeOverlayIdentity; event: NativeOverlayEvent?
+    reset: Bool; truncation: Bool; selection: NativeOverlaySelectionRequest?
+    unavailable: [NativeOverlayUnavailableFact]
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:176
+alias NativeOverlayProjection :: NativeOverlayUpdate
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:179
+#Error
+enum NativeOverlayAdapterError {
+    InvalidProtocol { expected: String, received: String }
+    SessionMismatch { expected: String, received: String }
+    InvalidRevision
+    InvalidSequence(U64)
+    StaleRevision { expected: String, received: String }
+    StaleSequence { expected: U64, received: U64 }
+    InvalidText { field: String }
+    DuplicatePanel(String); ReservedPanel(String); InvalidPanel(String); InvalidNode(String)
+    HostRejected(String); MissingProjection; UnknownPanel(String); UnknownNode(String)
+    ActionUnavailable(String); ActionMismatch(String)
+}
+impl NativeOverlayAdapterError.Display {
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:202
+    fn fmt(self: Self, formatter: fmt.Formatter) -> fmt.Result {
+        message :: if self == {
+            .InvalidProtocol { expected, received } -> "native overlay protocol `{received}` does not match `{expected}`"
+            .SessionMismatch { expected, received } -> "native overlay session `{received}` does not match `{expected}`"
+            .InvalidRevision -> "native overlay revision is empty, too long, or contains control text"
+            .InvalidSequence(sequence) -> "native overlay sequence {sequence} is invalid"
+            .StaleRevision { expected, received } -> "native overlay revision `{received}` is stale; current revision is `{expected}`"
+            .StaleSequence { expected, received } -> "native overlay sequence {received} is stale; current sequence is {expected}"
+            .InvalidText { field } -> "native overlay {field} is empty, too long, or contains control text"
+            .DuplicatePanel(panel_id) -> "native overlay panel `{panel_id}` is duplicated"
+            .ReservedPanel(panel_id) -> "native overlay panel `{panel_id}` is reserved for the event log"
+            .InvalidPanel(error) | .InvalidNode(error) | .HostRejected(error) -> error
+            .MissingProjection -> "native overlay has no current projection"
+            .UnknownPanel(panel_id) -> "native overlay panel `{panel_id}` is unavailable"
+            .UnknownNode(node_id) -> "native overlay node `{node_id}` is unavailable"
+            .ActionUnavailable(node_id) -> "native overlay node `{node_id}` has no action"
+            .ActionMismatch(action_id) -> "native overlay action `{action_id}` is stale or no longer matches the node"
+        }
+        return formatter.write_str(message)
+    }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:259
+struct NativeOverlayAdapter {
+    session_id: String; revision: String?; sequence: U64?; release_build: Bool
+    event_facts: VecDeque<JetDevtoolsEvent>; typed_panels: [String: NativeOverlayPanelFact]
+    history_truncated: Bool; last_update: NativeOverlayUpdate?
+}
+impl NativeOverlayAdapter {
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:273
+    fn new(session_id: String) -> Self {
+        return Self { session_id, revision: .None, sequence: .None, release_build: false,
+            event_facts: VecDeque.new(), typed_panels: {}, history_truncated: false, last_update: .None }
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:288
+    fn from_projection(projection: DevtoolsProjection, typed_panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        return project_projection(projection, typed_panels)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:295
+    fn for_session(session: ResidentDevSession) -> Self { return Self.new(session.id()) }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:298
+    fn with_release_build(self: Self, release_build: Bool) -> Self { self.set_release_build(release_build); return self }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:305
+    fn release_build(self: Self) -> Bool { return self.release_build }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:309
+    fn set_release_build(self: Self, release_build: Bool) -> Unit {
+        self.release_build = release_build
+        if release_build {
+            self.revision = .None
+            self.sequence = .None
+            self.event_facts.clear()
+            self.typed_panels.clear()
+            self.history_truncated = false
+            self.last_update = .None
+        }
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:321
+    fn panel_catalog(self: Self) -> [JetDevtoolsPanelDescriptor] { return descriptors() }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:327
+    fn panel_availability(self: Self) -> [JetDevtoolsPanelAvailability] {
+        grants :: if self.release_build -> &[] else -> &JetDevtoolsPanelCapability.ALL
+        return project_panel_availability(.NativeOverlay, grants)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:337
+    fn session_id(self: Self) -> String { return self.session_id }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:341
+    fn sequence(self: Self) -> U64? { return self.sequence }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:345
+    fn revision(self: Self) -> String? { return self.revision.as_deref() }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:349
+    fn cursor(self: Self) -> NativeOverlayCursor? { return self.sequence.map(NativeOverlayCursor.new) }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:353
+    fn last_update(self: Self) -> NativeOverlayUpdate? { return self.last_update.as_ref() }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:357
+    // Retain already-typed nodes/actions without deriving semantics from names.
+    fn set_typed_panels(self: &Self, panels: &[NativeOverlayPanelFact]) NativeOverlayAdapterError! {
+        if self.release_build -> return .Err(.HostRejected("native overlay is excluded from release builds"))
+        next :: typed_panel_map(panels)
+        self.typed_panels = next
+        return ()
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:373
+    fn apply_projection(self: Self, projection: DevtoolsProjection) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        return self.apply_projection_internal(^projection, false)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:381
+    fn apply_projection_internal(self: Self, projection: DevtoolsProjection, retain_typed_panels: Bool) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        if self.release_build -> return .Err(.HostRejected("native overlay is excluded from release builds"))
+        validate_projection_identity(&projection, self.session_id)
+        validate_revision(projection.revision, projection.sequence == 0)
+        self.check_projection_order(&projection)
+        revision_changed :: self.revision.as_deref() != .Val(projection.revision)
+        effective_reset :: projection.reset || revision_changed
+        if effective_reset {
+            self.event_facts.clear()
+            self.history_truncated = false
+            if !retain_typed_panels -> self.typed_panels.clear()
+        }
+        events := projection.panels.copy()
+        events.sort_by((left, right) -> left.sequence().cmp(right.sequence())
+            .then_with(() -> left.timestamp_ms.cmp(right.timestamp_ms))
+            .then_with(() -> left.source().cmp(right.source()))
+            .then_with(() -> left.kind().cmp(right.kind()))
+            .then_with(() -> left.entity().cmp(right.entity())))
+        previous_sequence := U64?{.None}
+        loop event in &events {
+            validate_event(event, &projection)
+            if previous_sequence == .Val(event.sequence()) -> return .Err(.InvalidSequence(event.sequence()))
+            if !projection.reset && !revision_changed {
+                if self.sequence == .Val(current_sequence) {
+                    if event.sequence() <= current_sequence -> return .Err(.StaleSequence { expected: current_sequence, received: event.sequence() })
+                }
+            }
+            previous_sequence = .Val(event.sequence())
+        }
+        loop event in events -> self.event_facts.push_back(^event)
+        loop self.event_facts.len() > MAX_NATIVE_OVERLAY_EVENTS {
+            _ :: self.event_facts.pop_front()
+            self.history_truncated = true
+        }
+        self.revision = .Val(projection.revision.copy())
+        self.sequence = if projection.sequence != 0 -> .Val(projection.sequence) else -> .None
+        unavailable := [NativeOverlayUnavailableFact]{}
+        if effective_reset -> unavailable.push(make_unavailable("session", .Reset))
+        if projection.truncation -> unavailable.push(make_unavailable("session", .Truncated))
+        if self.history_truncated -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .EventLimit))
+        event :: if self.sequence == {
+            .Val(sequence) -> {
+                (panels, dropped_for_nodes) :: self.render_panels(sequence)
+                if dropped_for_nodes -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .NodeLimit))
+                event :: NativeOverlayEvent.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), projection.revision.copy(), sequence, projection.observed_at, ^panels)
+                event.validate() ?? return .Err(.HostRejected(err))
+                .Val(event)
+            }
+            .None -> {
+                unavailable.push(make_unavailable("session", .EmptyStream))
+                .None
+            }
+        }
+        selection :: projection.selection.map((selection) -> {
+            sequence :: self.sequence ?? {
+                unavailable.push(make_unavailable(selection.panel_id, .NoCursor))
+                return .None
+            }
+            if !self.typed_panels.contains_key(selection.panel_id) && selection.panel_id != NATIVE_OVERLAY_EVENT_LOG_PANEL_ID {
+                unavailable.push(make_unavailable(selection.panel_id, .SelectionPanelUnavailable))
+            }
+            return .Val(NativeOverlaySelectionRequest.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), projection.revision.copy(), sequence, ^selection.panel_id, ^selection.item_key))
+        }).flatten()
+        identity :: NativeOverlayIdentity { protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: self.session_id.copy(), revision: ^projection.revision, cursor: self.cursor() }
+        update :: NativeOverlayUpdate { identity, event, reset: effective_reset, truncation: projection.truncation, selection, unavailable }
+        self.last_update = .Val(update.copy())
+        return update
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:530
+    fn apply_projection_with_panels(self: Self, projection: DevtoolsProjection, panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        self.set_typed_panels(panels)
+        return self.apply_projection_internal(^projection, true)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:540
+    fn sync_session(self: Self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        if session.id() != self.session_id -> return .Err(.SessionMismatch { expected: self.session_id.copy(), received: session.id().to_string() })
+        return self.apply_projection(session.devtools_events_since(self.sequence))
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:554
+    fn sync(self: Self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! { return self.sync_session(session) }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:561
+    fn action_request(self: Self, panel_id: String, node_id: String) -> NativeOverlayActionRequest NativeOverlayAdapterError! {
+        (revision, sequence) :: self.current_context()
+        node :: self.find_node(panel_id, node_id)
+        action :: node.action.as_ref() ?? return .Err(.ActionUnavailable(node_id.to_string()))
+        return NativeOverlayActionRequest.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), ^revision, sequence, panel_id, node_id, action.action_id.copy(), action.required_grant)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:585
+    fn validate_action_request(self: &Self, request: &NativeOverlayActionRequest) NativeOverlayAdapterError! {
+        self.validate_request_identity(request.protocol, request.session_id, request.revision, request.sequence)
+        node :: self.find_node(request.panel_id, request.node_id)
+        action :: node.action.as_ref() ?? return .Err(.ActionUnavailable(request.node_id.copy()))
+        if action.action_id != request.action_id || action.required_grant != request.required_grant -> return .Err(.ActionMismatch(request.action_id.copy()))
+        return ()
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:609
+    fn selection_request(self: Self, panel_id: String, item_key: String) -> NativeOverlaySelectionRequest NativeOverlayAdapterError! {
+        validate_text(panel_id, "selection panel id", false)
+        validate_text(item_key, "selection item key", true)
+        (revision, sequence) :: self.current_context()
+        return NativeOverlaySelectionRequest.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), ^revision, sequence, panel_id, item_key)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:629
+    fn current_context(self: Self) -> (String, U64) NativeOverlayAdapterError! {
+        revision :: self.revision.clone() ?? return .Err(.MissingProjection)
+        sequence :: self.sequence ?? return .Err(.MissingProjection)
+        return (_0: revision, _1: sequence)
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:638
+    fn validate_request_identity(self: &Self, protocol: String, session_id: String, revision: String, sequence: U64) NativeOverlayAdapterError! {
+        if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidProtocol { expected: JET_DEVTOOLS_PROTOCOL.to_string(), received: protocol.to_string() })
+        if session_id != self.session_id -> return .Err(.SessionMismatch { expected: self.session_id.copy(), received: session_id.to_string() })
+        (current_revision, current_sequence) :: self.current_context()
+        if revision != current_revision -> return .Err(.StaleRevision { expected: current_revision, received: revision.to_string() })
+        if sequence != current_sequence -> return .Err(.StaleSequence { expected: current_sequence, received: sequence })
+        return ()
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:673
+    fn check_projection_order(self: &Self, projection: &DevtoolsProjection) NativeOverlayAdapterError! {
+        current_sequence :: self.sequence ?? return ()
+        if self.revision.as_deref() == .Val(current_revision) {
+            if projection.revision != current_revision && projection.sequence <= current_sequence -> return .Err(.StaleRevision { expected: current_revision.to_string(), received: projection.revision.copy() })
+        }
+        if projection.sequence < current_sequence -> return .Err(.StaleSequence { expected: current_sequence, received: projection.sequence })
+        if projection.sequence == current_sequence && self.revision.as_deref() == .Val(projection.revision) && !projection.panels.is_empty() && !projection.reset {
+            return .Err(.StaleSequence { expected: current_sequence, received: projection.sequence })
+        }
+        return ()
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:709
+    fn find_node(self: Self, panel_id: String, node_id: String) -> NativeOverlayNode NativeOverlayAdapterError! {
+        panel :: self.typed_panels.get(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
+        return find_node_in(&panel.nodes, node_id) ?? return .Err(.UnknownNode(node_id.to_string()))
+    }
+    // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:722
+    fn render_panels(self: Self, sequence: U64) -> ([NativeOverlayPanelFact], Bool) NativeOverlayAdapterError! {
+        typed_node_count :: self.typed_panels.values().map(panel_node_count).sum()
+        keys := self.typed_panels.keys().cloned().collect()
+        keys.sort()
+        panels := [NativeOverlayPanelFact]{keys.iter().map((key) -> self.typed_panels[key].clone()).collect()}
+        dropped_for_nodes := false
+        if !self.event_facts.is_empty() {
+            available :: MAX_OVERLAY_NODES.saturating_sub(typed_node_count)
+            max_events :: available / EVENT_LOG_NODES_PER_EVENT
+            skip :: self.event_facts.len().saturating_sub(max_events)
+            if skip != 0 -> dropped_for_nodes = true
+            facts :: self.event_facts.iter().skip(skip).collect()
+            if !facts.is_empty() -> panels.push(event_log_panel(&facts, sequence)?)
+        }
+        if panels.len() > MAX_OVERLAY_PANELS -> return .Err(.InvalidPanel("native overlay projection exceeds its panel budget"))
+        return (_0: panels, _1: dropped_for_nodes)
+    }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:758
+fn project_projection(projection: DevtoolsProjection, typed_panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+    adapter := NativeOverlayAdapter.new(projection.session_id.copy())
+    return adapter.apply_projection_with_panels(projection.copy(), typed_panels)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:767
+fn node_from_event(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayAdapterError! {
+    if event.sequence() == 0 -> return .Err(.InvalidSequence(event.sequence()))
+    validate_event_text(event)
+    children := [
+        NativeOverlayNode.text("source", "source").with_value(event.source().to_string()),
+        NativeOverlayNode.text("kind", "kind").with_value(event.kind().to_string()),
+        NativeOverlayNode.text("entity", "entity").with_value(event.entity().to_string()),
+        NativeOverlayNode.text("observed_at", "observed_at").with_value(event.timestamp_ms.to_string()),
+        NativeOverlayNode.text("fields", "fields").with_value(event.fields_json().to_string())
+    ]
+    if event.payload_json() == .Val(payload) -> children.push(NativeOverlayNode.text("payload", "payload").with_value(payload.to_string()))
+    return NativeOverlayNode.new("event-{event.sequence()}", .Status, "event").with_value(event.entity().to_string()).with_status(event.kind().to_string()).with_children(^children)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:798
+fn event_log_panel(events: [&JetDevtoolsEvent], sequence: U64) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
+    if sequence == 0 -> return .Err(.InvalidSequence(sequence))
+    if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES / EVENT_LOG_NODES_PER_EVENT -> return .Err(.InvalidPanel("native overlay event log exceeds its event or node budget"))
+    nodes := [NativeOverlayNode]{[].with_capacity(events.len())}
+    loop event in events -> nodes.push(node_from_event(event)?)
+    return NativeOverlayPanelFact.new(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, NATIVE_OVERLAY_EVENT_LOG_TITLE, sequence, NATIVE_OVERLAY_EVENT_LOG_STATUS, ^nodes)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:826
+fn validate_projection_identity(projection: &DevtoolsProjection, session_id: String) NativeOverlayAdapterError! {
+    if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidProtocol { expected: JET_DEVTOOLS_PROTOCOL.to_string(), received: projection.protocol.copy() })
+    if projection.session_id != session_id -> return .Err(.SessionMismatch { expected: session_id.to_string(), received: projection.session_id.copy() })
+    validate_text(projection.session_id, "session id", false)
+    return ()
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:846
+fn validate_revision(revision: String, allow_empty: Bool) NativeOverlayAdapterError! {
+    if !allow_empty && revision.is_empty() -> return .Err(.InvalidRevision)
+    return validate_text(revision, "revision", true)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:856
+fn validate_event(event: &JetDevtoolsEvent, projection: &DevtoolsProjection) NativeOverlayAdapterError! {
+    if event.sequence() == 0 || event.sequence() > projection.sequence -> return .Err(.InvalidSequence(event.sequence()))
+    return validate_event_text(event)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:866
+fn validate_event_text(event: &JetDevtoolsEvent) NativeOverlayAdapterError! {
+    validate_text(event.source(), "event source", false)
+    validate_text(event.kind(), "event kind", false)
+    validate_text(event.entity(), "event entity", false)
+    validate_text(event.fields_json(), "event fields", true)
+    if event.payload_json() == .Val(payload) -> validate_text(payload, "event payload", true)
+    return ()
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:877
+fn typed_panel_map(panels: [NativeOverlayPanelFact]) -> [String: NativeOverlayPanelFact] NativeOverlayAdapterError! {
+    if panels.len() > MAX_OVERLAY_PANELS -> return .Err(.InvalidPanel("native overlay typed panels exceed their panel budget"))
+    output := [String: NativeOverlayPanelFact]{}
+    count := Usize{0}
+    loop panel in panels {
+        if panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID -> return .Err(.ReservedPanel(panel.panel_id.copy()))
+        if output.contains_key(panel.panel_id) -> return .Err(.DuplicatePanel(panel.panel_id.copy()))
+        validate_panel(panel, &count)
+        output.insert(panel.panel_id.copy(), panel.copy())
+    }
+    return output
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:900
+fn validate_panel(panel: &NativeOverlayPanelFact, count: &Usize) NativeOverlayAdapterError! {
+    validate_text(panel.panel_id, "panel id", false)
+    validate_text(panel.title, "panel title", false)
+    validate_text(panel.status, "panel status", true)
+    ids := [String: Bool]{}
+    loop node in &panel.nodes -> validate_node(node, 0, count, &ids)
+    return ()
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:914
+fn validate_node(node: &NativeOverlayNode, depth: Usize, count: &Usize, ids: &[String: Bool]) NativeOverlayAdapterError! {
+    if depth > MAX_OVERLAY_DEPTH -> return .Err(.InvalidNode("native overlay node tree exceeds its depth budget"))
+    validate_text(node.id, "node id", false)
+    validate_text(node.label, "node label", false)
+    if ids.insert(node.id.copy(), true).is_some() -> return .Err(.InvalidNode("native overlay node id `{node.id}` is duplicated"))
+    count = count.saturating_add(1)
+    if count > MAX_OVERLAY_NODES -> return .Err(.InvalidNode("native overlay projection exceeds its node budget"))
+    if node.value.as_deref() == .Val(value) -> validate_text(value, "node value", true)
+    if node.status.as_deref() == .Val(status) -> validate_text(status, "node status", true)
+    if {
+        node.kind == .Action && node.action.as_ref() == .None -> return .Err(.InvalidNode("native overlay action node `{node.id}` has no typed action"))
+        node.kind == .Action && node.action.as_ref() == .Val(action) -> validate_action(action)
+        node.action.as_ref() == .Val(_) -> return .Err(.InvalidNode("native overlay node `{node.id}` carries an action but is not an action node"))
+        node.action.as_ref() == .None -> {}
+    }
+    loop child in &node.children -> validate_node(child, depth + 1, count, ids)
+    return ()
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:969
+fn validate_action(action: &NativeOverlayAction) NativeOverlayAdapterError! { return validate_text(action.action_id, "action id", false) }
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:973
+fn validate_text(value: String, field: String, allow_empty: Bool) NativeOverlayAdapterError! {
+    if (!allow_empty && value.is_empty()) || value.len() > MAX_OVERLAY_TEXT_BYTES || value.chars().any((c) -> c.is_control()) -> return .Err(.InvalidText { field: field.to_string() })
+    return ()
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:989
+fn panel_node_count(panel: NativeOverlayPanelFact) -> Usize { return panel.nodes.iter().map(node_count).sum() }
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:993
+fn node_count(node: NativeOverlayNode) -> Usize { return 1 + node.children.iter().map(node_count).sum() }
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:997
+fn find_node(nodes: [NativeOverlayNode], node_id: String) -> NativeOverlayNode? {
+    return nodes.iter().find_map((node) -> if node.id == node_id -> .Val(node) else -> find_node(&node.children, node_id))
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1007
+fn find_node_in(nodes: [NativeOverlayNode], node_id: String) -> NativeOverlayNode? { return find_node(nodes, node_id) }
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1014
+fn make_unavailable(subject: String, reason: NativeOverlayUnavailableReason) -> NativeOverlayUnavailableFact { return NativeOverlayUnavailableFact { subject, reason } }

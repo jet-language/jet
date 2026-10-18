@@ -82,8 +82,10 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: Se
 
 fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {
     if ty == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(value) -> TFailureCarrier.Optional{value: value}
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Infallible
         else -> TFailureCarrier.Infallible
     }
@@ -116,7 +118,7 @@ fn sema_expression_present(value: Expr, span: Span, expected: Type?, environment
             return None
         }
     }
-    sema_expr_expected(sema_tir_expr(result_ty ?? Type.Option{inner: payload.ty}, TExprKind.Present{value: payload}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_node(result_ty ?? Type.Option{inner: payload.ty}, TExprKind.Present{value: payload}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -126,7 +128,7 @@ fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic
     }
     normalized :: sema_expr_unwrap_tag(required)
     if normalized == {
-        .Option(_) -> Val(sema_tir_expr(normalized, TExprKind.Absent, span))
+        .Option(_) -> Val(sema_tir_node(normalized, TExprKind.Absent, span))
         else -> {
             &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
             None
@@ -290,7 +292,7 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
     }
     payload_expected := if success -> expected_ok else -> expected_err
     checked_payload :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    payload :: if take_field -> sema_tir_expr(checked_payload.ty, TExprKind.Move{value: checked_payload}, checked_payload.span) else -> checked_payload
+    payload :: if take_field -> sema_tir_node(checked_payload.ty, TExprKind.Move{value: checked_payload}, checked_payload.span) else -> checked_payload
     ok_ty := expected_ok ?? Type.Named{name: "Unit"}
     err_ty := expected_err ?? Type.Named{name: "Err"}
     required :: if success -> ok_ty else -> err_ty
@@ -306,7 +308,7 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
     }
     result_ty :: Type.Result{ok: ok_ty, err: err_ty}
     kind :: if success -> TExprKind.Ok{value: payload} else -> TExprKind.Err{value: payload}
-    sema_expr_expected(sema_tir_expr(result_ty, kind, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tir_expr(result_ty, kind, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConvert? {
@@ -360,7 +362,7 @@ fn sema_expression_carrier_payload(ty: Type) -> Type? {
 fn sema_expression_propagating_call(expr: Expr) -> Bool Never! {
     if expr == {
         .Call(call) -> call.name != "Ok" && call.name != "Err"
-        .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> true
+        .MethodCall(_, _, _, _, _, _, _, _) -> true
         .CallValue(callee, args, _) -> !sema_call_value_is_inline_loop(callee, args)
         else -> false
     }
@@ -461,14 +463,14 @@ struct SemaFailureProvenance {
 
 fn sema_failure_definition_location(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> String? {
     if program.registration_graph == .Val(graph) {
-    loop module_row in graph.modules {
-        if module_row.module_identity != symbol.module_name && module_row.module_name != symbol.module_name -> next
-        if module_row.module_path == "" -> return None
-        line :: sema_source_line_at(module_row.source_segments, symbol.span) ?? return None
-        loop segment in module_row.source_segments {
-            if symbol.span.start >= segment.generated.start && symbol.span.start < segment.generated.end && line <= segment.line_starts.len() {
-                column :: symbol.span.start - segment.generated.start - segment.line_starts[line - 1] + 1
-                return Val("{module_row.module_path}:{line}:{column}")
+    loop module_row_index in 0..<graph.modules.len() {
+        if graph.modules[module_row_index].module_identity != symbol.module_name && graph.modules[module_row_index].module_name != symbol.module_name -> next
+        if graph.modules[module_row_index].module_path == "" -> return None
+        line :: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
+        loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
+            if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
+                column :: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
+                return Val("{graph.modules[module_row_index].module_path}:{line}:{column}")
             }
         }
         return None
@@ -495,7 +497,7 @@ fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, 
             }
             return SemaFailureProvenance{callee: call.name, definition: definition, contract: contract}
         }
-        .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
+        .MethodCall(_, method, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
         else -> {}
     }
     SemaFailureProvenance{callee: "this fallible expression", definition: fallback, contract: "inferred failure contract"}
@@ -523,7 +525,7 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
         // Rust `inferable_failure_callee`: `alias.member(...)` through a
         // whole-module import names that module's source function, which the
         // bundle solve settles like a same-module callee.
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
             alias :: if receiver == {
                 .Ident(name, _) -> name
                 else -> { return None }
@@ -745,7 +747,7 @@ fn sema_expression_propagation_taken(context: &SemaCheckContext, conversion: TTr
 }
 
 // A conversion already carried by the AST is validated, never re-derived.
-fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert, span: Span, scopes: &SemaScopeTable, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
+fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
     source_error :: if sema_expr_unwrap_tag(inner.ty) == {
         .Result(_, err) -> Val(err)
         else -> None
@@ -781,7 +783,7 @@ fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert,
                 &diagnostics.push(sema_error("E2402", span, "the declared error conversion `{fn_name}` is not in scope", "a checked conversion must resolve to one registered function", "declare or import the conversion before using `?`"))
                 return None
             }
-            symbol :: scopes.bindings[symbol_index].symbol
+            symbol :: sema_scope_binding_symbol(environment, scopes, symbol_index)
             if symbol.kind != SymbolKind.Function || symbol.ty == None {
                 &diagnostics.push(sema_error("E2402", span, "`{fn_name}` is not a checked error-conversion function", "the conversion route must retain a callable symbol and signature", "declare a function taking the source error and returning the target error"))
                 return None
@@ -821,7 +823,7 @@ fn sema_expression_try_declared_conversion(inner: TExpr, conversion: TryConvert,
 // The success payload of a propagated carrier, wrapped in the shared Try node.
 fn sema_expression_propagated(inner: TExpr, conversion: TTryConvert, span: Span) -> TExpr? {
     payload :: sema_expression_carrier_payload(inner.ty) ?? return None
-    Val(sema_tir_expr(payload, TExprKind.Try{value: inner, conversion: conversion, failure: sema_expression_failure_carrier(inner.ty)}, span))
+    Val(sema_tir_node(payload, TExprKind.Try{value: inner, conversion: conversion, failure: sema_expression_failure_carrier(inner.ty)}, span))
 }
 
 // D-FAILURE-FOUNDATION1=A: automatic propagation of a call root. Only a
@@ -840,7 +842,7 @@ fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, en
     conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
     location :: sema_expression_panic_location(environment, program, scopes, span)
-    propagated :: sema_tir_expr(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
+    propagated :: sema_tir_node(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
     sema_expr_expected(propagated, expected, environment, program, &diagnostics)
 }
 
@@ -856,7 +858,7 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
                 else -> false
             }
             if !unreachable_route -> sema_failure_record_edge(sema_failure_callee(Val(value), environment, program, scopes), &check_context)
-            sema_expression_try_declared_conversion(inner, conversion, span, &scopes, &check_context, &diagnostics) ?? return None
+            sema_expression_try_declared_conversion(inner, conversion, span, environment, &scopes, &check_context, &diagnostics) ?? return None
         }
     }
     value_tir := sema_expression_propagated(inner, try_conversion, span) ?? return None
@@ -869,7 +871,7 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
         sema_ownership_fork_close(&state, context_fork)
         note :: checked_note ?? return None
         location :: sema_expression_panic_location(environment, program, scopes, span)
-        value_tir = sema_tir_expr(value_tir.ty, TExprKind.TryWithContext{inner: inner, note: Val(note), convert: try_conversion, file: location.file, line: location.line, function: location.function}, span)
+        value_tir = sema_tir_node(value_tir.ty, TExprKind.TryWithContext{inner: inner, note: Val(note), convert: try_conversion, file: location.file, line: location.line, function: location.function}, span)
     }
     sema_expr_expected(value_tir, expected, environment, program, &diagnostics)
 }
@@ -910,7 +912,8 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
             }
             return Val(Stmt.BreakLabelValue{name: root.name, name_span: root.span, value: value, span: expr_span(value)})
         }
-        .Return(value, span) -> return Val(Stmt.Return{value: value, span: span})
+        // copy: `value` is a payload of read parameter `fallback`, which keeps the original; field `value` of the new Stmt.Return owns this one
+        .Return(value, span) -> return Val(Stmt.Return{value: value.copy(), span: span})
         .Panic(name_span, args) -> {
             call := Call{name: "panic", name_span: name_span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
             return Val(Stmt.Expr{expr: Expr.Call{call: call}})
@@ -1046,7 +1049,6 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
         return None
     }
-    fallback_payload :: checked_route.payload
     if checked_route.reaches_merge {
         sema_ownership_fork_rollback(&state, fork)
         joined :: sema_ownership_path_join(state, fork, sema_ownership_fork_base(fork), fallback_path, true, state.share_found)
@@ -1055,7 +1057,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     } else {
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
     }
-    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}
+    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(checked_route.payload, TExprKind.Unit, span)}
     // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
     // first its Result route (where `err` is bound and a value fallback is
@@ -1063,14 +1065,14 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     // route runs, so the fallback is still evaluated at most once.
     if subject.ty == .Result(ok, _) && ok == .Option(_) {
         failure_route :: if route_value == {
-            .Value(fallback_value) -> TOrFallback.Value{value: sema_tir_expr(ok, TExprKind.Present{value: fallback_value}, fallback_value.span)}
+            .Value(fallback_value) -> TOrFallback.Value{value: sema_tir_node(ok, TExprKind.Present{value: fallback_value}, fallback_value.span)}
             else -> route_value
         }
-        after_result :: sema_tir_expr(ok, TExprKind.OrFallback{value: subject, fallback: failure_route, ambient_err: checked_route.ambient_err}, span)
-        mixed :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
-        return sema_expr_expected(mixed, expected, environment, program, &diagnostics)
+        after_result :: sema_tir_node(ok, TExprKind.OrFallback{value: subject, fallback: failure_route, ambient_err: checked_route.ambient_err}, span)
+        mixed :: sema_tir_node(checked_route.payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
+        return sema_expr_expected_owned(^mixed, expected, environment, program, &diagnostics)
     }
-    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
+    result :: sema_tir_node(checked_route.payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
     sema_expr_expected(result, expected, environment, program, &diagnostics)
 }
 
@@ -1087,7 +1089,7 @@ fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
     if value == {
         .Paren(inner, _) -> sema_fallback_unit_call_name(inner)
         .Call(call) -> Val(call.name)
-        .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> Val(method)
+        .MethodCall(_, method, _, _, _, _, _, _) -> Val(method)
         .CallValue(_, _, _) -> Val("this call")
         else -> None
     }
@@ -1098,6 +1100,9 @@ fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
 fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, fallback_state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaOrFallbackRoute? {
     fallback_payload := payload
     fallback_tir := TOrFallback?{None}
+    // copy: `outer_return_type` restores scopes.return_type after the fallback frame, which
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`, so the old
+    // value is copied out before it is overwritten.
     outer_return_type :: scopes.return_type.copy()
     outer_loop_depth := scopes.loop_depth
     sema_scope_enter(&scopes, &fallback_state, "or.fallback@{span.start}")
@@ -1115,6 +1120,8 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         ambient_err = Val(tir_symbol_local("err", span, symbol.id))
     }
     fallback_reaches_merge := false
+    // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback, which
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `context`.
     enclosing_err_denial :: context.fallback_err_denial.copy()
     context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
     // Ok(None) shares the mixed carrier's fallback but carries no report.
@@ -1176,25 +1183,25 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                     sema_scope_leave(&scopes, &fallback_state)
                     return None
                 }
-                if payload == (Type.Named{name: "Never"}) -> fallback_payload = (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty
+                if payload == (Type.Named{name: "Never"}) -> fallback_payload = (tail_value ?? sema_tir_node(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty
             }
             sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
             sema_scope_rollback(&scopes, block_mark)
             if {
                 checked_block.value.len() == 0 && tail_value != None -> {
-                    fallback_tir = Val(TOrFallback.Value{value: tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span)})
+                    fallback_tir = Val(TOrFallback.Value{value: tail_value ?? sema_tir_node(fallback_payload, TExprKind.Unit, block_span)})
                 }
                 else -> {
                     block_values := checked_block.value
-                    if tail_value != None -> &block_values.push(TStmt.ExprStmt{value: tail_value ?? sema_tir_expr(fallback_payload, TExprKind.Unit, block_span), span: expr_span(tail ?? Expr.Unit{span: block_span})})
-                    fallback_expr :: sema_tir_expr(fallback_payload, TExprKind.InlineBlock{body: block_values}, block_span)
+                    if tail_value != None -> &block_values.push(TStmt.ExprStmt{value: tail_value ?? sema_tir_node(fallback_payload, TExprKind.Unit, block_span), span: expr_span(tail ?? Expr.Unit{span: block_span})})
+                    fallback_expr :: sema_tir_node(fallback_payload, TExprKind.InlineBlock{body: block_values}, block_span)
                     fallback_tir = Val(TOrFallback.Value{value: fallback_expr})
                 }
             }
             // Both block shapes reach the merge unless the body or its tail
             // value diverges.
             fallback_reaches_merge = !sema_stmt_block_has_no_fallthrough(body) && !sema_stmt_refutable_block_exits(body)
-            if tail_value != None && (tail_value ?? sema_tir_expr(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty == (Type.Named{name: "Never"}) -> fallback_reaches_merge = false
+            if tail_value != None && (tail_value ?? sema_tir_node(Type.Named{name: "Never"}, TExprKind.Never{reason: "missing fallback value"}, block_span)).ty == (Type.Named{name: "Never"}) -> fallback_reaches_merge = false
         }
         .Return(return_value, return_span) -> {
             return_type :: outer_return_type
@@ -1281,7 +1288,8 @@ fn sema_expression_if_dispatch_subject(condition: Expr, else_value: Expr) -> Exp
 
 fn sema_expression_if_condition_subject(condition: Expr) -> Expr? {
     return if condition == {
-        .PatternTest(subject, _, _) -> Val(subject)
+        // copy: `subject` is a payload of read parameter `condition`, which keeps the original; the Val carrier owns this one
+        .PatternTest(subject, _, _) -> Val(subject.copy())
         .Binary(op, left, right, _) -> if {
             op == BinOp.And || op == BinOp.Or -> {
                 left_subject :: sema_expression_if_condition_subject(left)
@@ -1321,7 +1329,8 @@ fn sema_expression_if_condition_consumes_carrier(condition: Expr) -> Bool {
 
 fn sema_expression_if_replace_subject(condition: Expr, subject_span: Span, local: Expr) -> Expr {
     return if condition == {
-        .PatternTest(subject, pattern, span) -> if expr_span(subject) == subject_span -> Expr.PatternTest{subject: local, pattern: pattern, span: span} else -> condition
+        // copy: `pattern` is a payload of read parameter `condition`, which keeps the original; field `pattern` of the new Expr.PatternTest owns this one
+        .PatternTest(subject, pattern, span) -> if expr_span(subject) == subject_span -> Expr.PatternTest{subject: local, pattern: pattern.copy(), span: span} else -> condition
         .Binary(op, left, right, span) -> if {
             op == BinOp.And || op == BinOp.Or -> Expr.Binary{op: op, left: sema_expression_if_replace_subject(left, subject_span, local), right: sema_expression_if_replace_subject(right, subject_span, local), span: span}
             sema_expression_if_dispatch_comparison(op) && expr_span(left) == subject_span -> Expr.Binary{op: op, left: local, right: right, span: span}
@@ -1338,6 +1347,9 @@ fn sema_expression_if_rebind_chain(value: Expr, subject_span: Span, local: Expr)
         .Paren(inner, _) -> sema_expression_if_rebind_chain(inner, subject_span, local)
         .If(condition, then_body, then_value, else_body, else_value, span) -> {
             subject :: sema_expression_if_condition_subject(condition) ?? return value
+            // copy: the rebound chain is a new owned Expr. When the subject span differs it equals
+            // `value`, the caller's condition (a read parameter), which the caller keeps in its
+            // AST.
             if expr_span(subject) != subject_span -> return value.copy()
             Expr.If{cond: sema_expression_if_replace_subject(condition, subject_span, local), then_body: then_body, then_value: then_value, else_body: else_body, else_value: sema_expression_if_rebind_chain(else_value, subject_span, local), span: span}
         }
@@ -1419,13 +1431,26 @@ fn sema_expression_condition_binds(condition: Expr) -> Bool Never! {
 fn sema_expression_window_source(subject: Expr, scopes: SemaScopeTable) -> Expr? {
     return if subject == {
         .Paren(inner, _) -> sema_expression_window_source(inner, scopes)
-        .Place(value, access, _) -> if access == PlaceAccess.Write -> Val(value) else -> None
+        // copy: `value` is a payload of read parameter `subject`, which keeps the original; the Val carrier owns this one
+        .Place(value, access, _) -> if access == PlaceAccess.Write -> Val(value.copy()) else -> None
         .Ident(name, _) -> {
             if !name.starts_with("__jet_switch_subject_") -> return None
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             if scopes.bindings[index].access == AccessConvention.Write -> Val(subject) else -> None
         }
         else -> None
+    }
+}
+
+// Whether a pattern subject is spelled `^place`: the subject itself moves
+// into the match, so its payload bindings own what they bind and record no
+// subject places (`^name` is an ordinary move of an owned local, never a
+// take out of a subject that stays live).
+fn sema_expression_subject_moved(subject: Expr) -> Bool Never! {
+    return if subject == {
+        .Paren(inner, _) -> sema_expression_subject_moved(inner)
+        .Place(_, access, _) -> access == PlaceAccess.Take
+        else -> false
     }
 }
 
@@ -1551,13 +1576,26 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
             symbol :: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, &sources, &diagnostics)
+            // An explicit `^name` takes this payload out of its subject
+            // (sema_ownership_move_pattern_payload) when the subject stays
+            // live. A `^subject` moves into the match, so its bindings own
+            // their payloads; a list or map pattern names its whole subject,
+            // so its bindings record none.
+            collection :: if checked.pattern.shape == {
+                .List(_, _, _) | .Map(_, _, _) -> true
+                else -> false
+            }
+            // copy: the ownership state keeps the payload's subject places
+            // for a later `^name`, while the condition binding keeps them for
+            // its view provenance (sema_ownership_record_pattern_views).
+            if !window && !collection && !sema_expression_subject_moved(subject) -> sema_ownership_note_pattern_sources(&state, symbol, sources.copy())
             &bindings.push(SemaConditionBinding{symbol: symbol, window: window, sources: sources})
         }
         &facts.push(updated)
     }
     tested := checked.pattern
     tested.bindings = facts
-    value :: sema_tir_expr(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: tested}, span)
+    value :: sema_tir_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: tested}, span)
     Val(SemaCheckedCondition{condition: TIfCond.IfLet{pattern: tested, subj: checked.subject}, value: value, bindings: bindings})
 }
 
@@ -1573,7 +1611,7 @@ fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScope
                 right_checked :: sema_expression_check_condition_inner(right, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 bindings := left_checked.bindings
                 loop binding in right_checked.bindings -> &bindings.push(binding)
-                value :: sema_tir_expr(Type.Bool, TExprKind.Binary{op: TBinaryOp.And, overflow: false, line: 0, lhs: left_checked.value, rhs: right_checked.value}, span)
+                value :: sema_tir_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.And, overflow: false, line: 0, lhs: left_checked.value, rhs: right_checked.value}, span)
                 return Val(SemaCheckedCondition{condition: TIfCond.And{left: left_checked.condition, right: right_checked.condition}, value: value, bindings: bindings})
             }
         }
@@ -1735,7 +1773,7 @@ fn sema_expression_if_rebound_chain(subject: Expr, else_value: Expr) -> Expr {
 fn sema_expression_if_hoisted(subject: Expr, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     binding :: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     table :: sema_expression_if(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    Val(sema_tir_expr(table.ty, TExprKind.InlineBlock{body: [TStmt]{binding, TStmt.ExprStmt{value: table, span: span}}}, span))
+    Val(sema_tir_node(table.ty, TExprKind.InlineBlock{body: [TStmt]{binding, TStmt.ExprStmt{value: table, span: span}}}, span))
 }
 
 // A multi-arm table (`if x == { None -> a  Val(v) -> b }`) reads as an `if`
@@ -1932,7 +1970,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         }
     }
     if else_table_head -> sema_coverage_check_redundant_else(sema_coverage_else_chain_conditions(checked_condition, else_checked, span), span, environment, program, &diagnostics)
-    value :: sema_tir_expr(result_ty, TExprKind.IfExpr{cond: checked.condition, then_body: then_result.value, then_value: joined_then, else_body: else_result.value, else_value: joined_else}, span)
+    value :: sema_tir_node(result_ty, TExprKind.IfExpr{cond: checked.condition, then_body: then_result.value, then_value: joined_then, else_body: else_result.value, else_value: joined_else}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
@@ -1960,8 +1998,10 @@ fn sema_expression_if_carrier(expected: Type?, then_ty: Type, else_ty: Type) -> 
 }
 
 fn sema_expression_lift_into_carrier(value: TExpr, carrier: Type) -> TExpr {
+    // copy: the lifted value is a new owned TExpr. When the carrier already matches it equals
+    // `value`, the caller's checked operand (a read parameter), which the caller keeps.
     if type_identity_equal(value.ty, carrier) -> return value.copy()
-    sema_tir_expr(carrier, TExprKind.Ok{value: value}, value.span)
+    sema_tir_node(carrier, TExprKind.Ok{value: value}, value.span)
 }
 
 fn sema_expression_compare_chain(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1992,6 +2032,6 @@ fn sema_expression_compare_chain(operands: [Expr], ops: [BinOp], hooks: [Bool], 
         }
         &tir_ops.push(sema_expr_tir_binary_op(op))
     }
-    value :: sema_tir_expr(Type.Bool, TExprKind.CompareChain{operands: checked, operators: tir_ops, hooks: hooks}, span)
+    value :: sema_tir_node(Type.Bool, TExprKind.CompareChain{operands: checked, operators: tir_ops, hooks: hooks}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }

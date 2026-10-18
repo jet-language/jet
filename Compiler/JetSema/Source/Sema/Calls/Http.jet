@@ -99,7 +99,7 @@ fn sema_call_http_static_target(receiver: Expr, environment: SemaScopeEnvironmen
 }
 
 fn sema_call_http_unit_receiver(span: Span) -> TExpr Never! {
-    sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
 }
 
 fn sema_call_http_static_rust_type(type_name: String) -> String Never! {
@@ -121,8 +121,6 @@ fn sema_call_http_static_tir_arg(value: TExpr, argument: CallArg) -> TCallArg Ne
         template_items: [SymbolID]{},
         borrow: argument.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
         mut_borrow: argument.convention == AccessConvention.Write,
-        clone: argument.flags.implicit_clone,
-        arc_clone: argument.flags.shared_auto_clone,
         fn_coerce: None,
         widen_to_vec: false,
         widen_to_union: None,
@@ -165,7 +163,7 @@ fn sema_call_http_source_text(value: ^TExpr, span: Span, environment: SemaScopeE
         candidates := sema_expr_registration_method_candidates(graph, value.ty, "to_string", [Type]{}, [Type]{}, span, environment, program, &scopes, &diagnostics)
         if candidates.len() != 1 -> return None
         candidate := &candidates.pop() ?? return None
-        return Val(sema_tir_expr(Type.String, TExprKind.MethodCall{receiver: ^value, method: ^candidate.method, type_args: [Type]{}, args: [TCallArg]{}}, span))
+        return Val(sema_tir_node(Type.String, TExprKind.MethodCall{receiver: ^value, method: ^candidate.method, type_args: [Type]{}, args: [TCallArg]{}}, span))
     } else {
         return None
     }
@@ -292,7 +290,7 @@ fn sema_call_try_http_static(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if target.type_name == "HTTPClientType" {
-        value := sema_tir_expr(Type.Named{name: "HTTPClient"}, TExprKind.HandleMethod{receiver: sema_call_http_unit_receiver(span), operation: THandleOp.HTTPClientNew, args: [TExpr]{}}, span)
+        value := sema_tir_node(Type.Named{name: "HTTPClient"}, TExprKind.HandleMethod{receiver: sema_call_http_unit_receiver(span), operation: THandleOp.HTTPClientNew, args: [TExpr]{}}, span)
         sema_call_http_record_effect("Net", "HTTPClient.new", value.ty, span, environment, program, &scopes, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
@@ -342,7 +340,10 @@ fn sema_call_try_http_static(
         else -> method
     }
     if target.type_name == "Body" && method == "text" && values.len() == 2 {
-        values[1] = sema_call_http_source_text(^values[1], span, environment, program, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        // The text argument is the last value: take it out and push its
+        // conversion back, instead of copying it out of its slot.
+        source :: &values.pop() ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &values.push(sema_call_http_source_text(^source, span, environment, program, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
     tir := sema_call_http_static_value(target.type_name, method, rust_method, args, values, result_type, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
@@ -534,7 +535,7 @@ fn sema_call_http_emit_method(receiver: TExpr, name: String, method: String, arg
         (name == "HTTPRequest" && (method == "method" || method == "path" || method == "param" || method == "body_len" || method == "under_limit" || (method == "header" && args.len() == 1) || (method == "body" && args.len() == 0) || method == "text" || (method == "json" && args.len() == 0) || method == "trailers")) || (name == "HTTPResponse" && method == "header" && args.len() == 2) || name.starts_with("HTTPServer") || name == "HTTPMux" || name == "HTTPHandler" -> THandleOp.HTTPServerMethod{kind: name, method: method}
         else -> THandleOp.HTTPClientMethod{kind: name, method: method}
     }
-    sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
 }
 
 fn sema_call_http_record_effect(effect_name: String, api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
@@ -614,7 +615,7 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
     parameter := SemaCallParam{label: "middleware", name: "middleware", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(callback_type), variadic: false}
     ownership := sema_ownership_check_method_call(&state, "middleware", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    tir := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.HTTPServerMethod{kind: "HTTPMux", method: "middleware"}, args: [TExpr]{callback}}, span)
+    tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.HTTPServerMethod{kind: "HTTPMux", method: "middleware"}, args: [TExpr]{callback}}, span)
     sema_call_http_record_effect("Net", "HTTPMux.middleware", tir.ty, span, environment, program, &scopes, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
 }
@@ -756,12 +757,12 @@ fn sema_call_http_core_synthetic_arg(expression: Expr, span: Span) -> CallArg Ne
 }
 
 fn sema_call_http_core_string(value: String, span: Span) -> TExpr Never! {
-    sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, span)
+    sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, span)
 }
 
 fn sema_call_http_core_unwrap_result(value: TExpr, payload: Type, message: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExpr Never! {
     text := sema_call_http_core_string(message, span)
-    sema_tir_expr(payload, TExprKind.OrFallback{value: value, fallback: TOrFallback.Panic{message: text, location: sema_expression_panic_location(environment, program, scopes, span)}, ambient_err: None}, span)
+    sema_tir_node(payload, TExprKind.OrFallback{value: value, fallback: TOrFallback.Panic{message: text, location: sema_expression_panic_location(environment, program, scopes, span)}, ambient_err: None}, span)
 }
 
 fn sema_call_http_form_text(value: String, span: Span) -> Expr Never! {
@@ -900,7 +901,7 @@ fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [
     }
     _ := sema_call_core_bind_arguments(input_record, input_signature_type, input_args, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     input_result :: input_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    input_values := [TExpr]{sema_call_http_core_string(model_name, span), sema_tir_expr(Type.List{element: Type.Named{name: "WebFormFieldSpec"}}, TExprKind.ListLit{values: descriptor_values}, span)}
+    input_values := [TExpr]{sema_call_http_core_string(model_name, span), sema_tir_node(Type.List{element: Type.Named{name: "WebFormFieldSpec"}}, TExprKind.ListLit{values: descriptor_values}, span)}
     input_fallibility := sema_call_failure_carrier(Val(input_result))
     if !sema_call_core_record_effects(input_record, span, [Type]{}, input_result, input_fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     input_call :: sema_call_core_tir(input_record, input_values, span, [Type]{}, [Bool]{false, false}, None, input_result, input_fallibility, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}

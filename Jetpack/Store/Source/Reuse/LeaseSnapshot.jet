@@ -37,7 +37,7 @@ fn store_reuse_direct_cas_entry(verification: &StoreVerification, roots: HangarR
     if !object_info.is_dir || object_info.is_symlink || !seal_info.is_file -> return false
     if (object_info.mode).bit_and(0o222) != 0 -> return false
     sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? None
-    sealed == Val(digest)
+    sealed == Val((digest))
 }
 
 // Rust `snapshot_lease_unlocked`: the caller holds the Hangar lock.

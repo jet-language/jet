@@ -131,7 +131,7 @@ struct TransitionFieldEntry {
 fn env_transition_required_field(entries: [TransitionSourceEntry], field: String, path: String) -> TransitionFieldEntry EnvironmentError! {
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == .Val(field) -> &matches.push(entry)
+        if entry.field == Val((field)) -> &matches.push(entry)
     }
     if matches.len() != 1 {
         return Err(env_transition_error("{field} must be declared exactly once in {path}"))
@@ -146,7 +146,7 @@ fn env_transition_required_inline_config(entries: [TransitionSourceEntry], name:
     key :: "::{name}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == .Val(key) -> &matches.push(entry)
+        if entry.field == Val((key)) -> &matches.push(entry)
     }
     if matches.len() != 1 {
         return Err(env_transition_error("closed Config {name} was not found in {path}"))
@@ -170,7 +170,7 @@ fn env_transition_require_output_declaration(entries: [TransitionSourceEntry], n
         if entry.field != Val("outputs") -> next
         value :: env_transition_field_value(entry.raw, "outputs") ?? return Err(env_transition_error("outputs has no value in {path}"))
         body :: env_transition_record_body(value) ?? return Err(env_transition_error("outputs in {path} is not a record"))
-        matches :: loop child in env_transition_source_entries(body) if child.field == Val(name) -> child
+        matches :: loop child in env_transition_source_entries(body) if child.field == Val((name)) -> child
         if matches.len() != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
         _ :: env_transition_field_value(matches[0].raw, name) ?? return Err(env_transition_error("outputs.{name} has no value in {path}"))
         return
@@ -259,7 +259,7 @@ fn env_transition_set_or_add_field(source: String, field: String, value: String)
     replacement :: "{field}: {value.trim()}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == .Val(field) -> &matches.push(entry)
+        if entry.field == Val((field)) -> &matches.push(entry)
     }
     if matches.len() > 1 {
         return Err(env_transition_error("{field} is ambiguous; migration stopped before writing"))

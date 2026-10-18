@@ -47,10 +47,10 @@ fn lower_fixed_literal_word(value: Int, target: MIRType) -> Int? Never! {
     None
 }
 
-fn lower_fixed_literal_conversion(p: MIRProgram, conversion: MIRConversion) -> Bool Never! {
+fn lower_fixed_literal_conversion(p: MIRProgram, m: LowerModule, conversion: MIRConversion) -> Bool Never! {
     if conversion == .Prelude(call, _, fallibility) {
         if fallibility != MIRCallFallibility.Infallible -> return false
-        row :: lower_prelude_row(p, call) ?? return false
+        row :: lower_prelude_row(p, m, call) ?? return false
         return row.member == "int_checked_fixed"
     }
     false
@@ -114,7 +114,7 @@ fn lower_exact_constants(function: MIRFunction) -> [U64:Int] Never! {
 // it would otherwise build a runtime big integer for no reader, which inside
 // the runtime's own Int kernels never returns. A value with any other use
 // keeps its ordinary lowering.
-fn lower_fixed_literals(p: MIRProgram, function: MIRFunction) -> [U64:Int] Never! {
+fn lower_fixed_literals(p: MIRProgram, m: LowerModule, function: MIRFunction) -> [U64:Int] Never! {
     known :: lower_exact_constants(function)
     words := [U64:Int]{}
     if known.len() == 0 -> return words
@@ -144,7 +144,7 @@ fn lower_fixed_literals(p: MIRProgram, function: MIRFunction) -> [U64:Int] Never
             folded := U64?{None}
             if instruction.operation == .Convert(value, _, target, conversion) {
                 if known.get(value.value) == .Val(number) {
-                    if lower_fixed_literal_conversion(p, conversion) {
+                    if lower_fixed_literal_conversion(p, m, conversion) {
                         if lower_fixed_literal_word(number, target) == .Val(word) {
                             // Two conversions to different words keep the runtime path.
                             if (words.get(value.value) ?? word) == word {
@@ -209,18 +209,21 @@ fn lower_convert_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, valu
     merge_block :: lower_new_block(&f)
     no_args :: [LIRValueID]{}
     layout :: lower_value_layout(f, dst)
-    fits :: lower_inline_test(&f, [LIRValueID]{value})
     if to_float {
-        fast_block :: lower_new_block(&f)
-        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-        lower_start(&f, fast_block, no_args)
+        lower_inline_branch(&f, [LIRValueID]{value}, slow_block, None)
         fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
         lower_emit(&f, LIRInst.Convert{dst: fast, src: value})
         lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
     } else {
-        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge_block, [LIRValueID]{value}), else_target: lower_target(slow_block, no_args)})
+        // The merge parameter is a word copy, not an owner: the inline edge
+        // hands nothing over (LowerFunction.consumed), so a temporary
+        // converted for a call is still released after it (lower_temp_release).
+        tracking :: f.track_consumes
+        f.track_consumes = false
+        lower_inline_branch(&f, [LIRValueID]{value}, slow_block, Val(lower_target(merge_block, [LIRValueID]{value})))
+        f.track_consumes = tracking
     }
-    lower_start(&f, slow_block, no_args)
+    lower_start_cold(&f, slow_block, no_args)
     slow :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{value}, Val(slow))
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
@@ -254,13 +257,16 @@ fn lower_convert_u64_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, 
     mask :: lower_const(&f, 9223372036854775807)
     low :: lower_word(&f)
     lower_emit(&f, LIRInst.Binary{dst: low, op: LIRBinaryOp.And, left: value, right: mask})
-    low_int :: lower_word(&f)
+    // jet_int_add borrows both halves: they are released after the sum.
+    low_int :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
     lower_call_runtime(&m, &f, "jet_int_owned_from_i64", [LIRValueID]{low}, Val(low_int))
-    half :: lower_word(&f)
+    half :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
     two_pow_63 :: lower_static_text(&m, &f, "9223372036854775808")
     lower_call_runtime(&m, &f, "jet_rt_int_from_static", two_pow_63, Val(half))
     large :: lower_word(&f)
     lower_call_runtime(&m, &f, "jet_int_add", [LIRValueID]{low_int, half}, Val(large))
+    lower_emit(&f, LIRInst.Drop{value: low_int})
+    lower_emit(&f, LIRInst.Drop{value: half})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{large})})
     lower_start(&f, merge_block, [LIRValueID]{dst})
 }
@@ -460,7 +466,7 @@ fn lower_convert_fixed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // MIRRust.rs:conversion :23541-23579. The runtime symbol is called like any
 // Prelude route (lower_call); a symbol the image runtime lacks is a link error.
 fn lower_convert_prelude(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, parameters: [MIRValueID], call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "conversion naming missing Prelude call {call.value} is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "conversion naming missing Prelude call {call.value} is not lowered at O0 yet")
     if row.member == "int_checked_fixed" {
         if c.fixed_literals.get(value.value) == .Val(word) {
             dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -539,16 +545,13 @@ fn lower_convert_checked_widen(p: MIRProgram, c: LowerContext, m: &LowerModule, 
     if !exact -> return lower_widen_word(p, c, &m, &f, dst, operand, unsigned_word, single, stop_at)
     layout :: lower_value_layout(f, dst)
     no_args :: [LIRValueID]{}
-    fast_block :: lower_new_block(&f)
     slow_block :: lower_new_block(&f)
     merge_block :: lower_new_block(&f)
-    fits :: lower_inline_test(&f, [LIRValueID]{operand})
-    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
-    lower_start(&f, fast_block, no_args)
+    lower_inline_branch(&f, [LIRValueID]{operand}, slow_block, None)
     fast :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_widen_word(p, c, &m, &f, fast, operand, false, single, stop_at)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
-    lower_start(&f, slow_block, no_args)
+    lower_start_cold(&f, slow_block, no_args)
     args := [LIRValueID]{operand}
     loop parameter in parameters {
         flag :: lower_use(&m, &f, parameter) ?? return
@@ -814,9 +817,8 @@ fn lower_convert_try_fixed(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     if exact {
         small :: lower_new_block(&f)
         big :: lower_new_block(&f)
-        inline :: lower_inline_test(&f, [LIRValueID]{operand})
-        lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(small, no_args), else_target: lower_target(big, no_args)})
-        lower_start(&f, big, no_args)
+        lower_inline_branch(&f, [LIRValueID]{operand}, big, Val(lower_target(small, no_args)))
+        lower_start_cold(&f, big, no_args)
         lower_convert_try_big(&m, &f, operand, t_signed, t_bits, ok_block, err_block)
         lower_start(&f, small, no_args)
     }

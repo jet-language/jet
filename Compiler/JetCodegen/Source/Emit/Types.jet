@@ -905,10 +905,16 @@ fn jet_rust_emit_collect_c_abi_types(ctx: &JetRustEmitContext, ty: MIRType, need
                     }
                 }
                 .Alias(target) -> {
+                    // copy: `target` is a payload view of `ty`, the caller's MIR type, and the
+                    // collection below writes the emit context (`&ctx`) and `needed`, so the alias
+                    // target is detached first.
                     target_ty :: target.copy()
                     jet_rust_emit_collect_c_abi_types(&ctx, target_ty, &needed)
                 }
                 .Distinct(base, _) -> {
+                    // copy: `base` is a payload view of `ty`, the caller's MIR type, and the
+                    // collection below writes the emit context (`&ctx`) and `needed`, so the
+                    // distinct base is detached first.
                     base_ty :: base.copy()
                     jet_rust_emit_collect_c_abi_types(&ctx, base_ty, &needed)
                 }
@@ -1055,8 +1061,10 @@ fn jet_rust_emit_type_application_generic_params(ctx: &JetRustEmitContext, sourc
 
 fn jet_rust_emit_function_owner_generic_params(ctx: &JetRustEmitContext, function: MIRFunction) -> [MIRGenericParam] Never! {
     owner := if function.form == {
-        .Method(ty, _) -> Val(ty)
-        .TraitMethod(ty, _, _, _) -> Val(ty)
+        // copy: `ty` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Method(ty, _) -> Val(ty.copy())
+        // copy: `ty` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .TraitMethod(ty, _, _, _) -> Val(ty.copy())
         else -> MIRType?{None}
     }
     if owner == None -> return [MIRGenericParam]{}
@@ -1250,6 +1258,8 @@ fn jet_rust_emit_structural_type_row(ctx: JetRustEmitContext, ty: MIRType) -> In
 
 fn jet_rust_emit_structural_type_def(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
     row :: jet_rust_emit_structural_type_row(ctx, ty) ?? return None
+    // copy: the structural definition is returned as an owned MIRTypeDef, while the row stays in
+    // ctx.program.types for every other emit.
     Val(ctx.program.types[row].copy())
 }
 
@@ -1313,6 +1323,8 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
             }
         }
         if matches {
+            // copy: the impl row is read while the capability check writes the emit context
+            // (`&ctx`), so a view into ctx.program.impls would be live across that write.
             implementation := ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return true
         }
@@ -1349,6 +1361,8 @@ fn jet_rust_emit_selected_user_impl_named(ctx: &JetRustEmitContext, ty: MIRType,
             }
         }
         if matches {
+            // copy: the impl row is read while the named-impl check writes the emit context
+            // (`&ctx`), so a view into ctx.program.impls would be live across that write.
             implementation := ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return true
         }
@@ -1566,6 +1580,9 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 index += 1
             }
             &visiting.push(row_id)
+            // copy: the type kind is read while the recursive derive check writes the emit context
+            // (`&ctx`) and `visiting`, so a view into ctx.program.types would be live across those
+            // writes.
             kind :: ctx.program.types[row].kind.copy()
             result :: if kind == {
                 .Struct(fields, _) -> {
@@ -1801,6 +1818,8 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
     // Only the impls of this trait, in program order (first match wins as before).
     rows :: (ctx.impls_by_trait.get(trait_id.value) ?? [Int]{}).copy()
     loop row in rows {
+        // copy: the candidate impl is read while validation writes the emit context (`&ctx`,
+        // diagnostics), so a view into ctx.program.impls would be live across those writes.
         candidate :: ctx.program.impls[row].copy()
         if jet_rust_emit_derived_impl_matches_type(candidate, definition, trait_id, trait_key) && jet_rust_emit_impl_target_enabled(&ctx, candidate) {
             implementation = Val(candidate)
@@ -2464,9 +2483,17 @@ fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MIRType, proje
 // Slot 0 selects a map key or result success, slot 1 a map value or error.
 fn jet_rust_emit_constant_inner_type(ty: MIRType, slot: Int) -> MIRType Never! {
     if ty.kind == {
+        // copy: the inner type is a new owned MIRType, while `inner` is a payload view of `ty`, the
+        // caller's constant type (a read parameter), which stays on its node.
         .List(inner) | .FixedList(inner, _) | .Option(inner) -> inner.copy()
+        // copy: the inner type is a new owned MIRType, while key/value are payload views of `ty`,
+        // the caller's constant type (a read parameter), which stays on its node.
         .Map(key, value) -> if slot == 0 -> key.copy() else -> value.copy()
+        // copy: the inner type is a new owned MIRType, while ok/err are payload views of `ty`, the
+        // caller's constant type (a read parameter), which stays on its node.
         .Result(ok, err) -> if slot == 0 -> ok.copy() else -> err.copy()
+        // copy: the inner type is a new owned MIRType. Otherwise it equals `ty`, the caller's
+        // constant type (a read parameter), which stays on its node.
         else -> ty.copy()
     }
 }
@@ -2478,9 +2505,15 @@ fn jet_rust_emit_constant_inner_type(ty: MIRType, slot: Int) -> MIRType Never! {
 fn jet_rust_emit_constant_type_definition(ctx: &JetRustEmitContext, type_name: String, ty: MIRType) -> MIRTypeDef? {
     candidates := [MIRType]{ty}
     if ty.kind == {
+        // copy: the candidate list owns its types, while `inner` is a payload view of `ty`, the
+        // caller's constant type (a read parameter), which stays on its node.
         .Option(inner) -> &candidates.push(inner.copy())
         .Result(ok, err) -> {
+            // copy: the candidate list owns its types, while `ok` is a payload view of `ty`, the
+            // caller's constant type (a read parameter), which stays on its node.
             &candidates.push(ok.copy())
+            // copy: the candidate list owns its types, while `err` is a payload view of `ty`, the
+            // caller's constant type (a read parameter), which stays on its node.
             &candidates.push(err.copy())
         }
         else -> {}
@@ -2525,6 +2558,8 @@ fn jet_rust_emit_constant_bound_type(ctx: &JetRustEmitContext, definition: MIRTy
     if ty.kind == .Apply(_, args) {
         if args.len() > 0 && definition.generic_params.len() > 0 -> return jet_rust_emit_partial_substitute_type(&ctx, declared, definition.generic_params, args)
     }
+    // copy: the bound type is a new owned MIRType. Otherwise it equals `declared`, the constant's
+    // declared type (a read parameter), which stays on the definition.
     declared.copy()
 }
 
@@ -2534,6 +2569,8 @@ fn jet_rust_emit_constant_field_type(ctx: &JetRustEmitContext, definition: MIRTy
             loop field in fields { if field.name == field_name -> return jet_rust_emit_constant_bound_type(&ctx, resolved, field.ty, fallback) }
         }
     }
+    // copy: the field type is a new owned MIRType. Without a field it equals `fallback`, the
+    // caller's type (a read parameter), which the caller keeps.
     fallback.copy()
 }
 
@@ -2554,6 +2591,8 @@ fn jet_rust_emit_constant_payload_type(ctx: &JetRustEmitContext, definition: MIR
             }
         }
     }
+    // copy: the payload type is a new owned MIRType. Without a payload it equals `fallback`, the
+    // caller's type (a read parameter), which the caller keeps.
     fallback.copy()
 }
 

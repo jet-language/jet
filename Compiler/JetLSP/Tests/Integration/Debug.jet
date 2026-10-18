@@ -1,0 +1,193 @@
+// Rust: tests/debug.rs:1-33
+// D-DBG1/D-DBG3 real scripted source debugger and production DAP wire journeys.
+use tests.common.[Scratch, unique_tmp]
+use tests.tir_support.[write_test_package, TIR_TEST_PACKAGE]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[json_get, json_str, parse_json]
+use std.[fs, process, thread, env]
+use std.process.[Command, Child]
+use std.time.[Duration, Instant]
+use std.sync.mpsc.[Receiver, RecvTimeoutError]
+use std.io.[Write]
+use core.sys.target.[selected_os]
+
+// Rust: tests/debug.rs:36
+struct Fixture {
+    path: String
+    scratch: Scratch
+    // Rust: tests/debug.rs:44
+    fn deref(self) -> String { self.path }
+    // Rust: tests/debug.rs:50
+    fn as_ref(self) -> OSPath { OSPath(self.path) }
+    // Rust: tests/debug.rs:56
+    fn as_os_ref(self) -> OSPath { OSPath(self.path) }
+    // Rust: tests/debug.rs:62
+    fn fmt(self, formatter: &std.fmt.Formatter) -> std.fmt.Result { self.path.fmt(&formatter) }
+}
+
+// Rust: tests/debug.rs:68
+// GATE #4494: Scratch owns package tree cleanup; actual file writes.
+fn fixture(tag_ref: String, src: String) -> Fixture {
+    scratch :: Scratch.new("jet_debug_{tag_ref}")
+    dir :: scratch.path
+    write_test_package(dir, TIR_TEST_PACKAGE)
+    p :: dir.join("jet_debug_{tag_ref}.jet")
+    f := fs.File.create(p).unwrap()
+    &f.write_all(src.bytes()).unwrap()
+    Fixture{path: p.to_string_lossy().to_string(), scratch: ^scratch}
+}
+
+// Rust: tests/debug.rs:81
+fn canvas_source_id(path: OSPath) -> String {
+    path.file_name().and_then((name) -> name.to_str()).expect("Canvas fixture must have a UTF-8 file name")
+}
+
+// Rust: tests/debug.rs:87
+LOOPS :: prep { String{"fn run() {{\n    n := 3\n    total := 0\n    loop i in 1..n {{\n        total += i\n    }}\n    print(\"total is {{total}}\")\n}}\n"} }
+// Rust: tests/debug.rs:98
+CALLS :: prep { String{"fn double(x: Int) -> Int {{\n    y := x * 2\n    return y\n}}\nfn run() {{\n    a := 5\n    b := double(a)\n    print(\"{{b}}\")\n}}\n"} }
+
+// Rust: tests/debug.rs:661
+fn have(tool: String) -> Bool {
+    Command.new(tool).arg("--version").output().map((output) -> output.status.success()).unwrap_or(false)
+}
+
+// Rust: tests/debug.rs:669
+fn native_fixture(tag_ref: String, src: String) -> Fixture {
+    scratch :: Scratch.new("jet_debug_native_{tag_ref}")
+    dir :: scratch.path
+    write_test_package(dir, TIR_TEST_PACKAGE)
+    p :: dir.join("jet_debug_native_{tag_ref}.jet")
+    fs.write(p, src).unwrap()
+    Fixture{path: p.to_string_lossy().to_string(), scratch: ^scratch}
+}
+
+// Rust: tests/debug.rs:681
+// This builds the foreign native debug target fixture, not a Jet implementation
+// or runtime callback. Its original Rust compiler remains the peer comparator.
+fn native_binary(tag_ref: String, rust: String) -> (Scratch, OSPath) {
+    scratch :: Scratch.new("jet_debug_native_map_{tag_ref}")
+    dir :: scratch.path
+    rust_file :: dir.join("prog.rs")
+    binary :: dir.join("prog")
+    fs.write(rust_file, rust).unwrap()
+    rustc :: Command.new("rustc").args(["--edition", "2021", "-C", "debuginfo=2", rust_file.to_str().unwrap(), "-o", binary.to_str().unwrap()]).output().unwrap()
+    assert(rustc.status.success(), "rustc rejected the {tag_ref} debug fixture:\n{String.from_utf8_lossy(rustc.stderr)}")
+    (_0: ^scratch, _1: binary)
+}
+
+// Rust: tests/debug.rs:707
+fn dap_frame(body: String) -> String { "Content-Length: {body.bytes().len()}{Char{13}}\n{Char{13}}\n{body}" }
+
+// Rust: tests/debug.rs:711
+fn dap_response(output: String, request_seq: U32, command: String) -> String? {
+    bytes :: output.bytes()
+    cursor := 0
+    loop {
+        relative_start :: output.slice(cursor, bytes.len()).find("Content-Length: ") ?? break
+        start :: cursor + relative_start
+        header_end :: output.slice(start, bytes.len()).find("{Char{13}}\n{Char{13}}\n") ?? return None
+        header := output.slice(start, start + header_end) // #4303
+        length :: (header.strip_prefix("Content-Length: ") ?? return None).parse<Int>().ok() ?? return None
+        body_start :: start + header_end + 4
+        body_end :: body_start.checked_add(length) ?? return None
+        body := std.str.from_utf8(bytes.get(body_start..<body_end) ?? return None).ok() ?? return None // #4303
+        value :: if parse_json(body) == {
+            .Ok(value) -> value
+            .Err(_) -> { cursor = body_end; next }
+        }
+        type_name :: json_get(value, "type").and_then(json_str)
+        actual_request_seq :: if json_get(value, "request_seq") == {
+            Val(.Int(value)) -> Val(value)
+            else -> None
+        }
+        success :: json_get(value, "success")
+        actual_command :: json_get(value, "command").and_then(json_str)
+        success_is_bool :: if success == {
+            Val(.Bool(_)) -> true
+            else -> false
+        }
+        if type_name == Val("response") && actual_request_seq == Val(I64{request_seq}) && success_is_bool && actual_command == Val((command)) {
+            return Val(body.to_string())
+        }
+        cursor = body_end
+    }
+    None
+}
+
+// Rust: tests/debug.rs:748
+fn write_dap_request(input: &Write, body: String) {
+    &input.write_all(body.bytes()).expect("send DAP request")
+    &input.flush().expect("flush DAP request")
+}
+
+// Rust: tests/debug.rs:753
+fn read_dap_until(output_rx: Receiver<[U8]>, stdout: &String, ready: fn(String) -> Bool, what: String) {
+    deadline :: Instant.now() + Duration.from_secs(30)
+    loop Instant.now() < deadline {
+        if ready(stdout) -> return
+        if output_rx.recv_timeout(Duration.from_millis(100)) == {
+            .Ok(chunk) -> &stdout.push_str(String.from_utf8_lossy(chunk))
+            .Err(RecvTimeoutError.Timeout) -> {}
+            .Err(RecvTimeoutError.Disconnected) -> { break }
+        }
+    }
+    panic("timed out waiting for {what}:\n{stdout}")
+}
+
+// Rust: tests/debug.rs:773
+fn read_dap_response(output_rx: Receiver<[U8]>, stdout: &String, request_seq: U32, command: String) -> String {
+    read_dap_until(output_rx, &stdout, (output) -> dap_response(output, request_seq, command).is_some(), "DAP {command} response {request_seq}")
+    dap_response(stdout, request_seq, command).expect("DAP response after wait")
+}
+
+// Rust: tests/debug.rs:788
+fn dap_u32_after(body: String, marker: String) -> U32 {
+    start :: body.find(marker) ?? panic("missing `{marker}` in DAP body: {body}")
+    body.slice(start + marker.bytes().len(), body.bytes().len()).chars().take_while((ch) -> ch.is_ascii_digit()).collect<String>().parse<U32>().unwrap_or_else((_) -> panic("missing integer after `{marker}` in DAP body: {body}"))
+}
+
+// Rust: tests/debug.rs:800
+fn dap_u32_before(body: String, marker: String) -> U32 {
+    end :: body.find(marker) ?? panic("missing `{marker}` in DAP body: {body}")
+    prefix := body.slice(0, end) // #4303
+    start :: prefix.rfind("\"id\":") ?? panic("missing frame id before `{marker}` in DAP body: {body}")
+    prefix.slice(start + 5, prefix.bytes().len()).chars().take_while((ch) -> ch.is_ascii_digit()).collect<String>().parse<U32>().unwrap_or_else((_) -> panic("missing frame id before `{marker}` in DAP body: {body}"))
+}
+
+// Rust: tests/debug.rs:817
+// GATE #4483: callers run only on selected Linux targets.
+fn linux_process_state(pid: U32) -> String? {
+    fs.read_to_string(OSPath("/proc/{pid}/stat")).ok().and_then((stat) -> stat.split_whitespace().nth(2).map((s) -> s.to_string()))
+}
+
+// Rust: tests/debug.rs:824
+// GATE #4494: native test helper grants ptrace permission before exec.
+fn spawn_attachable_native_target(binary: OSPath, tag_ref: String) -> Child {
+    root :: unique_tmp("jet_debug_attach_authorizer_{tag_ref}")
+    fs.create_dir_all(root).unwrap()
+    write_test_package(root, TIR_TEST_PACKAGE)
+    source :: root.join("authorizer.jet")
+    helper :: root.join("build/authorizer")
+    // Rust: tests/debug.rs:831-849 — audited helper, translated in full.
+    fs.write(source, "use std.[env, process]\nuse std.process.[Command]\nuse core.sys.linux.[prctl]\nfn run() -[IO]> {{\n    target :: env.args_os().nth(1).expect(\"target binary\")\n    result :: #Unsafe(\"test authorizer permits native debugger attach before exec\") {{ prctl(0x59616d61, UInt.MAX, 0, 0, 0) }}\n    if result != 0 -> process.exit(125)\n    error :: Command.new(target).exec()\n    eprintln(\"{{error}}\")\n    process.exit(126)\n}}\n").expect("write attach authorizer")
+    compile :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).current_dir(root).args(["build"]).arg(source).output().expect("compile attach authorizer")
+    assert(compile.status.success(), "Jet rejected attach authorizer:\n{String.from_utf8_lossy(compile.stderr)}")
+    target :: Command.new(helper).arg(binary).spawn().expect("start attachable native debug target")
+    _ :: fs.remove_file(source)
+    _ :: fs.remove_file(helper)
+    target
+}
+
+// Rust: tests/debug.rs:874
+fn wait_for_target_binary(pid: U32, binary: OSPath) {
+    expected :: fs.canonicalize(binary).expect("canonicalize attach target")
+    deadline :: Instant.now() + Duration.from_secs(5)
+    loop {
+        if fs.canonicalize(OSPath("/proc/{pid}/exe")).ok() == Val((expected)) -> return
+        assert(Instant.now() < deadline, "attach target did not exec the matching native debug binary")
+        thread.sleep(Duration.from_millis(20))
+    }
+}
+
+use Compiler.JetLSP.Tests.Integration.DebugTests

@@ -175,6 +175,8 @@ fn jet_driver_payload_order_keys(layouts: [CoreSharedNativeLayout], key: String,
         if checked.refusal_key != "" -> return checked.refusal_key
         &ordered.push(index)
     }
+    // copy: the bottom-up merge sort writes runs between `ordered` and a scratch buffer of the same
+    // length. This copy is that second buffer, and `ordered` (the caller's list) keeps the result.
     scratch := ordered.copy()
     width := 1
     loop width < ordered.len() {

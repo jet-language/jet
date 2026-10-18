@@ -37,16 +37,9 @@ fn coll_test_source() -> I64 {
 }
 
 // Single-threaded bounded fixtures never fill a slab or allocate directly.
-// Count each available slab's live payloads, excluding bounded empty caches.
-fn coll_test_live(width: I64) -> I64 {
-    total := I64{0}
-    slab := trap_word(alloc_head(alloc_root, width))
-    loop slab != (I64{0}) {
-        total += trap_word(slab + I64{24})
-        slab = trap_word(slab)
-    }
-    total
-}
+// Count each available slab's live payloads in every arena, excluding bounded
+// empty caches.
+fn coll_test_live(width: I64) -> I64 { alloc_available_live(width) }
 
 fn coll_test_bytes() {
     coll_test_require(RT_HOST_U8_STRIDE == I64{1})

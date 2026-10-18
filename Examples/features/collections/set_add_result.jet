@@ -1,0 +1,15 @@
+//! #4366: `Set.add` returns whether the element was new (Bool), on every tier.
+fn run() {
+    seen := Set.from([4])
+    again :: &seen.add(4)
+    other :: &seen.add(7)
+    print("again {again} other {other} len {seen.len()}")
+    fresh := 0
+    loop n in [1, 2, 1, 3, 2] {
+        if &seen.add(n) -> fresh += 1
+    }
+    print("fresh {fresh} len {seen.len()}")
+    words := Set.from(["b"])
+    print(&words.add("a"))
+    print(&words.add("a"))
+}

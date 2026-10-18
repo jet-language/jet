@@ -71,9 +71,9 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
         cli_cc_report_usage_error(verb, err.message)
         return EXIT_USAGE
     }
-    build := BuildContext.new()
-    toolchain :: build.toolchain("cc-toolchain", descriptor.toolchain_spec()) ?? {
-        cli_cc_report_operational_error("C/C++ toolchain could not enter the build graph", "{err}", "repair the pinned Hangar descriptor and retry")
+    build := HermeticBuildContext.new()
+    toolchain :: &build.toolchain("cc-toolchain", descriptor.toolchain_spec()) ?? {
+        cli_cc_report_operational_error("C/C++ toolchain could not enter the build graph", err.debug_text(), "repair the pinned Hangar descriptor and retry")
         return EXIT_USER_ERROR
     }
     // The target is already a declared ToolchainSpec fact and action-key
@@ -89,30 +89,30 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
         .with_env("LANG", "C")
         .with_env_allowlist([String]{"PATH", "LANG"})
         .with_kind(ActionKind.Compile)
-        .with_cap(BuildCapability.Exec)
+        .with_cap(BuildEffect.Exec)
         .with_toolchain(toolchain)
         .with_variant_identity(descriptor.identity())
         .with_label("cc.driver", verb)
         .with_label("cc.target", descriptor.target)
         .with_label("cc.bundle", descriptor.bundle_sha256)
     if !options.compile_only -> action = action.with_pool(BuildResourcePool.Linker)
-    action_handle :: build.action("cc", action) ?? {
-        cli_cc_report_operational_error("C/C++ invocation could not enter the build graph", "{err}", "check the declared source and output paths")
+    action_handle :: &build.action("cc", action) ?? {
+        cli_cc_report_operational_error("C/C++ invocation could not enter the build graph", err.debug_text(), "check the declared source and output paths")
         return EXIT_USER_ERROR
     }
     target_spec := TargetSpec.new().with_action(action_handle).with_toolchain(toolchain)
     loop source in invocation.sources -> target_spec = target_spec.with_source(source)
     loop input in invocation.inputs -> target_spec = target_spec.with_input(input)
     loop output in invocation.outputs -> target_spec = target_spec.with_output(output)
-    build_target :: build.add_executable("cc-output", target_spec) ?? {
-        cli_cc_report_operational_error("C/C++ invocation could not create its build target", "{err}", "check the declared source and output paths")
+    build_target :: &build.add_executable("cc-output", target_spec) ?? {
+        cli_cc_report_operational_error("C/C++ invocation could not create its build target", err.debug_text(), "check the declared source and output paths")
         return EXIT_USER_ERROR
     }
     plan :: build.plan_with_default(build_target) ?? {
-        cli_cc_report_operational_error("C/C++ invocation produced an invalid build graph", "{err}", "check the declared source and output paths")
+        cli_cc_report_operational_error("C/C++ invocation produced an invalid build graph", err.debug_text(), "check the declared source and output paths")
         return EXIT_USER_ERROR
     }
-    grants :: [BuildCapability]{BuildCapability.Exec}
+    grants :: [BuildEffect]{BuildEffect.Exec}
     artifact_store :: BuildArtifactStoreHandle.open() ?? {
         cli_cc_report_operational_error("C/C++ invocation could not open the artifact store", "{err}", "check JET_STORE_DIR and retry")
         return EXIT_USER_ERROR
@@ -437,11 +437,11 @@ fn cli_cc_report_execution_error(error: BuildExecutionError) -[IO, Env, Time.Wai
     theme :: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
         .SandboxUnavailable -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", "the native action boundary could not be enforced", "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
-        .Reported(report) -> theme.error_coded(report.code ?? "E3505", "C/C++ compiler action failed", report.render(), "fix the reported compiler or linker error; no artifact was accepted")
-        .MissingGrant(action, capability) -> theme.error_coded("E1340", "C/C++ action lacked its required build grant", "action `{action}` requested `{capability}`", "retry through the canonical `jet cc` or `jet c++` entry point")
+        .Reported(report) -> theme.error_coded(report.code ?? "E3505", "C/C++ compiler action failed", build_report_render(report), "fix the reported compiler or linker error; no artifact was accepted")
+        .MissingGrant(action, capability) -> theme.error_coded("E1340", "C/C++ action lacked its required build grant", "action `{action}` requested `{capability.name()}`", "retry through the canonical `jet cc` or `jet c++` entry point")
         .IO(action, detail) -> theme.error_coded("E1340", "C/C++ build action could not complete", "action `{action}`: {detail}", "check the project paths and declared toolchain object, then retry")
         .ProbeFailed(probe, detail) -> theme.error_coded("E1340", "C/C++ build probe failed", "probe `{probe}`: {detail}", "repair the pinned toolchain or target descriptor, then retry")
-        .InvalidGraph(graph_error) -> theme.error_coded("E1340", "C/C++ build graph is invalid", "{graph_error}", "report the graph error; the compiler action was not accepted")
+        .InvalidGraph(graph_error) -> theme.error_coded("E1340", "C/C++ build graph is invalid", graph_error.debug_text(), "report the graph error; the compiler action was not accepted")
     }
 }
 

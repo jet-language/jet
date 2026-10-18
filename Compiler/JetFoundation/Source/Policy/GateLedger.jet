@@ -165,15 +165,8 @@ fn gate_entry_compare(left: GateEntry, right: GateEntry) -> Ordering Never! {
 }
 
 fn gate_ledger_sort(ledger: &GateLedger) Never! {
-    loop index in 1..<ledger.rows.len() {
-        row :: ledger.rows[index].copy()
-        position := index
-        loop position > 0 && gate_entry_compare(ledger.rows[position - 1], row) == Ordering.Greater {
-            ledger.rows[position] = ledger.rows[position - 1]
-            position -= 1
-        }
-        ledger.rows[position] = row
-    }
+    ledger.rows = loop fresh_item in ledger.rows -> fresh_item
+    &ledger.rows.sort_by((left: GateEntry, right: GateEntry) -> gate_entry_compare(left, right))
 }
 
 fn gate_source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {

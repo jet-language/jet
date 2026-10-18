@@ -117,28 +117,40 @@ fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], r
 // Replace a scalar join whose live edges all carry one constant with that
 // constant. Folding decided the branch (`m :: if a > b -> a else -> b`, or
 // the test behind `xs.min_by(f) ?? -1`), so every tier reads a literal.
+// Each function is read in place and its joins are rewritten after the
+// read, so no view of it is live across a write (which would copy it).
 fn jet_driver_pure_fold_resolve_joins(program: &MIRProgram) {
     loop function_index in 0..<program.functions.len() {
+        rewrites := [JetDriverPureFoldJoin]{}
         function :: program.functions[function_index]
         initializers :: jet_driver_pure_fold_initializers(function)
         if initializers.len() == 0 -> next
         constants :: jet_driver_pure_fold_constants(function, initializers, jet_driver_pure_fold_root_locals(function))
-        loop block_index in 0..<function.blocks.len() {
-            loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
-                instruction := function.blocks[block_index].instructions[instruction_index]
+        loop (block_index, block) in function.blocks {
+            loop (instruction_index, instruction) in block.instructions {
                 result :: instruction.result ?? next
                 ty :: instruction.ty ?? next
                 if !jet_driver_pure_fold_scalar(ty) -> next
                 if instruction.operation == {
                     .Phi(_) -> {
                         constant :: constants.get(result.value) ?? next
-                        program.functions[function_index].blocks[block_index].instructions[instruction_index].operation = MIROperation.Constant{value: constant}
+                        &rewrites.push(JetDriverPureFoldJoin{block: block_index, instruction: instruction_index, constant: constant})
                     }
                     else -> {}
                 }
             }
         }
+        loop rewrite in rewrites {
+            program.functions[function_index].blocks[rewrite.block].instructions[rewrite.instruction].operation = MIROperation.Constant{value: rewrite.constant}
+        }
     }
+}
+
+// One join resolve_joins rewrites to its constant.
+struct JetDriverPureFoldJoin {
+    block: Int
+    instruction: Int
+    constant: MIRConstant
 }
 
 fn jet_driver_pure_fold_scalar(ty: MIRType) -> Bool Never! {
@@ -202,17 +214,16 @@ fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool])
         inputs.definitions = definitions
         inputs.initializers = initializers
         inputs.roots = roots
-        loop block_index in 0..<function.blocks.len() {
-            block := function.blocks[block_index]
-            loop instruction_index in 0..<block.instructions.len() {
-                if declined.get(jet_driver_pure_fold_site_key(function_index, block_index, instruction_index)) != None -> next
-                instruction := block.instructions[instruction_index]
+        loop (block_index, block) in function.blocks {
+            loop (instruction_index, instruction) in block.instructions {
                 result :: instruction.result ?? next
                 ty :: instruction.ty ?? next
                 if feeding.get(result.value) == None -> next
                 if inputs.constants.get(result.value) != None -> next
                 if !jet_driver_pure_fold_result_type(ty) -> next
                 if !jet_driver_pure_fold_operation(instruction.operation, inputs.callees, inputs.preludes) -> next
+                // Only a site that is otherwise a candidate builds its key.
+                if declined.len() > 0 && declined.get(jet_driver_pure_fold_site_key(function_index, block_index, instruction_index)) != None -> next
                 slice := JetDriverPureFoldSlice{instructions: [MIRInstruction]{}, defined: [U64:Bool]{}, visiting: [U64:Bool]{}}
                 complete := true
                 loop value in mir_operation_value_uses(instruction.operation) {

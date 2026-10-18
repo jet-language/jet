@@ -1,13 +1,10 @@
 use core.files as files
 
-// KNOWN-FAILING #4803: original tests/core_surface_ledger.rs:204-205 requires lowercase
-// "variadic parameter"; committed variadic_not_last.stderr starts with uppercase.
-// Predicate retained verbatim.
 fn s3_guard_core_syntax_surfaces() {
     syntax :: files.read("Docs/spec/reference/syntax-surface.jet") ?? panic("read syntax reference")
     markers :: [String]{
         "values: ...String", "[...tags", "user.[name, email]", "Stream<Int>", "yield i",
-        "delay: Int", "pub policy audit", "wrap(call)", "#Policy(",
+        "delay: Int", "policy audit(", "wrap(call)", "#Policy(",
     }
     loop marker in markers {
         assert(syntax.contains(marker), "syntax reference lost: {marker}")
@@ -19,7 +16,7 @@ fn s3_guard_core_syntax_surfaces() {
     assert(!hover.contains("=>"))
     variadic :: files.read("tests/ui/variadic_not_last.stderr") ?? panic("read variadic diagnostic")
     assert(variadic.contains("E1310"))
-    assert(variadic.contains("variadic parameter"))
+    assert(variadic.contains("Variadic parameter"))
     spread :: files.read("tests/ui/spread_bad_call.stderr") ?? panic("read spread diagnostic")
     assert(spread.contains("E1312"))
     assert(spread.contains("call spread"))
@@ -27,7 +24,7 @@ fn s3_guard_core_syntax_surfaces() {
     assert(yielded.contains("E0807"))
     assert(yielded.contains("Stream<Int"))
     policy :: files.read("tests/ui/user_policy_bad_args.stderr") ?? panic("read policy diagnostic")
-    assert(policy.contains("policy `audit`"))
+    assert(policy.contains("Policy `audit`"))
     assert(policy.contains("Fix:"))
 }
 

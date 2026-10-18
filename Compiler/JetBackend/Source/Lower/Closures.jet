@@ -126,6 +126,8 @@ fn lower_capture_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         lower_fail(&m, &f, "capture slot {slot} has no capture parameter")
         return None
     }
+    // copy: the env pointer is read while the capture address emits into `&f`, so a view into f.env
+    // would be live across those writes.
     env :: (f.env.copy()) ?? {
         lower_fail(&m, &f, "capture slot {slot} outside a closure body")
         return None
@@ -138,10 +140,12 @@ fn lower_capture_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 }
 
 // `Capture(slot)`: the captured value, read from its cell (an inline
-// aggregate's value is the cell itself).
+// aggregate's value is the cell itself). The value stays the closure box's
+// (its release helper drops it): the body reads it in place, a borrow with
+// no drop glue of its own, never a second owner.
 fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, slot: Int) Never! {
     ty :: lower_checked_type(c, instruction) ?? return lower_alias_absent(&f, instruction)
-    if lower_repr_layout(lower_repr(p, ty)) == None -> return lower_alias_absent(&f, instruction)
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_alias_absent(&f, instruction)
     address :: lower_capture_address(p, c, &m, &f, slot) ?? return
     index :: lower_capture_index(c.mir, slot)
     if c.mir.capture_params[index].place_only {
@@ -152,7 +156,9 @@ fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         return lower_alias_absent(&f, instruction)
     }
     if lower_is_inline(p, ty) -> return lower_alias(c, &f, instruction, address)
-    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    result :: instruction.result ?? return
+    dst :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    lower_define(c, &f, result, dst)
     lower_read_into(p, &f, dst, address, 0, ty)
 }
 
@@ -173,10 +179,16 @@ fn lower_frame_cells(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             }
             .Parameter(value) -> {
                 if row.write_param >= 0 {
+                    // copy: the write parameter's pointer becomes the cell while the frame setup
+                    // writes f.cells and emits into `&f`, so a view into f.params would be live
+                    // across those writes.
                     cell = f.params[row.write_param].copy()
                 } else {
                     index :: lower_param_index(c.mir, value)
                     if index >= 0 && index < f.params.len() {
+                        // copy: the parameter value is stored into its new cell while the frame
+                        // setup writes `&f`, so a view into f.params would be live across those
+                        // writes.
                         param_value :: f.params[index].copy()
                         if param_value == .Val(param) {
                             if lower_is_inline(p, row.ty) {
@@ -206,7 +218,11 @@ fn lower_frame_cells(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // aggregate is the cell, any other cell value is loaded (borrowed); other
 // slots hold their current value.
 fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slot: Int) -> LIRValueID? {
+    // copy: the slot root is returned as an owned value, while f.current keeps the slot's value for
+    // later reads.
     if !c.slots[slot].cell -> return f.current[slot].copy()
+    // copy: the cell pointer is read while the root load emits into `&f`, so a view into f.cells
+    // would be live across those writes.
     cell :: (f.cells[slot].copy()) ?? {
         lower_fail(&m, &f, "captured slot {slot} has no storage")
         return None
@@ -222,13 +238,15 @@ fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 // projections from the cell's root.
 fn lower_cell_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slot: Int, row: MIRPlace) -> LowerFieldAddress? {
     if row.projections.len() == 0 {
+        // copy: the cell pointer is read while the field walk emits into `&f`, so a view into
+        // f.cells would be live across those writes.
         cell :: (f.cells[slot].copy()) ?? {
             lower_fail(&m, &f, "captured place {row.id.value} has no storage")
             return None
         }
         return Val(LowerFieldAddress{base: cell, offset: 0})
     }
-    root :: lower_slot_root(p, c, &m, &f, slot) ?? return None
+    root :: lower_slot_root_for_write(p, c, &m, &f, slot) ?? return None
     lower_walk_projections(p, c, &m, &f, root, c.slots[slot].ty, row.projections)
 }
 
@@ -236,6 +254,8 @@ fn lower_cell_walk(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
 // it is cleared when it still holds that value (an inline aggregate's value
 // is the cell's own storage).
 fn lower_cell_dropped(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int, value: LIRValueID) Never! {
+    // copy: the cell pointer is read while the drop emits into `&f`, so a view into f.cells would
+    // be live across those writes.
     cell :: (f.cells[slot].copy()) ?? return
     ty :: c.slots[slot].ty
     if lower_is_inline(p, ty) -> return lower_clear_at(p, &f, cell, 0, ty)
@@ -255,9 +275,14 @@ fn lower_cell_dropped(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: I
 
 // The address of a place a closure captures by reference.
 fn lower_place_address(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) -> LIRValueID? {
-    row :: lower_place_row(c.mir, place) ?? {
+    row :: lower_place_row(c.mir, c.place_rows, place) ?? {
         lower_fail(&m, &f, "captured place {place.value} is missing")
         return None
+    }
+    // #5001: a constant read in place lends its one frozen value.
+    if row.base == .Static(name) {
+        walked :: lower_static_walk(p, c, &m, &f, row, name) ?? return None
+        return Val(lower_address(&f, walked.base, walked.offset))
     }
     slot :: c.place_slots.get(place.value) ?? {
         lower_fail(&m, &f, "captured place {place.value} has no lowered root")
@@ -334,7 +359,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     closure :: lower_use(&m, &f, callee) ?? return
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    temporaries := [LIRValueID]{}
+    temporaries := LowerCallTemps{drops: [LIRValueID]{}, taken: [MIRValueID]{}}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks, &temporaries) -> return
     code :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: code, base: closure, offset: 8})
@@ -357,7 +382,7 @@ fn lower_indirect_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     signature :: lower_signature(&m, params, result)
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Value{value: code}, args: call_args})
     loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
-    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
+    lower_release_call_temps(p, c, &m, &f, temporaries)
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +405,8 @@ fn lower_closure_helper_id(m: &LowerModule, helper: String, index: Int, source: 
 // calls the function with the rest of its arguments.
 fn lower_closure_thunk(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     target_signature :: m.mir_signatures[glue.function].copy()
+    // copy: the target signature is read while the thunk registers signatures and glue in `m`
+    // (`&m`), so a view into m.signatures would be live across those writes.
     target :: m.signatures[target_signature.value].copy()
     params := [LIRLayout]{lir_layout_pointer()}
     loop layout in target.params -> &params.push(layout)

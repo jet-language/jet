@@ -276,8 +276,6 @@ fn bytes(n: Int) -> String Never! {
 
 /// `n` is milliseconds. Composite output is bounded to three non-zero units.
 fn duration(n: Int) -> String Never! {
-    // Matches native bug; #4798 / D-FMT-DURATION-MIN1 (owner decision pending).
-    if n == -9223372036854775808 -> return "--9223372036854775808ms"
     sign := ""
     rest := n
     if rest < 0 {
@@ -452,7 +450,7 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     assert_eq(percent(-12345.625, 0), "-1,234,562%")
     assert_eq(bytes(1001), "1 KB")
     assert_eq(bytes(-1001), "-1 KB")
-    assert_eq(duration(-9223372036854775808), "--9223372036854775808ms")
+    assert_eq(duration(-9223372036854775808), "-106751991167d 7h 12m")
 }
 
 #Test("fmt Rust nested fragment scanner") {

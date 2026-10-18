@@ -2328,7 +2328,7 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
         used = true
         transfer :: function.blocks[user.block].instructions[user.instruction].result
         if transfer == .Val(result) {
-            transfers_read :: jet_rust_emit_transparent_read(ctx, function, result) == .Val(value)
+            transfers_read :: jet_rust_emit_transparent_read(ctx, function, result) == Val((value))
             if transfers_read && jet_rust_emit_inspected_transfer(&ctx, function, result) -> next
         }
         if operation == .Drop(operand, kind) && operand == value && kind != MIRDropKind.ForeignHandle {
@@ -2547,6 +2547,8 @@ fn jet_rust_emit_partial_type_instance(ctx: &JetRustEmitContext, ty: MIRType) ->
     loop instance in ctx.program.type_instances {
         if mir_type_same_checked_type(ty, instance) -> return instance
     }
+    // copy: the instance type is a new owned MIRType. Otherwise it equals `ty`, the caller's MIR
+    // type (a read parameter), which stays on its node.
     ty.copy()
 }
 
@@ -2557,6 +2559,9 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MIRTy
                 loop (index, parameter) in parameters {
                     if parameter.name == name.name && name.id == mir_type_id(parameter.name) {
                         if index < arguments.len() -> return arguments[index]
+                        // copy: the substituted type is a new owned MIRType. Unbound, it equals
+                        // `source`, the caller's MIR type (a read parameter), which stays on its
+                        // node.
                         return source.copy()
                     }
                 }
@@ -3047,9 +3052,11 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
             .Capture(value) -> jet_rust_emit_parameter_place(&ctx, function, value, mutable)
             .Temporary(value) -> "*({jet_rust_emit_value_reference(ctx, value, mutable)})"
             .Static(name) -> {
+                // #5001: a constant read in place borrows its one value;
                 // MIRRust place_base: a persistent cell lends no mutable projection.
-                if mutable -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR mutable static projection has no canonical owning representation", "persistent places are read whole and written through their cell", None)
-                "({jet_rust_emit_static_path(&ctx, name)}).get()"
+                constant :: jet_rust_emit_constant_place(&ctx, name)
+                if mutable -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "MIR mutable static projection has no canonical owning representation", "persistent places are read whole and written through their cell; a constant read in place is never written", None)
+                constant ?? "({jet_rust_emit_static_path(&ctx, name)}).get()"
             }
         }
     }
@@ -3464,6 +3471,12 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MIRFunction, id:
         if place.id == id {
             if place.projections.len() != 0 {
                 if jet_rust_emit_partial_move(&ctx, function, id) == .Val(partial) -> return partial
+                // A taken match payload (a checked `^p`): Rust cannot move
+                // out of an enum through a place, so this tier reads a copy
+                // and the subject keeps (and later drops) its own payload.
+                loop projection in place.projections {
+                    if projection == .Payload(_, _) -> return jet_rust_emit_place_read(&ctx, function, id)
+                }
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "projected MIR move lacks a source ownership projection", "checked projected moves require a canonical partial-move plan", Val(place.span))
                 return "unreachable!(\"unsupported projected MIR move\")"
             }

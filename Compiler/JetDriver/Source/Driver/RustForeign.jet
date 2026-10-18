@@ -286,14 +286,19 @@ fn jet_driver_rust_foreign_record_type(ty: Type, records: JetDriverRustForeignRe
         else -> None
     }
 }
-fn jet_driver_rust_foreign_facts(graph: SemaRegistrationGraph) -> JetDriverRustForeignFacts Never! {
-    has_rust := false
+// Whether any module declares an `extern rust` foreign function; without one
+// the graph's Rust foreign facts are empty (jet_driver_rust_foreign_facts).
+fn jet_driver_rust_foreign_present(graph: SemaRegistrationGraph) -> Bool Never! {
     loop module_row in graph.modules {
         loop function in module_row.foreign_functions {
-            if function.owner == SemaRegistrationForeignOwner.ExternRust -> has_rust = true
+            if function.owner == SemaRegistrationForeignOwner.ExternRust -> return true
         }
     }
-    if !has_rust -> return jet_driver_rust_foreign_empty()
+    false
+}
+
+fn jet_driver_rust_foreign_facts(graph: SemaRegistrationGraph) -> JetDriverRustForeignFacts Never! {
+    if !jet_driver_rust_foreign_present(graph) -> return jet_driver_rust_foreign_empty()
     entries := [JetDriverRustForeignEntry]{}
     records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
     loop module_row in graph.modules -> jet_driver_rust_foreign_collect_items(module_row.declarations, module_row.module_name, module_row.module_identity, &entries, &records)

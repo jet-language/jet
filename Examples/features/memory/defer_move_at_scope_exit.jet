@@ -1,0 +1,17 @@
+// #4711: `defer close(^log)` moves `log` when the scope exits, not on the
+// `defer` line, so the statements after the `defer` still read `log`; the
+// deferred close consumes it last.
+struct Log {
+    name: String
+}
+
+impl Log.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn run() {
+    log :: Log{name: "audit"}
+    defer close(^log)
+    print("open {log.name}")
+    print("still open {log.name}")
+}

@@ -2230,6 +2230,18 @@ jet.push("}");
 jet.push("");
 jet.push("struct LowerRoute { symbol: String, export: String, native_lists: Bool, params: [LowerRouteCarrier], result: LowerRouteResult }");
 jet.push("");
+// #5001: a table's keyed index, frozen at build time: its distinct keys in
+// ascending byte order and, beside each, the key's first row (the row a scan
+// of the table returns), searched by lower_key_row.
+function jetKeyIndex(name, keys) {
+  const first = new Map();
+  keys.forEach((key, position) => { if (!first.has(key)) first.set(key, position); });
+  const sorted = [...first].sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  return [
+    `${name}_KEYS :: prep { [String]{`, ...sorted.map(([key]) => `    "${key}",`), "} }",
+    `${name}_KEY_ROWS :: prep { [Int]{`, ...sorted.map(([, position]) => `    ${position},`), "} }",
+  ];
+}
 jet.push("LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{");
 for (const adapter of adapters) {
   const params = adapter.params.map((param) => `LowerRouteCarrier.${param.jet}`).join(", ");
@@ -2237,11 +2249,28 @@ for (const adapter of adapters) {
 }
 jet.push("} }");
 jet.push("");
-jet.push("fn lower_runtime_route(symbol: String) -> LowerRoute? {");
-jet.push("    loop route in LOWER_RUNTIME_ROUTES {");
-jet.push("        if route.symbol == symbol -> return Val(route)");
+jet.push("// #5001: each table below is read in place, and its lookup is keyed: the");
+jet.push("// table's distinct keys in ascending byte order with each key's first row,");
+jet.push("// frozen at build time, searched by halving instead of a scan of every row.");
+jet.push("fn lower_key_row(keys: [String], rows: [Int], key: String) -> Int? Never! {");
+jet.push("    low := 0");
+jet.push("    high := keys.len()");
+jet.push("    loop low < high {");
+jet.push("        middle :: low + (high - low) /% 2");
+jet.push("        if {");
+jet.push("            keys[middle] == key -> return Val(rows[middle])");
+jet.push("            keys[middle] < key -> low = middle + 1");
+jet.push("            else -> high = middle");
+jet.push("        }");
 jet.push("    }");
 jet.push("    None");
+jet.push("}");
+jet.push("");
+jet.push(...jetKeyIndex("LOWER_RUNTIME_ROUTE", adapters.map((adapter) => adapter.symbol)));
+jet.push("");
+jet.push("fn lower_runtime_route(symbol: String) -> LowerRoute? {");
+jet.push("    position :: lower_key_row(LOWER_RUNTIME_ROUTE_KEYS, LOWER_RUNTIME_ROUTE_KEY_ROWS, symbol) ?? return None");
+jet.push("    Val(LOWER_RUNTIME_ROUTES[position].copy())");
 jet.push("}");
 jet.push("");
 jet.push("// The runtime handle type a Jet type generated Rust holds natively crosses the");
@@ -2257,7 +2286,8 @@ jet.push("struct LowerRuntimeHandle { jet_name: String, runtime: String, clone: 
 jet.push("");
 jet.push("LOWER_RUNTIME_HANDLES :: prep { [LowerRuntimeHandle]{");
 const fullOf = new Map(handleRows);
-for (const [jetName, name] of [...jetNames].sort((a, b) => a[0].localeCompare(b[0]))) {
+const handleOrder = [...jetNames].sort((a, b) => a[0].localeCompare(b[0]));
+for (const [jetName, name] of handleOrder) {
   const render = rendered(name, fullOf.get(name));
   jet.push(`    LowerRuntimeHandle{jet_name: "${jetName}", runtime: "${name}", clone: ${cloneable.has(name)}, display: ${render.display}, show: ${render.show}, debug: ${render.debug}, eq: ${comparable.has(name)}},`);
 }
@@ -2268,15 +2298,16 @@ jet.push("LOWER_NATIVE_PROVIDER_HANDLES :: prep { [LowerRuntimeHandle]{");
 for (const row of nativeProviders) jet.push(`    LowerRuntimeHandle{jet_name: "${row.jetName}", runtime: "${row.runtime}", clone: true, display: false, show: false, debug: false, eq: false},`);
 jet.push("} }");
 jet.push("");
+jet.push(...jetKeyIndex("LOWER_RUNTIME_HANDLE", handleOrder.map(([jetName]) => jetName)));
+jet.push(...jetKeyIndex("LOWER_NATIVE_PROVIDER_HANDLE", nativeProviders.map((row) => row.jetName)));
+jet.push("");
 jet.push("fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {");
-jet.push("    loop handle in LOWER_RUNTIME_HANDLES {");
-jet.push("        if handle.jet_name == name -> return Val(handle.copy())");
+jet.push("    if lower_key_row(LOWER_RUNTIME_HANDLE_KEYS, LOWER_RUNTIME_HANDLE_KEY_ROWS, name) == .Val(position) {");
+jet.push("        return Val(LOWER_RUNTIME_HANDLES[position].copy())");
 jet.push("    }");
 jet.push("    // Existing Rust rows win in seed mode; absent nominals may use a provider.");
-jet.push("    loop handle in LOWER_NATIVE_PROVIDER_HANDLES {");
-jet.push("        if handle.jet_name == name -> return Val(handle.copy())");
-jet.push("    }");
-jet.push("    None");
+jet.push("    position :: lower_key_row(LOWER_NATIVE_PROVIDER_HANDLE_KEYS, LOWER_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None");
+jet.push("    Val(LOWER_NATIVE_PROVIDER_HANDLES[position].copy())");
 jet.push("}");
 jet.push("");
 jet.push("// Core records the runtime's generated record exports carry (Records.jet),");
@@ -2304,11 +2335,11 @@ jet.push("LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{");
 for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}", header_bytes: ${row.headerBytes}},`);
 jet.push("} }");
 jet.push("");
+jet.push(...jetKeyIndex("LOWER_HANDLE_FIELD", handleFields.map((row) => `${row.name} ${row.field}`)));
+jet.push("");
 jet.push("fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
-jet.push("    loop row in LOWER_HANDLE_FIELDS {");
-jet.push("        if row.runtime == runtime && row.field == field -> return Val(row.copy())");
-jet.push("    }");
-jet.push("    None");
+jet.push("    position :: lower_key_row(LOWER_HANDLE_FIELD_KEYS, LOWER_HANDLE_FIELD_KEY_ROWS, \"{runtime} {field}\") ?? return None");
+jet.push("    Val(LOWER_HANDLE_FIELDS[position].copy())");
 jet.push("}");
 jet.push(...emitNativeEnvironmentRoutes(nativeEnvironmentRoutes(routes, jetRuntimeExports, jetRuntimeSignatures)));
 
@@ -2318,17 +2349,19 @@ jet.push("struct LowerNativeType { jet_name: String, declaration: String, argume
 jet.push("LOWER_NATIVE_TYPES :: prep { [LowerNativeType]{");
 for (const type of nativeTypes) jet.push(`    LowerNativeType{jet_name: "${type.jetName}", declaration: "${type.source.key}", arguments: "${type.arguments}"},`);
 jet.push("} }");
+jet.push(...jetKeyIndex("LOWER_NATIVE_TYPE", nativeTypes.map((type) => type.jetName)));
 jet.push("fn lower_native_type(name: String) -> LowerNativeType? {");
-jet.push("    loop row in LOWER_NATIVE_TYPES { if row.jet_name == name -> return Val(row.copy()) }");
-jet.push("    None");
+jet.push("    position :: lower_key_row(LOWER_NATIVE_TYPE_KEYS, LOWER_NATIVE_TYPE_KEY_ROWS, name) ?? return None");
+jet.push("    Val(LOWER_NATIVE_TYPES[position].copy())");
 jet.push("}");
 jet.push("struct LowerNativeExport { symbol: String, jet_name: String, op: String, member: String }");
 jet.push("LOWER_NATIVE_EXPORTS :: prep { [LowerNativeExport]{");
 for (const row of nativeExports) jet.push(`    LowerNativeExport{symbol: "${row.name}", jet_name: "${row.jetName}", op: "${row.op}", member: "${row.member}"},`);
 jet.push("} }");
+jet.push(...jetKeyIndex("LOWER_NATIVE_EXPORT", nativeExports.map((row) => row.name)));
 jet.push("fn lower_native_export(symbol: String) -> LowerNativeExport? {");
-jet.push("    loop row in LOWER_NATIVE_EXPORTS { if row.symbol == symbol -> return Val(row.copy()) }");
-jet.push("    None");
+jet.push("    position :: lower_key_row(LOWER_NATIVE_EXPORT_KEYS, LOWER_NATIVE_EXPORT_KEY_ROWS, symbol) ?? return None");
+jet.push("    Val(LOWER_NATIVE_EXPORTS[position].copy())");
 jet.push("}");
 jet.push("// All possible external C imports, mechanically derived from the ABI tables.");
 jet.push("LOWER_NATIVE_IMPORTS :: prep { [String]{");

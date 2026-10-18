@@ -161,7 +161,7 @@ fn sema_effect_leaf_check_function(leaves: [SemaEffectLeaf], function: Func, dia
             sema_effect_leaf_check_name(leaves, name, entry.span, &diagnostics)
         }
     }
-    loop parameter in function.params -> sema_effect_leaf_check_type(leaves, parameter.ty, &diagnostics)
+    loop parameter_index in 0..<function.params.len() -> sema_effect_leaf_check_type(leaves, function.params[parameter_index].ty, &diagnostics)
     if function.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
     sema_effect_leaf_check_statements(leaves, function.body, &diagnostics)
 }
@@ -229,17 +229,17 @@ fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnos
 fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
     loop name in sema_effect_builtin_leaves() -> sema_effect_leaf_add(&leaves, name)
-    loop source_module in graph.modules {
-        if source_module.module_identity == graph.canonical_effect_module_identity -> next
-        sema_effect_leaf_collect(&leaves, source_module.program.items)
+    loop source_module_index in 0..<graph.modules.len() {
+        if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
+        sema_effect_leaf_collect(&leaves, graph.modules[source_module_index].program.items)
     }
     found := false
-    loop source_module in graph.modules {
-        if source_module.module_identity == graph.canonical_effect_module_identity -> next
+    loop source_module_index in 0..<graph.modules.len() {
+        if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         start :: diagnostics.len()
-        sema_effect_leaf_check_items(leaves, source_module.program.items, &diagnostics)
+        sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, &diagnostics)
         if diagnostics.len() > start {
-            sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+            sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
             found = true
         }
     }

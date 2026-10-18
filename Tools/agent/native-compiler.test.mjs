@@ -20,6 +20,8 @@ function dryRun(extra, inspect) {
         assert.equal((source.match(/^fn run\(/gm) ?? []).length, 1);
         assert.match(source, /process\.exit\(jet_cli_main\(process\.args\(\)\)\)/);
         assert.equal((source.match(/^use core\.process as process$/gm) ?? []).length, 1);
+        assert.equal((source.match(/^JET_CLI_BUILT_COMPILER_IDENTITY :: "jet@[^"#\s]+#[0-9a-f]{64}"$/gm) ?? []).length, 1,
+            'the assembly embeds the identity of the source it assembled');
         const manifest = readFileSync(join(out, 'compiler/package.jet'), 'utf8');
         assert.doesNotMatch(manifest, /^deps:/m);
         const budget = manifest.match(/holds:\s*\{\s*allow:\s*\[([^\]]*)\]/)?.[1];
@@ -69,10 +71,10 @@ function dryRun(extra, inspect) {
     } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test('native assembly selects real CLI and two native O0 builds at the same path', () => {
+test('native assembly selects real CLI and two native O1 builds at the same path', () => {
     dryRun(root => ['--runtime-dir', join(root, 'unavailable-runtime')], plan => {
         assert.equal(plan.backend, 'jet-native');
-        assert.equal(plan.optimization, 'O0');
+        assert.equal(plan.optimization, 'O1');
         assert.equal(plan.lowering, 'lir_lower_entry');
         assert.equal(plan.linker, 'x64_link_executable');
         assert.equal(plan.stages.length, 2);

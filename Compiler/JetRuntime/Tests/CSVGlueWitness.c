@@ -38,7 +38,7 @@ static void watch_row(Row *row) {
     watch(row,16,8); watch(row->fields,24,8);
     if(row->fields->capacity) watch(row->fields->data,row->fields->capacity*8,8);
     for(int64_t i=0;i<row->fields->length;++i) {
-        Text *t=row->fields->data[i]; watch(t,24,8);
+        Text *t=row->fields->data[i]; watch((char *)(t)-8,32,8);
         if(t->capacity) watch(t->data,t->capacity,1);
     }
 }

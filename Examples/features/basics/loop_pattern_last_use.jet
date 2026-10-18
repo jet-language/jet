@@ -1,0 +1,61 @@
+// A pattern binding consumed in its arm inside a loop is the binding's last
+// use: the payload moves into the list instead of being copied, whether the
+// subject is a call made in the loop, a local bound in the loop body, or an
+// Option or enum. The unmatched path never runs the arm, so the binding is
+// not live around the loop's back edge.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+enum Shape {
+    Circle(blob: Blob, size: Int)
+    Line(size: Int)
+    Empty
+}
+
+fn make(k: Int) -> Shape {
+    if k % 3 == 0 -> return Shape.Circle{blob: Blob{data: [Int]{k, k + 1}, text: "c{k}"}, size: k}
+    if k % 3 == 1 -> return Shape.Line{size: k}
+    Shape.Empty
+}
+
+fn maybe(k: Int) -> Blob? {
+    if k % 2 == 0 -> return Val(Blob{data: [Int]{k}, text: "b{k}"})
+    None
+}
+
+fn texts(blobs: [Blob]) -> String {
+    out := ""
+    loop blob in blobs -> out = "{out}{blob.text}:{blob.data.len()} "
+    out
+}
+
+fn run() {
+    from_calls := [Blob]{}
+    loop k in 0..<5 {
+        if maybe(k) == .Val(blob) -> &from_calls.push(blob)
+    }
+    print(texts(from_calls))
+    from_locals := [Blob]{}
+    index := 0
+    loop index < 7 {
+        shape := make(index)
+        if shape == {
+            .Circle(blob, _) -> &from_locals.push(blob)
+            .Line(size) -> &from_locals.push(Blob{data: [Int]{}, text: "l{size}"})
+            .Empty -> {}
+        }
+        index += 1
+    }
+    print(texts(from_locals))
+    sizes := 0
+    loop k in 0..<4 {
+        value :: maybe(k)
+        if value == {
+            .Val(blob) -> sizes += blob.data.len() + blob.text.len()
+            .None -> sizes += 100
+        }
+    }
+    print("sizes {sizes}")
+}

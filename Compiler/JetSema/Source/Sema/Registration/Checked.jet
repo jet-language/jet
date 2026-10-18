@@ -93,6 +93,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
 ]
+use jet_parser.parser_guest_import_symbol
 
 fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
@@ -125,7 +126,12 @@ fn sema_checked_marker_text(marker: Marker) -> String? {
     if marker.args[0] == {
         .Expr(expression) -> if expression == {
             .Ident(name, _) -> Val(name)
-            .Str(parts, _) -> if parts.len() == 1 && parts[0] == .Lit(text) -> Val(text) else -> None
+            .Str(parts, _) -> {
+                if parts.len() == 1 {
+                    if parts[0] == .Lit(text) -> return Val(text)
+                }
+                None
+            }
             else -> None
         }
         else -> None
@@ -140,7 +146,9 @@ fn sema_checked_marker_text_label(marker: Marker, label: String) -> String? {
                     .Expr(expression) -> {
                         if expression == {
                             .Str(parts, _) -> {
-                                if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+                                if parts.len() == 1 {
+                                    if parts[0] == .Lit(text) -> return Val(text)
+                                }
                                 return None
                             }
                             .Ident(name, _) -> return Val(name)
@@ -1127,9 +1135,9 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
         return false
     }
     function_candidate := SemaRegistrationFunction?{None}
-    loop function in module_row.functions {
-        if function.declaration.name == close.name {
-            function_candidate = Val(function)
+    loop function_index in 0..<module_row.functions.len() {
+        if module_row.functions[function_index].declaration.name == close.name {
+            function_candidate = Val(module_row.functions[function_index])
             break
         }
     }
@@ -1140,9 +1148,9 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
         return false
     }
     candidate := SemaRegistrationForeignFunction?{None}
-    loop function in module_row.foreign_functions {
-        if function.declaration.name == close.name {
-            candidate = Val(function)
+    loop function_index in 0..<module_row.foreign_functions.len() {
+        if module_row.foreign_functions[function_index].declaration.name == close.name {
+            candidate = Val(module_row.foreign_functions[function_index])
             break
         }
     }
@@ -1151,9 +1159,9 @@ fn sema_checked_foreign_close(graph: SemaRegistrationGraph, module_row: SemaRegi
             if provider.module_identity != module_row.module_identity -> next
             loop adapter in provider.close_adapters {
                 if adapter.adapter_function != close.name -> next
-                loop function in module_row.foreign_functions {
-                    if function.declaration.name == adapter.raw_function && function.declaration.return_type != None && function.parameters.len() == 1 {
-                        parameter :: function.parameters[0]
+                loop function_index in 0..<module_row.foreign_functions.len() {
+                    if module_row.foreign_functions[function_index].declaration.name == adapter.raw_function && module_row.foreign_functions[function_index].declaration.return_type != None && module_row.foreign_functions[function_index].parameters.len() == 1 {
+                        parameter :: module_row.foreign_functions[function_index].parameters[0]
                         handle_match :: return_type == Type.Named{name: adapter.handle_type}
                         if !parameter.variadic && parameter.convention == AccessConvention.Move && parameter.ty == return_type && handle_match -> return true
                     }
@@ -1176,19 +1184,19 @@ fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegis
     inverse_params := [SemaRegistrationParameter]{}
     inverse_return := Type?{None}
     found := false
-    loop function in module_row.functions {
-        if function.declaration.name == inverse.name {
-            inverse_params = function.parameters
-            inverse_return = function.declaration.return_type
+    loop function_index in 0..<module_row.functions.len() {
+        if module_row.functions[function_index].declaration.name == inverse.name {
+            inverse_params = module_row.functions[function_index].parameters
+            inverse_return = module_row.functions[function_index].declaration.return_type
             found = true
             break
         }
     }
     if !found {
-        loop function in module_row.foreign_functions {
-            if function.declaration.name == inverse.name {
-                inverse_params = function.parameters
-                inverse_return = function.declaration.return_type
+        loop function_index in 0..<module_row.foreign_functions.len() {
+            if module_row.foreign_functions[function_index].declaration.name == inverse.name {
+                inverse_params = module_row.foreign_functions[function_index].parameters
+                inverse_return = module_row.foreign_functions[function_index].declaration.return_type
                 found = true
                 break
             }
@@ -1229,9 +1237,9 @@ fn sema_checked_foreign_crate_version(library: String, span: Span, diagnostics: 
 }
 
 fn sema_checked_foreign_first_library(module_row: SemaRegistrationModule, registered: SemaRegistrationForeignFunction) -> Bool Never! {
-    loop function in module_row.foreign_functions {
-        if function.owner == registered.owner && function.foreign_library == registered.foreign_library {
-            return function.symbol.id.key == registered.symbol.id.key
+    loop function_index in 0..<module_row.foreign_functions.len() {
+        if module_row.foreign_functions[function_index].owner == registered.owner && module_row.foreign_functions[function_index].foreign_library == registered.foreign_library {
+            return module_row.foreign_functions[function_index].symbol.id.key == registered.symbol.id.key
         }
     }
     true
@@ -1315,19 +1323,19 @@ fn sema_checked_inline_undo(graph: SemaRegistrationGraph, module_row: SemaRegist
     inverse_params := [SemaRegistrationParameter]{}
     inverse_return := Type?{None}
     found := false
-    loop function in module_row.functions {
-        if function.declaration.name == inverse.name {
-            inverse_params = function.parameters
-            inverse_return = function.declaration.return_type
+    loop function_index in 0..<module_row.functions.len() {
+        if module_row.functions[function_index].declaration.name == inverse.name {
+            inverse_params = module_row.functions[function_index].parameters
+            inverse_return = module_row.functions[function_index].declaration.return_type
             found = true
             break
         }
     }
     if !found {
-        loop function in module_row.foreign_functions {
-            if function.declaration.name == inverse.name {
-                inverse_params = function.parameters
-                inverse_return = function.declaration.return_type
+        loop function_index in 0..<module_row.foreign_functions.len() {
+            if module_row.foreign_functions[function_index].declaration.name == inverse.name {
+                inverse_params = module_row.foreign_functions[function_index].parameters
+                inverse_return = module_row.foreign_functions[function_index].declaration.return_type
                 found = true
                 break
             }
@@ -1392,21 +1400,21 @@ fn sema_checked_foreign_close_foreign_key(module_row: SemaRegistrationModule, re
         if provider.module_identity != module_row.module_identity -> next
         loop adapter in provider.close_adapters {
             if adapter.adapter_function != close.name -> next
-            loop function in module_row.foreign_functions {
-                if function.declaration.name == adapter.raw_function -> return Val(function.symbol.id.key)
+            loop function_index in 0..<module_row.foreign_functions.len() {
+                if module_row.foreign_functions[function_index].declaration.name == adapter.raw_function -> return Val(module_row.foreign_functions[function_index].symbol.id.key)
             }
         }
     }
-    loop function in module_row.foreign_functions {
-        if function.declaration.name == close.name -> return Val(function.symbol.id.key)
+    loop function_index in 0..<module_row.foreign_functions.len() {
+        if module_row.foreign_functions[function_index].declaration.name == close.name -> return Val(module_row.foreign_functions[function_index].symbol.id.key)
     }
     None
 }
 
 fn sema_checked_foreign_registered_close_key(module_row: SemaRegistrationModule, close: NamedSpan?) -> String? {
     named :: close ?? return None
-    loop function in module_row.functions {
-        if function.declaration.name == named.name -> return Val(function.symbol.id.key)
+    loop function_index in 0..<module_row.functions.len() {
+        if module_row.functions[function_index].declaration.name == named.name -> return Val(module_row.functions[function_index].symbol.id.key)
     }
     None
 }
@@ -1550,7 +1558,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
 // declaration lowers as a foreign C call of the marker's symbol; the
 // declaration itself has no Jet body and no TFunc.
 fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
-    symbol :: sema_guest_import_symbol(registered.declaration) ?? return None
+    symbol :: parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
     params :: sema_checked_foreign_params(graph, module_identity, registered.parameters)
     // The failure solve projects an unannotated import onto `T Never!` (a C
@@ -1615,16 +1623,16 @@ fn sema_checked_inline_foreign_gate(module_row: SemaRegistrationModule, func: Fu
 // never reads ExternFn/Func payloads to reconstruct an ABI decision.
 fn sema_checked_foreign_functions(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, providers: [SemaCheckedForeignProvider], diagnostics: &[Diagnostic]) -> [SemaCheckedForeignFunction] Never! {
     result := [SemaCheckedForeignFunction]{}
-    loop registered in module_row.foreign_functions {
-        row_value :: sema_checked_foreign_row(graph, module_row, registered, providers, &diagnostics) ?? next
+    loop registered_index in 0..<module_row.foreign_functions.len() {
+        row_value :: sema_checked_foreign_row(graph, module_row, module_row.foreign_functions[registered_index], providers, &diagnostics) ?? next
         &result.push(row_value)
     }
-    loop registered in module_row.functions {
-        if sema_checked_inline_foreign_row(graph, module_row, registered, &diagnostics) == .Val(inline_row) {
+    loop registered_index in 0..<module_row.functions.len() {
+        if sema_checked_inline_foreign_row(graph, module_row, module_row.functions[registered_index], &diagnostics) == .Val(inline_row) {
             &result.push(inline_row)
             next
         }
-        guest_row :: sema_checked_guest_import_foreign_row(graph, module_row, registered) ?? next
+        guest_row :: sema_checked_guest_import_foreign_row(graph, module_row, module_row.functions[registered_index]) ?? next
         &result.push(guest_row)
     }
     result
@@ -1886,13 +1894,13 @@ fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: Str
 
 fn sema_checked_struct_fields(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: StructDef, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> [TField] {
     fields := [TField]{}
-    loop source in definition.fields {
-        ty :: sema_checked_qualify_type_with_generics(graph, source.ty, module_row.module_identity, generic_params)
-        if sema_type_has_forbidden_never(source.ty, false) {
-            &diagnostics.push(sema_error("E0109", source.ty_span, "a stored field cannot contain Never", "Never may not appear in a value position", "use an optional or fallible value instead"))
+    loop source_index in 0..<definition.fields.len() {
+        ty :: sema_checked_qualify_type_with_generics(graph, definition.fields[source_index].ty, module_row.module_identity, generic_params)
+        if sema_type_has_forbidden_never(definition.fields[source_index].ty, false) {
+            &diagnostics.push(sema_error("E0109", definition.fields[source_index].ty_span, "a stored field cannot contain Never", "Never may not appear in a value position", "use an optional or fallible value instead"))
         }
-        sema_checked_validate_struct_field(definition, source, &diagnostics)
-        &fields.push(sema_checked_field(source, ty, sema_checked_field_shape_names(definition, source)))
+        sema_checked_validate_struct_field(definition, definition.fields[source_index], &diagnostics)
+        &fields.push(sema_checked_field(definition.fields[source_index], ty, sema_checked_field_shape_names(definition, definition.fields[source_index])))
     }
     fields
 }
@@ -1979,11 +1987,11 @@ fn sema_checked_validate_layout(definition: StructDef, diagnostics: &[Diagnostic
 // Rust CheckerFieldPolicy.rs `process_computed_fields`: E0382 for a field
 // `#Memo` without a bare formula, then E0338 for a computed-field cycle.
 fn sema_checked_validate_field_policy(definition: StructDef, diagnostics: &[Diagnostic]) {
-    loop field in definition.fields {
-        loop marker in field.serde_markers {
+    loop field_index in 0..<definition.fields.len() {
+        loop marker in definition.fields[field_index].serde_markers {
             if marker.name != "Memo" -> next
-            if field.computed == None || marker.args.len() != 0 {
-                &diagnostics.push(sema_error("E0382", marker.span, "`#Memo` cannot mark `{field.name}`.", "A stored computed result needs a formula and its dependency set; field `#Memo` does not take cache arguments.", "Write `#Memo` before `{field.name}: T -> expr` without arguments."))
+            if definition.fields[field_index].computed == None || marker.args.len() != 0 {
+                &diagnostics.push(sema_error("E0382", marker.span, "`#Memo` cannot mark `{definition.fields[field_index].name}`.", "A stored computed result needs a formula and its dependency set; field `#Memo` does not take cache arguments.", "Write `#Memo` before `{definition.fields[field_index].name}: T -> expr` without arguments."))
             }
             break
         }
@@ -1991,10 +1999,10 @@ fn sema_checked_validate_field_policy(definition: StructDef, diagnostics: &[Diag
     names := [String]{}
     spans := [Span]{}
     formulas := [Expr]{}
-    loop field in definition.fields {
-        if field.computed == .Val(formula) {
-            &names.push(field.name)
-            &spans.push(field.name_span)
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].computed == .Val(formula) {
+            &names.push(definition.fields[field_index].name)
+            &spans.push(definition.fields[field_index].name_span)
             &formulas.push(formula)
         }
     }
@@ -2052,9 +2060,9 @@ fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnos
         &diagnostics.push(sema_error("E0336", definition.name_span, "`#[Patchable]` on generic struct `{definition.name}` isn't supported yet", "`T.Patch` codegen needs a concrete field list — generic patches are a follow-on", "remove the type parameters, or drop `#[Patchable]` for now"))
         return
     }
-    loop field in definition.fields {
-        if field.ty == .Fn(_, _, _, _, _, _) {
-            &diagnostics.push(sema_error("E0337", field.name_span, "`#[Patchable]` struct `{definition.name}` field `{field.name}` has function type", "patches are data values — function-typed fields can't be patched", "store a callable handle type instead, or drop `#[Patchable]`"))
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].ty == .Fn(_, _, _, _, _, _) {
+            &diagnostics.push(sema_error("E0337", definition.fields[field_index].name_span, "`#[Patchable]` struct `{definition.name}` field `{definition.fields[field_index].name}` has function type", "patches are data values — function-typed fields can't be patched", "store a callable handle type instead, or drop `#[Patchable]`"))
             return
         }
     }
@@ -2063,8 +2071,8 @@ fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnos
 // Rust CheckerMarkers.rs (D-DEFAULT-SHAPE1=B): a field `#Default(expr)` is
 // retired under its own registered code.
 fn sema_checked_validate_field_default_marker(definition: StructDef, diagnostics: &[Diagnostic]) {
-    loop field in definition.fields {
-        loop marker in field.serde_markers {
+    loop field_index in 0..<definition.fields.len() {
+        loop marker in definition.fields[field_index].serde_markers {
             if marker.name != "Default" -> next
             &diagnostics.push(sema_error("E0375", marker.span, "`#Default` on a field is retired.", "Field absence and construction defaults ride the field's type as `field: T{{expr}}` (D-DEFAULT-SHAPE1=B).", "Write `field: T{{expr}}` instead of `#Default(expr)`."))
             break
@@ -2414,15 +2422,15 @@ fn sema_checked_item_span(item: Item) -> Span Never! {
 fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], active: &[String:Bool]) -> (reaches: Bool, cut: Bool) Never! {
     if ty == {
         .Named(_) -> {
-            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (reaches: false, cut: false)
+            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (cut: false, reaches: false)
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
             // Two single-level matches read the declaration in place; a nested
             // `.SourceAST(.Struct(definition))` pattern clones the whole Item.
             if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                 if item == .Struct(definition) {
-                    if key == owner -> return (reaches: true, cut: false)
-                    if memo.get(key) == .Val(known) -> return (reaches: known, cut: false)
-                    if active.get(key) == (Val(true)) -> return (reaches: false, cut: true)
+                    if key == owner -> return (cut: false, reaches: true)
+                    if memo.get(key) == .Val(known) -> return (cut: false, reaches: known)
+                    if active.get(key) == (Val(true)) -> return (cut: true, reaches: false)
                     active[key] = true
                     reaches := false
                     cut := false
@@ -2440,61 +2448,74 @@ fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, call
                     // A negative reached through an active cycle is provisional:
                     // a later sibling may reach the owner. Never memoize that cut.
                     if reaches || !cut -> memo[key] = reaches
-                    return (reaches: reaches, cut: cut)
+                    return (cut: cut, reaches: reaches)
                 }
             }
-            (reaches: false, cut: false)
+            (cut: false, reaches: false)
         }
         .Shared(inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
         .Map(first, _, second) | .Result(first, second) -> {
             left :: sema_checked_shared_reaches(graph, owner, caller, first, &memo, &active)
             if left.reaches -> return left
             right :: sema_checked_shared_reaches(graph, owner, caller, second, &memo, &active)
-            (reaches: right.reaches, cut: left.cut || right.cut)
+            (cut: left.cut || right.cut, reaches: right.reaches)
         }
         .Tuple(fields) -> {
             cut := false
             loop field in fields {
                 result :: sema_checked_shared_reaches(graph, owner, caller, field.ty, &memo, &active)
                 cut = cut || result.cut
-                if result.reaches -> return (reaches: true, cut: cut)
+                if result.reaches -> return (cut: cut, reaches: true)
             }
-            (reaches: false, cut: cut)
+            (cut: cut, reaches: false)
         }
         .Union(members) | .Apply(_, members) -> {
-            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (reaches: false, cut: false)
+            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (cut: false, reaches: false)
             cut := false
             loop member in members {
                 result :: sema_checked_shared_reaches(graph, owner, caller, member, &memo, &active)
                 cut = cut || result.cut
-                if result.reaches -> return (reaches: true, cut: cut)
+                if result.reaches -> return (cut: cut, reaches: true)
             }
-            (reaches: false, cut: cut)
+            (cut: cut, reaches: false)
         }
-        else -> (reaches: false, cut: false)
+        else -> (cut: false, reaches: false)
     }
+}
+
+// One owner's witness search: `stack` holds the struct keys on the current
+// by-value path; `met_path` is set when the walk meets one of them. `clear`
+// holds every struct key whose whole walk found no witness without meeting a
+// key on its path: that walk explored every by-value path below the key, and
+// any later walk from it explores a subset of them (a key on a later path cuts
+// a path short and finds nothing), so it finds no witness either and the walk
+// returns None at once instead of walking the same struct graph again.
+struct SemaSharedWitnessWalk {
+    stack: [String]
+    clear: [String:Bool]
+    met_path: Bool
 }
 
 // Returns the first strong payload that closes a cycle. By-value struct
 // paths can contain the Shared edge; weak handles never contribute one.
-fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], stack: &[String]) -> String? Never! {
+fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], walk: &SemaSharedWitnessWalk) -> String? Never! {
     if ty == {
         .Shared(inner) -> {
             active := [String:Bool]{}
             result :: sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
             if result.reaches -> Val(type_name(inner)) else -> None
         }
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, &memo, &stack)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, &memo, &walk)
         .Map(first, _, second) | .Result(first, second) -> {
-            first_witness :: sema_checked_shared_witness(graph, owner, caller, first, &memo, &stack)
+            first_witness :: sema_checked_shared_witness(graph, owner, caller, first, &memo, &walk)
             if first_witness == {
                 .Val(witness) -> Val(witness)
-                .None -> sema_checked_shared_witness(graph, owner, caller, second, &memo, &stack)
+                .None -> sema_checked_shared_witness(graph, owner, caller, second, &memo, &walk)
             }
         }
         .Tuple(fields) -> {
             loop field in fields {
-                witness :: sema_checked_shared_witness(graph, owner, caller, field.ty, &memo, &stack)
+                witness :: sema_checked_shared_witness(graph, owner, caller, field.ty, &memo, &walk)
                 if witness != None -> return witness
             }
             None
@@ -2502,7 +2523,7 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
         .Union(members) | .Apply(_, members) -> {
             if ty == .Apply(name, _) && name == "Shared.Weak" -> return None
             loop member in members {
-                witness :: sema_checked_shared_witness(graph, owner, caller, member, &memo, &stack)
+                witness :: sema_checked_shared_witness(graph, owner, caller, member, &memo, &walk)
                 if witness != None -> return witness
             }
             None
@@ -2510,20 +2531,28 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
         .Named(_) -> {
             row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return None
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
-            if stack.contains(key) -> return None
+            if walk.clear.has_key(key) -> return None
+            if walk.stack.contains(key) {
+                walk.met_path = true
+                return None
+            }
             // Single-level matches borrow the declaration in place (see
             // sema_checked_shared_reaches); a nested pattern clones the Item.
             if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                 if item == .Struct(definition) {
-                    &stack.push(key)
+                    &walk.stack.push(key)
+                    outer_met :: walk.met_path
+                    walk.met_path = false
                     witness := String?{None}
                     module_identity :: graph.modules[row.module_index].module_identity
                     loop field in definition.fields {
                         if field.computed != None -> next
-                        witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack)
+                        witness = sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &walk)
                         if witness != None -> break
                     }
-                    _ := &stack.pop()
+                    _ := &walk.stack.pop()
+                    if witness == None && !walk.met_path -> walk.clear[key] = true
+                    walk.met_path = walk.met_path || outer_met
                     return witness
                 }
             }
@@ -2536,11 +2565,11 @@ fn sema_checked_shared_witness(graph: SemaRegistrationGraph, owner: String, call
 fn sema_checked_shared_cycles(graph: SemaRegistrationGraph, module_identity: String, nominal: SemaRegistrationNominal, definition: StructDef, diagnostics: &[Diagnostic]) Never! {
     owner :: nominal.symbol.id.key
     memo := [String:Bool]{}
-    stack := [String]{}
-    loop field in definition.fields {
-        if field.computed != None -> next
-        if sema_checked_shared_witness(graph, owner, module_identity, field.ty, &memo, &stack) == .Val(through) {
-            &diagnostics.push(sema_error("E0221", field.name_span, "field `{field.name}` on `{definition.name}` can form a strong `Shared` cycle", "a strong `Shared` edge through `{through}` can point back at `{definition.name}`, so reference counting alone cannot free the graph", "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle"))
+    walk := SemaSharedWitnessWalk{stack: [String]{}, clear: [String:Bool]{}, met_path: false}
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].computed != None -> next
+        if sema_checked_shared_witness(graph, owner, module_identity, definition.fields[field_index].ty, &memo, &walk) == .Val(through) {
+            &diagnostics.push(sema_error("E0221", definition.fields[field_index].name_span, "field `{definition.fields[field_index].name}` on `{definition.name}` can form a strong `Shared` cycle", "a strong `Shared` edge through `{through}` can point back at `{definition.name}`, so reference counting alone cannot free the graph", "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle"))
         }
     }
 }
@@ -2802,12 +2831,14 @@ fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrat
 fn sema_checked_trait_nominal_row(graph: SemaRegistrationGraph, module_identity: String, trait_name: String) -> SemaRegistrationRowRef? {
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, trait_name) ?? return None
     if resolved.symbol.kind != SymbolKind.Trait -> return None
-    sema_type_graph_nominal_row(graph, resolved.symbol.id.key)
+    sema_type_graph_resolved_nominal_row(graph, resolved)
 }
 
 fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, implementation: SemaRegistrationImpl, diagnostics: &[Diagnostic]) {
     trait_name :: implementation.trait_name ?? return
-    bound :: sema_type_bound_satisfied(graph, implementation.target_type, trait_name, module_row.module_identity)
+    // A generated codec is its own type's codec: asking the bound would only
+    // demand its body (sema_codec_demand_type) for no use.
+    bound :: if implementation.declaration.is_generated_serde -> Bool?{Val(true)} else -> sema_type_bound_satisfied(graph, implementation.target_type, trait_name, module_row.module_identity)
     if bound == {
         .Val(bound_value) -> {
             if !bound_value {
@@ -2817,16 +2848,16 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         else -> {}
     }
     trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
-    loop expected in graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods {
+    loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
-            if actual.declaration.name == expected.declaration.name {
+            if actual.declaration.name == graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration.name {
                 found = Val(actual)
                 break
             }
         }
         actual :: found ?? next
-        compatible :: sema_type_assignable_in_graph(graph, expected.signature, actual.signature, module_row.module_identity)
+        compatible :: sema_type_assignable_in_graph(graph, graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature, actual.signature, module_row.module_identity)
         mismatch :: if compatible == {
             .Val(value) -> !value
             else -> graph.complete
@@ -2885,8 +2916,8 @@ fn sema_checked_coherence_arithmetic(trait_name: String) -> Bool Never! {
 // nominals.
 fn sema_checked_coherence_state(module_row: SemaRegistrationModule) -> SemaCheckedCoherence Never! {
     state := SemaCheckedCoherence{trait_keys: [String:Bool]{}, operator_slots: [String:Int]{}, operator_rhs: [[Type]]{}, local_types: [String:Bool]{}, owner_types: [String:Type]{}, tags: [String:Bool]{}, traits: [String:Bool]{}}
-    loop item in module_row.program.items {
-        if item == {
+    loop item_index in 0..<module_row.program.items.len() {
+        if module_row.program.items[item_index] == {
             .Struct(value) -> {
                 state.local_types[value.name] = true
                 if state.owner_types.get(value.name) == None -> state.owner_types[value.name] = sema_checked_coherence_applied(value.name, value.type_params)
@@ -2906,9 +2937,9 @@ fn sema_checked_coherence_state(module_row: SemaRegistrationModule) -> SemaCheck
             else -> {}
         }
     }
-    loop nominal in module_row.nominals {
-        if nominal.kind == SemaRegistrationNominalKind.Tag -> state.tags[nominal.symbol.name] = true
-        if nominal.kind == SemaRegistrationNominalKind.Trait -> state.traits[nominal.symbol.name] = true
+    loop nominal_index in 0..<module_row.nominals.len() {
+        if module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Tag -> state.tags[module_row.nominals[nominal_index].symbol.name] = true
+        if module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait -> state.traits[module_row.nominals[nominal_index].symbol.name] = true
     }
     state
 }
@@ -3093,12 +3124,12 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     owner_module :: implementation.target_module_identity ?? return
     owner_index :: sema_registration_module_index(graph, owner_module) ?? return
     loop nominal_index in 0..<graph.modules[owner_index].nominals.len() {
-        nominal :: graph.modules[owner_index].nominals[nominal_index]
-        if nominal.kind != SemaRegistrationNominalKind.Struct || nominal.symbol.name != definition.type_name -> next
-        loop field in nominal.fields {
-            if field.symbol.name != field_name -> next
-            field_type_name :: type_name(field.ty)
-            satisfied :: sema_type_bound_satisfied(graph, field.ty, trait_name, module_row.module_identity) ?? true
+        // Read in place: binding the row copied every nominal of the module.
+        if graph.modules[owner_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Struct || graph.modules[owner_index].nominals[nominal_index].symbol.name != definition.type_name -> next
+        loop field_index in 0..<graph.modules[owner_index].nominals[nominal_index].fields.len() {
+            if graph.modules[owner_index].nominals[nominal_index].fields[field_index].symbol.name != field_name -> next
+            field_type_name :: type_name(graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty)
+            satisfied :: sema_type_bound_satisfied(graph, graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty, trait_name, module_row.module_identity) ?? true
             if !satisfied {
                 &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}: {trait_name}` on the field's type, or choose a different field"))
             }
@@ -3113,9 +3144,9 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
 // Only operator hooks may repeat a method name (pair coherence checks the RHS).
 fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
     names := [String:Bool]{}
-    loop nominal in module_row.nominals {
-        owner :: nominal.symbol.id.key
-        loop method in nominal.methods {
+    loop nominal_index in 0..<module_row.nominals.len() {
+        owner :: module_row.nominals[nominal_index].symbol.id.key
+        loop method in module_row.nominals[nominal_index].methods {
             key :: "{owner}::{method.symbol.name}"
             hook :: method.symbol.owner != Val(owner)
             previous :: names.get(key)
@@ -3125,21 +3156,21 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
             if previous == None -> &names.add(key, hook).drop("new member name")
         }
     }
-    loop implementation in module_row.impls {
+    loop implementation_index in 0..<module_row.impls.len() {
         // Rust register_impl_methods inserts each impl method into its type's
         // method table once. An impl attached to a registered nominal row
         // already contributed its methods to `nominal.methods`, which the
         // owner module's walk above names; walking it again would see the
         // same declaration twice. Only unattached impls are named here.
-        if implementation.target_module_identity == .Val(target_module) {
+        if module_row.impls[implementation_index].target_module_identity == .Val(target_module) {
             if sema_registration_module_index(graph, target_module) == .Val(target_index) {
-                if sema_registration_impl_nominal_index(graph.modules[target_index], implementation.target_type_name) >= 0 -> next
+                if sema_registration_impl_nominal_index(graph.modules[target_index], module_row.impls[implementation_index].target_type_name) >= 0 -> next
             }
         }
-        row :: sema_type_resolve_nominal_row(graph, implementation.target_type, module_row.module_identity)
-        owner :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.id.key else -> type_name(implementation.target_type)
-        hook :: sema_checked_operator_trait(implementation.trait_name ?? "")
-        loop method in implementation.methods {
+        row :: sema_type_resolve_nominal_row(graph, module_row.impls[implementation_index].target_type, module_row.module_identity)
+        owner :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.id.key else -> type_name(module_row.impls[implementation_index].target_type)
+        hook :: sema_checked_operator_trait(module_row.impls[implementation_index].trait_name ?? "")
+        loop method in module_row.impls[implementation_index].methods {
             key :: "{owner}::{method.symbol.name}"
             previous :: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) {
@@ -3153,11 +3184,11 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
 fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
     sema_checked_member_names(graph, module_row, &diagnostics)
     state := sema_checked_coherence_state(module_row)
-    loop implementation in module_row.impls -> sema_checked_coherence_impl(graph, module_row, implementation, &state, &diagnostics)
+    loop implementation_index in 0..<module_row.impls.len() -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], &state, &diagnostics)
     // The struct and enum sources are read in place (derives first, then
     // the inline trait blocks), never copied out of their nominal rows.
-    loop nominal in module_row.nominals {
-        if nominal.source == .SourceAST(item) {
+    loop nominal_index in 0..<module_row.nominals.len() {
+        if module_row.nominals[nominal_index].source == .SourceAST(item) {
             if item == {
                 .Struct(value) -> sema_checked_coherence_derives(state, value.derives, &diagnostics)
                 .Enum(value) -> sema_checked_coherence_derives(state, value.derives, &diagnostics)
@@ -3165,8 +3196,8 @@ fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaReg
             }
         }
     }
-    loop nominal in module_row.nominals {
-        if nominal.source == .SourceAST(item) {
+    loop nominal_index in 0..<module_row.nominals.len() {
+        if module_row.nominals[nominal_index].source == .SourceAST(item) {
             if item == {
                 .Struct(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, &state, &diagnostics)
                 .Enum(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, &state, &diagnostics)
@@ -3174,7 +3205,7 @@ fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaReg
             }
         }
     }
-    loop implementation in module_row.impls -> sema_checked_validate_delegation(graph, module_row, implementation, &diagnostics)
+    loop implementation_index in 0..<module_row.impls.len() -> sema_checked_validate_delegation(graph, module_row, module_row.impls[implementation_index], &diagnostics)
 }
 
 fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, block: TraitImplBlock) -> TImplDef Never! {
@@ -3481,7 +3512,7 @@ fn sema_checked_module_literal(value: Expr) -> Bool Never! {
             true
         }
         .Field(_, _, _) -> sema_checked_module_type_path(value)
-        .MethodCall(receiver, method, _, _, type_args, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, type_args, args, _, _) -> {
             if type_args.len() != 0 || !sema_checked_module_uppercase(method) || !sema_checked_module_type_path(receiver) -> return false
             loop argument in args {
                 if !sema_checked_module_literal(argument.expr) -> return false
@@ -3645,12 +3676,12 @@ fn sema_checked_layout_item_resolutions(graph: SemaRegistrationGraph, module_row
 fn sema_checked_layout_engine(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> TargetLayoutEngine Never! {
     qualified_items := [TargetLayoutQualifiedItem]{}
     name_resolutions := [TargetLayoutNameResolution]{}
-    loop source_module in graph.modules {
-        loop item in source_module.program.items {
-            item_name :: sema_checked_layout_item_name(item) ?? next
-            identity :: sema_checked_module_key(source_module, item_name)
-            &qualified_items.push(TargetLayoutQualifiedItem{qualified_name: identity, module_identity: source_module.module_identity, item: item})
-            sema_checked_layout_item_resolutions(graph, source_module, identity, item, &name_resolutions)
+    loop source_module_index in 0..<graph.modules.len() {
+        loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
+            item_name :: sema_checked_layout_item_name(graph.modules[source_module_index].program.items[item_index]) ?? next
+            identity :: sema_checked_module_key(graph.modules[source_module_index], item_name)
+            &qualified_items.push(TargetLayoutQualifiedItem{qualified_name: identity, module_identity: graph.modules[source_module_index].module_identity, item: graph.modules[source_module_index].program.items[item_index]})
+            sema_checked_layout_item_resolutions(graph, graph.modules[source_module_index], identity, graph.modules[source_module_index].program.items[item_index], &name_resolutions)
         }
     }
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, name_resolutions, jet_target_layout_from_machine(graph.target_machine))

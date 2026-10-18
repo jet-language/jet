@@ -27,7 +27,7 @@ fn lower_iter_check(m: &LowerModule, f: &LowerFunction, failed: LIRValueID, mess
 }
 
 fn lower_iter_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIRPreludeCallID, symbol: String, arity: Int) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? {
+    row :: lower_prelude_row(p, m, call) ?? {
         lower_fail(&m, &f, "iterator Prelude route is not lowered at O0 yet")
         return false
     }
@@ -90,11 +90,20 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     // loop does (Lower.jet lower_iter_takes, MIRRust.rs `consumed`).
     taken :: by_value || c.iter_takes.get(collection.value) != None
     if !taken || lower_view_element(ty) != None {
-        // Materialize a View with List clone glue, as lower_copy does. Cloning
-        // a View header would leave Advance/Drop destroying the source owners.
+        // A View's window (cap 0, data inside its owner's buffer) is
+        // materialized element by element (lower_list_make_unique below):
+        // List clone glue would share the window header, leaving
+        // Advance/Drop destroying the source owners. A List shares.
         list = lower_new_storage(p, &f, snapshot_ty)
-        lower_inline_clone(p, &m, &f, source, list, snapshot_ty)
+        if lower_view_element(ty) != None {
+            lower_copy_bytes(&f, list, 0, source, 0, 24)
+        } else {
+            lower_inline_clone(p, &m, &f, source, list, snapshot_ty)
+        }
     }
+    // The cursor moves elements out and frees the buffer: it must own the
+    // buffer alone (#5041 P2), so a shared one is detached here.
+    lower_list_make_unique(p, &m, &f, list, snapshot_ty)
     // Register every typed release while lowering user MIR, before generic glue
     // is generated. Its function ID is a stable dispatch key, not a code pointer.
     release :: lower_helper_id(&m, "iter.release", snapshot_ty)
@@ -103,7 +112,7 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: stride})
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
 }
@@ -137,7 +146,7 @@ fn lower_chars_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     lower_store_word(&f, dst, 16, 1)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
 }
@@ -173,7 +182,7 @@ fn lower_line_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: handle})
     lower_store_word(&f, dst, 8, -1)
     lower_store_word(&f, dst, 16, 0)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
     true
@@ -307,6 +316,8 @@ fn lower_iter_dispatch(p: MIRProgram, m: &LowerModule, f: &LowerFunction, cursor
     done :: lower_new_block(&f)
     count :: m.glue.len()
     loop index in 0..<count {
+        // copy: the glue row is read while the dispatch emits into `&f` and registers helpers in
+        // `m`. A view into m.glue would dangle when that list grows.
         row :: m.glue[index].copy()
         if row.helper != "iter.release" -> next
         expected :: lower_const(&f, row.id.value)
@@ -425,7 +436,7 @@ fn lower_range_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_emit(&f, LIRInst.Binary{dst: marker, op: LIRBinaryOp.Sub, left: minus_one, right: stride})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: marker})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: end})
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
 }

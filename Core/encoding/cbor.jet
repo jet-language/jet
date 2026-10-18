@@ -233,6 +233,18 @@ fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items
     if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
 }
 
+#Test("CBOR major type 0 above I64 stays an exact Int and wide Int trees compare equal") {
+    // #4362: 2^63 and 2^64-1 decode exactly into the one `Dyn.Int` case.
+    assert_eq(parse([U8]{27, 128, 0, 0, 0, 0, 0, 0, 0}), Ok(Dyn.Int(9223372036854775808)))
+    assert_eq(parse([U8]{27, 255, 255, 255, 255, 255, 255, 255, 255}), Ok(Dyn.Int(18446744073709551615)))
+    // Two separately built 2^128+1 trees are equal; a neighbour is not.
+    wide :: 340282366920938463463374607431768211457
+    left :: Dyn.Array([Dyn]{Dyn.Int(wide)})
+    right :: Dyn.Array([Dyn]{Dyn.Int(340282366920938463463374607431768211456 + 1)})
+    assert(left == right)
+    assert(left != Dyn.Array([Dyn]{Dyn.Int(wide - 1)}))
+}
+
 #Test("CBOR stream definite and indefinite containers and text chunks") {
     dir :: core.files.temp_dir("jet-cbor-events") ?? panic("temp")
     path :: "{dir.path}/events.cbor"

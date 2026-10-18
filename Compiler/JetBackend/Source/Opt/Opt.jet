@@ -1,36 +1,583 @@
-// The Jet backend's optimization levels over LIR (Compiler/JetBackend/Docs/O1.md).
+// The Jet backend's optimization levels over LIR (Compiler/JetBackend/Docs/O1.md),
+// and the streaming per-function back end that applies them.
 // Level 0 (`jet run`, `jet dev`, compile-time code) compiles the lowered LIR
 // as is; level 1 (`jet build`) runs the O1 pipeline on every function and
 // level 2 (`--release`) adds the O2 passes. The result must lint like any
-// lowered module: x64_compile_module lints it again, so an optimizer bug
-// refuses the build instead of producing wrong code.
+// lowered module: the one LIR lint runs on the final LIR of each function,
+// right before its selection (x64_compile_linted_row; SPEED-500K D6), so an
+// optimizer bug refuses the build instead of producing wrong code.
 
-fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
-    if level <= 0 -> return program.copy()
-    // P5/P4 first (module): inlined bodies then go through the per-function
-    // passes. Strength reduction before Simplify: Simplify folds its constants
-    // and removes what it leaves dead. P3 facts before Simplify, so Simplify
-    // folds the inline tests P3 proved and drops their slow paths; P6 CSE on
-    // the simplified function, then Simplify again removes what CSE aliased.
-    // Level 2: scalar replacement on the simplified function (inlined struct
-    // returns are local slots by then), Simplify propagates the promoted
-    // fields, CSE, LICM hoists what is invariant, and Simplify cleans up.
-    inlined :: lir_inline_module(program)
-    functions := [LIRFunction]{}
-    loop function in inlined.functions {
-        simplified :: lir_simplify_function(lir_inline_facts_function(lir_strength_function(function)))
-        if level == 1 {
-            &functions.push(lir_simplify_function(lir_cse_function(simplified)))
-            next
-        }
-        promoted :: lir_simplify_function(lir_scalar_replace_function(simplified))
-        &functions.push(lir_simplify_function(lir_licm_function(lir_cse_function(promoted))))
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
+
+// The module moves in and the optimized module out, so the lowered and the
+// optimized module are never both resident. This is the serial form of the
+// levels (the runtime library, the native test harness, fixtures); the
+// native route runs the same passes per function inside
+// x64_compile_module_owned, whose result is the same by construction.
+fn lir_optimize_module(program: ^LIRModule, level: Int) -> LIRModule Never! {
+    if level <= 0 -> return ^program
+    // Bottom-up over the call graph (callees first, Opt/Inline.jet): each
+    // function inlines the final, already optimized bodies of its callees
+    // (P5/P4), then runs the per-function passes, and only then becomes
+    // inlinable itself, so wrapper chains collapse into their callers.
+    state := lir_inline_start(^program)
+    loop position in 0..<state.order.len() {
+        // copy: plain Int function id; lir_inline_finish writes `state`, so the id
+        // cannot stay a view into `state.order`.
+        id :: state.order[position].copy()
+        inlined :: lir_inline_step(state, id)
+        optimized :: opt_function_passes(inlined, level)
+        lir_inline_finish(&state, id, ^optimized)
     }
-    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
+    lir_inline_result(^state)
+}
+
+// The per-function passes. Strength reduction before Simplify: Simplify
+// folds its constants and removes what it leaves dead. P3 facts before
+// Simplify, so Simplify folds the inline tests P3 proved and drops their slow
+// paths; P6 CSE on the simplified function, then Simplify again removes what
+// CSE aliased. Level 2: scalar replacement on the simplified function
+// (inlined struct returns are local slots by then), Simplify propagates the
+// promoted fields, CSE, LICM hoists what is invariant, and Simplify cleans up.
+fn opt_function_passes(function: LIRFunction, level: Int) -> LIRFunction Never! {
+    simplified :: lir_simplify_function(lir_inline_facts_function(lir_strength_function(function)))
+    if level == 1 -> return lir_simplify_function(lir_cse_function(simplified))
+    promoted :: lir_simplify_function(lir_scalar_replace_function(simplified))
+    lir_simplify_function(lir_licm_function(lir_cse_function(promoted)))
 }
 
 // Unknown source positions stay zero, including generated instructions.
 fn opt_debug_line(block: LIRBlock, index: Int) -> Int Never! {
     if block.lines.len() != block.insts.len() + 1 -> return 0
     block.lines[index]
+}
+
+// ---------------------------------------------------------------------------
+// The streaming per-function back end (SPEED-500K §8 #10): the module's
+// functions compile as one job each on the threads `threads` admits, and a
+// job is a function's whole back end: its inline step and passes at the level
+// (level > 0), its one LIR lint, and its x64 selection and encoding. No LIR
+// module beyond the lowered one is ever materialized: a job's final body
+// replaces the lowered one in the module after its wave, and is released
+// (opt_stream_release) once its own job and every caller's inline step have
+// read it, so the resident LIR only shrinks from the lowering on.
+//
+// Jobs run in waves that follow the call graph bottom-up (opt_schedule): a
+// function's inline step reads only the final bodies of its non-recursive
+// direct callees (Opt/Inline.jet inline_caller), and every such callee is in
+// an earlier wave, so each job is a pure function of its lowered body and
+// those final bodies; lir_optimize_module visits the same functions in a
+// Tarjan order with the same property, and lir_lint_function and
+// x64_compile_function read of other functions only their name and
+// signature, which no pass changes. Results sit in slots by function id and
+// join in id order: the functions, debug rows and errors are those the
+// calling thread produces alone with lir_optimize_module, lir_lint_module
+// and x64_compile_module, for any thread count and partition.
+//
+// JET_KEEP_GOING (the bootstrap native feed): nothing stops the compile. A
+// function a lint finding names, whose selection reports gaps, or whose job
+// stops (a panic in a pass or the selector, caught at its task's join)
+// compiles as a trap (x64_trap_function) with one error naming it, its
+// lowered body stays in the module and is never inlined, so the function
+// table stays whole and the object, link and every later function still run
+// and report. Its output is never shipped.
+
+// Function compiling threads (D-JOBS1, compiler_threads_admit): a thread is
+// admitted for at least this many LIR instructions, so a small module
+// compiles on the calling thread.
+X64_COMPILE_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+
+// Parts per admitted thread in a wave: enough that a thread which drew light
+// parts claims more while another finishes a heavy one, few enough that
+// claiming stays rare.
+X64_COMPILE_PARTS_PER_THREAD :: 8
+
+// x64_compile_module_owned's result: the compiled functions, and the module
+// moved back out of the jobs' shared inputs with every function body
+// released (its name, signature and debug facts remain: the object writer
+// reads those), except the bodies of `faults`: the functions (ascending)
+// whose job reported a lint finding or a compile error, kept in their final
+// form (the lowered one when the job stopped) for a fault dump.
+struct X64CompiledModule {
+    program: LIRModule
+    compiled: X64ModuleResult
+    faults: [Int]
+}
+
+// The call-graph schedule of a compile at level > 0. `deps[f]` are f's
+// non-recursive direct callees (each once), whose final bodies f's inline
+// step reads; `callers[g]` counts the functions whose `deps` hold g; wave k
+// holds, in ascending id, the functions whose longest `deps` chain has k
+// edges. Ids are rows of the module's function table, so the schedule is the
+// same for any thread count.
+struct OptSchedule {
+    recursive: [Bool]
+    deps: [[Int]]
+    callers: [Int]
+    waves: [[Int]]
+}
+
+// The schedule of `program` after P5 (inline_direct) over every function, in
+// place: the rows move out and back, uncopied.
+fn opt_schedule(program: &LIRModule) -> OptSchedule Never! {
+    signatures := [LIRSignatureID]{}
+    loop function in program.functions -> &signatures.push(function.signature)
+    functions := compiler_take_rows<LIRFunction>(&program.functions)
+    reversed := [LIRFunction]{}
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        &reversed.push(inline_direct(signatures, ^function))
+    }
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        &program.functions.push(^function)
+    }
+    graph :: inline_graph(program.functions)
+    count :: program.functions.len()
+    deps := [[Int]]{}
+    callers := [Int]{}
+    level := [Int]{}
+    // mark[g] is the last caller whose deps took g: each callee once per caller.
+    mark := [Int]{}
+    loop _ in 0..<count {
+        &deps.push([Int]{})
+        &callers.push(0)
+        &level.push(0)
+        &mark.push(-1)
+    }
+    loop node in 0..<count {
+        loop target in graph.edges[node] {
+            if graph.recursive[target] || mark[target] == node -> next
+            mark[target] = node
+            &deps[node].push(target)
+        }
+    }
+    // Tarjan's order finishes every callee's SCC before its caller's, so a
+    // callee's level is final when its caller's is taken.
+    loop position in 0..<graph.order.len() {
+        node :: graph.order[position].copy()
+        depth := 0
+        loop target in deps[node] {
+            callers[target] = callers[target] + 1
+            if level[target] + 1 > depth -> depth = level[target] + 1
+        }
+        level[node] = depth
+    }
+    deepest := 0
+    loop depth in level { if depth > deepest -> deepest = depth }
+    waves := [[Int]]{}
+    loop _ in 0..<(deepest + 1) -> &waves.push([Int]{})
+    loop node in 0..<count -> &waves[level[node]].push(node)
+    OptSchedule{recursive: graph.recursive.copy(), deps: deps, callers: callers, waves: waves}
+}
+
+// The schedule of a level 0 compile: no function reads another, one wave.
+fn opt_schedule_flat(count: Int) -> OptSchedule Never! {
+    recursive := [Bool]{}
+    deps := [[Int]]{}
+    callers := [Int]{}
+    wave := [Int]{}
+    loop node in 0..<count {
+        &recursive.push(false)
+        &deps.push([Int]{})
+        &callers.push(0)
+        &wave.push(node)
+    }
+    OptSchedule{recursive: recursive, deps: deps, callers: callers, waves: [[Int]]{wave}}
+}
+
+// The jobs' shared inputs: the one module, moved in for the compile and back
+// out after, whose function bodies the calling thread replaces by their
+// final form wave by wave and releases once no job reads them; per function,
+// whether it is recursive and the inline facts of its final body (`sizes` 41
+// until the body is final, as lir_inline_start starts them).
+struct OptStreamInputs {
+    programs: [LIRModule]
+    recursive: [Bool]
+    sizes: [Int]
+    consumed: [[Bool]]
+    level: Int
+    // The module's tables have lint findings and the compile stops at the
+    // findings: every job lints its final body and compiles nothing.
+    lint_only: Bool
+}
+
+// One job's result: the function's final body (level > 0, a one-row list;
+// empty when the job stopped and the lowered body stays), the inline facts
+// of that body, and its lint and compile rows.
+struct OptStreamResult {
+    id: Int
+    function: [LIRFunction]
+    size: Int
+    consumed: [Bool]
+    lint: [String]
+    result: X64CompileResult
+}
+
+// One claimable part of a wave: its functions `ids`, the next of them to
+// compile at `position`, and the results of those compiled so far, in order.
+struct OptStreamPart {
+    ids: [Int]
+    position: Int
+    results: [OptStreamResult]
+}
+
+// The next unclaimed part.
+struct OptStreamQueue {
+    next: Int
+}
+
+// The one LIR lint and the compile of every function of a module it owns,
+// with the LIR passes of `level`, on as many threads as `threads` admits for
+// its instructions (see the section comment above). The result's rows are
+// x64_compile_module's over lir_optimize_module's module, with `keep_going`
+// (JET_KEEP_GOING) as that section describes.
+fn x64_compile_module_owned(program: ^LIRModule, threads: CompilerThreads, level: Int, keep_going: Bool) -> X64CompiledModule Never! {
+    owned := ^program
+    lint := [String]{}
+    loop issue in lir_lint_module_rows(owned) -> &lint.push(x64_lint_error(issue))
+    lint_only :: lint.len() > 0 && !keep_going
+    count :: owned.functions.len()
+    schedule := if level > 0 -> opt_schedule(&owned) else -> opt_schedule_flat(count)
+    weights :: x64_compile_weights(owned)
+    total := 0
+    loop weight in weights -> total += weight
+    workers :: compiler_threads_admit(threads, count, total, X64_COMPILE_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    sizes := [Int]{}
+    consumed := [[Bool]]{}
+    lints := [[String]]{}
+    outcomes := [X64CompileResult]{}
+    loop _ in 0..<count {
+        &sizes.push(41)
+        &consumed.push([Bool]{})
+        &lints.push([String]{})
+        &outcomes.push(X64CompileResult{function: None, debug: None, errors: [String]{}})
+    }
+    inputs :: shared OptStreamInputs{programs: [LIRModule]{^owned}, recursive: ^schedule.recursive, sizes: ^sizes, consumed: ^consumed, level: level, lint_only: lint_only}
+    callers := ^schedule.callers
+    faulted := [Bool]{}
+    loop _ in 0..<count -> &faulted.push(false)
+    loop wave in schedule.waves {
+        parts :: opt_stream_wave(inputs, wave, workers, keep_going)
+        opt_stream_settle(inputs, parts, schedule.deps, &callers, &faulted, &lints, &outcomes)
+    }
+    program_back :: opt_stream_take_program(inputs)
+    faults := [Int]{}
+    loop id in 0..<count { if faulted[id] -> &faults.push(id) }
+    errors := ^lint
+    loop id in 0..<count -> &errors.extend(compiler_take_rows<String>(&lints[id]))
+    if !keep_going && errors.len() > 0 -> return X64CompiledModule{program: program_back, compiled: X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: errors}, faults: faults}
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    // The outcomes file in id order: popped once into reverse order, then
+    // popped again, each moved, never copied.
+    reversed := [X64CompileResult]{}
+    loop outcomes.len() > 0 {
+        outcome := &outcomes.pop() ?? { break }
+        &reversed.push(^outcome)
+    }
+    id := 0
+    loop reversed.len() > 0 {
+        outcome := &reversed.pop() ?? { break }
+        x64_compile_file_result(^outcome, keep_going, program_back.functions[id], &functions, &debug, &errors)
+        id += 1
+    }
+    X64CompiledModule{program: program_back, compiled: X64ModuleResult{functions: functions, debug: debug, errors: errors}, faults: faults}
+}
+
+// Each function's instructions (and one per block), in function order.
+fn x64_compile_weights(program: LIRModule) -> [Int] Never! {
+    weights := [Int]{}
+    loop function in program.functions -> &weights.push(opt_stream_weight(function))
+    weights
+}
+
+fn opt_stream_weight(function: LIRFunction) -> Int Never! {
+    size := 0
+    loop block in function.blocks -> size += block.insts.len() + 1
+    size
+}
+
+// The current weights of the wave's functions (their lowered bodies).
+fn opt_stream_weights(inputs: Shared<OptStreamInputs>, ids: [Int]) -> [Int] {
+    read :: inputs.guard_read()
+    weights := [Int]{}
+    loop id in ids -> &weights.push(opt_stream_weight(read.value.programs[0].functions[id]))
+    weights
+}
+
+fn opt_stream_take_program(inputs: Shared<OptStreamInputs>) -> LIRModule {
+    permit :: inputs.guard_edit()
+    &permit.value.programs.pop() ?? panic("the x64 compile module left its shared inputs")
+}
+
+// One wave: its functions are cut into consecutive parts of about equal
+// instruction count (compiler_threads_partition), and each thread claims the
+// next unclaimed part until none is left. Without JET_KEEP_GOING a stop stops
+// the compile, so the calling thread claims parts too; with it every
+// claiming thread is a task whose stop is caught at its join, and
+// opt_stream_finish_parts completes its part. A task group is a failure
+// source of its own: the claimers and the finishing tasks fail only when
+// their group does, which stops the compile. The parts come back complete.
+fn opt_stream_wave(inputs: Shared<OptStreamInputs>, ids: [Int], workers: Int, keep_going: Bool) -> [Shared<OptStreamPart>] {
+    weights :: opt_stream_weights(inputs, ids)
+    count := workers * X64_COMPILE_PARTS_PER_THREAD
+    if count > ids.len() -> count = ids.len()
+    if count < 1 -> count = 1
+    bounds :: compiler_threads_partition(weights, count)
+    parts := [Shared<OptStreamPart>]{}
+    loop part in 0..<count {
+        rows := [Int]{}
+        loop at in (bounds[part])..<(bounds[part + 1]) -> &rows.push(ids[at])
+        row :: shared OptStreamPart{ids: ^rows, position: 0, results: [OptStreamResult]{}}
+        &parts.push(row)
+    }
+    tasks := workers
+    if tasks > count -> tasks = count
+    queue :: shared OptStreamQueue{next: 0}
+    if keep_going {
+        _ := opt_stream_claimers(inputs, parts, queue, tasks, false, true) ?? panic("the x64 compile threads failed")
+        opt_stream_finish_parts(inputs, parts) ?? panic("the x64 compile threads failed")
+    } else {
+        _ := opt_stream_claimers(inputs, parts, queue, tasks - 1, true, false) ?? panic("the x64 compile threads failed")
+    }
+    parts
+}
+
+// Runs `tasks` claiming threads, one task each, and one more on this thread
+// when `inline`; returns how many functions they compiled. A claiming task
+// that stops re-raises its panic here unless `keep_going`.
+fn opt_stream_claimers(inputs: Shared<OptStreamInputs>, parts: [Shared<OptStreamPart>], queue: Shared<OptStreamQueue>, tasks: Int, inline: Bool, keep_going: Bool) -> Int {
+    if tasks <= 0 {
+        if inline -> return opt_stream_claimed(inputs, parts, queue)
+        return 0
+    }
+    compiled := 0
+    task.group x64_compile {
+        head :: task opt_stream_claimed(inputs, parts, queue)
+        compiled = opt_stream_claimers(inputs, parts, queue, tasks - 1, inline, keep_going)
+        compiled += head.join() ?? opt_stream_stopped(keep_going, err)
+    }
+    compiled
+}
+
+// A stopped claiming thread: its panic text, re-raised unchanged so an
+// internal error reads the same with any thread count; under JET_KEEP_GOING
+// its part is left open for opt_stream_finish_parts.
+fn opt_stream_stopped(keep_going: Bool, failure: TaskFailure) -> Int Never! {
+    if !keep_going -> panic(compiler_threads_failure_text(failure))
+    0
+}
+
+// One thread: compiles the parts it claims until none is left.
+fn opt_stream_claimed(inputs: Shared<OptStreamInputs>, parts: [Shared<OptStreamPart>], queue: Shared<OptStreamQueue>) -> Int {
+    compiled := 0
+    loop {
+        index :: opt_stream_claim(queue)
+        if index >= parts.len() -> break
+        compiled += opt_stream_part_run(inputs, parts[index])
+    }
+    compiled
+}
+
+fn opt_stream_claim(queue: Shared<OptStreamQueue>) -> Int {
+    permit :: queue.guard_edit()
+    index :: permit.value.next
+    permit.value.next = index + 1
+    index
+}
+
+fn opt_stream_part_run(inputs: Shared<OptStreamInputs>, part: Shared<OptStreamPart>) -> Int {
+    read :: inputs.guard_read()
+    permit := part.guard_edit()
+    // Passed straight through: a local binding of the guarded module would copy it.
+    opt_stream_rows(read.value, &permit.value)
+}
+
+// Compiles `part`'s functions from its position on, writing each result and
+// the next position into `part` as it goes, so a stop leaves the position
+// at the function it was compiling.
+fn opt_stream_rows(inputs: OptStreamInputs, part: &OptStreamPart) -> Int Never! {
+    first :: part.position
+    loop part.position < part.ids.len() {
+        at :: part.position
+        // copy: plain Int function id; the loop writes `part`, so the id cannot
+        // stay a view into `part.ids`.
+        id :: part.ids[at].copy()
+        result := opt_stream_function(inputs.programs[0], inputs.recursive, inputs.sizes, inputs.consumed, inputs.level, inputs.lint_only, id)
+        &part.results.push(^result)
+        part.position = at + 1
+    }
+    part.ids.len() - first
+}
+
+// One job: function `id`'s back end at `level`.
+fn opt_stream_function(program: LIRModule, recursive: [Bool], sizes: [Int], consumed: [[Bool]], level: Int, lint_only: Bool, id: Int) -> OptStreamResult Never! {
+    if level <= 0 {
+        outcome := x64_compile_linted_row(program, id, program.functions[id], lint_only)
+        return OptStreamResult{id: id, function: [LIRFunction]{}, size: 0, consumed: [Bool]{}, lint: ^outcome.lint, result: ^outcome.result}
+    }
+    inlined :: inline_caller(program.functions, program.functions[id], recursive, sizes, consumed)
+    optimized :: opt_function_passes(inlined, level)
+    facts := lir_inline_measure(optimized)
+    outcome := x64_compile_linted_row(program, id, optimized, lint_only)
+    OptStreamResult{id: id, function: [LIRFunction]{^optimized}, size: facts.size, consumed: ^facts.consumed, lint: ^outcome.lint, result: ^outcome.result}
+}
+
+// After a wave joined: each result's final body replaces the lowered one in
+// the module, with its inline facts, and its rows go to its slots; then the
+// bodies no later job reads are released: every callee of the result whose
+// callers have all taken their inline step, and the result's own body when
+// it has no callers. A function whose job reported a lint finding or an
+// error is `faulted` and keeps its body.
+fn opt_stream_settle(inputs: Shared<OptStreamInputs>, parts: [Shared<OptStreamPart>], deps: [[Int]], callers: &[Int], faulted: &[Bool], lints: &[[String]], outcomes: &[X64CompileResult]) {
+    permit := inputs.guard_edit()
+    loop part in parts {
+        held := part.guard_edit()
+        loop held.value.results.len() > 0 {
+            result := &held.value.results.pop() ?? { break }
+            id :: result.id
+            size :: result.size
+            final := false
+            loop result.function.len() > 0 {
+                body := &result.function.pop() ?? { break }
+                permit.value.programs[0].functions[id] = ^body
+                final = true
+            }
+            if final {
+                permit.value.sizes[id] = size
+                permit.value.consumed[id] = ^result.consumed
+            }
+            if result.lint.len() > 0 || result.result.errors.len() > 0 -> faulted[id] = true
+            lints[id] = ^result.lint
+            outcomes[id] = ^result.result
+            loop target in deps[id] {
+                callers[target] = callers[target] - 1
+                if callers[target] == 0 && !faulted[target] -> opt_stream_release(&permit.value.programs[0], target)
+            }
+            if callers[id] == 0 && !faulted[id] -> opt_stream_release(&permit.value.programs[0], id)
+        }
+    }
+}
+
+// Releases function `id`'s body: no job reads it again. Its name, signature
+// and debug facts stay for the object writer and for the lint of its callers.
+fn opt_stream_release(program: &LIRModule, id: Int) Never! {
+    program.functions[id].values = [LIRValue]{}
+    program.functions[id].blocks = [LIRBlock]{}
+}
+
+// JET_KEEP_GOING: a part whose claiming thread stopped, or that no thread
+// claimed, compiles on from the function it stopped at, one task at a time;
+// the function a task stops at becomes one error and a trap, and a new task
+// compiles the rest of the part.
+fn opt_stream_finish_parts(inputs: Shared<OptStreamInputs>, parts: [Shared<OptStreamPart>]) {
+    loop part in parts {
+        loop opt_stream_part_open(part) {
+            reason :: opt_stream_attempt(inputs, part)
+            if !opt_stream_part_open(part) -> break
+            opt_stream_trap(inputs, part, reason)
+        }
+    }
+}
+
+fn opt_stream_part_open(part: Shared<OptStreamPart>) -> Bool {
+    permit :: part.guard_read()
+    permit.value.position < permit.value.ids.len()
+}
+
+// The stop text when the task stopped, else "".
+fn opt_stream_attempt(inputs: Shared<OptStreamInputs>, part: Shared<OptStreamPart>) -> String {
+    stopped := ""
+    task.group x64_compile {
+        head :: task opt_stream_part_task(inputs, part)
+        stopped = head.join() ?? compiler_threads_failure_text(err)
+    }
+    stopped
+}
+
+fn opt_stream_part_task(inputs: Shared<OptStreamInputs>, part: Shared<OptStreamPart>) -> String {
+    _ := opt_stream_part_run(inputs, part)
+    ""
+}
+
+fn opt_stream_trap(inputs: Shared<OptStreamInputs>, part: Shared<OptStreamPart>, reason: String) {
+    read :: inputs.guard_read()
+    permit := part.guard_edit()
+    opt_stream_trap_row(read.value.programs[0], &permit.value, reason)
+}
+
+// The function at `part.position` stopped: one error, and its trap; its
+// lowered body stays in the module, never inlined (its size stays 41).
+fn opt_stream_trap_row(program: LIRModule, part: &OptStreamPart, reason: String) Never! {
+    at :: part.position
+    // copy: plain Int function id; `part` is written below.
+    id :: part.ids[at].copy()
+    &part.results.push(OptStreamResult{id: id, function: [LIRFunction]{}, size: 0, consumed: [Bool]{}, lint: [String]{}, result: X64CompileResult{function: None, debug: None, errors: [String]{"x64: {program.functions[id].name}: keep-going trap: compiling it stopped: {reason}"}}})
+    part.position = at + 1
+}
+
+// x64_relocatable_object_owned's result: the object, and the final LIR of
+// every function whose job reported a lint finding or a compile error
+// (ascending by id; empty when the object compiled), for the host's fault
+// dump. Costs nothing when nothing failed.
+struct X64ObjectOutcome {
+    object: X64ExecutableResult
+    faults: [LIRFunction]
+}
+
+fn x64_object_outcome_failed(errors: [String]) -> X64ObjectOutcome Never! {
+    X64ObjectOutcome{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, faults: [LIRFunction]{}}
+}
+
+// The faulted functions moved out of the compiled module, in id order.
+fn x64_object_faults(kept: &X64CompiledModule) -> [LIRFunction] Never! {
+    faults := [LIRFunction]{}
+    if kept.faults.len() == 0 -> return faults
+    wanted := [Bool]{}
+    loop _ in kept.program.functions -> &wanted.push(false)
+    loop id in kept.faults -> wanted[id] = true
+    rows := compiler_take_rows<LIRFunction>(&kept.program.functions)
+    reversed := [LIRFunction]{}
+    loop rows.len() > 0 {
+        row := &rows.pop() ?? { break }
+        &reversed.push(^row)
+    }
+    id := 0
+    loop reversed.len() > 0 {
+        row := &reversed.pop() ?? { break }
+        if wanted[id] -> &faults.push(^row)
+        id += 1
+    }
+    faults
+}
+
+// x64_relocatable_object over a module it owns, compiled on as many threads
+// as `threads` admits with the LIR passes of `level`
+// (x64_compile_module_owned): the object bytes are the same for any thread
+// count. The module moves through the compile, uncopied. `keep_going`
+// (JET_KEEP_GOING, the bootstrap native feed): every function is present (a
+// trap where compiling it failed), so the object is written whenever its own
+// writer succeeds, and the result keeps the compile errors before the
+// writer's. It is never shipped.
+fn x64_relocatable_object_owned(program: ^LIRModule, entry: LIRFunctionID, threads: CompilerThreads, level: Int, keep_going: Bool) -> X64ObjectOutcome Never! {
+    if entry.value < 0 || entry.value >= program.functions.len() -> return x64_object_outcome_failed([String]{"entry function {entry.value} is not in the module"})
+    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return x64_object_outcome_failed([String]{"entry function has no signature"})
+    if signature.params.len() != 0 || signature.result != None -> return x64_object_outcome_failed([String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"})
+    kept := x64_compile_module_owned(^program, threads, level, keep_going)
+    if !keep_going && kept.compiled.errors.len() > 0 {
+        errors :: compiler_take_rows<String>(&kept.compiled.errors)
+        return X64ObjectOutcome{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, faults: x64_object_faults(&kept)}
+    }
+    main :: x64_object_main(entry)
+    functions := [X64CompiledFunction]{main}
+    &functions.extend(compiler_take_rows<X64CompiledFunction>(&kept.compiled.functions))
+    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
+    &debug.extend(compiler_take_rows<X64FunctionDebug>(&kept.compiled.debug))
+    written := x64_object_functions(kept.program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+    if !keep_going -> return X64ObjectOutcome{object: ^written, faults: [LIRFunction]{}}
+    errors := compiler_take_rows<String>(&kept.compiled.errors)
+    &errors.extend(compiler_take_rows<String>(&written.errors))
+    written.errors = errors
+    X64ObjectOutcome{object: ^written, faults: x64_object_faults(&kept)}
 }

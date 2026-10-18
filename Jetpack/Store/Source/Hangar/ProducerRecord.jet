@@ -142,7 +142,7 @@ fn store_canonical_producer(provider: String, immutable_source: String, source_d
 
 // Whether a producer was built as a private untrusted build.
 fn store_is_private_untrusted_build(producer: ProducerRecord) -> Bool Never! {
-    producer.facts.get("build.trust") == Val(STORE_PRIVATE_UNTRUSTED_BUILD)
+    producer.facts.get("build.trust") == .Val(trust) && trust == STORE_PRIVATE_UNTRUSTED_BUILD
 }
 
 // The signed SLSA-style action identity of one cache admission.
@@ -182,7 +182,7 @@ fn store_refresh_lock_digest(verification: &StoreVerification, roots: HangarRoot
         else -> return Ok(entry.copy())
     }
     plan_facts :: producer.plan.facts()
-    if producer.facts.get("nix.lock.digest") == Val(lock_digest) && plan_facts.get("nix.lock.digest") == Val(lock_digest) {
+    if producer.facts.get("nix.lock.digest") == Val((lock_digest)) && plan_facts.get("nix.lock.digest") == Val((lock_digest)) {
         return Ok(entry.copy())
     }
     producer.facts["nix.lock.digest"] = lock_digest

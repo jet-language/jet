@@ -1,6 +1,6 @@
 // D-STRUCT-POLICY1=A: checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, CallArg, Diagnostic, Expr, Func, Item, MarkerCallArg, Param, ParamZone, Program, Span, SymbolKind, TCallArg, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, CallArg, Diagnostic, Expr, Func, Item, MarkerCallArg, Param, ParamZone, Program, Span, SymbolID, SymbolKind, TCallArg, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 fn sema_policy_builtin(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -40,8 +40,14 @@ struct SemaPolicyUses {
 // Registration runs this after inline-module lifting, before signature and
 // body passes, so generated wrappers receive exactly the ordinary checks.
 fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) {
+    generated :: sema_policy_wrappers(program.items, declarations, module_identity, source_file, origin, segments, &diagnostics)
+    loop item in generated -> &program.items.push(item)
+}
+
+// The policy wrappers `items` call for; each item is read in place.
+fn sema_policy_wrappers(items: [Item], declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> [Item] {
     uses := [String:[String]]{}
-    loop item in program.items {
+    loop item in items {
         if item == .Func(function) {
             loop call in sema_policy_calls(function) {
                 names := uses.get(function.name) ?? [String]{}
@@ -54,7 +60,7 @@ fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], mo
         }
     }
     generated := [Item]{}
-    loop item in program.items {
+    loop item in items {
         if item == .Func(target) {
             names :: uses.get(target.name) ?? next
             signature :: sema_function_symbol_type(target, false, symbol_id(SymbolKind.Function, module_identity, "", target.name), source_file, origin, segments)
@@ -88,7 +94,7 @@ fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], mo
             }
         }
     }
-    loop item in generated -> &program.items.push(item)
+    ^generated
 }
 
 fn sema_policy_declarations_checked(input: [UserPolicyDecl], diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {
@@ -138,20 +144,35 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     captured := callee
     captured.ty = all_params[count].ty ?? return None
     conventions := (loop parameter in params -> parameter.convention)
-    value :: sema_tir_expr(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper_name: Val(wrapper.symbol.id.key), captures: [TCapture]{}, callee: captured}}, policy.name_span)
+    value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper_name: Val(wrapper.symbol.id.key), captures: [TCapture]{}, callee: captured}}, policy.name_span)
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
 }
 
-fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    declaration :: if program.registration_graph == .Val(graph) -> sema_registration_callable_declaration(graph, target.symbol.id) ?? return None else -> {
-        item :: sema_scope_resolve_declaration(environment, program, target.symbol.id) ?? return None
-        if item == .Func(function) -> function else -> {
-            return None
-        }
+// The policy calls of a registered callable, read from its row in place.
+fn sema_policy_registered_calls(graph: SemaRegistrationGraph, target: SymbolID) -> [Call]? Never! {
+    row :: graph.callable_rows.get(target.key) ?? return None
+    if row == {
+        .Function(module_index, index) -> Val(sema_policy_calls(graph.modules[module_index].functions[index].declaration))
+        .Foreign(_, _) -> None
+        .NominalMethod(module_index, owner, index) -> Val(sema_policy_calls(graph.modules[module_index].nominals[owner].methods[index].declaration))
+        .ImplMethod(module_index, owner, index) -> Val(sema_policy_calls(graph.modules[module_index].impls[owner].methods[index].declaration))
     }
-    policies :: sema_policy_calls(declaration)
+}
+
+// The policy calls of a callable declared in the checked scope.
+fn sema_policy_local_calls(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> [Call]? {
+    item :: sema_scope_resolve_declaration(environment, program, target) ?? return None
+    if item == .Func(function) -> return Val(sema_policy_calls(function))
+    None
+}
+
+fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // The callee's policies are read from its registered declaration in
+    // place: returning the declaration copied the whole function, body
+    // included, on every direct call.
+    policies :: if program.registration_graph == .Val(graph) -> sema_policy_registered_calls(graph, target.symbol.id) ?? return None else -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
-    callee := sema_tir_expr(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, span)
+    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, span)
     index := policies.len()
     loop index > 0 {
         index -= 1
@@ -169,7 +190,7 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
     last :: call.args[call.args.len() - 1]
     target_name :: if last.expr == .Ident(name, _) -> name else -> ""
     target :: sema_call_resolve_direct(target_name, [Type]{}, environment, program, &scopes, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    callee := sema_tir_expr(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, last.span)
+    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, last.span)
     index := call.args.len() - 1
     loop index > 0 {
         index -= 1

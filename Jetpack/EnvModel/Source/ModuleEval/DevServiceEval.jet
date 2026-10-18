@@ -191,7 +191,8 @@ fn envmodel_probe_error(what: String, why: String, fix: String, span: Span) -> E
 // `value` is not one and the ordinary `ready:` shell-command path applies.
 fn envmodel_ready_probe_from(value: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> ReadyProbe? EnvModelEvalError! {
     call :: if value == {
-        .Call(call) -> call
+        // copy: `call` is a payload of read parameter `value`, which keeps the original; the assigned `call` owns this one
+        .Call(call) -> call.copy()
         else -> { return Ok(None) }
     }
     leaf :: call.name.cut_last(".")?.after ?? call.name
@@ -386,7 +387,7 @@ fn envmodel_restart_args(args: [CtEnumArg]) -> (max: Int, backoff_ms: Int, expon
             saw_backoff = true
         }
     }
-    Val((max: max, backoff_ms: backoff_ms, exponential: exponential))
+    Val((backoff_ms: backoff_ms, exponential: exponential, max: max))
 }
 
 fn envmodel_nonnegative_u32(value: CtValue) -> Int? Never! {
@@ -405,15 +406,15 @@ fn envmodel_nonnegative_u64(value: CtValue) -> Int? Never! {
 
 fn envmodel_backoff_value(value: CtValue) -> (ms: Int, exponential: Bool)? Never! {
     if value == {
-        .Int(number) -> if number >= 0 -> Val((ms: number, exponential: false)) else -> None
-        .Str(text) -> if pkg_ascii_lower(text) == "exponential" -> Val((ms: 250, exponential: true)) else -> None
+        .Int(number) -> if number >= 0 -> Val((exponential: false, ms: number)) else -> None
+        .Str(text) -> if pkg_ascii_lower(text) == "exponential" -> Val((exponential: true, ms: 250)) else -> None
         .Enum(_, variant, args) -> {
             if envmodel_variant_leaf(variant) == {
-                "Exponential" -> if args.len() == 0 -> Val((ms: 250, exponential: true)) else -> None
+                "Exponential" -> if args.len() == 0 -> Val((exponential: true, ms: 250)) else -> None
                 "Fixed" -> {
                     if args.len() != 1 -> return None
                     ms :: envmodel_nonnegative_u64(args[0].value) ?? return None
-                    Val((ms: ms, exponential: false))
+                    Val((exponential: false, ms: ms))
                 }
                 else -> None
             }

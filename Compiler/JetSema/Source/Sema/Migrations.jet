@@ -61,9 +61,9 @@ fn sema_migration_wire_name(style: String?, name: String) -> String Never! {
 }
 
 fn sema_migration_json_key(definition: StructDef, style: String?, name: String) -> String Never! {
-    loop field in definition.fields {
-        if field.name == name {
-            names := sema_checked_field_shape_names(definition, field)
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].name == name {
+            names := sema_checked_field_shape_names(definition, definition.fields[field_index])
             return names.json ?? names.text
         }
     }
@@ -75,11 +75,11 @@ fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationD
     names := [SemaMigrationFieldName]{}
     current := [String]{}
     skipped := [String]{}
-    loop field in definition.fields {
-        key := sema_migration_json_key(definition, style, field.name)
-        &names.push(SemaMigrationFieldName{field: field.name, json_key: key})
+    loop field_index in 0..<definition.fields.len() {
+        key := sema_migration_json_key(definition, style, definition.fields[field_index].name)
+        &names.push(SemaMigrationFieldName{field: definition.fields[field_index].name, json_key: key})
         if {
-            sema_checked_marker(field.serde_markers, "Skip") != None -> skipped = sema_migration_insert_sorted(skipped, key)
+            sema_checked_marker(definition.fields[field_index].serde_markers, "Skip") != None -> skipped = sema_migration_insert_sorted(skipped, key)
             else -> current = sema_migration_insert_sorted(current, key)
         }
     }

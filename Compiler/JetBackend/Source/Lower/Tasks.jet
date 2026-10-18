@@ -70,6 +70,8 @@ fn lower_task_stop_program(p: MIRProgram, prepared: [LowerPreparedFunction]) -> 
 
 fn lower_task_template_source(p: MIRProgram, function: MIRFunctionID) -> MIRFunction? {
     loop source in p.functions {
+        // copy: the task template is returned as an owned MIRFunction, while `p` is the caller's
+        // MIR program (a read parameter), which keeps its function rows.
         if source.id == function -> return Val(source.copy())
     }
     None
@@ -168,7 +170,7 @@ fn lower_task_kind(kind: MIRTaskGroupKind) -> Int Never! {
 // `task.all` / `task.any` / `task.race` over one List of tasks or of SendFn
 // bodies (spawned first); the checked worker element remains the payload.
 fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRTaskGroupKind, tasks: [MIRValueID]) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "task group names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "task group names missing Prelude call {call.value}")
     if kind != .All && !m.task_stop_points -> return lower_fail(&m, &f, "task.any/task.race requires checked native Poll/Stopped cleanup edges")
     if tasks.len() != 1 -> return lower_fail(&m, &f, "task group over {tasks.len()} operands is not lowered at O0 yet")
     list_ty :: lower_value_type(c, tasks[0]) ?? return lower_fail(&m, &f, "task group operand has no checked type")
@@ -245,7 +247,8 @@ fn lower_task_tuple_all(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // layout is reported instead of reinterpreting runtime bytes.
 fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, export: String, args: [LIRValueID], result_ty: MIRType) Never! {
     err := MIRType?{None}
-    if result_ty.kind == .Result(_, failure) -> err = Val(failure)
+    // copy: `failure` is a payload of read parameter `result_ty`, which keeps the original; the Val carrier owns this one
+    if result_ty.kind == .Result(_, failure) -> err = Val(failure.copy())
     err_ty :: err ?? return lower_fail(&m, &f, "{export} result {mir_type_display_name(result_ty)} is not lowered at O0 yet")
     runtime :: lower_record_handle(p, err_ty)
     if runtime == None {
@@ -333,7 +336,7 @@ fn lower_task_spawn(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // deferred `JetTaskGroup.close(&group)` (Statements.jet task group) joins them
 // at the scope exit through the borrowed handle, as MathTaskMem.rs close.
 fn lower_task_group_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: mir_symbol_name(row.symbol)
     if symbol == "jet_std::JetTaskGroup::close" {
         if args.len() != 1 || args[0].access == .Write {
@@ -362,7 +365,7 @@ fn lower_task_group_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // runtime's exit handlers (CAbiTask.rs jet_rt_native_atexit), which run at
 // the process exit boundary (jet_runtime_boundary / jet_runtime_process_exit).
 fn lower_atexit_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if mir_symbol_name(row.symbol) != "jet_std_os_atexit" -> return false
     if args.len() != 1 {
         lower_fail(&m, &f, "core.sys.atexit with {args.len()} arguments is not lowered at O0 yet")
@@ -391,7 +394,7 @@ fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     receiver_ty :: lower_value_type(c, receiver) ?? return false
     if lower_channel_method(p, c, &m, &f, instruction, call, receiver, args, receiver_ty) -> return true
     if lower_task_element(receiver_ty) == None -> return false
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_runtime_symbol(row)
     handle :: lower_use(&m, &f, receiver) ?? return true
     if symbol == "cancel" {
@@ -480,7 +483,7 @@ fn lower_helper_task_debug(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
 
 // The operands task and channel operations consume (as MIRRust moves them):
 // an owned place read that lands here is a copy of its own (LowerContext.sunk).
-fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_task_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(semantic) {
         if semantic == .SharedGuardWait(_, _, _, predicate) -> &stored.push(predicate)
@@ -496,7 +499,7 @@ fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
             }
         }
         if semantic == .HandleMethod(call, receiver, args, _, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             symbol :: mir_symbol_name(row.symbol)
             if symbol == "jet_std::JetTask::join" || symbol == "jet_std::jet_task_join_result" || symbol == "jet_task_join_result" || symbol == "jet_std::JetTask::detach" -> &stored.push(receiver)
             if symbol == "jet_std::JetSender::send" && args.len() == 1 -> &stored.push(args[0])
@@ -504,13 +507,13 @@ fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
         // Shared.new takes its initial value and Shared.read / Shared.edit
         // their callback when MIR moves them.
         if semantic == .StaticPreludeCall(call, args, _, _) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             if mir_symbol_name(row.symbol) == "jet_std::JetShared::new" {
                 loop arg in args { if arg.access == .Move -> &stored.push(arg.value) }
             }
         }
         if semantic == .HostCall(call, args) {
-            row :: lower_prelude_row(p, call) ?? return stored
+            row :: lower_prelude_row(p, m, call) ?? return stored
             symbol :: mir_symbol_name(row.symbol)
             if symbol == "jet_shared_read" || symbol == "jet_shared_edit" || symbol == "jet_shared_read_txn" || symbol == "jet_shared_edit_txn" {
                 loop arg in args { if arg.access == .Move -> &stored.push(arg.value) }
@@ -545,7 +548,7 @@ fn lower_shared_taken_slot(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 }
 
 fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if mir_symbol_name(row.symbol) != "jet_std::JetShared::new" -> return false
     result_ty :: lower_checked_type(c, instruction) ?? {
         lower_fail(&m, &f, "Shared.new has no checked result type")
@@ -578,7 +581,7 @@ fn lower_shared_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // handle is its cell address (jet_rt_native_shared_clone returns the same
 // cell), so identity is equality of the two borrowed handle words.
 fn lower_shared_same(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if mir_symbol_name(row.symbol) != "jet_shared_same" -> return false
     if args.len() != 2 {
         lower_fail(&m, &f, "Shared.same requires two checked Shared operands")
@@ -603,7 +606,7 @@ fn lower_shared_same(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // callback (LazyIter.jet "lazy.callback.owned": a Write parameter receives the
 // cell's slot itself) runs under the lock and writes its result to `out`.
 fn lower_shared_access(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: mir_symbol_name(row.symbol)
     transaction :: symbol == "jet_shared_read_txn" || symbol == "jet_shared_edit_txn"
     edits :: symbol == "jet_shared_edit" || symbol == "jet_shared_edit_txn"
@@ -677,7 +680,7 @@ fn lower_shared_access(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
 // go to the runtime's JetSender / JetReceiver over NativeValue.
 
 fn lower_channel_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, route) ?? return false
+    row :: lower_prelude_row(p, m, route) ?? return false
     symbol :: mir_symbol_name(row.symbol)
     bounded :: symbol == "jet_std::channel_bounded"
     if symbol != "jet_std::channel" && !bounded -> return false
@@ -725,7 +728,7 @@ fn lower_channel_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     sender :: lower_task_handle_element(receiver_ty, "Sender")
     receiving :: lower_task_handle_element(receiver_ty, "Receiver")
     elem :: sender ?? (receiving ?? return false)
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_runtime_symbol(row)
     endpoint :: if sender != None -> "sender" else -> "receiver"
     handle :: lower_use(&m, &f, receiver) ?? return true
@@ -795,7 +798,7 @@ fn lower_channel_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: handle})
     lower_store_word(&f, dst, 8, -1)
     lower_store_word(&f, dst, 16, 0)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
     true
@@ -805,7 +808,7 @@ fn lower_channel_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
 // Lists and one Wait. The canonical kernel writes (arm, value: T?).
 fn lower_task_select(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRSelectKind, values: [MIRValueID]) Never! {
     if kind != .Wait || values.len() != 2 -> return lower_fail(&m, &f, "select has no normalized readiness table")
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "select names a missing Prelude call")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "select names a missing Prelude call")
     symbol :: lower_runtime_symbol(row)
     probing :: symbol == "jet_select_try_wait_tagged"
     if symbol != "jet_select_wait_tagged" && !probing -> return lower_fail(&m, &f, "select has no canonical wait route")

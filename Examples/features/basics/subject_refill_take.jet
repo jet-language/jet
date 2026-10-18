@@ -1,0 +1,119 @@
+// `root = p`, where `p` is a payload binding of a match over `root` itself
+// (or over a field of it), takes the payload out of the subject instead of
+// copying it: the write then drops what is left of the old root (#5041). A
+// payload read after the refill, a sibling payload read after it, a payload
+// stored under another name, and a payload of a read parameter keep a copy
+// of their own.
+enum Node {
+    Leaf(name: String)
+    Wrap(inner: Node)
+    Pair(left: Node, right: Node)
+}
+
+struct Expr {
+    kind: ExprKind
+    label: String
+}
+
+enum ExprKind {
+    Paren(inner: Expr)
+    Atom(text: String)
+}
+
+fn nest(depth: Int, name: String) -> Node {
+    if depth == 0 -> return Node.Leaf{name: name}
+    Node.Wrap{inner: nest(depth - 1, name)}
+}
+
+fn describe(node: Node) -> String {
+    if node == {
+        .Leaf(name) -> "leaf {name}"
+        .Wrap(_) -> "wrap"
+        .Pair(_, _) -> "pair"
+    }
+}
+
+// A whole local descends into its own payload on every turn.
+fn descend(depth: Int, steps: Int) -> String {
+    cursor := nest(depth, "d{depth}")
+    loop _ in 0..<steps {
+        if cursor == {
+            .Wrap(inner) -> cursor = inner
+            else -> break
+        }
+    }
+    describe(cursor)
+}
+
+fn paren(depth: Int) -> Expr {
+    if depth == 0 -> return Expr{kind: ExprKind.Atom{text: "atom"}, label: "a"}
+    Expr{kind: ExprKind.Paren{inner: paren(depth - 1)}, label: "p{depth}"}
+}
+
+// The subject is a field of the local the payload refills.
+fn unwrap_parens(depth: Int) -> String {
+    current := paren(depth)
+    loop _ in 0..<depth + 1 {
+        if current.kind == {
+            .Paren(inner) -> current = inner
+            .Atom(_) -> break
+        }
+    }
+    if current.kind == {
+        .Atom(text) -> "{text} {current.label}"
+        .Paren(_) -> "paren"
+    }
+}
+
+// Rejected: the payload is read after the refill, so it is a value of its own.
+fn read_after(depth: Int) -> String {
+    cursor := nest(depth, "r")
+    seen := ""
+    if cursor == {
+        .Wrap(inner) -> {
+            cursor = inner
+            seen = describe(inner)
+        }
+        else -> {}
+    }
+    "{describe(cursor)} / {seen}"
+}
+
+// Rejected: a sibling payload of the same subject is read after the refill.
+fn sibling_after() -> String {
+    cursor := Node.Pair{left: Node.Leaf{name: "a"}, right: Node.Leaf{name: "b"}}
+    seen := ""
+    if cursor == {
+        .Pair(left, right) -> {
+            cursor = left
+            seen = describe(right)
+        }
+        else -> {}
+    }
+    "{describe(cursor)} / {seen}"
+}
+
+// Rejected: a payload stored under another name leaves the subject whole.
+fn other_target(depth: Int) -> String {
+    cursor := nest(depth, "o")
+    other := Node.Leaf{name: "none"}
+    if cursor == .Wrap(inner) -> other = inner
+    "{describe(cursor)} / {describe(other)}"
+}
+
+// Rejected: a read parameter's payload is copied, never taken.
+fn from_param(node: Node) -> String {
+    cursor := Node.Leaf{name: "start"}
+    if node == .Wrap(inner) -> cursor = inner
+    "{describe(cursor)} {describe(node)}"
+}
+
+fn run() {
+    print(descend(3, 2))
+    print(descend(2, 5))
+    print(unwrap_parens(3))
+    print(read_after(1))
+    print(sibling_after())
+    print(other_target(1))
+    print(from_param(nest(1, "p")))
+}

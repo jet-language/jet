@@ -1,0 +1,86 @@
+// Or-pattern bindings over a subject that cannot change while they live (a
+// read parameter, or a local the arm leaves alone) borrow the payload of the
+// alternative that matched: reading them copies nothing, a consuming use
+// copies the payload, and the subject stays whole afterwards (nothing is
+// taken out of it, matched again or not).
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+enum Shape {
+    Circle(blob: Blob, size: Int)
+    Square(blob: Blob, size: Int)
+    Line(size: Int)
+    Empty
+}
+
+enum Tag {
+    First(label: String?)
+    Second(label: String?)
+}
+
+fn describe(shape: Shape) -> String {
+    if shape == {
+        .Circle(blob, size) | .Square(blob, size) -> "{blob.text}:{blob.data.len()}:{size}"
+        .Line(size) -> "line:{size}"
+        .Empty -> "empty"
+    }
+}
+
+// A consuming use of a borrowed binding is a copy of the payload.
+fn first_blob(shape: Shape) -> Blob? {
+    if shape == {
+        .Circle(blob, _) | .Square(blob, _) -> Val(blob)
+        else -> None
+    }
+}
+
+// A match on the binding itself reads the parameter's payload in place.
+fn label(item: Tag) -> String {
+    if item == {
+        .First(name) | .Second(name) -> {
+            if name == {
+                .Val(text) -> text
+                .None -> "none"
+            }
+        }
+    }
+}
+
+// The subject is a local whose last use is the match: the borrowed binding is
+// read after every other read of it, so the local lives (and drops) after it.
+fn last_use_subject(k: Int) -> Int {
+    shape :: if k > 0 -> Shape.Circle{blob: Blob{data: [Int]{1, 2}, text: "x"}, size: k} else -> Shape.Empty
+    if shape == {
+        .Circle(blob, size) | .Square(blob, size) -> blob.data.len() + size
+        else -> 0
+    }
+}
+
+fn run() {
+    circle :: Shape.Circle{blob: Blob{data: [Int]{1, 2, 3}, text: "c"}, size: 7}
+    square :: Shape.Square{blob: Blob{data: [Int]{4}, text: "s"}, size: 2}
+    print(describe(circle))
+    print(describe(square))
+    print(describe(Shape.Line{size: 5}))
+    print(describe(Shape.Empty))
+    copied := first_blob(square) ?? panic("square has a blob")
+    copied.text = "changed"
+    &copied.data.push(9)
+    print("{copied.text} {copied.data.len()} {describe(square)}")
+    tags :: [Tag]{Tag.First{label: Val("one")}, Tag.Second{label: None}, Tag.Second{label: Val("two")}}
+    loop _ in 0..<2 {
+        loop item in tags -> print(label(item))
+    }
+    print(label(tags[0]))
+    total := 0
+    loop k in 0..<3 {
+        if circle == {
+            .Circle(blob, size) | .Square(blob, size) -> total += blob.data.len() + size + k
+            else -> total += 1000
+        }
+    }
+    print("total {total} {describe(circle)}")
+    print("last {last_use_subject(3)} {last_use_subject(0)}")
+}

@@ -286,11 +286,14 @@ fn sema_infer_validate_explicit(graph: SemaRegistrationGraph?, context: &SemaInf
 // fallible callee's success value; only a Result expectation is the carrier.
 fn sema_inference_expected_return_view(declared_return: Type, expected: Type) -> Type Never! {
     if expected == {
+        // copy: the expected return is a new owned Type. For a Result it equals `declared_return`,
+        // the signature's return type (a read parameter), which stays in the signature.
         .Result(_, _) -> return declared_return.copy()
         else -> {}
     }
     if declared_return == {
-        .Result(success, _) -> success
+        // copy: `success` is a payload of read parameter `declared_return`, which keeps the original; the returned value owns this one
+        .Result(success, _) -> success.copy()
         else -> declared_return
     }
 }

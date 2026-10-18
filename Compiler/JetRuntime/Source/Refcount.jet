@@ -1,0 +1,61 @@
+// #5041 P2 shared heap storage. A refcounted block carries one aligned count
+// word just before the address its owners hold (the prefix); every existing
+// read offset is unchanged. Counts are atomic: once thread crossings retain
+// instead of copy, two threads may hold one block. A negative count (the
+// sign bit) marks an immortal static or process-lifetime block: retain and
+// release never write it, and a writer must copy it before any store.
+//
+// Protocol (the caller owns a live reference throughout):
+// - retain publishes one more owner;
+// - release consumes one owner; only a true result authorizes freeing the
+//   block (LOCK XADD is a full fence, so the last owner observes every
+//   earlier owner's writes);
+// - unique is true when the caller's reference is the only one. A writer has
+//   exclusive access to its own reference, so a count of 1 it observes stays
+//   1 until that writer itself clones.
+
+fn rc_load(count: I64) -> I64 {
+    #Unsafe("count addresses the aligned prefix word of a live refcounted block the caller holds") {
+        return os_load_i64(count)
+    }
+}
+
+fn rc_store(count: I64, value: I64) {
+    #Unsafe("count addresses the aligned prefix word of a block the caller just allocated and still owns exclusively") {
+        os_store_i64(count, value)
+    }
+}
+
+fn rc_add(count: I64, delta: I64) -> I64 {
+    #Unsafe("LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live") {
+        return os_fetch_add_i64(count, delta)
+    }
+}
+
+// Publishes the first owner of a freshly allocated block.
+fn rc_init(count: I64) { rc_store(count, I64{1}) }
+
+#Export(c) fn jet_rt_rc_retain(count: I64) {
+    if (rc_load(count) < I64{0}) -> return
+    old :: rc_add(count, I64{1})
+    if (old == I64{9223372036854775807}) -> jet_rt_panic_overflow()
+}
+
+#Export(c) fn jet_rt_rc_release(count: I64) -> Bool {
+    if (rc_load(count) < I64{0}) -> return false
+    rc_add(count, I64{-1}) == I64{1}
+}
+
+#Export(c) fn jet_rt_rc_unique(count: I64) -> Bool { rc_load(count) == I64{1} }
+
+// Heap blocks allocated with align >= 8 carry their count in the allocator's
+// block header, 24 bytes before the payload (Alloc.jet alloc_count_init), so
+// List-family buffers and Option/Result/enum boxes share through these three
+// entries whatever allocated them. `block` is the payload address an owner
+// holds; callers never pass a static (frozen) buffer: lowering tests cap == 0
+// for lists, and static boxes carry an immortal (negative) word there.
+#Export(c) fn jet_rt_block_retain(block: I64) { jet_rt_rc_retain(wrapping(block - I64{24})) }
+
+#Export(c) fn jet_rt_block_release(block: I64) -> Bool { jet_rt_rc_release(wrapping(block - I64{24})) }
+
+#Export(c) fn jet_rt_block_unique(block: I64) -> Bool { jet_rt_rc_unique(wrapping(block - I64{24})) }

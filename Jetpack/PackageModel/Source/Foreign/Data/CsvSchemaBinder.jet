@@ -131,7 +131,7 @@ fn pkg_data_csv_type(values: [String]) -> (ty: BoundType, optional: Bool) Never!
             &nonempty.push(value)
         }
     }
-    if nonempty.len() == 0 -> return (ty: BoundType.Scalar("String"), optional: optional)
+    if nonempty.len() == 0 -> return (optional: optional, ty: BoundType.Scalar("String"))
     all_bool := true
     all_int := true
     all_float := true
@@ -149,8 +149,8 @@ fn pkg_data_csv_type(values: [String]) -> (ty: BoundType, optional: Bool) Never!
             0.0
         }
     }
-    if all_bool -> return (ty: BoundType.Scalar("Bool"), optional: optional)
-    if all_int -> return (ty: BoundType.Scalar("Int"), optional: optional)
-    if all_float -> return (ty: BoundType.Scalar("Float"), optional: optional)
-    (ty: BoundType.Scalar("String"), optional: optional)
+    if all_bool -> return (optional: optional, ty: BoundType.Scalar("Bool"))
+    if all_int -> return (optional: optional, ty: BoundType.Scalar("Int"))
+    if all_float -> return (optional: optional, ty: BoundType.Scalar("Float"))
+    (optional: optional, ty: BoundType.Scalar("String"))
 }

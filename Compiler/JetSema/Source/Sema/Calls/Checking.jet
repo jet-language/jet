@@ -11,6 +11,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
+    MIRCopyFact,
     PlaceAccess,
     Span,
     Symbol,
@@ -26,7 +27,6 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     expr_span,
     symbol_id,
-    tir_call_arg_copy_fact,
     tir_symbol_local,
     type_identity_equal,
     type_name,
@@ -48,6 +48,8 @@ fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment, program:
     if program.registration_graph == .Val(graph) {
         sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
     } else {
+        // copy: the resolved type is a new owned Type. When nothing resolves it equals `ty`, the
+        // caller's signature type (a read parameter), which stays in the signature.
         return ty.copy()
     }
 }
@@ -217,6 +219,8 @@ fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg]
         loop source_path in entry.value.sources {
             source_expr := Expr?{None}
             if source_path.source == {
+                // copy: each return-view source path builds its own source Expr, and `receiver` is
+                // the caller's call receiver (a read parameter), used once per path in this loop.
                 .Receiver -> source_expr = receiver.copy()
                 .Parameter(parameter) -> source_expr = sema_call_return_view_parameter_expr(parameter, binding, args)
                 .Static(_, _) -> {}
@@ -387,14 +391,23 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 &take_keys.push(key)
             }
         }
-        // Rust `check_call_argument_access`: the parser stores `f(^x.f)`'s
-        // move mark on the CallArg, and a marked field read passed to a
-        // consuming parameter is the exact-place move, so the argument moves
-        // out of its owner instead of materializing a copy. A field of a
-        // borrowed parameter has no storage to give up and keeps its copy.
-        taken_field := parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && args[index].expr == .Field(_, _, _)
-        if taken_field && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_field = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: if taken_field -> sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        // Rust `check_call_argument_access`: the parser stores `f(^x)`'s and
+        // `f(^x.f)`'s move mark on the CallArg, and a marked name or field
+        // passed to a consuming parameter is the exact-place move, so the
+        // argument moves out of its owner (MovePlace, clearing its drop
+        // flag) instead of reaching lowering as a bare read that only a
+        // last-use proof turns into a move. A read parameter or its field has
+        // no storage to give up: the mark is E0201, never a silent copy, and
+        // an element (or a place inside one) stays owned by its collection
+        // (E0225). A write parameter's field keeps the refill move the
+        // last-use pass proves.
+        consuming_mark :: parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
+        if consuming_mark && sema_call_reject_element_move(args[index].expr, &diagnostics) -> return None
+        marked_place :: consuming_mark && sema_call_marked_move_place(args[index].expr, value)
+        if marked_place && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return None
+        taken_place := marked_place
+        if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
+        stored :: sema_call_marked_move_value(&state, taken_place, args[index].expr, ^value, scopes, &diagnostics) ?? return None
         &values.push(stored)
         &slots.push(slot)
         &required_types.push(required)
@@ -471,14 +484,11 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         // tail. Its private pin cannot shadow a declaration-slot default.
         pin_slot := slot
         if params[slot].variadic -> pin_slot = -index - 1
+        // copy: the argument's checked value becomes the binder pin's init, and
+        // lowered[index].value is overwritten with the pin local below. Jet has no exchange on an
+        // element of the write-borrowed `lowered`.
         original :: lowered[index].value.copy()
-        ty :: original.ty
         init := original
-        if lowered[index].clone || lowered[index].arc_clone {
-            init = sema_tir_expr(ty, TExprKind.Clone{value: init, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, original.span)
-            lowered[index].clone = false
-            lowered[index].arc_clone = false
-        }
         place_value :: if init.kind == {
             .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Deref(_) | .Borrow(_, _) -> true
             else -> false
@@ -486,16 +496,16 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
             access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
-            init = sema_tir_expr(ty, TExprKind.Borrow{place: init, access: access}, original.span)
+            init = sema_tir_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
-        symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, ty, span)
+        symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
         local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
-        local_value :: sema_tir_expr(ty, TExprKind.Local{local: local}, original.span)
+        local_value :: sema_tir_node(original.ty, TExprKind.Local{local: local}, original.span)
         moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
-        lowered[index].value = if moves_pin -> sema_tir_expr(ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        lowered[index].value = if moves_pin -> sema_tir_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
     bindings
@@ -504,10 +514,54 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
 // Places the binder pins before the call they feed.
 fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) -> TExpr Never! {
     if pins.len() == 0 -> return call_value
+    // copy: `call_value` moves into the block body on the next line, while the block node needs the
+    // call's type as its own.
     ty :: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
-    sema_tir_expr(ty, TExprKind.InlineBlock{body: body}, span)
+    sema_tir_node(ty, TExprKind.InlineBlock{body: body}, span)
+}
+
+// The place a `^`-marked call argument moves exactly: a field read, or a
+// whole non-Copy local named by itself (a Copy value simply copies).
+fn sema_call_marked_move_place(expr: Expr, value: TExpr) -> Bool Never! {
+    if expr == {
+        .Field(_, _, _) -> true
+        .Ident(_, _) -> value.kind == .Local(_) && !sema_ownership_type_is_copy(value.ty)
+        else -> false
+    }
+}
+
+// A consuming argument `^xs[i]` or `^xs[i].f`: an element stays owned by its
+// collection, so the mark is E0225 (as at a value-position mark,
+// Expressions/Places.jet), never a silent copy. True when rejected.
+fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool Never! {
+    element :: if expr == {
+        .Index(_, _, _, _) -> true
+        else -> false
+    }
+    if !element && !sema_expression_place_below_element(expr) -> return false
+    start :: expr_span(expr).start
+    mark_span :: Span{start: start - 1, end: start}
+    if element {
+        &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "pass `.copy()` of the element instead of `^`, or take it out with a removing call such as `pop`"))
+    } else {
+        &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take a field out of a collection element", "an element stays owned by its collection together with every field inside it, so this value can only be a copy", "remove `^` and call `.copy()` on the field instead"))
+    }
+    true
+}
+
+// The stored value of a consuming argument: a `^`-marked exact place
+// (`taken`) is a checked move, and the move of a match payload binding takes
+// the payload out of its subject (sema_ownership_move_pattern_payload).
+// None when the move is rejected.
+fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Expr, value: ^TExpr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !taken -> return Val(^value)
+    start :: expr_span(expr).start
+    payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
+    if payload < 0 -> return None
+    moved :: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value
+    Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
 }
 
 fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
@@ -539,8 +593,6 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
             template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
             mut_borrow: param.convention == AccessConvention.Write,
-            clone: arg.flags.implicit_clone,
-            arc_clone: arg.flags.shared_auto_clone,
             fn_coerce: None,
             widen_to_vec: widen_to_vec,
             widen_to_union: widen_to_union,
@@ -559,19 +611,17 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
     loop index in 0..<lowered.len() {
         slot :: typed.slots[index]
         if !params[slot].variadic -> next
+        // copy: the variadic element value is rewrapped and written back into lowered[index] below.
+        // Jet has no exchange on an element of the write-borrowed `lowered`.
         value := lowered[index].value.copy()
         if lowered[index].widen_to_vec {
             // The boundary copy itself clones the fixed list's elements.
             // Do not first clone the array and then clone that copy again.
-            if !lowered[index].clone && !lowered[index].arc_clone {
-                if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-            }
-            if args[index].convention == AccessConvention.Move -> value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
-            value = sema_tir_expr(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
-        } else if lowered[index].clone || lowered[index].arc_clone {
-            value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(lowered[index].arc_clone)}, value.span)
+            if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
+            if args[index].convention == AccessConvention.Move -> value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tir_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
         } else if args[index].convention == AccessConvention.Move {
-            value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
         } else if lowered[index].spread {
             // A lone spread is a direct List borrow; mixed spread cloning is
             // judged below on the canonical ListSpread, not on its List root.
@@ -587,17 +637,15 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-                value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(false)}, value.span)
+                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: MIRCopyFact.Materialize}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
-                value = sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
+                value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
             }
         }
         lowered[index].value = ^value
         lowered[index].borrow = false
         lowered[index].mut_borrow = false
-        lowered[index].clone = false
-        lowered[index].arc_clone = false
         lowered[index].widen_to_vec = false
     }
     true
@@ -647,7 +695,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             value: ^value, template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,
             mut_borrow: params[slot].convention == AccessConvention.Write,
-            clone: false, arc_clone: false, fn_coerce: None,
+            fn_coerce: None,
             widen_to_vec: false, widen_to_union: None, box_as_trait: None,
             label: Val(params[slot].label), spread: false,
         })
@@ -655,10 +703,10 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
     Val(^packed)
 }
 
-// This path runs Ownership after expression typing and before lowering. The
-// ownership hook may mark implicit_clone on the source arg, so lowering must
-// happen only after it accepts and completes. Return the lowered arguments
-// together with the declaration-slot temporaries placed before the call.
+// This path runs Ownership after expression typing and before lowering, so
+// lowering happens only after the ownership check accepts and completes.
+// Return the lowered arguments together with the declaration-slot
+// temporaries placed before the call.
 fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (args: [TCallArg], pins: [TStmt])? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)

@@ -91,7 +91,7 @@ fn gl_case(name: String, pack: GLPack, level: Int) -> String {
         return "unsupported"
     }
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    lir := lir_optimize_module(lowered.lir, level)
+    lir := lir_optimize_module(^lowered.lir, level)
     hosted_entry :: test_pack_entry(&lir, entry)
     // A `<case>.want-lir` marker asks for the (optimized) LIR as `<case>.lir`.
     if files.exists("{name}.want-lir") {
