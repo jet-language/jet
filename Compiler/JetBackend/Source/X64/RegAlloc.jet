@@ -555,6 +555,56 @@ fn x64_value_location(function: LIRFunction, folds: X64AddressFolds, immediate: 
     }
 }
 
+// A position no slot span ends at: an unused slot never ends before a span.
+X64_SLOT_END_NEVER :: prep { 9223372036854775807 }
+
+// The frame slots of x64_allocate's slot sharing: per slot the position its
+// last holder's span ends at, kept as the leaves of a complete binary
+// min-tree (`tree[1]` the root, leaf `slot` at `tree[leaves + slot]`), so
+// the first slot whose holders all ended before a position is found in
+// O(log slots) instead of a scan of every slot per spilled value.
+struct X64SlotEnds {
+    leaves: Int
+    count: Int
+    tree: [Int]
+}
+
+// Room for `capacity` slots.
+fn x64_slot_ends(capacity: Int) -> X64SlotEnds Never! {
+    leaves := 1
+    loop leaves < capacity -> leaves = leaves * 2
+    tree := [Int]{}
+    loop _ in 0..<(2 * leaves) -> &tree.push(X64_SLOT_END_NEVER)
+    X64SlotEnds{leaves: leaves, count: 0, tree: tree}
+}
+
+// The lowest slot whose end lies before `position`, or -1.
+fn x64_slot_ends_first_before(ends: X64SlotEnds, position: Int) -> Int Never! {
+    if ends.tree[1] >= position -> return -1
+    node := 1
+    loop node < ends.leaves {
+        node = if ends.tree[2 * node] < position -> 2 * node else -> 2 * node + 1
+    }
+    node - ends.leaves
+}
+
+fn x64_slot_ends_set(ends: &X64SlotEnds, slot: Int, end: Int) Never! {
+    node := ends.leaves + slot
+    ends.tree[node] = end
+    loop node > 1 {
+        node = node /% 2
+        left :: ends.tree[2 * node]
+        right :: ends.tree[2 * node + 1]
+        ends.tree[node] = if left < right -> left else -> right
+    }
+}
+
+fn x64_slot_ends_push(ends: &X64SlotEnds, end: Int) Never! {
+    slot :: ends.count
+    ends.count = slot + 1
+    x64_slot_ends_set(&ends, slot, end)
+}
+
 fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     folds :: x64_address_folds(function)
     count :: function.values.len()
@@ -799,24 +849,28 @@ fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     }
     spans := [[Int]]{}
     loop _ in 0..<(position + 1) -> &spans.push([Int]{})
+    spilled := 0
     loop value in 0..<count {
-        if slots[value] >= 0 -> &spans[span_starts[value]].push(value)
+        if slots[value] >= 0 {
+            &spans[span_starts[value]].push(value)
+            spilled += 1
+        }
     }
-    slot_ends := [Int]{}
+    // Every spilled value takes at most one new slot.
+    slot_ends := x64_slot_ends(spilled)
     loop bucket in spans {
         loop value in bucket {
-            reuse := -1
-            loop (slot, last) in slot_ends { if reuse < 0 && last < span_starts[value] -> reuse = slot }
+            reuse := x64_slot_ends_first_before(slot_ends, span_starts[value])
             if reuse < 0 {
-                reuse = slot_ends.len()
-                &slot_ends.push(span_ends[value])
+                reuse = slot_ends.count
+                x64_slot_ends_push(&slot_ends, span_ends[value])
             } else {
-                slot_ends[reuse] = span_ends[value]
+                x64_slot_ends_set(&slot_ends, reuse, span_ends[value])
             }
             slots[value] = reuse
         }
     }
-    spill_slots = slot_ends.len()
+    spill_slots = slot_ends.count
 
     segment_locations := [X64Loc]{}
     loop (segment, value) in build.values {
