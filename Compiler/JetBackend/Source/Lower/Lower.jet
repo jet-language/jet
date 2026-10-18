@@ -298,13 +298,15 @@ struct LowerModule {
     // without reading a stopped result.
     stop_points: Bool
     task_stop_points: Bool
-    // Parallel body lowering (Workers.jet): set in each thread's copy of the
+    // Parallel lowering (Workers.jet): set in each thread's copy of the
     // module, which then records the extent of every keyed registration that
-    // creates other rows, and every constant carrying a function ID, so the
-    // merge can drop and renumber them.
+    // creates other rows, every constant carrying a function ID, and the
+    // native export symbols it registers, in order, so the merge can drop,
+    // renumber and replay them.
     parted: Bool{false}
     extents: [LowerExtent]{[LowerExtent]{}}
     function_keys: [LowerFunctionKey]{[LowerFunctionKey]{}}
+    export_rows: [String]{[String]{}}
 }
 
 // Read-only facts about the MIR function being lowered.
@@ -691,13 +693,20 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         loop symbol in imports -> lower_native_glue_import(program, &m, "external C consumer", symbol)
         loop function in functions -> lower_native_glue_rewrite(program, &m, function)
     }
-    // Glue and helpers may register more, so the list grows while it is walked.
+    // Glue and helpers may register more, so the list grows while it is
+    // walked: on the threads in waves when the bodies were parted
+    // (lower_glue_waves), else row by row here.
     cursor := 0
     dispatchers := [Int]{}
     glue_functions := [LIRFunction?]{}
     emitted := 0
     inventory :: lower_trait_key_count(m)
     loop {
+        if workers > 1 && !keep_going {
+            waved := lower_glue_waves(program, ^m, cursor, workers, native_pack, &dispatchers, &glue_functions)
+            m = ^waved.state
+            cursor = waved.cursor
+        }
         loop cursor < m.glue.len() {
             // copy: the glue row is read while lowering it pushes more glue and signatures into `m`
             // (`&m`). A view into m.glue would dangle when that list grows.
