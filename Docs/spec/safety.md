@@ -226,9 +226,9 @@ example retains the negative unsafe-outside-vetted scan.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1051,
+  "total": 1125,
   "counts": {
-    "Compiler": 436,
+    "Compiler": 510,
     "Core": 204,
     "Examples": 38,
     "Jetpack": 9,
@@ -674,245 +674,266 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 408,
+      "line": 411,
+      "column": 1,
+      "reason": "the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 430,
+      "column": 1,
+      "reason": "the caller owns count readable bytes ending at source_last and count writable bytes ending at target_last; an overlap has target above source"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 446,
+      "column": 1,
+      "reason": "the caller owns count readable words whose last starts at source_last and count writable words whose last starts at target_last; an overlap has target above source"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/OS/Linux.jet",
+      "line": 462,
       "column": 1,
       "reason": "reads one byte from a live readable mapped address supplied by the caller"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 415,
+      "line": 469,
       "column": 1,
       "reason": "writes one byte to a live writable mapped address supplied by the caller"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 429,
+      "line": 483,
       "column": 1,
       "reason": "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 450,
+      "line": 504,
       "column": 1,
       "reason": "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 487,
+      "line": 541,
       "column": 1,
       "reason": "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 534,
+      "line": 588,
       "column": 1,
       "reason": "the calling thread is attached and GS points at its live Jet TCB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 543,
+      "line": 597,
       "column": 1,
       "reason": "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 558,
+      "line": 612,
       "column": 1,
       "reason": "atomically adds to one aligned live word and returns its previous value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 571,
+      "line": 625,
       "column": 1,
       "reason": "atomically exchanges one aligned live word; xchg has an implicit full barrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 584,
+      "line": 638,
       "column": 1,
       "reason": "calls executable System V code with one raw word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 597,
+      "line": 651,
       "column": 1,
       "reason": "calls a Jet closure's code with the live closure header and one raw word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 615,
+      "line": 669,
       "column": 1,
       "reason": "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 656,
+      "line": 710,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller lends one live raw machine-word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 668,
+      "line": 722,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller vouches for both raw machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 682,
+      "line": 736,
       "column": 1,
       "reason": "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 698,
+      "line": 752,
       "column": 1,
       "reason": "calls a checked native runtime callback with one machine-word argument"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 711,
+      "line": 765,
       "column": 1,
       "reason": "calls a checked native runtime callback with two machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 726,
+      "line": 780,
       "column": 1,
       "reason": "calls a checked native runtime callback with three machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 743,
+      "line": 797,
       "column": 1,
       "reason": "calls a checked native runtime callback with four machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 762,
+      "line": 816,
       "column": 1,
       "reason": "calls a checked native runtime callback with five machine-word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 786,
+      "line": 840,
       "column": 1,
       "reason": "source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 808,
+      "line": 862,
       "column": 1,
       "reason": "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 832,
+      "line": 886,
       "column": 1,
       "reason": "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 921,
+      "line": 975,
       "column": 1,
       "reason": "the audited caller lends the stat scalar row and valid syscall object"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 923,
+      "line": 977,
       "column": 5,
       "reason": "packed Linux 32-bit fields become independent portable machine words without any allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 935,
+      "line": 989,
       "column": 1,
       "reason": "calls a checked System V void(void) process entry that remains executable for the entire call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 946,
+      "line": 1000,
       "column": 1,
       "reason": "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1044,
+      "line": 1098,
       "column": 5,
       "reason": "address names an initialized canonical native word owned by the pinned request or retained slot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1051,
+      "line": 1105,
       "column": 5,
       "reason": "address names an initialized canonical native byte owned by the pinned request or retained slot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1058,
+      "line": 1112,
       "column": 5,
       "reason": "width and address range are checked; the caller retains the initialized slot's physical permit"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1094,
+      "line": 1148,
       "column": 5,
       "reason": "the caller owns exactly size writable bytes under the native payload permit; width and value were checked above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1112,
+      "line": 1166,
       "column": 9,
       "reason": "both addresses have the checked canonical alloc(size,align) / free(pointer,size,align) ABI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1128,
+      "line": 1182,
       "column": 5,
       "reason": "the allocation receipt pairs this owner with its original free address and exact size/alignment"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1136,
+      "line": 1190,
       "column": 5,
       "reason": "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/OS/Linux.jet",
-      "line": 1144,
+      "line": 1198,
       "column": 1,
       "reason": "calls machine code; the caller vouches for its three-word System V signature"
     },
@@ -1051,218 +1072,673 @@ example retains the negative unsafe-outside-vetted scan.
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 112,
+      "column": 19,
+      "reason": "rename within the retained parent descriptor; C names remain live"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 142,
+      "column": 35,
+      "reason": "mkdir relative to retained directory with live encoded name"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 216,
+      "column": 11,
+      "reason": "openat borrows live retained parent and terminated encoded name"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 218,
+      "column": 9,
+      "reason": "transfer ownership of newly opened descriptor exactly once"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 222,
+      "column": 11,
+      "reason": "exclusive nofollow openat below retained parent"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 224,
+      "column": 9,
+      "reason": "transfer ownership of newly created descriptor exactly once"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/Canvas/SourceModel.jet",
+      "line": 228,
+      "column": 15,
+      "reason": "unlink retained-parent entry without following final symlink"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 470,
+      "column": 5,
+      "reason": "unlinkat borrows a held parent and CString"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 475,
+      "column": 5,
+      "reason": "adopt only a successful openat descriptor"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 483,
+      "column": 5,
+      "reason": "adopt only a successful openat descriptor"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 529,
+      "column": 5,
+      "reason": "mkdirat borrows the retained directory and CString"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 548,
+      "column": 5,
+      "reason": "exclusive openat descriptor transfers ownership exactly once"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 570,
+      "column": 5,
+      "reason": "exclusive temporary and renameat borrow retained parent and names"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 590,
+      "column": 5,
+      "reason": "renameat borrows both retained directory authorities"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 669,
+      "column": 5,
+      "reason": "Win32 fills borrowed UTF16 buffer; handle remains owned"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 680,
+      "column": 5,
+      "reason": "Win32 writes exactly the C-layout attribute tag record"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 737,
+      "column": 5,
+      "reason": "aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetDevserver/Source/WebHost02.jet",
+      "line": 751,
+      "column": 5,
+      "reason": "Win32 consumes borrowed C-layout disposition record"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 154,
+      "column": 9,
+      "reason": "fchmod retries EINTR on the same retained descriptor; first noninterrupted native error survives cleanup"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 164,
+      "column": 9,
+      "reason": "canonical selected-target file sync uses F_FULLFSYNC on Apple, fsync elsewhere; std sync_all retries EINTR"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 202,
+      "column": 9,
+      "reason": "owned Unix descriptor is released exactly once, never retried"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 214,
+      "column": 9,
+      "reason": "drop releases flock on this held open-file description before close"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 224,
+      "column": 5,
+      "reason": "NUL-terminated component payload lives across synchronous openat/mkdirat; parent fd is retained"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 248,
+      "column": 9,
+      "reason": "absolute root uses nofollow/directory flags; std OpenOptions retries EINTR, unlike the explicit component openat calls"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 281,
+      "column": 5,
+      "reason": "canonical dup_cloexec preserves std try_clone's CLOEXEC and open-file description, without re-resolving pathname"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 288,
+      "column": 9,
+      "reason": "exclusive nonblocking flock on the held directory, exactly the Rust lock scope"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 302,
+      "column": 5,
+      "reason": "history file is opened nofollow relative to the retained directory descriptor"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 323,
+      "column": 13,
+      "reason": "mutable native loan covers initialized destination payload only; EINTR retries the same live buffer without regrowth"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 350,
+      "column": 9,
+      "reason": "write borrows the remaining original payload, with no slice allocation; handles short writes and EINTR"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 373,
+      "column": 5,
+      "reason": "create-new nofollow temp is confined to held directory; NUL buffers live throughout synchronous calls"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 381,
+      "column": 9,
+      "reason": "error cleanup unlinks only the pid/counter temp under the held root; it must not replace the captured original error"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 391,
+      "column": 5,
+      "reason": "persist file bytes before atomic held-root rename, then persist the directory; capture each failure before cleanup"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 401,
+      "column": 5,
+      "reason": "clear unlinks only the retained-root child; ENOENT still requires directory sync"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 415,
+      "column": 9,
+      "reason": "owned full-width HANDLE is closed exactly once; cleanup cannot replace the already captured primary error"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 443,
+      "column": 5,
+      "reason": "OVERLAPPED event is a real null native pointer, with native-width zeroed internal words"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 451,
+      "column": 9,
+      "reason": "unlock the same retained handle and one-byte range/zero offsets before closing it; unlock failure is ignored on drop as in Rust"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 473,
+      "column": 5,
+      "reason": "CreateFileW borrows NUL-terminated UTF16, preserves raw surrogates, uses full-width native handle and share read/write/delete"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 487,
+      "column": 5,
+      "reason": "original reparse check uses untransformed raw UTF16 for attributes and OPEN_REPARSE_POINT CreateFileW, then closes the checked full-width HANDLE"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 507,
+      "column": 9,
+      "reason": "create only this normal path component; a racing existing object remains a native create error exactly as Rust"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 543,
+      "column": 5,
+      "reason": "size query uses null UTF16 buffer; native result is checked before allocation"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 551,
+      "column": 5,
+      "reason": "GetFinalPathNameByHandleW fills one live initialized UTF16 buffer; zero/out-of-capacity result is checked before reading"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 562,
+      "column": 5,
+      "reason": "canonical C-layout handle information is read only after native success from its live initialized out slot"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 583,
+      "column": 5,
+      "reason": "native NT relative open is rooted at held directory HANDLE with share-all/open-reparse semantics; child is a single internal component"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 631,
+      "column": 9,
+      "reason": "native-width zeroed OVERLAPPED locks one byte exclusively/immediately; no pathname lock or overlapped async IO"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 658,
+      "column": 9,
+      "reason": "ReadFile writes bounded live payload/count slot; null OVERLAPPED is synchronous and native-width selected"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 683,
+      "column": 9,
+      "reason": "WriteFile borrows remaining original bytes without slice copy and a live written-count slot; short writes advance once"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 726,
+      "column": 5,
+      "reason": "canonical C header and inline UTF16 tail occupy SAME aligned live storage; held directory HANDLE is the rename root"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 744,
+      "column": 5,
+      "reason": "FILE_DISPOSITION_INFO is exactly one initialized byte and applies to the verified HANDLE, not its mutable pathname"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 763,
+      "column": 5,
+      "reason": "FlushFileBuffers persists the held temp file before replacement"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/HistoryHost.jet",
+      "line": 845,
+      "column": 17,
+      "reason": "after replacement, persist held directory; native flush failure cannot delete committed destination"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 728,
+      "column": 9,
+      "reason": "owned descriptor closes exactly once on every unwind/error rail; std File drop ignores close errors and does not retry"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 754,
+      "column": 9,
+      "reason": "each openat borrows terminated component bytes and retains every parent owner through the final operation; #4494/#4500"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 768,
+      "column": 5,
+      "reason": "final openat is NOFOLLOW+CLOEXEC and descriptor-relative; capture errno before parent cleanup"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 793,
+      "column": 13,
+      "reason": "read fills initialized output storage in place, retries only EINTR, and retains payload loan through native call"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 818,
+      "column": 9,
+      "reason": "write borrows original remaining bytes, handles short writes/EINTR, and captures errno before close"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 851,
+      "column": 5,
+      "reason": "mkdirat creates mode0777 subject to native umask relative to held parent; errno survives cleanup"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRepl/Source/Repl/TurnFacts.jet",
+      "line": 860,
+      "column": 5,
+      "reason": "unlinkat retries AT_REMOVEDIR ONLY after original EISDIR, never after other errors; retains same parent/name"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 88,
+      "line": 104,
       "column": 5,
       "reason": "pointer is a fresh payload whose align >= 8 block reserved the word 24 bytes before it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 110,
+      "line": 126,
       "column": 5,
       "reason": "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 124,
+      "line": 140,
       "column": 5,
       "reason": "the caller has removed this mapping from all heap lists and no payload remains live"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 139,
+      "line": 155,
       "column": 5,
       "reason": "the fresh state page is private to initialization, which precedes every allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 147,
+      "line": 165,
       "column": 5,
       "reason": "initialization wrote the arena table word once, before any allocation"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 159,
+      "line": 177,
       "column": 5,
       "reason": "reads the stack pointer register only; nothing is dereferenced"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 171,
+      "line": 191,
       "column": 9,
-      "reason": "the caller is quiescent: no thread mutates the slab lists it walks"
+      "reason": "the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 190,
+      "line": 218,
       "column": 5,
       "reason": "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 205,
+      "line": 233,
       "column": 5,
       "reason": "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 214,
+      "line": 242,
       "column": 5,
       "reason": "slab and its linked neighbours are live heap-owned headers protected by the held heap lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 232,
+      "line": 260,
       "column": 5,
       "reason": "head and slab are live heap-owned metadata protected by the held heap lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 248,
+      "line": 276,
       "column": 5,
       "reason": "the fresh 64KiB mapping holds every aligned free-block link; the heap lock excludes all list readers"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 266,
+      "line": 297,
       "column": 5,
-      "reason": "the held heap lock protects the class list, block links and slab live count; the chosen block has at least size+header+slack bytes"
+      "reason": "the held arena lock protects the class list, the slab's free links and live count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 319,
+      "line": 329,
       "column": 5,
-      "reason": "the large-cache lock owns every class list, its link words and the cached byte count"
+      "reason": "the held arena lock protects the slab's free links, live count, class list and live total; the block is no longer any payload or cache entry"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 339,
-      "column": 9,
-      "reason": "the large-cache lock owns every class list and the cached byte count; the mapping's first word is no live payload once it is freed"
+      "line": 357,
+      "column": 5,
+      "reason": "the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 370,
+      "line": 366,
       "column": 5,
-      "reason": "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping"
+      "reason": "block is this caller's exclusive block; its two cached words are read before the payload header overwrites them"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
       "line": 395,
       "column": 5,
+      "reason": "row is this thread's private cache row and block its cached head; both cached words are read before the payload header overwrites them"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 410,
+      "column": 5,
+      "reason": "row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 441,
+      "column": 9,
+      "reason": "row is one of this thread's eight private cache rows"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 480,
+      "column": 5,
+      "reason": "the large-cache lock owns every class list, its link words and the cached byte count"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 500,
+      "column": 9,
+      "reason": "the large-cache lock owns every class list and the cached byte count; the mapping's first word is no live payload once it is freed"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 531,
+      "column": 5,
+      "reason": "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 551,
+      "column": 9,
+      "reason": "row is this thread's private cache row"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 570,
+      "column": 5,
       "reason": "the caller holds the policy lock and cell is a counter in alloc_root"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 403,
+      "line": 578,
       "column": 5,
       "reason": "the aligned mode word is read atomically on x86; system allocation needs no policy lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 409,
+      "line": 584,
       "column": 5,
       "reason": "the policy lock exclusively owns the mode, cap and accounting words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 438,
+      "line": 613,
       "column": 5,
       "reason": "the policy lock exclusively owns live bytes; restoration does not erase outstanding tracked blocks"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 452,
+      "line": 627,
       "column": 5,
       "reason": "the held policy lock serializes all native allocator configuration and reservations"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 469,
+      "line": 644,
       "column": 5,
       "reason": "the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 483,
+      "line": 658,
       "column": 5,
       "reason": "the policy lock protects this bounded fact word in alloc_root"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 498,
+      "line": 673,
       "column": 5,
       "reason": "the private raw-heap node is fully initialized before linking under the policy/tracker lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 511,
+      "line": 686,
       "column": 5,
       "reason": "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 518,
+      "line": 693,
       "column": 5,
       "reason": "the policy/tracker lock exclusively owns all side-table links and count"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 601,
+      "line": 777,
       "column": 9,
       "reason": "the lowering returns this still-live direct allocation with exactly its original size and alignment"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 610,
+      "line": 788,
+      "column": 9,
+      "reason": "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Alloc.jet",
+      "line": 801,
       "column": 5,
       "reason": "the caller's live payload header names its slab, whose arena word is fixed when the slab is created"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 615,
+      "line": 806,
       "column": 5,
       "reason": "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 643,
+      "line": 820,
       "column": 5,
       "reason": "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
-      "line": 683,
+      "line": 860,
       "column": 5,
       "reason": "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed"
     },
@@ -1339,42 +1815,49 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 93,
+      "line": 81,
+      "column": 5,
+      "reason": "native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Collections.jet",
+      "line": 116,
       "column": 5,
       "reason": "checked native value-returning callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 99,
+      "line": 122,
       "column": 5,
       "reason": "checked native value-returning callback; both raw arguments stay valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 105,
+      "line": 128,
       "column": 5,
       "reason": "checked unary closure adapter with borrowed environment, input and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 111,
+      "line": 134,
       "column": 5,
       "reason": "checked binary closure adapter with live environment, inputs and output slots"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 117,
+      "line": 140,
       "column": 5,
       "reason": "checked native Unit callback; its raw argument stays valid for the synchronous call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Collections.jet",
-      "line": 123,
+      "line": 146,
       "column": 5,
       "reason": "checked Unit clone callback; source remains live and target lends writable output storage"
     },
@@ -1808,49 +2291,49 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 165,
+      "line": 177,
       "column": 13,
       "reason": "the owned walk descriptor and terminated part live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 223,
+      "line": 235,
       "column": 13,
       "reason": "the walk directory and terminated final part live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 460,
+      "line": 472,
       "column": 13,
       "reason": "the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 468,
+      "line": 480,
       "column": 17,
       "reason": "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 475,
+      "line": 487,
       "column": 21,
       "reason": "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 543,
+      "line": 555,
       "column": 5,
       "reason": "both walk directories and terminated final parts live through renameat/renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 557,
+      "line": 569,
       "column": 9,
       "reason": "both walk directories and terminated final parts live through linkat"
     },
@@ -2648,14 +3131,14 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 95,
+      "line": 96,
       "column": 5,
-      "reason": "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB"
+      "reason": "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 916,
+      "line": 917,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS worker"
     },
@@ -2830,63 +3313,63 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 50,
+      "line": 55,
       "column": 5,
-      "reason": "every caller has attached before running Jet TLS code"
+      "reason": "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 54,
+      "line": 65,
       "column": 5,
-      "reason": "GS is reserved for Jet and base is a live self-addressed TCB or zero at detach"
+      "reason": "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 61,
+      "line": 72,
       "column": 5,
       "reason": "gettid identifies this thread without reading its inherited GS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 243,
+      "line": 254,
       "column": 9,
       "reason": "the registry owns this live closure header whose code accepts header and one I64 value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 328,
+      "line": 342,
       "column": 5,
       "reason": "the caller transferred a System V I64->I64 code address and one argument to this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 344,
+      "line": 358,
       "column": 5,
       "reason": "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 396,
+      "line": 410,
       "column": 5,
       "reason": "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 413,
+      "line": 427,
       "column": 5,
       "reason": "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 428,
+      "line": 442,
       "column": 9,
       "reason": "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR"
     },
@@ -2991,84 +3474,119 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 9,
+      "line": 11,
       "column": 5,
       "reason": "a failed allocator witness terminates this isolated test process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 25,
+      "line": 27,
       "column": 5,
       "reason": "both allocations own count bytes; touching their endpoints must not alias each other or their metadata"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 64,
+      "line": 67,
       "column": 5,
       "reason": "first's private header names its live slab, whose arena word is fixed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 75,
+      "line": 84,
       "column": 5,
-      "reason": "the test is the only heap user and the class has a retained empty slab"
+      "reason": "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 82,
+      "line": 94,
       "column": 9,
-      "reason": "pointer's private header identifies its still-live slab, which must be the retained mapping"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 86,
-      "column": 9,
-      "reason": "no other thread touches the retained slab or its state cell"
+      "reason": "pointer's private header identifies its still-live slab, which must be the same mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
       "line": 99,
+      "column": 9,
+      "reason": "no other thread touches the slab or its class list"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "line": 113,
       "column": 5,
       "reason": "first's private header holds its mapping base and length"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 120,
+      "line": 137,
       "column": 9,
       "reason": "the test owns the full payload and can read its allocator header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 137,
+      "line": 154,
       "column": 9,
       "reason": "the chain word remains readable until its payload is freed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 143,
+      "line": 161,
       "column": 5,
       "reason": "after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 173,
+      "line": 191,
       "column": 5,
       "reason": "the test owns this fresh align-8 block and its count word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
-      "line": 219,
+      "line": 226,
+      "column": 9,
+      "reason": "the test owns the payload and keeps its chain word there"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "line": 235,
+      "column": 5,
+      "reason": "row is this thread's own cache row"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "line": 239,
+      "column": 9,
+      "reason": "the chain word remains readable until its payload is freed"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "line": 245,
+      "column": 9,
+      "reason": "row is this thread's own cache row"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "line": 252,
+      "column": 5,
+      "reason": "after the flush the row is empty"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "line": 288,
       "column": 5,
       "reason": "the exact success line is two bounded stack words written to stdout"
     },
@@ -4986,14 +5504,14 @@ example retains the negative unsafe-outside-vetted scan.
     {
       "package": "Jetpack",
       "file": "Jetpack/Foundation/Source/TreeHash.jet",
-      "line": 563,
+      "line": 557,
       "column": 9,
       "reason": "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler"
     },
     {
       "package": "Jetpack",
       "file": "Jetpack/Foundation/Source/TreeHash.jet",
-      "line": 741,
+      "line": 735,
       "column": 5,
       "reason": "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here"
     },
@@ -7602,14 +8120,14 @@ example retains the negative unsafe-outside-vetted scan.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 436 |
+| Compiler | 510 |
 | Core | 204 |
 | Examples | 38 |
 | Jetpack | 9 |
 | Tools | 4 |
 | jetpack | 1 |
 | tests | 359 |
-| **total** | **1051** |
+| **total** | **1125** |
 
 ### Regions
 
@@ -7677,41 +8195,44 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 370:1 | "atomically compares and exchanges one aligned live machine word; every non-atomic access to protected data holds its lock" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 385:1 | "x86 pause only hints that this thread is waiting in a spin loop" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 396:1 | "reads the stack pointer register after one balanced push; no memory is read" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 408:1 | "reads one byte from a live readable mapped address supplied by the caller" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 415:1 | "writes one byte to a live writable mapped address supplied by the caller" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 429:1 | "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 450:1 | "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 487:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 534:1 | "the calling thread is attached and GS points at its live Jet TCB" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 543:1 | "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 558:1 | "atomically adds to one aligned live word and returns its previous value" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 571:1 | "atomically exchanges one aligned live word; xchg has an implicit full barrier" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 584:1 | "calls executable System V code with one raw word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 597:1 | "calls a Jet closure's code with the live closure header and one raw word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 615:1 | "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 656:1 | "calls checked System V Unit code; the caller lends one live raw machine-word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 668:1 | "calls checked System V Unit code; the caller vouches for both raw machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 682:1 | "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 698:1 | "calls a checked native runtime callback with one machine-word argument" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 711:1 | "calls a checked native runtime callback with two machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 726:1 | "calls a checked native runtime callback with three machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 743:1 | "calls a checked native runtime callback with four machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 762:1 | "calls a checked native runtime callback with five machine-word arguments" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 786:1 | "source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 808:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 832:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 921:1 | "the audited caller lends the stat scalar row and valid syscall object" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 923:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 935:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 946:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1044:5 | "address names an initialized canonical native word owned by the pinned request or retained slot" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1051:5 | "address names an initialized canonical native byte owned by the pinned request or retained slot" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1058:5 | "width and address range are checked; the caller retains the initialized slot's physical permit" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1094:5 | "the caller owns exactly size writable bytes under the native payload permit; width and value were checked above" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1112:9 | "both addresses have the checked canonical alloc(size,align) / free(pointer,size,align) ABI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1128:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1136:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
-| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1144:1 | "calls machine code; the caller vouches for its three-word System V signature" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 411:1 | "the caller owns count readable bytes at source and count writable bytes at target; an overlap has target below source" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 430:1 | "the caller owns count readable bytes ending at source_last and count writable bytes ending at target_last; an overlap has target above source" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 446:1 | "the caller owns count readable words whose last starts at source_last and count writable words whose last starts at target_last; an overlap has target above source" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 462:1 | "reads one byte from a live readable mapped address supplied by the caller" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 469:1 | "writes one byte to a live writable mapped address supplied by the caller" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 483:1 | "writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 504:1 | "bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 541:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 588:1 | "the calling thread is attached and GS points at its live Jet TCB" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 597:1 | "ARCH_GET_GS writes one initialized aligned stack word only during this syscall; no TLS or heap is read, and the push/pop is balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 612:1 | "atomically adds to one aligned live word and returns its previous value" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 625:1 | "atomically exchanges one aligned live word; xchg has an implicit full barrier" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 638:1 | "calls executable System V code with one raw word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 651:1 | "calls a Jet closure's code with the live closure header and one raw word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 669:1 | "raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 710:1 | "calls checked System V Unit code; the caller lends one live raw machine-word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 722:1 | "calls checked System V Unit code; the caller vouches for both raw machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 736:1 | "calls checked System V Unit code; the caller vouches for all three raw machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 752:1 | "calls a checked native runtime callback with one machine-word argument" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 765:1 | "calls a checked native runtime callback with two machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 780:1 | "calls a checked native runtime callback with three machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 797:1 | "calls a checked native runtime callback with four machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 816:1 | "calls a checked native runtime callback with five machine-word arguments" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 840:1 | "source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 862:1 | "ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 886:1 | "object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 975:1 | "the audited caller lends the stat scalar row and valid syscall object" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 977:5 | "packed Linux 32-bit fields become independent portable machine words without any allocation" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 989:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1000:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1098:5 | "address names an initialized canonical native word owned by the pinned request or retained slot" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1105:5 | "address names an initialized canonical native byte owned by the pinned request or retained slot" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1112:5 | "width and address range are checked; the caller retains the initialized slot's physical permit" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1148:5 | "the caller owns exactly size writable bytes under the native payload permit; width and value were checked above" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1166:9 | "both addresses have the checked canonical alloc(size,align) / free(pointer,size,align) ABI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1182:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1190:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
+| Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1198:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionOutput.jet | 7:5 | "fd is this host's owned anonymous output file; no request is running" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionOutput.jet | 16:5 | "the child's completed request no longer writes this anonymous file" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionOutput.jet | 36:13 | "index is within the bytes just read into this mapping" |
@@ -7731,37 +8252,102 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetBackend/Tests/CallableStatics.jet | 77:5 | "the loaded image owns both observer pointers and their writable static cells through unload; fini is the checked zero-argument Unit function" |
 | Compiler | Compiler/JetBackend/Tests/SessionHostFixtures.jet | 151:9 | "half-close only this owned socket's write side; leave read open for HostError" |
 | Compiler | Compiler/JetBackend/Tests/SessionHostFixtures.jet | 291:5 | "the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 88:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 110:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 124:5 | "the caller has removed this mapping from all heap lists and no payload remains live" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 139:5 | "the fresh state page is private to initialization, which precedes every allocation" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 147:5 | "initialization wrote the arena table word once, before any allocation" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 159:5 | "reads the stack pointer register only; nothing is dereferenced" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 171:9 | "the caller is quiescent: no thread mutates the slab lists it walks" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 190:5 | "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 214:5 | "slab and its linked neighbours are live heap-owned headers protected by the held heap lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 232:5 | "head and slab are live heap-owned metadata protected by the held heap lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 248:5 | "the fresh 64KiB mapping holds every aligned free-block link; the heap lock excludes all list readers" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 266:5 | "the held heap lock protects the class list, block links and slab live count; the chosen block has at least size+header+slack bytes" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 319:5 | "the large-cache lock owns every class list, its link words and the cached byte count" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 339:9 | "the large-cache lock owns every class list and the cached byte count; the mapping's first word is no live payload once it is freed" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 370:5 | "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 395:5 | "the caller holds the policy lock and cell is a counter in alloc_root" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 403:5 | "the aligned mode word is read atomically on x86; system allocation needs no policy lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 409:5 | "the policy lock exclusively owns the mode, cap and accounting words" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 438:5 | "the policy lock exclusively owns live bytes; restoration does not erase outstanding tracked blocks" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 452:5 | "the held policy lock serializes all native allocator configuration and reservations" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 469:5 | "the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 483:5 | "the policy lock protects this bounded fact word in alloc_root" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 498:5 | "the private raw-heap node is fully initialized before linking under the policy/tracker lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 511:5 | "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 518:5 | "the policy/tracker lock exclusively owns all side-table links and count" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 601:9 | "the lowering returns this still-live direct allocation with exactly its original size and alignment" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 610:5 | "the caller's live payload header names its slab, whose arena word is fixed when the slab is created" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 615:5 | "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 643:5 | "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 683:5 | "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 112:19 | "rename within the retained parent descriptor; C names remain live" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 142:35 | "mkdir relative to retained directory with live encoded name" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 216:11 | "openat borrows live retained parent and terminated encoded name" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 218:9 | "transfer ownership of newly opened descriptor exactly once" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 222:11 | "exclusive nofollow openat below retained parent" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 224:9 | "transfer ownership of newly created descriptor exactly once" |
+| Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 228:15 | "unlink retained-parent entry without following final symlink" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 470:5 | "unlinkat borrows a held parent and CString" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 475:5 | "adopt only a successful openat descriptor" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 483:5 | "adopt only a successful openat descriptor" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 529:5 | "mkdirat borrows the retained directory and CString" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 548:5 | "exclusive openat descriptor transfers ownership exactly once" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 570:5 | "exclusive temporary and renameat borrow retained parent and names" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 590:5 | "renameat borrows both retained directory authorities" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 669:5 | "Win32 fills borrowed UTF16 buffer; handle remains owned" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 680:5 | "Win32 writes exactly the C-layout attribute tag record" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 737:5 | "aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans" |
+| Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 751:5 | "Win32 consumes borrowed C-layout disposition record" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 154:9 | "fchmod retries EINTR on the same retained descriptor; first noninterrupted native error survives cleanup" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 164:9 | "canonical selected-target file sync uses F_FULLFSYNC on Apple, fsync elsewhere; std sync_all retries EINTR" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 202:9 | "owned Unix descriptor is released exactly once, never retried" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 214:9 | "drop releases flock on this held open-file description before close" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 224:5 | "NUL-terminated component payload lives across synchronous openat/mkdirat; parent fd is retained" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 248:9 | "absolute root uses nofollow/directory flags; std OpenOptions retries EINTR, unlike the explicit component openat calls" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 281:5 | "canonical dup_cloexec preserves std try_clone's CLOEXEC and open-file description, without re-resolving pathname" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 288:9 | "exclusive nonblocking flock on the held directory, exactly the Rust lock scope" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 302:5 | "history file is opened nofollow relative to the retained directory descriptor" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 323:13 | "mutable native loan covers initialized destination payload only; EINTR retries the same live buffer without regrowth" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 350:9 | "write borrows the remaining original payload, with no slice allocation; handles short writes and EINTR" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 373:5 | "create-new nofollow temp is confined to held directory; NUL buffers live throughout synchronous calls" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 381:9 | "error cleanup unlinks only the pid/counter temp under the held root; it must not replace the captured original error" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 391:5 | "persist file bytes before atomic held-root rename, then persist the directory; capture each failure before cleanup" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 401:5 | "clear unlinks only the retained-root child; ENOENT still requires directory sync" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 415:9 | "owned full-width HANDLE is closed exactly once; cleanup cannot replace the already captured primary error" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 443:5 | "OVERLAPPED event is a real null native pointer, with native-width zeroed internal words" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 451:9 | "unlock the same retained handle and one-byte range/zero offsets before closing it; unlock failure is ignored on drop as in Rust" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 473:5 | "CreateFileW borrows NUL-terminated UTF16, preserves raw surrogates, uses full-width native handle and share read/write/delete" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 487:5 | "original reparse check uses untransformed raw UTF16 for attributes and OPEN_REPARSE_POINT CreateFileW, then closes the checked full-width HANDLE" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 507:9 | "create only this normal path component; a racing existing object remains a native create error exactly as Rust" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 543:5 | "size query uses null UTF16 buffer; native result is checked before allocation" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 551:5 | "GetFinalPathNameByHandleW fills one live initialized UTF16 buffer; zero/out-of-capacity result is checked before reading" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 562:5 | "canonical C-layout handle information is read only after native success from its live initialized out slot" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 583:5 | "native NT relative open is rooted at held directory HANDLE with share-all/open-reparse semantics; child is a single internal component" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 631:9 | "native-width zeroed OVERLAPPED locks one byte exclusively/immediately; no pathname lock or overlapped async IO" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 658:9 | "ReadFile writes bounded live payload/count slot; null OVERLAPPED is synchronous and native-width selected" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 683:9 | "WriteFile borrows remaining original bytes without slice copy and a live written-count slot; short writes advance once" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 726:5 | "canonical C header and inline UTF16 tail occupy SAME aligned live storage; held directory HANDLE is the rename root" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 744:5 | "FILE_DISPOSITION_INFO is exactly one initialized byte and applies to the verified HANDLE, not its mutable pathname" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 763:5 | "FlushFileBuffers persists the held temp file before replacement" |
+| Compiler | Compiler/JetRepl/Source/Repl/HistoryHost.jet | 845:17 | "after replacement, persist held directory; native flush failure cannot delete committed destination" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 728:9 | "owned descriptor closes exactly once on every unwind/error rail; std File drop ignores close errors and does not retry" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 754:9 | "each openat borrows terminated component bytes and retains every parent owner through the final operation; #4494/#4500" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 768:5 | "final openat is NOFOLLOW+CLOEXEC and descriptor-relative; capture errno before parent cleanup" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 793:13 | "read fills initialized output storage in place, retries only EINTR, and retains payload loan through native call" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 818:9 | "write borrows original remaining bytes, handles short writes/EINTR, and captures errno before close" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 851:5 | "mkdirat creates mode0777 subject to native umask relative to held parent; errno survives cleanup" |
+| Compiler | Compiler/JetRepl/Source/Repl/TurnFacts.jet | 860:5 | "unlinkat retries AT_REMOVEDIR ONLY after original EISDIR, never after other errors; retains same parent/name" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 104:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 126:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 140:5 | "the caller has removed this mapping from all heap lists and no payload remains live" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 155:5 | "the fresh state page is private to initialization, which precedes every allocation" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 165:5 | "initialization wrote the arena table word once, before any allocation" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 177:5 | "reads the stack pointer register only; nothing is dereferenced" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 191:9 | "the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 218:5 | "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 233:5 | "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 242:5 | "slab and its linked neighbours are live heap-owned headers protected by the held heap lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 260:5 | "head and slab are live heap-owned metadata protected by the held heap lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 276:5 | "the fresh 64KiB mapping holds every aligned free-block link; the heap lock excludes all list readers" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 297:5 | "the held arena lock protects the class list, the slab's free links and live count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 329:5 | "the held arena lock protects the slab's free links, live count, class list and live total; the block is no longer any payload or cache entry" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 357:5 | "the held arena lock makes the arena's scratch row exclusive; it is emptied again before the lock is released" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 366:5 | "block is this caller's exclusive block; its two cached words are read before the payload header overwrites them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 395:5 | "row is this thread's private cache row and block its cached head; both cached words are read before the payload header overwrites them" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 410:5 | "row is this thread's private cache row; each cached block's slab is live while the block is cached, so its arena word is readable, and the block returns under that arena's lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 441:9 | "row is one of this thread's eight private cache rows" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 480:5 | "the large-cache lock owns every class list, its link words and the cached byte count" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 500:9 | "the large-cache lock owns every class list and the cached byte count; the mapping's first word is no live payload once it is freed" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 531:5 | "pointer's two header words and the aligned payload are wholly within this page-rounded class mapping" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 551:9 | "row is this thread's private cache row" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 570:5 | "the caller holds the policy lock and cell is a counter in alloc_root" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 578:5 | "the aligned mode word is read atomically on x86; system allocation needs no policy lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 584:5 | "the policy lock exclusively owns the mode, cap and accounting words" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 613:5 | "the policy lock exclusively owns live bytes; restoration does not erase outstanding tracked blocks" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 627:5 | "the held policy lock serializes all native allocator configuration and reservations" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 644:5 | "the policy lock serializes restoration with native reserve and free; tracked blocks remain in the side table" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 658:5 | "the policy lock protects this bounded fact word in alloc_root" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 673:5 | "the private raw-heap node is fully initialized before linking under the policy/tracker lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 686:5 | "the process-lifetime tracker count is an aligned x86 word; a zero count avoids any lookup or lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 693:5 | "the policy/tracker lock exclusively owns all side-table links and count" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 777:9 | "the lowering returns this still-live direct allocation with exactly its original size and alignment" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 788:9 | "row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 801:5 | "the caller's live payload header names its slab, whose arena word is fixed when the slab is created" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 806:5 | "the lowering frees exactly once with the allocation's original layout; its slab remains live until this last payload is returned under its arena's lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 820:5 | "remaining is in 1..=8, so write borrows only the initialized stack word; a short write advances within it" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 860:5 | "the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 14:5 | "place is caller-owned aligned8 private unpublished storage for one atomic word" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 19:5 | "place borrows one aligned8 live atomic word; x86 aligned MOV is the SeqCst load mapping" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 24:5 | "place borrows one aligned8 live atomic word; XCHG is the full-barrier SeqCst store mapping" |
@@ -7772,12 +8358,13 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Source/CodecCSV.jet | 265:5 | "checked native Decode callback; the tree, value slot and out words stay live for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 9:5 | "data lends index's initialized packed native U8 element" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 14:5 | "data owns index's writable packed native U8 element" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 93:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 99:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 105:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 111:5 | "checked binary closure adapter with live environment, inputs and output slots" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 117:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Collections.jet | 123:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 81:5 | "native lowering owns both live ranges of count bytes; the leaves receive the copy order that overlap requires" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 116:5 | "checked native value-returning callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 122:5 | "checked native value-returning callback; both raw arguments stay valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 128:5 | "checked unary closure adapter with borrowed environment, input and output slots" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 134:5 | "checked binary closure adapter with live environment, inputs and output slots" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 140:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/Collections.jet | 146:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
 | Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 165:17 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 113:13 | "the owned readable file lends its descriptor; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
 | Compiler | Compiler/JetRuntime/Source/CountMinSketch.jet | 8:5 | "caller holds this native CMS mutex and owns the initialized four-byte counter" |
@@ -7839,13 +8426,13 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 620:9 | "the held directory, terminated plain name and writable byte range are borrowed only through readlinkat" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 646:5 | "held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2" |
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 666:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 165:13 | "the owned walk descriptor and terminated part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 223:13 | "the walk directory and terminated final part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 460:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 468:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 475:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 543:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 557:9 | "both walk directories and terminated final parts live through linkat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 177:13 | "the owned walk descriptor and terminated part live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 235:13 | "the walk directory and terminated final part live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 472:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 480:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 487:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 555:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 569:9 | "both walk directories and terminated final parts live through linkat" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 21:5 | "value transfers one 56-byte error header and its nullable owned E4 text children" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 32:5 | "value borrows the complete error header; result exclusively owns 56 fresh bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 68:5 | "value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot" |
@@ -7959,8 +8546,8 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 30:5 | "LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
 | Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 4:5 | "borrows an initialized aligned word in a live scalar/reflection carrier" |
 | Compiler | Compiler/JetRuntime/Source/ScalarReflectGlue.jet | 7:5 | "owns a writable aligned word in a native scalar/reflection carrier" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 95:5 | "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 916:9 | "sched_yield retains no memory and yields this OS worker" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 96:5 | "the cold OS leaf borrows its initialized stack word; a successful nonzero base is this attached thread's live Jet TCB or the detached zero word" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 917:9 | "sched_yield retains no memory and yields this OS worker" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 11:5 | "address names the caller-owned live Secret buffer; effectful asm stores wipe every byte including spare capacity before release" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 24:5 | "bytes is the exclusive moved native List&lt;U8&gt; header; secret is fresh aligned24B storage and adopts its sole buffer without copying secret material" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 42:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
@@ -7985,15 +8572,15 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 7:5 | "owns a writable aligned word in a fresh native text diagnostic" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 146:9 | "item0 lends the C-ABI tuple's one writable Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 151:5 | "item0 lends the C-ABI tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 50:5 | "every caller has attached before running Jet TLS code" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 54:5 | "GS is reserved for Jet and base is a live self-addressed TCB or zero at detach" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 61:5 | "gettid identifies this thread without reading its inherited GS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 243:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 328:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 344:5 | "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 396:5 | "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 413:5 | "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 428:9 | "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 55:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 65:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 72:5 | "gettid identifies this thread without reading its inherited GS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 254:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 342:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 358:5 | "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 410:5 | "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 427:5 | "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 442:9 | "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 4:5 | "borrows an initialized aligned word inside a native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 7:5 | "owns a writable aligned word inside a fresh native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 9:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |
@@ -8008,18 +8595,23 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Source/World.jet | 76:5 | "registered provider code remains live at this world/lease boundary; output lends one writable word" |
 | Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 5:5 | "borrows an initialized aligned word in a live XML carrier or optional input" |
 | Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 8:5 | "owns a writable aligned word in a fresh XML carrier or caller output" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 9:5 | "a failed allocator witness terminates this isolated test process" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 25:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 64:5 | "first's private header names its live slab, whose arena word is fixed" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 75:5 | "the test is the only heap user and the class has a retained empty slab" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 82:9 | "pointer's private header identifies its still-live slab, which must be the retained mapping" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 86:9 | "no other thread touches the retained slab or its state cell" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 99:5 | "first's private header holds its mapping base and length" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 120:9 | "the test owns the full payload and can read its allocator header" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 137:9 | "the chain word remains readable until its payload is freed" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 143:5 | "after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 173:5 | "the test owns this fresh align-8 block and its count word" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 219:5 | "the exact success line is two bounded stack words written to stdout" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 11:5 | "a failed allocator witness terminates this isolated test process" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 27:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 67:5 | "first's private header names its live slab, whose arena word is fixed" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 84:5 | "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 94:9 | "pointer's private header identifies its still-live slab, which must be the same mapping" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 99:9 | "no other thread touches the slab or its class list" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 113:5 | "first's private header holds its mapping base and length" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 137:9 | "the test owns the full payload and can read its allocator header" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 154:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 161:5 | "after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 191:5 | "the test owns this fresh align-8 block and its count word" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 226:9 | "the test owns the payload and keeps its chain word there" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 235:5 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 239:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 245:9 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 252:5 | "after the flush the row is empty" |
+| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 288:5 | "the exact success line is two bounded stack words written to stdout" |
 | Compiler | Compiler/JetRuntime/Tests/AllocationPolicyTests.jet | 4:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
 | Compiler | Compiler/JetRuntime/Tests/EnvOverlayKernel.jet | 6:5 | "failed witness terminates its isolated real-runtime process" |
 | Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 5:5 | "an isolated failed scheduler witness exits with no further runtime cleanup" |
@@ -8293,8 +8885,8 @@ example retains the negative unsafe-outside-vetted scan.
 | Examples | Examples/features/memory/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/features/memory/unsafe_sentries_source_off.jet | 7:5 | "the local cell is live for this raw read" |
 | Examples | Examples/features/tooling/checked_text_type.jet | 20:5 | "checked text example output" |
-| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 563:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
-| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 741:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
+| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 557:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
+| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 735:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 58:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 113:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 137:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |

@@ -3665,19 +3665,23 @@ struct JetCodegenSideRows {
 // Parts per admitted thread: enough that a thread which drew light parts
 // claims more while another finishes a heavy one, few enough that each
 // part's builder is set up rarely.
-JET_CODEGEN_LOWER_PARTS_PER_THREAD :: 8
+JET_CODEGEN_LOWER_PARTS_PER_THREAD :: 32
 
 // Lowers the program in `slot` on `workers` threads with dynamic scheduling:
 // the function rows are cut into consecutive parts of about equal source
 // weight (compiler_threads_partition), and each thread claims the next
 // unclaimed part until none is left, so no thread idles while parts remain.
-// With more than one thread the constant and declared type rows, which read
-// only the program, lower on one more task meanwhile (into `constants` and
-// `types`; with one thread the caller lowers them after). Each part lowers
-// on its own builder and the parts join in part order. A function's lowering
-// reads only the program and its own builder state (jet_codegen_begin_function
-// resets every per-function field), so the rows are those one builder lowers
-// in order, whichever thread lowers a part.
+// Parts are claimed heaviest single function first
+// (compiler_threads_heaviest_first over each part's largest row), so the
+// part holding a giant function starts first instead of ending the phase
+// alone. With more than one thread the constant and declared type rows,
+// which read only the program, lower on one more task meanwhile (into
+// `constants` and `types`; with one thread the caller lowers them after).
+// Each part lowers on its own builder and the parts join in part order. A
+// function's lowering reads only the program and its own builder state
+// (jet_codegen_begin_function resets every per-function field), so the rows
+// are those one builder lowers in order, whichever thread lowers a part and
+// whenever it is claimed.
 //
 // A part whose thread stopped (a panic) lowers again on this thread after
 // the join, in part order. Without JET_KEEP_GOING it lowers as one range, so
@@ -3690,19 +3694,28 @@ fn jet_codegen_lower_in_parts(slot: Shared<JetCodegenProgramSlot>, weights: [Int
     count := workers * JET_CODEGEN_LOWER_PARTS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     bounds :: compiler_threads_partition(weights, count)
+    peaks := [Int]{}
+    loop part in 0..<count {
+        peak := 0
+        loop position in bounds[part]..<bounds[part + 1] {
+            if weights[position] > peak -> peak = weights[position]
+        }
+        &peaks.push(peak)
+    }
+    order :: compiler_threads_heaviest_first(peaks)
     queue :: shared JetCodegenPartQueue{next: 0}
     ranges := [JetCodegenLoweredRange]{}
     loop _ in 0..<count -> &ranges.push(JetCodegenLoweredRange{complete: false, failure: "", rows: [JetCodegenLoweredFunction]{}})
     if workers > 1 {
         task.group lower_side {
             head :: task jet_codegen_lower_side_rows(slot)
-            jet_codegen_lower_claimers(slot, bounds, queue, 0, workers, &ranges)
+            jet_codegen_lower_claimers(slot, bounds, order, queue, 0, workers, &ranges)
             side := head.join() ?? panic(compiler_threads_failure_text(err))
             &constants.extend(compiler_take_rows<MIRConstantDef>(&side.constants))
             &types.extend(compiler_take_rows<MIRTypeDef>(&side.types))
         }
     } else {
-        jet_codegen_lower_claimers(slot, bounds, queue, 0, workers, &ranges)
+        jet_codegen_lower_claimers(slot, bounds, order, queue, 0, workers, &ranges)
     }
     lowered_rows := [JetCodegenLoweredFunction]{}
     loop part in 0..<count {
@@ -3729,11 +3742,11 @@ fn jet_codegen_lower_in_parts(slot: Shared<JetCodegenProgramSlot>, weights: [Int
 // Runs claiming threads `from..<workers`, one task each, and records every
 // part a thread returned in `ranges`. A thread that stops returns nothing,
 // so the parts it claimed stay incomplete.
-fn jet_codegen_lower_claimers(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], queue: Shared<JetCodegenPartQueue>, from: Int, workers: Int, ranges: &[JetCodegenLoweredRange]) {
+fn jet_codegen_lower_claimers(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], order: [Int], queue: Shared<JetCodegenPartQueue>, from: Int, workers: Int, ranges: &[JetCodegenLoweredRange]) {
     if from >= workers -> return
     task.group lower_threads {
-        head :: task jet_codegen_lower_claimed(slot, bounds, queue)
-        jet_codegen_lower_claimers(slot, bounds, queue, from + 1, workers, &ranges)
+        head :: task jet_codegen_lower_claimed(slot, bounds, order, queue)
+        jet_codegen_lower_claimers(slot, bounds, order, queue, from + 1, workers, &ranges)
         claimed := head.join() ?? [JetCodegenClaimedPart]{}
         loop claimed.len() > 0 {
             lowered := &claimed.pop() ?? break
@@ -3742,13 +3755,14 @@ fn jet_codegen_lower_claimers(slot: Shared<JetCodegenProgramSlot>, bounds: [Int]
     }
 }
 
-// One thread: lowers the parts it claims until none is left, each on its
-// own builder.
-fn jet_codegen_lower_claimed(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], queue: Shared<JetCodegenPartQueue>) -> [JetCodegenClaimedPart] {
+// One thread: lowers the parts it claims (`order[rank]` at claim `rank`)
+// until none is left, each on its own builder.
+fn jet_codegen_lower_claimed(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], order: [Int], queue: Shared<JetCodegenPartQueue>) -> [JetCodegenClaimedPart] {
     claimed := [JetCodegenClaimedPart]{}
     loop {
-        index :: jet_codegen_lower_claim(queue)
-        if index >= bounds.len() - 1 -> break
+        rank :: jet_codegen_lower_claim(queue)
+        if rank >= order.len() -> break
+        index :: order[rank]
         &claimed.push(JetCodegenClaimedPart{part: index, rows: jet_codegen_lower_rows(slot, bounds[index], bounds[index + 1])})
     }
     claimed

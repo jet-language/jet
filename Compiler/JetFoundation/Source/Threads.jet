@@ -85,6 +85,56 @@ fn compiler_threads_part_of(bounds: [Int], part: Int, position: Int) -> Int Neve
     found
 }
 
+// The jobs of the given `weights` in claim order for a dynamically scheduled
+// step: heaviest first, equal weights in job order (a stable merge of the
+// indexes), so a heavy job starts while light ones remain to fill the
+// threads' tails. `order[rank]` is the job index claimed at `rank`.
+fn compiler_threads_heaviest_first(weights: [Int]) -> [Int] Never! {
+    count :: weights.len()
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    if count < 2 -> return order
+    scratch := [Int]{}
+    loop _ in 0..<count -> &scratch.push(0)
+    width := 1
+    loop width < count {
+        start := 0
+        loop start < count {
+            middle := start + width
+            if middle > count -> middle = count
+            end := start + width + width
+            if end > count -> end = count
+            left := start
+            right := middle
+            out := start
+            loop left < middle && right < end {
+                if weights[order[right]] > weights[order[left]] {
+                    scratch[out] = order[right]
+                    right += 1
+                } else {
+                    scratch[out] = order[left]
+                    left += 1
+                }
+                out += 1
+            }
+            loop left < middle {
+                scratch[out] = order[left]
+                left += 1
+                out += 1
+            }
+            loop right < end {
+                scratch[out] = order[right]
+                right += 1
+                out += 1
+            }
+            start = end
+        }
+        loop index in 0..<count -> order[index] = scratch[index]
+        width = width + width
+    }
+    order
+}
+
 // A failed compiler thread's panic text, re-raised on the caller unchanged so
 // an internal error reads the same with any thread count.
 fn compiler_threads_failure_text(failure: TaskFailure) -> String Never! {

@@ -1,5 +1,5 @@
 use core.text as units_unicode
-use jet_foundation.[Span]
+use jet_foundation.[Span, name_find_bytes, name_intern, name_table]
 
 // Rust Bundle/Units.rs::SourceMentions. Offsets are UTF-8 bytes, never
 // String scalar indices. The source is indexed once, not once per catalog member.
@@ -16,18 +16,17 @@ struct SemaUnitSourceMentions {
 // Rust `is_alphanumeric() || == '_'` on the scalar bytes[at..<end]; ASCII
 // scalars are decided from the byte without building a String.
 fn sema_units_ident(bytes: [U8], at: Int, end: Int) -> Bool Never! {
-    code :: Int.from_u8(bytes[at])
-    if code < 128 -> return code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    byte :: bytes[at]
+    if byte < (U8{128}) -> return byte == (U8{95}) || (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
     scalar :: String.from_bytes(bytes[at..<end]) ?? return false
     units_unicode.is_alphabetic(scalar) || units_unicode.is_numeric(scalar)
 }
 fn sema_units_ascii_digit(byte: U8) -> Bool Never! {
-    value :: Int.from_u8(byte)
-    value >= 48 && value <= 57
+    byte >= (U8{48}) && byte <= (U8{57})
 }
 fn sema_units_scalar_end(bytes: [U8], at: Int) -> Int Never! {
     end := at + 1
-    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) <= 191 -> end += 1
+    loop end < bytes.len() && bytes[end] >= (U8{128}) && bytes[end] <= (U8{191}) -> end += 1
     end
 }
 fn sema_units_mention_suffix(rows: &[String:SemaUnitSuffixMention], bytes: [U8], start: Int, end: Int, from: Bool) Never! {
@@ -40,9 +39,13 @@ fn sema_units_mention_suffix(rows: &[String:SemaUnitSuffixMention], bytes: [U8],
 }
 // Only identifiers named in `wanted` (the catalog's family names and member
 // type names, the only names ever looked up) are indexed: the maps stay
-// catalog-sized instead of holding every identifier of the source.
+// catalog-sized instead of holding every identifier of the source. The
+// wanted names are interned once, so an identifier run is looked up by its
+// bytes and only a wanted one is built as a String.
 fn sema_units_source_mentions(source: String, wanted: [String:Bool]) -> SemaUnitSourceMentions Never! {
     bytes :: source.bytes()
+    wanted_names := name_table()
+    loop (name, _) in wanted -> _ := name_intern(&wanted_names, name)
     identifiers := [String:Span]{}
     unqualified := [String:Bool]{}
     suffixes := [String:SemaUnitSuffixMention]{}
@@ -54,21 +57,22 @@ fn sema_units_source_mentions(source: String, wanted: [String:Bool]) -> SemaUnit
             next
         }
         start :: at
-        starts := [Int]{}
         loop at < bytes.len() {
             end = sema_units_scalar_end(bytes, at)
             if !sema_units_ident(bytes, at, end) -> break
-            &starts.push(at)
             at = end
         }
-        run :: String.from_bytes(bytes[start..<at]) ?? ""
-        if wanted.get(run) != None {
+        if name_find_bytes(wanted_names, bytes, start, at) != None {
+            run :: String.from_bytes(bytes[start..<at]) ?? ""
             if identifiers.get(run) == None -> identifiers[run] = Span{start: start, end: at}
-            if (start == 0 || Int.from_u8(bytes[start - 1]) != 46) && unqualified.get(run) == None -> unqualified[run] = true
+            if (start == 0 || bytes[start - 1] != (U8{46})) && unqualified.get(run) == None -> unqualified[run] = true
         }
-        loop offset in starts {
+        // Every scalar start of the run, as the ident loop above visited them.
+        offset := start
+        loop offset < at {
             if offset > 0 && sema_units_ascii_digit(bytes[offset - 1]) && !sema_units_ascii_digit(bytes[offset]) -> sema_units_mention_suffix(&suffixes, bytes, offset, at, false)
-            if offset + 5 <= at && Int.from_u8(bytes[offset]) == 102 && Int.from_u8(bytes[offset + 1]) == 114 && Int.from_u8(bytes[offset + 2]) == 111 && Int.from_u8(bytes[offset + 3]) == 109 && Int.from_u8(bytes[offset + 4]) == 95 -> sema_units_mention_suffix(&suffixes, bytes, offset + 5, at, true)
+            if offset + 5 <= at && bytes[offset] == (U8{102}) && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) -> sema_units_mention_suffix(&suffixes, bytes, offset + 5, at, true)
+            offset = sema_units_scalar_end(bytes, offset)
         }
     }
     sorted := [SemaUnitSuffixMention]{}

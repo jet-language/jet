@@ -1,7 +1,7 @@
 // Jet threads and dynamic TLS. GS belongs exclusively to Jet; FS remains
 // musl's TLS until libc exit. The interim pthread imports die when musl leaves
 // the pack (U4 end); raw clone is implemented below but used only by fixtures.
-// TCB (320 bytes, align64), append-only runtime layout; owner per slot:
+// TCB (448 bytes, align64), append-only runtime layout; owner per slot:
 // @0 Thread self; @8 Thread tid; @16 Scheduler current control;
 // @24 Scheduler shield; @32 Scheduler wait boundary; @40 Deadline boundary;
 // @48 Deadline presence; @56 Deadline ms; @64 Scheduler native body active;
@@ -18,12 +18,17 @@
 // Appended Comptime frame: @256 depth, @264 owner, @272 start, @280 end,
 // all raw U64 bit carriers. Comptime scope saves Scheduler's four words at
 // @288 previous control, @296 shield, @304 wait boundary, @312 body active.
+// Appended Alloc thread cache: @320 + 16 per class 32..4096, each
+// [cached head block][cached count] (Alloc.jet alloc_cache_row).
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
 // Task's matches concern its separate 200-byte child, not the TCB.
 // RtL8a6 confirms no T1/Thread claim on either reserved slot. Attach before
-// the first GS read, never lazily from TLS.
+// the first GS read, never lazily from TLS: GS of an unattached thread
+// points at the allocator's zero word (thread_detached_base), so
+// thread_base() reads 0 there instead of faulting, and only the allocator
+// tests for that zero.
 #Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 = "pthread_create"
 #Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 = "pthread_join"
 #Import(c) fn thread_pthread_detach(thread: I64) -> I64 = "pthread_detach"
@@ -47,11 +52,17 @@ fn thread_zero(address: I64, bytes: I64) {
 }
 
 fn thread_base() -> I64 {
-    #Unsafe("every caller has attached before running Jet TLS code") { return os_tls_base_i64() }
+    #Unsafe("every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB") {
+        return os_tls_base_i64()
+    }
 }
 
+// The GS target of a thread without a TCB: the allocator state page's zero
+// word (Alloc.jet). jet_rt_alloc_init installs it for the initializing thread.
+fn thread_detached_base() -> I64 { alloc_root }
+
 fn thread_set_base(base: I64) {
-    #Unsafe("GS is reserved for Jet and base is a live self-addressed TCB or zero at detach") {
+    #Unsafe("GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word") {
         status :: os_syscall_i64(I64{158}, I64{4097}, base, I64{0}, I64{0}, I64{0}, I64{0})
         if (status != I64{0}) { trap_gs_failure() }
     }
@@ -64,8 +75,8 @@ fn thread_tid() -> I64 {
 }
 
 fn thread_new_tcb(tid: I64) -> I64 {
-    tcb :: jet_rt_alloc(I64{320}, I64{64})
-    thread_zero(tcb, I64{320})
+    tcb :: jet_rt_alloc(I64{448}, I64{64})
+    thread_zero(tcb, I64{448})
     sync_store(tcb, tcb)
     sync_store(tcb + I64{8}, tid)
     tcb
@@ -86,7 +97,7 @@ fn thread_register_tcb(tid: I64, tcb: I64) {
 // point to a parent's already-freed TCB; never read that base or its memory.
 #Export(c) fn jet_rt_thread_bootstrap() {
     // Even an allocation failure must not let a trap read inherited GS.
-    thread_set_base(I64{0})
+    thread_set_base(thread_detached_base())
     tid :: thread_tid()
     tcb :: thread_new_tcb(tid)
     sync_mutex_lock(thread_tls_registry)
@@ -99,7 +110,7 @@ fn thread_register_tcb(tid: I64, tcb: I64) {
 // Otherwise a recycled Linux tid could match a stale live-registry row.
 #Export(c) fn jet_rt_thread_attach() {
     // This path may also allocate; clear a foreign/inherited base first.
-    thread_set_base(I64{0})
+    thread_set_base(thread_detached_base())
     // Explicit host attach and repeated attach use only live registry records.
     // Linux gettid is the lookup key; a copied/stale GS base is irrelevant.
     tid :: thread_tid()
@@ -307,9 +318,12 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
         jet_rt_free(table, I64{24}, I64{8})
     }
     sentry_thread_detach()
+    // Every destructor above has run its last free: return the cache before
+    // the TCB that holds it goes away, then release the TCB on the locked path.
+    alloc_cache_flush()
     thread_unregister_tcb(tcb)
-    thread_set_base(I64{0})
-    jet_rt_free(tcb, I64{320}, I64{64})
+    thread_set_base(thread_detached_base())
+    jet_rt_free(tcb, I64{448}, I64{64})
 }
 
 // RuntimeLower alone replaces this body with FunctionAddress of the checked
