@@ -652,7 +652,9 @@ fn pkg_data_sql_table_constraint(segment: [String], primary_seen: Bool) -> (requ
         else -> return Err(DataBindError{message: "SQL table constraint {token} is unsupported"})
     }
     if cursor.index != segment.len() -> return Err(DataBindError{message: "SQL table constraint has trailing tokens"})
-    Ok((required: required, primary: primary))
+    // Written in the tuple's canonical member order: the O0 seed zips a
+    // literal's members by position after sorting its type's.
+    Ok((primary: primary, required: required))
 }
 
 // One `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] [schema.]name (...)`.

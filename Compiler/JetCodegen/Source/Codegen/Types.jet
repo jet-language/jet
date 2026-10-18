@@ -285,9 +285,13 @@ fn jet_codegen_core_owner_identity(owner: TCoreBuiltinOwner, semantic_module: Se
 
 // The invariants of a checked Core builtin owner, without building its
 // identity (the nominal index validates every owner once).
+// The report takes a copy of `fault`: the stop path releases every live
+// local (the scope-exit drops run before the stop call), and the O0 seed
+// reads the dropped message otherwise (a0_005 round 5, LIR lint
+// "use after moved or dropped").
 fn jet_codegen_check_core_owner(owner: TCoreBuiltinOwner, semantic_module: SemaGraphModuleResult) Never! {
     fault :: jet_codegen_core_owner_fault(owner, semantic_module)
-    if fault != "" -> panic(fault)
+    if fault != "" -> panic(fault.copy())
 }
 
 // Why a checked Core builtin owner is invalid, "" when it is not.
