@@ -84,17 +84,23 @@ struct LowerFunctionKey {
     value: Int
 }
 
-// The registries whose rows register under a key (LowerKeyedRow.registry).
+// The registries whose rows register under a key (LowerKeyedRow.registry):
+// the five the merge remaps by row, then the frozen-static roots (`row` is
+// the static_rows value: a data row, or the "box:" addend) and the native
+// exports (`row` is the function id), which the glue-wave sync mirrors.
 LOWER_KEYED_SIGNATURE :: 0
 LOWER_KEYED_GLUE :: 1
 LOWER_KEYED_DATA :: 2
 LOWER_KEYED_DEBUG_TYPE :: 3
 LOWER_KEYED_DEBUG_FILE :: 4
+LOWER_KEYED_STATIC :: 5
+LOWER_KEYED_EXPORT :: 6
 
-// One keyed registration of a thread's module: registry row `row` under
-// `key` (a debug file's key is the source file id `file`), in registration
-// order, so the merge reads each row's key from this log instead of scanning
-// every registry map of the module (lower_remap_open).
+// One keyed registration of a parted module: registry row `row` under `key`
+// (a debug file's key is the source file id `file`), in registration order.
+// A thread's log gives the merge each row's key (lower_remap_open) and the
+// sync the keys to retract; the merged module's log (parted for the glue
+// phase) gives the sync the keys to adopt (lower_workers_sync).
 struct LowerKeyedRow {
     registry: Int
     row: Int
@@ -102,8 +108,8 @@ struct LowerKeyedRow {
     file: U64
 }
 
-// Records a keyed registration (only in a thread's module; the serial
-// lowering records nothing).
+// Records a keyed registration (only in a parted module; the serial lowering
+// records nothing).
 fn lower_keyed_record(m: &LowerModule, registry: Int, row: Int, key: String, file: U64) Never! {
     if !m.parted -> return
     &m.keyed_rows.push(LowerKeyedRow{registry: registry, row: row, key: key.copy(), file: file})
@@ -177,10 +183,34 @@ struct LowerWorkersInputs {
     native_pack: Bool
 }
 
-// One thread's module (none until its first part) and failed functions.
+// One thread's module (none until its first part) and failed functions. In
+// the glue waves the module persists across waves: `synced` is the merged
+// module's marks it mirrors (its rows past them are its own), `synced_log`
+// the length of the merged module's registration log it has adopted, and
+// `synced_wave` the merged module's wave count when it did
+// (lower_workers_sync).
 struct LowerWorker {
     modules: [LowerModule]
     failed: [U64:Bool]
+    synced: LowerMarks
+    synced_log: Int
+    synced_wave: Int
+}
+
+fn lower_marks_none() -> LowerMarks Never! {
+    LowerMarks{signatures: 0, data: 0, debug_types: 0, debug_files: 0, glue: 0, issues: 0, fixups: 0, extents: 0, keys: 0, sites: 0, exports: 0}
+}
+
+// The glue phase's thread modules (lower_glue_waves): one slot per thread
+// and one for the calling thread, each opened from the merged module at its
+// first wave and kept across waves and calls.
+fn lower_glue_slots(workers: Int) -> [Shared<LowerWorker>] Never! {
+    slots := [Shared<LowerWorker>]{}
+    loop _ in 0..<(workers + 1) {
+        slot :: shared LowerWorker{modules: [LowerModule]{}, failed: [U64:Bool]{}, synced: lower_marks_none(), synced_log: 0, synced_wave: 0}
+        &slots.push(slot)
+    }
+    slots
 }
 
 // One claimable part: its consecutive inventory rows [position, last) still
@@ -219,7 +249,7 @@ fn lower_workers_lower(program: ^MIRProgram, m: ^LowerModule, functions: ^[Lower
     // the parts no thread claimed); each claiming task has one of 1..workers.
     slots := [Shared<LowerWorker>]{}
     loop _ in 0..<(workers + 1) {
-        slot :: shared LowerWorker{modules: [LowerModule]{}, failed: [U64:Bool]{}}
+        slot :: shared LowerWorker{modules: [LowerModule]{}, failed: [U64:Bool]{}, synced: bases, synced_log: 0, synced_wave: 0}
         &slots.push(slot)
     }
     queue :: shared LowerWorkersQueue{next: 0}
@@ -283,20 +313,113 @@ fn lower_workers_part_run(inputs: Shared<LowerWorkersInputs>, worker: Shared<Low
     read :: inputs.guard_read()
     held := worker.guard_edit()
     permit := part.guard_edit()
-    if held.value.modules.len() == 0 -> lower_workers_open(read.value.modules[0], read.value.failed, &held.value)
+    if held.value.modules.len() == 0 {
+        lower_workers_open(read.value.modules[0], read.value.failed, &held.value)
+    } else if read.value.glue_wave && held.value.synced_wave != read.value.modules[0].glue_waves {
+        lower_workers_sync(read.value.modules[0], &held.value)
+    }
     // Passed straight through: a local binding of the guarded program would copy it.
     if read.value.glue_wave -> return lower_workers_glue_rows(read.value.programs[0], read.value.modules[0], read.value.glue, read.value.native_pack, &held.value, slot, &permit.value)
     lower_workers_rows(read.value.programs[0], read.value.functions, read.value.instances, &held.value, slot, &permit.value)
 }
 
-// A thread's first part: its own module, copied from the pre-registered one.
+// A thread's first part: its own module, copied from the pre-registered one
+// (for the glue waves, from the merged module as the first wave finds it:
+// once per thread for the whole glue phase, lower_workers_sync after that).
+// The copy's logs are the base's (empty, or the merged module's own) and are
+// cleared: the thread's logs hold its own registrations only.
 fn lower_workers_open(base: LowerModule, failed: [U64:Bool], worker: &LowerWorker) Never! {
     // copy: each thread registers into a module of its own, whose rows the merge replays.
     own := base.copy()
     own.parted = true
+    own.keyed_rows = [LowerKeyedRow]{}
+    own.extents = [LowerExtent]{}
+    own.function_keys = [LowerFunctionKey]{}
+    own.export_rows = [String]{}
     &worker.modules.push(^own)
+    worker.synced = lower_marks(base)
+    worker.synced_log = base.keyed_rows.len()
+    worker.synced_wave = base.glue_waves
     // copy: the preparation's failures, which every thread's bodies test.
     worker.failed = failed.copy()
+}
+
+// Brings a thread's module from the previous glue wave to the merged module
+// `base` as this wave finds it, without copying the module: the thread's own
+// rows (past `synced`, all merged by now) are retracted, keys first
+// (lower_workers_retract), then the rows the merged module gained since the
+// thread last mirrored it are adopted with the keys its log recorded
+// (lower_workers_adopt). The module then reads exactly as a copy of `base`
+// would (its type caches are pure functions of the program), so the wave
+// lowers the same functions and registers the same rows.
+fn lower_workers_sync(base: LowerModule, worker: &LowerWorker) Never! {
+    // copy: eleven counts, read while the module (`&worker.modules[0]`) is written below.
+    synced :: worker.synced.copy()
+    from :: worker.synced_log
+    lower_workers_retract(&worker.modules[0], synced)
+    lower_workers_adopt(&worker.modules[0], base, synced, from)
+    worker.synced = lower_marks(base)
+    worker.synced_log = base.keyed_rows.len()
+    worker.synced_wave = base.glue_waves
+}
+
+fn lower_workers_truncate<T>(rows: &[T], count: Int) Never! {
+    loop rows.len() > count -> _ := &rows.pop()
+}
+
+// Drops the module's own rows: those past `synced`, with the keys its log
+// registered them under, and its logs.
+fn lower_workers_retract(m: &LowerModule, synced: LowerMarks) Never! {
+    log :: compiler_take_rows<LowerKeyedRow>(&m.keyed_rows)
+    loop keyed in log {
+        if {
+            keyed.registry == LOWER_KEYED_SIGNATURE -> _ := &m.signature_rows.remove(keyed.key)
+            keyed.registry == LOWER_KEYED_GLUE -> _ := &m.glue_rows.remove(keyed.key)
+            keyed.registry == LOWER_KEYED_DATA -> _ := &m.data_rows.remove(keyed.key)
+            keyed.registry == LOWER_KEYED_DEBUG_TYPE -> _ := &m.debug_type_rows.remove(keyed.key)
+            keyed.registry == LOWER_KEYED_DEBUG_FILE -> _ := &m.debug_file_rows.remove(keyed.file)
+            keyed.registry == LOWER_KEYED_STATIC -> _ := &m.static_rows.remove(keyed.key)
+            else -> _ := &m.native_exports.remove(keyed.key)
+        }
+    }
+    lower_workers_truncate<LIRSignature>(&m.signatures, synced.signatures)
+    lower_workers_truncate<LowerGlue>(&m.glue, synced.glue)
+    lower_workers_truncate<LIRData>(&m.data, synced.data)
+    lower_workers_truncate<LIRDebugType>(&m.debug_types, synced.debug_types)
+    lower_workers_truncate<String>(&m.debug_files, synced.debug_files)
+    lower_workers_truncate<LIRLoweringIssue>(&m.issues, synced.issues)
+    lower_workers_truncate<LowerStaticFixup>(&m.static_fixups, synced.fixups)
+    lower_workers_truncate<LIRSharedSiteExport>(&m.shared_sites, synced.sites)
+    m.extents = [LowerExtent]{}
+    m.function_keys = [LowerFunctionKey]{}
+    m.export_rows = [String]{}
+}
+
+// Appends the merged module's rows past `synced` and registers the keys its
+// log recorded from position `from` on (every key added to a merged-module
+// map since then; none was present in the thread's module, which mirrored
+// the merged module at `synced`).
+fn lower_workers_adopt(m: &LowerModule, base: LowerModule, synced: LowerMarks, from: Int) Never! {
+    loop at in synced.signatures..<base.signatures.len() -> &m.signatures.push(base.signatures[at].copy())
+    loop at in synced.glue..<base.glue.len() -> &m.glue.push(base.glue[at].copy())
+    loop at in synced.data..<base.data.len() -> &m.data.push(base.data[at].copy())
+    loop at in synced.debug_types..<base.debug_types.len() -> &m.debug_types.push(base.debug_types[at].copy())
+    loop at in synced.debug_files..<base.debug_files.len() -> &m.debug_files.push(base.debug_files[at].copy())
+    loop at in synced.issues..<base.issues.len() -> &m.issues.push(base.issues[at].copy())
+    loop at in synced.fixups..<base.static_fixups.len() -> &m.static_fixups.push(base.static_fixups[at].copy())
+    loop at in synced.sites..<base.shared_sites.len() -> &m.shared_sites.push(base.shared_sites[at].copy())
+    loop at in from..<base.keyed_rows.len() {
+        keyed :: base.keyed_rows[at]
+        if {
+            keyed.registry == LOWER_KEYED_SIGNATURE -> &m.signature_rows.add(keyed.key.copy(), keyed.row).drop("absent: the module mirrors the merged one")
+            keyed.registry == LOWER_KEYED_GLUE -> &m.glue_rows.add(keyed.key.copy(), keyed.row).drop("absent: the module mirrors the merged one")
+            keyed.registry == LOWER_KEYED_DATA -> &m.data_rows.add(keyed.key.copy(), keyed.row).drop("absent: the module mirrors the merged one")
+            keyed.registry == LOWER_KEYED_DEBUG_TYPE -> &m.debug_type_rows.add(keyed.key.copy(), keyed.row).drop("absent: the module mirrors the merged one")
+            keyed.registry == LOWER_KEYED_DEBUG_FILE -> &m.debug_file_rows.add(keyed.file, keyed.row).drop("absent: the module mirrors the merged one")
+            keyed.registry == LOWER_KEYED_STATIC -> &m.static_rows.add(keyed.key.copy(), keyed.row).drop("absent: the module mirrors the merged one")
+            else -> &m.native_exports.add(keyed.key.copy(), LIRFunctionID{value: keyed.row}).drop("absent: the module mirrors the merged one")
+        }
+    }
 }
 
 // Lowers `part`'s functions from its position to its last against module
@@ -342,29 +465,28 @@ fn lower_workers_glue_rows(program: MIRProgram, base: LowerModule, wave: [Int], 
 // Lowers the glue rows `wave` (rows of `m`'s glue list, in order; no trait
 // dispatcher or barrier row among them, lower_glue_barrier) on `workers`
 // threads: consecutive parts of about equal row counts, each thread lowering
-// its parts against a copy of `m` as it stands now, merged in part order
-// (lower_workers_merge). Returns the merged module and the lowered
-// functions in wave order, in lower_workers_lower's form; the module's glue
-// list then holds, after the wave's rows, every row the wave registered, in
-// the order the serial loop registers them.
-fn lower_workers_glue(program: ^MIRProgram, m: ^LowerModule, wave: [Int], workers: Int, native_pack: Bool) -> LowerKeepGoingLowered {
+// its parts against its module of `slots` (opened from `m` at its first wave,
+// brought to `m` as it stands now at each later one: lower_workers_sync),
+// merged in part order (lower_workers_merge). Returns the merged module and
+// the lowered functions in wave order, in lower_workers_lower's form; the
+// module's glue list then holds, after the wave's rows, every row the wave
+// registered, in the order the serial loop registers them.
+fn lower_workers_glue(program: ^MIRProgram, m: ^LowerModule, wave: [Int], workers: Int, native_pack: Bool, slots: [Shared<LowerWorker>]) -> LowerKeepGoingLowered {
     count := workers * LOWER_WORKERS_PARTS_PER_THREAD
     if count > wave.len() -> count = wave.len()
     if count < 1 -> count = 1
     weights := [Int]{}
     loop _ in wave -> &weights.push(1)
     bounds :: compiler_threads_partition(weights, count)
-    bases :: lower_marks(m)
-    inputs :: shared LowerWorkersInputs{programs: [MIRProgram]{^program}, functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{}, modules: [LowerModule]{^m}, failed: [U64:Bool]{}, glue_wave: true, glue: wave.copy(), native_pack: native_pack}
+    // This wave's number: a thread module syncs to `m` once it sees it.
+    merged := ^m
+    merged.glue_waves = merged.glue_waves + 1
+    bases :: lower_marks(merged)
+    inputs :: shared LowerWorkersInputs{programs: [MIRProgram]{^program}, functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{}, modules: [LowerModule]{^merged}, failed: [U64:Bool]{}, glue_wave: true, glue: wave.copy(), native_pack: native_pack}
     parts := [Shared<LowerWorkersPart>]{}
     loop part in 0..<count {
         row :: shared LowerWorkersPart{position: bounds[part], last: bounds[part + 1], worker: -1, start: bases, end: bases, functions: [LIRFunction]{}}
         &parts.push(row)
-    }
-    slots := [Shared<LowerWorker>]{}
-    loop _ in 0..<(workers + 1) {
-        slot :: shared LowerWorker{modules: [LowerModule]{}, failed: [U64:Bool]{}}
-        &slots.push(slot)
     }
     queue :: shared LowerWorkersQueue{next: 0}
     _ := lower_workers_claimers(inputs, slots, parts, queue, workers - 1, true, false)
@@ -388,14 +510,18 @@ struct LowerGlueWaves {
 
 // The parallel form of lower_selected_in_place's glue loop: lowers the glue
 // rows from `cursor` to the end of the list, and the rows those register, in
-// waves on the threads (lower_workers_glue) until none is left. Each wave is
-// the rows registered so far and not yet lowered: a trait dispatcher row is
-// deferred into `dispatchers` (its function None until the caller emits it);
-// a barrier row (lower_glue_barrier) ends its wave and lowers here once the
-// rows before it are merged, so it reads the registry exactly as the serial
-// loop does at that row. `glue_functions` gets one entry per row, by row.
-fn lower_glue_waves(program: MIRProgram, m: ^LowerModule, cursor: Int, workers: Int, native_pack: Bool, dispatchers: &[Int], glue_functions: &[LIRFunction?]) -> LowerGlueWaves Never! {
+// waves on the threads (lower_workers_glue, on the thread modules `slots`:
+// lower_glue_slots, kept across waves and calls) until none is left. Each
+// wave is the rows registered so far and not yet lowered: a trait dispatcher
+// row is deferred into `dispatchers` (its function None until the caller
+// emits it); a barrier row (lower_glue_barrier) ends its wave and lowers here
+// once the rows before it are merged, so it reads the registry exactly as the
+// serial loop does at that row. `glue_functions` gets one entry per row, by
+// row. `m` is parted: it logs the keys it registers (the merge's and the
+// barrier rows'), which the thread modules adopt at their next wave.
+fn lower_glue_waves(program: MIRProgram, m: ^LowerModule, cursor: Int, workers: Int, native_pack: Bool, slots: [Shared<LowerWorker>], dispatchers: &[Int], glue_functions: &[LIRFunction?]) -> LowerGlueWaves Never! {
     state := ^m
+    assert(state.parted)
     at := cursor
     loop at < state.glue.len() {
         end :: state.glue.len()
@@ -417,7 +543,7 @@ fn lower_glue_waves(program: MIRProgram, m: ^LowerModule, cursor: Int, workers: 
             // copy: the threads read an indexed program of their own, while `program` (the caller's,
             // write-borrowed there) still feeds the barrier rows and the caller. Its rows are shared
             // buffers, not copies of the whole program.
-            parted := lower_workers_glue(program.copy(), ^state, wave, workers, native_pack) ?? panic("the native glue lowering threads failed")
+            parted := lower_workers_glue(program.copy(), ^state, wave, workers, native_pack, slots) ?? panic("the native glue lowering threads failed")
             state = ^parted.state
             lowered := ^parted.functions
             loop index in 0..<wave.len() {
@@ -557,7 +683,8 @@ fn lower_remap_open(local: LowerModule, bases: LowerMarks, remap: &LowerRemap) N
             keyed.registry == LOWER_KEYED_GLUE -> glue_keys[keyed.row - bases.glue] = keyed.key.copy()
             keyed.registry == LOWER_KEYED_DATA -> data_keys[keyed.row - bases.data] = Val(keyed.key.copy())
             keyed.registry == LOWER_KEYED_DEBUG_TYPE -> debug_keys[keyed.row - bases.debug_types] = Val(keyed.key.copy())
-            else -> file_keys[keyed.row - bases.debug_files] = keyed.file
+            keyed.registry == LOWER_KEYED_DEBUG_FILE -> file_keys[keyed.row - bases.debug_files] = keyed.file
+            else -> {}
         }
     }
     remap.signature_keys = ^signature_keys
@@ -706,6 +833,7 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
             row = m.signatures.len()
             signature :: local.signatures[at]
             &m.signatures.push(LIRSignature{id: LIRSignatureID{value: row}, convention: signature.convention, params: signature.params.copy(), result: signature.result.copy()})
+            lower_keyed_record(&m, LOWER_KEYED_SIGNATURE, row, key, U64{0})
             &m.signature_rows.add(key, row).drop("checked absent above")
         }
         remap.signatures[at - bases.signatures] = row
@@ -717,6 +845,7 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
             row = m.glue.len()
             glue :: local.glue[at]
             &m.glue.push(LowerGlue{key: glue.key.copy(), ty: glue.ty.copy(), id: LIRFunctionID{value: m.glue_base + row}, clone: glue.clone, helper: glue.helper.copy(), function: glue.function})
+            lower_keyed_record(&m, LOWER_KEYED_GLUE, row, key, U64{0})
             &m.glue_rows.add(key, row).drop("checked absent above")
         }
         remap.glue[at - bases.glue] = row
@@ -727,6 +856,7 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
         if row < 0 {
             row = m.debug_files.len()
             &m.debug_files.push(local.debug_files[at].copy())
+            lower_keyed_record(&m, LOWER_KEYED_DEBUG_FILE, row, "", file)
             &m.debug_file_rows.add(file, row).drop("checked absent above")
         }
         remap.debug_files[at - bases.debug_files] = row
@@ -750,7 +880,10 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
         if row < 0 {
             row = m.debug_types.len()
             &m.debug_types.push(LIRDebugType{name: "", size: 0, kind: LIRDebugTypeKind.Opaque})
-            if keyed -> &m.debug_type_rows.add(key, row).drop("checked absent above")
+            if keyed {
+                lower_keyed_record(&m, LOWER_KEYED_DEBUG_TYPE, row, key, U64{0})
+                &m.debug_type_rows.add(key, row).drop("checked absent above")
+            }
             &appended_debug.push(at)
         }
         remap.debug_types[at - bases.debug_types] = row
@@ -773,7 +906,10 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
             row = m.data.len()
             source :: local.data[at]
             &m.data.push(LIRData{id: LIRDataID{value: row}, bytes: source.bytes.copy(), align: source.align, relocs: [LIRDataReloc]{}})
-            if text == .Val(interned) -> &m.data_rows.add(interned.copy(), row).drop("checked absent above")
+            if text == .Val(interned) {
+                lower_keyed_record(&m, LOWER_KEYED_DATA, row, interned, U64{0})
+                &m.data_rows.add(interned.copy(), row).drop("checked absent above")
+            }
             &appended_data.push(at)
         }
         remap.data[at - bases.data] = row
@@ -794,8 +930,12 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
         if !extent.frozen || m.static_rows.get(extent.key) != None -> next
         root :: if extent.root < bases.data -> extent.root else -> remap.data[extent.root - bases.data]
         if root < 0 -> next
+        lower_keyed_record(&m, LOWER_KEYED_STATIC, root, extent.key, U64{0})
         &m.static_rows.add(extent.key.copy(), root).drop("checked absent above")
-        if extent.addend != 0 -> &m.static_rows.add("box:{extent.key}", extent.addend).drop("cached with its row")
+        if extent.addend != 0 {
+            lower_keyed_record(&m, LOWER_KEYED_STATIC, extent.addend, "box:{extent.key}", U64{0})
+            &m.static_rows.add("box:{extent.key}", extent.addend).drop("cached with its row")
+        }
     }
     loop at in start.fixups..<end.fixups {
         if dropped_fixups[at - start.fixups] -> next
@@ -814,6 +954,7 @@ fn lower_workers_replay(m: &LowerModule, local: LowerModule, start: LowerMarks, 
         if m.native_exports.get(symbol) != None -> next
         id :: local.native_exports.get(symbol) ?? panic("parallel native lowering: a recorded native export {symbol} has no row")
         to :: lower_workers_function(remap, bases, m.glue_base, id)
+        lower_keyed_record(&m, LOWER_KEYED_EXPORT, to.value, symbol, U64{0})
         &m.native_exports.add(symbol.copy(), to).drop("checked absent above")
     }
 }

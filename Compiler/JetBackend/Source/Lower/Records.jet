@@ -193,6 +193,7 @@ fn lower_native_glue_import(p: MIRProgram, m: &LowerModule, caller: String, symb
 // Registers `symbol` as native export `id`; under parallel lowering the
 // symbol is also recorded in order, so the merge replays it (Workers.jet).
 fn lower_native_export_register(m: &LowerModule, symbol: String, id: LIRFunctionID) Never! {
+    lower_keyed_record(&m, LOWER_KEYED_EXPORT, id.value, symbol, U64{0})
     &m.native_exports.add(symbol, id).drop("native symbol is registered once")
     if m.parted -> &m.export_rows.push(symbol.copy())
 }

@@ -419,8 +419,12 @@ fn lower_static_constant_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction
     }
     if value.data == .Val(data) {
         lower_extent_record(&m, true, definition.key, data.value, value.addend, start)
+        lower_keyed_record(&m, LOWER_KEYED_STATIC, data.value, definition.key, U64{0})
         &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
-        if value.addend != 0 -> &m.static_rows.add("box:{definition.key}", value.addend).drop("cached with its row")
+        if value.addend != 0 {
+            lower_keyed_record(&m, LOWER_KEYED_STATIC, value.addend, "box:{definition.key}", U64{0})
+            &m.static_rows.add("box:{definition.key}", value.addend).drop("cached with its row")
+        }
     }
     Val(value)
 }
@@ -448,6 +452,7 @@ fn lower_static_constant_object(p: MIRProgram, m: &LowerModule, f: &LowerFunctio
         lower_static_store_sized(&m, object, 0, value, if size > 0 && size < 8 -> size else -> 8)
     }
     lower_extent_record(&m, true, key, object.value, 0, start)
+    lower_keyed_record(&m, LOWER_KEYED_STATIC, object.value, key, U64{0})
     &m.static_rows.add(key, object.value).drop("checked absent above")
     Val(object)
 }
@@ -475,6 +480,7 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
         }
         if f.failed -> return None
         lower_extent_record(&m, true, key, object.value, 0, start)
+        lower_keyed_record(&m, LOWER_KEYED_STATIC, object.value, key, U64{0})
         &m.static_rows.add(key, object.value).drop("checked absent above")
     }
     cell :: lower_pointer(&f)

@@ -93,6 +93,7 @@ fn lower_dyn_schema(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRTy
         id = lower_static_object(&m, words.len() * 8)
         loop (index, word) in words -> lower_static_store(&m, id, index * 8, lower_static_word(word))
         lower_extent_record(&m, true, key, id.value, 0, start)
+        lower_keyed_record(&m, LOWER_KEYED_STATIC, id.value, key, U64{0})
         &m.static_rows.add(key, id.value).drop("schema absent above")
     }
     address :: lower_pointer(&f)

@@ -311,6 +311,9 @@ struct LowerModule {
     // renumber and replay them.
     parted: Bool{false}
     keyed_rows: [LowerKeyedRow]{[LowerKeyedRow]{}}
+    // The glue waves lowered on this module so far (lower_workers_glue): a
+    // thread module syncs to the merged module once per wave.
+    glue_waves: Int{0}
     extents: [LowerExtent]{[LowerExtent]{}}
     function_keys: [LowerFunctionKey]{[LowerFunctionKey]{}}
     export_rows: [String]{[String]{}}
@@ -644,6 +647,15 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     }
     // Glue, helpers and entry wrappers resolve types through the same index.
     glue_inputs :: shared LowerGlueInputs{programs: ^glue_programs}
+    // Parted glue (lower_glue_waves): from here the module logs the keys it
+    // registers, so the glue phase's thread modules (`glue_slots`, one per
+    // thread for the whole phase) can adopt them between waves instead of
+    // copying the module per wave.
+    glue_slots := [Shared<LowerWorker>]{}
+    if workers > 1 && !keep_going {
+        m.parted = true
+        glue_slots = lower_glue_slots(workers)
+    }
     if !shared_sites_dynamic {
         loop definition in program.constants {
             if definition.value == .SharedSite(site) {
@@ -710,7 +722,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     inventory :: lower_trait_key_count(m)
     loop {
         if workers > 1 && !keep_going {
-            waved := lower_glue_waves(program, ^m, cursor, workers, native_pack, &dispatchers, &glue_functions)
+            waved := lower_glue_waves(program, ^m, cursor, workers, native_pack, glue_slots, &dispatchers, &glue_functions)
             m = ^waved.state
             cursor = waved.cursor
         }
