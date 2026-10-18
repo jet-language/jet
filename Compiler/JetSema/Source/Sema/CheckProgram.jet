@@ -27,6 +27,12 @@ use jet_foundation.[
     Marker,
     MetaAttr,
     NamedSpan,
+    NameTable,
+    name_count,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
     Param,
     Program,
     Span,
@@ -4286,15 +4292,43 @@ fn sema_name_owner_index(graph: SemaRegistrationGraph) -> [String:String] Never!
     names
 }
 
-fn sema_name_index_symbol(index: &[String:SemaNameResolvedDeclaration], symbol: Symbol, kind: String) Never! {
-    if index.get(symbol.id.key) != None -> return
-    index[symbol.id.key] = SemaNameResolvedDeclaration{symbol: symbol, kind: kind}
+// The declarations a call fact can name: `keys` interns each symbol ID
+// (an open-addressing hash, so indexing never shifts a sorted entry list)
+// and `rows[id]` is the declaration row of that ID, or -1 while unindexed
+// (`name_table()` interns "" as id 0 before any symbol).
+struct SemaNameSymbolIndex {
+    keys: NameTable
+    rows: [Int]
+    declarations: [SemaNameResolvedDeclaration]
+}
+
+fn sema_name_index_symbol(index: &SemaNameSymbolIndex, symbol: Symbol, kind: String) Never! {
+    id :: name_index(name_intern(&index.keys, symbol.id.key))
+    if id == index.rows.len() -> &index.rows.push(-1)
+    if index.rows[id] >= 0 -> return
+    index.rows[id] = index.declarations.len()
+    &index.declarations.push(SemaNameResolvedDeclaration{symbol: symbol, kind: kind})
+}
+
+// The declaration row of `key`, or -1.
+fn sema_name_symbol_row(index: SemaNameSymbolIndex, key: String) -> Int Never! {
+    name :: name_find(index.keys, key) ?? return -1
+    index.rows[name_index(name)]
+}
+
+// Whether `key` (never empty) is new to `seen`, recording it: the first row
+// with a key is kept and every later one dropped, as a seen map did, without
+// a sorted key list that each insert shifts.
+fn sema_name_first_seen(seen: &NameTable, key: String) -> Bool Never! {
+    before :: name_count(seen)
+    _ :: name_intern(&seen, key)
+    name_count(seen) != before
 }
 
 // Every declaration a call fact can name, keyed by symbol ID. The first
 // declaration in graph order wins, as the ordered search did.
-fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResolvedDeclaration] Never! {
-    index := [String:SemaNameResolvedDeclaration]{}
+fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> SemaNameSymbolIndex Never! {
+    index := SemaNameSymbolIndex{keys: name_table(), rows: [Int]{-1}, declarations: [SemaNameResolvedDeclaration]{}}
     loop graph_module_index in 0..<graph.modules.len() {
         loop symbol_index in 0..<graph.modules[graph_module_index].symbols.len() {
             sema_name_index_symbol(&index, graph.modules[graph_module_index].symbols[symbol_index], if {
@@ -4319,14 +4353,13 @@ fn sema_name_symbol_index(graph: SemaRegistrationGraph) -> [String:SemaNameResol
 
 fn sema_name_first_declarations(rows: ^[MIRNameDeclaration]) -> [MIRNameDeclaration] Never! {
     owned_rows := ^rows
-    seen := [String:Bool]{}
+    seen := name_table()
     kept := [MIRNameDeclaration]{}
     &owned_rows.reverse()
     loop owned_rows.len() > 0 {
         row := &owned_rows.pop() ?? break
         key :: "{row.module_index}|{row.name}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        if !sema_name_first_seen(&seen, key) -> next
         &kept.push(^row)
     }
     kept
@@ -4334,21 +4367,20 @@ fn sema_name_first_declarations(rows: ^[MIRNameDeclaration]) -> [MIRNameDeclarat
 
 fn sema_name_first_aliases(rows: ^[MIRNameAlias]) -> [MIRNameAlias] Never! {
     owned_rows := ^rows
-    seen := [String:Bool]{}
+    seen := name_table()
     kept := [MIRNameAlias]{}
     &owned_rows.reverse()
     loop owned_rows.len() > 0 {
         row := &owned_rows.pop() ?? break
         key :: "{row.module_index}|{row.name}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        if !sema_name_first_seen(&seen, key) -> next
         &kept.push(^row)
     }
     kept
 }
 
 fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Never! {
-    seen := [String:Bool]{}
+    seen := name_table()
     kept := [MIRNameReference]{}
     loop row in rows {
         // The path is length-prefixed and the identity is last, so no two
@@ -4358,8 +4390,7 @@ fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Ne
             else -> "-"
         }
         key :: "{row.module_path.len()}:{row.module_path}|{row.kind}|{row.def_span.start}:{row.def_span.end}|{identity}"
-        if seen.get(key) != None -> next
-        seen[key] = true
+        if !sema_name_first_seen(&seen, key) -> next
         &kept.push(row)
     }
     kept
@@ -4588,8 +4619,8 @@ fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         loop reference in checked.name_references -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, reference.span, reference.symbol, reference.kind)
         loop call in checked.call_facts {
             callee :: call.callee ?? next
-            resolved :: symbol_index.get(callee.key)
-            if resolved == .Val(declaration) -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, call.span, declaration.symbol, declaration.kind)
+            row :: sema_name_symbol_row(symbol_index, callee.key)
+            if row >= 0 -> sema_name_add_reference(&facts, graph, owner_names, &module_indices, call.span, symbol_index.declarations[row].symbol, symbol_index.declarations[row].kind)
         }
         module_index += 1
     }
