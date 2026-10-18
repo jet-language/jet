@@ -329,44 +329,59 @@ fn opt_rewrite(facts: OptFacts, defs: OptDefs, function: LIRFunction, inst: LIRI
     }
 }
 
-// One folding sweep over every block in order. Returns whether anything changed.
+// One folding sweep over every block in order, in place: a dropped
+// instruction leaves its block compacted (with its line). Returns whether
+// anything changed.
 fn opt_fold_sweep(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
     changed := false
     defs :: opt_defs(function)
-    blocks := [LIRBlock]{}
-    loop block in function.blocks {
-        insts := [LIRInst]{}
-        lines := [Int]{}
-        loop (index, original) in block.insts {
-            inst :: opt_rename_inst(facts, original)
-            if inst != original -> changed = true
-            rewrite :: opt_rewrite(facts, defs, function, inst)
-            if rewrite.inst == .Val(kept) {
-                if kept != inst -> changed = true
-                if kept == .Const(dst, value) {
-                    facts.known[dst.value] = true
-                    facts.consts[dst.value] = value
-                }
-                &insts.push(kept)
-                &lines.push(opt_debug_line(block, index))
-            } else {
-                changed = true
-                if lir_inst_def(inst) == .Val(dst) -> facts.alias[dst.value] = opt_root(facts, rewrite.replaced_by)
-            }
-        }
-        terminator := opt_rename_terminator(facts, block.terminator)
-        if terminator == .Branch(condition, then_target, else_target) {
-            if facts.known[condition.value] {
-                terminator = LIRTerminator.Jump{target: if facts.consts[condition.value] != 0 -> then_target else -> else_target}
-            } else {
-                if then_target == else_target -> terminator = LIRTerminator.Jump{target: then_target}
-            }
-        }
-        if terminator != block.terminator -> changed = true
-        &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: terminator, lines: lines, cold: block.cold})
+    loop row in 0..<function.blocks.len() {
+        if opt_fold_block(&function, &facts, defs, row) -> changed = true
     }
-    function.blocks = blocks
+    changed
+}
+
+fn opt_fold_block(function: &LIRFunction, facts: &OptFacts, defs: OptDefs, row: Int) -> Bool Never! {
+    changed := false
+    count :: function.blocks[row].insts.len()
+    lined :: function.blocks[row].lines.len() == count + 1
+    kept := 0
+    loop index in 0..<count {
+        inst :: opt_rename_inst(facts, function.blocks[row].insts[index])
+        if inst != function.blocks[row].insts[index] -> changed = true
+        rewrite :: opt_rewrite(facts, defs, function, inst)
+        if rewrite.inst == .Val(kept_inst) {
+            if kept_inst != inst -> changed = true
+            if kept_inst == .Const(dst, value) {
+                facts.known[dst.value] = true
+                facts.consts[dst.value] = value
+            }
+            line :: if lined -> function.blocks[row].lines[index].copy() else -> 0
+            function.blocks[row].insts[kept] = kept_inst
+            function.blocks[row].lines[kept] = line
+            kept += 1
+        } else {
+            changed = true
+            if lir_inst_def(inst) == .Val(dst) -> facts.alias[dst.value] = opt_root(facts, rewrite.replaced_by)
+        }
+    }
+    terminator_line :: if lined -> function.blocks[row].lines[count].copy() else -> 0
+    loop function.blocks[row].insts.len() > kept -> _ := &function.blocks[row].insts.pop()
+    loop function.blocks[row].lines.len() > kept + 1 -> _ := &function.blocks[row].lines.pop()
+    loop function.blocks[row].lines.len() < kept + 1 -> &function.blocks[row].lines.push(0)
+    function.blocks[row].lines[kept] = terminator_line
+    terminator := opt_rename_terminator(facts, function.blocks[row].terminator)
+    if terminator == .Branch(condition, then_target, else_target) {
+        if facts.known[condition.value] {
+            terminator = LIRTerminator.Jump{target: if facts.consts[condition.value] != 0 -> then_target else -> else_target}
+        } else {
+            if then_target == else_target -> terminator = LIRTerminator.Jump{target: then_target}
+        }
+    }
+    if terminator != function.blocks[row].terminator {
+        changed = true
+        function.blocks[row].terminator = terminator
+    }
     changed
 }
 
@@ -476,26 +491,33 @@ fn opt_outside_uses(function: LIRFunction) -> [Bool] Never! {
     outside
 }
 
+// Threads every block's edges, reading the function as it was before this
+// pass (a hop threaded earlier in the pass is still read as the hop), then
+// writes the changed terminators back in place.
 fn opt_thread(function: &LIRFunction) -> Bool Never! {
     rows :: opt_block_rows(function)
     outside :: opt_outside_uses(function)
-    changed := false
-    blocks := [LIRBlock]{}
-    loop block in function.blocks {
-        terminator :: if block.terminator == {
-            .Jump(target) -> LIRTerminator.Jump{target: opt_thread_target(function, rows, outside, target)}
+    threaded_rows := [Int]{}
+    threaded := [LIRTerminator]{}
+    loop (row, block) in function.blocks {
+        found := LIRTerminator?{None}
+        if block.terminator == {
+            .Jump(target) -> found = Val(LIRTerminator.Jump{target: opt_thread_target(function, rows, outside, target)})
             .Branch(condition, then_target, else_target) -> {
                 then_next :: opt_thread_target(function, rows, outside, then_target)
                 else_next :: opt_thread_target(function, rows, outside, else_target)
-                if then_next == else_next -> LIRTerminator.Jump{target: then_next} else -> LIRTerminator.Branch{condition: condition, then_target: then_next, else_target: else_next}
+                found = Val(if then_next == else_next -> LIRTerminator.Jump{target: then_next} else -> LIRTerminator.Branch{condition: condition, then_target: then_next, else_target: else_next})
             }
-            else -> block.terminator
+            else -> {}
         }
-        if terminator != block.terminator -> changed = true
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines, cold: block.cold})
+        terminator :: found ?? { next }
+        if terminator != block.terminator {
+            &threaded_rows.push(row)
+            &threaded.push(terminator)
+        }
     }
-    function.blocks = blocks
-    changed
+    loop (at, row) in threaded_rows -> function.blocks[row].terminator = threaded[at].copy()
+    threaded_rows.len() > 0
 }
 
 // A block that jumps to a block with no other predecessor absorbs it: the
@@ -661,45 +683,65 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
             }
         }
     }
-    changed := false
-    blocks := [LIRBlock]{}
-    loop (index, block) in function.blocks {
-        params := [LIRValueID]{}
-        loop param in block.params {
-            if index == 0 || live[param.value] {
-                &params.push(param)
-            } else {
-                changed = true
-            }
-        }
-        insts := [LIRInst]{}
-        lines := [Int]{}
-        loop (at, inst) in block.insts {
-            keep := opt_inst_has_effect(inst)
-            if !keep {
-                if lir_inst_def(inst) == .Val(dst) -> keep = live[dst.value]
-            }
-            if keep {
-                &insts.push(inst)
-                &lines.push(opt_debug_line(block, at))
-            } else {
-                changed = true
-            }
-        }
-        &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: block.terminator, lines: lines, cold: block.cold})
-    }
-    // Drop the arguments of removed parameters on every edge.
-    rewired := [LIRBlock]{}
-    loop block in blocks {
-        terminator :: if block.terminator == {
+    // Drop the arguments of removed parameters on every edge (opt_live_args
+    // reads the parameter lists from before the removal), then the dead
+    // parameters and instructions, each block compacted in place.
+    rewired := [LIRTerminator]{}
+    loop block in function.blocks {
+        &rewired.push(if block.terminator == {
             .Jump(target) -> LIRTerminator.Jump{target: opt_live_args(function, rows, live, target)}
             .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: condition, then_target: opt_live_args(function, rows, live, then_target), else_target: opt_live_args(function, rows, live, else_target)}
-            else -> block.terminator
-        }
-        &rewired.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines, cold: block.cold})
+            else -> block.terminator.copy()
+        })
     }
-    function.blocks = rewired
+    changed := false
+    loop row in 0..<function.blocks.len() {
+        if opt_dead_block(&function, live, row) -> changed = true
+        function.blocks[row].terminator = rewired[row].copy()
+    }
+    changed
+}
+
+// Removes block `row`'s dead parameters (the entry's stay) and dead
+// instructions in place; returns whether it removed any.
+fn opt_dead_block(function: &LIRFunction, live: [Bool], row: Int) -> Bool Never! {
+    changed := false
+    kept := 0
+    loop index in 0..<function.blocks[row].params.len() {
+        param :: function.blocks[row].params[index].copy()
+        if row == 0 || live[param.value] {
+            function.blocks[row].params[kept] = param
+            kept += 1
+        } else {
+            changed = true
+        }
+    }
+    loop function.blocks[row].params.len() > kept -> _ := &function.blocks[row].params.pop()
+    count :: function.blocks[row].insts.len()
+    lined :: function.blocks[row].lines.len() == count + 1
+    kept = 0
+    loop index in 0..<count {
+        keep := opt_inst_has_effect(function.blocks[row].insts[index])
+        if !keep {
+            if lir_inst_def(function.blocks[row].insts[index]) == .Val(dst) -> keep = live[dst.value]
+        }
+        if keep {
+            if kept != index {
+                moved :: function.blocks[row].insts[index].copy()
+                function.blocks[row].insts[kept] = moved
+            }
+            line :: if lined -> function.blocks[row].lines[index].copy() else -> 0
+            function.blocks[row].lines[kept] = line
+            kept += 1
+        } else {
+            changed = true
+        }
+    }
+    terminator_line :: if lined -> function.blocks[row].lines[count].copy() else -> 0
+    loop function.blocks[row].insts.len() > kept -> _ := &function.blocks[row].insts.pop()
+    loop function.blocks[row].lines.len() > kept + 1 -> _ := &function.blocks[row].lines.pop()
+    loop function.blocks[row].lines.len() < kept + 1 -> &function.blocks[row].lines.push(0)
+    function.blocks[row].lines[kept] = terminator_line
     changed
 }
 
@@ -842,15 +884,18 @@ fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
     opt_compact(function)
 }
 
+// Names every use by its alias root, in place.
 fn opt_rename_all(function: &LIRFunction, facts: OptFacts) Never! {
-    blocks := [LIRBlock]{}
-    loop block in function.blocks {
-        insts := [LIRInst]{}
-        loop inst in block.insts -> &insts.push(opt_rename_inst(facts, inst))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator), lines: block.lines, cold: block.cold})
+    loop row in 0..<function.blocks.len() {
+        loop index in 0..<function.blocks[row].insts.len() {
+            renamed :: opt_rename_inst(facts, function.blocks[row].insts[index])
+            function.blocks[row].insts[index] = renamed
+        }
+        terminator :: opt_rename_terminator(facts, function.blocks[row].terminator)
+        function.blocks[row].terminator = terminator
     }
-    function.blocks = blocks
-    bindings := [LIRDebugBinding]{}
-    loop binding in function.debug.bindings -> &bindings.push(LIRDebugBinding{variable: binding.variable, value: LIRValueID{value: opt_root(facts, binding.value.value)}})
-    function.debug.bindings = bindings
+    loop index in 0..<function.debug.bindings.len() {
+        root :: opt_root(facts, function.debug.bindings[index].value.value)
+        function.debug.bindings[index].value = LIRValueID{value: root}
+    }
 }
