@@ -22,15 +22,9 @@ fn parallel_test_require(ok: Bool) {
     I64{0}
 }
 
-fn parallel_test_live(width: I64) -> I64 {
-    total := I64{0}
-    slab := sync_load(alloc_head(alloc_root, width))
-    loop slab != (I64{0}) {
-        total += sync_load(slab + I64{24})
-        slab = sync_load(slab)
-    }
-    total
-}
+// Live payloads of the class across every arena: walk workers allocate in
+// their own stack band's arena.
+fn parallel_test_live(width: I64) -> I64 { alloc_available_live(width) }
 
 fn parallel_test_walk(env: I64, invoke: I64, length: I64, limit: I64, fails: Bool) {
     thread_zero(env, I64{128})

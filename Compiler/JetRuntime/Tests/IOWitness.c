@@ -76,7 +76,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
 }
 static void text_watch(Text *text) {
     if(!text) return;
-    watch(text,24,8);
+    watch((char *)(text)-8,32,8);
     if(text->capacity) watch(text->data,text->capacity,1);
 }
 static void context_watch(Context *c) { watch(c,40,8); text_watch(c->resource); text_watch(c->cause); }

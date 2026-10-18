@@ -446,7 +446,8 @@ fn jet_rust_emit_type_has_entry_show(ctx: &JetRustEmitContext, ty: MIRType) -> B
 
 fn jet_rust_emit_entry_error_exit(ctx: &JetRustEmitContext, function: MIRFunction, error: String, service: Bool) -> String Never! {
     error_ty :: if function.failure == {
-        .Result(_, ty) -> Val(ty)
+        // copy: `ty` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Result(_, ty) -> Val(ty.copy())
         .Optional(_) -> MIRType?{None}
         else -> {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR entry error edge requested for an infallible or diverging function", "only Result and Optional entries have an error exit", Val(function.span))
@@ -805,7 +806,8 @@ fn jet_rust_emit_job_queue_wrapper(ctx: &JetRustEmitContext, function: MIRFuncti
     // MIRRust builds these rows with `\n\` continuations, which drop the
     // leading indentation of every continued line.
     result_ok :: if function.return_type.kind == {
-        .Result(ok, _) -> Val(ok)
+        // copy: `ok` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Result(ok, _) -> Val(ok.copy())
         else -> MIRType?{None}
     }
     if mir_type_is_unit(function.return_type) {

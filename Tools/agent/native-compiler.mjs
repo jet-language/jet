@@ -2,7 +2,7 @@
 // Build the production compiler, not Bootstrap/Tests.rs's private factory.
 // The seed must already execute JetCli's Jet code (a Rust-bootstrapped Jet-built
 // seed is allowed); the Rust reference CLI is NOT a seed for this driver.
-// `build` without --release selects Host.jet -> lir_lower_entry (O0) ->
+// `build` without --release selects Host.jet -> lir_lower_entry -> the O1 LIR passes ->
 // x64_relocatable_object -> Image/StaticLink.x64_link_executable. Every concrete
 // function reachable from the full CLI dispatch is lowered; generic templates
 // are instantiated by the backend, not independently emitted as dead roots.
@@ -28,6 +28,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readNativeRuntimePack } from '../packaging/runtime-pack-cache.mjs';
 import { hostedSeedCensus } from './hosted-seed-proof.mjs';
+import { compilerSourceIdentity } from './stage1/native-factory.mjs';
 
 const usage = 'native-compiler.mjs --jet CLI_SEED --runtime-dir DIR --out FRESH_DIR [--repo DIR] [--stages 1|2] [--dry-run]; assembly: --assemble-only --out FRESH_DIR [--repo DIR]; bootstrap only: --seed-build --jet RUST_HOST --out FRESH_DIR [--repo DIR] [--dry-run]';
 const options = { repo: resolve(dirname(fileURLToPath(import.meta.url)), '../..'), stages: 2, dryRun: false };
@@ -59,7 +60,18 @@ mkdirSync(home);
 execute(process.execPath, [join(repo, 'Compiler/Bootstrap/assemble.mjs')],
     { ...process.env, HOME: home, JET_BOOTSTRAP_SOURCE_ROOT: repo }, repo);
 const bootstrap = join(home, '.cache/jet-luna/compiler-bootstrap');
-const aggregate = readFileSync(join(bootstrap, 'project/src/compiler.jet'), 'utf8');
+const assembled = readFileSync(join(bootstrap, 'project/src/compiler.jet'), 'utf8');
+// The built compiler knows its own identity: Request.jet's last line,
+// JET_CLI_BUILT_COMPILER_IDENTITY, gets the compiler_source_id of the source
+// assembled here (stage N+1 carries the identity of the source stage N
+// compiled). Generated offsets after it move by the rewrite's length.
+const identityLine = 'JET_CLI_BUILT_COMPILER_IDENTITY :: ""';
+const identityAt = assembled.indexOf(identityLine);
+if (identityAt < 0 || assembled.indexOf(identityLine, identityAt + 1) >= 0) throw Error(`the assembled compiler must hold exactly one \`${identityLine}\` (Compiler/JetCli/Source/Cli/Request.jet)`);
+const compilerIdentity = compilerSourceIdentity(repo);
+const identityEmbedded = `JET_CLI_BUILT_COMPILER_IDENTITY :: ${JSON.stringify(compilerIdentity)}`;
+const aggregate = assembled.slice(0, identityAt) + identityEmbedded + assembled.slice(identityAt + identityLine.length);
+const identityByte = Buffer.byteLength(assembled.slice(0, identityAt)), identityShift = Buffer.byteLength(identityEmbedded) - Buffer.byteLength(identityLine);
 // Preserve the actual canonical entry bytes. Its Core import already appears
 // in the aggregate (Cache.jet); deduplicate exactly as assemble.mjs does.
 const entryPath = 'Compiler/JetCli/run.jet';
@@ -98,11 +110,15 @@ if (!denyOnlyPorted) {
 }
 writeFileSync(join(project, 'package.jet'), manifest);
 const map = JSON.parse(readFileSync(join(bootstrap, 'compiler.map.json'), 'utf8'));
+for (const { generated } of map.source_segments) {
+    if (generated.start > identityByte) generated.start += identityShift;
+    if (generated.end > identityByte) generated.end += identityShift;
+}
 map.source_segments.push({ generated: { start: Buffer.byteLength(aggregate + marker), end: Buffer.byteLength(source) }, source_file: entryPath,
     line_starts: [0, ...[...Buffer.from(entry).entries()].filter(([, byte]) => byte === 10).map(([index]) => index + 1)] });
 json(join(out, 'compiler.map.json'), map);
 if (options.assembleOnly) {
-    const assembly = { schema: 'jet-cli-assembly/v1', sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), project, entry: entryPath, map: join(out, 'compiler.map.json'), manifestPatch };
+    const assembly = { schema: 'jet-cli-assembly/v1', sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), compilerIdentity, project, entry: entryPath, map: join(out, 'compiler.map.json'), manifestPatch };
     json(join(out, 'plan.json'), assembly);
     console.log(JSON.stringify(assembly, null, 2));
     process.exit(0);
@@ -152,7 +168,7 @@ const stages = Array.from({ length: options.stages }, (_, index) => {
 });
 const plan = { schema: 'jet-native-compiler-plan/v1', seed: options.jet, runtimeDir: options.runtime,
     sourceRoot: repo, source: unit, sourceSha256: hash(Buffer.from(source)), entry: entryPath, manifestPatch,
-    backend: 'jet-native', optimization: 'O0', environment: { JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1' },
+    backend: 'jet-native', optimization: 'O1', environment: { JET_TOOLCHAIN_ROOT: repo, JET_KEEP_GOING: '1' },
     lowering: 'lir_lower_entry', objectWriter: 'x64_relocatable_object', linker: 'x64_link_executable',
     stages, comparisons: options.stages === 2 ? ['stage1/jet.o == stage2/jet.o', 'stage1/jet == stage2/jet'] : [] };
 json(join(out, 'plan.json'), plan);
@@ -201,5 +217,5 @@ if (options.stages === 2) {
 const final = stages.at(-1).destination;
 json(join(out, 'native-compiler.json'), { schema: 'jet-native-compiler/v1', sourceSha256: plan.sourceSha256,
     sourceRoot: repo, seedSha256: hash(readFileSync(options.jet)), runtimePackSha256: hash(pack),
-    optimization: 'O0', backend: 'jet-native', fixedPoint, stages: receipts, jet: final, runtimeDir: join(dirname(final), 'jet-runtime') });
+    optimization: 'O1', backend: 'jet-native', fixedPoint, stages: receipts, jet: final, runtimeDir: join(dirname(final), 'jet-runtime') });
 console.log(JSON.stringify({ jet: final, runtimeDir: join(dirname(final), 'jet-runtime'), fixedPoint }));

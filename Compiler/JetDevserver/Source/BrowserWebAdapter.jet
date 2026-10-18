@@ -1,0 +1,1301 @@
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1
+// HTTP-facing adapter for the typed browser devtools host.
+use std.collections.[VecDeque]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.Devtools.[jet_observe_live_value_update]
+use jet_foundation.DevtoolsControl.[JetDevtoolsCommandReceipt]
+use jet_foundation.HotSwap.[HotSwapDecision]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_foundation.[TEXT_NUL]
+use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserDock, BrowserHost, BrowserHostAction, BrowserHostEffect, BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserNodeKind, BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection, BrowserSessionState, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT, MAX_BROWSER_VALUE]
+use jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession, JET_DEVTOOLS_PROTOCOL]
+use jet_devserver.WebModuleSwap.[WebFocusFact, WebFormDraftFact, WebIslandFact, WebModuleFact, WebModuleSwapIdentity, WebModuleSwapPlan, WebModuleSwapReceipt, WebModuleSwapSnapshot, WebModuleSwapState, WebModuleSwapStateFact, WebPageFact, WebQueryCacheFact, WebScrollFact, WebSignalFact, WebStateValue, WebStoreFact]
+use jet_devserver.[MAX_REQUEST_BODY_BYTES, MAX_STATIC_RESPONSE_BYTES]
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:38
+BROWSER_PAGE_SCHEMA :: "jet.devtools.browser.v1"
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:41
+struct WebLiveValueUpdate { key: String; type_identity: String; rendered_value: String? }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:50
+struct BrowserTools { source: Bool; source_reason: String?; rebuild: Bool; rebuild_reason: String? }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:63
+struct BrowserDevtoolsFrame {
+    placement: BrowserPlacement; route: String; protocol: String; session_id: String
+    source_id: String?; build_id: String?; revision: String; world_id: String?
+    sequence: U64?; cursor: BrowserReconnectCursor?; state: BrowserSessionState
+    status: DevtoolsStatusFact; tools: BrowserTools; receipts: [JetDevtoolsCommandReceipt]
+    selection: BrowserSelection?; panels: [BrowserPanelView]; elements: [BrowserHtmlElement]
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:85
+struct BrowserWebState {
+    host: BrowserHost; facts: [String:BrowserPanelFact]; panel_order: VecDeque<String>
+    source_id: String?; build_id: String?; revision: String; world_id: String?
+    status: DevtoolsStatusFact; tools: BrowserTools; receipts: [JetDevtoolsCommandReceipt]
+    swap: WebModuleSwapState?; last_swap: WebModuleSwapReceipt?; swap_error: String?
+    dom_state: [WebModuleSwapStateFact]
+}
+impl BrowserWebState {
+    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:103
+    fn new(session_id: String) -> BrowserWebState {
+        BrowserWebState { host: BrowserHost.new(session_id), facts: {}, panel_order: VecDeque.new(),
+            source_id: .None, build_id: .None, revision: "", world_id: .None, status: starting_status(),
+            tools: BrowserTools { source: false, source_reason: .None, rebuild: false, rebuild_reason: .None },
+            receipts: [], swap: .None, last_swap: .None, swap_error: .None, dom_state: [] }
+    }
+    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:127
+    fn host(self) -> BrowserHost { &self.host }
+    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:131
+    fn frame(self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
+        model := self.host.view_model(placement)
+        BrowserDevtoolsFrame { placement: model.placement, route: model.route, protocol: model.protocol,
+            session_id: model.session_id, source_id: self.source_id.clone(), build_id: self.build_id.clone(),
+            revision: self.revision.clone(), world_id: self.world_id.clone(), sequence: model.sequence,
+            cursor: model.cursor, state: browser_session_state(self.status.state), status: self.status.clone(),
+            tools: self.tools.clone(), receipts: self.receipts.clone(), selection: model.selection,
+            panels: model.panels, elements: model.elements }
+    }
+    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:154
+    fn reset(&self, session_id: String) {
+        self.host = BrowserHost.new(session_id)
+        self.facts.clear(); self.panel_order.clear()
+        self.source_id = .None; self.build_id = .None; self.revision.clear(); self.world_id = .None
+        self.status = starting_status(); self.receipts.clear()
+        self.swap = .None; self.last_swap = .None; self.swap_error = .None; self.dom_state.clear()
+    }
+    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:170
+    fn sync(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
+        if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools projection protocol does not match jet.devtools.v1")
+        if projection.session_id != self.host.session_id() -> self.reset(projection.session_id.clone())
+        if projection.reset {
+            self.facts.clear(); self.panel_order.clear()
+            self.host = BrowserHost.new(projection.session_id.clone())
+        }
+        self.source_id = bounded_optional(projection.source_id.clone(), MAX_BROWSER_TEXT)
+        self.build_id = bounded_optional(projection.build_id.clone(), MAX_BROWSER_TEXT)
+        self.revision = bounded_text(projection.revision, "", MAX_BROWSER_TEXT)
+        self.world_id = bounded_optional(projection.world_id, MAX_BROWSER_TEXT)
+        self.status = normalize_status(projection.status)
+        self.tools.rebuild = projection.command_capabilities.project_rebuild
+        self.tools.rebuild_reason = bounded_optional(projection.command_capabilities.project_rebuild_reason, MAX_BROWSER_TEXT)
+        self.receipts = projection.command_receipts
+        self.facts.clear(); self.panel_order.clear()
+        loop panel in canonical_panels {
+            fact := panel_from_projection(panel)
+            panel_id := fact.panel_id.clone()
+            self.panel_order.push_back(panel_id.clone())
+            _ :: self.facts.insert(panel_id, fact)
+        }
+        sequence := projection.sequence
+        should_apply := self.host.sequence().map_or(true, (current) -> sequence > current)
+        if should_apply {
+            revision := self.host.revision().unwrap_or(0).max(parse_revision(projection.revision).unwrap_or(sequence))
+            panels := self.panel_order.iter().filter_map((panel_id) -> self.facts.get(panel_id)).cloned().collect()
+            event := BrowserHostEvent.new(self.host.session_id(), revision, sequence, projection.observed_at, panels)
+            self.host.apply_event(event) ?? return .Err("browser projection rejected event: {err}")
+        }
+        if projection.selection == {
+            .Val(selection) -> {
+                if self.host.panel(selection.panel_id).is_some() {
+                    if selection.item_key.is_empty() || self.host.select(selection.panel_id, .Val(selection.item_key.clone())).is_ok() {
+                        if selection.item_key.is_empty() -> self.host.select(selection.panel_id, .None) ?? return .Err(err.to_string())
+                    } else {
+                        self.host.select(selection.panel_id, .None) ?? return .Err(err.to_string())
+                    }
+                } else { self.host.clear_selection() }
+            }
+            .None -> self.host.clear_selection()
+        }
+        .Ok(_)
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:269
+fn starting_status() -> DevtoolsStatusFact {
+    DevtoolsStatusFact { state: .Starting, diagnostic_code: .None, diagnostic: .None, accepted_revision: .None,
+        last_good_revision: .None, run_target: .None, run_output: .None, test_state: .None }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:282
+fn normalize_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
+    status.diagnostic_code = bounded_optional(status.diagnostic_code, MAX_BROWSER_TEXT)
+    status.diagnostic = bounded_optional(status.diagnostic, MAX_BROWSER_VALUE)
+    status.accepted_revision = bounded_optional(status.accepted_revision, MAX_BROWSER_TEXT)
+    status.last_good_revision = bounded_optional(status.last_good_revision, MAX_BROWSER_TEXT)
+    status.run_target = bounded_optional(status.run_target, MAX_BROWSER_TEXT)
+    status.run_output = bounded_optional(status.run_output, MAX_BROWSER_VALUE)
+    status.test_state = bounded_optional(status.test_state, MAX_BROWSER_TEXT)
+    status
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:293
+fn bounded_optional(value: String?, limit: USize) -> String? {
+    value.and_then((value) -> {
+        bounded := bounded_text(value, "", limit)
+        if bounded.is_empty() -> .None else -> .Val(bounded)
+    })
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:300
+fn browser_session_state(state: DevtoolsSessionState) -> BrowserSessionState {
+    if state == { .Starting | .Ready -> .Idle, .Building -> .Building, .Error -> .BuildFailed
+        .Unavailable | .Stopped -> .RuntimeFailure }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:312
+fn sync_session(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
+    cursor := state.as_ref().and_then((state) -> state.host().sequence())
+    projection := session.devtools_events_since(cursor)
+    canonical_panels := session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.ALL) ?? return .Err("browser panel catalog rejected projection: {err}")
+    if state.is_none() -> state = .Val(BrowserWebState.new(projection.session_id.clone()))
+    resident := state.as_mut().expect("browser web state initialized")
+    resident.tools.source = session.canvas_port() != 0
+    resident.tools.source_reason = if resident.tools.source -> .None else -> .Val(SOURCE_TOOLS_OFF_REASON.to_string())
+    resident.sync(projection, canonical_panels)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:337
+SOURCE_TOOLS_OFF_REASON :: "This host runs without Canvas, so source is read and edited elsewhere."
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:340
+fn object_map(value: Dyn) -> [String:Dyn] Err! {
+    if value == {
+        .Object(fields) -> .Ok(fields.iter().cloned().collect())
+        else -> .Err("expected a JSON object")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:351
+fn record_dom_snapshot(state: &BrowserWebState?, session_id: String, payload: &[U8]) Err! {
+    text := std.str.from_utf8(payload) ?? return .Err("web DOM snapshot body must be UTF-8 JSON")
+    root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("web DOM snapshot body is not valid bounded JSON")
+    object := object_map(root) ?? return .Err("web DOM snapshot must be a JSON object")
+    protocol := required_json_string(object, "protocol")?
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("web DOM snapshot protocol does not match jet.devtools.v1")
+    if required_json_string(object, "kind")? != "web.dom-snapshot" -> return .Err("web DOM snapshot kind is not web.dom-snapshot")
+    rows_value := object.get("state").ok_or("web DOM snapshot must include state")?
+    rows := rows_value.as_array() ?? return .Err("web DOM snapshot state must be an array")
+    facts := [WebModuleSwapStateFact]{[].with_capacity(rows.len())}
+    live_value_updates := [WebLiveValueUpdate]{}
+    seen := [(String, String):()]{} // GATE #4499: composite map keys.
+    loop raw_row in rows {
+        row := object_map(raw_row) ?? return .Err("web DOM snapshot state rows must be objects")
+        kind := required_json_string(row, "kind")?
+        if kind == "persist_live_value" {
+            update := parse_live_value_update(row)?
+            if seen.insert((kind.clone(), update.key.clone()), ()).is_some() -> return .Err("web DOM snapshot state keys must be unique per family")
+            live_value_updates.push(update)
+            next
+        }
+        key := required_json_string(row, "key")?
+        type_fingerprint := required_json_string(row, "type_fingerprint")?
+        identity := row.get("identity").map((value) -> value.as_str().map((s) -> s.to_string()).map_err((_) -> "web DOM island identity must be a string")).transpose()?
+        value := parse_dom_state_value(row.get("value").ok_or("web DOM snapshot state row has no value")?)?
+        if seen.insert((kind.clone(), key.clone()), ()).is_some() -> return .Err("web DOM snapshot state keys must be unique per family")
+        fact := if kind == {
+            "signal" -> WebModuleSwapStateFact.Signal(WebSignalFact.new(key, type_fingerprint, value))
+            "store" -> WebModuleSwapStateFact.Store(WebStoreFact.new(key, type_fingerprint, value))
+            "query_cache" -> WebModuleSwapStateFact.QueryCache(WebQueryCacheFact.new(key, type_fingerprint, value))
+            "form_draft" -> WebModuleSwapStateFact.FormDraft(WebFormDraftFact.new(key, type_fingerprint, value))
+            "scroll" -> WebModuleSwapStateFact.Scroll(WebScrollFact.new(key, type_fingerprint, value))
+            "focus" -> WebModuleSwapStateFact.Focus(WebFocusFact.new(key, type_fingerprint, value))
+            "island" -> WebModuleSwapStateFact.Island(WebIslandFact.new(key, identity.ok_or("web DOM island state needs identity")?, type_fingerprint, value))
+            else -> { return .Err("web DOM snapshot has unknown state family `{kind}`") }
+        }
+        facts.push(fact)
+    }
+    loop update in live_value_updates -> jet_observe_live_value_update(update.key, update.type_identity, update.rendered_value.as_deref())
+    resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
+    resident.dom_state = facts
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:457
+fn parse_live_value_update(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
+    keys := object.keys().collect(); keys.sort()
+    loop field in keys {
+        if !["kind", "key", "type_identity", "rendered_value"].contains(field) -> return .Err("web DOM snapshot persist_live_value has unknown field `{field}`")
+    }
+    if required_json_string(object, "kind")? != "persist_live_value" -> return .Err("web DOM snapshot live value row has the wrong kind")
+    key := required_json_string(object, "key")?
+    type_identity := required_json_string(object, "type_identity")?
+    rendered_value := if object.get("rendered_value") == {
+        .Val(.Null) -> .None, .Val(.Text(value)) -> .Val(value.to_string())
+        .Val(_) -> { return .Err("web DOM snapshot persist_live_value `rendered_value` must be a string or null") }
+        .None -> { return .Err("web DOM snapshot persist_live_value has no `rendered_value`") }
+    }
+    .Ok(WebLiveValueUpdate { key: key, type_identity: type_identity, rendered_value: rendered_value })
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:495
+fn required_json_string(object: [String:Dyn], key: String) -> String Err! {
+    value := object.get(key).ok_or("web DOM snapshot has no `{key}`")?
+    text := value.as_str() ?? return .Err("web DOM snapshot `{key}` must be a string")
+    .Ok(text.to_string())
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:510
+fn parse_dom_state_value(value: Dyn) -> WebStateValue Err! {
+    object := object_map(value) ?? return .Err("web DOM snapshot state value must be an object")
+    kind := required_json_string(object, "kind")?
+    if kind == {
+        "text" -> .Ok(.Text(required_json_string(object, "value")?))
+        "integer" -> if object.get("value") == {
+            .Val(.Int(value)) -> .Ok(.Integer(value))
+            else -> .Err("web DOM integer state value must be a JSON integer")
+        }
+        "unsigned" -> if object.get("value") == {
+            .Val(.Int(value)) if value >= 0 -> .Ok(.Unsigned(U64{value})) else -> .Err("web DOM unsigned state value must be a non-negative integer")
+        }
+        "boolean" -> if object.get("value") == {
+            .Val(.Bool(value)) -> .Ok(.Boolean(value))
+            else -> .Err("web DOM boolean state value must be a JSON boolean")
+        }
+        "bytes" -> {
+            raw := object.get("value").ok_or("web DOM bytes state value has no value")?
+            values := raw.as_array() ?? return .Err("web DOM bytes state value must be an array")
+            bytes := [U8]{[].with_capacity(values.len())}
+            loop value in values {
+                if value == {
+                    .Int(n) && n >= 0 && n <= 255 -> bytes.push(U8{n})
+                    else -> { return .Err("web DOM bytes state value has a non-byte element") }
+                }
+            }
+            .Ok(.Bytes(bytes))
+        }
+        else -> .Err("web DOM state value has unknown kind `{kind}`")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:548
+fn view_json(state: BrowserWebState, placement: BrowserPlacement) -> String { frame_json(state.frame(placement)) }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:551
+fn swap_json(state: BrowserWebState) -> String {
+    output := String.with_capacity(2048)
+    output.push('{')
+    field_string(&output, "protocol", JET_DEVTOOLS_PROTOCOL, true)
+    field_string(&output, "kind", "web.module-swap", false)
+    output.push_str(",\"active\":")
+    if state.swap.as_ref() == {
+        .Val(swap) -> write_swap_snapshot(&output, swap.active())
+        .None -> output.push_str("null")
+    }
+    output.push_str(",\"committed\":")
+    if state.swap.as_ref() == {
+        .Val(swap) -> write_swap_snapshot(&output, swap.committed())
+        .None -> output.push_str("null")
+    }
+    output.push_str(",\"phase\":")
+    if state.swap.as_ref() == {
+        .Val(swap) -> quoted(swap.phase().as_str(), &output)
+        .None -> output.push_str("null")
+    }
+    output.push_str(",\"last_receipt\":")
+    if state.last_swap.as_ref() == {
+        .Val(receipt) -> write_swap_receipt(&output, receipt)
+        .None -> output.push_str("null")
+    }
+    output.push_str(",\"error\":")
+    if state.swap_error.as_deref() == {
+        .Val(error) -> quoted(error, &output)
+        .None -> output.push_str("null")
+    }
+    output.push('}'); output
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:593
+fn release_json(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
+    output := String.with_capacity(2048)
+    output.push('{')
+    field_string(&output, "protocol", projection.protocol, true)
+    field_string(&output, "kind", "devtools.release", false)
+    field_string(&output, "session_id", projection.session_id, false)
+    field_optional_string(&output, "source_id", projection.source_id.as_deref())
+    field_optional_string(&output, "build_id", projection.build_id.as_deref())
+    field_string(&output, "revision", projection.revision, false)
+    field_string(&output, "lifecycle", projection.status.state.as_str(), false)
+    field_bool(&output, "read_only", true, false)
+    field_bool(&output, "payloads_redacted", true, false)
+    output.push_str(",\"panels\":[")
+    loop (index, panel) in panels.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        descriptor := panel.availability.descriptor
+        output.push('{')
+        field_string(&output, "id", descriptor.id.as_str(), true)
+        field_string(&output, "title", descriptor.title, false)
+        field_bool(&output, "available", panel.availability.is_available(), false)
+        output.push_str(",\"capabilities\":[")
+        loop (capability_index, capability) in descriptor.required_capabilities.iter().enumerate() {
+            if capability_index != 0 -> output.push(',')
+            quoted(capability.as_str(), &output)
+        }
+        output.push_str("]}}")
+    }
+    output.push_str("]}}"); output
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:645
+fn apply_web_swap_from_manifest(state: &BrowserWebState?, session_id: String, source_revision: String, build_revision: String, manifest: String, decision: &HotSwapDecision?) Err! {
+    dom_state := state.as_ref().map((state) -> state.dom_state.clone()).unwrap_or_default()
+    candidate := snapshot_from_manifest(source_revision, build_revision, manifest, dom_state) ?? {
+        resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
+        resident.swap_error = .Val(err.clone())
+        return .Err(err)
+    }
+    apply_web_swap_snapshot(state, session_id, candidate, decision)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:669
+fn manifest_artifact_identity(manifest: String) -> String Err! {
+    value := parse_manifest(manifest)?
+    root := object_map(value) ?? return .Err("web manifest must be a JSON object")
+    package := required_json_string(root, "package")?
+    if package.is_empty() -> return .Err("web manifest package identity is empty")
+    artifact_value := root.get("artifact").ok_or("web manifest has no selected artifact")?
+    artifact := object_map(artifact_value) ?? return .Err("web manifest artifact must be an object")
+    identity := required_json_string(artifact, "artifact_identity")?
+    if identity.is_empty() -> return .Err("web manifest artifact identity is empty")
+    .Ok(identity)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:688
+fn parse_manifest(manifest: String) -> Dyn Err! {
+    root := parse_json_with_limit(manifest, USize{MAX_STATIC_RESPONSE_BYTES}) ?? return .Err("web manifest is not valid bounded JSON")
+    object := object_map(root) ?? return .Err("web manifest must be a JSON object")
+    schema := required_json_string(object, "schema")?
+    if schema != "mir-web-v1" -> return .Err("unsupported web manifest schema `{schema}`")
+    .Ok(root)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:699
+fn snapshot_from_manifest(source_revision: String, build_revision: String, manifest: String, state: [WebModuleSwapStateFact]) -> WebModuleSwapSnapshot Err! {
+    if source_revision.is_empty() || build_revision.is_empty() -> return .Err("web swap requires non-empty source and build revisions")
+    value := parse_manifest(manifest)?
+    root := object_map(value) ?? return .Err("web manifest must be a JSON object")
+    package := required_json_string(root, "package")?
+    artifact_value := root.get("artifact").ok_or("web manifest has no selected artifact")?
+    artifact := object_map(artifact_value) ?? return .Err("web manifest artifact must be an object")
+    artifact_identity := required_json_string(artifact, "artifact_identity")?
+    selected_value := artifact.get("modules").ok_or("web manifest artifact has no modules")?
+    selected_modules := selected_value.as_array() ?? return .Err("web manifest artifact modules must be an array")
+    modules_value := root.get("modules").ok_or("web manifest has no module table")?
+    modules := modules_value.as_array() ?? return .Err("web manifest modules must be an array")
+    module_facts := [WebModuleFact]{[].with_capacity(selected_modules.len())}
+    loop selected in selected_modules {
+        module_id := if selected == {
+            .Int(id) -> id
+            else -> { return .Err("web manifest module id must be an integer") }
+        }
+        module_value := modules.iter().find((module_ref) -> {
+            object := object_map(module_ref) ?? return false
+            if object.get("id") == {
+                .Val(.Int(id)) -> id == module_id
+                else -> false
+            }
+        }).ok_or("web manifest selected module {module_id} is missing")?
+        module_ref := object_map(module_value) ?? return .Err("web manifest module must be an object")
+        identity := required_json_string(module_ref, "key")?
+        path := required_json_string(module_ref, "path")?
+        imports_value := module_ref.get("imports").ok_or("web manifest module has no imports")?
+        import_rows := imports_value.as_array() ?? return .Err("web manifest module imports must be an array")
+        imports := [String]{}
+        loop id in import_rows {
+            if id == {
+                .Int(n) -> imports.push(n.to_string())
+                else -> { return .Err("web manifest module import id must be an integer") }
+            }
+        }
+        imports_text := imports.join(",")
+        items_value := module_ref.get("item_order").ok_or("web manifest module has no item_order")?
+        item_rows := items_value.as_array() ?? return .Err("web manifest module item_order must be an array")
+        items := [String]{}
+        loop item in item_rows {
+            text := item.as_str() ?? return .Err("web manifest module item_order entries must be strings")
+            items.push(text.to_string())
+        }
+        item_order := items.join(TEXT_NUL)
+        interface_seed := "{identity}{TEXT_NUL}{path}{TEXT_NUL}{imports_text}{TEXT_NUL}{item_order}"
+        interface_fingerprint := "sha256-{sha256_hex(interface_seed.as_bytes())}"
+        body_seed := "{artifact_identity}{TEXT_NUL}{module_id}{TEXT_NUL}{path}"
+        body_fingerprint := "sha256-{sha256_hex(body_seed.as_bytes())}"
+        module_facts.push(WebModuleFact.new(identity, interface_fingerprint, body_fingerprint))
+    }
+    WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new(package, "application"), source_revision, build_revision, WebPageFact.new("application", artifact_identity), module_facts, state).map_err((error) -> "web swap candidate rejected: {error}")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:791
+fn apply_web_swap_snapshot(state: &BrowserWebState?, session_id: String, candidate: WebModuleSwapSnapshot, decision: &HotSwapDecision?) Err! {
+    resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
+    if resident.swap.is_none() {
+        if decision.is_some() {
+            error := "web swap decision has no resident snapshot; rebuild was rejected"
+            resident.swap_error = .Val(error.clone())
+            return .Err(error)
+        }
+        swap := WebModuleSwapState.new(candidate) ?? return .Err("web swap state rejected: {err}")
+        resident.swap = .Val(swap); resident.last_swap = .None; resident.swap_error = .None
+        return .Ok(_)
+    }
+    canonical_decision := decision.ok_or_else(() -> {
+        error := "web rebuild has no canonical HotSwapDecision; compatibility planning was rejected"
+        resident.swap_error = .Val(error.clone()); error
+    })?
+    swap := resident.swap.as_mut().expect("web swap state initialized")
+    plan := WebModuleSwapPlan.from_hot_swap_decision(swap.committed(), candidate, canonical_decision) ?? return .Err("web swap plan rejected: {err}")
+    receipt := swap.apply_decision(plan) ?? {
+        resident.swap_error = .Val(err.to_string())
+        return .Err("web swap transaction rejected: {err}")
+    }
+    resident.last_swap = .Val(receipt); resident.swap_error = .None
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:837
+fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {
+    output.push_str("{{\"identity\":{{")
+    field_string(output, "module", snapshot.identity.module_ref, true)
+    field_string(output, "page", snapshot.identity.page, false)
+    output.push('}')
+    field_string(output, "source_revision", snapshot.source_revision, false)
+    field_string(output, "build_revision", snapshot.build_revision, false)
+    output.push_str(",\"page\":{{")
+    field_string(output, "identity", snapshot.page.identity, true)
+    field_string(output, "artifact", snapshot.page.artifact, false)
+    output.push_str("}},\"modules\":[")
+    loop (index, module_ref) in snapshot.modules.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_string(output, "identity", module_ref.identity, true)
+        field_string(output, "interface_fingerprint", module_ref.interface_fingerprint, false)
+        field_string(output, "body_fingerprint", module_ref.body_fingerprint, false)
+        output.push('}')
+    }
+    output.push(']')
+    field_u64(output, "state_count", U64{snapshot.state.len()}, false)
+    output.push('}')
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:870
+fn write_swap_receipt(output: &String, receipt: &WebModuleSwapReceipt) {
+    output.push('{')
+    field_string(output, "operation", receipt.operation.as_str(), true)
+    field_string(output, "status", receipt.status.as_str(), false)
+    field_string(output, "phase", receipt.phase.as_str(), false)
+    field_string(output, "source_revision", receipt.source_revision, false)
+    field_string(output, "build_revision", receipt.build_revision, false)
+    output.push_str(",\"identity\":{{")
+    field_string(output, "module", receipt.identity.module_ref, true)
+    field_string(output, "page", receipt.identity.page, false)
+    output.push_str("}},\"candidate_identity\":{{")
+    field_string(output, "module", receipt.candidate_identity.module_ref, true)
+    field_string(output, "page", receipt.candidate_identity.page, false)
+    output.push('}')
+    write_string_array(output, "changed_modules", receipt.changed_modules)
+    write_string_array(output, "reason_codes", receipt.reason_codes.iter().map((reason) -> reason.as_str().to_string()).collect())
+    output.push_str(",\"preserved\":[")
+    loop (index, fact) in receipt.preserved.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_string(output, "kind", fact.kind().as_str(), true)
+        field_string(output, "key", fact.key(), false)
+        field_string(output, "identity", fact.identity(), false)
+        field_string(output, "type_fingerprint", fact.type_fingerprint(), false)
+        output.push('}')
+    }
+    output.push_str("],\"reset\":[")
+    loop (index, fact) in receipt.reset.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_string(output, "kind", fact.state.kind().as_str(), true)
+        field_string(output, "key", fact.state.key(), false)
+        field_string(output, "identity", fact.state.identity(), false)
+        field_optional_string(output, "prior_identity", fact.prior_identity.as_deref())
+        field_optional_string(output, "prior_type_fingerprint", fact.prior_type_fingerprint.as_deref())
+        field_string(output, "reason", fact.reason.as_str(), false)
+        output.push('}')
+    }
+    output.push_str("],\"committed_page\":{{")
+    field_string(output, "identity", receipt.committed_page.identity, true)
+    field_string(output, "artifact", receipt.committed_page.artifact, false)
+    output.push_str("}},\"active_page\":{{")
+    field_string(output, "identity", receipt.active_page.identity, true)
+    field_string(output, "artifact", receipt.active_page.artifact, false)
+    output.push_str("}}")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:936
+fn write_string_array(output: &String, key: String, values: &[String]) {
+    output.push(','); quoted(key, output); output.push_str(":[")
+    loop (index, value) in values.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        quoted(value, output)
+    }
+    output.push(']')
+}
+
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:952
+PAGE_CSS :: """
+:root{color-scheme:dark;--bg:#0F1013;--raised:#17191D;--raised-2:#1D2026;--well:#0A0B0D;--line:#30343C;--ink:#F6F5F2;--dim:#9B9EA8;--red:#E8232A;--ok:#56C271;--amber:#E3A43B;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+button,select,textarea{font:inherit;color:inherit}button{background:none;border:0;padding:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--red);outline-offset:3px}textarea:focus-visible{outline:1px solid var(--dim);outline-offset:0}
+code,pre,textarea,.mono{font:12px/1.55 var(--mono)}
+main{height:100%;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line);flex:none}
+.embedded .bar{display:none}
+.mark{display:grid;place-items:center;flex:none;width:40px;height:40px;border:1px solid var(--ok);border-radius:13px;background:var(--well);box-shadow:0 0 14px #56c27144}
+.mark svg{display:block;width:32px;height:20px}
+[data-state=building] .mark{border-color:var(--amber);border-style:dashed;box-shadow:0 0 14px #e3a43b55}
+[data-state=error] .mark,[data-state=unavailable] .mark,[data-state=stopped] .mark{border-color:var(--red);border-style:double;box-shadow:0 0 14px #e8232a66}
+[data-state=starting] .mark,[data-state=reconnecting] .mark{border-color:var(--dim);border-style:dotted;box-shadow:0 0 14px #9b9ea844}
+.state{display:inline-flex;align-items:center;gap:8px;font-weight:600}
+.status-mark{display:inline-block;width:10px;height:10px;border:2px solid var(--ok);border-radius:3px;flex:none}
+[data-state=building] .status-mark{border-color:var(--amber);border-style:dashed}
+[data-state=error] .status-mark,[data-state=unavailable] .status-mark,[data-state=stopped] .status-mark{border-color:var(--red);border-radius:2px}
+[data-state=starting] .status-mark,[data-state=reconnecting] .status-mark{border-color:var(--dim);border-style:dotted}
+.grow{flex:1}
+.note{color:var(--dim);font-size:12px}.note:empty{display:none}
+.link{color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:9px;padding:6px 11px;font-size:12px}.link:hover{background:var(--raised)}
+.link[hidden]{display:none}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:var(--raised);font-size:12px;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--raised-2)}.btn.primary{border-color:var(--red)}.btn[disabled]{opacity:.45;cursor:default}
+.btn.quiet{background:none;border-color:transparent;color:var(--dim)}.btn.quiet:hover{color:var(--ink);background:var(--raised)}
+.attention{flex:none;padding:16px 18px 14px;border-bottom:1px solid var(--line)}
+.attention h2{margin:0;display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;line-height:1.3;flex-wrap:wrap}
+.attention h2 small{font-weight:400;color:var(--dim);font-size:11px}
+.attention .diag{margin:11px 0 0;padding:11px 13px;background:var(--well);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:34vh;overflow:auto}
+main:has(.source:not([hidden])) .attention .diag{max-height:88px}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:11px}.acts:empty{display:none}
+.why{flex:1 1 100%;color:var(--dim);font-size:12px}
+.receipt{color:var(--dim);font-size:12px}.receipt:empty{display:none}.receipt[data-status=failed]{color:var(--red)}.receipt[data-status=completed]{color:var(--ok)}
+.source{flex:none;display:flex;flex-direction:column;border-bottom:1px solid var(--line);max-height:min(62vh,540px)}
+.source[hidden]{display:none}
+.source header{display:flex;align-items:center;gap:8px;padding:9px 18px;flex-wrap:wrap}
+.source select{background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:5px 8px;color:var(--ink);max-width:60%;font-family:var(--mono);font-size:12px}
+.source .rev{color:var(--dim);font-size:11px;font-family:var(--mono)}
+.source textarea{flex:1 1 auto;min-height:130px;margin:0 18px;padding:11px 13px;background:var(--well);color:var(--ink);border:1px solid var(--line);border-radius:10px;resize:vertical;tab-size:4;white-space:pre;overflow:auto}
+.source textarea[data-dirty=true]{border-color:var(--amber)}
+.source footer{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 18px}
+.source .out{margin:0 18px 11px;padding:11px 13px;background:var(--well);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:26vh;overflow:auto}
+.source .out[hidden]{display:none}.source .out[data-ok=true]{border-color:var(--ok)}.source .out[data-ok=false]{border-color:var(--red)}
+.result{color:var(--dim);font-size:12px;min-width:0;overflow-wrap:anywhere}.result:empty{display:none}.result[data-tone=bad]{color:var(--red)}.result[data-tone=good]{color:var(--ok)}
+.body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+[data-placement=workbench] .body{grid-template-columns:minmax(0,1fr) minmax(300px,.78fr)}
+.facts,.inspector{min-height:0;overflow:auto}
+.facts{padding:9px 0 28px}
+.selected{margin:8px 18px 14px;padding:12px 14px;background:var(--raised);border:1px solid var(--line);border-radius:12px}
+.selected .eyebrow{margin-bottom:5px;color:var(--dim);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.crumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--dim)}.crumbs button{color:var(--dim)}.crumbs button:hover{color:var(--ink)}
+.selected h3{margin:5px 0 7px;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0;font-size:12px;color:var(--dim)}.kv dt,.kv dd{margin:0}.kv dd{color:var(--ink);font-family:var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.group{margin:0 18px 8px;border:1px solid var(--line);border-radius:12px;background:rgba(23,25,29,.6);overflow:hidden}
+.group>summary{display:flex;align-items:center;gap:10px;min-height:46px;padding:10px 13px;cursor:pointer;list-style:none}
+.group>summary::-webkit-details-marker{display:none}
+.group>summary::before{content:"";width:0;height:0;border:4px solid transparent;border-left:5px solid var(--dim);flex:none;transform-origin:2px 50%}
+.group[open]>summary::before{transform:rotate(90deg)}
+.group>summary:hover{background:var(--raised)}
+.group[data-active=true]>summary{border-bottom:1px solid var(--line)}
+.group-label{font-size:13px;font-weight:600}.group-meta{margin-left:auto;color:var(--dim);font-size:11px;white-space:nowrap}
+.group-body{padding:5px 5px 8px}
+.panel{margin:0 2px}.panel+ .panel{border-top:1px solid rgba(48,52,60,.6)}
+.panel>header{display:flex;align-items:center;gap:8px;padding-right:7px}
+.panel h2{margin:0;flex:1;min-width:0;font:inherit}
+.toggle{display:flex;align-items:center;gap:8px;width:100%;padding:8px;border-radius:8px;font-weight:500}.toggle:hover{background:var(--raised)}
+.chev{width:0;height:0;border:4px solid transparent;border-left:5px solid var(--dim);flex:none}
+.panel[data-open=true] .chev{transform:rotate(90deg)}
+.panel small{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+.nodes{list-style:none;margin:0 0 5px;padding:0 0 0 14px}
+.node{display:flex;align-items:baseline;gap:8px;width:100%;padding:6px 8px;border-radius:8px;min-width:0}.node:hover{background:var(--raised)}
+li[data-selected=true]>.node{background:var(--raised);box-shadow:inset 2px 0 0 var(--red)}
+.node .lbl{overflow-wrap:anywhere;min-width:0;font-family:var(--mono);font-size:12px}.node b{font-weight:500;color:var(--dim);font-size:11px;margin-left:auto;white-space:nowrap}
+.fold{margin:11px 18px}.fold>summary{list-style:none;cursor:pointer;color:var(--dim);font-size:12px;padding:7px 0}.fold>summary::-webkit-details-marker{display:none}.fold>summary:hover{color:var(--ink)}
+.fold .u{display:flex;gap:8px;padding:4px 0;font-size:12px}.fold .u small{color:var(--dim)}
+.group-body .fold{margin:6px 10px;padding-left:12px;border-left:1px solid var(--line)}
+.group-body .u{flex-wrap:wrap;column-gap:10px}
+.inspector{border-left:1px solid var(--line);padding:17px 18px}
+.inspector h3{margin:6px 0 9px;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.value{display:block;margin:7px 0;padding:9px 11px;background:var(--well);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.empty{padding:32px 18px;color:var(--dim);text-align:center;font-size:12px}
+@media(max-width:900px){[data-placement=workbench] .body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}.inspector{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+@media(max-width:560px){.bar,.attention,.source header,.source footer{padding-left:14px;padding-right:14px}.selected,.group,.fold{margin-left:14px;margin-right:14px}.group>summary{padding-left:11px;padding-right:11px}.group-meta{font-size:10px}}
+@media(prefers-reduced-motion:no-preference){.chev,.group>summary::before{transition:transform .12s}.selected,.source{animation:in .18s ease}@keyframes in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}}
+"""
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1052
+PAGE_JS :: """
+const session=new URL(location.href).searchParams.get('session')||'';const params=new URL(location.href).searchParams;const q=(p)=>p+'?session='+encodeURIComponent(session);const key='jet-devtools:'+S.placement;const DRAFT='jet-devtools:draft';const OPEN='jet-devtools:source';const $=(s)=>document.querySelector(s);const note=$('.note');const embedded=window.parent!==window;$('main').classList.toggle('embedded',embedded);document.querySelectorAll('a[data-route]').forEach((a)=>{a.href=q(a.dataset.route);a.hidden=embedded});
+const store={get(k){try{return JSON.parse(sessionStorage.getItem(k)||'null')}catch(_){return null}},set(k,v){try{if(v==null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
+const intentKey='jet-devtools:intents:'+S.placement;const restoreIntentGroups=()=>{const saved=store.get(intentKey)||{};document.querySelectorAll('details[data-intent]').forEach((group)=>{if(group.dataset.active!=='true'&&Object.prototype.hasOwnProperty.call(saved,group.dataset.intent))group.open=!!saved[group.dataset.intent];group.addEventListener('toggle',()=>{const next=store.get(intentKey)||{};next[group.dataset.intent]=group.open;store.set(intentKey,next)})})};restoreIntentGroups();
+const focusKey=()=>document.activeElement&&document.activeElement.dataset.focus||null;const scrollers=()=>[...document.querySelectorAll('[data-scroll]')];
+const reload=(focus)=>{store.set(key,{focus,scroll:scrollers().map((e)=>e.scrollTop)});location.reload()};
+{const m=store.get(key);if(m){store.set(key,null);scrollers().forEach((e,i)=>{if(m.scroll[i]!=null)e.scrollTop=m.scroll[i]});const f=[...document.querySelectorAll('[data-focus]')].find((e)=>e.dataset.focus===m.focus);if(f)f.focus({preventScroll:true})}}
+const fail=(r)=>r.text().then((t)=>{throw new Error(t||('HTTP '+r.status))});
+const post=(path,body)=>fetch(q(path),{method:'POST',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+const send=(path,body,focus)=>post(path,body).then((r)=>r.ok?r.json():fail(r)).then(()=>reload(focus)).catch((e)=>{note.textContent=String(e.message||e)});
+document.addEventListener('click',(ev)=>{const el=ev.target.closest('[data-select],[data-layout],[data-clear],[data-tool],[data-refresh]');if(!el)return;if(el.dataset.select)send('/__jet_devtools/selection',{selection:{panel_id:el.dataset.panel,item_key:el.dataset.node}},el.dataset.focus);else if(el.dataset.layout)send('/__jet_devtools/action',{action:el.dataset.layout==='open'?'open_panel':'close_panel',placement:S.placement,panel_id:el.dataset.panel},el.dataset.focus);else if(el.dataset.clear)send('/__jet_devtools/selection',{selection:null},null);else if(el.dataset.refresh)reload(focusKey());else if(el.dataset.tool==='source')openSource(el.dataset.file||null);else if(el.dataset.tool==='rebuild')rebuild(el)});
+/* Rebuild: one canonical host_to_runtime command; the receipt the host publishes is the only progress shown. */
+const receiptEl=$('.receipt');const rebuildResult=$('.acts .result');
+function rebuild(button){button.disabled=true;rebuildResult.dataset.tone='';rebuildResult.textContent='Requesting rebuild…';const id='rebuild-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);post('/__jet_devtools',{protocol:'jet.devtools.v1',session_id:S.session_id,started_at_ms:Date.now(),direction:'host_to_runtime',commands:[{kind:'ProjectRebuild',payload:{session_id:S.session_id,request_id:id,expected_revision:S.revision}}]}).then((r)=>{if(!r.ok)return fail(r);rebuildResult.textContent='';return live(true)}).catch((e)=>{rebuildResult.dataset.tone='bad';rebuildResult.textContent=String(e.message||e)}).finally(()=>{button.disabled=false})}
+const receiptText={queued:'Rebuild queued',building:'Rebuilding…',completed:'Rebuild finished',failed:'Rebuild failed'};
+function renderReceipt(list){const r=(list||[]).filter((x)=>x.kind==='ProjectRebuild').pop();if(!receiptEl)return;if(!r){receiptEl.textContent='';receiptEl.removeAttribute('data-status');return}receiptEl.dataset.status=r.status;receiptEl.textContent=(receiptText[r.status]||r.status)+(r.error?': '+r.error:'')}
+renderReceipt(S.receipts);
+/* Source tool */
+const src={box:$('.source'),file:$('.source select'),rev:$('.source .rev'),text:$('.source textarea'),out:$('.source .out'),result:$('.source .result'),apply:$('[data-src=apply]'),check:$('[data-src=check]'),discard:$('[data-src=discard]'),files:[],source_id:null,revision:null,base:'',loading:false};
+const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);const dirty=()=>!!src.box&&!src.box.hidden&&src.text.value!==src.base;
+function say(el,tone,text){el.dataset.tone=tone||'';el.textContent=text||''}
+function showOut(ok,text){src.out.hidden=!text;src.out.dataset.ok=String(ok);src.out.textContent=text||''}
+function fileFromDiagnostic(){const m=/-->\s*([^\s:]+\.jet)/.exec(S.status.diagnostic||'');return m?m[1]:null}
+function pickFile(wanted){if(!src.files.length)return null;const norm=(p)=>String(p||'').replace(/^\.\//,'');if(wanted){const w=norm(wanted);const hit=src.files.find((f)=>norm(f)===w)||src.files.find((f)=>w.endsWith('/'+norm(f))||norm(f).endsWith('/'+w)||norm(f).split('/').pop()===w.split('/').pop());if(hit)return hit}return src.files.includes(src.entry)?src.entry:src.files[0]}
+function openSource(file){if(!src.box)return;src.box.hidden=false;const draft=store.get(DRAFT);const want=file||(draft&&draft.source_id)||fileFromDiagnostic()||null;loadProject().then(()=>loadFile(pickFile(want),draft)).catch((e)=>say(src.result,'bad',String(e.message||e)))}
+function loadProject(){return fetch(q('/__jet_canvas/project'),{cache:'no-store'}).then((r)=>r.ok?r.json():fail(r)).then((j)=>{const c=j.canvas||{};src.entry=String(c.entry||'').replace(/^\.\//,'');src.revisions={};src.files=(c.files||[]).filter((f)=>f.kind==='source').map((f)=>{const p=String(f.path).replace(/^\.\//,'');src.revisions[p]=f.revision;return p});src.file.innerHTML='';src.files.forEach((p)=>{const o=document.createElement('option');o.value=p;o.textContent=p;src.file.appendChild(o)});if(src.source_id)src.file.value=src.source_id})}
+function loadFile(id,draft){if(!id)throw new Error('This project has no Jet source files to edit.');src.loading=true;src.file.value=id;return fetch(q('/__jet_canvas/source?source_id='+encodeURIComponent(id)),{cache:'no-store'}).then((r)=>r.ok?r.text():fail(r)).then((text)=>{src.source_id=id;src.revision=src.revisions[id]||null;src.base=text;src.rev.textContent=src.revision?src.revision.slice(0,15):'';showOut(true,'');say(src.result,'','');if(draft&&draft.source_id===id&&draft.text!==text){src.text.value=draft.text;if(draft.revision!==src.revision)say(src.result,'','The file changed on disk since this draft started; Apply checks against the current file.')}else{src.text.value=text;if(draft&&draft.source_id===id)store.set(DRAFT,null)}markDirty();store.set(OPEN,{source_id:id});if(draft&&draft.sel&&draft.source_id===id){try{src.text.setSelectionRange(draft.sel[0],draft.sel[1]);src.text.scrollTop=draft.scroll||0}catch(_){}}}).finally(()=>{src.loading=false})}
+function markDirty(){const d=dirty();src.text.dataset.dirty=String(d);src.apply.disabled=!d;src.discard.hidden=!d;if(d)store.set(DRAFT,{source_id:src.source_id,revision:src.revision,text:src.text.value,sel:[src.text.selectionStart,src.text.selectionEnd],scroll:src.text.scrollTop});else if(!src.loading)store.set(DRAFT,null)}
+function readCanvas(r){return r.text().then((t)=>{let j=null;try{j=JSON.parse(t)}catch(_){}if(!j)throw new Error(t||('HTTP '+r.status));return j.canvas||j})}
+function diagText(c){const lines=[];if(c.message)lines.push(c.message);(c.diagnostics||[]).forEach((d)=>{if(typeof d==='string'){lines.push(d);return}const where=d.file?(d.file+(d.line?':'+d.line+(d.col?':'+d.col:''):'')):'';lines.push([d.code?'['+d.code+']':'',d.what||d.message||'',where?'— '+where:''].filter(Boolean).join(' '));if(d.fix)lines.push('  fix: '+d.fix)});return lines.join('\n')}
+function conflict(c){src.revisions={};return loadProject().then(()=>{src.revision=src.revisions[src.source_id]||c.current_revision||src.revision;src.rev.textContent=src.revision?src.revision.slice(0,15):'';say(src.result,'bad',(c.message||'The file changed on disk.')+' Your draft is kept; Check or Apply again runs against the current file, or Discard reloads it.')})}
+if(src.box){src.text.addEventListener('input',markDirty);src.text.addEventListener('select',markDirty);src.text.addEventListener('scroll',()=>{if(dirty())markDirty()});
+src.file.addEventListener('change',()=>{if(dirty()){src.file.value=src.source_id;say(src.result,'','Apply or discard the current draft before switching files.');return}loadFile(src.file.value,null).catch((e)=>say(src.result,'bad',String(e.message||e)))});
+src.discard.addEventListener('click',()=>{store.set(DRAFT,null);loadFile(src.source_id,null).catch((e)=>say(src.result,'bad',String(e.message||e)))});
+$('[data-src=close]').addEventListener('click',()=>{if(dirty()&&!confirm('Close the source tool and keep the draft for later?'))return;src.box.hidden=true;store.set(OPEN,null);const u=new URL(location.href);u.searchParams.delete('tool');u.searchParams.delete('file');history.replaceState(null,'',u)});
+src.check.addEventListener('click',()=>{src.check.disabled=true;say(src.result,'','Checking…');showOut(true,'');post('/__jet_canvas/command',{action_id:'canvas.command:check',source_id:src.source_id,revision:src.revision,source_text:src.text.value}).then((r)=>readCanvas(r).then((c)=>{if(c.ok===false&&c.kind==='conflict')return conflict(c);if(c.ok===false)throw new Error(c.message||'check refused');if(c.success){say(src.result,'good','No errors — Apply writes this exact text, formatted.')}else{say(src.result,'bad','Check found errors; nothing was written.');showOut(false,c.stderr||diagText(c))}})).catch((e)=>say(src.result,'bad',String(e.message||e))).finally(()=>{src.check.disabled=false})});
+src.apply.addEventListener('click',()=>{src.apply.disabled=true;say(src.result,'','Applying…');showOut(true,'');post('/__jet_canvas/transaction',{schema_version:1,op:'replace_source',source_id:src.source_id,revision:src.revision,source:src.text.value}).then((r)=>readCanvas(r).then((c)=>{if(c.ok===false&&c.kind==='conflict')return conflict(c);if(c.ok===false){say(src.result,'bad','Not applied'+(c.message?': '+c.message:'.'));if((c.diagnostics||[]).length)showOut(false,diagText(c));return}src.base=c.source_text!=null?c.source_text:src.text.value;src.text.value=src.base;src.revision=c.revision||src.revision;src.revisions[src.source_id]=src.revision;src.rev.textContent=src.revision?src.revision.slice(0,15):'';store.set(DRAFT,null);markDirty();say(src.result,'good',c.changed===false?'No change to write.':'Applied — the host is rebuilding from this revision.')})).catch((e)=>say(src.result,'bad',String(e.message||e))).finally(()=>{markDirty()})});
+const open=store.get(OPEN);const draft=store.get(DRAFT);if(params.get('tool')==='source'||open||draft)openSource(params.get('file')||(open&&open.source_id)||null)}
+/* Live: reload when shared facts move, unless a draft is in progress; then only the receipt updates and a refresh chip appears. */
+const refresh=$('[data-refresh]');
+function live(once){return fetch(q('/__jet_devtools/state'),{cache:'no-store'}).then((r)=>r.json()).then((n)=>{const moved=n.sequence!==S.sequence||n.state!==S.state||n.status.state!==S.status.state||!same(n.selection,S.selection)||!same(n.receipts,S.receipts)||!same(n.tools,S.tools);if(!moved)return;if(dirty()||document.activeElement===src.text){renderReceipt(n.receipts);if(refresh)refresh.hidden=false;return}reload(focusKey())}).catch(()=>{}).finally(()=>{if(!once)setTimeout(live,1000)})}
+setTimeout(live,1000);
+const sel=S.selection&&S.panels.find((p)=>p.panel_id===S.selection.panel_id);if(sel&&!sel.open){const once='jet-devtools:reveal:'+S.placement+':'+sel.panel_id;let done=false;try{done=sessionStorage.getItem(once)===String(S.sequence);sessionStorage.setItem(once,String(S.sequence))}catch(_){}if(!done)send('/__jet_devtools/action',{action:'open_panel',placement:S.placement,panel_id:sel.panel_id},focusKey())}
+addEventListener('keydown',(ev)=>{if(ev.key==='Escape'&&document.activeElement===src.text){src.text.blur();ev.preventDefault();return}if(!embedded)return;const alt=ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='j';if(ev.key==='Escape'||alt){ev.preventDefault();parent.postMessage({jet:'devtools',key:ev.key,altKey:ev.altKey},location.origin)}});
+"""
+
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1099
+INTENT_GROUPS :: [(String, [String])]{[
+    ("Build & source", ["build", "gates", "structure", "tests", "jobs"]),
+    ("Data & requests", ["routes", "queries", "mutations", "forms", "table", "store", "database"]),
+    ("Runtime & interface", ["traces", "cost", "profiler", "ui-tree", "topology", "game", "world"])
+]}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1124
+fn intent_group(panel_id: String) -> USize { INTENT_GROUPS.iter().position((group) -> group.1.contains(panel_id)).unwrap_or(INTENT_GROUPS.len() - 1) }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1131
+fn panel_available(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1137
+fn unavailable_reason_text(status: String) -> String {
+    status.trim_start_matches("unavailable:").split(',').map((reason) -> if reason == {
+        "unsupported-host" | "host-kind" -> "not offered by this host".to_string()
+        "missing-capability" -> "needs a grant this session does not hold".to_string()
+        other -> other.to_string()
+    }).collect().join(", ")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1151
+fn diagnostic_file(diagnostic: String) -> String? {
+    rest := diagnostic.split("-->").nth(1)?.trim_start() // #4303
+    token := rest.split_whitespace().next()?
+    file := token.split(':').next()?
+    if file.ends_with(".jet") -> .Val(file) else -> .None
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1163
+fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
+    frame := state.frame(placement)
+    state_json := frame_json(frame)
+    workbench := placement == .Workbench
+    selection := frame.selection.as_ref()
+    any_open := frame.panels.iter().any((panel) -> panel.open && panel_available(panel))
+    html := String.with_capacity(16 * 1024)
+    html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'\"><title>Jet devtools")
+    if workbench -> html.push_str(" workbench")
+    html.push_str("</title><style>"); html.push_str(PAGE_CSS)
+    html.push_str("</style></head><body><main data-schema=\""); html.push_str(BROWSER_PAGE_SCHEMA)
+    html.push_str("\" data-placement=\""); html.push_str(placement.as_str())
+    html.push_str("\" data-session-id=\""); html.push_str(html_escape(frame.session_id))
+    html.push_str("\" data-state=\"")
+    state_word := devtools_state_as_str(frame.status.state)
+    html.push_str(state_word)
+    html.push_str("\"><header class=\"bar\"><span class=\"mark\">")
+    html.push_str(include_str("../../../Docs/site/assets/mark.svg")) // GATE #4494: compile-time embedded asset.
+    html.push_str("</span><strong>Jet devtools</strong><span class=\"state\"><i class=\"status-mark\" aria-hidden=\"true\"></i>")
+    html.push_str(state_word)
+    html.push_str("</span><span class=\"grow\"></span><span class=\"note\" role=\"status\"></span>")
+    if !workbench -> html.push_str("<a class=\"link\" data-route=\"/__jet_devtools/workbench\">Workbench</a>")
+    html.push_str("</header>")
+    render_attention(&html, frame); render_source_tool(&html, frame)
+    html.push_str("<div class=\"body\"><section class=\"facts\" data-scroll aria-label=\"Facts\">")
+    if !workbench -> render_selected(&html, frame)
+    loop (index, group) in INTENT_GROUPS.iter().enumerate() {
+        members := frame.panels.iter().filter((panel) -> intent_group(panel.panel_id) == index).collect()
+        if members.is_empty() -> next
+        available_count := members.iter().filter((panel) -> panel_available(panel)).count()
+        open_count := members.iter().filter((panel) -> panel.open && panel_available(panel)).count()
+        selected_here := selection.is_some_and((selected) -> members.iter().any((panel) -> panel.panel_id == selected.panel_id))
+        forced := selected_here || open_count > 0 || (!workbench && index == 0 && (frame.status.state == .Building || frame.status.state == .Error))
+        initially_open := forced || (workbench && index == 0 && !any_open && selection.is_none())
+        html.push_str("<details class=\"group\" data-intent=\""); html.push_str(index.to_string())
+        html.push_str(if forced -> "\" data-active=\"true\"" else -> "\"")
+        if initially_open -> html.push_str(" open")
+        html.push_str("><summary data-focus=\"intent:"); html.push_str(index.to_string())
+        html.push_str("\"><span class=\"group-label\">"); html.push_str(html_escape(group.0))
+        html.push_str("</span><span class=\"group-meta\">")
+        if selected_here { html.push_str("Selected") } else if open_count > 0 {
+            suffix := if available_count == 1 -> "" else -> "s"
+            html.push_str("{open_count} open · {available_count} panel{suffix}")
+        } else { html.push_str("{available_count} available") }
+        html.push_str("</span></summary><div class=\"group-body\">")
+        loop panel in members.iter().filter((panel) -> panel_available(panel)) -> render_panel(&html, panel, selection)
+        unavailable_count := members.len() - available_count
+        if unavailable_count > 0 {
+            html.push_str("<details class=\"fold\"><summary>{unavailable_count} not available here</summary>")
+            loop panel in members.iter().filter((panel) -> !panel_available(panel)) {
+                html.push_str("<div class=\"u\"><span>"); html.push_str(html_escape(panel.title))
+                html.push_str("</span><small>"); html.push_str(html_escape(unavailable_reason_text(panel.status)))
+                html.push_str("</small></div>")
+            }
+            html.push_str("</details>")
+        }
+        html.push_str("</div></details>")
+    }
+    if frame.panels.is_empty() { html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>") } else if frame.panels.iter().all((panel) -> !panel_available(panel)) { html.push_str("<p class=\"empty\">No live panels are available on this host.</p>") }
+    html.push_str("</section>")
+    if workbench -> render_inspector(&html, frame)
+    html.push_str("</div><script>const S=JSON.parse(\"")
+    html.push_str(js_string(state_json)); html.push_str("\");"); html.push_str(PAGE_JS)
+    html.push_str("</script></main></body></html>")
+    html
+}
+
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1305
+fn render_attention(html: &String, frame: &BrowserDevtoolsFrame) {
+    status := frame.status
+    failing_file := status.diagnostic.as_deref().and_then(diagnostic_file)
+    html.push_str("<section class=\"attention\" aria-label=\"Attention\"><h2><i class=\"status-mark\" aria-hidden=\"true\"></i>")
+    html.push_str(if status.state == { .Starting -> "Starting", .Building -> "Building", .Ready -> "Ready"
+        .Error -> "Build failed", .Unavailable -> "Runtime unavailable", .Stopped -> "Stopped" })
+    if status.diagnostic_code == .Val(code) {
+        html.push_str("<small class=\"mono\">"); html.push_str(html_escape(code)); html.push_str("</small>")
+    }
+    if failing_file == .Val(file) {
+        html.push_str("<small class=\"mono\">"); html.push_str(html_escape(file)); html.push_str("</small>")
+    }
+    if status.test_state == .Val(tests) {
+        html.push_str("<small>tests "); html.push_str(html_escape(tests)); html.push_str("</small>")
+    }
+    html.push_str("</h2>")
+    if status.diagnostic == .Val(diagnostic) {
+        // Verbatim diagnostic (I4), escaped for HTML.
+        html.push_str("<pre class=\"diag\">"); html.push_str(html_escape(diagnostic)); html.push_str("</pre>")
+    }
+    html.push_str("<div class=\"acts\">")
+    if frame.tools.source {
+        if status.state == .Error {
+            html.push_str("<button class=\"btn primary\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\"")
+            if failing_file == .Val(file) {
+                html.push_str(" data-file=\""); html.push_str(html_escape(file)); html.push('"')
+            }
+            html.push_str(">Fix in source</button>")
+        } else { html.push_str("<button class=\"btn\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\">Source</button>") }
+    }
+    if frame.tools.rebuild -> html.push_str("<button class=\"btn\" type=\"button\" data-tool=\"rebuild\" data-focus=\"tool:rebuild\">Rebuild</button>")
+    html.push_str("<span class=\"receipt\" role=\"status\"></span><span class=\"result\" role=\"status\"></span>")
+    reasons := [String]{}
+    if frame.tools.source_reason.as_deref() == .Val(reason) -> reasons.push(reason)
+    if !frame.tools.rebuild && frame.tools.rebuild_reason.as_deref() == .Val(reason) -> reasons.push(reason)
+    if !reasons.is_empty() {
+        html.push_str("<span class=\"why\">"); html.push_str(html_escape(reasons.join(" "))); html.push_str("</span>")
+    }
+    html.push_str("</div></section>")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1376
+fn render_source_tool(html: &String, frame: &BrowserDevtoolsFrame) {
+    if !frame.tools.source -> return
+    html.push_str("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1388
+fn render_panel(html: &String, panel: &BrowserPanelView, selection: &BrowserSelection?) {
+    node_id := selection.filter((selection) -> selection.panel_id == panel.panel_id).and_then((selection) -> selection.node_id.as_deref())
+    html.push_str("<article class=\"panel\" data-panel-id=\""); html.push_str(html_escape(panel.panel_id))
+    html.push_str("\" data-open=\""); html.push_str(if panel.open -> "true" else -> "false")
+    html.push_str("\"><header><h2><button class=\"toggle\" data-layout=\""); html.push_str(if panel.open -> "close" else -> "open")
+    html.push_str("\" data-panel=\""); html.push_str(html_escape(panel.panel_id))
+    html.push_str("\" data-focus=\"toggle:"); html.push_str(html_escape(panel.panel_id))
+    html.push_str("\" aria-expanded=\""); html.push_str(if panel.open -> "true" else -> "false")
+    html.push_str("\"><span class=\"chev\"></span>"); html.push_str(html_escape(panel.title))
+    html.push_str("</button></h2><small>"); html.push_str(html_escape(panel.status)); html.push_str("</small></header>")
+    if panel.open {
+        html.push_str("<ul class=\"nodes\">"); render_nodes_html(html, panel.panel_id, panel.nodes, node_id); html.push_str("</ul>")
+    }
+    html.push_str("</article>")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1418
+fn render_selected(html: &String, frame: &BrowserDevtoolsFrame) {
+    selection := frame.selection.as_ref() ?? return
+    panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? return
+    path := [&BrowserNode]{}
+    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, &path)).and_then((_) -> path.last().copied())
+    html.push_str("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>")
+    render_crumbs(html, panel, path)
+    if node == { .Val(node) -> render_node_detail(html, panel.panel_id, node)
+        .None -> { html.push_str("<h3>"); html.push_str(html_escape(panel.title)); html.push_str("</h3>") } }
+    html.push_str("</section>")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1448
+fn render_crumbs(html: &String, panel: &BrowserPanelView, path: &[&BrowserNode]) {
+    html.push_str("<div class=\"crumbs\"><span>"); html.push_str(html_escape(panel.title)); html.push_str("</span>")
+    loop ancestor in path.iter().take(path.len().saturating_sub(1)) {
+        html.push_str("<span>›</span><button data-select=\"1\" data-panel=\""); html.push_str(html_escape(panel.panel_id))
+        html.push_str("\" data-node=\""); html.push_str(html_escape(ancestor.id))
+        html.push_str("\">"); html.push_str(html_escape(ancestor.label)); html.push_str("</button>")
+    }
+    html.push_str("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1466
+fn render_node_detail(html: &String, panel_id: String, node: &BrowserNode) {
+    html.push_str("<h3>"); html.push_str(html_escape(node.label))
+    if node.status == .Val(status) { html.push_str(" <small class=\"mono\">"); html.push_str(html_escape(status)); html.push_str("</small>") }
+    html.push_str("</h3>")
+    if node.value == .Val(value) { html.push_str("<code class=\"value\">"); html.push_str(html_escape(value)); html.push_str("</code>") }
+    (leaves, trees) := node.children.iter().partition((child) -> child.children.is_empty() && child.value.is_some())
+    if !leaves.is_empty() {
+        html.push_str("<dl class=\"kv\">")
+        loop leaf in leaves {
+            html.push_str("<dt>"); html.push_str(html_escape(leaf.label))
+            html.push_str("</dt><dd>"); html.push_str(html_escape(leaf.value.as_deref().unwrap_or(""))); html.push_str("</dd>")
+        }
+        html.push_str("</dl>")
+    }
+    if !trees.is_empty() {
+        html.push_str("<ul class=\"nodes\">")
+        owned := trees.into_iter().cloned().collect()
+        render_nodes_html(html, panel_id, owned, .None)
+        html.push_str("</ul>")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1505
+fn render_inspector(html: &String, frame: &BrowserDevtoolsFrame) {
+    html.push_str("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
+    selection := frame.selection.as_ref() ?? { html.push_str("<p class=\"empty\">Select a fact to inspect it.</p></aside>"); return }
+    panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? {
+        html.push_str("<p class=\"empty\">Selected panel is not in the current catalog.</p></aside>"); return
+    }
+    path := [&BrowserNode]{}
+    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, &path)).and_then((_) -> path.last().copied())
+    render_crumbs(html, panel, path)
+    if node == {
+        .Val(node) -> render_node_detail(html, panel.panel_id, node)
+        .None -> {
+            html.push_str("<h3>"); html.push_str(html_escape(panel.title))
+            html.push_str("</h3><dl class=\"kv\"><dt>status</dt><dd>"); html.push_str(html_escape(panel.status))
+            html.push_str("</dd><dt>facts</dt><dd>{panel.nodes.len()}</dd></dl>")
+        }
+    }
+    html.push_str("</aside>")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1547
+fn find_path(nodes: [BrowserNode], node_id: String, path: [&BrowserNode]) -> Bool {
+    loop node in nodes {
+        path.push(node)
+        if node.id == node_id || find_path(node.children, node_id, path) -> return true
+        _ :: path.pop()
+    }
+    false
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1558
+fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
+    descriptor := panel.availability.descriptor
+    status := if {
+        panel.availability.is_available() -> {
+            panel.events.last().map((event) -> event.kind().to_string()).unwrap_or_else(() -> "available".to_string())
+        }
+        else -> {
+            reasons := panel.availability.unavailable_reasons().iter().map((reason) -> reason.as_str()).collect().join(",")
+            "unavailable:{reasons}"
+        }
+    }
+    status = bounded_text(status, "unavailable", MAX_BROWSER_TEXT)
+    nodes := [BrowserNode]{[].with_capacity(panel.events.len().max(1))}
+    loop event in panel.events {
+        prefix := "event:{event.sequence()}"
+        children := [
+            BrowserNode.new("{prefix}:source", .Text, "source").with_value(bounded_value(event.source())),
+            BrowserNode.new("{prefix}:kind", .Text, "kind").with_value(bounded_value(event.kind())),
+            BrowserNode.new("{prefix}:entity", .Text, "entity").with_value(bounded_value(event.entity())),
+            BrowserNode.new("{prefix}:fields", .Text, "fields").with_value(bounded_value(event.fields_json())),
+            BrowserNode.new("{prefix}:payload", .Text, "payload").with_value(bounded_value(event.payload_json().unwrap_or("(absent)")))
+        ]
+        label := bounded_text(event.entity(), event.kind(), MAX_BROWSER_TEXT)
+        nodes.push(BrowserNode.new(prefix, .Tree, label).with_status(bounded_text(event.kind(), "event", MAX_BROWSER_TEXT)).with_children(children))
+    }
+    if nodes.is_empty() -> nodes.push(BrowserNode.new("availability", .Status, "availability").with_status(status.clone()))
+    BrowserPanelFact.new(descriptor.id.as_str(), descriptor.title, 0, status, nodes).with_cursor(panel.cursor)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1620
+fn parse_revision(value: String) -> U64? { value.parse<U64>().ok() }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1624
+fn bounded_text(value: String, fallback: String, limit: USize) -> String {
+    source := if value.is_empty() -> fallback else -> value
+    output := String.new()
+    loop raw_character in source.chars() {
+        character := if raw_character.is_control() -> ' ' else -> raw_character
+        if output.len() + character.len_utf8() > limit -> break
+        output.push(character)
+    }
+    if output.is_empty() -> fallback.to_string() else -> output
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1645
+fn bounded_value(value: String) -> String { bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
+
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1649
+fn frame_json(frame: BrowserDevtoolsFrame) -> String {
+    output := String.with_capacity(4096)
+    output.push('{')
+    field_string(&output, "schema", BROWSER_PAGE_SCHEMA, true)
+    field_string(&output, "protocol", frame.protocol, false)
+    field_string(&output, "placement", frame.placement.as_str(), false)
+    field_string(&output, "route", frame.route, false)
+    field_string(&output, "session_id", frame.session_id, false)
+    field_optional_string(&output, "source_id", frame.source_id.as_deref())
+    field_optional_string(&output, "build_id", frame.build_id.as_deref())
+    field_string(&output, "revision", frame.revision, false)
+    field_optional_string(&output, "world_id", frame.world_id.as_deref())
+    field_u64_option(&output, "sequence", frame.sequence)
+    field_u64_option(&output, "cursor", frame.cursor.map((cursor) -> cursor.sequence))
+    field_string(&output, "state", frame.state.as_str(), false)
+    output.push_str(",\"status\":"); status_json(&output, frame.status)
+    output.push_str(",\"tools\":{{\"source\":{{")
+    field_bool(&output, "available", frame.tools.source, true)
+    field_optional_string(&output, "reason", frame.tools.source_reason.as_deref())
+    output.push_str("}},\"rebuild\":{{")
+    field_bool(&output, "available", frame.tools.rebuild, true)
+    field_optional_string(&output, "reason", frame.tools.rebuild_reason.as_deref())
+    output.push_str("}},\"receipts\":[")
+    loop (index, receipt) in frame.receipts.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_u64(&output, "sequence", receipt.sequence, true)
+        field_string(&output, "request_id", receipt.request_id, false)
+        field_string(&output, "kind", receipt.kind, false)
+        field_string(&output, "status", receipt.status, false)
+        field_optional_string(&output, "error", receipt.error.as_deref())
+        output.push('}')
+    }
+    output.push_str("],\"selection\":")
+    if frame.selection.as_ref() == {
+        .Val(selection) -> {
+            output.push('{'); field_string(&output, "panel_id", selection.panel_id, true)
+            field_optional_string(&output, "node_id", selection.node_id.as_deref()); output.push('}')
+        }
+        .None -> output.push_str("null")
+    }
+    output.push_str(",\"panels\":[")
+    loop (index, panel) in frame.panels.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_string(&output, "panel_id", panel.panel_id, true)
+        field_string(&output, "title", panel.title, false)
+        field_u64(&output, "freshness_ms", panel.freshness_ms, false)
+        field_string(&output, "status", panel.status, false)
+        field_u64_option(&output, "cursor", panel.cursor)
+        field_bool(&output, "open", panel.open, false)
+        field_string(&output, "dock", panel.dock.as_str(), false)
+        output.push_str(",\"nodes\":["); write_nodes_json(&output, panel.nodes); output.push_str("]}}")
+    }
+    output.push_str("],\"elements\":[")
+    loop (index, element) in frame.elements.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_string(&output, "id", element.id, true)
+        field_string(&output, "kind", element.kind, false)
+        field_optional_string(&output, "panel_id", element.panel_id.as_deref())
+        field_optional_string(&output, "node_id", element.node_id.as_deref())
+        field_string(&output, "label", element.label, false)
+        field_optional_string(&output, "value", element.value.as_deref())
+        field_optional_string(&output, "status", element.status.as_deref())
+        output.push('}')
+    }
+    output.push_str("]}}"); output
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1740
+fn status_json(output: &String, status: &DevtoolsStatusFact) {
+    output.push('{')
+    field_string(output, "state", devtools_state_as_str(status.state), true)
+    field_optional_string(output, "diagnostic_code", status.diagnostic_code.as_deref())
+    field_optional_string(output, "diagnostic", status.diagnostic.as_deref())
+    field_optional_string(output, "accepted_revision", status.accepted_revision.as_deref())
+    field_optional_string(output, "last_good_revision", status.last_good_revision.as_deref())
+    field_optional_string(output, "run_target", status.run_target.as_deref())
+    field_optional_string(output, "run_output", status.run_output.as_deref())
+    field_optional_string(output, "test_state", status.test_state.as_deref())
+    output.push('}')
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1761
+fn devtools_state_as_str(state: DevtoolsSessionState) -> String {
+    if state == {
+        .Starting -> "starting"
+        .Building -> "building"
+        .Ready -> "ready"
+        .Error -> "error"
+        .Unavailable -> "unavailable"
+        .Stopped -> "stopped"
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1772
+fn write_nodes_json(output: &String, nodes: &[BrowserNode]) {
+    loop (index, node) in nodes.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        output.push('{')
+        field_string(output, "id", node.id, true)
+        field_string(output, "kind", node.kind.as_str(), false)
+        field_string(output, "label", node.label, false)
+        field_optional_string(output, "value", node.value.as_deref())
+        field_optional_string(output, "status", node.status.as_deref())
+        output.push_str(",\"children\":["); write_nodes_json(output, node.children); output.push_str("]}}")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1789
+fn field_string(output: &String, key: String, value: String, first: Bool) {
+    if !first -> output.push(',')
+    quoted(key, output); output.push(':'); quoted(value, output)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1798
+fn field_optional_string(output: &String, key: String, value: String?) {
+    output.push(','); quoted(key, output); output.push(':')
+    if value == {
+        .Val(value) -> quoted(value, output)
+        .None -> output.push_str("null")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1808
+fn field_u64_option(output: &String, key: String, value: U64?) {
+    output.push(','); quoted(key, output); output.push(':')
+    if value == {
+        .Val(value) -> output.push_str(value.to_string())
+        .None -> output.push_str("null")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1818
+fn field_u64(output: &String, key: String, value: U64, first: Bool) {
+    if !first -> output.push(',')
+    quoted(key, output); output.push(':'); output.push_str(value.to_string())
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1827
+fn field_bool(output: &String, key: String, value: Bool, first: Bool) {
+    if !first -> output.push(',')
+    quoted(key, output); output.push(':'); output.push_str(if value -> "true" else -> "false")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1836
+fn quoted(value: String, output: &String) { output.push('"'); output.push_str(foundation_json_escape(value)); output.push('"') }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1844
+fn reconnect_json(state: BrowserWebState, from: U64?, reset: Bool, truncation: Bool) -> String Err! {
+    output := String.with_capacity(4096)
+    output.push('{')
+    field_string(&output, "schema", BROWSER_PAGE_SCHEMA, true)
+    field_string(&output, "protocol", JET_DEVTOOLS_PROTOCOL, false)
+    field_string(&output, "session_id", state.host().session_id(), false)
+    field_u64_option(&output, "from", from)
+    field_u64_option(&output, "cursor", state.host().sequence())
+    field_bool(&output, "reset", reset, false)
+    field_bool(&output, "truncation", truncation, false)
+    field_bool(&output, "complete", !truncation, false)
+    output.push_str(",\"events\":[")
+    if !truncation {
+        replay := state.host().resume_from(from.map(BrowserReconnectCursor.new)) ?? return .Err(err.to_string())
+        loop (index, event) in replay.events.iter().enumerate() {
+            if index != 0 -> output.push(',')
+            event_json(&output, event)
+        }
+    }
+    output.push_str("],\"view\":"); output.push_str(view_json(state, .Workbench)); output.push('}')
+    .Ok(output)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1890
+fn event_json(output: &String, event: &BrowserHostEvent) {
+    output.push('{')
+    field_string(output, "protocol", event.protocol, true)
+    field_string(output, "session_id", event.session_id, false)
+    field_u64(output, "revision", event.revision, false)
+    field_u64(output, "sequence", event.sequence, false)
+    field_u64(output, "observed_at_ms", event.observed_at_ms, false)
+    output.push_str(",\"panels\":[")
+    loop (index, panel) in event.panels.iter().enumerate() {
+        if index != 0 -> output.push(',')
+        panel_json(output, panel)
+    }
+    output.push_str("]}}")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1907
+fn panel_json(output: &String, panel: &BrowserPanelFact) {
+    output.push('{')
+    field_string(output, "panel_id", panel.panel_id, true)
+    field_string(output, "title", panel.title, false)
+    field_u64(output, "freshness_ms", panel.freshness_ms, false)
+    field_string(output, "status", panel.status, false)
+    field_u64_option(output, "cursor", panel.cursor)
+    output.push_str(",\"nodes\":["); write_nodes_json(output, panel.nodes); output.push_str("]}}")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1922
+fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
+    text := std.str.from_utf8(payload) ?? return .Err("browser selection body must be UTF-8 JSON")
+    root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser selection body is not valid bounded JSON")
+    object := object_map(root) ?? return .Err("browser selection body must be an object")
+    selection_value := object.get("selection").ok_or("browser selection body must include selection")?
+    if selection_value == .Null -> return .Ok(.None)
+    selection := object_map(selection_value) ?? return .Err("browser selection must be an object or null")
+    panel_value := selection.get("panel_id").ok_or("browser selection must include panel_id")?
+    panel_id := panel_value.as_str() ?? return .Err("browser selection panel_id must be a string")
+    if panel_id.is_empty() -> return .Err("browser selection panel_id must not be empty")
+    item_key := if selection.get("item_key") == {
+        .None | .Val(.Null) -> .None
+        .Val(value) -> {
+            key := value.as_str() ?? return .Err("browser selection item_key must be a string")
+            .Val(key.to_string())
+        }
+    }
+    .Ok(.Val((panel_id.to_string(), item_key)))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1959
+fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
+    text := std.str.from_utf8(payload) ?? return .Err("browser action body must be UTF-8 JSON")
+    root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser action body is not valid bounded JSON")
+    object := object_map(root) ?? return .Err("browser action body must be an object")
+    name := required_string(object, "action").or_else((_) -> required_string(object, "op"))?
+    placement := object.get("placement").map(parse_placement).transpose()?.unwrap_or(default_placement)
+    if name == {
+        "open" | "open_panel" -> .Ok(BrowserHostAction.open(placement, required_string(object, "panel_id")?))
+        "close" | "close_panel" -> .Ok(BrowserHostAction.close(placement, required_string(object, "panel_id")?))
+        "dock" | "dock_panel" -> .Ok(BrowserHostAction.dock(placement, required_string(object, "panel_id")?, parse_dock(required_string(object, "dock")?)?))
+        "navigate_source" | "navigate" -> .Ok(BrowserHostAction.navigate_source(placement, required_string(object, "panel_id")?, required_string(object, "node_id")?, parse_source_grant(object)?))
+        "invoke_action" | "invoke" -> {
+            action_id := required_string(object, "action_id")?
+            .Ok(BrowserHostAction.invoke_action(placement, required_string(object, "panel_id")?, required_string(object, "node_id")?, action_id, parse_action_grant(object)?))
+        }
+        else -> .Err("unknown browser action `{name}`")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2009
+fn parse_source_grant(object: [String:Dyn]) -> BrowserSourceGrant Err! {
+    grant := nested_object(object, "grant")?
+    source := nested_object(grant, "source")?
+    function := optional_string(source, "function")
+    location := BrowserSourceLocation.new(required_string(source, "source_id")?, required_u32(source, "line")?, optional_u32(source, "column").unwrap_or(0), function.map((s) -> s.to_string()))
+    .Ok(BrowserSourceGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, location))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2028
+fn parse_action_grant(object: [String:Dyn]) -> BrowserActionGrant Err! {
+    grant := nested_object(object, "grant")?
+    .Ok(BrowserActionGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, required_string(grant, "action_id")?))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2039
+fn nested_object(object: [String:Dyn], key: String) -> [String:Dyn] Err! {
+    value := object.get(key).ok_or("browser action is missing `{key}`")?
+    object_map(value).map_err((_) -> "browser action `{key}` must be an object")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2049
+fn required_string(object: [String:Dyn], key: String) -> String Err! {
+    value := object.get(key).ok_or("browser action is missing `{key}`")?
+    value.as_str().map_err((_) -> "browser action `{key}` must be a string")
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2060
+fn optional_string(object: [String:Dyn], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2064
+fn required_u64(object: [String:Dyn], key: String) -> U64 Err! {
+    if object.get(key) == {
+        .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err((_) -> "browser action `{key}` is out of range") else -> .Err("browser action `{key}` must be a non-negative integer")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2075
+fn required_u32(object: [String:Dyn], key: String) -> U32 Err! {
+    required_u64(object, key).and_then((value) -> U32.try_from(value).map_err((_) -> "browser action `{key}` is out of range"))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2081
+fn optional_u32(object: [String:Dyn], key: String) -> U32? {
+    object.get(key).and_then((value) -> if value == {
+        .Int(n) && n >= 0 -> U32.try_from(n).ok()
+        else -> .None
+    })
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2088
+fn parse_placement(value: Dyn) -> BrowserPlacement Err! {
+    text := value.as_str() ?? return .Err("browser action placement must be a string")
+    if text == {
+        "in-app" | "in_app" -> .Ok(.InApp)
+        "workbench" -> .Ok(.Workbench)
+        else -> .Err("unknown browser placement `{text}`")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2099
+fn parse_dock(value: String) -> BrowserDock Err! {
+    if value == {
+        "left" -> .Ok(.Left)
+        "right" -> .Ok(.Right)
+        "bottom" -> .Ok(.Bottom)
+        "floating" -> .Ok(.Floating)
+        else -> .Err("unknown browser dock `{value}`")
+    }
+}
+
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2109
+fn effect_json(effect_ref: BrowserHostEffect) -> String {
+    output := String.from("{{\"schema\":\"")
+    output.push_str(BROWSER_PAGE_SCHEMA); output.push_str("\",\"effect\":")
+    if effect_ref == {
+        .PanelOpened { placement, panel_id } -> {
+            output.push_str("{{\"kind\":\"panel-opened\",\"placement\":"); quoted(placement.as_str(), &output)
+            field_string(&output, "panel_id", panel_id, false)
+        }
+        .PanelClosed { placement, panel_id } -> {
+            output.push_str("{{\"kind\":\"panel-closed\",\"placement\":"); quoted(placement.as_str(), &output)
+            field_string(&output, "panel_id", panel_id, false)
+        }
+        .PanelDocked { placement, panel_id, dock } -> {
+            output.push_str("{{\"kind\":\"panel-docked\",\"placement\":"); quoted(placement.as_str(), &output)
+            field_string(&output, "panel_id", panel_id, false); field_string(&output, "dock", dock.as_str(), false)
+        }
+        .SourceNavigated { placement, panel_id, node_id, source } -> {
+            output.push_str("{{\"kind\":\"source-navigated\",\"placement\":"); quoted(placement.as_str(), &output)
+            field_string(&output, "panel_id", panel_id, false); field_string(&output, "node_id", node_id, false)
+            output.push_str(",\"source\":{{")
+            field_string(&output, "source_id", source.source_id, true)
+            field_u64(&output, "line", U64{source.line}, false)
+            field_u64(&output, "column", U64{source.column}, false)
+            field_optional_string(&output, "function", source.function.as_deref())
+            output.push('}')
+        }
+        .ActionInvoked { placement, panel_id, node_id, action_id } -> {
+            output.push_str("{{\"kind\":\"action-invoked\",\"placement\":"); quoted(placement.as_str(), &output)
+            field_string(&output, "panel_id", panel_id, false); field_string(&output, "node_id", node_id, false)
+            field_string(&output, "action_id", action_id, false)
+        }
+    }
+    output.push_str("}}"); output
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2183
+fn dispatch_action(state: BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
+    state.host.dispatch(action).map((effect_ref) -> effect_json(effect_ref))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2197
+fn render_nodes_html(output: &String, panel_id: String, nodes: &[BrowserNode], selected: String?) {
+    loop node in nodes {
+        is_selected := selected == .Val(node.id.as_str())
+        holds := contains_node(node.children, selected)
+        output.push_str("<li data-selected=\""); output.push_str(if is_selected || holds -> "true" else -> "false")
+        output.push_str("\"><button class=\"node\" data-select=\"1\" data-panel=\""); output.push_str(html_escape(panel_id))
+        output.push_str("\" data-node=\""); output.push_str(html_escape(node.id))
+        output.push_str("\" data-focus=\"node:"); output.push_str(html_escape(panel_id))
+        output.push(':'); output.push_str(html_escape(node.id))
+        output.push_str("\" aria-pressed=\""); output.push_str(if is_selected -> "true" else -> "false")
+        output.push_str("\"><span class=\"lbl\">"); output.push_str(html_escape(node.label)); output.push_str("</span>")
+        if node.status == .Val(status) { output.push_str("<b>"); output.push_str(html_escape(status)); output.push_str("</b>") }
+        output.push_str("</button></li>")
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2234
+fn contains_node(nodes: [BrowserNode], node_id: String?) -> Bool {
+    id := node_id ?? return false
+    nodes.iter().any((node) -> node.id == id || contains_node(node.children, .Val(id)))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2243
+fn html_escape(value: String) -> String {
+    output := String.with_capacity(value.len())
+    loop character in value.chars() {
+        if character == {
+            '&' -> output.push_str("&amp;"), '<' -> output.push_str("&lt;"), '>' -> output.push_str("&gt;")
+            '"' -> output.push_str("&quot;"), Char{39} -> output.push_str("&#39;")
+            c if c.is_control() -> output.push(' '), c -> output.push(c)
+        }
+    }
+    output
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2259
+fn js_string(value: String) -> String {
+    output := String.with_capacity(value.len())
+    loop character in value.chars() {
+        if character == {
+            '\\' -> output.push_str("\\\\"), '"' -> output.push_str("\\\"")
+            '\n' -> output.push_str("\\n"), Char{13} -> output.push_str("\\r"), '\t' -> output.push_str("\\t")
+            Char{8232} -> output.push_str("\\u2028"), Char{8233} -> output.push_str("\\u2029")
+            '<' -> output.push_str("\\u003c"), '>' -> output.push_str("\\u003e"), '&' -> output.push_str("\\u0026")
+            c if c.is_control() -> {
+                output.push_str("\\u"); output.push_str((U32{c}).to_radix(16).pad_start(4, '0'))
+            }
+            c -> output.push(c)
+        }
+    }
+    output
+}
+

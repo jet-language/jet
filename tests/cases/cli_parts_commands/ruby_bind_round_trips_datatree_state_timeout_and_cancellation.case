@@ -1,6 +1,5 @@
 # Port of tests/cli_parts/commands.rs:413-492; sources copied verbatim.
 # PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
-# KNOWN-FAILING #4799: original copies missing main.jet; keep the failure and EVERY later probe predicate.
 # Original C probe and example expected.out copied verbatim.
 # PENDING-GRAMMAR: file kind/negative ASCII-case substring, read-only source copy.
 fixture: fixtures/ruby_roundtrip
@@ -10,8 +9,8 @@ exit: 0
 file: .jet/bindings/ruby/libjet_ruby_ops.a is-file
 file: .jet/bindings/ruby/ops_worker.rb is-file
 file: .jet/bindings/ruby/ops.provenance is-file
-copy: {root}/Examples/interop/ruby/main.jet main.jet
-step: jet run --profile=debug main.jet
+copy: {root}/Examples/interop/ruby/run.jet run.jet
+step: jet run --profile=debug run.jet
 exit: 0
 stdout: = ruby_bind_round_trips_datatree_state_timeout_and_cancellation.out
 step: cc cancel.c -L.jet/bindings/ruby -l:libjet_ruby_ops.a -lpthread -o cancel

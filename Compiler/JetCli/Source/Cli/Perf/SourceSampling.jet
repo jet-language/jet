@@ -5,7 +5,7 @@ use jet_foundation.[Span, TraceProfile, TraceProfileRow, TraceProfileSource, tra
 
 struct JetCLIPerfSource { identity: SourceIdentity, run_span: Span?, text: String }
 fn jet_cli_perf_source(path: String, text: String) -> JetCLIPerfSource Never! {
-    identity := SourceIdentity{path: path, sha256: mir_sha256_hex(text), symbols: [(name: String, kind: String)]{}}
+    identity := SourceIdentity{path: path, sha256: mir_sha256_hex(text), symbols: [(kind: String, name: String)]{}}
     block :: jet_driver_inline_package(text)
     if block.error != None -> return JetCLIPerfSource{identity: identity, run_span: None, text: text}
     masked :: jet_driver_mask_inline_package(text, block)
@@ -13,7 +13,7 @@ fn jet_cli_perf_source(path: String, text: String) -> JetCLIPerfSource Never! {
     run_span := Span?{None}
     loop item in program.items {
         if item == .Func(function) {
-            &identity.symbols.push((name: function.name, kind: "fn"))
+            &identity.symbols.push((kind: "fn", name: function.name))
             if function.name == "run" -> run_span = Val(function.span)
         }
     }
@@ -32,7 +32,7 @@ fn jet_cli_perf_source_position(text: String, offset: Int) -> (line: U64, column
             column = U64{1}
         } else if byte < (U8{128}) || byte >= (U8{192}) -> column += U64{1}
     }
-    Ok((line: line, column: column))
+    Ok((column: column, line: line))
 }
 fn jet_cli_perf_source_profile(source: JetCLIPerfSource, wall_samples: U64, cpu_samples: U64, truncated: Bool) -> TraceProfile JetCLIReadError! {
     span :: source.run_span ?? return Ok(trace_profile_unsupported("checked source attribution requires a parseable top-level `run` function"))

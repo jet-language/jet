@@ -156,14 +156,13 @@ fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) 
     if json {
         values := [JetCLIStatusValue]{}
         loop entry in applied {
-            row :: entry.row
             &values.push(
             jet_cli_status_object(
             [JetCLIStatusField]{
-                jet_cli_status_field("source", jet_cli_status_text(row.source)),
-                jet_cli_status_field("span_start", jet_cli_status_int(row.span_start)),
-                jet_cli_status_field("span_end", jet_cli_status_int(row.span_end)),
-                jet_cli_status_field("repair", jet_cli_status_text(row.repairs[0])),
+                jet_cli_status_field("source", jet_cli_status_text(entry.row.source)),
+                jet_cli_status_field("span_start", jet_cli_status_int(entry.row.span_start)),
+                jet_cli_status_field("span_end", jet_cli_status_int(entry.row.span_end)),
+                jet_cli_status_field("repair", jet_cli_status_text(entry.row.repairs[0])),
                 jet_cli_status_field("changed", jet_cli_status_bool(entry.changed && !dry_run)),
             },
             ),
@@ -181,9 +180,8 @@ fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) 
     out := "jet fix memory\ncoverage: exercised runs only\n"
     if applied.len() == 0 -> out = "{out}applied: none\n"
     loop entry in applied {
-        row :: entry.row
         action :: if dry_run && entry.changed -> "would apply" else if entry.changed -> "applied" else -> "already applied"
-        out = "{out}{action}: {row.source}:{row.span_start}..{row.span_end} -> {row.repairs[0]}\n"
+        out = "{out}{action}: {entry.row.source}:{entry.row.span_start}..{entry.row.span_end} -> {entry.row.repairs[0]}\n"
     }
     loop row in options {
         out = "{out}options: {row.source}:{row.span_start}..{row.span_end} {row.detail}\n"

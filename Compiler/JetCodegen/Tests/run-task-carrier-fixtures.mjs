@@ -31,5 +31,5 @@ const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf
 const fixtures = readFileSync(join(repo, "Compiler/JetCodegen/Tests/TaskCarrierFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), foundation + "\n" + definitions.join("\n") + "\n" + fixtures);
-writeFileSync(join(out, "project/package.jet"), 'name: "task_carrier_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Panic] } }\n');
+writeFileSync(join(out, "project/package.jet"), 'name: "task_carrier_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');
 console.log(`${out}/project/src/compiler.jet`);

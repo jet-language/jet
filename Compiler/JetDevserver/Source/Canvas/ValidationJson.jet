@@ -1,0 +1,347 @@
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:1
+use jet_driver.Diagnostics.[json_str]
+use jet_semindex.[SourceSpan]
+use jet_devserver.Canvas.GraphHelpers.[edit_error, project_edit_error, query_error]
+use jet_devserver.Canvas.GraphJson.[canvas_collapse_hints, canvas_comment_hints, CommentHint]
+use std.fmt.[format]
+use std.iter.[once]
+
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:7
+fn validate_ident(name: String) Err! {
+    chars := name.chars()
+    first :: chars.next() ?? return .Err(edit_error("bad_request", "empty identifier"))
+    if (!first.is_ascii_alphabetic() && first != '_') || !chars.all((c) -> c.is_ascii_alphanumeric() || c == '_') -> return .Err(edit_error("bad_request", "identifier is not a Jet name"))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:20
+fn validate_query_ident(name: String) Err! {
+    chars := name.chars()
+    first :: chars.next() ?? return .Err(query_error("bad_request", "empty identifier"))
+    if (!first.is_ascii_alphabetic() && first != '_') || !chars.all((c) -> c.is_ascii_alphanumeric() || c == '_') -> return .Err(query_error("bad_request", "identifier is not a Jet name"))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:33
+fn validate_ident_for_project(name: String) Err! {
+    chars := name.chars()
+    first :: chars.next() ?? return .Err(project_edit_error("bad_request", "empty identifier"))
+    if (!first.is_ascii_alphabetic() && first != '_') || !chars.all((c) -> c.is_ascii_alphanumeric() || c == '_') -> return .Err(project_edit_error("bad_request", "identifier is not a Jet package name"))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:49
+fn validate_qualified_name(name: String) Err! {
+    loop part in name.split('.') { validate_ident(part) }
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:56
+fn validate_signature_fragment(fragment: String) Err! {
+    if fragment.contains('{') || fragment.contains('}') || fragment.contains('\n') -> return .Err(edit_error("bad_request", "function parameter text must stay inside the signature"))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:66
+fn validate_type_fragment(fragment: String) Err! {
+    if fragment.trim().is_empty() || fragment.contains('{') || fragment.contains('}') || fragment.contains('\n') -> return .Err(edit_error("bad_request", "return type is not a Jet type"))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:77
+fn validate_function_signature(signature: String) Err! {
+    if signature.contains('{') || signature.contains('}') || signature.contains('\n') -> return .Err(edit_error("bad_request", "function signature must not include a body"))
+    if !signature.split_whitespace().any((part) -> part == "fn") -> return .Err(edit_error("bad_request", "function signature must include fn"))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:93
+fn validate_single_line_fragment(fragment: String, label: String) Err! {
+    if fragment.trim().is_empty() || fragment.contains('\n') || fragment.contains(Char{13}) -> return .Err(edit_error("bad_request", label))
+    .Ok(_)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:100
+fn validate_comment_color(color: String) Err! {
+    ok :: color.len() == 7 && color.starts_with('#') && color[1..<color.len()].chars().all((c) -> c.is_ascii_hexdigit())
+    if ok { .Ok(_) } else { .Err(edit_error("bad_request", "Canvas comment color must be #RRGGBB")) }
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:114
+fn validate_comment_alpha(alpha: String) Err! {
+    value :: alpha.parse<F32>().map_err((_) -> edit_error("bad_request", "Canvas comment alpha must be a number"))
+    if value >= 0.0 && value <= 1.0 { .Ok(_) } else { .Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1")) }
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:131
+fn normalize_bounds(bounds: String) -> String Err! {
+    nums :: bounds.trim().trim_start_matches('(').trim_end_matches(')').split(',').map((part) -> part.trim().parse<I32>()).collect<Result<[I32], _>>().map_err((_) -> edit_error("bad_request", "Canvas comment bounds must be x,y,w,h"))
+    if nums.len() != 4 || nums[2] <= 0 || nums[3] <= 0 -> return .Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h with positive size"))
+    .Ok("{nums[0]},{nums[1]},{nums[2]},{nums[3]}")
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:149
+fn quoted_attr(value: String) -> String { json_str(value) }
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:153
+fn find_comment_hint(src: String, graph_json: String, region_id: String) -> CommentHint? {
+    loop chunk in graph_json.split("\"region_id\":").skip(1) {
+        (id, _) :: parse_json_string(chunk.trim_start())
+        if id != region_id -> next
+        start :: json_usize_field(chunk, "start")
+        end :: json_usize_field(chunk, "end")
+        return canvas_comment_hints(src).into_iter().find((hint) -> hint.anchor.start == start && hint.anchor.end == end)
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:172
+fn find_hint_region(src: String, graph_json: String, region_id: String, kind: String) -> CommentHint? {
+    loop chunk in graph_json.split("\"region_id\":").skip(1) {
+        (id, _) :: parse_json_string(chunk.trim_start())
+        if id != region_id -> next
+        if json_string_field(chunk, "kind") != .Some(kind) -> next
+        start :: json_usize_field(chunk, "start")
+        end :: json_usize_field(chunk, "end")
+        hints :: if kind is { "comment" -> canvas_comment_hints(src); "collapse" -> canvas_collapse_hints(src); _ -> return .None }
+        return hints.into_iter().find((hint) -> hint.anchor.start == start && hint.anchor.end == end)
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:200
+fn extract_params(graph_json: String, expr: String) -> [(String, String)] {
+    out := [(String, String)]{}
+    loop ident in identifiers(expr) {
+        if graph_type_for_name(graph_json, ident) == .Val(ty) {
+            if !out.iter().any(((_0: name, _1: _)) -> name == ident) -> out.push((ident, ty))
+        }
+    }
+    out
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:212
+fn graph_type_for_name(graph_json: String, name: String) -> String? {
+    loop chunk in graph_json.split("\"name\":").skip(1) {
+        (found, _) :: parse_json_string(chunk.trim_start())
+        if found != name || !chunk.contains("\"direction\":\"output\"") -> next
+        pos :: chunk.find("\"type\"")
+        rest := chunk[pos + "\"type\"".len()..<chunk.len()] // #4303
+        colon :: rest.find(':')
+        return parse_json_string(rest[colon + 1..<rest.len()].trim_start()).map(((_0: s, _1: _)) -> s)
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:226
+fn identifiers(expr: String) -> [String] {
+    out := [String]{}
+    current := ""
+    loop c in expr.chars().chain(once(' ')) {
+        if c.is_ascii_alphanumeric() || c == '_' { current.push(c) } else if !current.is_empty() {
+            if current.chars().next().map((c) -> c.is_ascii_alphabetic() || c == '_').unwrap_or(false) && !(current == "true".bit_or("false").bit_or("ok").bit_or("err")) -> out.push(current.to_string())
+            current.clear()
+        }
+    }
+    out
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:248
+fn parse_simple_call(call: String) -> (String, [String])? {
+    open :: call.find('(')
+    close :: call.rfind(')')
+    name := call[0..<open].trim() // #4303
+    validate_ident(name).ok()
+    args :: if call[open + 1..close].trim().is_empty() -> [] else -> call[open + 1..close].split(',').map((arg) -> { arg := arg.trim(); arg.to_string() }).collect()
+    .Some((_0: name.to_string(), _1: args))
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:264
+fn find_simple_helper(src: String, name: String) -> ([String], String)? {
+    needle :: "fn {name}("
+    start :: src.find(needle)
+    params_start :: start + needle.len()
+    params_end :: src[params_start..<src.len()].find(')')? + params_start
+    params :: src[params_start..params_end].split(',').filter_map((param) -> param.trim().split_once(':').map(((_0: name, _1: _)) -> { name := name.trim(); name.to_string() })).collect()
+    body_start :: src[params_end..<src.len()].find('{')? + params_end + 1
+    body_end :: src[body_start..<src.len()].find('}')? + body_start
+    body := src[body_start..body_end].trim() // #4303
+    returned := body.strip_prefix("return ")?.trim() // #4303
+    .Some((_0: params, _1: returned.to_string()))
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:285
+fn replace_ident(expr: String, ident: String, replacement: String) -> String {
+    out := ""
+    current := ""
+    loop c in expr.chars().chain(once(' ')) {
+        if c.is_ascii_alphanumeric() || c == '_' { current.push(c) } else {
+            if !current.is_empty() {
+                if current == ident -> out.push_str(replacement) else -> out.push_str(current)
+                current.clear()
+            }
+            out.push(c)
+        }
+    }
+    trimmed := out.trim_end() // #4303
+    trimmed.to_string()
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:306
+fn attr_string(text: String, key: String) -> String? {
+    needle :: "{key}="
+    pos :: text.find(needle)
+    rest := text[pos + needle.len()..<text.len()].trim_start() // #4303
+    if rest.starts_with('"') -> return parse_json_string(rest).map(((_0: s, _1: _)) -> s)
+    .Some(rest.chars().take_while((c) -> !c.is_whitespace()).collect())
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:320
+fn attr_span(text: String, key: String) -> SourceSpan? {
+    raw :: attr_string(text, key)
+    (start, end) :: raw.split_once("..")
+    .Some(SourceSpan(start: start.parse().ok()?, end: end.parse().ok()?))
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:329
+fn attr_bounds(text: String, key: String) -> (I32, I32, I32, I32)? {
+    needle :: "{key}="
+    pos :: text.find(needle)
+    rest := text[pos + needle.len()..<text.len()].trim_start().strip_prefix('(')? // #4303
+    close :: rest.find(')')
+    nums :: rest[0..<close].split(',').map((part) -> part.trim().parse<I32>()).collect<Result<[I32], _>>().ok()
+    if nums.len() == 4 { .Some((_0: nums[0], _1: nums[1], _2: nums[2], _3: nums[3])) } else { .None }
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:347
+fn required_string(text: String, key: String) -> String Err! { json_string_field(text, key).ok_or_else(() -> edit_error("bad_request", "missing `{key}`")) }
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:352
+fn required_query_string(text: String, key: String) -> String Err! { json_string_field(text, key).ok_or_else(() -> query_error("bad_request", "missing `{key}`")) }
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:357
+fn required_project_string(text: String, key: String) -> String Err! { json_string_field(text, key).ok_or_else(() -> project_edit_error("bad_request", "missing `{key}`")) }
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:362
+fn json_string_field(text: String, key: String) -> String? {
+    needle :: "\"{key}\""
+    pos :: text.find(needle)
+    rest := text[pos + needle.len()..<text.len()] // #4303
+    colon :: rest.find(':')
+    parse_json_string(rest[colon + 1..<rest.len()].trim_start()).map(((_0: s, _1: _)) -> s)
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:371
+fn json_bool_field(text: String, key: String) -> Bool? {
+    needle :: "\"{key}\""
+    pos :: text.find(needle)
+    rest := text[pos + needle.len()..<text.len()] // #4303
+    colon :: rest.find(':')
+    rest = rest[colon + 1..<rest.len()].trim_start()
+    if rest.starts_with("true") { .Some(true) } else if rest.starts_with("false") { .Some(false) } else { .None }
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:386
+fn json_usize_field(text: String, key: String) -> Usize? {
+    needle :: "\"{key}\""
+    pos :: text.find(needle)
+    rest := text[pos + needle.len()..<text.len()] // #4303
+    colon :: rest.find(':')
+    rest[colon + 1..<rest.len()].trim_start().chars().take_while((c) -> c.is_ascii_digit()).collect<String>().parse().ok()
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:400
+fn json_usize_array(text: String, key: String) -> [Usize] {
+    needle :: "\"{key}\""
+    pos :: text.find(needle) ?? return []
+    rest := text[pos + needle.len()..<text.len()] // #4303
+    colon :: rest.find(':') ?? return []
+    rest = rest[colon + 1..<rest.len()].trim_start()
+    rest = rest.strip_prefix('[') ?? return []
+    out := [Usize]{}
+    loop {
+        rest = rest.trim_start()
+        if rest.starts_with(']') -> break
+        digits :: rest.chars().take_while((c) -> c.is_ascii_digit()).collect<String>()
+        if digits.is_empty() -> break
+        if digits.parse<Usize>() is .Ok(n) -> out.push(n)
+        rest = rest[digits.len()..<rest.len()].trim_start()
+        if rest.starts_with(',') -> rest = rest[1..<rest.len()]
+    }
+    out
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:438
+fn json_array_body(text: String, key: String) -> String? {
+    needle :: "\"{key}\""
+    pos :: text.find(needle)
+    rest := text[pos + needle.len()..<text.len()] // #4303
+    colon :: rest.find(':')
+    rest = rest[colon + 1..<rest.len()].trim_start()
+    bytes :: rest.as_bytes()
+    if bytes.first().copied()? != 91 -> return .None
+    depth := I32{0}
+    in_string := false
+    escaped := false
+    loop (i, b) in bytes.iter().copied().enumerate() {
+        if in_string {
+            if escaped { escaped = false } else if b == 92 { escaped = true } else if b == 34 { in_string = false }
+            next
+        }
+        if b is {
+            34 -> in_string = true
+            91 -> depth += 1
+            93 -> { depth -= 1; if depth == 0 -> return rest.get(1..i) }
+            _ -> {}
+        }
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:477
+fn json_object_bodies(text: String) -> [String] {
+    out := [String]{}
+    start := Usize?{.None}
+    depth := I32{0}
+    in_string := false
+    escaped := false
+    loop (i, b) in text.bytes().enumerate() {
+        if in_string {
+            if escaped { escaped = false } else if b == 92 { escaped = true } else if b == 34 { in_string = false }
+            next
+        }
+        if b is {
+            34 -> in_string = true
+            123 -> { if depth == 0 -> start = .Some(i + 1); depth += 1 }
+            125 -> {
+                depth -= 1
+                if depth == 0 {
+                    if start.take() == .Val(s) {
+                        if text.get(s..i) == .Val(body) -> out.push(body)
+                    }
+                }
+            }
+            _ -> {}
+        }
+    }
+    out
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:519
+fn wire_span_from_json_chunk(chunk: String, wire_id: String) -> SourceSpan? {
+    (id, _) :: parse_json_string(chunk.trim_start())
+    if id != wire_id -> return .None
+    pos :: chunk.find("\"source_span\"")
+    rest := chunk[pos + "\"source_span\"".len()..<chunk.len()] // #4303
+    colon :: rest.find(':')
+    value := rest[colon + 1..<rest.len()].trim_start() // #4303
+    if value.starts_with("null") -> return .None
+    .Some(SourceSpan(start: json_usize_field(value, "start"), end: json_usize_field(value, "end")?))
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:537
+fn json_string_array(text: String, key: String) -> [String] {
+    needle :: "\"{key}\""
+    pos :: text.find(needle) ?? return []
+    rest := text[pos + needle.len()..<text.len()] // #4303
+    colon :: rest.find(':') ?? return []
+    rest = rest[colon + 1..<rest.len()].trim_start()
+    rest = rest.strip_prefix('[') ?? return []
+    out := [String]{}
+    loop {
+        rest = rest.trim_start()
+        if rest.starts_with(']') -> break
+        (value, consumed) :: parse_json_string(rest) ?? break
+        out.push(value)
+        rest = rest[consumed..<rest.len()].trim_start()
+        if rest.starts_with(',') -> rest = rest[1..<rest.len()]
+    }
+    out
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:569
+fn parse_json_string(text: String) -> (String, Usize)? {
+    chars := text.char_indices()
+    if chars.next()?._1 != '"' -> return .None
+    out := ""
+    escaped := false
+    loop (i, c) in chars {
+        if escaped {
+            out.push(if c is { 'n' -> '\n'; 'r' -> (Char{13}); 't' -> '\t'; '"' -> '"'; '\\' -> '\\'; other -> other })
+            escaped = false
+        } else if c == '\\' { escaped = true } else if c == '"' { return .Some((_0: out, _1: i + 1)) } else { out.push(c) }
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:598
+fn span_json(span: SourceSpan) -> String { "{{\"start\":{span.start},\"end\":{span.end}}}" }
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:602
+fn json_strs(values: [String]) -> String { values.iter().map(json_str).collect().join(",") }
+// Rust: crates/jet-devserver/src/Canvas/validation_json.rs:610
+fn json_optional_str(value: String?) -> String { value.map(json_str).unwrap_or("null") }

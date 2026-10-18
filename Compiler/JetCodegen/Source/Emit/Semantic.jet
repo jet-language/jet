@@ -941,12 +941,16 @@ fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRTy
         .Apply(name, _) -> {
             row :: jet_rust_emit_type_index(ctx, name.id) ?? return source
             if ctx.program.types[row].kind == .Alias(target) {
+                // copy: `target` is a payload view into ctx.program.types, and the recursive call
+                // writes the emit context (`&ctx`), so the alias target is detached first.
                 aliased :: target.copy()
                 return jet_rust_emit_plugin_type(&ctx, aliased)
             }
         }
         else -> {}
     }
+    // copy: the plugin type is a new owned MIRType. Otherwise it equals `source`, the caller's MIR
+    // type (a read parameter), which stays on its node.
     source.copy()
 }
 

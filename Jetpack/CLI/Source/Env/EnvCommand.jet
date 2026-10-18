@@ -420,7 +420,7 @@ fn cli_foreign_flake_path(dir: String) -[FS]> String? Never! {
 // through the typed `module env.*` surface or the Phase-1 `pkg.*` directive
 // surface. A malformed typed surface still counts as declared, so this never
 // masks that error by falling through to a foreign flake.
-fn cli_project_declares_env(dir: String) -[FS, Env]> Bool Never! {
+fn cli_project_declares_env(dir: String) -[FS, Env, Exec, Time.Wait]> Bool Never! {
     src :: files.read(EnvFile.path_in(dir)) ?? return false
     if envmodel_is_module_surface(src) {
         plan :: envmodel_evaluate_env(src, dir) ?? return true

@@ -1,0 +1,506 @@
+// Synchronous typed events (D-EVENT1=D, D-EVENT-CONTINUE1=C). One meaning with
+// the Rust reference crates/jet-codegen/src/Prelude/CoreLib/JetStd/
+// ReactiveEventWatch.rs: JetEventPolicy :511-528, JetEventTrace :530-551,
+// JetSubscription :553-597, JetEventScope :599-661, JetEvent :663-817.
+// The carriers are single-thread shared cells (Rust Rc/Cell/RefCell), so the
+// counts are plain words, not atomics.
+//
+// EventCore56: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
+//   An Event handle is its core (Rust: Rc<RefCell<Vec<JetListener>>>); a
+//   subscription's cleanup holds a weak count (Rust: Rc::downgrade).
+// Listener64: refs0 id8 priority16 once24 sub32 env40 invoke48 release56
+//   One count for the core's list, one per dispatch snapshot holding it
+//   (Rust: the entry clones its handler Rc), so a handler that unsubscribes
+//   itself or another listener mid-dispatch keeps the running closure alive.
+//   invoke(env, payload_slot, scratch) is the lowering's typed adapter; the
+//   payload slot is lent for the call. release(env) frees the closure once.
+// Subscription32: refs0 active8 core16 (weak, 0 none) id24
+// EventScope40: refs0 cancelled8 subs{len16 cap24 data32}
+// EventTrace24: delivered0 queued8 dropped16
+
+fn event_word(address: I64) -> I64 { trap_word(address) }
+fn event_store(address: I64, value: I64) { trap_store(address, value) }
+
+// Word vectors embedded at `base`: len0 cap8 data16.
+fn event_words_push(base: I64, word: I64) {
+    length :: event_word(base)
+    capacity :: event_word(base + I64{8})
+    if length == capacity {
+        grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+        next :: jet_rt_alloc(grown * I64{8}, I64{8})
+        data :: event_word(base + I64{16})
+        if (length != I64{0}) -> coll_copy(data, next, length * I64{8})
+        if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+        event_store(base + I64{8}, grown)
+        event_store(base + I64{16}, next)
+    }
+    event_store(event_word(base + I64{16}) + length * I64{8}, word)
+    event_store(base, length + I64{1})
+}
+
+fn event_words_get(base: I64, index: I64) -> I64 {
+    event_word(event_word(base + I64{16}) + index * I64{8})
+}
+
+// Order-preserving removal: registration order is dispatch order.
+fn event_words_remove(base: I64, index: I64) {
+    length :: event_word(base)
+    data :: event_word(base + I64{16})
+    last :: length - I64{1}
+    at := index
+    loop at < last {
+        event_store(data + at * I64{8}, event_word(data + (at + I64{1}) * I64{8}))
+        at += I64{1}
+    }
+    event_store(base, length - I64{1})
+}
+
+// Detaches the vector's buffer (its words now belong to the caller).
+fn event_words_take(base: I64) {
+    event_store(base, I64{0})
+    event_store(base + I64{8}, I64{0})
+    event_store(base + I64{16}, I64{0})
+}
+
+fn event_words_free(data: I64, capacity: I64) {
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+}
+
+fn event_release_closure(env: I64, release: I64) {
+    if (release == I64{0}) -> return
+    jet_rt_session_shield_enter()
+    coll_call1_unit(release, env)
+    jet_rt_session_shield_leave()
+}
+
+// ---- Subscription ----------------------------------------------------------
+
+fn event_sub_new() -> I64 {
+    sub :: jet_rt_alloc(I64{32}, I64{8})
+    event_store(sub, I64{1})
+    event_store(sub + I64{8}, I64{1})
+    event_store(sub + I64{16}, I64{0})
+    event_store(sub + I64{24}, I64{0})
+    sub
+}
+
+fn event_sub_retain(sub: I64) -> I64 {
+    event_store(sub, event_word(sub) + I64{1})
+    sub
+}
+
+fn event_sub_release(sub: I64) {
+    refs :: event_word(sub) - I64{1}
+    if (refs != I64{0}) {
+        event_store(sub, refs)
+        return
+    }
+    core :: event_word(sub + I64{16})
+    jet_rt_free(sub, I64{32}, I64{8})
+    if (core != I64{0}) -> event_core_weak_release(core)
+}
+
+fn event_sub_active(sub: I64) -> Bool {
+    event_word(sub + I64{8}) != I64{0}
+}
+
+// JetSubscription::unsubscribe :578-590: the first call deactivates and runs
+// the cleanup, which removes the listener while its event is still alive
+// (Weak::upgrade); a later call is a no-op.
+fn event_sub_unsubscribe(sub: I64) {
+    if !event_sub_active(sub) -> return
+    event_store(sub + I64{8}, I64{0})
+    core :: event_word(sub + I64{16})
+    if (core == I64{0} || event_word(core) == I64{0}) -> return
+    id :: event_word(sub + I64{24})
+    base :: core + I64{24}
+    at := I64{0}
+    loop at < event_word(base) {
+        listener :: event_words_get(base, at)
+        if event_word(listener + I64{8}) == id {
+            event_words_remove(base, at)
+            event_listener_release(listener)
+            return
+        }
+        at += I64{1}
+    }
+}
+
+#Export(c) fn jet_subscription_unsubscribe(sub: I64) {
+    event_sub_unsubscribe(sub)
+}
+
+#Export(c) fn jet_subscription_active(sub: I64) -> Bool {
+    event_sub_active(sub)
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_subscription(sub: I64) -> I64 {
+    event_sub_retain(sub)
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_subscription(sub: I64) {
+    if (sub != I64{0}) -> event_sub_release(sub)
+}
+
+// ---- Listener --------------------------------------------------------------
+
+fn event_listener_retain(listener: I64) {
+    event_store(listener, event_word(listener) + I64{1})
+}
+
+fn event_listener_release(listener: I64) {
+    refs :: event_word(listener) - I64{1}
+    if (refs != I64{0}) {
+        event_store(listener, refs)
+        return
+    }
+    sub :: event_word(listener + I64{32})
+    env :: event_word(listener + I64{40})
+    release :: event_word(listener + I64{56})
+    jet_rt_free(listener, I64{64}, I64{8})
+    event_release_closure(env, release)
+    event_sub_release(sub)
+}
+
+// ---- EventScope ------------------------------------------------------------
+
+#Export(c) fn jet_event_scope_new() -> I64 {
+    scope :: jet_rt_alloc(I64{40}, I64{8})
+    coll_zero(scope, I64{40})
+    event_store(scope, I64{1})
+    scope
+}
+
+// JetEventScope::track :625-634 and active_count :648-652 drop the
+// subscriptions no longer active before they count or append.
+fn event_scope_prune(scope: I64) {
+    base :: scope + I64{16}
+    length :: event_word(base)
+    data :: event_word(base + I64{16})
+    kept := I64{0}
+    at := I64{0}
+    loop at < length {
+        sub :: event_word(data + at * I64{8})
+        if event_sub_active(sub) {
+            event_store(data + kept * I64{8}, sub)
+            kept += I64{1}
+        } else {
+            event_sub_release(sub)
+        }
+        at += I64{1}
+    }
+    event_store(base, kept)
+}
+
+// A cancelled scope deactivates every new subscription at once.
+fn event_scope_track(scope: I64, sub: I64) {
+    if (event_word(scope + I64{8}) != I64{0}) {
+        event_sub_unsubscribe(sub)
+        return
+    }
+    event_scope_prune(scope)
+    event_words_push(scope + I64{16}, event_sub_retain(sub))
+}
+
+// JetEventScope::cancel :635-647: once; every tracked subscription is
+// unsubscribed in registration order and the scope keeps none.
+#Export(c) fn jet_event_scope_cancel(scope: I64) {
+    if (event_word(scope + I64{8}) != I64{0}) -> return
+    event_store(scope + I64{8}, I64{1})
+    base :: scope + I64{16}
+    length :: event_word(base)
+    capacity :: event_word(base + I64{8})
+    data :: event_word(base + I64{16})
+    event_words_take(base)
+    at := I64{0}
+    loop at < length {
+        sub :: event_word(data + at * I64{8})
+        event_sub_unsubscribe(sub)
+        event_sub_release(sub)
+        at += I64{1}
+    }
+    event_words_free(data, capacity)
+}
+
+#Export(c) fn jet_event_scope_active_count(scope: I64) -> I64 {
+    event_scope_prune(scope)
+    jet_int_owned_from_i64(event_word(scope + I64{16}))
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_event_scope(scope: I64) -> I64 {
+    event_store(scope, event_word(scope) + I64{1})
+    scope
+}
+
+// Drop for JetEventScope :655-661: the last handle cancels, releasing every
+// subscription the scope still tracks.
+#Export(c) fn jet_rt_handle_drop_jet_event_scope(scope: I64) {
+    if (scope == I64{0}) -> return
+    if (event_word(scope) == I64{1}) -> jet_event_scope_cancel(scope)
+    refs :: event_word(scope) - I64{1}
+    if (refs != I64{0}) {
+        event_store(scope, refs)
+        return
+    }
+    base :: scope + I64{16}
+    length :: event_word(base)
+    capacity :: event_word(base + I64{8})
+    data :: event_word(base + I64{16})
+    jet_rt_free(scope, I64{40}, I64{8})
+    at := I64{0}
+    loop at < length {
+        event_sub_release(event_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    event_words_free(data, capacity)
+}
+
+// ---- EventPolicy / EventTrace ----------------------------------------------
+
+// JetEventPolicy::sync :522-528: the sole AllowDepthFirst ordinal (0); its
+// box is EncodingABI's enum owner (EventEnumHandles.jet clone/drop).
+#Export(c) fn jet_event_policy_sync() -> I64 {
+    policy :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    encoding_store(policy + ENCODING_ENUM_TAG, I64{0})
+    policy
+}
+
+fn event_trace_new(delivered: I64, queued: I64, dropped: I64) -> I64 {
+    trace :: jet_rt_alloc(I64{24}, I64{8})
+    event_store(trace, delivered)
+    event_store(trace + I64{8}, queued)
+    event_store(trace + I64{16}, dropped)
+    trace
+}
+
+#Export(c) fn jet_event_trace_delivered(trace: I64) -> I64 { jet_int_owned_from_i64(event_word(trace)) }
+#Export(c) fn jet_event_trace_queued(trace: I64) -> I64 { jet_int_owned_from_i64(event_word(trace + I64{8})) }
+#Export(c) fn jet_event_trace_dropped(trace: I64) -> I64 { jet_int_owned_from_i64(event_word(trace + I64{16})) }
+
+// `event delivered={d} queued={q} dropped={r}` (dispatch :800-805).
+#Export(c) fn jet_event_trace_summary(trace: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("event delivered="))
+    rt_text_push_number(text, event_word(trace))
+    jet_rt_string_builder_push(text, rt_static_text(" queued="))
+    rt_text_push_number(text, event_word(trace + I64{8}))
+    jet_rt_string_builder_push(text, rt_static_text(" dropped="))
+    rt_text_push_number(text, event_word(trace + I64{16}))
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_event_trace(trace: I64) -> I64 {
+    event_trace_new(event_word(trace), event_word(trace + I64{8}), event_word(trace + I64{16}))
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_event_trace(trace: I64) {
+    if (trace != I64{0}) -> jet_rt_free(trace, I64{24}, I64{8})
+}
+
+// ---- Event -----------------------------------------------------------------
+
+// JetEvent::with_policy :692-698 borrows the policy ordinal; the caller keeps
+// and releases its policy value.
+#Export(c) fn jet_event_with_policy(policy: I64) -> I64 {
+    core :: jet_rt_alloc(I64{56}, I64{8})
+    coll_zero(core, I64{56})
+    event_store(core, I64{1})
+    event_store(core + I64{48}, encoding_word(policy + ENCODING_ENUM_TAG))
+    core
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_event(core: I64) -> I64 {
+    event_store(core, event_word(core) + I64{1})
+    core
+}
+
+fn event_core_free(core: I64) {
+    event_words_free(event_word(core + I64{40}), event_word(core + I64{32}))
+    jet_rt_free(core, I64{56}, I64{8})
+}
+
+fn event_core_weak_release(core: I64) {
+    weak :: event_word(core + I64{8}) - I64{1}
+    event_store(core + I64{8}, weak)
+    if (weak == I64{0} && event_word(core) == I64{0}) -> event_core_free(core)
+}
+
+// The last Event handle drops its listeners (handlers and their counts on
+// each subscription). Subscriptions outlive it: their cleanup finds no event.
+#Export(c) fn jet_rt_handle_drop_jet_event(core: I64) {
+    if (core == I64{0}) -> return
+    strong :: event_word(core) - I64{1}
+    event_store(core, strong)
+    if (strong != I64{0}) -> return
+    // Hold the cell while released listeners drop their subscriptions' weak counts.
+    event_store(core + I64{8}, event_word(core + I64{8}) + I64{1})
+    base :: core + I64{24}
+    length :: event_word(base)
+    capacity :: event_word(base + I64{8})
+    data :: event_word(base + I64{16})
+    event_words_take(base)
+    at := I64{0}
+    loop at < length {
+        event_listener_release(event_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    event_words_free(data, capacity)
+    event_core_weak_release(core)
+}
+
+// JetEvent::add :717-754 (on / once / on_priority). The subscription is
+// tracked by `scope` first; a cancelled scope returns it inactive and the
+// handler is released unregistered.
+#Export(c) fn jet_event_listen(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
+    sub :: event_sub_new()
+    event_scope_track(scope, sub)
+    if !event_sub_active(sub) {
+        event_release_closure(env, release)
+        return sub
+    }
+    id :: event_word(core + I64{16})
+    event_store(core + I64{16}, id + I64{1})
+    listener :: jet_rt_alloc(I64{64}, I64{8})
+    event_store(listener, I64{1})
+    event_store(listener + I64{8}, id)
+    event_store(listener + I64{16}, priority)
+    event_store(listener + I64{24}, if (once != I64{0}) -> I64{1} else -> I64{0})
+    event_store(listener + I64{32}, event_sub_retain(sub))
+    event_store(listener + I64{40}, env)
+    event_store(listener + I64{48}, invoke)
+    event_store(listener + I64{56}, release)
+    event_words_push(core + I64{24}, listener)
+    event_store(sub + I64{16}, core)
+    event_store(sub + I64{24}, id)
+    event_store(core + I64{8}, event_word(core + I64{8}) + I64{1})
+    sub
+}
+
+// Whether the snapshot row before `position` has a strictly lower priority.
+fn event_ranks_below(snapshot: I64, position: I64, priority: I64) -> Bool {
+    if (position == I64{0}) -> return false
+    event_word(event_word(snapshot + (position - I64{1}) * I64{8}) + I64{16}) < priority
+}
+
+// JetEvent::dispatch :758-806 under the sole AllowDepthFirst policy: nested
+// emits dispatch immediately. The active listeners are snapshot, ordered by
+// priority (highest first) then registration; a listener deactivated before
+// its turn is skipped; a once listener is consumed before its handler runs.
+// A stop delivered by a handler ends the dispatch and returns no trace.
+// The dispatch holds its own strong count: a handler that drops the last
+// Event handle leaves the core alive until the dispatch releases it.
+#Export(c) fn jet_event_emit(core: I64, payload: I64) -> I64 {
+    event_store(core, event_word(core) + I64{1})
+    base :: core + I64{24}
+    length :: event_word(base)
+    snapshot :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    count := I64{0}
+    at := I64{0}
+    loop at < length {
+        listener :: event_words_get(base, at)
+        if event_sub_active(event_word(listener + I64{32})) {
+            event_listener_retain(listener)
+            priority :: event_word(listener + I64{16})
+            position := count
+            // Stable insertion: the list is already in registration order.
+            loop event_ranks_below(snapshot, position, priority) {
+                event_store(snapshot + position * I64{8}, event_word(snapshot + (position - I64{1}) * I64{8}))
+                position -= I64{1}
+            }
+            event_store(snapshot + position * I64{8}, listener)
+            count += I64{1}
+        }
+        at += I64{1}
+    }
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    coll_zero(scratch, I64{16})
+    delivered := I64{0}
+    stopped := false
+    at = I64{0}
+    loop at < count {
+        listener :: event_word(snapshot + at * I64{8})
+        sub :: event_word(listener + I64{32})
+        if !stopped && event_sub_active(sub) {
+            if (event_word(listener + I64{24}) != I64{0}) -> event_sub_unsubscribe(sub)
+            _ := coll_call3(event_word(listener + I64{48}), event_word(listener + I64{40}), payload, scratch)
+            if (jet_rt_session_propagate() != I64{0}) {
+                stopped = true
+            } else {
+                delivered += I64{1}
+            }
+        }
+        event_listener_release(listener)
+        at += I64{1}
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (length != I64{0}) -> jet_rt_free(snapshot, length * I64{8}, I64{8})
+    event_prune_listeners(core)
+    jet_rt_handle_drop_jet_event(core)
+    if stopped -> return I64{0}
+    event_trace_new(delivered, I64{0}, I64{0})
+}
+
+// Keeps only listeners whose subscription is still active (dispatch :795).
+fn event_prune_listeners(core: I64) {
+    if (event_word(core) == I64{0}) -> return
+    base :: core + I64{24}
+    length :: event_word(base)
+    data :: event_word(base + I64{16})
+    kept := I64{0}
+    at := I64{0}
+    loop at < length {
+        listener :: event_word(data + at * I64{8})
+        if event_sub_active(event_word(listener + I64{32})) {
+            event_store(data + kept * I64{8}, listener)
+            kept += I64{1}
+        }
+        at += I64{1}
+    }
+    if kept == length -> return
+    removed :: length - kept
+    dropped :: jet_rt_alloc(removed * I64{8}, I64{8})
+    out := I64{0}
+    at = I64{0}
+    // Collect the inactive rows before releasing any (release runs closure drops).
+    loop at < length {
+        listener :: event_word(data + at * I64{8})
+        if !event_sub_active(event_word(listener + I64{32})) {
+            event_store(dropped + out * I64{8}, listener)
+            out += I64{1}
+        }
+        at += I64{1}
+    }
+    event_store(base, kept)
+    at = I64{0}
+    loop at < removed {
+        event_listener_release(event_word(dropped + at * I64{8}))
+        at += I64{1}
+    }
+    jet_rt_free(dropped, removed * I64{8}, I64{8})
+}
+
+fn event_active_listeners(core: I64) -> I64 {
+    base :: core + I64{24}
+    count := I64{0}
+    at := I64{0}
+    loop at < event_word(base) {
+        if event_sub_active(event_word(event_words_get(base, at) + I64{32})) {
+            count += I64{1}
+        }
+        at += I64{1}
+    }
+    count
+}
+
+#Export(c) fn jet_event_listener_count(core: I64) -> I64 {
+    jet_int_owned_from_i64(event_active_listeners(core))
+}
+
+// JetEvent::trace :814-816.
+#Export(c) fn jet_event_trace(core: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("listeners="))
+    rt_text_push_number(text, event_active_listeners(core))
+    jet_rt_string_builder_push(text, rt_static_text(" queued=0 dropped=0"))
+    jet_rt_string_builder_finish(text)
+}

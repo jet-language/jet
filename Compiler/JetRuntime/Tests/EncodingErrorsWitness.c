@@ -71,7 +71,7 @@ static void watch(void *pointer,int64_t bytes,int64_t align) {
     watched[watched_count].bytes=bytes;
     watched[watched_count++].align=align;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_cause(Cause *c) { watch(c,32,8); watch_text(c->kind); watch_text(c->message); }
 static void watch_error(Error *e) { watch(e,80,8); watch_text(e->path); watch_text(e->reason); if(e->cause) watch_cause(e->cause); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }

@@ -122,7 +122,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     files.write(files.join(source, "payload"), "now-real") ?? panic("fixture payload")
     ingested :: store_ingest_tree(&verification, roots, request) ?? panic("retry ingest")
     ingested_entry :: ingested.entry
-    assert(store_find_by_reference(&verification, roots, "path:late-ingest") == Val(ingested_entry))
+    assert(store_find_by_reference(&verification, roots, "path:late-ingest") == Val((ingested_entry)))
     hit :: store_find_verified_by_reference(&verification, roots, "path:late-ingest", store_test_expectation(ingested.entry.out)) ?? panic("lookup")
     verified :: hit ?? panic("retry must publish one verified cache hit")
     assert_eq(verified.entry, ingested.entry)

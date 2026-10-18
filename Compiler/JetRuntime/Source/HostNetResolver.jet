@@ -96,7 +96,9 @@ fn net_resolver_job_drop(job: I64) {
     net_resolver_job_drop(job)
     I64{0}
 }
-#Export(c) fn jet_net_raw_resolve_ordered(host: I64, port: I64, rows_out: I64, length_out: I64, error_out: I64) -> I64 {
+// The ordered answers as one owned buffer of inline Socket56 rows (count*56),
+// the shape the worker publishes; `jet_http_build_resolve` reads it directly.
+fn net_resolve_rows(host: I64, port: I64, rows_out: I64, length_out: I64, error_out: I64) -> I64 {
     // Source has already validated host/port. The NUL case still has std's
     // exact InvalidInput meaning at this foreign-string boundary.
     length :: rt_text_len(host)
@@ -161,4 +163,26 @@ fn net_resolver_job_drop(job: I64) {
     net_resolver_job_drop(job)
     jet_rt_string_drop(wait_kind)
     result
+}
+// The `core.net.__resolve_ordered` route: `[SocketAddr]` is a native List of
+// JetSocketAddr handles, so each answer becomes its own Socket56 box behind
+// an eight-byte slot (Lower/Routes.jet stores the buffer as the List data;
+// the List drop glue drops each handle and frees count*8).
+#Export(c) fn jet_net_raw_resolve_ordered(host: I64, port: I64, rows_out: I64, length_out: I64, error_out: I64) -> I64 {
+    // Reviewed u16 boundary (runtime-route-abi.mjs maskedWordParameters).
+    if (net_resolve_rows(host, port.bit_and(I64{65535}), rows_out, length_out, error_out) == I64{0}) -> return I64{0}
+    rows :: net_word(rows_out, I64{0})
+    count :: net_word(length_out, I64{0})
+    handles := I64{0}
+    if (count != I64{0}) {
+        handles = jet_rt_alloc(count * I64{8}, I64{8})
+        at := I64{0}
+        loop at < count {
+            net_put(handles, at * I64{8}, net_copy(wrapping(rows + at * I64{56}), I64{56}))
+            at = at + I64{1}
+        }
+        jet_rt_free(rows, count * I64{56}, I64{8})
+    }
+    net_put(rows_out, I64{0}, handles)
+    I64{1}
 }

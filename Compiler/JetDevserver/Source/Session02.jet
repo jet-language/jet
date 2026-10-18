@@ -1,0 +1,456 @@
+use std.sync.[Arc, MutexGuard]
+use std.time.[Instant, SystemTime, UNIX_EPOCH]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json]
+use jet_foundation.HotSwap.[StateRetentionFact, StateRetentionDecision]
+use jet_foundation.Game.[JetGameChangeFact]
+use jet_devserver.CapturePolicy.[RecordIndexCaptureSink]
+
+impl ResidentDevSession {
+    // Rust: crates/jet-devserver/src/Session.rs:1824
+    fn publish_session_state(self: Self, state_name: String, code: String, diagnostic: String) -> Unit {
+        lifecycle :: devtools_session_state(state_name)
+        freshness :: if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(unix_time_ms()) else -> JetDevtoolsFreshnessFact.stale(unix_time_ms()) {
+            state :: self.devtools_lock()
+            state.envelope.set_lifecycle(lifecycle)
+            state.envelope.set_freshness(freshness)
+        }
+        fields :: "{{\"state\":{json_value(state_name)},\"code\":{json_value(code)},\"diagnostic\":{json_value(diagnostic)}}}"
+        if JetDevtoolsEvent.from_parts(unix_time_ms(), "devserver", "state", "session", ^fields) == .Ok(event) {
+            _ :: self.publish_devtools_event_typed(^event)
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1852
+    fn push_devtools_event(self: Self, event: JetDevtoolsEvent) -> U64 Err! {
+        devtools :: self.devtools_lock()
+        sequence :: if devtools.envelope.latest_sequence() == {
+            .Val(sequence) -> sequence.checked_add(1) ?? return .Err("devtools event sequence exhausted")
+            .None -> 1
+        }
+        recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+        if recording.as_mut() == .Val(state) {
+            recorded :: SessionEvent.new(sequence, event.timestamp_ms, event.source().to_string(), event.kind().to_string(),
+                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map((text) -> text.to_string())).map_err(recording_error)
+            state.recording.append_event(^recorded).map_err(recording_error)
+        }
+        assigned :: devtools.envelope.push(^event)
+        if recording.as_mut() == .Val(state) {
+            cursor := state.recording.replay()
+            loop _ in 0..state.recording.event_count() -> _ :: cursor.step_forward(&state.recording).map_err(recording_error)
+            state.cursor = ^cursor
+            state.checkpoints.clear()
+        }
+        assigned
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1893
+    fn devtools_lock(self: Self) -> MutexGuard<DevtoolsState> {
+        // GATE #4494: poison recovery retains the resident envelope.
+        if self.devtools.lock() == {
+            .Ok(guard) -> guard
+            .Err(poisoned) -> poisoned.into_inner()
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1899
+    fn sync_replay_cursor(self: Self, projection: ReplayProjection) -> Unit { self.devtools_lock().envelope.set_cursor(projection.sequence()) }
+    // Rust: crates/jet-devserver/src/Session.rs:1905
+    fn mark_last_good(self: Self, revision: String, program: String) -> Unit {
+        if revision.is_empty() -> return
+        *self.last_good_revision.lock().unwrap() = revision
+        *self.last_good_program.lock().unwrap() = program
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1917
+    fn remember_last_good_view(self: Self, kind: String, source_id: String, revision: String, payload: String) -> Unit {
+        if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision.is_empty() || payload.is_empty() || payload.len() > MAX_RETAINED_VIEW_BYTES -> return
+        self.last_good_views.lock().unwrap().insert(kind, RetainedView { revision, source_id, payload })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1942
+    fn last_good_view(self: Self, kind: String, source_id: String) -> (String,String)? {
+        views :: self.last_good_views.lock().unwrap()
+        view :: views.get(kind)
+        if view.source_id != source_id -> return .None
+        .Val((_0: view.revision.copy(), _1: view.payload.copy()))
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1955
+    fn clear_last_good_view(self: Self, kind: String) -> Unit { self.last_good_views.lock().unwrap().remove(kind) }
+    // Rust: crates/jet-devserver/src/Session.rs:1959
+    fn accept_transaction(self: Self, request: String, revision: String) -> Unit {
+        before :: request_string(request, "revision")
+        client :: request_string(request, "client_id")
+        kind :: request_string(request, "op")
+        self.select_project_source(request_string(request, "source_id"))
+        self.observe_source(revision)
+        if !revision.is_empty() -> *self.accepted_revision.lock().unwrap() = revision
+        self.push_receipt(Receipt { kind: if kind.is_empty() -> "source" else -> ^kind, status: "accepted", before: ^before,
+            after: revision, client: ^client, output: request_string(request, "output"), live: .None })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1983
+    fn refuse_transaction(self: Self, request: String, current_revision: String) -> Unit {
+        self.observe_source(current_revision)
+        self.push_receipt(Receipt { kind: request_string(request, "op"), status: "refused", before: request_string(request, "revision"),
+            after: current_revision, client: request_string(request, "client_id"), output: request_string(request, "output"), live: .None })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1996
+    fn lock_source_transaction(self: Self) -> MutexGuard<Unit> { self.source_transactions.lock_source_transaction() }
+    // Rust: crates/jet-devserver/src/Session.rs:2000
+    fn record_command(self: Self, request: String) -> Unit {
+        action :: request_string(request, "action_id")
+        self.select_project_source(request_string(request, "source_id"))
+        if action.contains("test") -> *self.test_state.lock().unwrap() = "requested"
+        self.push_receipt(Receipt { kind: if action.is_empty() -> "command" else -> ^action, status: "requested", before: "",
+            after: (*self.current_revision.lock().unwrap()).copy(), client: request_string(request, "client_id"),
+            output: (*self.selected_output.lock().unwrap()).copy(), live: .None })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2021
+    fn record_debug(self: Self, request: String) -> Unit {
+        self.select_project_source(request_string(request, "source_id"))
+        debugger :: self.debugger.lock().unwrap()
+        if request_bool(request, "stop") || request_string(request, "op") == "disconnect" {
+            *debugger = idle_debugger()
+            drop(debugger)
+            self.clear_last_good_view("debugger")
+            return
+        }
+        debugger.state = "active"
+        set_if_present(&debugger.session_id, request_string(request, "session_id"))
+        set_if_present(&debugger.source_id, request_string(request, "source_id"))
+        set_if_present(&debugger.revision, request_string(request, "revision"))
+        set_if_present(&debugger.tier, request_string(request, "tier"))
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2037
+    fn record_debug_response(self: Self, request: String, response: String) -> Unit {
+        self.record_debug(request)
+        if request_bool(request, "stop") -> return
+        snapshot :: find_debugger_snapshot(response) ?? return
+        (source_id, debugger_revision) :: (() -> {
+            debugger :: self.debugger.lock().unwrap()
+            state :: if snapshot.state == {
+                "running" -> "active"
+                "stopped" -> "idle"
+                state -> state.copy()
+            }
+            *debugger = DebuggerSnapshot { state: ^state, session_id: ^snapshot.session_id, source_id: ^snapshot.source_id,
+                revision: ^snapshot.revision, tier: ^snapshot.tier }
+            source_id :: if debugger.source_id.is_empty() -> request_string(request, "source_id") else -> debugger.source_id.copy()
+            (_0: source_id, _1: debugger.revision.copy())
+        })()
+        revision :: if debugger_revision.is_empty() {
+            requested :: request_string(request, "revision")
+            if requested.is_empty() -> (*self.current_revision.lock().unwrap()).copy() else -> ^requested
+        } else -> ^debugger_revision
+        self.remember_last_good_view("debugger", source_id, revision, response)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2079
+    fn select_project_source(self: Self, source_id: String) -> Unit {
+        if !source_id.is_empty() -> *self.selected_source_id.lock().unwrap() = source_id
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2085
+    fn select_project_source_from_payload(self: Self, payload: String) -> Unit {
+        if json_string_any(payload, "source_id") == .Val(source_id) -> self.select_project_source(source_id)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2091
+    fn select_output(self: Self, request: String) -> Unit {
+        output :: request_string(request, "output")
+        target :: request_string(request, "target")
+        self.select_output_values(if !output.is_empty() -> .Val(&output) else -> .None, if !target.is_empty() -> .Val(&target) else -> .None)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2100
+    fn select_output_values(self: Self, output: String?, target: String?) -> Unit {
+        if output.filter((output) -> !output.is_empty()) == .Val(selected) -> *self.selected_output.lock().unwrap() = selected.copy()
+        if target.filter((target) -> !target.is_empty()) == .Val(selected) -> *self.selected_target.lock().unwrap() = selected.copy()
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2109
+    fn id(self: Self) -> String { &self.id }
+    // Rust: crates/jet-devserver/src/Session.rs:2115
+    fn selected_target(self: Self) -> String? {
+        target :: (*self.selected_target.lock().unwrap()).copy()
+        if !target.is_empty() -> .Val(^target) else -> .None
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2121
+    fn selected_output(self: Self) -> String? {
+        output :: (*self.selected_output.lock().unwrap()).copy()
+        if !output.is_empty() -> .Val(^output) else -> .None
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2125
+    fn application_port(self: Self) -> U16 { self.application_port }
+    // Rust: crates/jet-devserver/src/Session.rs:2129
+    fn canvas_port(self: Self) -> U16 { self.canvas_port }
+    // Rust: crates/jet-devserver/src/Session.rs:2133
+    fn application_host(self: Self) -> String { &self.application_host }
+    // Rust: crates/jet-devserver/src/Session.rs:2137
+    fn json(self: Self) -> String {
+        current :: (*self.current_revision.lock().unwrap()).copy()
+        accepted :: (*self.accepted_revision.lock().unwrap()).copy()
+        last_good :: (*self.last_good_revision.lock().unwrap()).copy()
+        program :: (*self.last_good_program.lock().unwrap()).copy()
+        state :: (*self.state.lock().unwrap()).copy()
+        diagnostic_code :: (*self.diagnostic_code.lock().unwrap()).copy()
+        diagnostic :: (*self.diagnostic.lock().unwrap()).copy()
+        diagnostic_revision :: (*self.diagnostic_revision.lock().unwrap()).copy()
+        selected_source_id :: (*self.selected_source_id.lock().unwrap()).copy()
+        output :: (*self.selected_output.lock().unwrap()).copy()
+        target :: (*self.selected_target.lock().unwrap()).copy()
+        debugger :: (*self.debugger.lock().unwrap()).copy()
+        tests :: (*self.test_state.lock().unwrap()).copy()
+        views :: (*self.last_good_views.lock().unwrap()).copy()
+        live_lineage :: (*self.live_lineage.lock().unwrap()).copy()
+        live_values :: (*self.live_values.lock().unwrap()).copy()
+        (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id) :: live_lineage.as_ref().map((lineage) ->
+            (_0: json_value(lineage.protocol), _1: json_value(lineage.session_id), _2: json_value(lineage.source_id), _3: json_value(lineage.build_id),
+                _4: json_value(lineage.revision), _5: json_value(lineage.world_id))).unwrap_or((_0: "null", _1: "null", _2: "null", _3: "null", _4: "null", _5: "null"))
+        live_values_json :: live_values.iter().map(live_value_fact_json).collect().join(",")
+        now :: Instant.now()
+        client_state :: self.clients.lock().unwrap()
+        expire_clients(&client_state, now)
+        clients :: client_state.len()
+        listener_entries := [String]{}
+        if self.canvas_port != 0 {
+            listener_entries.push("\"canvas\":{{\"host\":{json_value(self.canvas_host)},\"port\":{self.canvas_port},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}")
+        }
+        if self.application_port != 0 {
+            listener_entries.push("\"application\":{{\"host\":{json_value(self.application_host)},\"port\":{self.application_port},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}")
+        }
+        listeners :: "{{{listener_entries.join(",")}}}"
+        custom_server_listener :: if self.application_port != 0 -> "\"application\"" else -> "null"
+        receipts :: self.receipts.lock().unwrap().iter().map((receipt) -> {
+            live :: receipt.live.as_ref().map(live_receipt_json).unwrap_or("null")
+            "{{\"kind\":{json_value(receipt.kind)},\"status\":{json_value(receipt.status)},\"before\":{json_value(receipt.before)},\"after\":{json_value(receipt.after)},\"client\":{json_value(receipt.client)},\"output\":{json_value(receipt.output)},\"live\":{live}}}"
+        }).collect().join(",")
+        "{{\"id\":{json_value(self.id)},\"protocol\":{live_protocol},\"session_id\":{live_session_id},\"source_id\":{live_source_id},\"build_id\":{live_build_id},\"revision\":{live_revision},\"world_id\":{live_world_id},\"values\":[{live_values_json}],\"entry\":{json_value(self.entry)},\"project_context\":{{\"source_id\":{json_value(selected_source_id)}}},\"source_revision\":{json_value(current)},\"accepted_revision\":{json_value(accepted)},\"last_good_revision\":{json_value(last_good)},\"last_good_program\":{json_value(program)},\"state\":{json_value(state)},\"diagnostic_code\":{json_value(diagnostic_code)},\"diagnostic\":{json_value(diagnostic)},\"diagnostic_revision\":{json_value(diagnostic_revision)},\"last_good_views\":{{\"graph\":{retained_view_json(views.get("graph"))},\"debugger\":{retained_view_json(views.get("debugger"))},\"runtime\":{retained_view_json(views.get("runtime"))}}},\"clients\":{clients},\"run\":{{\"output\":{json_value(output)},\"target\":{json_value(target)}}},\"debugger\":{{\"state\":{json_value(debugger.state)},\"session_id\":{json_value(debugger.session_id)},\"source_id\":{json_value(debugger.source_id)},\"revision\":{json_value(debugger.revision)},\"tier\":{json_value(debugger.tier)}}},\"tests\":{{\"state\":{json_value(tests)}}},\"history\":{{\"count\":{self.receipts.lock().unwrap().len()},\"receipts\":[{receipts}]}},\"listeners\":{listeners},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{custom_server_listener}}}}}"
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2270
+    fn push_receipt(self: Self, receipt: Receipt) -> Unit {
+        receipts :: self.receipts.lock().unwrap()
+        receipts.push(^receipt)
+        if receipts.len() > MAX_RECEIPTS -> receipts.remove(0)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2280
+    fn install_devtools_event_sink(self: Arc<Self>) -> JetDevtoolsEventSinkGuard {
+        // GATE #4494: scoped Arc-backed callback registration.
+        sink :: Arc<JetDevtoolsEventSink>{self.clone()}
+        jet_foundation.Devtools.jet_devtools_install_event_sink(^sink)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2288
+    fn drop(self: Self) -> Unit {
+        jet_foundation.DevtoolsControl.jet_devtools_clear_commands(self.id)
+        _ :: jet_foundation.Devtools.jet_devtools_clear_game_control_relays()
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2294
+impl ResidentDevSession.JetDevtoolsEventSink {
+    // Rust: crates/jet-devserver/src/Session.rs:2295
+    fn publish(self: Self, event: JetDevtoolsEvent) -> Unit { _ :: self.publish_devtools_event_typed(^event) }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2300
+fn trim_capture_facts(facts: [CaptureSessionFact]) -> Unit {
+    if facts.len() > MAX_RECEIPTS {
+        drop_count :: facts.len() - MAX_RECEIPTS
+        facts.drain(..drop_count)
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2307
+impl ResidentDevSession.RecordIndexCaptureSink {
+    alias Error :: String
+    // Rust: crates/jet-devserver/src/Session.rs:2310
+    fn record_capture_start(self: &Self, fact: &CaptureStartFact) Err! { ResidentDevSession.record_capture_start(self, fact) }
+    // Rust: crates/jet-devserver/src/Session.rs:2314
+    fn record_capture_fault(self: &Self, fact: &CaptureFaultFact) Err! { ResidentDevSession.record_capture_fault(self, fact) }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2319
+fn persist_outcome_fact(outcome: PersistOutcome) -> LiveValueFact {
+    if outcome == {
+        .Kept(entry) -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "kept", reason: "" }
+        .Migrated(entry) -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "migrated", reason: "published schema migration applied" }
+        .Reset { reason, entry } -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "reset", reason: reason.copy() }
+        .Rejected { reason, prior } -> {
+            type_identity :: if reason == {
+                .MigrationUnavailable { from, .. } | .ShapeChanged { from, .. } -> from.copy()
+                else -> "unavailable"
+            }
+            LiveValueFact { value_id: prior.key(), type_identity: ^type_identity, disposition: "rejected", reason: reason.message() }
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2355
+fn optional_fact(value: String) -> String? { if !value.is_empty() -> .Val(value) else -> .None }
+// Rust: crates/jet-devserver/src/Session.rs:2359
+fn devtools_session_state(value: String) -> DevtoolsSessionState {
+    if value == {
+        "starting" -> .Starting
+        "building" -> .Building
+        "ready" -> .Ready
+        "error" -> .Error
+        "stopped" -> .Stopped
+        else -> .Unavailable
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2369
+fn live_value_fact_json(value: LiveValueFact) -> String {
+    "{{\"value_id\":{json_value(value.value_id)},\"type_identity\":{json_value(value.type_identity)},\"disposition\":{json_value(value.disposition)},\"reason\":{json_value(value.reason)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2379
+fn live_receipt_json(receipt: LiveReceipt) -> String {
+    values :: receipt.values.iter().map(live_value_fact_json).collect().join(",")
+    "{{\"protocol\":{json_value(receipt.lineage.protocol)},\"session_id\":{json_value(receipt.lineage.session_id)},\"source_id\":{json_value(receipt.lineage.source_id)},\"build_id\":{json_value(receipt.lineage.build_id)},\"revision\":{json_value(receipt.lineage.revision)},\"world_id\":{json_value(receipt.lineage.world_id)},\"values\":[{values}]}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2398
+fn expire_clients(clients: [String:Instant], now: Instant) -> Unit { clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= CLIENT_TTL) }
+// Rust: crates/jet-devserver/src/Session.rs:2402
+fn client_id_is_valid(client: String) -> Bool { !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any((ch) -> ch.is_control()) }
+// Rust: crates/jet-devserver/src/Session.rs:2406
+fn retained_view_json(view: RetainedView?) -> String {
+    retained :: view.cloned().unwrap_or(RetainedView { revision: "", source_id: "", payload: "" })
+    "{{\"revision\":{json_value(retained.revision)},\"source_id\":{json_value(retained.source_id)},\"payload\":{json_value(retained.payload)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2416
+fn recording_error(error: RecordingError) -> String { error.to_string() }
+// Rust: crates/jet-devserver/src/Session.rs:2420
+fn recording_unavailable() -> String { "devtools recording is unavailable because source/build identity is not installed" }
+// Rust: crates/jet-devserver/src/Session.rs:2424
+fn recording_unavailable_json(session_id: String, reason: String) -> String {
+    "{{\"protocol\":{json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{json_value(session_id)},\"kind\":\"session.recording\",\"available\":false,\"reason\":{json_value(reason)},\"events\":[],\"cursor\":null,\"divergence\":null}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2433
+fn recording_json_for_state(session_id: String, state: &ResidentRecordingState, projection: &ReplayProjection, divergence: &DevtoolsRecordingDivergence?) -> String {
+    identity :: state.recording.identity()
+    events :: state.recording.events().map(recording_event_json).collect().join(",")
+    names := state.checkpoints.keys().cloned().collect()
+    names.sort()
+    checkpoints :: names.into_iter().map((name) -> recording_checkpoint_json(name, state.checkpoints.get(name).unwrap())).collect().join(",")
+    current_event :: projection.event().map(recording_event_json).unwrap_or("null")
+    truncation :: state.recording.truncation()
+    divergence_json :: divergence.map(recording_divergence_json).unwrap_or("null")
+    "{{\"protocol\":{json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{json_value(session_id)},\"kind\":\"session.recording\",\"available\":true,\"identity\":{{\"source_id\":{json_value(identity.source_id)},\"build_id\":{json_value(identity.build_id)}}},\"events\":[{events}],\"truncation\":{{\"event_limit\":{truncation.event_limit},\"byte_limit\":{truncation.byte_limit},\"retained_events\":{truncation.retained_events},\"retained_bytes\":{truncation.retained_bytes},\"dropped_events\":{truncation.dropped_events},\"dropped_bytes\":{truncation.dropped_bytes},\"event_limit_reached\":{truncation.event_limit_reached},\"byte_limit_reached\":{truncation.byte_limit_reached},\"first_dropped_sequence\":{optional_u64_json(truncation.first_dropped_sequence)},\"last_dropped_sequence\":{optional_u64_json(truncation.last_dropped_sequence)},\"first_retained_sequence\":{optional_u64_json(truncation.first_retained_sequence)},\"last_retained_sequence\":{optional_u64_json(truncation.last_retained_sequence)}}},\"cursor\":{{\"identity\":{{\"source_id\":{json_value(projection.identity().source_id)},\"build_id\":{json_value(projection.identity().build_id)}}},\"generation\":{state.cursor.generation()},\"position\":{projection.position()},\"sequence\":{optional_u64_json(projection.sequence())},\"timestamp_ms\":{optional_u64_json(projection.timestamp_ms())},\"previous_sequence\":{optional_u64_json(projection.previous_sequence())},\"next_sequence\":{optional_u64_json(projection.next_sequence())},\"event\":{current_event}}},\"checkpoints\":[{checkpoints}],\"divergence\":{divergence_json}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2496
+fn recording_event_json(event: SessionEvent) -> String {
+    "{{\"sequence\":{event.sequence()},\"timestamp_ms\":{event.timestamp_ms()},\"source\":{json_value(event.source())},\"kind\":{json_value(event.kind())},\"entity\":{json_value(event.entity())},\"fields\":{event.fields_json()},\"payload\":{event.payload_json().unwrap_or("null")}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2509
+fn recording_checkpoint_json(name: String, checkpoint: &SessionCheckpoint) -> String {
+    "{{\"name\":{json_value(name)},\"identity\":{{\"source_id\":{json_value(checkpoint.identity().source_id)},\"build_id\":{json_value(checkpoint.identity().build_id)}}},\"generation\":{checkpoint.generation()},\"position\":{checkpoint.position()},\"sequence\":{optional_u64_json(checkpoint.sequence())},\"timestamp_ms\":{optional_u64_json(checkpoint.timestamp_ms())}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2522
+fn recording_divergence_json(divergence: DevtoolsRecordingDivergence) -> String {
+    reason :: divergence.reason.as_ref().map(json_value).unwrap_or("null")
+    "{{\"divergent\":{divergence.divergent},\"reason\":{reason},\"expected_sequence\":{optional_u64_json(divergence.expected_sequence)},\"actual_sequence\":{optional_u64_json(divergence.actual_sequence)},\"retained_events\":{divergence.retained_events},\"dropped_events\":{divergence.dropped_events}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2538
+fn optional_u64_json(value: U64?) -> String { value.map((value) -> value.to_string()).unwrap_or("null") }
+// Rust: crates/jet-devserver/src/Session.rs:2544
+fn json_value(value: String) -> String { if value.is_empty() -> "null" else -> "\"{foundation_json_escape(value)}\"" }
+// Rust: crates/jet-devserver/src/Session.rs:2552
+fn unix_time_ms() -> U64 {
+    // GATE #4494: wall clock uses epoch duration with original failure/overflow behavior.
+    SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().try_into().unwrap_or(U64.MAX)
+}
+// Rust: crates/jet-devserver/src/Session.rs:2561
+fn json_string(value: Dyn) -> String? { if value == {
+    .Text(value) | .TypedText(value) -> .Val(value)
+    else -> .None
+} }
+// Rust: crates/jet-devserver/src/Session.rs:2568
+fn json_u64(value: Dyn) -> U64? {
+    if value == {
+        .Int(value) && *value >= 0 -> U64.try_from(*value).ok()
+        .Float(value) && value.fract() == 0.0 && *value >= 0.0 && *value <= F64{U64.MAX} -> .Val(U64{*value})
+        else -> .None
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2580
+fn validate_devtools_text(value: String, label: String) Err! {
+    if value.is_empty() || value.len() > DEVTOOLS_TEXT_LIMIT || value.chars().any((ch) -> ch.is_control()) -> return .Err("devtools {label} is empty, too long, or contains control text")
+}
+// Rust: crates/jet-devserver/src/Session.rs:2588
+fn string_array_json(values: [String]) -> String { "[{values.iter().map((value) -> json_value(value)).collect().join(",")}]" }
+// Rust: crates/jet-devserver/src/Session.rs:2599
+fn retention_fact_json(fact: StateRetentionFact) -> String {
+    (decision, reason) :: if fact.decision == {
+        .Preserve -> (_0: "preserve", _1: "")
+        .Fresh { reason } -> (_0: "fresh", _1: reason)
+    }
+    "{{\"key\":{json_value(fact.key)},\"decision\":{json_value(decision)},\"reason\":{json_value(reason)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2612
+fn game_change_fact_json(fact: JetGameChangeFact) -> String {
+    old_schema :: fact.old_schema_id.as_ref().map(json_value).unwrap_or("null")
+    new_schema :: fact.new_schema_id.as_ref().map(json_value).unwrap_or("null")
+    "{{\"path\":{json_value(fact.path)},\"kind\":{json_value(fact.kind.as_str())},\"old_schema_id\":{old_schema},\"new_schema_id\":{new_schema},\"migration\":{json_value(fact.migration.as_str())},\"reason\":{json_value(fact.reason)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2630
+fn render_json(value: Dyn) -> String {
+    if value == {
+        .Null -> "null"
+        .Bool(value) -> value.to_string()
+        .Int(value) -> value.to_string()
+        .Float(value) -> value.to_string()
+        .Number(value) -> value.copy()
+        .TypedText(value) | .Text(value) -> json_value(value)
+        .Bytes(values) -> "[{values.iter().map((value) -> value.to_string()).collect().join(",")}]"
+        .Array(values) -> "[{values.iter().map(render_json).collect().join(",")}]"
+        .Object(values) -> "{{{values.iter().map(((key, value)) -> "{json_value(key)}:{render_json(value)}").collect().join(",")}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2660
+fn object_map(value: Dyn) -> [String:Dyn]? {
+    if value == {
+        .Object(values) -> .Val(values.iter().cloned().collect())
+        else -> .None
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2667
+fn request_string(text: String, key: String) -> String {
+    value :: parse_json(text) ?? return ""
+    object_map(&value).and_then((object) -> object.get(key).and_then(json_string).map((text) -> text.to_string())).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/Session.rs:2676
+fn request_bool(text: String, key: String) -> Bool {
+    value :: parse_json(text) ?? return false
+    object_map(&value).and_then((object) -> object.get(key).cloned()).is_some_and((value) -> if value == {
+        .Bool(lit0) && lit0 == true -> true
+        else -> false
+    })
+}
+// Rust: crates/jet-devserver/src/Session.rs:2685
+fn set_if_present(target: String, value: String) -> Unit { if !value.is_empty() -> *target = value }
+// Rust: crates/jet-devserver/src/Session.rs:2691
+fn idle_debugger() -> DebuggerSnapshot { DebuggerSnapshot { state: "idle", session_id: "", source_id: "", revision: "", tier: "" } }
+// Rust: crates/jet-devserver/src/Session.rs:2701
+fn json_string_any(text: String, key: String) -> String? {
+    value :: parse_json(text).ok()
+    // Rust: crates/jet-devserver/src/Session.rs:2704
+    fn find(value: Dyn, key: String) -> String? {
+        if value == {
+            .Object(object) -> {
+                if object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None) == .Val(found) {
+                    if json_string(found) == .Val(found_text) -> return .Val(found_text.copy())
+                }
+                object.iter().find_map(((_, value)) -> find(value, key))
+            }
+            .Array(values) -> values.iter().find_map((value) -> find(value, key))
+            else -> .None
+        }
+    }
+    find(&value, key)
+}
+// Rust: crates/jet-devserver/src/Session.rs:2722
+fn find_debugger_snapshot(text: String) -> DebuggerSnapshot? {
+    value :: parse_json(text).ok()
+    // Rust: crates/jet-devserver/src/Session.rs:2725
+    fn find(value: Dyn) -> DebuggerSnapshot? {
+        if value == {
+            .Object(object) -> {
+                if object.iter().find_map(((name, value)) -> if name == "id" -> .Val(value) else -> .None).and_then(json_string) == .Val(session_id) {
+                    if session_id.starts_with("canvas-debug-") {
+                        field :: (key: String) -> object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None)
+                            .and_then(json_string).map((text) -> text.to_string()).unwrap_or_default()
+                        return .Val(DebuggerSnapshot { state: field("state"), session_id: session_id.copy(), source_id: field("source_id"), revision: field("revision"), tier: field("tier") })
+                    }
+                }
+                object.iter().find_map(((_, value)) -> find(value))
+            }
+            .Array(values) -> values.iter().find_map(find)
+            else -> .None
+        }
+    }
+    find(&value)
+}

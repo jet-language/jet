@@ -273,7 +273,11 @@ fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionR
         sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
         return None
     }
+    // copy: the minted enum is stored twice in the graph: as a program item here and as the
+    // export's declaration below (`declaration: Val(item)`).
     &graph.modules[module_index].program.items.push(item.copy())
+    // copy: the export row stores its own symbol, while the registered symbol row stays in the
+    // module, and `graph` is written (exports.push) while it is live.
     symbol :: graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].copy()
     module_identity :: graph.modules[module_index].module_identity.copy()
     if symbol.visibility > 0 -> &graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
@@ -351,7 +355,8 @@ fn sema_failure_union_unqualified(name: String) -> String Never! {
 
 // The success side of an unwritten contract.
 fn sema_failure_union_success(function: Func) -> Type Never! {
-    if function.return_type == .Val(written) -> return written
+    // copy: `written` is a payload of read parameter `function`, which keeps the original; the returned value owns this one
+    if function.return_type == .Val(written) -> return written.copy()
     Type.Named{name: "Unit"}
 }
 

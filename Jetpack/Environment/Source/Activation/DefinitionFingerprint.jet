@@ -56,13 +56,13 @@ struct FingerprintBudget {
 }
 
 // Hash the checked activation plan for the default environment selection.
-fn env_hook_definition_fingerprint(root: String, requested_preset: String?) -[FS, Env]> String? Never! {
+fn env_hook_definition_fingerprint(root: String, requested_preset: String?) -[FS, Env, Exec, Time.Wait]> String? Never! {
     env_hook_definition_fingerprint_with_selections(root, requested_preset, None)
 }
 
 // Hash the activation plan for both kinds of explicit selection: a named
 // preset inside `env.jet`, and one declared `env.<name>` module.
-fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> String? Never! {
+fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env, Exec, Time.Wait]> String? Never! {
     raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return None
     bytes :: raw ?? return None
     source :: String.from_bytes(bytes) ?? return None
@@ -309,12 +309,12 @@ fn env_hook_relative_to(path: String, root: String) -> String Never! {
 
 // The typed reload policy, read without realizing packages or executing
 // project code. Legacy `pkg.*` env files use the normal prompt policy.
-fn env_hook_reload_policy(root: String) -[FS, Env]> ReloadPolicy Never! {
+fn env_hook_reload_policy(root: String) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
     env_hook_reload_policy_with_environment(root, None)
 }
 
 // The reload policy of the selected `env.<name>` environment module.
-fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env]> ReloadPolicy Never! {
+fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env, Exec, Time.Wait]> ReloadPolicy Never! {
     raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
     bytes :: raw ?? return ReloadPolicy.Prompt
     source :: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt

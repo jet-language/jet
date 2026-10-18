@@ -69,11 +69,15 @@ fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool Never! {
     true
 }
 
+// Rust `auto_derive_requested`: the last marker naming the trait decides
+// (`!` refuses it); `#Codable` names both codec traits. With no marker the
+// package default applies.
 fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
+    codec :: trait_name == "Encode" || trait_name == "Decode"
     index := markers.len() - 1
     loop index >= 0 {
         marker :: markers[index]
-        if marker.name == trait_name -> return !marker.negated
+        if marker.name == trait_name || (codec && marker.name == "Codable") -> return !marker.negated
         index -= 1
     }
     package_default

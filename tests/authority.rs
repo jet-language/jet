@@ -609,7 +609,7 @@ fn plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers() {
 /// The example's guest imports the host `read`, so its package declares
 /// `needs: [FS.Read]` (Examples/.../plugin_failure/package.jet); the scratch
 /// project holds the whole FS root because its read root is an absolute path.
-const PLUGIN_FAILURE_PACKAGE: &str = "name: \"plugin_failure\"\nversion: \"0.1.0\"\nauthority: { needs: [FS.Read], holds: { allow: [Exec, FS, IO, Mem.Alloc, Panic] } }\n";
+const PLUGIN_FAILURE_PACKAGE: &str = "name: \"plugin_failure\"\nversion: \"0.1.0\"\nauthority: { needs: [FS.Read], holds: { allow: [Exec, FS, IO, Mem.Alloc] } }\n";
 
 #[test]
 fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {

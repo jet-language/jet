@@ -34,7 +34,7 @@ fn fx_atomic_print(b: &FxBuilder, value: MIRValueID) Never! {
     fx_atomic_drop(&b, value)
 }
 
-fn fx_atomic_program(b: FxBuilder, types: [MIRTypeDef]) -> MIRProgram Never! {
+fn fx_atomic_program(b: FxBuilder, types: ^[MIRTypeDef]) -> MIRProgram Never! {
     p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
     &p.types.push(fx_type_def("AllocError", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("AllocError", "requested_bytes", fx_int()), fx_field("AllocError", "allocator", fx_string())}, methods: [MIRFunctionID]{}}))
     members :: [String]{"load", "observe", "store", "publish", "add", "try_add", "compare_exchange"}

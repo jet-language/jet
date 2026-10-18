@@ -1,6 +1,8 @@
-// P3: exact-Int eligibility facts, restricted to the true edge of lowering's
-// sign-bit test. A join, false edge, or second predecessor never invents a fact.
-// CHK immediate dominators are shared with P6; unreachable blocks stay untouched.
+// P3: exact-Int eligibility facts, restricted to the false edge of lowering's
+// inline test (`Overflows(Add, x, x)`: x is inline exactly when doubling it
+// does not overflow; Lower.jet lower_inline_branch). A join, true edge, or
+// second predecessor never invents a fact. CHK immediate dominators are
+// shared with P6; unreachable blocks stay untouched.
 struct OptDominators {
     order: [Int]
     parent: [Int]
@@ -132,52 +134,10 @@ fn opt_inline_record(facts: &[Bool], undo: &[Int], count: &Int, value: Int) Neve
     count += 1
 }
 
-fn opt_inline_constant(defs: OptDefs, value: LIRValueID, expected: Int) -> Bool Never! {
-    if defs.insts[value.value] == .Val(inst) {
-        if inst == .Const(_, constant) -> return constant == expected
-    }
-    false
-}
-
-fn opt_inline_shift(defs: OptDefs, value: LIRValueID, shifted: LIRValueID) -> Bool Never! {
-    if defs.insts[shifted.value] == .Val(inst) {
-        if inst == .Binary(_, op, left, right) -> return op == .Shl && left == value && opt_inline_constant(defs, right, 1)
-    }
-    false
-}
-
-// None means not the canonical sign test. Val([]) is an always-true test.
-// Every Or leaf must be accounted for; recognizing just one leaf is unsound.
-fn opt_inline_test_values(function: LIRFunction, defs: OptDefs, inst: LIRInst) -> [Int]? {
-    if inst == .Compare(_, condition, left, right) {
-        if condition != .Ge || !opt_is_word(function, left) || !opt_inline_constant(defs, right, 0) -> return None
-        pending := [LIRValueID]{left}
-        values := [Int]{}
-        cursor := 0
-        loop cursor < pending.len() {
-            value :: pending[cursor].copy()
-            cursor += 1
-            if !opt_is_word(function, value) -> return None
-            definition :: defs.insts[value.value] ?? return None
-            if definition == {
-                .Binary(_, op, a, b) -> {
-                    if op == .Or {
-                        &pending.push(a)
-                        &pending.push(b)
-                    } else if op == .Xor {
-                        if opt_inline_shift(defs, a, b) -> &values.push(a.value)
-                        else if opt_inline_shift(defs, b, a) -> &values.push(b.value)
-                        else -> return None
-                    } else {
-                        return None
-                    }
-                }
-                // Simplify may leave a nonnegative constant in an Or tree.
-                .Const(_, constant) -> { if constant < 0 || constant > OPT_I64_MAX -> return None }
-                else -> return None
-            }
-        }
-        return Val(values)
+// The value an inline test instruction tests; None for any other instruction.
+fn opt_inline_test_value(function: LIRFunction, inst: LIRInst) -> Int? {
+    if inst == .Overflows(_, op, left, right) {
+        if op == .Add && left == right && opt_is_word(function, left) -> return Val(left.value)
     }
     None
 }
@@ -186,7 +146,7 @@ fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
     function := original
     defs :: opt_defs(function)
     dom :: opt_dominators(function)
-    tests := [[Int]?]{}
+    tests := [Int?]{}
     facts := [Bool]{}
     loop (index, value) in function.values {
         &tests.push(None)
@@ -200,7 +160,7 @@ fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
     }
     loop block in function.blocks {
         loop inst in block.insts {
-            if lir_inst_def(inst) == .Val(dst) -> tests[dst.value] = opt_inline_test_values(function, defs, inst)
+            if lir_inst_def(inst) == .Val(dst) -> tests[dst.value] = opt_inline_test_value(function, inst)
         }
     }
     undo := [Int]{}
@@ -219,18 +179,18 @@ fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
         row :: event
         marks[row] = count
         // Count edges, not distinct predecessor blocks: Branch(t, t) must
-        // not claim its condition held on arrival. Entry has no incoming fact.
+        // not claim its condition failed on arrival. Entry has no incoming fact.
         if row != 0 && dom.predecessors[row].len() == 1 {
             predecessor :: dom.predecessors[row][0].copy()
-            if function.blocks[predecessor].terminator == .Branch(condition, then_target, _) {
-                if then_target.block == function.blocks[row].id {
-                    if tests[condition.value] == .Val(values) {
-                        loop value in values -> opt_inline_record(&facts, &undo, &count, value)
-                    }
-                    // Preserve facts through single-edge block parameters.
-                    loop (index, param) in function.blocks[row].params {
-                        if facts[then_target.args[index].value] -> opt_inline_record(&facts, &undo, &count, param.value)
-                    }
+            if function.blocks[predecessor].terminator == .Branch(condition, then_target, else_target) {
+                if else_target.block == function.blocks[row].id {
+                    if tests[condition.value] == .Val(value) -> opt_inline_record(&facts, &undo, &count, value)
+                }
+                // Preserve facts through single-edge block parameters.
+                on_then :: then_target.block == function.blocks[row].id
+                loop (index, param) in function.blocks[row].params {
+                    arg :: if on_then -> then_target.args[index].value else -> else_target.args[index].value
+                    if facts[arg] -> opt_inline_record(&facts, &undo, &count, param.value)
                 }
             }
         }
@@ -238,10 +198,8 @@ fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
         loop inst in function.blocks[row].insts {
             rewritten := inst
             if lir_inst_def(inst) == .Val(dst) {
-                if tests[dst.value] == .Val(values) {
-                    all_inline := true
-                    loop value in values { if !facts[value] -> all_inline = false }
-                    if all_inline -> rewritten = LIRInst.Const{dst: dst, value: 1}
+                if tests[dst.value] == .Val(value) {
+                    if facts[value] -> rewritten = LIRInst.Const{dst: dst, value: 0}
                 }
             }
             &insts.push(rewritten)

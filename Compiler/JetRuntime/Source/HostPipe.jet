@@ -157,8 +157,8 @@ fn pipe_output_name() -> I64 {
             rt_text_bytes_copy(bytes, rt_text_data(line), length)
             jet_rt_string_drop(line)
         } else {
-            // Transfer the data, freeing only its temporary byte-buffer header.
-            jet_rt_free(line, I64{24}, I64{8})
+            // Transfer the data of this fresh builder, freeing only its header.
+            bytes = rt_text_take_unique_buffer(line)
         }
         fd_put(data_out, I64{0}, bytes)
         fd_put(len_out, I64{0}, length)

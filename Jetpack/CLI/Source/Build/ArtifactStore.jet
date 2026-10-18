@@ -1,0 +1,41 @@
+// The machine-wide artifact store as the build executor's CAS, ported 1:1
+// from crates/jet-driver Driver/mod.rs `BuildArtifactStoreHandle` and its
+// `BuildArtifactStore` implementation over jet-store.
+
+struct BuildArtifactStoreHandle {
+    store: ArtifactStore
+
+    // The store named by `JET_STORE_DIR` (else the default store root). Rust
+    // reports the open refusal as its display string; `{err}` is that text.
+    fn open() -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
+        Ok(BuildArtifactStoreHandle{store: ArtifactStore.from_env()})
+    }
+
+    fn at(root: String) -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
+        Ok(BuildArtifactStoreHandle{store: ArtifactStore.new(root)})
+    }
+
+    fn put_blob(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ContentDigest BuildIOError! {
+        object :: self.store.publish_blob(bytes) ?? return Err(build_store_io_error(err))
+        ContentDigest.parse("sha256:{object.digest().to_hex()}") ?? return Err(BuildIOError.new(.InvalidData, err.message))
+    }
+
+    fn get_blob(self, digest: ContentDigest) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
+        if !digest.as_str().starts_with("sha256:") -> return Err(BuildIOError.new(.InvalidInput, "artifact digest has no sha256 prefix"))
+        parsed :: ArtifactDigest.from_hex(digest.as_str().removeprefix("sha256:")) ?? return Err(build_store_io_error(err))
+        self.store.blob_by_digest(parsed) ?? return Err(build_store_io_error(err))
+    }
+
+    fn put_record(self, key: String, bytes: [U8]) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+        self.store.publish_action(self.store.action(key), bytes) ?? return Err(build_store_io_error(err))
+    }
+
+    fn get_record(self, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
+        self.store.get_action(self.store.action(key)) ?? return Err(build_store_io_error(err))
+    }
+}
+
+// Rust `store_io_error`: every store refusal is an `Other` I/O error.
+fn build_store_io_error(error: ArtifactStoreError) -> BuildIOError Never! {
+    BuildIOError.new(.Other, "{error}")
+}

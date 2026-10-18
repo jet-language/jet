@@ -105,13 +105,12 @@ fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) J
             id := ""
             loop member in 0..<entries.len() {
                 if !group[member] -> next
-                row :: entries[member]
-                if row.recorded_sequence < sequence || (row.recorded_sequence == sequence && (id == "" || row.artifact_id < id)) {
-                    sequence = row.recorded_sequence
-                    id = row.artifact_id
+                if entries[member].recorded_sequence < sequence || (entries[member].recorded_sequence == sequence && (id == "" || entries[member].artifact_id < id)) {
+                    sequence = entries[member].recorded_sequence
+                    id = entries[member].artifact_id
                 }
                 loop outside in 0..<entries.len() {
-                    if !group[outside] && jet_cli_record_links_to(entries[outside], row) {
+                    if !group[outside] && jet_cli_record_links_to(entries[outside], entries[member]) {
                         referenced = true
                     }
                 }
@@ -312,7 +311,7 @@ fn jet_cli_record_index_store(index: JetCLIRecordIndex, project_root: String) Je
     jet_cli_record_index_store_held(index, held, project_root, previous.entries)
 }
 
-fn jet_cli_record_index_publish_and_store(index: &JetCLIRecordIndex, project_root: String, entry: JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
+fn jet_cli_record_index_publish_and_store(index: &JetCLIRecordIndex, project_root: String, entry: ^JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
     held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
@@ -324,24 +323,22 @@ fn jet_cli_record_index_publish_and_store(index: &JetCLIRecordIndex, project_roo
         }
         candidate.entries = ^retained
     }
-    copied_entry := entry.copy()
-    fresh :: jet_cli_record_index_fresh_sequence(candidate, ^copied_entry)
+    fresh :: jet_cli_record_index_fresh_sequence(candidate, ^entry)
     jet_cli_record_index_update(&candidate, fresh)
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
     index = ^candidate
 }
 
-fn jet_cli_record_index_upsert_many_and_store(index: &JetCLIRecordIndex, project_root: String, entries: [JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
+fn jet_cli_record_index_upsert_many_and_store(index: &JetCLIRecordIndex, project_root: String, entries: ^[JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
     held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous :: candidate.entries
-    loop entry in entries {
+    loop entry in ^entries {
         if jet_cli_record_index_find(candidate, entry.kind, entry.artifact_id, true) != None {
             jet_cli_record_index_replace(&candidate, entry)
         } else {
-            copied_entry := entry.copy()
-            fresh :: jet_cli_record_index_fresh_sequence(candidate, ^copied_entry)
+            fresh :: jet_cli_record_index_fresh_sequence(candidate, ^entry)
             jet_cli_record_index_update(&candidate, fresh)
         }
     }

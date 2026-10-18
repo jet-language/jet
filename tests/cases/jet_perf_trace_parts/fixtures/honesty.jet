@@ -51,7 +51,7 @@ fn s6_array(text: String, marker: String, end: String) -> String {
 
 fn s6_find_task(tasks: [String], id: String) -> String {
     loop row in tasks {
-        if s6_json_u64_after(row, "id") == Val(id) -> return row.copy()
+        if s6_json_u64_after(row, "id") == Val((id)) -> return row.copy()
     }
     panic("span task {id} missing: {tasks}")
 }
@@ -149,7 +149,7 @@ fn s6_honest_capture() {
         if parent == "0" {
             assert(span.contains("\"parent_task_id\":null"))
         } else {
-            assert(s6_json_u64_after(span, "parent_task_id") == Val(parent))
+            assert(s6_json_u64_after(span, "parent_task_id") == Val((parent)))
         }
         span_count = span_count + 1
     }

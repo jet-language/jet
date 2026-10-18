@@ -49,7 +49,7 @@ fn jet_codegen_dyn_type() -> Type Never! {
 }
 
 fn jet_codegen_dyn_type_id(builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRTypeID Never! {
-    jet_codegen_type_instance_id(jet_codegen_dyn_type(), program.modules, builder.function.module_identity, builder.generic_type_names)
+    jet_codegen_type_instance_id(jet_codegen_dyn_type(), program.nominals, builder.function.module_identity, builder.generic_type_names)
 }
 
 fn jet_codegen_data_expr(ty: Type, span: Span, kind: TExprKind) -> TExpr Never! {
@@ -73,7 +73,7 @@ fn jet_codegen_data_enum_arg(builder: &JetCodegenBuilder, program: JetCodegenPro
 }
 fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, owner: String, variant: String, argument: TExpr?, clone_arg: Bool) -> MIRValueID {
     args := jet_codegen_data_enum_arg(&builder, program, argument, clone_arg)
-    type_id := jet_codegen_type_instance_id(Type.Named{name: owner}, program.modules, builder.function.module_identity, builder.generic_type_names)
+    type_id := jet_codegen_type_instance_id(Type.Named{name: owner}, program.nominals, builder.function.module_identity, builder.generic_type_names)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: variant, args: args})
 }
 
@@ -150,6 +150,8 @@ fn jet_codegen_typed_codec_target(ty: Type) -> Bool Never! {
         .IntN(_, _) | .List(_) | .FixedList(_, _) | .Option(_) -> return true
         .Map(key, _, _) -> return jet_codegen_unwrap_pattern_tags(key) == Type.String
         .Named(name) -> {
+            // Core's ZonedDateTime is the `Dyn.DateTime` payload: a built-in typed codec.
+            if name == "ZonedDateTime" || (name.starts_with("<corelib>/Core/time::") && name.ends_with("::ZonedDateTime")) -> return true
             return name == "Data" || name == "Dyn" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128"
         }
         .Tagged(_, inner) -> return jet_codegen_typed_codec_target(inner)
@@ -309,7 +311,7 @@ fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, program: JetCodeg
         else -> { return None }
     }
     if builder.generic_type_names.contains(owner_name) -> return None
-    owner_identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
+    owner_identity := jet_codegen_find_nominal_identity(program.nominals, builder.function.module_identity, owner_name, builder.generic_type_names)
     if owner_identity == None -> return None
     identity :: owner_identity ?? return None
     owner_key :: jet_codegen_qualified_function_key(identity.module_identity, identity.name)

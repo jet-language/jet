@@ -1,0 +1,129 @@
+// Source producer for the synchronous Event family's handle methods (D-EVENT1=D,
+// D-EVENT-CONTINUE1=C). One meaning with the Rust checker's method table
+// (crates/jet-foundation/src/Collections.rs event_method_return,
+// subscription_method_return, event_scope_method_return,
+// event_trace_method_return) and its TIR producer (crates/jet-codegen/src/
+// Codegen/TIR/lower/method_calls.rs D-EVENT1=D). A handler is a retained
+// `Fn(T)` callback; every method borrows its receiver.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    ParamZone,
+    Span,
+    TExpr,
+    TExprKind,
+    THandleOp,
+    Type,
+]
+
+fn sema_event_unit() -> Type Never! {
+    Type.Named{name: "Unit"}
+}
+
+// The handle family a receiver type is named for: `Event<T>`, `EventScope`,
+// `Subscription`, `EventTrace`; None for any other type (a non-generic
+// `Event` included).
+fn sema_event_handle_family(ty: Type) -> String? {
+    if ty == {
+        .Apply(name, args) -> if name == "Event" && args.len() == 1 -> Val(name) else -> None
+        .Named(name) -> if name == "EventScope" || name == "Subscription" || name == "EventTrace" -> Val(name) else -> None
+        else -> None
+    }
+}
+
+// The built-in handle family of a receiver. These are compiler-known types
+// with no source declaration (the lowering's `lower_event_repr` guard): a
+// visible user nominal of the same name shadows them, as a user
+// `Sender`/`Receiver` shadows the channel endpoints (StreamHandles.jet
+// `sema_stream_handle_is_canonical`).
+fn sema_event_handle_owner(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    owner :: sema_event_handle_family(ty) ?? return None
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return None
+    }
+    Val(owner)
+}
+
+// (arity, result) of a known method, or None.
+fn sema_event_method_shape(owner: String, method: String) -> (arity: Int, result: Type)? {
+    if owner == "Event" {
+        if method == "on" || method == "once" -> return Val((arity: 2, result: Type.Named{name: "Subscription"}))
+        if method == "on_priority" -> return Val((arity: 3, result: Type.Named{name: "Subscription"}))
+        if method == "emit" -> return Val((arity: 1, result: Type.Named{name: "EventTrace"}))
+        if method == "listener_count" -> return Val((arity: 0, result: Type.Int))
+        if method == "trace" -> return Val((arity: 0, result: Type.String))
+        return None
+    }
+    if owner == "EventScope" {
+        if method == "cancel" -> return Val((arity: 0, result: sema_event_unit()))
+        if method == "active_count" -> return Val((arity: 0, result: Type.Int))
+        return None
+    }
+    if owner == "Subscription" {
+        if method == "unsubscribe" -> return Val((arity: 0, result: sema_event_unit()))
+        if method == "is_active" -> return Val((arity: 0, result: Type.Bool))
+        return None
+    }
+    if owner == "EventTrace" {
+        if method == "summary" -> return Val((arity: 0, result: Type.String))
+        if method == "delivered" || method == "queued" || method == "dropped" -> return Val((arity: 0, result: Type.Int))
+        return None
+    }
+    None
+}
+
+fn sema_event_parameter(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
+    SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
+}
+
+// The non-handler parameters: scope (and priority) of a registration, the
+// moved payload of an emit.
+fn sema_event_value_parameters(method: String, payload: Type) -> [SemaCallParam] Never! {
+    params := [SemaCallParam]{}
+    if method == "on" || method == "once" || method == "on_priority" -> &params.push(sema_event_parameter("scope", Type.Named{name: "EventScope"}, AccessConvention.Read))
+    if method == "on_priority" -> &params.push(sema_event_parameter("priority", Type.Int, AccessConvention.Read))
+    if method == "emit" -> &params.push(sema_event_parameter("payload", payload, AccessConvention.Move))
+    params
+}
+
+// Rust `F: Fn(T) + 'static`: one payload parameter, Unit result.
+fn sema_event_handler_type(payload: Type) -> Type Never! {
+    Type.Fn{params: [Type]{payload}, ret: Val(sema_event_unit()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+}
+
+fn sema_call_try_event_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    receiver_type :: sema_call_resolved_type(receiver_value.ty, environment, program)
+    owner :: sema_event_handle_owner(receiver_type, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    payload :: if receiver_type == {
+        .Apply(_, type_args) -> if type_args.len() == 1 -> sema_call_resolved_type(type_args[0], environment, program) else -> Type.Int
+        else -> Type.Int
+    }
+    shape :: sema_event_method_shape(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    callee :: "{owner}.{method}"
+    if args.len() != shape.arity {
+        _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_arity_diagnostic(callee, shape.arity, args.len(), false, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    registers :: method == "on" || method == "once" || method == "on_priority"
+    params :: sema_event_value_parameters(method, payload)
+    checked_args := [CallArg]{}
+    loop index in 0..<params.len() -> &checked_args.push(args[index])
+    binding :: sema_call_bind_args(callee, params, &checked_args, span, &diagnostics) ?? {
+        _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    typed :: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ownership := sema_ownership_check_method_call(&state, callee, receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    values := typed.values
+    if registers {
+        handler :: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(payload)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &values.push(handler)
+    }
+    value := sema_tir_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{method: method}, args: values}, span)
+    checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}

@@ -69,6 +69,16 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     }
 }
 
+// Rust: crates/jet-parser/src/FencedNames.rs:677 (`seen.insert` is true for a new name)
+#Test("binding_fence_accepts_distinct_names_and_rejects_only_a_repeat") {
+    distinct := lex(`fn run() { <: first, second, third :> := 0 }`.bytes())
+    assert(distinct.diagnostics.is_empty())
+    assert(parser_prepare_tokens(^distinct.tokens, &distinct.tables).diagnostics.is_empty())
+    repeated := lex(`fn run() { <: first, second, first :> := 0 }`.bytes())
+    assert(repeated.diagnostics.is_empty())
+    _ :: parser_test_diagnostic(parser_prepare_tokens(^repeated.tokens, &repeated.tables).diagnostics, "E0369")
+}
+
 // Rust: crates/jet-parser/src/FencedNames.rs:895
 #Test("formatter_emits_one_fence_and_is_stable") {
     formatted :: parser_test_stable(`fn run() {

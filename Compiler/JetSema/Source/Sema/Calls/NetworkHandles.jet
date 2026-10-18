@@ -16,7 +16,6 @@ use jet_foundation.[
     TExprKind,
     THandleOp,
     Type,
-    tir_call_arg_copy_fact,
 ]
 
 struct SemaNetworkHandleSpec {
@@ -334,9 +333,7 @@ fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], arg
         found := false
         loop index in 0..<typed.values.len() {
             if typed.slots[index] == slot {
-                value := typed.values[index]
-                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
-                &values.push(value)
+                &values.push(typed.values[index])
                 found = true
                 break
             }

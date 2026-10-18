@@ -1,0 +1,13 @@
+#Test("notebook_entry_embeds_the_complete_production_client") {
+    assert(NOTEBOOK_CLIENT_HTML.starts_with("<!doctype html>"))
+    assert(NOTEBOOK_CLIENT_HTML.contains("/api/edit"))
+    assert(NOTEBOOK_CLIENT_HTML.contains("frame.sandbox = ''"))
+    assert(NOTEBOOK_CLIENT_HTML.contains("text.textContent"))
+    assert(NOTEBOOK_CLIENT_HTML.contains("</html>"))
+}
+#Test("notebook_entry_native_text_ingress_uses_selected_target") {
+    path :: notebook_native_path("analysis.jetnb")
+    expected :: if notebook_entry_target.selected_family() == notebook_entry_target.NativeTargetFamily.Windows -> notebook_entry_paths.PathPlatform.Windows else -> notebook_entry_paths.PathPlatform.Unix
+    assert_eq(path.platform, expected)
+    assert_eq(path.encoded, "analysis.jetnb".bytes())
+}

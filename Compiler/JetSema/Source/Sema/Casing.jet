@@ -553,7 +553,7 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
             if context == .Val(note) -> sema_casing_expr(note, &diagnostics)
         }
         .MemberSpread(base, _, _) | .OptField(base, _, _, _, _) -> sema_casing_expr(base, &diagnostics)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             sema_casing_expr(receiver, &diagnostics)
             sema_casing_call_args(args, &diagnostics)
         }

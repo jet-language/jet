@@ -89,8 +89,10 @@ fn lower_dyn_schema(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRTy
             schema_words :: [Int]{lower_discriminant(found.index), offset, boxed, bytes, stride, key_offset, value_offset, element_bytes}
             loop word in schema_words -> &words.push(word)
         }
+        start :: lower_marks(m)
         id = lower_static_object(&m, words.len() * 8)
         loop (index, word) in words -> lower_static_store(&m, id, index * 8, lower_static_word(word))
+        lower_extent_record(&m, true, key, id.value, 0, start)
         &m.static_rows.add(key, id.value).drop("schema absent above")
     }
     address :: lower_pointer(&f)
@@ -205,10 +207,10 @@ fn lower_dyn_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     err_block :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(ok_block, [LIRValueID]{}), else_target: lower_target(err_block, [LIRValueID]{})})
     lower_start(&f, ok_block, [LIRValueID]{})
-    lower_route_store_payload(p, &m, &f, failed, lower_result_payload_offset(), ty, ok, out.slot, route.native_lists)
+    lower_route_store_payload(p, &m, &f, failed, lower_result_payload_offset(), ty, ok, out.slot)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{failed})})
     lower_start(&f, err_block, [LIRValueID]{})
-    lower_route_store_payload(p, &m, &f, failed, lower_result_payload_offset(), errors, err, out.slot, route.native_lists)
+    lower_route_store_payload(p, &m, &f, failed, lower_result_payload_offset(), errors, err, out.slot)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{failed})})
     joined :: dst ?? lower_pointer(&f)
     lower_start(&f, merge, [LIRValueID]{joined})
@@ -259,7 +261,7 @@ fn lower_dyn_to_text(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_start(&f, some_block, [LIRValueID]{})
     box :: lower_pointer(&f)
     lower_alloc(&m, &f, box, lower_box_size(p, result_ty))
-    lower_route_store_payload(p, &m, &f, box, 0, inner, some, out.slot, route.native_lists)
+    lower_route_store_payload(p, &m, &f, box, 0, inner, some, out.slot)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
     lower_start(&f, none_block, [LIRValueID]{})
     null :: lower_pointer(&f)
@@ -278,7 +280,7 @@ fn lower_dyn_to_text(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // length") with DynKind.rs's wording; the MIR branches that Err to its stop.
 // False when the checked types are not Dyn and Result<Int, String>.
 fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     if row.module_name != "core.encoding.dyn" || row.member != "len" || lower_route_symbol(row) != "jet_dyn_len" -> return false
     if args.len() != 1 -> return false
     ty :: lower_value_type(c, receiver) ?? return false
@@ -337,7 +339,7 @@ fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         lower_start(&f, other, [LIRValueID]{})
     }
     // The remaining variants name their DynKind.rs kind in the stop detail.
-    unsized :: [(name: String, kind: String)]{(name: "Null", kind: "null"), (name: "Bool", kind: "Bool"), (name: "Int", kind: "Int"), (name: "Float", kind: "Float"), (name: "Number", kind: "number")}
+    unsized :: [(kind: String, name: String)]{(kind: "null", name: "Null"), (kind: "Bool", name: "Bool"), (kind: "Int", name: "Int"), (kind: "Float", name: "Float"), (kind: "number", name: "Number")}
     loop entry in unsized {
         found :: lower_variant(definition, entry.name) ?? {
             lower_fail(&m, &f, "Dyn.len has no {entry.name} variant")
@@ -386,7 +388,7 @@ fn lower_dyn_len(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
 // These kernels already operate on Jet's native value storage. Crossing a
 // Rust Dyn bridge would clone the borrowed Object and lose its view lifetime.
 fn lower_native_value_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_route_symbol(row)
     entries_view :: symbol == "jet_raw_object_entries_view"
     entries_take :: symbol == "jet_raw_object_from_entries"

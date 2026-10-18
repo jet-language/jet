@@ -45,6 +45,28 @@ fn x64_cond_code(cond: X64Cond) -> Int Never! {
     }
 }
 
+// The condition that holds exactly when `cond` does not (cc xor 1).
+fn x64_cond_invert(cond: X64Cond) -> X64Cond Never! {
+    if cond == {
+        .O -> X64Cond.NO
+        .NO -> X64Cond.O
+        .B -> X64Cond.AE
+        .AE -> X64Cond.B
+        .E -> X64Cond.NE
+        .NE -> X64Cond.E
+        .BE -> X64Cond.A
+        .A -> X64Cond.BE
+        .S -> X64Cond.NS
+        .NS -> X64Cond.S
+        .P -> X64Cond.NP
+        .NP -> X64Cond.P
+        .L -> X64Cond.GE
+        .GE -> X64Cond.L
+        .LE -> X64Cond.G
+        .G -> X64Cond.LE
+    }
+}
+
 fn x64_byte(code: &[U8], value: Int) Never! {
     &code.push(U8{(value).bit_and(255)})
 }
@@ -125,6 +147,14 @@ fn x64_mov_ri(code: &[U8], dst: Int, value: Int) Never! {
     }
 }
 
+// mov qword [base + disp], imm32 sign-extended (REX.W C7 /0 id).
+fn x64_store_imm32(code: &[U8], base: Int, disp: Int, value: Int) Never! {
+    x64_rex(&code, true, 0, base)
+    x64_byte(&code, 0xc7)
+    x64_modrm_mem(&code, 0, base, disp)
+    x64_u32(&code, value)
+}
+
 fn x64_alu_opcode(op: X64Alu) -> Int Never! {
     if op == {
         .Add -> 0x01
@@ -202,6 +232,17 @@ fn x64_load(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, true, dst, base)
     x64_byte(&code, 0x8b)
     x64_modrm_mem(&code, dst, base, disp)
+}
+
+// mov dst, qword gs:[disp32] (65 REX.W 8B /r; ModRM rm=100 with SIB 25: no
+// base, no index, absolute disp32 in the GS segment).
+fn x64_load_gs(code: &[U8], dst: Int, disp: Int) Never! {
+    x64_byte(&code, 0x65)
+    x64_rex(&code, true, dst, 0)
+    x64_byte(&code, 0x8b)
+    x64_byte(&code, ((dst.bit_and(7)) << 3).bit_or(4))
+    x64_byte(&code, 0x25)
+    x64_u32(&code, disp)
 }
 
 // mov [base + disp], src (REX.W 89 /r)
@@ -367,6 +408,16 @@ fn x64_shift_ri(code: &[U8], shift: X64Shift, dst: Int, count: Int) Never! {
 fn x64_rep_movsb(code: &[U8]) Never! {
     x64_byte(&code, 0xf3)
     x64_byte(&code, 0xa4)
+}
+
+// lock xadd [base + disp], src (F0 REX.W 0F C1 /r): atomically adds src to the
+// word and leaves the previous value in src.
+fn x64_lock_xadd(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, 0xf0)
+    x64_rex(&code, true, src, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xc1)
+    x64_modrm_mem(&code, src, base, disp)
 }
 
 // repe cmpsb (F3 A6): compare rcx bytes at [rsi] and [rdi] while equal.

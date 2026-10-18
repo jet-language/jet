@@ -73,7 +73,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     for(size_t i=0;i<watched_count;++i) assert(watched[i].pointer!=p);
     watched[watched_count].pointer=p; watched[watched_count].bytes=bytes; watched[watched_count++].align=align;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_detail(Detail *d) { watch(d,48,8); watch_text(d->operation); if(d->address) watch_text(d->address); if(d->name) watch_text(d->name); watch_text(d->message); }
 static void watch_error(Error *e) { watch(e,16,8); if(e->tag==11) { DNS *d=e->payload; watch(d,16,8); watch_text(d->text); } else watch_detail(e->payload); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }

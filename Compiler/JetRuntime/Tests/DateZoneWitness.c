@@ -49,7 +49,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     watched[count].p=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
 static void done(void) { assert(intercepted); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_rows(Rows *r) { watch(r,24,8); if(r->capacity) watch(r->data,r->capacity*16,8); }
 static void watch_zone(Zone *z) { watch(z,24,8); watch_text(z->name); watch_rows(z->transitions); watch_rows(z->infos); }
 static void watch_zoned(Zoned *z) { watch(z,16,8); watch(z->instant,24,8); watch_zone(z->zone); }

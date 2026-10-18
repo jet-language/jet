@@ -231,6 +231,7 @@ fn build_session_action_key(state: BuildSessionState, id: Int) -> String Never! 
     build_key_map(&bytes, action.helpers)
     build_key_text(&bytes, "generated-modules")
     generated := state.generated
+    generated = loop fresh_item in generated -> fresh_item
     &generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> left.path <=> right.path)
     loop generated_row in generated {
         build_key_text(&bytes, generated_row.path)
@@ -239,6 +240,7 @@ fn build_session_action_key(state: BuildSessionState, id: Int) -> String Never! 
     }
     build_key_text(&bytes, "build-fact-contributions")
     contributions := state.contributions
+    contributions = loop fresh_item in contributions -> fresh_item
     &contributions.sort_by((left: BuildSessionContribution, right: BuildSessionContribution) -> left.key <=> right.key)
     loop contribution in contributions {
         values :: [String]{contribution.key, build_key_contribution(contribution.value), "function", "environment", contribution.source, "computed by fn build"}
@@ -294,6 +296,7 @@ fn build_session_action_key(state: BuildSessionState, id: Int) -> String Never! 
 }
 fn build_session_compiler_node(kind: String, subject: String, input_digests: [BuildGraphInputDigest]) -> BuildGraphNode Never! {
     sorted := input_digests
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by((left: BuildGraphInputDigest, right: BuildGraphInputDigest) -> if left.name == right.name -> left.digest <=> right.digest else -> left.name <=> right.name)
     digests := [BuildGraphInputDigest]{}
     inputs := [String]{}

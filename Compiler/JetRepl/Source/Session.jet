@@ -80,7 +80,7 @@ fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult {
         }
         lexed := lex_generated(wrapper.bytes())
         loop index in 0..<lexed.tokens.len() -> token_shift_spans(&lexed.tokens[index], offset, &lexed.tables.literals)
-        parsed :: parse_lexed_with_source(lexed, session.source, session.line_starts)
+        parsed :: parse_lexed_with_source(^lexed, session.source, session.line_starts)
         if parsed.diagnostics.len() > 0 {
             loop session.source.len() > offset -> _ :: &session.source.pop()
             loop session.line_starts.len() > lines_mark -> _ :: &session.line_starts.pop()

@@ -1,0 +1,492 @@
+// Bounded transport-fact recorder; replay fails closed on identity/generation changes.
+use jet_foundation.Devtools.[JET_DEVTOOLS_PROTOCOL]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
+use std.collections.[VecDeque]
+use std.fmt
+
+// Rust: crates/jet-devserver/src/SessionRecording.rs:16
+MAX_RECORDING_EVENTS :: prep { USize{256} }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:18
+MAX_RECORDING_BYTES :: prep { USize{1024 * 1024} }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:20
+MAX_RECORDING_TEXT_BYTES :: prep { USize{16 * 1024} }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:22
+MAX_ID_BYTES :: prep { USize{1024} }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:26
+struct SessionIdentity { source_id: String; build_id: String }
+impl SessionIdentity {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:33
+    fn new(source_id: String, build_id: String) -> Self RecordingError! {
+        identity :: Self { source_id: ^source_id, build_id: ^build_id }
+        validate_id(identity.source_id, "source_id")
+        validate_id(identity.build_id, "build_id")
+        identity
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:44
+    fn matches(self: Self, other: Self) -> Bool { self == other }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:51
+struct SessionRecordingLimits { max_events: USize; max_bytes: USize }
+impl SessionRecordingLimits {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:59
+    fn new(max_events: USize, max_bytes: USize) -> Self { Self { max_events, max_bytes } }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:66
+    fn validate(self: Self) RecordingError! {
+        if self.max_events == 0 || self.max_events > MAX_RECORDING_EVENTS -> return .Err(.InvalidLimits { max_events: self.max_events, max_bytes: self.max_bytes })
+        if self.max_bytes == 0 || self.max_bytes > MAX_RECORDING_BYTES -> return .Err(.InvalidLimits { max_events: self.max_events, max_bytes: self.max_bytes })
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:84
+    fn default() -> Self { Self.new(MAX_RECORDING_EVENTS, MAX_RECORDING_BYTES) }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:91
+struct SessionEvent {
+    sequence: U64; timestamp_ms: U64; source: String; kind: String; entity: String; fields_json: String; payload_json: String?
+}
+impl SessionEvent {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:106
+    fn new(sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String, fields_json: String, payload_json: String?) -> Self RecordingError! {
+        validate_text(source, "event source")
+        validate_text(kind, "event kind")
+        validate_text(entity, "event entity")
+        fields :: canonical_object(fields_json, "event fields")
+        payload :: if payload_json == {
+            .None -> .None
+            .Val(payload) -> {
+                value :: parse_json_value(payload, "event payload")
+                if value == {
+                    .Null -> .None
+                    .Object(_) -> .Val(canonical_json(&value))
+                    else -> { return .Err(.InvalidEvent("event payload must be an object or null")) }
+                }
+            }
+        }
+        event :: Self { sequence, timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields_json: ^fields, payload_json: ^payload }
+        if event.wire_len() > MAX_RECORDING_BYTES -> return .Err(.EventTooLarge { bytes: event.wire_len(), limit: MAX_RECORDING_BYTES })
+        event
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:155
+    fn sequence(self: Self) -> U64 { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:159
+    fn timestamp_ms(self: Self) -> U64 { self.timestamp_ms }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:163
+    fn source(self: Self) -> String { &self.source }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:167
+    fn kind(self: Self) -> String { &self.kind }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:171
+    fn entity(self: Self) -> String { &self.entity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:176
+    fn fields_json(self: Self) -> String { &self.fields_json }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:181
+    fn payload_json(self: Self) -> String? { self.payload_json.as_ref() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:185
+    fn wire_len(self: Self) -> USize {
+        payload :: self.payload_json.as_ref().unwrap_or("null")
+        "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":{quoted(self.source)},\"kind\":{quoted(self.kind)},\"entity\":{quoted(self.entity)},\"fields\":{self.fields_json},\"payload\":{payload}}}".len()
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:203
+struct TruncationFacts {
+    event_limit: USize; byte_limit: USize; retained_events: USize; retained_bytes: USize
+    dropped_events: U64; dropped_bytes: U64; event_limit_reached: Bool; byte_limit_reached: Bool
+    first_dropped_sequence: U64?; last_dropped_sequence: U64?; first_retained_sequence: U64?; last_retained_sequence: U64?
+}
+impl TruncationFacts {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:219
+    fn truncated(self: Self) -> Bool { self.dropped_events != 0 }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:227
+#Error
+enum RecordingError {
+    InvalidIdentity(String); InvalidLimits { max_events: USize; max_bytes: USize }; InvalidEnvelope(String); InvalidEvent(String)
+    EnvelopeTooLarge { bytes: USize; limit: USize }; EventTooLarge { bytes: USize; limit: USize }
+    NonMonotonicSequence { previous: U64; next: U64 }; NonMonotonicTime { previous: U64; next: U64 }
+    IdentityMismatch { expected: SessionIdentity; found: SessionIdentity }
+    RecordingChanged; CheckpointUnavailable; CursorUnavailable { sequence: U64 }; ReplayAtBeginning; ReplayAtEnd
+}
+impl RecordingError {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:248
+    fn fmt(self: Self, formatter: fmt.Formatter) -> fmt.Error! {
+        if self == {
+            .InvalidIdentity(message) -> formatter.write_str("invalid session identity: {message}")
+            .InvalidLimits { max_events, max_bytes } -> formatter.write_str("session recording limits are outside the bounded policy: events={max_events}, bytes={max_bytes}")
+            .InvalidEnvelope(message) -> formatter.write_str("invalid jet.devtools.v1 envelope: {message}")
+            .InvalidEvent(message) -> formatter.write_str("invalid jet.devtools.v1 event: {message}")
+            .EnvelopeTooLarge { bytes, limit } -> formatter.write_str("devtools envelope is {bytes} bytes; limit is {limit}")
+            .EventTooLarge { bytes, limit } -> formatter.write_str("devtools event is {bytes} bytes; limit is {limit}")
+            .NonMonotonicSequence { previous, next } -> formatter.write_str("devtools event sequence moved backwards or repeated: previous={previous}, next={next}")
+            .NonMonotonicTime { previous, next } -> formatter.write_str("devtools event timestamp moved backwards: previous={previous}, next={next}")
+            .IdentityMismatch { expected, found } -> formatter.write_str("replay identity mismatch: expected source={expected.source_id} build={expected.build_id}, found source={found.source_id} build={found.build_id}")
+            .RecordingChanged -> formatter.write_str("recording changed after replay cursor creation")
+            .CheckpointUnavailable -> formatter.write_str("checkpoint does not belong to the retained recording")
+            .CursorUnavailable { sequence } -> formatter.write_str("replay sequence {sequence} is outside the retained window")
+            .ReplayAtBeginning -> formatter.write_str("replay cursor is already at the beginning")
+            .ReplayAtEnd -> formatter.write_str("replay cursor is already at the end")
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:294
+enum ReplayStep { Forward; Backward }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:301
+struct ReplayCursor { identity: SessionIdentity; generation: U64; position: USize; sequence: U64? }
+impl ReplayCursor {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:309
+    fn identity(self: Self) -> SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:314
+    fn position(self: Self) -> USize { self.position }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:319
+    fn sequence(self: Self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:323
+    fn generation(self: Self) -> U64 { self.generation }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:327
+    fn seek(self: Self, recording: SessionRecording, sequence: U64) -> ReplayProjection RecordingError! {
+        self.check(recording)
+        index :: recording.events.iter().position((event) -> event.sequence == sequence) ?? return .Err(.CursorUnavailable { sequence })
+        self.position = index + 1
+        self.sequence = .Val(sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:348
+    fn seek_time(self: Self, recording: SessionRecording, timestamp_ms: U64) -> ReplayProjection RecordingError! {
+        self.check(recording)
+        if recording.events.front() == .Val(first) {
+            if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return .Err(.CursorUnavailable { sequence: first.sequence })
+        }
+        position :: recording.events.iter().enumerate().filter(((_0: _, _1: event)) -> event.timestamp_ms <= timestamp_ms).map(((index, _)) -> index + 1).last().unwrap_or(0)
+        self.position = position
+        self.sequence = position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:377
+    fn step(self: Self, recording: SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
+        if direction == {
+            .Forward -> self.step_forward(recording)
+            .Backward -> self.step_backward(recording)
+        }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:388
+    fn step_forward(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
+        self.check(recording)
+        event :: recording.events.get(self.position) ?? return .Err(.ReplayAtEnd)
+        self.position += 1
+        self.sequence = .Val(event.sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:401
+    fn step_backward(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
+        self.check(recording)
+        if self.position == 0 -> return .Err(.ReplayAtBeginning)
+        self.position -= 1
+        self.sequence = self.position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:418
+    fn check(self: &Self, recording: &SessionRecording) RecordingError! {
+        if !self.identity.matches(&recording.identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: recording.identity.copy() })
+        if self.generation != recording.generation -> return .Err(.RecordingChanged)
+        if self.position > recording.events.len() -> return .Err(.CheckpointUnavailable)
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:438
+struct SessionCheckpoint {
+    identity: SessionIdentity; generation: U64; position: USize; sequence: U64?; timestamp_ms: U64?
+    first_retained_sequence: U64?; last_retained_sequence: U64?
+}
+impl SessionCheckpoint {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:449
+    fn identity(self: Self) -> SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:453
+    fn position(self: Self) -> USize { self.position }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:457
+    fn sequence(self: Self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:461
+    fn generation(self: Self) -> U64 { self.generation }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:465
+    fn timestamp_ms(self: Self) -> U64? { self.timestamp_ms }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:473
+struct ReplayProjection {
+    identity: SessionIdentity; position: USize; sequence: U64?; timestamp_ms: U64?; event: SessionEvent?
+    previous_sequence: U64?; next_sequence: U64?; limits: SessionRecordingLimits; truncation: TruncationFacts
+}
+impl ReplayProjection {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:486
+    fn identity(self: Self) -> SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:490
+    fn position(self: Self) -> USize { self.position }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:494
+    fn sequence(self: Self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:498
+    fn timestamp_ms(self: Self) -> U64? { self.timestamp_ms }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:502
+    fn event(self: Self) -> SessionEvent? { self.event.as_ref() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:506
+    fn previous_sequence(self: Self) -> U64? { self.previous_sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:510
+    fn next_sequence(self: Self) -> U64? { self.next_sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:514
+    fn limits(self: Self) -> SessionRecordingLimits { self.limits }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:518
+    fn truncation(self: Self) -> TruncationFacts { &self.truncation }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:525
+struct SessionRecording {
+    identity: SessionIdentity; limits: SessionRecordingLimits; events: VecDeque<SessionEvent>; retained_bytes: USize
+    dropped_events: U64; dropped_bytes: U64; event_limit_reached: Bool; byte_limit_reached: Bool
+    first_dropped_sequence: U64?; last_dropped_sequence: U64?; last_sequence: U64?; last_timestamp_ms: U64?; generation: U64
+}
+impl SessionRecording {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:542
+    fn new(identity: SessionIdentity) -> Self RecordingError! { Self.with_limits(^identity, SessionRecordingLimits.default()) }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:546
+    fn with_limits(identity: SessionIdentity, limits: SessionRecordingLimits) -> Self RecordingError! {
+        validate_id(identity.source_id, "source_id")
+        validate_id(identity.build_id, "build_id")
+        limits.validate()
+        Self { identity: ^identity, limits, events: VecDeque.new(), retained_bytes: 0, dropped_events: 0, dropped_bytes: 0,
+            event_limit_reached: false, byte_limit_reached: false, first_dropped_sequence: .None, last_dropped_sequence: .None,
+            last_sequence: .None, last_timestamp_ms: .None, generation: 0 }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:570
+    fn identity(self: Self) -> SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:574
+    fn limits(self: Self) -> SessionRecordingLimits { self.limits }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:578
+    fn event_count(self: Self) -> USize { self.events.len() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:582
+    fn generation(self: Self) -> U64 { self.generation }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:586
+    fn retained_bytes(self: Self) -> USize { self.retained_bytes }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:590
+    fn events(self: Self) -> Iterator<SessionEvent> { self.events.iter() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:595
+    fn truncation(self: Self) -> TruncationFacts {
+        TruncationFacts { event_limit: self.limits.max_events, byte_limit: self.limits.max_bytes,
+            retained_events: self.events.len(), retained_bytes: self.retained_bytes, dropped_events: self.dropped_events,
+            dropped_bytes: self.dropped_bytes, event_limit_reached: self.event_limit_reached, byte_limit_reached: self.byte_limit_reached,
+            first_dropped_sequence: self.first_dropped_sequence, last_dropped_sequence: self.last_dropped_sequence,
+            first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:614
+    fn append_event(self: Self, event: SessionEvent) -> U64 RecordingError! {
+        self.validate_next(&event)
+        sequence :: event.sequence
+        self.append_event_unchecked(^event)
+        sequence
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:623
+    fn record_envelope(self: Self, bytes: [U8]) -> USize RecordingError! {
+        if bytes.len() > MAX_RECORDING_BYTES -> return .Err(.EnvelopeTooLarge { bytes: bytes.len(), limit: MAX_RECORDING_BYTES })
+        events :: parse_envelope(bytes, &self.identity)
+        self.preflight(&events)
+        count :: events.len()
+        loop event in events -> self.append_event_unchecked(^event)
+        count
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:640
+    fn replay(self: Self) -> ReplayCursor { ReplayCursor { identity: self.identity.copy(), generation: self.generation, position: 0, sequence: .None } }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:651
+    fn replay_for(self: Self, identity: SessionIdentity) -> ReplayCursor RecordingError! {
+        validate_id(identity.source_id, "source_id")
+        validate_id(identity.build_id, "build_id")
+        if !self.identity.matches(identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: identity.copy() })
+        self.replay()
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:663
+    fn projection(self: Self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
+        cursor.check(self)
+        self.make_projection(cursor)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:668
+    fn checkpoint(self: Self, cursor: ReplayCursor) -> SessionCheckpoint RecordingError! {
+        cursor.check(self)
+        timestamp_ms :: cursor.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.timestamp_ms)
+        SessionCheckpoint { identity: self.identity.copy(), generation: self.generation, position: cursor.position, sequence: cursor.sequence, timestamp_ms,
+            first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:686
+    fn restore_checkpoint(self: Self, checkpoint: SessionCheckpoint) -> ReplayCursor RecordingError! {
+        if !self.identity.matches(&checkpoint.identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: checkpoint.identity.copy() })
+        if checkpoint.generation != self.generation || checkpoint.first_retained_sequence != self.events.front().map((event) -> event.sequence)
+            || checkpoint.last_retained_sequence != self.events.back().map((event) -> event.sequence) || checkpoint.position > self.events.len() -> return .Err(.CheckpointUnavailable)
+        actual_sequence :: checkpoint.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
+        if actual_sequence != checkpoint.sequence -> return .Err(.CheckpointUnavailable)
+        ReplayCursor { identity: self.identity.copy(), generation: self.generation, position: checkpoint.position, sequence: checkpoint.sequence }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:720
+    fn preflight(self: &Self, events: &[SessionEvent]) RecordingError! {
+        previous_sequence := self.last_sequence
+        previous_time := self.last_timestamp_ms
+        loop event in events {
+            bytes :: event.wire_len()
+            if bytes > self.limits.max_bytes -> return .Err(.EventTooLarge { bytes, limit: self.limits.max_bytes })
+            if previous_sequence == .Val(previous) {
+                if event.sequence <= previous -> return .Err(.NonMonotonicSequence { previous, next: event.sequence })
+            }
+            if previous_time == .Val(previous) {
+                if event.timestamp_ms < previous -> return .Err(.NonMonotonicTime { previous, next: event.timestamp_ms })
+            }
+            previous_sequence = .Val(event.sequence)
+            previous_time = .Val(event.timestamp_ms)
+        }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:753
+    fn validate_next(self: &Self, event: &SessionEvent) RecordingError! {
+        bytes :: event.wire_len()
+        if bytes > self.limits.max_bytes -> return .Err(.EventTooLarge { bytes, limit: self.limits.max_bytes })
+        if self.last_sequence == .Val(previous) {
+            if event.sequence <= previous -> return .Err(.NonMonotonicSequence { previous, next: event.sequence })
+        }
+        if self.last_timestamp_ms == .Val(previous) {
+            if event.timestamp_ms < previous -> return .Err(.NonMonotonicTime { previous, next: event.timestamp_ms })
+        }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:780
+    fn append_event_unchecked(self: Self, event: SessionEvent) -> Unit {
+        bytes :: event.wire_len()
+        self.last_sequence = .Val(event.sequence)
+        self.last_timestamp_ms = .Val(event.timestamp_ms)
+        self.events.push_back(^event)
+        self.retained_bytes = self.retained_bytes.saturating_add(bytes)
+        if self.events.len() > self.limits.max_events -> self.event_limit_reached = true
+        loop self.events.len() > self.limits.max_events || self.retained_bytes > self.limits.max_bytes {
+            if self.events.len() > self.limits.max_events -> self.event_limit_reached = true
+            if self.retained_bytes > self.limits.max_bytes -> self.byte_limit_reached = true
+            evicted :: self.events.pop_front() ?? break
+            evicted_bytes :: evicted.wire_len()
+            self.retained_bytes = self.retained_bytes.saturating_sub(evicted_bytes)
+            self.dropped_events = self.dropped_events.saturating_add(1)
+            self.dropped_bytes = self.dropped_bytes.saturating_add(U64{evicted_bytes})
+            if self.first_dropped_sequence.is_none() -> self.first_dropped_sequence = .Val(evicted.sequence)
+            self.last_dropped_sequence = .Val(evicted.sequence)
+        }
+        self.generation = self.generation.wrapping_add(1)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:815
+    fn make_projection(self: Self, cursor: ReplayCursor) -> ReplayProjection {
+        current_index :: cursor.position.checked_sub(1)
+        event :: current_index.and_then((index) -> self.events.get(index)).cloned()
+        previous_sequence :: cursor.position.checked_sub(2).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
+        next_sequence :: self.events.get(cursor.position).map((event) -> event.sequence)
+        ReplayProjection { identity: self.identity.copy(), position: cursor.position, sequence: cursor.sequence,
+            timestamp_ms: event.as_ref().map((event) -> event.timestamp_ms), event: ^event, previous_sequence, next_sequence,
+            limits: self.limits, truncation: self.truncation() }
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:841
+fn parse_envelope(bytes: [U8], expected_identity: SessionIdentity) -> [SessionEvent] RecordingError! {
+    text :: std.str.from_utf8(bytes) ?? return .Err(.InvalidEnvelope("envelope is not UTF-8"))
+    root :: parse_json_value(text, "devtools envelope")
+    object :: [String:Dyn]{if root == {
+        .Object(object) -> object.into_iter().collect()
+        else -> { return .Err(.InvalidEnvelope("envelope must be an object")) }
+    }}
+    protocol :: object.get("protocol").and_then((value) -> if value == {
+        .Text(protocol) -> .Val(protocol)
+        else -> .None
+    })
+        ?? return .Err(.InvalidEnvelope("missing string `protocol`"))
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEnvelope("protocol is `{protocol}`, expected `{JET_DEVTOOLS_PROTOCOL}`"))
+    validate_optional_envelope_identity(&object, expected_identity)
+    values :: object.get("events") ?? return .Err(.InvalidEnvelope("missing `events` array"))
+    if values == .Array(values) {
+        events := [SessionEvent]{}
+        loop value in values -> events.push(parse_event(value)?)
+        events
+    } else { .Err(.InvalidEnvelope("envelope `events` must be an array")) }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:883
+fn parse_event(value: Dyn) -> SessionEvent RecordingError! {
+    object :: [String:Dyn]{if value == {
+        .Object(object) -> object.iter().cloned().collect()
+        else -> { return .Err(.InvalidEvent("event must be an object")) }
+    }}
+    sequence :: required_u64(&object, "sequence")
+    timestamp_ms :: required_u64(&object, "timestamp_ms")
+    source :: required_string(&object, "source")
+    kind :: required_string(&object, "kind")
+    entity :: required_string(&object, "entity")
+    fields :: object.get("fields") ?? return .Err(.InvalidEvent("missing event `fields`"))
+    fields_json :: if fields == {
+        .Object(_) -> canonical_json(fields)
+        else -> { return .Err(.InvalidEvent("event fields must be an object")) }
+    }
+    payload_json :: if object.get("payload") == {
+        .None | .Val(.Null) -> .None
+        .Val(value) && value == .Object(_) -> .Val(canonical_json(value))
+        .Val(_) -> { return .Err(.InvalidEvent("event payload must be an object or null")) }
+    }
+    SessionEvent.new(sequence, timestamp_ms, ^source, ^kind, ^entity, ^fields_json, ^payload_json)
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:928
+fn parse_json_value(text: String, label: String) -> Dyn RecordingError! {
+    if text.len() > MAX_RECORDING_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"))
+    parse_json_with_limit(text, MAX_RECORDING_BYTES).map_err((_) ->
+        if label == "devtools envelope" -> RecordingError.InvalidEnvelope("{label} is not valid bounded JSON") else -> RecordingError.InvalidEvent("{label} is not valid bounded JSON"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:944
+fn canonical_object(text: String, label: String) -> String RecordingError! {
+    if text.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"))
+    value :: parse_json_value(text, label)
+    if value == .Object(_) -> canonical_json(&value) else -> .Err(.InvalidEvent("{label} must be an object"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:958
+fn required_string(object: [String:Dyn], key: String) -> String RecordingError! {
+    value :: object.get(key).and_then((value) -> if value == {
+        .Text(value) -> .Val(value.copy())
+        else -> .None
+    })
+        ?? return .Err(.InvalidEvent("missing string `{key}`"))
+    validate_text(value, "event {key}")
+    value
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:970
+fn required_u64(object: [String:Dyn], key: String) -> U64 RecordingError! {
+    if object.get(key) == {
+        .Val(.Int(value)) -> U64.try_from(*value) ?? return .Err(.InvalidEvent("event `{key}` must be a non-negative integer"))
+        .Val(_) -> .Err(.InvalidEvent("event `{key}` must be an exact integer"))
+        .None -> .Err(.InvalidEvent("missing integer `{key}`"))
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:982
+fn validate_optional_envelope_identity(object: &[String:Dyn], expected: &SessionIdentity) RecordingError! {
+    source :: object.get("source_id")
+    build :: object.get("build_id")
+    if source.is_none() && build.is_none() -> return
+    source_text :: source.and_then((value) -> if value == {
+        .Text(value) -> .Val(value.copy())
+        else -> .None
+    })
+        ?? return .Err(.InvalidEnvelope("envelope `source_id` must be a string"))
+    build_text :: build.and_then((value) -> if value == {
+        .Text(value) -> .Val(value.copy())
+        else -> .None
+    })
+        ?? return .Err(.InvalidEnvelope("envelope `build_id` must be a string"))
+    found :: SessionIdentity.new(^source_text, ^build_text) ?? return .Err(.InvalidEnvelope("invalid envelope identity: {err}"))
+    if !expected.matches(&found) -> return .Err(.IdentityMismatch { expected: expected.copy(), found: ^found })
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1019
+fn validate_id(value: String, label: String) RecordingError! {
+    if value.is_empty() || value.len() > MAX_ID_BYTES || value.bytes().any((byte) -> byte.is_ascii_control()) -> return .Err(.InvalidIdentity("{label} must contain 1..={MAX_ID_BYTES} bytes and no control characters"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1033
+fn validate_text(value: String, label: String) RecordingError! {
+    if value.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1043
+fn quoted(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1047
+fn canonical_json(value: Dyn) -> String {
+    if value == {
+        .Null -> "null"
+        .Bool(value) -> value.to_string()
+        .Int(value) -> value.to_string()
+        .Float(value) -> value.to_string()
+        .Number(value) -> value.copy()
+        .TypedText(value) | .Text(value) -> quoted(value)
+        .Bytes(values) -> "[{values.iter().map((value) -> value.to_string()).collect().join(",")}]"
+        .Array(values) -> "[{values.iter().map(canonical_json).collect().join(",")}]"
+        .Object(values) -> "{{{values.iter().map(((key, value)) -> "{quoted(key)}:{canonical_json(value)}").collect().join(",")}}}"
+    }
+}

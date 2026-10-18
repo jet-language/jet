@@ -238,7 +238,7 @@ fn trap_root_panic_report(message: I64) -> I64 {
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // Core.rs jet_runtime_stop_unwind carries the raw message into the task
     // runner, not this process report (Scheduler.rs jet_scheduler_panic_message).
-    if rt_task_panic_publish(message, message_len, I64{0}) -> return
+    if rt_task_panic_publish(message, message_len, code) -> return
     trap_header(code)
     trap_write(message, message_len)
     trap_msg_message_end()
@@ -279,7 +279,7 @@ fn trap_native_index_range_stop() {
     trap_store(message + I64{16}, I64{7305815396256607845})
     trap_store(message + I64{24}, I64{8391173023733081189})
     trap_store(message + I64{32}, I64{111494907916832})
-    published :: rt_task_panic_publish(message, I64{38}, I64{0})
+    published :: rt_task_panic_publish(message, I64{38}, I64{1})
     alloc_release_valid(message, I64{40}, I64{8})
     if published -> return
     trap_native_index_range_root()
@@ -306,7 +306,7 @@ fn trap_native_index_range_root() {
     trap_store(message + I64{56}, I64{7235441220371030131})
     trap_store(message + I64{64}, I64{7021710449270399077})
     trap_store(message + I64{72}, I64{694511470})
-    published :: rt_task_panic_publish(message, I64{76}, I64{0})
+    published :: rt_task_panic_publish(message, I64{76}, I64{1})
     alloc_release_valid(message, I64{80}, I64{8})
     if published -> return
     trap_header(I64{1})
@@ -352,7 +352,7 @@ fn trap_native_index_range_root() {
     coll_render_i64(message, scratch, native)
     rt_text_push_word(message, I64{8369779874393449504}, I64{8})
     rt_text_push_word(message, I64{128039039558944}, I64{6})
-    published :: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{0})
+    published :: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1})
     alloc_release_valid(scratch, I64{24}, I64{8})
     jet_rt_string_drop(message)
     if published -> return

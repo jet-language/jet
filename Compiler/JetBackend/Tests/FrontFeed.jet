@@ -405,7 +405,8 @@ fn ff_explicit_cleanup_case(file: String) {
             if !result.complete -> panic("explicit cleanup witness front end incomplete")
             program :: result.mir ?? panic("explicit cleanup witness lost checked MIR")
             rendered := ""
-            loop name in [String]{"exit_case", "stop_case"} {
+            names :: [String]{"exit_case", "stop_case"}
+            loop name in names {
                 found := false
                 loop function in program.functions {
                     if function.name != name -> next

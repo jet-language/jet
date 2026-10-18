@@ -443,8 +443,13 @@ fn fx_qualified_record_identity_checks() -> Bool Never! {
     true
 }
 
-// expect-stdout qualified-dir-entries: ""
-// expect-runtime-only qualified-dir-entries: real directory results rebuild and drop native DirEntry slots
+// A route-returned record List is a buffer of runtime handles rebuilt into
+// native rows (Lower/Routes.jet): read the first entry's fields, so a shape
+// drift between the provider and the lowering fails as a wrong value here
+// instead of a pointer-sized allocation in the first user of `entry.name`.
+// expect-stdout qualified-dir-entries: "true\n2\ntrue\n"
+// expect-runtime-only qualified-dir-entries: real directory results rebuild, read and drop native DirEntry slots
+// expect-requires-route qualified-dir-entries jet_std_fs_list_dir_raw
 fn fx_qualified_dir_entries() -> MIRProgram Never! {
     key :: "<corelib>/Core/files::Core/files/files.jet::DirEntry"
     entries :: fx_list_type(fx_named(key))
@@ -452,6 +457,20 @@ fn fx_qualified_dir_entries() -> MIRProgram Never! {
     b := fx_builder()
     path :: fx_strings_literal(&b, ".")
     result :: fx_owned(&b, result_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.files", "list_dir"), args: [MIRCallArg]{fx_arg(path, .Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    ok :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: result})
+    fx_print(&b, ok)
+    listed :: fx_value(&b, entries, fx_borrow(), MIROperation.ResultValue{subject: result, ok: true})
+    zero :: fx_int_const(&b, 0)
+    first :: fx_list_index(&b, listed, zero, fx_named(key), false)
+    name :: fx_values_field(&b, first, "DirEntry", "name", fx_string())
+    full :: fx_values_field(&b, first, "DirEntry", "path", fx_string())
+    name_len :: fx_list_method(&b, "len", name, None, [MIRValueID]{}, fx_int(), false)
+    path_len :: fx_list_method(&b, "len", full, None, [MIRValueID]{}, fx_int(), false)
+    // `path` is `./<name>`: two bytes longer than `name`, which is never empty.
+    extra :: fx_int_op(&b, MIRBinaryOp.Sub, "sub", path_len, name_len)
+    fx_print(&b, extra)
+    named :: fx_compare(&b, MIRBinaryOp.Gt, name_len, zero)
+    fx_print(&b, named)
     fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
     fx_do(&b, MIROperation.Drop{value: path, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})

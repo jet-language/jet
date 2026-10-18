@@ -213,7 +213,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
                         }
                         else -> {}
                     }
-                    &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: default, variadic: variadic})
+                    &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: ^default, variadic: variadic})
                 }
             }
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
@@ -286,10 +286,12 @@ fn parser_parse_template_loop(state: &JetParserState) -> ItemTemplateLoop {
     parser_expect(&state, TOKEN_KW_LOOP, "after `prep` in a declaration loop")
     variable :: parser_expect_name(&state, "for a declaration loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a declaration loop binding and source")
-    source :: parser_parse_expression(&state, 1, 0)
+    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens
+    // the loop body instead of a struct literal.
+    source :: parser_parse_expression_no_struct_lit(&state, 0)
     body :: parser_marker_body(&state)
     end :: parser_lookahead(&state, -1).span
-    ItemTemplateLoop{var: parser_value(state, variable), var_span: variable.span, source: source.expr, body: body, span: parser_cover(start.span, end)}
+    ItemTemplateLoop{var: parser_value(state, variable), var_span: variable.span, source: source.expr, body: ^body, span: parser_cover(start.span, end)}
 }
 
 fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {

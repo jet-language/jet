@@ -54,12 +54,12 @@ fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -
     // Every DocModule shares this one checked graph; never duplicate its rows.
     storage :: loop unit in modules { if unit.memory_facts == .Val(value) -> break value } ?? return [JetCLIExpandFact]{}
     permit :: storage.guard_read()
-    projections := [(root: String, fact: String):Int]{}
-    loop (position, row) in permit.value.projections -> projections[(root: row.root, fact: row.fact)] = position
+    projections := [(fact: String, root: String):Int]{}
+    loop (position, row) in permit.value.projections -> projections[(fact: row.fact, root: row.root)] = position
     facts := [JetCLIExpandFact]{}
     loop declaration in permit.value.declarations {
         loop root in declaration.roots {
-            projection :: if projections.get((root: root, fact: declaration.fact)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
+            projection :: if projections.get((fact: declaration.fact, root: root)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
             status :: jet_cli_expand_memory_status(projection)
             fields := [JetCLIStatusField]{
                 jet_cli_status_field("fact", jet_cli_status_text(declaration.fact)),
@@ -73,15 +73,7 @@ fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -
             &facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
         }
     }
-    loop position in 1..<facts.len() {
-        row :: facts[position].copy()
-        destination := position
-        loop destination > 0 && facts[destination - 1].text > row.text {
-            facts[destination] = facts[destination - 1]
-            destination -= 1
-        }
-        facts[destination] = row
-    }
+    &facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.text <=> right.text)
     facts
 }
 fn jet_cli_expand_layout_missing(value: TComptimeValue, names: [String]) -> Bool Never! {

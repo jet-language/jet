@@ -57,7 +57,7 @@ fn prepare_positive9_fixture(
     std::fs::write(&entry, GUEST_SOURCE).expect("write registered fixture source");
     std::fs::write(
         directory.join("package.jet"),
-        "name: \"io11_positive9\"\nversion: \"0.1.0\"\nauthority: { needs: [FS.Read], holds: { allow: [FS.Read, IO, Mem.Alloc, Panic] } }\n",
+        "name: \"io11_positive9\"\nversion: \"0.1.0\"\nauthority: { needs: [FS.Read], holds: { allow: [FS.Read, IO, Mem.Alloc] } }\n",
     )
     .expect("write actual guest package authority");
     let entry_name = entry.to_str().expect("fixture source path");

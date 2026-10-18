@@ -117,7 +117,7 @@ fn body_index_identity_and_lifecycle() {
     sema_comptime_body_values_truncate(&context, 2)
     body_index_query(context, "mod::one", "function::one", source, site)
     sema_comptime_body_values_truncate(&context, 1)
-    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "truncating the second match restores uniqueness")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((repeated)), "truncating the second match restores uniqueness")
     if context.comptime_body_values.facts == .Val(facts) {
         permit :: facts.guard_read()
         body_index_require(permit.value.values.len() == 3 && permit.value.indexed_rows == 3, "prefix truncation neither removes published rows nor rebuilds their immutable index")
@@ -130,11 +130,11 @@ fn body_index_identity_and_lifecycle() {
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "different second payload is equally ambiguous")
     sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated})
     sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{changed_value})
-    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(changed_value), "same-key same-length replacement reads the current canonical payload")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((changed_value)), "same-key same-length replacement reads the current canonical payload")
     wrong_module := repeated
     wrong_module.module_identity = "mod::two"
     sema_comptime_body_values_replace(&context, [SemaComptimeBodyValue]{repeated, wrong_module})
-    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "an equal key with a different module is not a second match")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((repeated)), "an equal key with a different module is not a second match")
     mark :: sema_check_context_mark(&context)
     sema_comptime_body_source_append(&context, first)
     _ := sema_comptime_body_capture(&context, environment, program, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None}, Type.Int, source, Span{start: 30, end: 31})
@@ -142,7 +142,7 @@ fn body_index_identity_and_lifecycle() {
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "a probe may append a second matching value")
     sema_check_context_rollback(&context, mark)
     body_index_require(context.comptime_body_sources.len() == 1, "rollback restores the canonical source prefix")
-    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val(repeated), "rollback rebuilds value uniqueness from the retained rows")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((repeated)), "rollback rebuilds value uniqueness from the retained rows")
     retained :: sema_comptime_body_capture(&context, environment, program, scopes, "after rollback", Expr.Bool{value: false, span: source}, Type.Bool, source, site)
     body_index_require(retained == first && context.comptime_body_sources.len() == 1, "duplicate pop retains the first source index")
     child := sema_check_context_snapshot(context)
@@ -215,7 +215,7 @@ fn body_index_shared_read(values: SemaComptimeBodyValues, size: Int) -> Int {
         site :: Span{start: index * 4 + 2, end: index * 4 + 3}
         actual :: sema_comptime_body_value_find(context, "shared::module", "shared::function", source, site)
         expected :: body_index_value("shared::module", "shared::function", source, site, index)
-        body_index_require(actual == Val(expected), "concurrent reads see the published payload")
+        body_index_require(actual == Val((expected)), "concurrent reads see the published payload")
         checked += 1
     }
     checked
@@ -306,7 +306,7 @@ fn body_index_publication_lifecycle() {
     full := environment.comptime_body_publication.copy()
     body_index_require(sema_scope_environment_enter_probe_module(&environment, program, "mod::one", ^full), "the next function restores the publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
-    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first), "empty item reset cannot erase a published function value")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val((first)), "empty item reset cannot erase a published function value")
     body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first}:Debug}", "a full selected view fingerprints ordered row contents, not the Shared cell")
     prior :: environment.comptime_body_publication.copy()
     next_site :: Span{start: 30, end: 31}
@@ -324,7 +324,7 @@ fn body_index_publication_lifecycle() {
     next_full := environment.comptime_body_publication.copy()
     body_index_require(sema_scope_environment_enter_probe_module(&environment, program, "mod::one", ^next_full), "the next function selects the new publication")
     context.comptime_body_values = environment.comptime_body_values.copy()
-    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val(first) && sema_comptime_body_value_find(context, "mod::one", "function::one", span, next_site) == Val(second), "the new function sees the entire ordered updated publication")
+    body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", span, site) == Val((first)) && sema_comptime_body_value_find(context, "mod::one", "function::one", span, next_site) == Val((second)), "the new function sees the entire ordered updated publication")
     body_index_require(sema_comptime_body_values_debug(environment.comptime_body_values) == "{[SemaComptimeBodyValue]{first, second}:Debug}", "the next full view fingerprints the newly published row order")
     nonbody :: body_index_item(second, SemaComptimeItemKind.MarkerArgument)
     body_index_require(jet_driver_comptime_apply_landed(&environment, &program, &available, sites, [SemaComptimeItemValue]{initial, landed, nonbody}, 2, &trail), "the authentic staging producer advances a nonconstant nonbody batch")
@@ -372,7 +372,7 @@ fn body_index_append_prefixes() {
     restored.comptime_body_values = publication.copy()
     mark :: sema_check_context_mark(&restored)
     sema_comptime_body_values_replace(&restored, [SemaComptimeBodyValue]{late})
-    body_index_require(sema_comptime_body_value_find(restored, "late::module", "late::function", source, site) == Val(late), "replacement publishes an isolated new generation")
+    body_index_require(sema_comptime_body_value_find(restored, "late::module", "late::function", source, site) == Val((late)), "replacement publishes an isolated new generation")
     replacement := restored.comptime_body_values.copy()
     replacement_items :: [SemaComptimeItemValue]{body_index_item(late, SemaComptimeItemKind.BodyExpression), body_index_item(first, SemaComptimeItemKind.BodyExpression)}
     sema_comptime_body_values_append_items(&replacement, replacement_items, 1)

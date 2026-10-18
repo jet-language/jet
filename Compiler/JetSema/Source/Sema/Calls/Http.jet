@@ -121,8 +121,6 @@ fn sema_call_http_static_tir_arg(value: TExpr, argument: CallArg) -> TCallArg Ne
         template_items: [SymbolID]{},
         borrow: argument.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
         mut_borrow: argument.convention == AccessConvention.Write,
-        clone: argument.flags.implicit_clone,
-        arc_clone: argument.flags.shared_auto_clone,
         fn_coerce: None,
         widen_to_vec: false,
         widen_to_union: None,
@@ -342,7 +340,10 @@ fn sema_call_try_http_static(
         else -> method
     }
     if target.type_name == "Body" && method == "text" && values.len() == 2 {
-        values[1] = sema_call_http_source_text(^values[1], span, environment, program, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        // The text argument is the last value: take it out and push its
+        // conversion back, instead of copying it out of its slot.
+        source :: &values.pop() ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &values.push(sema_call_http_source_text(^source, span, environment, program, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
     tir := sema_call_http_static_value(target.type_name, method, rust_method, args, values, result_type, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}

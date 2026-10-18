@@ -1124,6 +1124,8 @@ fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value
     storage := cell.storage
     permit :: storage.guard_edit()
     previous := permit.value.value
+    // copy: the caller keeps the value (owner: the read parameter; it retires it itself when the
+    // swap fails) while the shared cell stores its payload (owner: the cell).
     permit.value.value = value.copy()
     Val(previous)
 }
@@ -1571,6 +1573,8 @@ fn jet_eval_validate_borrow(value: JetEvalRuntimeValue, machine: &JetEvalMachine
 
 fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    // copy: a borrow in the evaluator is an alias: the borrowed value stays with its owner (read
+    // parameter) and the alias is a second runtime value (owner: the result), validated above.
     value.copy()
 }
 

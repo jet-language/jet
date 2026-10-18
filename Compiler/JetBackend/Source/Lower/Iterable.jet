@@ -109,7 +109,8 @@ fn lower_iterable_next_problem(p: MIRProgram, m: LowerModule, next: MIRFunction,
 }
 
 // One `next` call on the iterator at `cell`: the Option box it returns (null
-// for None), owned by the caller.
+// for None), owned by the caller alone (lower_box_owned: the loop takes the
+// item out of it by bytes and frees the shell, lower_iterable_value).
 fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: MIRFunction, cell: LIRValueID) -> LIRValueID Never! {
     index :: lower_function_index(m, next.id)
     signature :: m.mir_signatures[index].copy()
@@ -120,8 +121,9 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
             return cell.copy()
         }
     }
-    item :: lower_pointer(&f)
-    lower_emit(&f, LIRInst.Call{dst: Val(item), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{receiver}})
+    called :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Call{dst: Val(called), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{receiver}})
+    item :: lower_box_owned(p, &m, &f, called, next.return_type)
     if next.return_type.kind == .Result(ok, err) {
         outcome_tag :: lower_list_word(&f, item, 0)
         zero :: lower_const(&f, lower_result_selector(false))
@@ -155,7 +157,7 @@ fn lower_iterable_pull(p: MIRProgram, m: &LowerModule, f: &LowerFunction, next: 
             return item
         }
         lower_free_shell(&m, &f, item, lower_result_box_size(p, ok, err))
-        return optional
+        return lower_box_owned(p, &m, &f, optional, ok)
     }
     item
 }
@@ -165,17 +167,16 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     unsupported :: "Iterable loop source"
     iter :: lower_function_with_key(p, iter_symbol) ?? return lower_fail(&m, &f, "{unsupported} names missing Iterable.iter {iter_symbol}")
     next :: lower_function_with_key(p, next_symbol) ?? return lower_fail(&m, &f, "{unsupported} names missing Iterator.next {next_symbol}")
-    iter_ty :: iter.return_type
     if iter.generic_params.len() > 0 || iter.capture_params.len() > 0 || iter.params.len() != 1 || iter.params[0].access == .Write {
         return lower_fail(&m, &f, "{unsupported} with Iterable.iter {iter_symbol} of this signature is not lowered at O0 yet")
     }
-    if lower_iterable_next(p, iter_ty) == .Val(found) {
-        if found.id != next.id -> return lower_fail(&m, &f, "{unsupported} {next_symbol} is not the Iterator.next of {mir_type_display_name(iter_ty)}")
+    if lower_iterable_next(p, iter.return_type) == .Val(found) {
+        if found.id != next.id -> return lower_fail(&m, &f, "{unsupported} {next_symbol} is not the Iterator.next of {mir_type_display_name(iter.return_type)}")
     } else {
-        return lower_fail(&m, &f, "{unsupported} iterator {mir_type_display_name(iter_ty)} has no Iterator.next")
+        return lower_fail(&m, &f, "{unsupported} iterator {mir_type_display_name(iter.return_type)} has no Iterator.next")
     }
-    if lower_iterable_next_problem(p, m, next, iter_ty) == .Val(problem) -> return lower_fail(&m, &f, "{unsupported}: {problem} is not lowered at O0 yet")
-    if lower_repr_layout(lower_repr(p, iter_ty)) == None -> return lower_fail(&m, &f, "{unsupported} iterator {mir_type_display_name(iter_ty)} is not lowered at O0 yet")
+    if lower_iterable_next_problem(p, m, next, iter.return_type) == .Val(problem) -> return lower_fail(&m, &f, "{unsupported}: {problem} is not lowered at O0 yet")
+    if lower_repr_layout(lower_repr(p, iter.return_type)) == None -> return lower_fail(&m, &f, "{unsupported} iterator {mir_type_display_name(iter.return_type)} is not lowered at O0 yet")
     iter_index :: lower_function_index(m, iter.id)
     if iter_index < 0 -> return lower_fail(&m, &f, "{unsupported} Iterable.iter {iter_symbol} is not lowered")
     // jet_iterable_loop_source consumes the collection: a borrowed source
@@ -201,7 +202,7 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     lower_iter_check(&m, &f, invalid, "iterator loop stride must be positive")
     source :: lower_use(&m, &f, collection) ?? return
     state :: lower_pointer(&f)
-    lower_alloc(&m, &f, state, lower_iterable_state_size(p, iter_ty))
+    lower_alloc(&m, &f, state, lower_iterable_state_size(p, iter.return_type))
     cell :: lower_address(&f, state, lower_iterable_state_head())
     iter_signature :: m.mir_signatures[iter_index].copy()
     iter_target :: LIRCallee.Function{id: LIRFunctionID{value: iter_index}}
@@ -209,8 +210,8 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
         // An inline iterator is built straight into the state box.
         lower_emit(&f, LIRInst.Call{dst: None, signature: iter_signature, callee: iter_target, args: [LIRValueID]{cell, source}})
     } else {
-        layout :: lower_repr_layout(lower_repr(p, iter_ty)) ?? return
-        made :: lower_new_value(&f, layout, LIRDrop.Trivial, iter_ty.identity)
+        layout :: lower_repr_layout(lower_repr(p, iter.return_type)) ?? return
+        made :: lower_new_value(&f, layout, LIRDrop.Trivial, iter.return_type.identity)
         lower_emit(&f, LIRInst.Call{dst: Val(made), signature: iter_signature, callee: iter_target, args: [LIRValueID]{source}})
         lower_emit(&f, LIRInst.Store{base: state, offset: lower_iterable_state_head(), value: made})
     }
@@ -224,13 +225,13 @@ fn lower_iterable_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     exhausted :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: exhausted, condition: LIRCondition.Eq, left: first, right: null})
     lower_emit(&f, LIRInst.Store{base: state, offset: 16, value: exhausted})
-    release :: lower_helper_id(&m, "iter.release", iter_ty)
+    release :: lower_helper_id(&m, "iter.release", iter.return_type)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_alloc(&m, &f, dst, 48)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: state})
     lower_store_word(&f, dst, 8, -1)
     lower_store_word(&f, dst, 16, 1)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
 }
@@ -292,7 +293,7 @@ fn lower_pipe_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: state})
     lower_store_word(&f, dst, 8, -1)
     lower_store_word(&f, dst, 16, 1)
-    lower_store_word(&f, dst, 24, release.value)
+    lower_store_function_key(&m, &f, dst, 24, release)
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
 }

@@ -181,7 +181,7 @@ fn x64_fx_scalar() Never! {
     dst :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
     single :: lir_builder_value(&b, lir_layout_float32(), .Trivial, None)
     f :: lir_builder_finish(b)
-    a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}, starts: [Int]{-1, -1, -1, -1}, ends: [Int]{-1, -1, -1, -1}, folds: x64_address_folds(f)}
+    a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}, segment_values: [Int]{}, segment_locations: [X64Loc]{}, segment_starts: [Int]{}, segment_ends: [Int]{}, block_segments: [Int]{0, 0}, block_entries: [Int]{0}, folds: x64_address_folds(f)}
     x64_emit_move(&e, .Imm{value: 0x3ff0000000000000}, a.locations[left.value])
     x64_emit_move(&e, .Imm{value: 0x4000000000000000}, a.locations[right.value])
     x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right})
@@ -323,7 +323,14 @@ fn x64_fixtures() -> Bool Never! {
     address_plan :: x64_fx_address_plan()
     memory :: x64_fx_memory()
     arithmetic :: x64_fx_address_arithmetic()
-    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic
+    frame :: x64_fx_frame_branch()
+    split :: x64_fx_split_loop()
+    fused :: x64_fx_fused_overflow()
+    call_loop :: x64_fx_call_loop()
+    critical :: x64_fx_critical_edges()
+    edge_store :: x64_fx_edge_store()
+    shared_slot :: x64_fx_shared_slot()
+    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic && frame && split && fused && call_loop && critical && edge_store && shared_slot
 }
 
 fn x64_fx_executable(name: String, program: LIRModule, argument: Int?, expected: Int) -> Bool Never! {
@@ -473,7 +480,7 @@ fn x64_fx_address_plan() -> Bool Never! {
     escaped.blocks[0].insts = escaped.blocks[0].insts.slice(0, 4)
     escaped.blocks[0].lines = [Int]{0, 0, 0, 0, 0}
     escaped.blocks[0].terminator = .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}}
-    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}, lines: [Int]{0, 0}})
+    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}, lines: [Int]{0, 0}, cold: false})
     if x64_address_folds(escaped).skipped[pointer.value] -> ok = false
     if !x64_fx_address_lint(escaped) -> ok = false
     // A non-memory use retains the pointer and its shift.
@@ -614,4 +621,427 @@ fn x64_fx_address_arithmetic() -> Bool Never! {
     }
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("address-arithmetic", program, Val(5), 80)
+}
+
+// Frame addresses take no register: the StackSlot's stores and loads are
+// `[rbp + d]`, and passing it to a call materializes one `lea` straight into
+// rdi. Overflows feeding a Branch become `jo`; a then block that follows is
+// reached by falling through an inverted jcc; a Const edge argument and the
+// spilled values are written with immediate moves. Exit 42 or a wrong path.
+fn x64_fx_frame_branch() -> Bool Never! {
+    reader := x64_fx_builder()
+    reader.id = LIRFunctionID{value: 1}
+    reader.signature = LIRSignatureID{value: 1}
+    slot_in :: lir_builder_value(&reader, lir_layout_pointer(), .Trivial, None)
+    first :: lir_builder_word(&reader)
+    second :: lir_builder_word(&reader)
+    pair :: lir_builder_word(&reader)
+    lir_builder_push(&reader, .Load{dst: first, base: slot_in, offset: 0})
+    lir_builder_push(&reader, .Load{dst: second, base: slot_in, offset: 8})
+    lir_builder_push(&reader, .Binary{dst: pair, op: .Add, left: first, right: second})
+    lir_builder_seal(&reader, LIRBlockID{value: 0}, [LIRValueID]{slot_in}, .Return{value: Val(pair)})
+
+    b := x64_fx_builder()
+    slot :: lir_builder_value(&b, lir_layout_pointer(), .Trivial, None)
+    seven :: lir_builder_word(&b)
+    five :: lir_builder_word(&b)
+    sum :: lir_builder_word(&b)
+    twelve :: lir_builder_word(&b)
+    matched :: lir_builder_bool(&b)
+    lir_builder_push(&b, .StackSlot{dst: slot, size: 16, align: 8})
+    lir_builder_push(&b, .Const{dst: seven, value: 7})
+    lir_builder_push(&b, .Const{dst: five, value: 5})
+    lir_builder_push(&b, .Store{base: slot, offset: 0, value: seven})
+    lir_builder_push(&b, .Store{base: slot, offset: 8, value: five})
+    lir_builder_push(&b, .Call{dst: Val(sum), signature: LIRSignatureID{value: 1}, callee: .Function{id: LIRFunctionID{value: 1}}, args: [LIRValueID]{slot}})
+    lir_builder_push(&b, .Const{dst: twelve, value: 12})
+    lir_builder_push(&b, .Compare{dst: matched, condition: .Eq, left: sum, right: twelve})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{}, .Branch{condition: matched, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{}}})
+    // b1 (follows b0): MAX + 1 overflows.
+    largest :: lir_builder_word(&b)
+    one :: lir_builder_word(&b)
+    wrapped :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: largest, value: 9223372036854775807})
+    lir_builder_push(&b, .Const{dst: one, value: 1})
+    lir_builder_push(&b, .Overflows{dst: wrapped, op: .Add, left: largest, right: one})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{}, .Branch{condition: wrapped, then_target: LIRJumpTarget{block: LIRBlockID{value: 3}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 4}, args: [LIRValueID]{}}})
+    wrong_compare :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: wrong_compare, value: 99})
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{}, .Return{value: Val(wrong_compare)})
+    // b3 (follows b2): reload through the frame, then 17 + 1 does not overflow.
+    reloaded :: lir_builder_word(&b)
+    partial :: lir_builder_word(&b)
+    plus :: lir_builder_word(&b)
+    unsigned :: lir_builder_bool(&b)
+    twenty_four :: lir_builder_word(&b)
+    lir_builder_push(&b, .Load{dst: reloaded, base: slot, offset: 8})
+    lir_builder_push(&b, .Binary{dst: partial, op: .Add, left: reloaded, right: sum})
+    lir_builder_push(&b, .Binary{dst: plus, op: .Add, left: partial, right: one})
+    lir_builder_push(&b, .Const{dst: twenty_four, value: 24})
+    lir_builder_push(&b, .Overflows{dst: unsigned, op: .UAdd, left: partial, right: one})
+    lir_builder_seal(&b, LIRBlockID{value: 3}, [LIRValueID]{}, .Branch{condition: unsigned, then_target: LIRJumpTarget{block: LIRBlockID{value: 5}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 6}, args: [LIRValueID]{plus, twenty_four}}})
+    wrong_overflow :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: wrong_overflow, value: 98})
+    lir_builder_seal(&b, LIRBlockID{value: 4}, [LIRValueID]{}, .Return{value: Val(wrong_overflow)})
+    wrong_unsigned :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: wrong_unsigned, value: 97})
+    lir_builder_seal(&b, LIRBlockID{value: 5}, [LIRValueID]{}, .Return{value: Val(wrong_unsigned)})
+    left :: lir_builder_word(&b)
+    right :: lir_builder_word(&b)
+    answer :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: answer, op: .Add, left: left, right: right})
+    lir_builder_seal(&b, LIRBlockID{value: 6}, [LIRValueID]{left, right}, .Return{value: Val(answer)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    if a.locations[slot.value] != (X64Loc.Frame{value: slot.value}) {
+        print("X64 FAIL frame address took a location other than its frame")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function, lir_builder_finish(reader)}, data: [LIRData]{}, debug: lir_module_debug_none()}
+    x64_fx_executable("frame-branch", program, None, 42)
+}
+
+// Live ranges split at block boundaries (RegAlloc.jet). Six values cross a
+// call in the entry block, where only the five callee-saved registers
+// survive it, and are read on every turn of a loop with no call: the loop
+// holds all six in registers while the entry block keeps one in its frame
+// slot (reloaded once, on the edge into the loop), and the back edge moves
+// nothing (each loop result takes its dying operand's register, which is its
+// parameter's). A value defined before an if/else and read only on its else
+// side holds no segment, so no register, in the then block. With seed 1 the
+// six values are 1..6: exit 10 * 21 = 210.
+fn x64_fx_split_loop() -> Bool Never! {
+    clobber := x64_fx_builder()
+    clobber.id = LIRFunctionID{value: 1}
+    clobber.signature = LIRSignatureID{value: 1}
+    nothing :: lir_builder_word(&clobber)
+    lir_builder_push(&clobber, .Const{dst: nothing, value: 0})
+    lir_builder_seal(&clobber, LIRBlockID{value: 0}, [LIRValueID]{}, .Return{value: Val(nothing)})
+
+    b := x64_fx_builder()
+    seed :: lir_builder_word(&b)
+    zero :: lir_builder_word(&b)
+    one :: lir_builder_word(&b)
+    ten :: lir_builder_word(&b)
+    ignored :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: zero, value: 0})
+    lir_builder_push(&b, .Const{dst: one, value: 1})
+    lir_builder_push(&b, .Const{dst: ten, value: 10})
+    crossing := [LIRValueID]{}
+    loop k in 1..<7 {
+        step :: lir_builder_word(&b)
+        value :: lir_builder_word(&b)
+        lir_builder_push(&b, .Const{dst: step, value: k})
+        lir_builder_push(&b, .Binary{dst: value, op: .Mul, left: seed, right: step})
+        &crossing.push(value)
+    }
+    lir_builder_push(&b, .Call{dst: Val(ignored), signature: LIRSignatureID{value: 1}, callee: .Function{id: LIRFunctionID{value: 1}}, args: [LIRValueID]{}})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{seed}, .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{zero, zero}}})
+    turn :: lir_builder_word(&b)
+    total :: lir_builder_word(&b)
+    sum := total
+    loop value in crossing {
+        added :: lir_builder_word(&b)
+        lir_builder_push(&b, .Binary{dst: added, op: .Add, left: sum, right: value})
+        sum = added
+    }
+    next_turn :: lir_builder_word(&b)
+    more :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Binary{dst: next_turn, op: .Add, left: turn, right: one})
+    lir_builder_push(&b, .Compare{dst: more, condition: .Lt, left: next_turn, right: ten})
+    back :: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{next_turn, sum}}
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{turn, total}, .Branch{condition: more, then_target: back, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{sum}}})
+    result :: lir_builder_word(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{result}, .Return{value: Val(result)})
+    function :: lir_builder_finish(b)
+
+    a := x64_allocate(function)
+    ok := a.spill_slots > 0
+    loop segment in a.block_segments[1]..<a.block_segments[2] {
+        if a.segment_locations[segment] == .Stack(_) -> ok = false
+    }
+    split := false
+    loop value in crossing {
+        loop segment in a.block_segments[0]..<a.block_segments[1] {
+            if a.segment_values[segment] == value.value && a.segment_locations[segment] == .Stack(_) -> split = true
+        }
+    }
+    if !split -> ok = false
+    x64_enter_block(&a, 1)
+    if x64_edge_moves(function, a, back, 1).len() != 0 -> ok = false
+
+    h := x64_fx_builder()
+    p :: lir_builder_word(&h)
+    origin :: lir_builder_word(&h)
+    squared :: lir_builder_word(&h)
+    taken :: lir_builder_bool(&h)
+    five :: lir_builder_word(&h)
+    lir_builder_push(&h, .Const{dst: origin, value: 0})
+    lir_builder_push(&h, .Binary{dst: squared, op: .Mul, left: p, right: p})
+    lir_builder_push(&h, .Compare{dst: taken, condition: .Eq, left: p, right: origin})
+    lir_builder_seal(&h, LIRBlockID{value: 0}, [LIRValueID]{p}, .Branch{condition: taken, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{}}})
+    lir_builder_push(&h, .Const{dst: five, value: 5})
+    lir_builder_seal(&h, LIRBlockID{value: 1}, [LIRValueID]{}, .Return{value: Val(five)})
+    lir_builder_seal(&h, LIRBlockID{value: 2}, [LIRValueID]{}, .Return{value: Val(squared)})
+    hole :: x64_allocate(lir_builder_finish(h))
+    loop segment in hole.block_segments[1]..<hole.block_segments[2] {
+        if hole.segment_values[segment] == squared.value -> ok = false
+    }
+    if !ok {
+        print("X64 FAIL split-loop allocation")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function, lir_builder_finish(clobber)}, data: [LIRData]{}, debug: lir_module_debug_none()}
+    x64_fx_executable("split-loop", program, Val(1), 210)
+}
+
+// A Binary followed by the Overflows of the same operands and a branch on it
+// is `add; jo` / `imul; jo` (x64_binary_sets_overflow), and a block marked
+// cold is laid out last without making a loop of the edge back into the hot
+// code (lir_builder_finish, x64_block_depths). Entry n: sum = n + 2 (jo
+// cold), prod = sum * sum (jo cold), prod inline test (`add prod, prod; jo
+// cold`), exit prod; the cold block exits 7. n = 3 exits 25; n = MAX
+// overflows the first add and exits 7.
+fn x64_fx_fused_overflow() -> Bool Never! {
+    b := x64_fx_builder()
+    n :: lir_builder_word(&b)
+    two :: lir_builder_word(&b)
+    sum :: lir_builder_word(&b)
+    carried :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: two, value: 2})
+    lir_builder_push(&b, .Binary{dst: sum, op: .Add, left: n, right: two})
+    lir_builder_push(&b, .Overflows{dst: carried, op: .Add, left: n, right: two})
+    cold :: LIRBlockID{value: 1}
+    lir_builder_mark_cold(&b, cold)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{n}, .Branch{condition: carried, then_target: LIRJumpTarget{block: cold, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{sum}}})
+    seven :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: seven, value: 7})
+    lir_builder_seal(&b, cold, [LIRValueID]{}, .Return{value: Val(seven)})
+    s :: lir_builder_word(&b)
+    prod :: lir_builder_word(&b)
+    wide :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Binary{dst: prod, op: .Mul, left: s, right: s})
+    lir_builder_push(&b, .Overflows{dst: wide, op: .Mul, left: s, right: s})
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{s}, .Branch{condition: wide, then_target: LIRJumpTarget{block: cold, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 3}, args: [LIRValueID]{}}})
+    tagged :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Overflows{dst: tagged, op: .Add, left: prod, right: prod})
+    lir_builder_seal(&b, LIRBlockID{value: 3}, [LIRValueID]{}, .Branch{condition: tagged, then_target: LIRJumpTarget{block: cold, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 4}, args: [LIRValueID]{prod}}})
+    result :: lir_builder_word(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 4}, [LIRValueID]{result}, .Return{value: Val(result)})
+    function :: lir_builder_finish(b)
+    ok := function.blocks.len() == 5 && function.blocks[4].id == cold && function.blocks[4].cold && !function.blocks[0].cold
+    loop depth in x64_block_depths(function, x64_block_rows(function)) { if depth != 0 -> ok = false }
+    folds :: x64_address_folds(function)
+    if !x64_binary_sets_overflow(function, folds, function.blocks[0].insts[1], .Add, n, two) -> ok = false
+    if !x64_binary_sets_overflow(function, folds, function.blocks[1].insts[0], .Mul, s, s) -> ok = false
+    if x64_binary_sets_overflow(function, folds, function.blocks[0].insts[1], .UMul, n, two) -> ok = false
+    if x64_binary_sets_overflow(function, folds, function.blocks[0].insts[1], .Add, two, n) -> ok = false
+    if !ok {
+        print("X64 FAIL fused-overflow layout")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
+    x64_fx_executable("fused-overflow", program, Val(3), 25) && x64_fx_executable("fused-overflow-cold", program, Val(9223372036854775807), 7)
+}
+
+// The `clobber` callee the split witnesses call: returns 0.
+fn x64_fx_clobber() -> LIRFunction Never! {
+    clobber := x64_fx_builder()
+    clobber.id = LIRFunctionID{value: 1}
+    clobber.signature = LIRSignatureID{value: 1}
+    nothing :: lir_builder_word(&clobber)
+    lir_builder_push(&clobber, .Const{dst: nothing, value: 0})
+    lir_builder_seal(&clobber, LIRBlockID{value: 0}, [LIRValueID]{}, .Return{value: Val(nothing)})
+    lir_builder_finish(clobber)
+}
+
+// `seed * k` for k in 1..<last, appended to the open block.
+fn x64_fx_multiples(b: &LIRFunctionBuilder, seed: LIRValueID, last: Int) -> [LIRValueID] Never! {
+    values := [LIRValueID]{}
+    loop k in 1..<last {
+        step :: lir_builder_word(&b)
+        value :: lir_builder_word(&b)
+        lir_builder_push(&b, .Const{dst: step, value: k})
+        lir_builder_push(&b, .Binary{dst: value, op: .Mul, left: seed, right: step})
+        &values.push(value)
+    }
+    values
+}
+
+// `start + values[0] + values[1] + ...`, appended to the open block.
+fn x64_fx_sum(b: &LIRFunctionBuilder, start: LIRValueID, values: [LIRValueID]) -> LIRValueID Never! {
+    sum := start
+    loop value in values {
+        added :: lir_builder_word(&b)
+        lir_builder_push(&b, .Binary{dst: added, op: .Add, left: sum, right: value})
+        sum = added
+    }
+    sum
+}
+
+fn x64_fx_call_clobber(b: &LIRFunctionBuilder) Never! {
+    ignored :: lir_builder_word(&b)
+    lir_builder_push(&b, .Call{dst: Val(ignored), signature: LIRSignatureID{value: 1}, callee: .Function{id: LIRFunctionID{value: 1}}, args: [LIRValueID]{}})
+}
+
+fn x64_fx_split_program(function: LIRFunction) -> LIRModule Never! {
+    LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
+    }, functions: [LIRFunction]{function, x64_fx_clobber()}, data: [LIRData]{}, debug: lir_module_debug_none()}
+}
+
+// Whether any move of `moves` writes a frame slot.
+fn x64_fx_stores(moves: [X64Move]) -> Bool Never! {
+    loop move in moves { if move.dst == .Stack(_) -> return true }
+    false
+}
+
+// A call inside a loop body with eight words live across it (the loop
+// counter, the running total and six seed multiples): at most five sit in
+// callee-saved registers there, the rest in frame slots, and every turn
+// reads them back. With seed 1: 10 turns of 21, exit 210.
+fn x64_fx_call_loop() -> Bool Never! {
+    b := x64_fx_builder()
+    seed :: lir_builder_word(&b)
+    zero :: lir_builder_word(&b)
+    one :: lir_builder_word(&b)
+    ten :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: zero, value: 0})
+    lir_builder_push(&b, .Const{dst: one, value: 1})
+    lir_builder_push(&b, .Const{dst: ten, value: 10})
+    crossing :: x64_fx_multiples(&b, seed, 7)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{seed}, .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{zero, zero}}})
+    turn :: lir_builder_word(&b)
+    total :: lir_builder_word(&b)
+    x64_fx_call_clobber(&b)
+    sum :: x64_fx_sum(&b, total, crossing)
+    next_turn :: lir_builder_word(&b)
+    more :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Binary{dst: next_turn, op: .Add, left: turn, right: one})
+    lir_builder_push(&b, .Compare{dst: more, condition: .Lt, left: next_turn, right: ten})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{turn, total}, .Branch{condition: more, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{next_turn, sum}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{sum}}})
+    result :: lir_builder_word(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{result}, .Return{value: Val(result)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    spilled := false
+    loop segment in a.block_segments[1]..<a.block_segments[2] {
+        if a.segment_locations[segment] == .Stack(_) -> spilled = true
+    }
+    if !spilled {
+        print("X64 FAIL call-loop allocation")
+        return false
+    }
+    x64_fx_executable("call-loop", x64_fx_split_program(function), Val(1), 210)
+}
+
+// A critical edge with resolution moves: seven seed multiples cross a call in
+// the entry block (two of them in frame slots there), which branches on
+// `seed == 1` to b1 (sums them, no call; every value in a register) or to b2,
+// which adds 100 and jumps to b1 too. The b0 -> b1 edge loads the spilled
+// values on the jcc stub path. Seed 1: 28; seed 2: 56 + 100 = 156.
+fn x64_fx_critical_edge() -> LIRFunction Never! {
+    b := x64_fx_builder()
+    seed :: lir_builder_word(&b)
+    one :: lir_builder_word(&b)
+    hundred :: lir_builder_word(&b)
+    taken :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: one, value: 1})
+    lir_builder_push(&b, .Const{dst: hundred, value: 100})
+    values :: x64_fx_multiples(&b, seed, 8)
+    x64_fx_call_clobber(&b)
+    lir_builder_push(&b, .Compare{dst: taken, condition: .Eq, left: seed, right: one})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{seed}, .Branch{condition: taken, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{hundred}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{}}})
+    extra :: lir_builder_word(&b)
+    total :: x64_fx_sum(&b, extra, values)
+    final :: lir_builder_word(&b)
+    lir_builder_push(&b, .Binary{dst: final, op: .Sub, left: total, right: hundred})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{extra}, .Return{value: Val(final)})
+    two_hundred :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: two_hundred, value: 200})
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{}, .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{two_hundred}}})
+    lir_builder_finish(b)
+}
+
+fn x64_fx_critical_edges() -> Bool Never! {
+    function :: x64_fx_critical_edge()
+    a := x64_allocate(function)
+    x64_enter_block(&a, 0)
+    edge :: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{LIRValueID{value: 2}}}
+    loaded := false
+    loop move in x64_edge_moves(function, a, edge, 1) {
+        if move.src == .Stack(_) -> loaded = true
+    }
+    if !loaded {
+        print("X64 FAIL critical-edge allocation")
+        return false
+    }
+    taken :: x64_fx_executable("critical-edge-then", x64_fx_split_program(function), Val(1), 28)
+    taken && x64_fx_executable("critical-edge-else", x64_fx_split_program(x64_fx_critical_edge()), Val(2), 156)
+}
+
+// A register-to-frame edge store: seven seed multiples live in registers in
+// the call-free entry block; b1 calls first, so two of them live in frame
+// slots there and the b0 -> b1 edge stores them. Seed 1: 28.
+fn x64_fx_edge_store() -> Bool Never! {
+    b := x64_fx_builder()
+    seed :: lir_builder_word(&b)
+    zero :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: zero, value: 0})
+    values :: x64_fx_multiples(&b, seed, 8)
+    target :: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{seed}, .Jump{target: target})
+    x64_fx_call_clobber(&b)
+    total :: x64_fx_sum(&b, zero, values)
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{}, .Return{value: Val(total)})
+    function :: lir_builder_finish(b)
+    a := x64_allocate(function)
+    x64_enter_block(&a, 0)
+    if !x64_fx_stores(x64_edge_moves(function, a, target, 1)) {
+        print("X64 FAIL edge-store allocation")
+        return false
+    }
+    x64_fx_executable("edge-store", x64_fx_split_program(function), Val(1), 28)
+}
+
+// Two values share one frame slot: seven seed multiples cross a first call
+// (two in frame slots) and die summing to `first`; seven multiples of
+// `first` then cross a second call (two more in frame slots). The spans are
+// disjoint, so the frame holds two slots, not four. Seed 1: 28 * 28 = 784.
+fn x64_fx_shared_slot() -> Bool Never! {
+    b := x64_fx_builder()
+    seed :: lir_builder_word(&b)
+    zero :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: zero, value: 0})
+    early :: x64_fx_multiples(&b, seed, 8)
+    x64_fx_call_clobber(&b)
+    first :: x64_fx_sum(&b, zero, early)
+    late :: x64_fx_multiples(&b, first, 8)
+    x64_fx_call_clobber(&b)
+    second :: x64_fx_sum(&b, zero, late)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{seed}, .Return{value: Val(second)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    early_slots := [Int]{}
+    loop value in early { if a.locations[value.value] == .Stack(slot) -> &early_slots.push(slot) }
+    shared := false
+    loop value in late {
+        if a.locations[value.value] == .Stack(slot) {
+            loop other in early_slots { if other == slot -> shared = true }
+        }
+    }
+    if !shared || early_slots.len() == 0 {
+        print("X64 FAIL shared-slot allocation: {a.spill_slots} slots")
+        return false
+    }
+    x64_fx_executable("shared-slot", x64_fx_split_program(function), Val(1), 784)
 }

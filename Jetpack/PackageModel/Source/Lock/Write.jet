@@ -446,12 +446,19 @@ fn pkg_lock_sorted_keys(keys: [String]) -> [String] Never! {
 // reason): stable passes from the least significant field.
 fn pkg_lock_sorted_contributions(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
     sorted := values
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.reason)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.value)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.source)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.scope)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.layer)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.key)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.package)
     sorted
 }
@@ -469,7 +476,9 @@ fn pkg_lock_dedup_contributions(values: [LockedBuildContribution]) -> [LockedBui
 // Comptime inputs ordered by (path, hash).
 fn pkg_lock_sorted_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] Never! {
     sorted := values
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(input -> input.hash)
+    sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(input -> input.path)
     sorted
 }

@@ -1,0 +1,78 @@
+// SourceSpan conversion is an independent, real consumer boundary (Types312–328).
+#Test("source_span_conversion_preserves_utf8_byte_offsets") {
+    source :: "aé😀z"
+    bytes :: source.bytes()
+    // é occupies bytes 1..3 and 😀 bytes 3..7, despite being one scalar each.
+    foundation :: Span{start: 1, end: 7}
+    projected :: semindex_source_span(foundation)
+    assert_eq(projected.start, 1)
+    assert_eq(projected.end, 7)
+    restored :: semindex_foundation_span(projected)
+    assert_eq(restored.start, foundation.start)
+    assert_eq(restored.end, foundation.end)
+    assert_eq(String.from_bytes(bytes[restored.start..<restored.end]) ?? panic("valid UTF-8 span"), "é😀")
+    assert_eq(bytes.len(), 8)
+}
+
+#Test("source_span_conversion_is_lossless_without_validation") {
+    spans :: [Span]{
+        Span{start: 0, end: 0},
+        Span{start: 7, end: 7},
+        Span{start: 8, end: 3},
+        Span{start: 2147483648, end: 4294967296},
+    }
+    loop span in spans {
+        roundtrip :: semindex_foundation_span(semindex_source_span(span))
+        assert_eq(roundtrip.start, span.start)
+        assert_eq(roundtrip.end, span.end)
+    }
+    source_span :: SourceSpan{start: 3, end: 7}
+    roundtrip :: semindex_source_span(semindex_foundation_span(source_span))
+    assert_eq(roundtrip.start, source_span.start)
+    assert_eq(roundtrip.end, source_span.end)
+}
+
+// BypassKind::as_str (Types409–418) is the machine audit classification, not
+// human prose: every expert escape must retain its own distinct wire category.
+#Test("bypass_kind_keeps_every_audited_escape_distinct") {
+    kinds :: [BypassKind]{.UnsafeRegion, .UnsafeFn, .ExplicitDrop, .LintAllow}
+    categories := [String]{}
+    loop kind in kinds -> &categories.push(kind.as_str())
+    assert_eq(categories, [String]{"unsafe_region", "unsafe_fn", "explicit_drop", "lint_allow"})
+}
+
+// Rust lib.rs every_structural_child_has_explicit_slot (819–825).
+// Called with structural_nodes from the checked basics/default_refs.jet index;
+// registration waits for the S3 query API, S4 open API, and C4 checked producer.
+fn semindex_test_every_structural_child_has_explicit_slot(nodes: [StructuralNode]) {
+    loop node in nodes -> assert(node.parent == None || node.slot != "root")
+}
+
+// Rust tests/semindex.rs definition_ancestry_identity_ignores_signature_and_body_shape
+// (1164–1188). Integration must open both checked source revisions and select
+// their score DefinitionFact, not construct literal records to satisfy this helper.
+// Before: fn score(n: Int) -> Int { return n + 1 }
+//         fn run() { print(score(1)) }
+// After:  fn score(n: Float, bonus: Float) -> Float { return n * bonus }
+//         fn run() { print(score(1.0, 2.0)) }
+fn semindex_test_definition_ancestry_identity_ignores_signature_and_body_shape(before_score: DefinitionFact, after_score: DefinitionFact) {
+    assert_eq(before_score.stable_id, after_score.stable_id)
+    assert(before_score.signature_id != after_score.signature_id)
+    assert(before_score.content_id != after_score.content_id)
+}
+
+// CompilerFact::from_member (Types537–544) must not advertise a receiver-dependent
+// read as a stable public type. Registered when CP-TOOLS-FACTS is integrated.
+#Test("compiler_fact_from_member_preserves_registry_availability") {
+    origin :: CompilerFact.from_member("$origin") ?? panic("Origin has a public read type")
+    assert_eq(origin.name, "$origin")
+    assert_eq(origin.kind, "Origin")
+    assert_eq(origin.type_name, "OriginInfo?")
+    // Known reflection kinds still have no stable direct-read type.
+    assert(CompilerFact.from_member("$layout") == None)
+    assert(CompilerFact.from_member("$name") == None)
+    assert(CompilerFact.from_member("$view_provenance") == None)
+    // A build snapshot reader has no reflected value kind.
+    assert(CompilerFact.from_member("$profile") == None)
+    assert(CompilerFact.from_member("unknown") == None)
+}

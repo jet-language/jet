@@ -51,7 +51,7 @@ void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
     }
     __real_jet_rt_free(ptr,size,align);
 }
-static void text_watch(Text *t) { watch(t,24,8); if(t->cap) watch(t->data,t->cap,1); }
+static void text_watch(Text *t) { watch((char *)(t)-8,32,8); if(t->cap) watch(t->data,t->cap,1); }
 static Text *text(const char *s) { Text *t=jet_rt_string_from_static(s,(int64_t)strlen(s)); text_watch(t); return t; }
 static void bytes_watch(Bytes *b) { if(b->cap) watch(b->data,b->cap*stride,8); }
 static void cert_fields_watch(Cert *c) {

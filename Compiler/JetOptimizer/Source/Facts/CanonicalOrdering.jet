@@ -260,6 +260,7 @@ fn mir_pass_sort_fields(rows: &[MIRFieldRow]) Never! {
 }
 
 fn mir_pass_sort_source_files(rows: &[MIRSourceFile]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRSourceFile, right: MIRSourceFile) -> if {
         left.id.value != right.id.value -> left.id.value <=> right.id.value
         left.path != right.path -> left.path <=> right.path
@@ -268,10 +269,12 @@ fn mir_pass_sort_source_files(rows: &[MIRSourceFile]) Never! {
 }
 
 fn mir_pass_sort_core_calls(rows: &[MIRCoreCall]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRCoreCall, right: MIRCoreCall) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn mir_pass_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRPreludeCall, right: MIRPreludeCall) -> if {
         left.id.value != right.id.value -> left.id.value <=> right.id.value
         left.module_name != right.module_name -> left.module_name <=> right.module_name
@@ -280,38 +283,47 @@ fn mir_pass_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
 }
 
 fn mir_pass_sort_foreign(rows: &[MIRForeign]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRForeign, right: MIRForeign) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn mir_pass_sort_links(rows: &[MIRLinkUnit]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRLinkUnit, right: MIRLinkUnit) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.crate_spec <=> right.crate_spec)
 }
 
 fn mir_pass_sort_callbacks(rows: &[MIRCallbackAdapter]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRCallbackAdapter, right: MIRCallbackAdapter) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.symbol <=> right.symbol)
 }
 
 fn mir_pass_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRHandleLifecycle, right: MIRHandleLifecycle) -> left.id.value <=> right.id.value)
 }
 
 fn mir_pass_sort_jobs(rows: &[MIRJob]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRJob, right: MIRJob) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.name <=> right.name)
 }
 
 fn mir_pass_sort_tests(rows: &[MIRTestCase]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRTestCase, right: MIRTestCase) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.name <=> right.name)
 }
 
 fn mir_pass_sort_harnesses(rows: &[MIRHarnessPlan]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRHarnessPlan, right: MIRHarnessPlan) -> left.id.value <=> right.id.value)
 }
 
 fn mir_pass_sort_artifacts(rows: &[MIRArtifactPlan]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRArtifactPlan, right: MIRArtifactPlan) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.name <=> right.name)
 }
 
 fn mir_pass_sort_unreachable(rows: &[MIRUnreachable]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRUnreachable, right: MIRUnreachable) -> if {
         left.span.start != right.span.start -> left.span.start <=> right.span.start
         left.span.end != right.span.end -> left.span.end <=> right.span.end
@@ -320,14 +332,17 @@ fn mir_pass_sort_unreachable(rows: &[MIRUnreachable]) Never! {
 }
 
 fn mir_pass_sort_import_items(rows: &[MIRImportItem]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRImportItem, right: MIRImportItem) -> if left.local != right.local -> left.local <=> right.local else -> left.original <=> right.original)
 }
 
 fn mir_pass_sort_trait_methods(rows: &[MIRTraitMethod]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRTraitMethod, right: MIRTraitMethod) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.name <=> right.name)
 }
 
 fn mir_pass_sort_associated_types(rows: &[MIRAssociatedTypeValue]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRAssociatedTypeValue, right: MIRAssociatedTypeValue) -> if {
         left.name != right.name -> left.name <=> right.name
         left.span.start != right.span.start -> left.span.start <=> right.span.start
@@ -336,10 +351,12 @@ fn mir_pass_sort_associated_types(rows: &[MIRAssociatedTypeValue]) Never! {
 }
 
 fn mir_pass_sort_function_ids(rows: &[MIRFunctionID]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRFunctionID, right: MIRFunctionID) -> left.value <=> right.value)
 }
 
 fn mir_pass_sort_link_ids(rows: &[MIRLinkUnitID]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRLinkUnitID, right: MIRLinkUnitID) -> left.value <=> right.value)
 }
 
@@ -350,26 +367,32 @@ fn mir_pass_sort_blocks(rows: &[MIRBasicBlock]) Never! {
 }
 
 fn mir_pass_sort_captures(rows: &[MIRCaptureParam]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRCaptureParam, right: MIRCaptureParam) -> if left.slot != right.slot -> left.slot <=> right.slot else -> left.name <=> right.name)
 }
 
 fn mir_pass_sort_values(rows: &[MIRValueFact]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRValueFact, right: MIRValueFact) -> left.id.value <=> right.id.value)
 }
 
 fn mir_pass_sort_locals(rows: &[MIRLocal]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRLocal, right: MIRLocal) -> left.id.value <=> right.id.value)
 }
 
 fn mir_pass_sort_places(rows: &[MIRPlace]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRPlace, right: MIRPlace) -> left.id.value <=> right.id.value)
 }
 
 fn mir_pass_sort_scopes(rows: &[MIRScope]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRScope, right: MIRScope) -> left.id.value <=> right.id.value)
 }
 
 fn mir_pass_sort_drops(rows: &[MIRDropAction]) Never! {
+    rows = loop fresh_item in rows -> fresh_item
     &rows.sort_by((left: MIRDropAction, right: MIRDropAction) -> if {
         left.place.value != right.place.value -> left.place.value <=> right.place.value
         left.span.start != right.span.start -> left.span.start <=> right.span.start

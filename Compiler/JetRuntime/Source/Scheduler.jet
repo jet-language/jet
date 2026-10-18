@@ -16,29 +16,14 @@ SCHEDULER_SCOPE_MASK_KIND :: prep { I64{1792} }
 
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 fn scheduler_text_new(length: I64) -> I64 {
-    text :: alloc_required_valid(I64{24}, I64{8})
     capacity :: (length + I64{7}).bit_and(I64{-8})
-    data :: if (capacity == I64{0}) -> I64{1} else -> jet_rt_alloc(capacity, I64{1})
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
-        alloc_release_valid(text, I64{24}, I64{8})
-        return I64{0}
-    }
-    sync_store(text, data)
-    sync_store(text + I64{8}, length)
-    sync_store(text + I64{16}, capacity)
-    if (capacity != I64{0}) -> coll_zero(data, capacity)
+    text :: rt_text_with_length(length, capacity)
+    if (text == I64{0}) -> return I64{0}
+    if (capacity != I64{0}) -> coll_zero(sync_load(text), capacity)
     text
 }
 
-// The empty owned E4 needs only its known-valid header; address1 is never
-// deallocated because byte capacity is zero, matching Text clone/drop.
-fn scheduler_text_empty() -> I64 {
-    text :: alloc_required_valid(I64{24}, I64{8})
-    sync_store(text, I64{1})
-    sync_store(text + I64{8}, I64{0})
-    sync_store(text + I64{16}, I64{0})
-    text
-}
+fn scheduler_text_empty() -> I64 { rt_text_copy(I64{1}, I64{0}) }
 
 fn scheduler_text_concat(left: I64, right: I64) -> I64 {
     a :: sync_load(left + I64{8})
@@ -336,6 +321,22 @@ fn scheduler_assert_not_root_cancel(control: I64) {
 #Export(c) fn jet_rt_session_cleanup_leave(saved_flags: I64) {
     control :: scheduler_control_current()
     if (control != I64{0}) -> sync_store(control + I64{104}, saved_flags)
+}
+// Compiler cleanup frames (Codegen/Builder.jet jet_codegen_emit_cleanup_frame,
+// lowered by Routes.jet lower_native_control_call) are one runtime cleanup
+// scope plus Shield, the idiom of every runtime-owned close: a stop pending at
+// entry stays in its control slot while Check/Propagate delivery of it is
+// masked, a new panic over it is process-fatal (scheduler_panic_check), and
+// cancellation/deadlines arriving meanwhile are held until leave delivers them
+// (Scheduler.rs:234-244). The returned word is the owned session token.
+#Export(c) fn jet_rt_cleanup_enter() -> I64 {
+    saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    jet_scheduler_shield_enter()
+    saved
+}
+#Export(c) fn jet_rt_cleanup_leave(saved: I64) {
+    jet_scheduler_shield_leave()
+    jet_rt_session_cleanup_leave(saved)
 }
 #Export(c) fn jet_rt_stop_domain() -> I64 {
     control :: scheduler_control_current()
@@ -1149,13 +1150,19 @@ fn scheduler_panic_check() -> Bool {
         scheduler_delivered_status_unmasked() != I64{0}) -> scheduler_abort_double_panic()
     true
 }
-fn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {
+// `code` is the registered stop row the root report would carry (0 E3001,
+// 1 E3010, 2 E3011; trap_header's numbering). Core.rs jet_runtime_stop
+// records the raw stop on every active expectation frame before it unwinds,
+// so the native catch probe sees the same first stop as the Rust reference.
+// The published record stays the raw message (form 0).
+fn rt_task_panic_publish(message: I64, length: I64, code: I64) -> Bool {
+    test_scope_record_coded_stop(code, message, length)
     if (jet_rt_stop_domain() != I64{2}) -> return false
     if !scheduler_panic_check() -> return false
     text :: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return true
     coll_copy(message, sync_load(text), length)
-    rt_task_panic_publish_owned(text, form)
+    rt_task_panic_publish_owned(text, I64{0})
     true
 }
 // Takes an owned, already checked report (or builder): the same publication

@@ -48,7 +48,9 @@ fn fallback_reaches_join(limit: Int) -> Bool {
 fn loop_rebinds(machines: [Machine]) -> Bool {
     done := false
     loop machine in machines {
-        done = finish(^machine, true)
+        // `machine` reads an element of the read parameter `machines`: the
+        // consumer gets an explicit copy (`^machine` would be E0201).
+        done = finish(machine.copy(), true)
     }
     loop machine in machines {
         if machine.soft_stop -> done = false

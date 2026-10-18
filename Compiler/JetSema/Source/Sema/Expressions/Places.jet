@@ -25,7 +25,6 @@ use jet_foundation.[
     TagMarker,
     TextEdit,
     Type,
-    Token,
     builtin_numeric_kind,
     ast_program,
     core_record_field,
@@ -39,6 +38,7 @@ use jet_foundation.[
     tir_symbol_local,
     type_name,
 ]
+use jet_lexer.Token
 use jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
 
 fn sema_expression_index_kind(kind: IndexKind, base: Type) -> TIndexKind Never! {
@@ -145,13 +145,29 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     if binding != None {
         info :: binding
         if sema_ownership_binding_is_borrowed_param(info) {
-            &diagnostics.push(sema_error("E0201", mark_span, "`{info.symbol.name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `.copy()`, or accept it with the move marker `^`"))
+            &diagnostics.push(sema_ownership_diag_move_from_borrowed(info.symbol.name, mark_span))
             return None
         }
     }
     if !sema_pin_check_move(&state, value, scopes, &diagnostics) -> return None
+    // `^p` of a match payload takes it out of its subject, never a copy.
+    payload :: sema_ownership_move_pattern_payload(&state, value, mark_span, scopes, &diagnostics)
+    if payload < 0 -> return None
     if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
-    Val(sema_tir_node(checked.ty, TExprKind.Move{value: checked}, span))
+    moved :: if payload > 0 -> sema_expression_payload_take(^checked) else -> ^checked
+    Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, span))
+}
+
+// Marks the checked `^p` of a match payload binding (TLocal.payload_take):
+// lowering may take the payload out of the subject's storage, which sema
+// has marked moved (sema_ownership_move_pattern_payload).
+fn sema_expression_payload_take(value: ^TExpr) -> TExpr Never! {
+    taken := value
+    if &taken.kind == {
+        .Local(local) -> local.payload_take = true
+        else -> {}
+    }
+    taken
 }
 
 fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -268,10 +284,14 @@ fn sema_expression_shared_guard_value(ty: Type) -> SemaCallMemoryGuard? {
 // stay parameters) before the owner's type arguments are substituted.
 fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: String, declared: Type, generic_names: [String]) -> Type Never! {
     if program.registration_graph == .Val(graph) {
+    // copy: the owner type is a new owned Type. Without an owner module it equals `declared`, the
+    // field's declared type (a read parameter), which stays in the nominal.
     if owner_module == "" -> return declared.copy()
     generics :: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
     return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
     }
+    // copy: the owner type is a new owned Type. When nothing applies it equals `declared`, the
+    // field's declared type (a read parameter), which stays in the nominal.
     declared.copy()
 }
 

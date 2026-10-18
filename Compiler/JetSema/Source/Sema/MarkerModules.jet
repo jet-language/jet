@@ -400,11 +400,11 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
     loop module_row_index in 0..<graph.modules.len() {
         start :: diagnostics.len()
         markers :: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
-        seen := [Marker]{}
+        seen := [String:Bool]{}
         loop marker in markers {
-            duplicate :: loop existing in seen { if sema_marker_rules_same_occurrence(existing, marker) -> break true } ?? false
-            if duplicate -> next
-            &seen.push(marker)
+            occurrence :: sema_marker_rules_occurrence_key(marker)
+            if seen.get(occurrence) != None -> next
+            seen[occurrence] = true
             if marker.declaration_module == None && sema_marker_rules_catalog_rule_index(catalog.applied_rules, marker.name) != None -> next
             resolved :: sema_marker_module_resolve_application(graph, graph.modules[module_row_index].module_identity, marker)
             if marker.name.contains(".") || marker.declaration_module != None {

@@ -37,8 +37,8 @@ fn run() Never! {
     scalar :: sema_guest_export_value_type(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}}))
     bd_require(scalar == Val(Type.Int), "guest inferred infallible scalar is one value")
     fallible :: Type.Result{ok: Type.Int, err: Type.String}
-    bd_require(sema_guest_export_value_type(Val(fallible)) == Val(fallible), "guest declared failure rail is retained")
+    bd_require(sema_guest_export_value_type(Val(fallible)) == Val((fallible)), "guest declared failure rail is retained")
     diverging :: Type.Result{ok: Type.Named{name: "Never"}, err: Type.Named{name: "Never"}}
-    bd_require(sema_guest_export_value_type(Val(diverging)) == Val(diverging), "guest divergence is not a scalar")
+    bd_require(sema_guest_export_value_type(Val(diverging)) == Val((diverging)), "guest divergence is not a scalar")
     print("recovered Source policy/guest contracts: passed")
 }

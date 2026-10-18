@@ -59,11 +59,11 @@ fn jet_codegen_artifact_function_id(reference: TFunctionRef, functions: JetCodeg
     Val(jet_codegen_function_id(function))
 }
 
-fn jet_codegen_artifact_checked_function(function_id: MIRFunctionID, checked_functions: [MIRFunction]) -> MIRFunction? {
-    loop function in checked_functions {
-        if function.id == function_id -> return Val(function)
-    }
-    None
+// `checked_rows`: checked MIR function id value -> its first row in
+// `checked_functions` (jet_codegen_lower_job_test_artifacts builds it once).
+fn jet_codegen_artifact_checked_function(function_id: MIRFunctionID, checked_functions: [MIRFunction], checked_rows: [U64:Int]) -> MIRFunction? {
+    row :: checked_rows.get(function_id.value) ?? return None
+    Val(checked_functions[row])
 }
 
 /// The command-line value kind of a checked job parameter's MIR type.
@@ -167,10 +167,10 @@ fn jet_codegen_job_limits(limits: [StringMapEntry]) -> [MIRJobLimit] Never! {
     result
 }
 
-fn jet_codegen_lower_job_fact(row: TJobFact, functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction]) -> MIRJob? {
+fn jet_codegen_lower_job_fact(row: TJobFact, functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction], checked_rows: [U64:Int]) -> MIRJob? {
     reference :: row.function ?? return None
     function_id :: jet_codegen_artifact_function_id(reference, functions) ?? return None
-    checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? panic("job target has no checked MIR signature")
+    checked :: jet_codegen_artifact_checked_function(function_id, checked_functions, checked_rows) ?? panic("job target has no checked MIR signature")
     // Each input binds one checked job parameter and carries that
     // parameter's canonical MIR type.
     inputs := [MIRCLIInput]{}
@@ -208,10 +208,10 @@ fn jet_codegen_test_kind(kind: TTestKind) -> MIRTestKind Never! {
     if kind == {.Unit -> MIRTestKind.Unit else -> MIRTestKind.Property}
 }
 
-fn jet_codegen_lower_test_fact(row: TTestFact, functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction]) -> MIRTestCase? {
+fn jet_codegen_lower_test_fact(row: TTestFact, functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction], checked_rows: [U64:Int]) -> MIRTestCase? {
     function :: jet_codegen_artifact_function(row.function, functions) ?? return None
     function_id := jet_codegen_function_id(function)
-    checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? panic("test target has no checked MIR signature")
+    checked :: jet_codegen_artifact_checked_function(function_id, checked_functions, checked_rows) ?? panic("test target has no checked MIR signature")
     parameters := [MIRParam]{}
     loop parameter in row.parameters {
         checked_parameter :: loop candidate in checked.params {
@@ -246,15 +246,18 @@ fn jet_codegen_lower_test_fact(row: TTestFact, functions: JetCodegenFunctionInde
     }
 }
 
-fn jet_codegen_test_id_for_key(key: String, rows: [TTestFact], lowered: [MIRTestCase]) -> MIRTestID? {
+// Test key -> its MIR test id, for each key of `rows` whose test lowered
+// (the id is the key's stable id), built once for every harness.
+fn jet_codegen_test_ids_by_key(rows: [TTestFact], lowered: [MIRTestCase]) -> [String:MIRTestID] Never! {
+    lowered_ids := [U64:Bool]{}
+    loop test in lowered -> lowered_ids[test.id.value] = true
+    ids := [String:MIRTestID]{}
     loop row in rows {
-        if row.key != key -> next
-        id := MIRTestID{value: stable_id("mir-test", row.key)}
-        loop test in lowered {
-            if test.id == id -> return Val(id)
-        }
+        if ids.get(row.key) != None -> next
+        id :: MIRTestID{value: stable_id("mir-test", row.key)}
+        if lowered_ids.get(id.value) != None -> ids[row.key] = id
     }
-    None
+    ids
 }
 
 fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checked: MIRFunction) -> MIRBlockID? {
@@ -262,13 +265,13 @@ fn jet_codegen_coverage_block(point: TCoveragePointFact, function: TFunc, checke
     if role == "entry" -> return Val(checked.entry)
     identity_limit := checked.blocks.len() + checked.values.len() + checked.places.len() + checked.locals.len() + checked.scopes.len()
     loop block in checked.blocks -> identity_limit += block.instructions.len()
+    block_ids := [U64:Bool]{}
+    loop block in checked.blocks -> block_ids[block.id.value] = true
     index := 0
     loop index <= identity_limit {
         identity := "{function.key}|block|{point.span.start}:{point.span.end}|{role}||{index}"
         candidate := MIRBlockID{value: stable_id("mir-block", identity)}
-        loop block in checked.blocks {
-            if block.id == candidate -> return Val(candidate)
-        }
+        if block_ids.get(candidate.value) != None -> return Val(candidate)
         index += 1
     }
     None
@@ -282,10 +285,10 @@ fn jet_codegen_harness_kind(kind: THarnessKind) -> MIRHarnessKind Never! {
     }
 }
 
-fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact], lowered_tests: [MIRTestCase], functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction]) -> MIRHarnessPlan Never! {
+fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_ids: [String:MIRTestID], functions: JetCodegenFunctionIndex, checked_functions: [MIRFunction], checked_rows: [U64:Int]) -> MIRHarnessPlan Never! {
     tests := [MIRTestID]{}
     loop key in row.tests {
-        test_id :: jet_codegen_test_id_for_key(key, test_rows, lowered_tests) ?? next
+        test_id :: test_ids.get(key) ?? next
         &tests.push(test_id)
     }
     output_checks := [MIROutputCheck]{}
@@ -301,7 +304,7 @@ fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact],
     loop point in row.coverage_points {
         function :: jet_codegen_artifact_function(point.function, functions) ?? next
         function_id := jet_codegen_function_id(function)
-        checked :: jet_codegen_artifact_checked_function(function_id, checked_functions) ?? next
+        checked :: jet_codegen_artifact_checked_function(function_id, checked_functions, checked_rows) ?? next
         block :: jet_codegen_coverage_block(point, function, checked) ?? next
         &coverage_points.push(MIRCoveragePoint{
             id: MIRCoveragePointID{value: stable_id("mir-coverage", point.key)},
@@ -311,7 +314,7 @@ fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact],
         })
     }
     selected_test := MIRTestID?{None}
-    if row.selected_test == .Val(key) -> selected_test = jet_codegen_test_id_for_key(key, test_rows, lowered_tests)
+    if row.selected_test == .Val(key) -> selected_test = test_ids.get(key)
     MIRHarnessPlan{
         id: MIRHarnessID{value: stable_id("mir-harness", row.key)},
         kind: jet_codegen_harness_kind(row.kind),
@@ -323,50 +326,30 @@ fn jet_codegen_lower_harness_fact(row: THarnessPlanFact, test_rows: [TTestFact],
     }
 }
 
-fn jet_codegen_insert_job(rows: &[MIRJob], row: MIRJob) Never! {
-    index := rows.len()
-    &rows.push(row)
-    loop index > 0 && rows[index - 1].id.value > row.id.value {
-        rows[index] = rows[index - 1]
-        index -= 1
-    }
-    rows[index] = row
-}
-
-fn jet_codegen_insert_test(rows: &[MIRTestCase], row: MIRTestCase) Never! {
-    index := rows.len()
-    &rows.push(row)
-    loop index > 0 && rows[index - 1].id.value > row.id.value {
-        rows[index] = rows[index - 1]
-        index -= 1
-    }
-    rows[index] = row
-}
-
-fn jet_codegen_insert_harness(rows: &[MIRHarnessPlan], row: MIRHarnessPlan) Never! {
-    index := rows.len()
-    &rows.push(row)
-    loop index > 0 && rows[index - 1].id.value > row.id.value {
-        rows[index] = rows[index - 1]
-        index -= 1
-    }
-    rows[index] = row
-}
-
 fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
     function_index :: jet_codegen_function_index(functions.copy())
+    checked_rows := [U64:Int]{}
+    loop (index, function) in checked_functions {
+        if checked_rows.get(function.id.value) == None -> checked_rows[function.id.value] = index
+    }
+    // Each list is ordered by id, equal ids in lowering order: one stable
+    // sort, as the per-row insertion it replaces.
     lowered_jobs := [MIRJob]{}
     loop row in jobs {
-        if jet_codegen_lower_job_fact(row, function_index, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)
+        if jet_codegen_lower_job_fact(row, function_index, checked_functions, checked_rows) == .Val(lowered) -> &lowered_jobs.push(lowered)
     }
+    &lowered_jobs.sort_by((left: MIRJob, right: MIRJob) -> left.id.value <=> right.id.value)
     lowered_tests := [MIRTestCase]{}
     loop row in tests {
-        if jet_codegen_lower_test_fact(row, function_index, checked_functions) == .Val(lowered) -> jet_codegen_insert_test(&lowered_tests, lowered)
+        if jet_codegen_lower_test_fact(row, function_index, checked_functions, checked_rows) == .Val(lowered) -> &lowered_tests.push(lowered)
     }
+    &lowered_tests.sort_by((left: MIRTestCase, right: MIRTestCase) -> left.id.value <=> right.id.value)
+    test_ids :: jet_codegen_test_ids_by_key(tests, lowered_tests)
     lowered_harnesses := [MIRHarnessPlan]{}
     loop row in harnesses {
-        lowered := jet_codegen_lower_harness_fact(row, tests, lowered_tests, function_index, checked_functions)
-        if lowered.tests.len() > 0 || lowered.output_checks.len() > 0 || lowered.coverage_points.len() > 0 -> jet_codegen_insert_harness(&lowered_harnesses, lowered)
+        lowered := jet_codegen_lower_harness_fact(row, test_ids, function_index, checked_functions, checked_rows)
+        if lowered.tests.len() > 0 || lowered.output_checks.len() > 0 || lowered.coverage_points.len() > 0 -> &lowered_harnesses.push(lowered)
     }
+    &lowered_harnesses.sort_by((left: MIRHarnessPlan, right: MIRHarnessPlan) -> left.id.value <=> right.id.value)
     JetCodegenJobTestArtifacts{jobs: lowered_jobs, tests: lowered_tests, harnesses: lowered_harnesses}
 }

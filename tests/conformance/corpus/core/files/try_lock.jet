@@ -15,7 +15,7 @@ fn run() {
     identity :: (files.stat(path) ?? panic("identity")).id
     print((files.try_lock(path) ?? panic("try held")) == None)
     if files.lock(path, timeout: Val(time.duration_ms(2))) == {
-        .Err(.TimedOut(context)) -> print(context.resource == Val(path))
+        .Err(.TimedOut(context)) -> print(context.resource == Val((path)))
         .Err(_) -> panic("wrong timeout kind")
         .Ok(owner) -> {
             close(^owner)

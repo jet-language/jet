@@ -61,7 +61,8 @@ fn jet_codegen_prepared_constant_item(value: TComptimeValue, index: TExpr) -> TC
 // prepared constant, followed by field and literal `[i]` projections.
 fn jet_codegen_prepared_constant_value(modules: [SemaGraphModuleResult], expression: TExpr) -> TComptimeValue? {
     if expression.kind == {
-        .CtLit(value) -> return Val(value)
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .CtLit(value) -> return Val(value.copy())
         .ConstRef(symbol) -> return jet_codegen_prepared_constant_root(modules, symbol)
         .Field(receiver, field) -> {
             base :: jet_codegen_prepared_constant_value(modules, receiver) ?? return None
@@ -80,7 +81,7 @@ fn jet_codegen_prepared_constant_value(modules: [SemaGraphModuleResult], express
 fn jet_codegen_fold_prepared_field(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, reference: TFieldRef) -> MIRValueID? {
     if reference.owner != None -> return None
     value :: jet_codegen_prepared_constant_value(program.modules, expression) ?? return None
-    constant :: jet_codegen_lower_comptime_value(value, program.modules, builder.function.module_identity, builder.generic_type_names) ?? return None
+    constant :: jet_codegen_lower_comptime_value(value, program.nominals, builder.function.module_identity, builder.generic_type_names) ?? return None
     Val(jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant}))
 }
 

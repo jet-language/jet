@@ -175,7 +175,9 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     merge :: lower_new_block(&f)
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return lower_fail(&m, &f, "try_map input has no stored value")
-    outcome :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, callback_result) ?? return
+    // The output or error moves out of the callback's Result by bytes.
+    called :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, callback_result) ?? return
+    outcome :: lower_box_owned(p, &m, &f, called, callback_result)
     selector :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: selector, base: outcome, offset: 0})
     succeeded :: lower_flag(&f)
@@ -208,10 +210,10 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 
 // These routes consume their receiver and moved callback. Owned reads from a
 // stable place must acquire their own value before an adapter drops it.
-fn lower_parallel_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+fn lower_parallel_stored_operands(p: MIRProgram, m: LowerModule, operation: MIROperation) -> [MIRValueID] Never! {
     stored := [MIRValueID]{}
     if operation == .Semantic(.ClosureMethod(receiver, args, call)) {
-        row :: lower_prelude_row(p, call) ?? return stored
+        row :: lower_prelude_row(p, m, call) ?? return stored
         symbol :: lower_runtime_symbol(row)
         if symbol != "jet_list_para_map" && symbol != "jet_list_try_map" && symbol != "jet_list_para_filter" && symbol != "jet_list_para_partition" && symbol != "jet_list_para_fold" -> return stored
         &stored.push(receiver)
@@ -232,6 +234,9 @@ fn lower_parallel_flags(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     if lower_task_stop_body(p, c, m, args[0].value) -> return lower_fail(&m, &f, "parallel predicate with a checked stop across native frames is not lowered at O0 yet")
     result_ty :: lower_checked_type(c, instruction) ?? return
     list :: lower_use(&m, &f, receiver) ?? return
+    // Items are moved out of the consumed List and their slots cleared: its
+    // buffer must not be shared (#5041 P2).
+    lower_list_make_unique(p, &m, &f, list, list_ty)
     closure :: lower_use(&m, &f, args[0].value) ?? return
     length :: lower_list_word(&f, list, 0)
     flags :: lower_list_buffer(&m, &f, length, 8)

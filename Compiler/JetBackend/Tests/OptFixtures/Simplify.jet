@@ -217,6 +217,22 @@ fn ofx_effects() -> Bool Never! {
     ofx_simplify(ofx_finish(&b, [LIRValueID]{ptr, value}, value), "  b0(v0: ptr drop(rt drop_fixture), v1: i64):\n    store v0+0, v1\n    call rt effect_fixture(): s1\n    drop v0\n    ret v1")
 }
 
+// lower_exact_arithmetic's merge after its inline tests folded: the folded
+// word is adopted into the owned Int parameter, which is dropped. The adopting
+// edge keeps its single-predecessor block; merging would alias the owner to
+// the trivial word and drop a value without drop glue.
+fn ofx_adopting_merge() -> Bool Never! {
+    b := ofx_builder("adopting-merge-kept")
+    x :: ofx_const(&b, 1)
+    y :: ofx_const(&b, 2)
+    sum :: ofx_binary(&b, LIRBinaryOp.Add, x, y)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{sum}}})
+    owned :: lir_builder_value(&b, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+    lir_builder_push(&b, LIRInst.Drop{value: owned})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{owned}, LIRTerminator.Return{value: None})
+    ofx_simplify(lir_builder_finish(b), "  b0():\n    v0: i64 = const 3\n    jmp b1(v0)\n  b1(v1: i64 drop(rt jet_rt_int_drop)):\n    drop v1\n    ret")
+}
+
 fn opt_fixtures_simplify() -> Bool Never! {
     passed := true
     if !ofx_fold("fold-add", LIRBinaryOp.Add, 7, 5, 12) -> passed = false
@@ -239,5 +255,6 @@ fn opt_fixtures_simplify() -> Bool Never! {
     if !ofx_dead_params() -> passed = false
     if !ofx_thread_param_read() -> passed = false
     if !ofx_effects() -> passed = false
+    if !ofx_adopting_merge() -> passed = false
     passed
 }

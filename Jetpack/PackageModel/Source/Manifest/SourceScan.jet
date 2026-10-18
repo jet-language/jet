@@ -19,7 +19,7 @@ fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
         masked :: pkg_mask_inline_package_source(text) ?? return None
         lexed :: lex(masked.source.bytes())
         if lexed.diagnostics.len() > 0 -> return None
-        parsed :: parse_lexed(lexed)
+        parsed :: parse_lexed(^lexed)
         if parsed.diagnostics.len() > 0 -> return None
         &out.push(ParsedSource{path: file.path, program: parsed.program})
     }
@@ -331,7 +331,7 @@ fn pkg_real_build_entry_lines(source: String, candidates: [Int]) -> [Int]? Never
     text :: masked.source
     lexed :: lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return None
-    parsed :: parse_lexed(lexed)
+    parsed :: parse_lexed(^lexed)
     real := [Int]{}
     loop item in parsed.program.items {
         if item == .Func(function) {

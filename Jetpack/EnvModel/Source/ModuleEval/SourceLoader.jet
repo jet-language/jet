@@ -125,7 +125,8 @@ fn envmodel_normalize_relative_path(path: String) -> String Never! {
 // The module declaration an item holds, if it is one.
 fn envmodel_module_decl(item: Item) -> ModuleDecl? Never! {
     if item == {
-        .Module(found) -> Val(found)
+        // copy: `found` is a payload of read parameter `item`, which keeps the original; the Val carrier owns this one
+        .Module(found) -> Val(found.copy())
         else -> None
     }
 }
@@ -206,7 +207,8 @@ fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: String, 
 // non-literal (interpolated) argument — is E0969.
 fn envmodel_find_dir_arg(directive: Expr) -> String EnvModelEvalError! {
     call :: if directive == {
-        .Call(call) -> call
+        // copy: `call` is a payload of read parameter `directive`, which keeps the original; the assigned `call` owns this one
+        .Call(call) -> call.copy()
         else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
     }
     if call.name != BUILTIN_FIND || call.args.len() != 1 -> return Err(envmodel_bad_import_directive(expr_span(directive)))

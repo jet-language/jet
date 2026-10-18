@@ -1,0 +1,12 @@
+// `^` on a read parameter has no storage to give up: E0201, never a copy.
+struct Bag {
+    items: [String]
+}
+
+fn keep(bag: ^Bag) -> Int { bag.items.len() }
+
+fn forward(bag: Bag) -> Int {
+    keep(^bag)
+}
+
+fn run() { print(forward(Bag{items: [String]{"one"}})) }

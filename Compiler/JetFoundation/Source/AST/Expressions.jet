@@ -29,7 +29,7 @@ enum Expr {
     Place(value: Expr, access: PlaceAccess, span: Span)
     Field(base: Expr, member: String, span: Span)
     OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span)
-    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, operator_rhs: Type?, checked_widen: Bool, checked_callee: String?)
+    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?)
     OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span)
     StructLit(type_name: String, type_args: [Type], import_ns: String?, as_trait: String?, fields: [ExprField], inferred: Bool, span: Span)
     TypedLit(head: Type?, body: TypedLitBody, span: Span)
@@ -110,8 +110,6 @@ struct CallLabel {
 }
 
 struct CallArgFlags {
-    implicit_clone: Bool
-    shared_auto_clone: Bool
     owned_last_use: Bool
     shared_access_desugar: Bool
     is_trailing_block: Bool
@@ -130,6 +128,10 @@ struct CallArgFlags {
     callable_policy: CallablePolicyChain?
     authority_boundary: Bool
     arithmetic_policy: ArithmeticPolicyFact?
+    // The operand of `shared <expr>`: its Move convention is the cell's own
+    // ownership, not a written `^`, so a bare name there is an unmarked
+    // owning position (Calls/Static.jet).
+    shared_operand: Bool{false}
 }
 
 struct BinderRef {
@@ -208,8 +210,6 @@ enum StrPart {
 }
 fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
     CallArgFlags{
-        implicit_clone: false,
-        shared_auto_clone: false,
         owned_last_use: false,
         shared_access_desugar: false,
         is_trailing_block: false,
@@ -475,7 +475,7 @@ struct DerivationRef {
 // S71 / D-SUGAR6: the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
 fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
-    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None}
 }
 
 fn expr_span(expr: Expr) -> Span {
@@ -507,7 +507,7 @@ fn expr_span(expr: Expr) -> Span {
         .Place(_, _, span) -> return span
         .Field(_, _, span) -> return span
         .OptField(_, _, _, _, span) -> return span
-        .MethodCall(_, _, method_span, _, _, _, _, _, _, _, _) -> return method_span
+        .MethodCall(_, _, method_span, _, _, _, _, _) -> return method_span
         .OptMethodCall(_, _, method_span, _, _, _) -> return method_span
         .StructLit(_, _, _, _, _, _, span) -> return span
         .TypedLit(_, _, span) -> return span

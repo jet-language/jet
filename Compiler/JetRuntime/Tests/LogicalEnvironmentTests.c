@@ -12,12 +12,10 @@ extern int64_t jet_rt_logical_env_get_os(Text *, unsigned char **, int64_t *);
 extern int64_t jet_rt_logical_env_set(Text *, Text *);
 extern int64_t jet_rt_logical_env_unset(Text *);
 extern void jet_rt_free(void *, int64_t, int64_t);
+extern void jet_rt_string_drop(Text *);
 
 static Text text(const char *s) { return (Text){(unsigned char *)s, (int64_t)strlen(s), 0}; }
-static void drop_text(Text *t) {
-    if (t->cap) jet_rt_free(t->ptr, t->cap, 1);
-    jet_rt_free(t, 24, 8);
-}
+static void drop_text(Text *t) { jet_rt_string_drop(t); }
 static void strict(Text *key, const char *expected) {
     Text *actual = jet_rt_logical_env_get(key);
     assert(actual && actual->len == (int64_t)strlen(expected));

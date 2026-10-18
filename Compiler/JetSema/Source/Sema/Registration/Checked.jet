@@ -93,6 +93,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
 ]
+use jet_parser.parser_guest_import_symbol
 
 fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
@@ -1557,7 +1558,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
 // declaration lowers as a foreign C call of the marker's symbol; the
 // declaration itself has no Jet body and no TFunc.
 fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
-    symbol :: sema_guest_import_symbol(registered.declaration) ?? return None
+    symbol :: parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
     params :: sema_checked_foreign_params(graph, module_identity, registered.parameters)
     // The failure solve projects an unannotated import onto `T Never!` (a C
@@ -2421,15 +2422,15 @@ fn sema_checked_item_span(item: Item) -> Span Never! {
 fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], active: &[String:Bool]) -> (reaches: Bool, cut: Bool) Never! {
     if ty == {
         .Named(_) -> {
-            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (reaches: false, cut: false)
+            row :: sema_type_resolve_nominal_row(graph, ty, caller) ?? return (cut: false, reaches: false)
             key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
             // Two single-level matches read the declaration in place; a nested
             // `.SourceAST(.Struct(definition))` pattern clones the whole Item.
             if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                 if item == .Struct(definition) {
-                    if key == owner -> return (reaches: true, cut: false)
-                    if memo.get(key) == .Val(known) -> return (reaches: known, cut: false)
-                    if active.get(key) == (Val(true)) -> return (reaches: false, cut: true)
+                    if key == owner -> return (cut: false, reaches: true)
+                    if memo.get(key) == .Val(known) -> return (cut: false, reaches: known)
+                    if active.get(key) == (Val(true)) -> return (cut: true, reaches: false)
                     active[key] = true
                     reaches := false
                     cut := false
@@ -2447,38 +2448,38 @@ fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, call
                     // A negative reached through an active cycle is provisional:
                     // a later sibling may reach the owner. Never memoize that cut.
                     if reaches || !cut -> memo[key] = reaches
-                    return (reaches: reaches, cut: cut)
+                    return (cut: cut, reaches: reaches)
                 }
             }
-            (reaches: false, cut: false)
+            (cut: false, reaches: false)
         }
         .Shared(inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_reaches(graph, owner, caller, inner, &memo, &active)
         .Map(first, _, second) | .Result(first, second) -> {
             left :: sema_checked_shared_reaches(graph, owner, caller, first, &memo, &active)
             if left.reaches -> return left
             right :: sema_checked_shared_reaches(graph, owner, caller, second, &memo, &active)
-            (reaches: right.reaches, cut: left.cut || right.cut)
+            (cut: left.cut || right.cut, reaches: right.reaches)
         }
         .Tuple(fields) -> {
             cut := false
             loop field in fields {
                 result :: sema_checked_shared_reaches(graph, owner, caller, field.ty, &memo, &active)
                 cut = cut || result.cut
-                if result.reaches -> return (reaches: true, cut: cut)
+                if result.reaches -> return (cut: cut, reaches: true)
             }
-            (reaches: false, cut: cut)
+            (cut: cut, reaches: false)
         }
         .Union(members) | .Apply(_, members) -> {
-            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (reaches: false, cut: false)
+            if ty == .Apply(name, _) && name == "Shared.Weak" -> return (cut: false, reaches: false)
             cut := false
             loop member in members {
                 result :: sema_checked_shared_reaches(graph, owner, caller, member, &memo, &active)
                 cut = cut || result.cut
-                if result.reaches -> return (reaches: true, cut: cut)
+                if result.reaches -> return (cut: cut, reaches: true)
             }
-            (reaches: false, cut: cut)
+            (cut: cut, reaches: false)
         }
-        else -> (reaches: false, cut: false)
+        else -> (cut: false, reaches: false)
     }
 }
 
@@ -2830,12 +2831,14 @@ fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrat
 fn sema_checked_trait_nominal_row(graph: SemaRegistrationGraph, module_identity: String, trait_name: String) -> SemaRegistrationRowRef? {
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, trait_name) ?? return None
     if resolved.symbol.kind != SymbolKind.Trait -> return None
-    sema_type_graph_nominal_row(graph, resolved.symbol.id.key)
+    sema_type_graph_resolved_nominal_row(graph, resolved)
 }
 
 fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, implementation: SemaRegistrationImpl, diagnostics: &[Diagnostic]) {
     trait_name :: implementation.trait_name ?? return
-    bound :: sema_type_bound_satisfied(graph, implementation.target_type, trait_name, module_row.module_identity)
+    // A generated codec is its own type's codec: asking the bound would only
+    // demand its body (sema_codec_demand_type) for no use.
+    bound :: if implementation.declaration.is_generated_serde -> Bool?{Val(true)} else -> sema_type_bound_satisfied(graph, implementation.target_type, trait_name, module_row.module_identity)
     if bound == {
         .Val(bound_value) -> {
             if !bound_value {
@@ -3509,7 +3512,7 @@ fn sema_checked_module_literal(value: Expr) -> Bool Never! {
             true
         }
         .Field(_, _, _) -> sema_checked_module_type_path(value)
-        .MethodCall(receiver, method, _, _, type_args, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, type_args, args, _, _) -> {
             if type_args.len() != 0 || !sema_checked_module_uppercase(method) || !sema_checked_module_type_path(receiver) -> return false
             loop argument in args {
                 if !sema_checked_module_literal(argument.expr) -> return false

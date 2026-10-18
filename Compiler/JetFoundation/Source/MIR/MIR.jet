@@ -1977,6 +1977,44 @@ fn mir_call_value_consumption(args: [MIRCallArg], value: MIRValueID) -> MIRValue
     MIRValueConsumption.No
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::partial_move_remainder_drops
+// The remainder drops among `candidates`, the results of whole-owner
+// MovePlaces (the caller resolves places through its own index): a result
+// whose every user is a releasing Drop. Such a move is an owner's scope-end
+// cleanup; after a field of the owner moved out it releases only the fields
+// still in place, so it reads none of the moved ones. Legality, MIR Lint and
+// last-use selection share this one classification.
+fn mir_remainder_drop_results(blocks: [MIRBasicBlock], candidates: [U64]) -> [U64:Bool] Never! {
+    remainder := [U64:Bool]{}
+    if candidates.len() == 0 -> return remainder
+    // 0: no user seen yet; 1: every user so far is a releasing Drop; 2: another user.
+    states := [U64:Int]{}
+    loop candidate in candidates -> states[candidate] = 0
+    loop block in blocks {
+        loop instruction in block.instructions {
+            released := MIRValueID?{None}
+            if instruction.operation == .Drop(dropped, kind) {
+                if kind != .NoDrop -> released = Val(dropped)
+            }
+            loop value in mir_operation_value_uses(instruction.operation) {
+                state :: states.get(value.value) ?? next
+                if state == 2 -> next
+                drop_only :: if released == .Val(dropped_value) -> dropped_value == value else -> false
+                states[value.value] = if drop_only -> 1 else -> 2
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) {
+            if states.get(value.value) != None -> states[value.value] = 2
+        }
+    }
+    loop candidate in candidates {
+        if states.get(candidate) == .Val(state) {
+            if state == 1 -> remainder[candidate] = true
+        }
+    }
+    remainder
+}
+
 // `borrow_mask` is the checked route's receiver-first borrow mask;
 // callers resolve it once per instruction, never invent access from a name.
 // Only these operation shapes use checked positional masks for consumption.
@@ -3867,7 +3905,8 @@ fn mir_c_void(ty: MIRType) -> Bool Never! {
 fn mir_c_export_result(function: MIRFunction) -> MIRType? {
     if function.failure == {
         .Infallible -> Val(function.return_type)
-        .Result(success, _) -> Val(success)
+        // copy: `success` is a payload of read parameter `function`, which keeps the original; the Val carrier owns this one
+        .Result(success, _) -> Val(success.copy())
         else -> None
     }
 }

@@ -634,7 +634,7 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     parser_literal_close_terminators(&state)
     close := parser_expect(&state, TOKEN_RBRACE, "`}}` to close a typed literal")
     span := parser_cover(start, close.span)
-    ParsedExpr{expr: Expr.TypedLit{head: head, body: body, span: span}, span: span}
+    ParsedExpr{expr: Expr.TypedLit{head: head, body: ^body, span: span}, span: span}
 }
 
 fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedExpr? {
@@ -678,9 +678,11 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         parser_bump(&state)
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span :: parser_cover(token.span, operand.span)
-        argument :: CallArg{convention: AccessConvention.Move, expr: operand.expr, span: operand.span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        flags := ast_empty_call_arg_flags()
+        flags.shared_operand = true
+        argument :: CallArg{convention: AccessConvention.Move, expr: operand.expr, span: operand.span, flags: flags, label: None, spread: false}
         return ParsedExpr{
-            expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: token.span}, method: "new", method_span: token.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
+            expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: token.span}, method: "new", method_span: token.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None},
             span: span,
         }
     }
@@ -786,7 +788,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         args :: if parser_current_kind(&state) == TOKEN_LPAREN -> parser_parse_call_args(&state, depth + 1, false) else -> [CallArg]{}
         span :: parser_cover(token.span, parser_lookahead(&state, -1).span)
         return ParsedExpr{
-            expr: Expr.MethodCall{receiver: Expr.Ident{name: "", span: token.span}, method: "new", method_span: method.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
+            expr: Expr.MethodCall{receiver: Expr.Ident{name: "", span: token.span}, method: "new", method_span: method.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, recv_type: None, resolved_ret: None},
             span: span,
         }
     }
@@ -992,7 +994,7 @@ fn parser_parse_interpolation(state: &JetParserState, part: StringPart, depth: I
         &parts.push(StrPart.Lit{text: label})
         &parts.push(StrPart.Lit{text: " = "})
     }
-    &parts.push(StrPart.Interp{expr: value.expr, format: format})
+    &parts.push(StrPart.Interp{expr: value.expr, format: ^format})
 }
 
 // Rust's debug-label spelling of one token, or "" when the token cannot
@@ -1349,7 +1351,7 @@ fn parser_parse_lambda_arrow_body(state: &JetParserState, depth: Int, fallback_e
         right :: parser_parse_expression(&state, 1, depth + 1)
         target :: parser_expression_lvalue(&state, value.expr, value.span, operator)
         end :: if right.span.end > fallback_end -> right.span.end else -> fallback_end
-        return ParsedLambdaBody{body: LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}, end: end}
+        return ParsedLambdaBody{body: LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: ^target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}, end: end}
     }
     end :: if value.span.end > fallback_end -> value.span.end else -> fallback_end
     ParsedLambdaBody{body: LambdaBody.Expr{value: value.expr}, end: end}
@@ -1402,7 +1404,7 @@ fn parser_parse_member_spread(state: &JetParserState, base: ParsedExpr) -> Parse
     }
     close :: parser_expect(&state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
     span :: parser_cover(base.span, close.span)
-    ParsedExpr{expr: Expr.MemberSpread{base: base.expr, members: members, span: span}, span: span}
+    ParsedExpr{expr: Expr.MemberSpread{base: base.expr, members: ^members, span: span}, span: span}
 }
 
 fn parser_report_member_spread_entry(state: &JetParserState) {
@@ -1419,7 +1421,7 @@ fn parser_task_internal(name: String) -> String Never! {
 }
 
 fn parser_task_call(head: Span, method: String, method_span: Span, argument: Expr, argument_span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: parser_task_internal("task"), span: head}, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+    Expr.MethodCall{receiver: Expr.Ident{name: parser_task_internal("task"), span: head}, method: parser_task_internal(method), method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: argument, span: argument_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}, recv_type: None, resolved_ret: None}
 }
 
 fn parser_task_spawn(head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
@@ -1510,7 +1512,7 @@ fn parser_parse_task_surface(state: &JetParserState, depth: Int) -> ParsedExpr {
     if parser_current_kind(&state) != TOKEN_LBRACE {
         value :: parser_parse_expression(&state, 1, depth + 1)
         span :: parser_cover(head, value.span)
-        return ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Expr{value: value.expr}, value.span), span: span}
+        return ParsedExpr{expr: parser_task_spawn(head, take_names, LambdaBody.Expr{value: value.expr}, value.span), span: ^span}
     }
     // A brace body holding one tail expression folds into an expression
     // body, so every tier sees one task-value shape.
@@ -1593,7 +1595,7 @@ fn parser_literal_head_path(expr: Expr) -> String Never! {
 fn parser_is_adjacent_call_result(expr: Expr) -> Bool Never! {
     if expr == {
         .Paren(inner, _) -> parser_is_adjacent_call_result(inner)
-        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> true
+        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -1680,7 +1682,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     // `new` (Rust `member_span`) and keep the method call.
                     if method == "new" && parser_literal_head_path(receiver) == "Shared" -> parser_add_error_code(&state, "E1115", Span{start: method_span.end - method.len(), end: method_span.end}, "`Shared.new(…)` is the retired shared-cell constructor.", "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page.", "Write `shared <value>` instead of `Shared.new(<value>)`.")
                     expression = ParsedExpr{
-                        expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None},
+                        expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None},
                         span: span,
                     }
                 }
@@ -1690,7 +1692,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                         span: span,
                     }
                 }
-                else -> expression = ParsedExpr{expr: Expr.CallValue{callee: expression.expr, args: args, span: span}, span: span}
+                else -> expression = ParsedExpr{expr: Expr.CallValue{callee: expression.expr, args: ^args, span: span}, span: span}
             }
             owner_type_args = [Type]{}
             call_type_args = [Type]{}
@@ -1748,7 +1750,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 }
                 selector_close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after an index")
                 selector_span :: parser_cover(open.span, selector_close.span)
-                expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: selector, span: selector_span, kind: IndexKind.Unknown}, span: selector_span}
+                expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: ^selector, span: selector_span, kind: IndexKind.Unknown}, span: selector_span}
                 next
             }
             index :: parser_parse_expression(&state, 1, depth + 1)
@@ -1935,7 +1937,7 @@ fn parser_retired_step_place(operand: Expr) -> String? {
 // receives rather than to the chain.
 fn parser_contains_method_call(expr: Expr) -> Bool Never! {
     if expr == {
-        .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> return true
+        .MethodCall(_, _, _, _, _, _, _, _) -> return true
         .Field(base, _, _) -> return parser_contains_method_call(base)
         .Index(base, _, _, _) -> return parser_contains_method_call(base)
         .Slice(base, _, _, _, _) -> return parser_contains_method_call(base)
@@ -1948,8 +1950,8 @@ fn parser_contains_method_call(expr: Expr) -> Bool Never! {
 // `buf` for `grow`, and `&values[0..1]` marks the whole range place.
 fn parser_mark_maximal_place(expr: Expr, access: PlaceAccess, mark: Span) -> Expr {
     if expr == {
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, checked_callee) -> {
-            return Expr.MethodCall{receiver: parser_mark_maximal_place(receiver, access, mark), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: checked_callee}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
+            return Expr.MethodCall{receiver: parser_mark_maximal_place(receiver, access, mark), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, recv_type: recv_type, resolved_ret: resolved_ret}
         }
         .Field(base, member, span) -> {
             if parser_contains_method_call(base) -> return Expr.Field{base: parser_mark_maximal_place(base, access, mark), member: member, span: span}
@@ -1963,7 +1965,7 @@ fn parser_mark_maximal_place(expr: Expr, access: PlaceAccess, mark: Span) -> Exp
         else -> {}
     }
     span :: parser_cover(mark, expr_span(expr))
-    Expr.Place{value: expr, access: access, span: span}
+    Expr.Place{value: expr, access: access, span: ^span}
 }
 
 fn parser_call_access_prefix(state: &JetParserState) -> AccessConvention Never! {
@@ -2019,7 +2021,7 @@ fn parser_parse_call_args(state: &JetParserState, depth: Int, allow_marker_label
                 marked :: parser_mark_maximal_place(argument.expr, access, mark_span)
                 &args.push(CallArg{convention: AccessConvention.Read, expr: marked, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread})
             } else {
-                &args.push(CallArg{convention: convention, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: label, spread: spread})
+                &args.push(CallArg{convention: ^convention, expr: argument.expr, span: argument_span, flags: ast_empty_call_arg_flags(), label: ^label, spread: spread})
             }
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
             if parser_current_kind(&state) != TOKEN_COMMA {

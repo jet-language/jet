@@ -188,7 +188,7 @@ fn store_reuse_projection_list(roots: HangarRoots, producer: ProducerRecord, log
     logicals :: store_sorted_keys(logical_digests)
     loop logical in logicals {
         digest :: logical_digests[logical]
-        primary :: primary_logical == Val(logical)
+        primary :: primary_logical == Val((logical))
         source :: if primary -> snapshot_root else -> store_reuse_hangar_projection_object(roots, digest, logical)
         &projection.push(NixStoreProjection{logical: logical, digest: digest, primary: primary, source: source})
     }

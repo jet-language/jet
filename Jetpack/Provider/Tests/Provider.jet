@@ -760,7 +760,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     cargo :: files.join(base, "toolchain/cargo")
     provider_core_test_write(cargo, "#!/bin/sh\nmkdir -p \"$CARGO_TARGET_DIR/release\"\nprintf 'PINNED-RLIB-BYTES' > \"$CARGO_TARGET_DIR/release/libmath.rlib\"\nexit 0\n")
     files.set_mode(cargo, 0o755) ?? panic("executable cargo")
-    toolchain :: BuildToolchain{cargo, id: "toolchain-test", version: "9.9.9", pinned: true, ring_artifacts: [String: String]{}}
+    toolchain :: CargoToolchain{cargo, id: "toolchain-test", version: "9.9.9", pinned: true, ring_artifacts: [String: String]{}}
     hangar :: files.join(base, "hangar")
     files.create_dir_all(hangar) ?? panic("hangar")
     pkg :: files.join(base, "pkg")

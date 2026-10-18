@@ -616,9 +616,9 @@ fn pkg_ref_provider_first(provider: String, target: String, raw: String) -> RefE
 // Split `source#selector`. `empty_half` reports a present `#` with an empty
 // side, which every ref classifier rejects.
 fn pkg_ref_split_selector(text: String) -> (source: String, selector: String?, empty_half: Bool) Never! {
-    parts :: text.split_once(REF_CHANNEL_MARKER) ?? return (source: text, selector: None, empty_half: false)
+    parts :: text.split_once(REF_CHANNEL_MARKER) ?? return (empty_half: false, selector: None, source: text)
     empty_half :: parts.before == "" || parts.after == ""
-    (source: parts.before, selector: Val(parts.after), empty_half: empty_half)
+    (empty_half: empty_half, selector: Val(parts.after), source: parts.before)
 }
 
 // Up to three closest labels to `query` by edit distance, for a did-you-mean
@@ -767,14 +767,14 @@ struct ProviderRef {
     // (automatic vs manual movement), another channel selector moves manually,
     // and an exact selector stays part of the pinned target.
     fn track(target: String, selector: String?) -> (target: String, channel: ChannelRef?, policy: ChannelPolicy) Never! {
-        value :: selector ?? return (target: target, channel: None, policy: ChannelPolicy.Pinned)
+        value :: selector ?? return (channel: None, policy: ChannelPolicy.Pinned, target: target)
         if value == {
-            REF_CHANNEL_AUTO -> (target: target, channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic)
-            REF_CHANNEL_LATEST -> (target: target, channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual)
+            REF_CHANNEL_AUTO -> (channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Automatic, target: target)
+            REF_CHANNEL_LATEST -> (channel: Val(ChannelRef.Latest), policy: ChannelPolicy.Manual, target: target)
             else -> {
                 if ChannelRef.parse_selector(value) == {
-                    .Val(channel) -> (target: target, channel: Val(channel), policy: ChannelPolicy.Manual)
-                    .None -> (target: "{target}{REF_CHANNEL_MARKER}{value}", channel: None, policy: ChannelPolicy.Pinned)
+                    .Val(channel) -> (channel: Val(channel), policy: ChannelPolicy.Manual, target: target)
+                    .None -> (channel: None, policy: ChannelPolicy.Pinned, target: "{target}{REF_CHANNEL_MARKER}{value}")
                 }
             }
         }

@@ -185,7 +185,7 @@ fn run() {
 "#;
 
 const PACKAGE_EDITION_MANIFEST: &str =
-    "name: \"tir_eval_edition\"\nversion: \"0.1.0\"\nedition: \"2027\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Panic] } }\n";
+    "name: \"tir_eval_edition\"\nversion: \"0.1.0\"\nedition: \"2027\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n";
 
 #[test]
 fn package_edition_survives_tir_eval_worker() {

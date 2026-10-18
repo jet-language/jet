@@ -41,7 +41,7 @@ static void watch(void *p,int64_t size,int64_t align) {
     assert(count<64);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
     watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch(t,24,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_error(Error *e) {
     watch(e,24,8);Fault *f=e->fault;watch(f,24,8);watch_text(f->export_name);watch_text(f->message);
     Frames *s=f->frames;watch(s,24,8);if(s->capacity) watch(s->data,s->capacity*24,8);

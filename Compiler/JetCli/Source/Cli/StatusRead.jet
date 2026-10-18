@@ -75,22 +75,31 @@ fn jet_cli_status_get(value: JetCLIStatusValue, name: String) -> JetCLIStatusVal
 }
 
 fn jet_cli_status_string(value: JetCLIStatusValue?) -> String? Never! {
-    if value == .Val(.Text(text)) -> return Val(text)
+    if value == .Val(status) {
+        if status == .Text(text) -> return Val(text)
+    }
     None
 }
 
 fn jet_cli_status_integer(value: JetCLIStatusValue?) -> Int? Never! {
-    if value == .Val(.Integer(number)) -> return Val(number)
+    if value == .Val(status) {
+        if status == .Integer(number) -> return Val(number)
+    }
     None
 }
 
 fn jet_cli_status_boolean(value: JetCLIStatusValue?) -> Bool? Never! {
-    if value == .Val(.Bool(flag)) -> return Val(flag)
+    if value == .Val(status) {
+        if status == .Bool(flag) -> return Val(flag)
+    }
     None
 }
 
 fn jet_cli_status_list(value: JetCLIStatusValue?) -> [JetCLIStatusValue]? Never! {
-    if value == .Val(.Array(items)) -> return Val(items)
+    if value == .Val(status) {
+        // copy: `items` is a payload of read parameter `value`, which keeps the original; the returned Option owns this one
+        if status == .Array(items) -> return Val(items.copy())
+    }
     None
 }
 

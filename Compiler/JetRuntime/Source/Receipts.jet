@@ -73,7 +73,7 @@ fn receipt_append_text(target: I64, text: I64) {
 #Export(c) fn jet_rt_record_get_jet_db_pool_receipt_replacements(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_REPLACEMENTS)) }
 #Export(c) fn jet_rt_record_get_jet_db_pool_receipt_replacement_failures(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DB_RECEIPT_REPLACEMENT_FAILURES)) }
 fn db_receipt_render(value: I64) -> I64 {
-    target :: rt_text_builder(I64{256})
+    target :: rt_text_builder_with_capacity(I64{256})
     rt_text_push_word(target, I64{2336364831112585828}, I64{8}) // db.pool lifecycle=
     rt_text_push_word(target, I64{7810219646600505708}, I64{8})
     rt_text_push_word(target, I64{15717}, I64{2})
@@ -150,7 +150,7 @@ fn delivery_state_label(target: I64, ordinal: I64) {
     }
 }
 #Export(c) fn jet_rt_handle_show_jet_delivery_state(value: I64) -> I64 {
-    target :: rt_text_builder(I64{12})
+    target :: rt_text_builder_with_capacity(I64{12})
     delivery_state_label(target, encoding_word(value))
     target
 }
@@ -223,7 +223,7 @@ fn delivery_state_label(target: I64, ordinal: I64) {
 #Export(c) fn jet_rt_record_get_jet_delivery_receipt_generation(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + DELIVERY_RECEIPT_GENERATION)) }
 #Export(c) fn jet_rt_record_get_jet_delivery_receipt_signature(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + DELIVERY_RECEIPT_SIGNATURE)) }
 #Export(c) fn jet_rt_handle_show_jet_delivery_receipt(value: I64) -> I64 {
-    target :: rt_text_builder(I64{256})
+    target :: rt_text_builder_with_capacity(I64{256})
     rt_text_push_word(target, I64{8751168585183552836}, I64{8}) // DeliveryReceipt(id=
     rt_text_push_word(target, I64{2915078456790443346}, I64{8})
     rt_text_push_word(target, I64{4023401}, I64{3})

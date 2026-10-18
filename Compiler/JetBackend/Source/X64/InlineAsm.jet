@@ -159,6 +159,21 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             s.written[1] = true
             s.written[11] = true
         }
+    } else if mnemonic == "cld" || mnemonic == "std" {
+        // The direction flag of a string move; System V requires it clear at
+        // every call and return, so a template that sets it clears it again.
+        if rest != "" -> return Val("instruction takes no operands")
+        x64_byte(&s.code, if mnemonic == "cld" -> 0xfc else -> 0xfd)
+    } else if mnemonic == "rep" {
+        // String moves only: rcx counts, rsi reads and rdi writes, all three
+        // advance; the template's #Unsafe contract owns both ranges.
+        if rest != "movsb" && rest != "movsq" -> return Val("unsupported rep instruction")
+        x64_byte(&s.code, 0xf3)
+        if rest == "movsq" -> x64_byte(&s.code, 0x48)
+        x64_byte(&s.code, if rest == "movsb" -> 0xa4 else -> 0xa5)
+        s.written[1] = true
+        s.written[6] = true
+        s.written[7] = true
     } else if mnemonic == "mov" || mnemonic == "movzx" {
         if operands.len() != 2 -> return Val("expected two operands")
         dst :: x64_asm_reg(s, first, false)

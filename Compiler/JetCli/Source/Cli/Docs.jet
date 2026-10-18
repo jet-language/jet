@@ -253,9 +253,13 @@ fn jet_cli_doc_stable_path(path: String) -> String Never! {
 
 // Docs.rs `module_name`: the alias, else the file stem.
 fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
+    // copy: `alias` stays with the caller (`alias` is a read parameter: no move out of it, E0201)
+    // and the new value owns its own.
     if alias != "" -> return alias.copy()
     parts :: path.split("/").to_list()
     file :: parts[parts.len() - 1]
+    // copy: `path` stays with the caller (`path` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if file == "" || file == "." || file == ".." -> return path.copy()
     bytes :: file.bytes()
     dot := -1
@@ -267,6 +271,8 @@ fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
 }
 
 fn jet_cli_doc_qualified(parent: String, name: String) -> String Never! {
+    // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if parent == "" -> return name.copy()
     "{parent}::{name}"
 }
@@ -452,10 +458,14 @@ fn jet_cli_doc_callable_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCL
     None
 }
 
-// The first semindex distinct nominal definition that documents `item`.
-fn jet_cli_doc_nominal_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemDefinition? Never! {
+// The trait contracts of the first semindex distinct nominal definition that
+// documents `item`, each rendered on its own line.
+fn jet_cli_doc_nominal_contracts(index: JetCLISemIndex, item: JetCLIDocItem) -> String? Never! {
     loop definition in index.definitions {
-        if definition.def.name == item.name && definition.nominal_base != None && jet_cli_doc_belongs(definition.def, item) -> return Val(definition.copy())
+        if definition.def.name != item.name || definition.nominal_base == None || !jet_cli_doc_belongs(definition.def, item) -> next
+        rendered := ""
+        loop contract in definition.trait_contracts -> rendered = "{rendered}\n{jet_cli_doc_trait_contract(contract)}"
+        return Val(rendered)
     }
     None
 }
@@ -474,10 +484,10 @@ fn jet_cli_doc_trait_contract(contract: JetCLISemTraitContract) -> String Never!
     lines.join("\n")
 }
 
-// The checked module whose stable path is `path`.
-fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> JetDriverDocModule? Never! {
-    loop candidate in modules {
-        if jet_cli_doc_stable_path(candidate.path) == path -> return Val(candidate.copy())
+// The position of the checked module whose stable path is `path`.
+fn jet_cli_doc_module_position(modules: [JetDriverDocModule], path: String) -> Int? Never! {
+    loop (position, candidate) in modules {
+        if jet_cli_doc_stable_path(candidate.path) == path -> return Val(position)
     }
     None
 }
@@ -485,24 +495,21 @@ fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> JetDriv
 // Docs.rs `enrich_callable_contracts` and `enrich_type_contracts`.
 fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
     loop item_index in 0..<items.len() {
-        item :: items[item_index].copy()
-        if item.kind == "function" {
-            callable :: jet_cli_doc_callable_for(index, item) ?? next
+        if items[item_index].kind == "function" {
+            callable :: jet_cli_doc_callable_for(index, items[item_index]) ?? next
             if !callable.signature_facts_available -> next
             failure :: jet_cli_sem_failure_contract_name(callable)
             source :: jet_cli_sem_failure_source_name(callable)
+            signature := "{items[item_index].signature}\nfailure: unavailable"
+            if failure == .Val(failure_name) {
+                if source == .Val(source_name) -> signature = "{items[item_index].signature}\nfailure: {failure_name} ({source_name})"
+            }
             items[item_index].failure_contract = failure
             items[item_index].failure_source = source
-            signature := "{item.signature}\nfailure: unavailable"
-            if failure == .Val(failure_name) {
-                if source == .Val(source_name) -> signature = "{item.signature}\nfailure: {failure_name} ({source_name})"
-            }
             items[item_index].signature = signature
-        } else if item.kind == "distinct" {
-            found :: jet_cli_doc_nominal_for(index, item) ?? next
-            signature := item.signature
-            loop contract in found.trait_contracts -> signature = "{signature}\n{jet_cli_doc_trait_contract(contract)}"
-            items[item_index].signature = signature
+        } else if items[item_index].kind == "distinct" {
+            contracts :: jet_cli_doc_nominal_contracts(index, items[item_index]) ?? next
+            items[item_index].signature = "{items[item_index].signature}{contracts}"
         }
     }
 }

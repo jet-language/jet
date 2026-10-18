@@ -47,7 +47,7 @@ static void expect(IP *ip, const char *expected) {
     assert(text->length == (int64_t)strlen(expected));
     assert(memcmp(text->data, expected, (size_t)text->length) == 0);
     assert(memcmp(ip, &saved, sizeof saved) == 0);
-    watch(text, 24, 8);
+    watch((char *)(text)-8, 32, 8);
     if (text->capacity) watch(text->data, text->capacity, 1);
     unsigned before = intercepted;
     jet_rt_string_drop(text);
@@ -60,7 +60,7 @@ static void address_case(int64_t family, const unsigned char octets[16], const c
     IP *copy = jet_rt_handle_clone_jet_ip_addr(ip);
     assert(ip != copy && jet_rt_handle_eq_jet_ip_addr(ip, copy));
     expect(ip, expected); expect(copy, expected);
-    watch(ip, 24, 8); watch(copy, 24, 8);
+    watch((char *)(ip)-8, 32, 8); watch((char *)(copy)-8, 32, 8);
     unsigned before = intercepted;
     jet_rt_handle_drop_jet_ip_addr(ip); jet_rt_handle_drop_jet_ip_addr(copy);
     done(before);

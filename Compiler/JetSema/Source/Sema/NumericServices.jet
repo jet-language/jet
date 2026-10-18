@@ -66,6 +66,9 @@ fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
 }
 
 fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
+    // copy: the observed access is a new owned Option. With nothing observed it equals `access`,
+    // the caller's host-hook access (a read parameter), which the caller keeps for its other body
+    // checks.
     if observed == None -> return access.copy()
     row :: access ?? return None
     Val(if row == {
@@ -93,8 +96,7 @@ fn sema_body_check_mark_foreign_raw_body(access: SemaHostHookAccess?) {
 
 fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
     hooks :: sema_host_hook_callbacks(access) ?? return SemaNumericUnitConversionProof.Unavailable
-    callback_option :: hooks.numeric_unit_conversion_exact
-    callback :: callback_option ?? return SemaNumericUnitConversionProof.Unavailable
+    callback :: hooks.numeric_unit_conversion_exact ?? return SemaNumericUnitConversionProof.Unavailable
     result :: callback(value, "{scale.numerator}", "{scale.denominator}", "{offset.numerator}", "{offset.denominator}") ?? return SemaNumericUnitConversionProof.Inexact
     SemaNumericUnitConversionProof.Exact{value: result}
 }

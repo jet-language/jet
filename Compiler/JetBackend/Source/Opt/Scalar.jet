@@ -218,6 +218,9 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                         // Memory held a snapshot even if its source was later
                         // moved/dropped. Retain that separate trivial lifetime.
                         if consumed[value.value] {
+                            // copy: opt_scalar_value writes `&function` (values are appended) while
+                            // it reads the sampled value, so a view into function.values would be
+                            // live across that write.
                             sample :: function.values[value.value].copy()
                             snapshot :: opt_scalar_value(&function, sample)
                             &aliases.alias.push(-1)
@@ -249,6 +252,8 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
         &lines.push(opt_debug_line(function.blocks[row], function.blocks[row].insts.len()))
         function.blocks[row].lines = lines
         function.blocks[row].insts = insts
+        // copy: the block's terminator is read, then rewritten in the same slot. Jet cannot move an
+        // element out of function.blocks (E0225) and has no writable enum-payload binding.
         terminator := function.blocks[row].terminator.copy()
         function.blocks[row].terminator = if terminator == {
             .Jump(target) -> {
@@ -270,6 +275,9 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
 fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
     slots := [LIRInst]{}
     loop block in original.blocks { loop inst in block.insts { if inst == .StackSlot(_, _, _) -> &slots.push(inst) } }
+    // copy: the scalar-replaced function is a new owned LIRFunction. With no slots it equals
+    // `original`, the caller's function (a read parameter; the CSE/simplify chain and fixtures keep
+    // it).
     if slots.len() == 0 -> return original.copy()
     dom :: opt_dominators(original)
     frontiers :: opt_scalar_frontiers(dom)
@@ -285,5 +293,8 @@ fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
             }
         }
     }
+    // copy: the scalar-replaced function is a new owned LIRFunction. Unchanged, it equals
+    // `original`, the caller's function (a read parameter; the CSE/simplify chain and fixtures keep
+    // it).
     if changed -> opt_compact(function) else -> original.copy()
 }

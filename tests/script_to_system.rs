@@ -478,7 +478,7 @@ fn script_to_system_continuity_preserves_one_source() {
     );
 
     let package_config = format!(
-        "{package_after_add}\nsettings: {{\n    default_minutes: Int = 1,\n}}\nenvironments: {{\n    development: Environment{{ tools: [\"git\"] }},\n}}\noutputs: {{\n    app: .Executable{{ name: \"pulse\", entry: run }},\n    api: .Service{{ name: \"pulse-api\", entry: serve }},\n}}\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Panic] }} }}\n"
+        "{package_after_add}\nsettings: {{\n    default_minutes: Int = 1,\n}}\nenvironments: {{\n    development: Environment{{ tools: [\"git\"] }},\n}}\noutputs: {{\n    app: .Executable{{ name: \"pulse\", entry: run }},\n    api: .Service{{ name: \"pulse-api\", entry: serve }},\n}}\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n"
     );
     edit_file(
         &cache,

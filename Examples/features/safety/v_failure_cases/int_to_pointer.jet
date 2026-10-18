@@ -1,0 +1,9 @@
+// #5037 case 3 (V p5, `voidptr(123)` cast to `&Something`): V accepts the
+// cast without `unsafe` and crashes on the read. Jet makes a raw pointer from
+// an address only inside an audited `#Unsafe` gate (D-CAP9).
+use core.mem as mem
+
+fn run() {
+    pointer :: mem.Ptr<Int>.from_addr(123)
+    print(pointer.read())
+}

@@ -54,6 +54,8 @@ enum TrustError {
 
 impl IOError -> TrustError { TrustError.IO("{self}") }
 
-impl LockError -> TrustError { TrustError.IO(self.message()) }
-
-impl TrustRootError -> TrustError { TrustError.Root(self) }
+// LockError and TrustRootError have no declared route here: both already
+// carry IOError, so an edge from either would give IOError two routes
+// (E2419). Their calls convert at the call site: `trust_lock_error(err)`,
+// `TrustError.Root(err)`.
+fn trust_lock_error(error: LockError) -> TrustError Never! { TrustError.IO(error.message()) }

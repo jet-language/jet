@@ -134,8 +134,10 @@ fn jet_web_wasm_bridge_name(function: MIRFunction) -> String Never! { "bridge_{f
 
 fn jet_web_wasm_export_success_type(function: MIRFunction) -> MIRType Never! {
     if function.failure == {
-        .Result(success, _) -> success
-        .Optional(value) -> value
+        // copy: `success` is a payload of read parameter `function`, which keeps the original; the returned value owns this one
+        .Result(success, _) -> success.copy()
+        // copy: `value` is a payload of read parameter `function`, which keeps the original; the returned value owns this one
+        .Optional(value) -> value.copy()
         .Infallible | .Diverges(_) -> function.return_type
     }
 }

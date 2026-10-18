@@ -215,7 +215,7 @@ fn lower_scan_take(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     taking_binary :: binary != None
     carrier :: if taking_binary -> "JetReader" else -> "JetCursor"
     ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "scan receiver has no checked type")
-    place :: lower_place_row(c.mir, receiver_place) ?? return lower_fail(&m, &f, "scan receiver has no checked place")
+    place :: lower_place_row(c.mir, c.place_rows, receiver_place) ?? return lower_fail(&m, &f, "scan receiver has no checked place")
     if place.access == .Read || !lower_route_carrier_matches(p, ty, LowerRouteCarrier.HandleMut{name: carrier}) -> return lower_fail(&m, &f, "typed scan requires its canonical writable {carrier} handle")
     payload :: lower_scan_payload(c, instruction, true) ?? return lower_fail(&m, &f, "take_pattern requires its checked Result<Tuple, String> carrier")
     tuple :: if payload.kind == .Tuple(_) -> true else -> false

@@ -91,7 +91,7 @@ fn lower_fixed_trap_floor(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 // inline fast path; every other route is called with the operands (and the
 // source location when the row takes one).
 fn lower_binary_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, exact: Bool, call: MIRPreludeCallID, location: MIRPanicLoc?, left_value: LIRValueID, right_value: LIRValueID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
     symbol :: lower_runtime_symbol(row)
     if exact && row.signature.arity == 2 {
         if op == {
@@ -257,8 +257,11 @@ fn lower_numeric_location(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
 fn lower_numeric_check(p: MIRProgram, c: LowerContext?, m: &LowerModule, f: &LowerFunction, failed: LIRValueID, location: [LIRValueID], message: String) Never! {
     stop :: lower_new_block(&f)
     next_block :: lower_new_block(&f)
+    // The stop is cold: the check falls through into `next_block`, which
+    // stays in its path's region (cold inside a cold path).
+    if lir_builder_is_cold(f.builder, f.open) -> lir_builder_mark_cold(&f.builder, next_block)
     lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
-    lower_start(&f, stop, [LIRValueID]{})
+    lower_start_cold(&f, stop, [LIRValueID]{})
     text :: lower_static_text(&m, &f, message)
     lower_call_runtime(&m, &f, "jet_rt_numeric_stop", [LIRValueID]{location[0], location[1], location[2], text[0], text[1]}, None)
     lower_numeric_stopped(p, c, &m, &f)
@@ -323,7 +326,7 @@ fn lower_numeric_shift_check(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
 }
 
 fn lower_numeric_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "numeric predicate without a Prelude row is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "numeric predicate without a Prelude row is not lowered at O0 yet")
     ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "numeric predicate without a checked receiver type is not lowered at O0 yet")
     symbol :: mir_symbol_name(row.symbol)
     supported :: (row.member == "is_nan" && symbol == "jet_std_math_is_nan") || (row.member == "is_infinite" && symbol == "jet_std_math_is_infinite") || (row.member == "is_finite" && symbol == "jet_std_math_is_finite")
@@ -344,7 +347,7 @@ fn lower_numeric_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 fn lower_numeric_euclid(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, argument: MIRValueID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "Euclidean arithmetic without a Prelude row is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "Euclidean arithmetic without a Prelude row is not lowered at O0 yet")
     remainder :: row.member == "rem_euclid"
     symbol :: if remainder -> "jet_int_rem_euclid" else -> "jet_int_div_euclid"
     left_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "Euclidean arithmetic without a receiver type is not lowered at O0 yet")
@@ -355,12 +358,9 @@ fn lower_numeric_euclid(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     right :: lower_use(&m, &f, argument) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     location :: lower_numeric_location(p, c, &m, &f, instruction, None)
-    fast_block :: lower_new_block(&f)
     slow_block :: lower_new_block(&f)
     merge :: lower_new_block(&f)
-    inline :: lower_inline_test(&f, [LIRValueID]{left, right})
-    lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(fast_block, [LIRValueID]{}), else_target: lower_target(slow_block, [LIRValueID]{})})
-    lower_start(&f, fast_block, [LIRValueID]{})
+    lower_inline_branch(&f, [LIRValueID]{left, right}, slow_block, None)
     zero :: lower_const(&f, 0)
     is_zero :: lower_numeric_compare(&f, LIRCondition.Eq, right, zero)
     lower_numeric_check(p, Val(c), &m, &f, is_zero, location, "divided by zero")
@@ -384,9 +384,8 @@ fn lower_numeric_euclid(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(adjusted, [LIRValueID]{negative_value})})
     fast :: lower_word(&f)
     lower_start(&f, adjusted, [LIRValueID]{fast})
-    fits :: lower_inline_test(&f, [LIRValueID]{fast})
-    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge, [LIRValueID]{fast}), else_target: lower_target(slow_block, [LIRValueID]{})})
-    lower_start(&f, slow_block, [LIRValueID]{})
+    lower_inline_branch(&f, [LIRValueID]{fast}, slow_block, Val(lower_target(merge, [LIRValueID]{fast})))
+    lower_start_cold(&f, slow_block, [LIRValueID]{})
     slow :: lower_word(&f)
     lower_call_runtime(&m, &f, symbol, [LIRValueID]{left, right, location[0], location[1], location[2]}, Val(slow))
     lower_numeric_propagate(p, c, &m, &f)
@@ -424,7 +423,7 @@ fn lower_numeric_finish(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, val
 fn lower_numeric_guard(f: &LowerFunction, failed: LIRValueID, absent: LIRBlockID) Never! {
     success :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(success, [LIRValueID]{})})
-    lower_start(&f, success, [LIRValueID]{})
+    lower_continue(&f, success, [LIRValueID]{})
 }
 
 fn lower_numeric_product(p: MIRProgram, c: LowerContext?, m: &LowerModule, f: &LowerFunction, op: LIRBinaryOp, operation: String, mode: String, unsigned: Bool, left: LIRValueID, right: LIRValueID, absent: LIRBlockID, location: [LIRValueID]) -> LIRValueID Never! {
@@ -463,7 +462,7 @@ fn lower_numeric_product(p: MIRProgram, c: LowerContext?, m: &LowerModule, f: &L
 }
 
 fn lower_numeric_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, left: MIRValueID, right: MIRValueID, location: MIRPanicLoc?) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "overflow policy without a Prelude row is not lowered at O0 yet")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "overflow policy without a Prelude row is not lowered at O0 yet")
     ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "overflow policy without a receiver type is not lowered at O0 yet")
     unsigned :: lower_is_unsigned_word(ty)
     if lower_narrow_bits(ty) > 0 -> return lower_narrow_overflow(p, c, &m, &f, instruction, row, ty, left, right, location)

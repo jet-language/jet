@@ -149,9 +149,11 @@ fn lower_debug_bind_variable(f: &LowerFunction, variable: Int, value: LIRValueID
 fn lower_debug_type(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Int Never! {
     key :: mir_type_canonical_key(ty)
     if m.debug_type_rows.get(key) == .Val(row) -> return row
+    start :: lower_marks(m)
     row :: lower_debug_reserve(&m, key)
     described :: lower_debug_describe(p, &m, ty)
     m.debug_types[row] = described
+    lower_extent_record(&m, false, key, row, 0, start)
     row
 }
 
@@ -300,6 +302,7 @@ fn lower_debug_tagged_box(m: &LowerModule, row: Int, name: String, size: Int, di
 fn lower_debug_enum_box(p: MIRProgram, m: &LowerModule, name: String, ty: MIRType, definition: MIRTypeDef, variants: [MIRVariant]) -> Int Never! {
     key :: "box:{mir_type_canonical_key(ty)}"
     if m.debug_type_rows.get(key) == .Val(found) -> return found
+    start :: lower_marks(m)
     row :: lower_debug_reserve(&m, key)
     discriminant :: m.debug_types.len()
     &m.debug_types.push(LIRDebugType{name: "{name}.Variant", size: 8, kind: LIRDebugTypeKind.Enum{enumerators: lower_debug_enumerators(p, ty)}})
@@ -317,6 +320,7 @@ fn lower_debug_enum_box(p: MIRProgram, m: &LowerModule, name: String, ty: MIRTyp
         &cases.push(LIRDebugMember{name: variant.name, offset: 0, ty: payload})
     }
     lower_debug_tagged_box(&m, row, name, lower_enum_box_size(p, definition), discriminant, cases)
+    lower_extent_record(&m, false, key, row, 0, start)
     row
 }
 
@@ -324,12 +328,14 @@ fn lower_debug_enum_box(p: MIRProgram, m: &LowerModule, name: String, ty: MIRTyp
 fn lower_debug_result_box(p: MIRProgram, m: &LowerModule, name: String, ty: MIRType, ok: MIRType, err: MIRType) -> Int Never! {
     key :: "box:{mir_type_canonical_key(ty)}"
     if m.debug_type_rows.get(key) == .Val(found) -> return found
+    start :: lower_marks(m)
     row :: lower_debug_reserve(&m, key)
     discriminant :: m.debug_type_rows.get("result-tag") ?? lower_debug_result_tag(&m)
     cases := [LIRDebugMember]{}
     if lower_repr(p, ok) != .Absent -> &cases.push(LIRDebugMember{name: "ok", offset: 0, ty: lower_debug_type(p, &m, ok)})
     if lower_repr(p, err) != .Absent -> &cases.push(LIRDebugMember{name: "err", offset: 0, ty: lower_debug_type(p, &m, err)})
     lower_debug_tagged_box(&m, row, name, lower_result_box_size(p, ok, err), discriminant, cases)
+    lower_extent_record(&m, false, key, row, 0, start)
     row
 }
 

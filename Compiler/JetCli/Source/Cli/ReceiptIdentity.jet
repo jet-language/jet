@@ -118,7 +118,7 @@ fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]
             next
         }
         jet_cli_receipt_frame(&tools, path.bytes())
-        digest :: if name == "jet" -> cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) ?? return Err(jet_cli_read_error("packaging host did not supply compiler identity")) else -> {
+        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error("this compiler has no embedded identity and JET_COMPILER_IDENTITY is unset")) else -> {
             if cli_files.read_bytes(path) == {
                 .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
                 .Err(_) -> "unreadable"

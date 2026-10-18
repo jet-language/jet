@@ -69,7 +69,7 @@ static void watch(int64_t p, int64_t size, int64_t align) {
     watched[watched_count].align = align; watched[watched_count++].freed = false;
 }
 static void text_watch(int64_t p) {
-    Text *t = (Text *)(uintptr_t)p; watch(p, 24, 8);
+    Text *t = (Text *)(uintptr_t)p; watch(pointer(p-8), 32, 8);
     if (t->capacity) watch(pointer(t->data), t->capacity, 1);
 }
 static void field_watch(int64_t p) {

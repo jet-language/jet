@@ -661,7 +661,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     contract_callee := Func?{None}
     if sema_contract_function_has_pre(environment, program, resolved_candidate.method.symbol) -> contract_callee = sema_contract_function_for_symbol(environment, program, resolved_candidate.method.symbol)
     if contract_callee == .Val(contract) {
-        receiver_arg :: TCallArg{value: call_receiver, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(call_receiver.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, call_receiver.ty, environment, program), label: None, spread: false}
+        receiver_arg :: TCallArg{value: call_receiver, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(call_receiver.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, call_receiver.ty, environment, program), label: None, spread: false}
         all_args := [TCallArg]{receiver_arg}
         loop argument in lowered -> &all_args.push(argument)
         receiver_slot :: resolved_candidate.receiver_offset - 1

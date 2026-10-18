@@ -310,7 +310,7 @@ fn jet_cli_bundle_status(value: CanonicalJSON) -> JetCLIStatusValue Never! {
         .Null -> JetCLIStatusValue.Null
         .Bool(flag) -> jet_cli_status_bool(flag)
         .Integer(text) -> jet_cli_status_int(jet_cli_bundle_canonical_status_integer(text) ?? panic("canonical package integer must fit status integer"))
-        .String(text) -> jet_cli_status_text(text.copy())
+        .String(text) -> jet_cli_status_text(text)
         .Array(values) -> {
             rows := [JetCLIStatusValue]{}
             loop child in values -> &rows.push(jet_cli_bundle_status(child))
@@ -318,7 +318,7 @@ fn jet_cli_bundle_status(value: CanonicalJSON) -> JetCLIStatusValue Never! {
         }
         .Object(values) -> {
             fields := [JetCLIStatusField]{}
-            loop field in values -> &fields.push(jet_cli_status_field(field.key.copy(), jet_cli_bundle_status(field.value)))
+            loop field in values -> &fields.push(jet_cli_status_field(field.key, jet_cli_bundle_status(field.value)))
             jet_cli_status_object(fields)
         }
     }
@@ -329,13 +329,13 @@ fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: b
     if machine {
         materializer :: if artifact.receipt.materializer == {
             .Val(fact) -> jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("authority", jet_cli_status_text(fact.authority.copy())),
-                jet_cli_status_field("executable", jet_cli_status_text(fact.executable.copy())),
-                jet_cli_status_field("mechanism", jet_cli_status_text(fact.mechanism.copy())),
-                jet_cli_status_field("policy", jet_cli_status_text(fact.policy.copy())),
-                jet_cli_status_field("tool", jet_cli_status_text(fact.tool.copy())),
-                jet_cli_status_field("tool_identity", jet_cli_status_text(fact.tool_identity.copy())),
-                jet_cli_status_field("tool_version", jet_cli_status_text(fact.tool_version.copy()))})
+                jet_cli_status_field("authority", jet_cli_status_text(fact.authority)),
+                jet_cli_status_field("executable", jet_cli_status_text(fact.executable)),
+                jet_cli_status_field("mechanism", jet_cli_status_text(fact.mechanism)),
+                jet_cli_status_field("policy", jet_cli_status_text(fact.policy)),
+                jet_cli_status_field("tool", jet_cli_status_text(fact.tool)),
+                jet_cli_status_field("tool_identity", jet_cli_status_text(fact.tool_identity)),
+                jet_cli_status_field("tool_version", jet_cli_status_text(fact.tool_version))})
             .None -> JetCLIStatusValue.Null
         }
         materialization :: jet_cli_status_object([JetCLIStatusField]{
@@ -350,8 +350,8 @@ fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: b
             jet_cli_status_field("artifact_status", jet_cli_status_text(artifact.receipt.artifact_status().as_str())),
             jet_cli_status_field("execution", jet_cli_status_text(execution)),
             jet_cli_status_field("materialization", materialization),
-            jet_cli_status_field("output", jet_cli_status_text(output.raw.copy())),
-            jet_cli_status_field("plan_identity", jet_cli_status_text(plan.identity.copy())),
+            jet_cli_status_field("output", jet_cli_status_text(output.raw)),
+            jet_cli_status_field("plan_identity", jet_cli_status_text(plan.identity)),
             jet_cli_status_field("receipt", jet_cli_bundle_status(receipt_tree)),
             jet_cli_status_field("receipt_digest", jet_cli_status_text(receipt_digest))}
         if explain -> &fields.push(jet_cli_status_field("explain", jet_cli_status_object([JetCLIStatusField]{
@@ -362,7 +362,7 @@ fn jet_cli_bundle_report(artifact: &BundleArtifact, plan: &BundlePlan, output: b
             jet_cli_status_field("inputs", jet_cli_status_int(plan.inputs.len())),
             jet_cli_status_field("materialization_status", jet_cli_status_text(execution)),
             jet_cli_status_field("planned", jet_cli_status_bool(!materialized)),
-            jet_cli_status_field("plan_identity", jet_cli_status_text(plan.identity.copy()))})))
+            jet_cli_status_field("plan_identity", jet_cli_status_text(plan.identity))})))
         return "{jet_cli_status_render("package", true, fields)}\n"
     }
     lines := [String]{"package plan: {plan.identity}\n", "target: {plan.target.as_str()}\n", "artifact: {artifact.artifact_name}\n", "output: {output.raw}\n", "execution: {execution}\n", "materialization: {execution}\n", "files: {artifact.files.len()}\n"}

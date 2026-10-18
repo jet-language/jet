@@ -2,7 +2,7 @@
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRCallee, MIRCallArg, MIRConstant, MIRConstantDef,
     MIRConstantID, MIRConstEnumArg, MIRConstField, MIRDropKind, MIRField,
-    MIRFunction, MIRFunctionID, MIRModuleID, MIROperation, MIRProgram,
+    MIRFunction, MIRFunctionID, MIRModuleID, MIROperation, MIRPayloadKind, MIRProgram,
     MIRStringFormat, MIRStringPart, MIRStringPartKind, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRValueID,
     MIRVariant, MIRVariantPayload, MIRVisibility,
     mir_field_id, mir_function_id, mir_owned_ownership, mir_type_id,
@@ -104,6 +104,35 @@ fn fx_statics() -> MIRProgram Never! {
     greeting_def := fx_static_definition("greeting", fx_string(), MIRConstant.String{value: "héllo"})
     greeting_def.id = MIRConstantID{value: 1}
     p.constants = [MIRConstantDef]{fx_static_record(), greeting_def}
+    p
+}
+
+// #5041 P2 A3: a frozen Option box carries an immortal count word, so an
+// owned read copies it (clone glue) and a write to that copy never reaches
+// read-only data; a borrowed read sees the frozen payload.
+// const maybe: String? = present("frozen")
+// fn run() { m := maybe; m.value = "mine"; print(m.value); print(maybe.value) }
+// expect-stdout statics-box: "mine\nfrozen\n"
+fn fx_statics_box() -> MIRProgram Never! {
+    text_maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    r := fx_builder()
+    local :: fx_local(&r, "m", text_maybe, mir_owned_ownership())
+    owned :: fx_owned(&r, text_maybe, MIROperation.Global{name: "fixture.maybe"})
+    fx_do(&r, MIROperation.WritePlace{place: local, value: owned})
+    window :: fx_payload_place(&r, local, MIRPayloadKind.Option, fx_string(), MIRAccess.Write)
+    mine :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "mine"}})
+    fx_do(&r, MIROperation.ReplacePlace{place: window, value: mine})
+    payload :: fx_payload_place(&r, local, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: payload})
+    fx_print(&r, now)
+    frozen :: fx_value(&r, text_maybe, fx_borrow(), MIROperation.Global{name: "fixture.maybe"})
+    inside :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.OptionValue{subject: frozen})
+    fx_print(&r, inside)
+    gone :: fx_owned(&r, text_maybe, MIROperation.MovePlace{place: local})
+    fx_do(&r, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+    p.constants = [MIRConstantDef]{fx_static_definition("maybe", text_maybe, MIRConstant.Present{value: MIRConstant.String{value: "frozen"}})}
     p
 }
 

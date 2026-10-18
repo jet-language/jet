@@ -1,0 +1,921 @@
+use std.io as io
+use jet_debug.Dap.[DapServer, ResumeMode, ResumeTask, breakpoint_source, breakpoint_specs_for_origin, cleanup_error_details, has_jet_frame, jet_expression, jet_thread_name, json_bool, parse_initialize_arguments, parse_launch_arguments, project_frames, valid_condition, valid_hit_condition, validate_breakpoint_specs]
+use jet_debug.Inferior.[Inferior, ResumeResult, parse_exit_signal, parse_current_thread_id]
+use jet_debug.LineMap.[LineMap]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[json_get, json_str, json_u32, foundation_json_escape]
+
+impl DapServer {
+    // Rust: crates/jet-debug/src/Dap.rs:1805
+    fn restart_target(self: &Self, out: &io.Write, request_seq: I64) {
+        was_configuring :: self.state == .Configuring
+        if self.resume_task.is_some() {
+            settled :: self.settle_resume()
+            self.emit_program_output(out)
+            if settled.is_err() {
+                if self.inf.take() == .Val(inf) -> inf.quit()
+                self.target = None
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not stop the current native target")
+                return
+            }
+        }
+        self.invalidate_references()
+        if self.inf.take() == .Val(inf) -> inf.quit()
+        self.reset_history()
+        self.current_thread = 1
+        self.last_signal = None
+        self.last_exception = None
+        self.unmapped_steps = 0
+        map_path :: self.binary.with_extension("jetmap")
+        if LineMap.load_verified(map_path, self.jet_file, self.jet_src, self.rust_file, self.rust_src, self.binary) == {
+            .Ok(map) -> self.map = ^map
+            .Err(_error) -> {
+                self.target = None
+                self.entry_breakpoint_id = None
+                self.source_breakpoint_ids.clear()
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22037, "restart target no longer matches the verified Jet build")
+                return
+            }
+        }
+        (inf, entry_id) := if self.spawn_target() == {
+            .Ok(target) -> ^target
+            .Err(_error) -> {
+                self.target = None
+                self.entry_breakpoint_id = None
+                self.source_breakpoint_ids.clear()
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not create a fresh native target")
+                return
+            }
+        }
+        if inf.configure_launch(self.launch_args, self.launch_cwd, self.launch_env).is_err() {
+            inf.quit()
+            self.target = None
+            self.entry_breakpoint_id = None
+            self.source_breakpoint_ids.clear()
+            self.state = .Ready
+            self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not restore launch arguments")
+            return
+        }
+        (source_ids, statuses) :: if Self.install_breakpoints(self.map, self.rust_file, self.pending_breakpoints, &inf) == {
+            .Ok(result) -> ^result
+            .Err(_error) -> {
+                inf.quit()
+                self.target = None
+                self.entry_breakpoint_id = None
+                self.source_breakpoint_ids.clear()
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not restore source breakpoints")
+                return
+            }
+        }
+        self.inf = .Val(^inf)
+        self.entry_breakpoint_id = entry_id
+        self.source_breakpoint_ids = ^source_ids
+        self.hit_counts = [Usize].repeat(0, self.pending_specs.len())
+        self.target = .Val(.Launched)
+        self.respond(out, request_seq, "restart", true, "{{}}")
+        self.emit_target_started_events(out)
+        self.emit_breakpoint_statuses(out, statuses)
+        if !was_configuring -> self.start_target(out)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:1934
+    fn begin_resume(self: &Self, out: &io.Write, command: String, mode: ResumeMode) {
+        inf :: self.inf.take() ?? {
+            self.terminate_with_diagnostic(out, "E2234", "the native debugger has no target to start")
+            return
+        }
+        self.resume_stop_requested = false
+        self.state = .Running
+        // GATE #4494: real resume worker and interrupt ownership.
+        self.resume_task = .Val(ResumeTask.spawn(^inf, command, mode))
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:1948
+    fn start_target(self: &Self, out: &io.Write) { self.begin_resume(out, "run", .Launch) }
+
+    // Rust: crates/jet-debug/src/Dap.rs:1954
+    // A present unit keeps the request loop alive; None closes it.
+    fn handle(self: Self, msg: Dyn, out: io.Write) -> Unit? {
+        command :: json_get(msg, "command").and_then(json_str)
+        client_seq :: json_get(msg, "seq").and_then(json_u32)
+        request_seq :: I64{client_seq}
+        if self.client_sequences.contains_key(client_seq) {
+            self.respond_jet_error(out, request_seq, command, 22032, "request sequence numbers must be unique")
+            return .Val(_)
+        }
+        self.client_sequences[client_seq] = true
+        args :: json_get(msg, "arguments")
+        if command == {
+            "initialize" -> {
+                if self.state != .New {
+                    self.respond_jet_error(out, request_seq, command, 22031, "initialize is only legal once at the start of a DAP session")
+                    return .Val(_)
+                }
+                initialize :: if parse_initialize_arguments(args) == {
+                    .Ok(arguments) -> ^arguments
+                    .Err(message) -> {
+                        self.respond_jet_error(out, request_seq, command, 22032, message)
+                        return .Val(_)
+                    }
+                }
+                self.lines_start_at_1 = initialize.lines_start_at_1
+                self.columns_start_at_1 = initialize.columns_start_at_1
+                self.supports_ansi_styling = initialize.supports_ansi_styling
+                self.state = .Ready
+                self.respond(out, request_seq, "initialize", true, "{{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsPauseRequest\":true,\"supportsStepBack\":true,\"supportsDataBreakpoints\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}}")
+            }
+            "launch".bit_or("attach") -> {
+                if self.state != .Ready {
+                    self.respond_jet_error(out, request_seq, command, 22031, "launch or attach requires a successful initialize request")
+                    return .Val(_)
+                }
+                progress_id :: "jet-debug-{request_seq}"
+                self.progress_start(out, progress_id, "Starting Jet debug target")
+                target :: if {
+                    command == "launch" -> {
+                        launch :: if parse_launch_arguments(args, self.jet_file) == {
+                            .Ok(launch) -> ^launch
+                            .Err(message) -> {
+                                self.progress_end(out, progress_id, "Invalid launch configuration")
+                                self.respond_jet_error(out, request_seq, command, 22032, message)
+                                return .Val(_)
+                            }
+                        }
+                        if args.and_then((a) -> json_get(a, "stopOnEntry")) == .Val(value) {
+                            stop :: json_bool(value) ?? {
+                                self.progress_end(out, progress_id, "Invalid launch configuration")
+                                self.respond_jet_error(out, request_seq, command, 22032, "stopOnEntry must be a boolean")
+                                return .Val(_)
+                            }
+                            self.stop_on_entry = stop
+                        }
+                        target :: self.spawn_target().and_then(((_0: inf, _1: id)) -> {
+                            inf := ^inf
+                            inf.configure_launch(launch.args, launch.cwd, launch.env)?
+                            .Ok((^inf, id))
+                        })
+                        if target.is_ok() {
+                            self.show_raw_frames = launch.show_raw_frames
+                            self.launch_args = ^launch.args
+                            self.launch_cwd = ^launch.cwd
+                            self.launch_env = ^launch.env
+                        }
+                        ^target
+                    }
+                    else -> {
+                        if self.attach_target(args) == {
+                            .Ok(tuple_0) -> {
+                                inf :: tuple_0._0
+                                map :: tuple_0._1
+                                show_raw_frames :: tuple_0._2
+                                self.map = ^map
+                                self.show_raw_frames = show_raw_frames
+                                .Ok((_0: ^inf, _1: None))
+                            }
+                            .Err(failure) -> {
+                                (id, format) :: failure.error()
+                                self.progress_end(out, progress_id, "Attach rejected")
+                                self.respond_jet_error(out, request_seq, command, id, format)
+                                return .Val(_)
+                            }
+                        }
+                    }
+                }
+                if target == {
+                    .Ok(tuple_1) -> {
+                        inf :: tuple_1._0
+                        entry_id :: tuple_1._1
+                        self.progress_end(out, progress_id, "Jet debug target ready")
+                        self.inf = .Val(^inf)
+                        self.entry_breakpoint_id = entry_id
+                        self.source_breakpoint_ids.clear()
+                        self.target = .Val(if command == "launch" -> .Launched else -> .Attached)
+                        self.state = .Configuring
+                        self.respond(out, request_seq, command, true, "{{}}")
+                        self.event(out, "initialized", "{{}}")
+                    }
+                    .Err(_error) -> {
+                        self.progress_end(out, progress_id, "Target setup failed")
+                        self.respond_jet_error(out, request_seq, command, 22034, "the native debugger could not create the requested target")
+                    }
+                }
+            }
+            "restart" -> {
+                if self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "restart requires an active launched Jet target")
+                    return .Val(_)
+                }
+                if self.target == {
+                    .Val(.Launched) -> self.restart_target(out, request_seq)
+                    .Val(.Attached) -> self.respond_jet_error(out, request_seq, command, 22033, "restart is only supported for a launched Jet target")
+                    else -> self.respond_jet_error(out, request_seq, command, 22031, "restart is not legal before a launched Jet target exists")
+                }
+            }
+            "setBreakpoints" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "source breakpoints are not legal after the target terminated")
+                    return .Val(_)
+                }
+                if breakpoint_source(args, self.jet_file) == .Err(message) {
+                    self.respond_jet_error(out, request_seq, command, 22032, message)
+                    return .Val(_)
+                }
+                specs :: if breakpoint_specs_for_origin(args, self.lines_start_at_1) == {
+                    .Ok(specs) -> ^specs
+                    .Err(message) -> { self.respond_err(out, request_seq, command, message); return .Val(_) }
+                }
+                if validate_breakpoint_specs(specs) == .Err(message) {
+                    self.respond_jet_error(out, request_seq, command, 22032, message)
+                    return .Val(_)
+                }
+                lines :: specs.iter().map((spec) -> spec.line).collect()
+                client_ids :: self.assign_client_breakpoint_ids(specs)
+                // Retain the backend's old state until replacement succeeds.
+                previous_breakpoints :: self.pending_breakpoints.copy()
+                previous_specs :: self.pending_specs.copy()
+                previous_client_ids :: self.client_breakpoint_ids.copy()
+                previous_hit_counts :: self.hit_counts.copy()
+                self.pending_breakpoints = lines.copy()
+                self.pending_specs = ^specs
+                self.client_breakpoint_ids = client_ids.copy()
+                self.hit_counts = [Usize].repeat(0, lines.len())
+                resume_after_replacement :: self.state == .Running && !self.resume_stop_requested
+                if resume_after_replacement && self.resume_task.is_some() {
+                    (mode, result) :: if self.take_resume_result() == {
+                        .Ok(event) -> ^event
+                        .Err(error) -> {
+                            self.respond_backend_error(out, request_seq, command, error, "the native debugger could not settle before replacing source breakpoints")
+                            self.terminate_backend(out, error, "the native debugger lost the running session while replacing source breakpoints")
+                            return .Val(_)
+                        }
+                    }
+                    if result == {
+                        .Ok(result) -> self.emit_resume(out, ^result, mode)
+                        .Err(error) -> {
+                            self.respond_backend_error(out, request_seq, command, error, "the native debugger could not settle before replacing source breakpoints")
+                            self.terminate_backend(out, error, "the native debugger lost the running session while replacing source breakpoints")
+                            return .Val(_)
+                        }
+                    }
+                }
+                if self.state == .Terminated || self.terminal_failure {
+                    self.respond_jet_error(out, request_seq, command, 22034, "the native debugger target terminated before source breakpoints could be replaced")
+                    return .Val(_)
+                }
+                statuses :: if self.state == .Configuring || self.state == .Running || self.state == .Stopped {
+                    if self.replace_source_breakpoints() == {
+                        .Ok(statuses) -> ^statuses
+                        .Err(_error) -> {
+                            self.pending_breakpoints = ^previous_breakpoints
+                            self.pending_specs = ^previous_specs
+                            self.client_breakpoint_ids = ^previous_client_ids
+                            self.hit_counts = ^previous_hit_counts
+                            self.respond_err(out, request_seq, command, "the native debugger could not replace source breakpoints")
+                            return .Val(_)
+                        }
+                    }
+                } else -> lines.iter().map((line) -> self.map.rust_line_for(line).is_some()).collect()
+                verified := [String]{}
+                loop i in 0..lines.len() {
+                    line :: lines[i]
+                    id :: client_ids[i]
+                    spec :: self.pending_specs[i]
+                    ok :: statuses[i] && spec.condition.is_none_or(valid_condition) && spec.hit_condition.is_none_or(valid_hit_condition)
+                    if ok {
+                        verified.push("{{\"id\":{id},\"verified\":true,\"line\":{self.dap_line(line)}}}")
+                    } else {
+                        verified.push("{{\"id\":{id},\"verified\":false,\"line\":{self.dap_line(line)},\"message\":\"E2235: no stoppable Jet statement at {foundation_json_escape(self.source_path())}:{self.dap_line(line)}\"}}")
+                    }
+                }
+                self.respond(out, request_seq, command, true, "{{\"breakpoints\":[{verified.join(",")}]}}")
+                if resume_after_replacement {
+                    self.state = .Running
+                    mode :: if self.entry_breakpoint_id.is_some() -> ResumeMode.Launch else -> ResumeMode.Continue
+                    self.begin_resume(out, "continue", mode)
+                }
+            }
+            "configurationDone" -> {
+                if self.state != .Configuring {
+                    self.respond_jet_error(out, request_seq, command, 22031, "configurationDone requires a launched or attached target")
+                    return .Val(_)
+                }
+                self.respond(out, request_seq, command, true, "{{}}")
+                self.emit_target_started_events(out)
+                self.apply_pending_breakpoints_and_run(out)
+            }
+            "threads" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "threads requires a stopped target")
+                    return .Val(_)
+                }
+                threads :: if self.inf.as_mut().map((inf) -> inf.thread_backtraces()) == {
+                    .Val(.Ok(threads)) -> threads.into_iter().filter_map(((_0: thread, _1: backtrace)) -> {
+                        frames :: Inferior.parse_frames(backtrace)
+                        has_jet_frame(frames, self.map, self.rust_file).then(() -> (thread.id, jet_thread_name(thread.id, backtrace, self.map, self.rust_file)))
+                    }).collect()
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the native debugger could not list Jet tasks")
+                        return .Val(_)
+                    }
+                    .None -> {
+                        self.respond_jet_error(out, request_seq, command, 22031, "threads requires a stopped target")
+                        return .Val(_)
+                    }
+                }
+                if threads.is_empty() {
+                    self.respond_jet_error(out, request_seq, command, 22039, "the stopped target has no verified Jet task")
+                    return .Val(_)
+                }
+                thread_json :: threads.iter().map(((_0: thread_id, _1: name)) -> "{{\"id\":{thread_id},\"name\":\"{foundation_json_escape(name)}\"}}").collect().join(",")
+                self.respond(out, request_seq, command, true, "{{\"threads\":[{thread_json}]}}")
+            }
+            "stackTrace" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "stackTrace requires a stopped target")
+                    return .Val(_)
+                }
+                thread_id :: args.and_then((a) -> json_get(a, "threadId")).and_then(json_u32).filter((id) -> id > 0) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22032, "stackTrace threadId must be a positive integer")
+                    return .Val(_)
+                }
+                if self.history_cursor.is_some() {
+                    start_frame :: Usize{args.and_then((a) -> json_get(a, "startFrame")).and_then(json_u32).unwrap_or(0)}
+                    levels :: args.and_then((a) -> json_get(a, "levels")).and_then(json_u32).map((n) -> Usize{n})
+                    body :: self.history_stack_body(thread_id, start_frame, levels) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22034, "the recorded Jet stack is unavailable at this stop")
+                        return .Val(_)
+                    }
+                    self.current_thread = thread_id
+                    self.respond(out, request_seq, command, true, body)
+                    return .Val(_)
+                }
+                if self.inf.as_mut() == .Val(inf) {
+                    if inf.select_thread(thread_id).is_err() {
+                        self.respond_jet_error(out, request_seq, command, 22034, "the requested Jet task is no longer stopped")
+                        return .Val(_)
+                    }
+                    self.current_thread = thread_id
+                }
+                show_raw_frames :: if self.raw_frames_for_request(args) == {
+                    .Ok(value) -> value
+                    .Err(message) -> { self.respond_jet_error(out, request_seq, command, 22032, message); return .Val(_) }
+                }
+                frames :: if self.inf.as_mut().map((inf) -> inf.backtrace()) == {
+                    .Val(.Ok(out_text)) -> Inferior.parse_frames(out_text)
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the native debugger could not read the Jet stack")
+                        return .Val(_)
+                    }
+                    .None -> {
+                        self.respond_jet_error(out, request_seq, command, 22031, "stackTrace requires a stopped target")
+                        return .Val(_)
+                    }
+                }
+                if !has_jet_frame(frames, self.map, self.rust_file) {
+                    self.respond_jet_error(out, request_seq, command, 22039, "the stopped target has no verified Jet frame")
+                    return .Val(_)
+                }
+                start_frame :: Usize{args.and_then((a) -> json_get(a, "startFrame")).and_then(json_u32).unwrap_or(0)}
+                levels :: args.and_then((a) -> json_get(a, "levels")).and_then(json_u32).map((n) -> Usize{n})
+                projected :: project_frames(frames, self.map, self.rust_file, show_raw_frames)
+                total_frames :: projected.len()
+                entries := [String]{}
+                loop p in projected.into_iter().skip(start_frame).take(levels.unwrap_or(Usize.MAX)) {
+                    if p.raw {
+                        id :: self.references.issue_raw_frame(thread_id, p.position)
+                        entries.push("{{\"id\":{id},\"name\":\"[raw] {foundation_json_escape(p.frame.func)}\",\"source\":{{\"path\":\"{foundation_json_escape(p.frame.rust_file)}\"}},\"line\":{self.dap_line(p.frame.rust_line)},\"column\":{self.dap_column(1)}}}")
+                    } else if p.jet_line == .Val(jline) {
+                        id :: self.references.issue_frame(thread_id, p.position)
+                        entries.push("{{\"id\":{id},\"name\":\"{foundation_json_escape(Inferior.safe_jet_func(p.frame.func))}\",\"source\":{{\"path\":\"{foundation_json_escape(self.source_path())}\"}},\"line\":{self.dap_line(jline)},\"column\":{self.dap_column(1)}}}")
+                    }
+                }
+                self.respond(out, request_seq, command, true, "{{\"stackFrames\":[{entries.join(",")}],\"totalFrames\":{total_frames}}}")
+            }
+            "scopes" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "scopes requires a stopped target")
+                    return .Val(_)
+                }
+                frame_id :: args.and_then((a) -> json_get(a, "frameId")).and_then(json_u32) ?? {
+                    self.respond_err(out, request_seq, command, "frameId is required")
+                    return .Val(_)
+                }
+                if !self.references.is_live(frame_id, .Frame) || self.references.frame_location(frame_id).is_none() {
+                    self.respond_stale_reference(out, request_seq, command)
+                    return .Val(_)
+                }
+                requested_raw :: if args.and_then((a) -> json_get(a, "showRawFrames")) == {
+                    .None -> false
+                    .Val(value) -> json_bool(value) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "showRawFrames must be a boolean")
+                        return .Val(_)
+                    }
+                }
+                raw_frame :: self.references.frame_is_raw(frame_id).unwrap_or(false)
+                show_raw_frames :: requested_raw || self.show_raw_frames || raw_frame
+                scopes := [String]{}
+                if raw_frame {
+                    scope_id :: self.references.issue_scope(frame_id, .RawScope)
+                    scopes.push("{{\"name\":\"[raw] Locals\",\"variablesReference\":{scope_id},\"expensive\":false}}")
+                } else {
+                    scope_id :: self.references.issue_scope(frame_id, .Scope)
+                    scopes.push("{{\"name\":\"Locals\",\"variablesReference\":{scope_id},\"expensive\":false}}")
+                    if show_raw_frames {
+                        raw_scope_id :: self.references.issue_scope(frame_id, .RawScope)
+                        scopes.push("{{\"name\":\"[raw] Locals\",\"variablesReference\":{raw_scope_id},\"expensive\":false}}")
+                    }
+                }
+                self.respond(out, request_seq, command, true, "{{\"scopes\":[{scopes.join(",")}]}}")
+            }
+            "variables" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "variables requires a stopped target")
+                    return .Val(_)
+                }
+                scope_id :: args.and_then((a) -> json_get(a, "variablesReference")).and_then(json_u32) ?? {
+                    self.respond_err(out, request_seq, command, "variablesReference is required")
+                    return .Val(_)
+                }
+                if self.history_cursor.is_some() {
+                    if !self.references.is_live(scope_id, .Scope) {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(_)
+                    }
+                    body :: self.history_variables_body() ?? {
+                        self.respond_jet_error(out, request_seq, command, 22034, "recorded Jet locals are unavailable at this stop")
+                        return .Val(_)
+                    }
+                    self.respond(out, request_seq, command, true, body)
+                    return .Val(_)
+                }
+                value_reference :: if self.references.is_live(scope_id, .Value) {
+                    value :: self.references.value(scope_id) ?? {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(_)
+                    }
+                    .Val((value.frame, value.expression.copy(), value.raw))
+                } else -> None
+                raw_scope :: value_reference.as_ref().map(((_, _, raw)) -> raw).or_else(() -> {
+                    if self.references.is_live(scope_id, .RawScope) -> .Val(true)
+                    else if self.references.is_live(scope_id, .Scope) -> .Val(false)
+                    else -> None
+                }) ?? {
+                    self.respond_stale_reference(out, request_seq, command)
+                    return .Val(_)
+                }
+                frame :: value_reference.as_ref().map(((frame, _, _)) -> frame).or_else(() -> self.references.scope_location(scope_id)) ?? {
+                    self.respond_stale_reference(out, request_seq, command)
+                    return .Val(_)
+                }
+                self.current_thread = frame.thread_id
+                if self.inf.as_mut() == .Val(inf) {
+                    if inf.select_thread(frame.thread_id).is_err() || inf.select_frame(frame.position).is_err() {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(_)
+                    }
+                }
+                locals :: if self.inf.as_mut().map((inf) -> == {
+                    if value_reference.as_ref() == .Val((_, expression, _)) -> inf.frame_variable(expression) else -> inf.locals()
+                }) {
+                    .Val(.Ok(output)) -> if value_reference.is_some() -> Inferior.parse_variable_children(output) else -> Inferior.parse_typed_locals(output)
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the native debugger could not read Jet variables")
+                        return .Val(_)
+                    }
+                    .None -> {
+                        self.respond_jet_error(out, request_seq, command, 22031, "variables requires a stopped target")
+                        return .Val(_)
+                    }
+                }
+                // Only safe Jet bindings cross the adapter boundary, unless raw was requested.
+                start :: if args.and_then((a) -> json_get(a, "start")) == {
+                    .None -> Usize
+                    .Val{0}(value) -> json_u32(value).and_then((n) -> Usize.try_from(n).ok()) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "variables start must be a nonnegative integer")
+                        return .Val(_)
+                    }
+                }
+                count :: if args.and_then((a) -> json_get(a, "count")) == {
+                    .None -> None
+                    .Val(value) -> .Val(json_u32(value).and_then((n) -> Usize.try_from(n).ok()) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "variables count must be a nonnegative integer")
+                        return .Val(_)
+                    })
+                }
+                entries := [String]{}
+                for (ty, name, value) in locals.iter() {
+                    if value_reference.is_none() && !raw_scope && !Inferior.rust_local_is_jet_visible(name) -> next
+                    display_name :: if raw_scope -> name.copy()
+                        else if value_reference.is_some() -> Inferior.rust_member_to_jet(name) ?? { next }
+                        else -> Inferior.rust_local_to_jet(name) ?? { next }
+                    safe_value :: if raw_scope -> value.copy() else -> Inferior.safe_value(ty, value)
+                    type_json :: if raw_scope -> ",\"type\":\"{foundation_json_escape(ty)}\"" else -> Inferior.jet_type_name(ty).map((t) -> ",\"type\":\"{foundation_json_escape(t)}\"").unwrap_or_default()
+                    variables_reference :: if Inferior.has_nested_value(value) {
+                        expression :: if value_reference.as_ref() == .Val(tuple_2) {
+                            parent :: tuple_2._1
+                            if name.starts_with('[') -> "{parent}{name}" else -> "{parent}.{name}"
+                        } else if raw_scope -> name.copy() else -> Inferior.jet_local_to_rust(display_name)
+                        self.references.issue_value_at(frame, ^expression, raw_scope)
+                    } else -> 0
+                    entries.push("{{\"name\":\"{foundation_json_escape(display_name)}\",\"value\":\"{foundation_json_escape(safe_value)}\"{type_json},\"variablesReference\":{variables_reference}}}")
+                }
+                total :: entries.len()
+                paged :: entries.into_iter().skip(start).take(count.unwrap_or(Usize.MAX)).collect()
+                self.respond(out, request_seq, command, true, "{{\"variables\":[{paged.join(",")}],\"namedVariables\":{total}}}")
+            }
+            "evaluate" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "evaluate requires a stopped target")
+                    return .Val(_)
+                }
+                if args.and_then((a) -> json_get(a, "context")) == .Val(context) {
+                    context_name :: json_str(context)
+                    if context_name != "hover" && context_name != "watch" && context_name != "repl" {
+                        self.respond_jet_error(out, request_seq, command, 22032, "evaluate context must be hover, watch, or repl")
+                        return .Val(_)
+                    }
+                }
+                expression :: args.and_then((a) -> json_get(a, "expression")).and_then(json_str) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22032, "evaluate requires a Jet expression")
+                    return .Val(_)
+                }
+                (root, suffix) :: jet_expression(expression) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22033, "only bounded read-only Jet local paths can be evaluated")
+                    return .Val(_)
+                }
+                if args.and_then((a) -> json_get(a, "frameId")).and_then(json_u32) == .Val(frame_id) {
+                    if !self.references.is_live(frame_id, .Frame) {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(_)
+                    }
+                    frame :: self.references.frame_location(frame_id) ?? {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(_)
+                    }
+                    self.current_thread = frame.thread_id
+                    if self.inf.as_mut() == .Val(inf) {
+                        if inf.select_thread(frame.thread_id).is_err() || inf.select_frame(frame.position).is_err() {
+                            self.respond_stale_reference(out, request_seq, command)
+                            return .Val(_)
+                        }
+                    }
+                }
+                rust_expression :: Inferior.jet_path_to_rust(root, suffix) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22033, "only bounded read-only Jet local paths can be evaluated")
+                    return .Val(_)
+                }
+                output :: if self.inf.as_mut().map((inf) -> inf.frame_variable(rust_expression)) == {
+                    .Val(.Ok(output)) -> ^output
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the Jet expression is unavailable at this stop")
+                        return .Val(_)
+                    }
+                    .None -> {
+                        self.respond_jet_error(out, request_seq, command, 22034, "the Jet expression is unavailable at this stop")
+                        return .Val(_)
+                    }
+                }
+                (ty, _name, value) :: Inferior.parse_typed_locals(output).into_iter().next() ?? {
+                    self.respond_jet_error(out, request_seq, command, 22034, "the Jet expression has no readable value at this stop")
+                    return .Val(_)
+                }
+                safe :: Inferior.safe_value(ty, value)
+                type_json :: Inferior.jet_type_name(ty).map((t) -> ",\"type\":\"{foundation_json_escape(t)}\"").unwrap_or_default()
+                self.respond(out, request_seq, command, true, "{{\"result\":\"{foundation_json_escape(safe)}\"{type_json} ,\"variablesReference\":0}}")
+            }
+            "reverseStep".bit_or("stepBack") -> self.reverse_history(out, request_seq, command, false)
+            "reverseContinue" -> self.reverse_history(out, request_seq, command, true)
+            "dataBreakpointInfo" -> self.data_breakpoint_info(out, request_seq, command, args)
+            "setDataBreakpoints" -> self.set_data_breakpoints(out, request_seq, command, args)
+            "setExpression" -> self.respond_jet_error(out, request_seq, command, 22033, "setExpression cannot mutate a native Jet frame; use fix with an edited source checkpoint")
+            "fix" -> self.apply_fix(out, request_seq, command, args)
+            "continue".bit_or("next").bit_or("stepIn").bit_or("stepOut") -> {
+                if self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "run control requires a stopped target")
+                    return .Val(_)
+                }
+                if self.history_cursor.is_some() {
+                    thread_id :: args.and_then((a) -> json_get(a, "threadId")).and_then(json_u32).filter((id) -> id > 0) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "run control requires a positive threadId")
+                        return .Val(_)
+                    }
+                    self.current_thread = thread_id
+                    self.replay_forward_history(out, request_seq, command, None)
+                    return .Val(_)
+                }
+                if self.inf.is_none() {
+                    self.invalidate_references()
+                    self.respond_jet_error(out, request_seq, command, 22034, "Jet debugger has no target")
+                    return .Val(_)
+                }
+                if self.select_resume_thread(args) == .Err(tuple_3) {
+                    id :: tuple_3._0
+                    message :: tuple_3._1
+                    self.respond_jet_error(out, request_seq, command, id, message)
+                    return .Val(_)
+                }
+                self.invalidate_references()
+                resume_cmd :: if command == {
+                    "continue" -> "continue"
+                    "next" -> "thread step-over"
+                    "stepIn" -> "thread step-in"
+                    else -> "thread step-out"
+                }
+                self.state = .Running
+                self.respond(out, request_seq, command, true, "{{\"allThreadsContinued\":true}}")
+                mode :: if command == "continue" -> ResumeMode.Continue else -> ResumeMode.Step
+                self.begin_resume(out, resume_cmd, mode)
+            }
+            "pause" -> {
+                if self.state != .Running {
+                    self.respond_jet_error(out, request_seq, command, 22031, "pause requires a running target")
+                    return .Val(_)
+                }
+                if self.resume_task.is_some() {
+                    self.resume_stop_requested = true
+                    if self.resume_task.as_ref() == .Val(task_ref) -> task_ref.interrupt()
+                    self.invalidate_references()
+                    self.respond(out, request_seq, command, true, "{{}}")
+                    return .Val(_)
+                }
+                if self.inf.is_none() {
+                    self.respond_jet_error(out, request_seq, command, 22034, "Jet debugger has no target")
+                    return .Val(_)
+                }
+                self.invalidate_references()
+                self.respond(out, request_seq, command, true, "{{}}")
+                if self.inf.as_mut().map((inf) -> inf.interrupt()) == {
+                    .Val(.Ok(bt_text)) -> self.emit_resume(out, .Stopped(^bt_text), .Pause)
+                    .Val(.Err(error)) -> self.terminate_backend(out, error, "the native debugger could not pause the program")
+                    .None -> self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target")
+                }
+            }
+            "setExceptionBreakpoints" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "exception filters are not legal before initialize or after termination")
+                    return .Val(_)
+                }
+                filters :: args.and_then((a) -> json_get(a, "filters")) ?? {
+                    self.exception_filters.clear()
+                    self.respond(out, request_seq, command, true, "{{}}")
+                    return .Val(_)
+                }
+                values :: if filters == {
+                    .Array(values) -> values
+                    else -> {
+                        self.respond_jet_error(out, request_seq, command, 22032, "exception filters must be a bounded array of Jet panic, error, signal, or all")
+                        return .Val(_)
+                    }
+                }
+                selected := [String:Bool]{}
+                loop value in values {
+                    filter :: json_str(value) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "exception filters must be Jet panic, error, signal, or all")
+                        return .Val(_)
+                    }
+                    if filter != "all" && filter != "error" && filter != "panic" && filter != "signal" {
+                        self.respond_jet_error(out, request_seq, command, 22032, "exception filters must be Jet panic, error, signal, or all")
+                        return .Val(_)
+                    }
+                    selected[filter.to_string()] = true
+                }
+                self.exception_filters = ^selected
+                self.respond(out, request_seq, command, true, "{{}}")
+            }
+            "exceptionInfo" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "exceptionInfo requires a stopped target")
+                    return .Val(_)
+                }
+                if self.last_exception.as_ref() == .Val(kind) {
+                    (exception_id, description) :: if kind == "panic" -> ("JetPanic", "Jet panic")
+                        else if kind == "error" -> ("JetError", "Jet error")
+                        else -> (kind, "Jet target stopped on {kind}")
+                    self.respond(out, request_seq, command, true, "{{\"exceptionId\":\"{foundation_json_escape(exception_id)}\",\"description\":\"{foundation_json_escape(description)}\"}}")
+                } else { self.respond_jet_error(out, request_seq, command, 22034, "the stopped Jet target has no exception information") }
+            }
+            "loadedSources" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "loadedSources requires an initialized debugger session")
+                    return .Val(_)
+                }
+                self.respond(out, request_seq, command, true, "{{\"sources\":[{{\"name\":\"{foundation_json_escape(self.source_path())}\",\"path\":\"{foundation_json_escape(self.source_path())}\"}}]}}")
+            }
+            "cancel" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "cancel requires an initialized debugger session")
+                    return .Val(_)
+                }
+                self.respond(out, request_seq, command, true, "{{}}")
+                if self.resume_task.as_ref() == .Val(task_ref) {
+                    self.resume_stop_requested = true
+                    task_ref.interrupt()
+                }
+            }
+            "disconnect".bit_or("terminate") -> {
+                terminate :: if command == "terminate" -> true else {
+                    if args.and_then((a) -> json_get(a, "terminateDebuggee")) == {
+                        .None -> self.target == .Val(.Launched)
+                        .Val(value) -> json_bool(value) ?? {
+                            self.respond_jet_error(out, request_seq, command, 22032, "terminateDebuggee must be a boolean")
+                            return .Val(_)
+                        }
+                    }
+                }
+                self.invalidate_references()
+                self.state = .Terminated
+                resume_error :: if self.resume_task.is_some() {
+                    settled :: self.settle_resume()
+                    self.emit_program_output(out)
+                    settled.err()
+                } else -> None
+                if self.close_target(terminate) == {
+                    .Ok(_) -> {
+                        if resume_error.is_some() -> self.respond_jet_error(out, request_seq, command, 22034, "the native debugger could not settle before disconnect") else -> self.respond(out, request_seq, command, true, "{{}}")
+                        if command == "terminate" -> self.event(out, "terminated", "{{}}")
+                    }
+                    .Err(error) -> {
+                        (id, message) :: cleanup_error_details(error)
+                        self.respond_jet_error(out, request_seq, command, id, message)
+                    }
+                }
+                return None
+            }
+            else -> self.respond_jet_error(out, request_seq, command, 22033, "this Jet debugger operation is unsupported; use read-only Jet stack, scope, or evaluation requests")
+        }
+        return .Val(_)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3323
+    fn apply_pending_breakpoints_and_run(self: &Self, out: &io.Write) {
+        // Preserve source requests so restart can recreate them.
+        lines :: self.pending_breakpoints.copy()
+        old :: self.source_breakpoint_ids.take()
+        map :: &self.map
+        rust_file :: self.rust_file.copy()
+        inf :: self.inf.as_mut() ?? {
+            self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target")
+            return
+        }
+        loop id in old {
+            if inf.delete_breakpoint(id) == .Err(error) {
+                io.eprintln("error: native debugger could not remove a source breakpoint: {error}") // GATE #4494
+                self.terminate_with_diagnostic(out, "E2234", "the native debugger could not remove a source breakpoint")
+                return
+            }
+        }
+        (ids, statuses) :: if Self.install_breakpoints(map, rust_file, lines, inf) == {
+            .Ok(result) -> ^result
+            .Err(_error) -> {
+                self.terminate_with_diagnostic(out, "E2234", "the native debugger could not install source breakpoints")
+                return
+            }
+        }
+        self.source_breakpoint_ids = ^ids
+        self.emit_breakpoint_statuses(out, statuses)
+        self.state = .Running
+        resume :: if self.target == .Val(.Attached) -> "continue" else -> "run"
+        mode :: if self.target == .Val(.Launched) -> ResumeMode.Launch else -> ResumeMode.Continue
+        self.begin_resume(out, resume, mode)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3376
+    fn emit_program_output(self: &Self, out: &io.Write) {
+        inf :: self.inf.as_mut() ?? { return }
+        (stdout, stderr) :: inf.drain_program_output()
+        if !stdout.is_empty() -> self.event(out, "output", "{{\"category\":\"stdout\",\"output\":\"{foundation_json_escape(self.output_text(stdout))}\"}}")
+        if !stderr.is_empty() -> self.event(out, "output", "{{\"category\":\"stderr\",\"output\":\"{foundation_json_escape(self.output_text(stderr))}\"}}")
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3395
+    fn emit_resume(self: &Self, out: &io.Write, result: ResumeResult, mode: ResumeMode) {
+        self.emit_resume_inner(out, ^result, mode, 0)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3399
+    fn emit_resume_inner(self: &Self, out: &io.Write, result: ResumeResult, mode: ResumeMode, depth: Usize) {
+        result := ^result
+        mode := mode
+        depth := depth
+        loop {
+            if depth >= 200 && result == .Stopped(_) {
+                self.terminate_with_diagnostic(out, "E2235", "native debugger produced too many stops without a verified Jet source mapping")
+                return
+            }
+            self.emit_program_output(out)
+            bt_text :: if result == {
+                .Exited { status, signal } -> {
+                    self.invalidate_references()
+                    self.state = .Terminated
+                    self.last_signal = signal.copy()
+                    body :: if {
+                        status == .Val(code) && signal == .Val(signal) -> "{{\"exitCode\":{code},\"signal\":\"{foundation_json_escape(signal)}\"}}"
+                        status == .Val(code) && signal == None -> "{{\"exitCode\":{code}}}"
+                        status == None && signal == .Val(signal) -> "{{\"signal\":\"{foundation_json_escape(signal)}\"}}"
+                        status == None && signal == None -> "{{}}"
+                    }
+                    self.event(out, "exited", body)
+                    if self.cleanup_after_terminal_state(out) -> self.event(out, "terminated", "{{}}")
+                    return
+                }
+                .Stopped(text) -> ^text
+            }
+            self.last_signal = parse_exit_signal(bt_text)
+            exception_kind :: self.exception_kind(bt_text).map((kind) -> kind.to_string())
+            self.last_exception = exception_kind.map((kind) -> {
+                if kind == "signal" -> self.last_signal.unwrap_or_else(() -> "unknown signal") else -> kind
+            })
+            if mode != .Pause {
+                if exception_kind.as_ref() == .Val(kind) {
+                    if !self.exception_filter_enabled(kind) {
+                        if self.resume_hidden_stop("continue") == {
+                            .Ok(following) -> { result = ^following; mode = .Continue; depth += 1; next }
+                            .Err(error) -> {
+                                self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                return
+                            }
+                        }
+                    }
+                }
+            }
+            if parse_current_thread_id(bt_text) == .Val(thread) -> self.current_thread = thread
+            self.state = .Stopped
+            entry_stop :: mode == .Launch && self.entry_breakpoint_id.is_some() && bt_text.contains("stop reason = breakpoint")
+            if entry_stop {
+                entry_id :: self.entry_breakpoint_id.take().expect("entry breakpoint checked")
+                removed :: self.inf.as_mut().map((inf) -> inf.delete_breakpoint(entry_id))
+                if removed != .Val(.Ok(_)) {
+                    self.terminate_with_diagnostic(out, "E2234", "the native debugger could not retire the entry breakpoint")
+                    return
+                }
+            }
+            reason := if mode == .Pause -> "pause"
+                else if self.last_exception.is_some() || self.last_signal.is_some() -> "exception"
+                else if entry_stop -> "entry"
+                else if mode == .Step -> "step"
+                else -> "breakpoint"
+            hit_breakpoint_ids := [U32]{}
+            if Inferior.parse_top_frame(bt_text) == .Val(frame) {
+                if self.map.jet_line_for_file(frame.rust_file, self.rust_file, frame.rust_line) == {
+                    .None -> {
+                        if self.unmapped_steps >= 200 {
+                            self.terminate_with_diagnostic(out, "E2235", "native debugger produced too many stops without a verified Jet source mapping")
+                            return
+                        }
+                        self.unmapped_steps += 1
+                        if self.resume_hidden_stop("thread step-over") == {
+                            .Ok(following) -> { result = ^following; depth += 1; next }
+                            .Err(error) -> {
+                                self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                return
+                            }
+                        }
+                    }
+                    .Val(jline) -> {
+                        self.unmapped_steps = 0
+                        if !entry_stop && mode != .Step && mode != .Pause {
+                            if self.breakpoint_action(jline) == {
+                                .Stop(ids) -> hit_breakpoint_ids = ^ids
+                                .Continue -> {
+                                    if self.resume_hidden_stop("continue") == {
+                                        .Ok(following) -> { result = ^following; mode = .Continue; depth = 0; next }
+                                        .Err(error) -> {
+                                            self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                            return
+                                        }
+                                    }
+                                }
+                                .Log(message) -> {
+                                    self.event(out, "output", "{{\"category\":\"console\",\"output\":\"{foundation_json_escape(message)}\\n\"}}")
+                                    if self.resume_hidden_stop("continue") == {
+                                        .Ok(following) -> { result = ^following; mode = .Continue; depth = 0; next }
+                                        .Err(error) -> {
+                                            self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                            return
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if Inferior.parse_top_frame(bt_text) == {
+                .Val(frame) -> {
+                    jet_line :: self.map.jet_line_for_file(frame.rust_file, self.rust_file, frame.rust_line).unwrap_or(1)
+                    _ :: self.source_line(jet_line)
+                    self.record_history_event(bt_text, jet_line)
+                    if reason == "breakpoint" && self.history.events.last().is_some_and((event) -> self.history_write_matches(event)) -> reason = "data breakpoint"
+                    hit_ids :: if hit_breakpoint_ids.is_empty() -> "" else -> ",\"hitBreakpointIds\":[{hit_breakpoint_ids.iter().map((id) -> id.to_string()).collect().join(",")}]"
+                    self.event(out, "stopped", "{{\"reason\":\"{reason}\",\"threadId\":{self.current_thread},\"allThreadsStopped\":true{hit_ids}}}")
+                }
+                .None -> self.terminate_with_diagnostic(out, "E2235", "native debugger stopped without a verified Jet frame")
+            }
+            return
+        }
+    }
+}

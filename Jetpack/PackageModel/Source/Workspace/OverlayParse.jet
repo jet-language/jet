@@ -166,14 +166,14 @@ impl PackageOverride {
 fn pkg_overlay_priority_payload(input: String) -> (value: String, priority: Int) OverlayError! {
     raw :: pkg_overlay_trim_end_all(input.trim(), ",")
     if pkg_overlay_strip_wrapped(raw, "Force(", ")") == {
-        .Val(inner) -> return Ok((value: inner.trim(), priority: 100))
+        .Val(inner) -> return Ok((priority: 100, value: inner.trim()))
         .None -> {}
     }
     if pkg_overlay_strip_wrapped(raw, "Default(", ")") == {
-        .Val(inner) -> return Ok((value: inner.trim(), priority: -100))
+        .Val(inner) -> return Ok((priority: -100, value: inner.trim()))
         .None -> {}
     }
-    inner :: pkg_overlay_strip_wrapped(raw, "Priority(", ")") ?? return Ok((value: raw, priority: 0))
+    inner :: pkg_overlay_strip_wrapped(raw, "Priority(", ")") ?? return Ok((priority: 0, value: raw))
     weight := ""
     value := ""
     if pkg_overlay_split_colon(inner) == {
@@ -189,7 +189,7 @@ fn pkg_overlay_priority_payload(input: String) -> (value: String, priority: Int)
         }
     }
     priority :: pkg_overlay_parse_i32(weight) ?? return Err(OverlayError.Malformed("Priority(n) needs an integer weight"))
-    Ok((value: value, priority: priority))
+    Ok((priority: priority, value: value))
 }
 
 // A decimal `i32` with an optional sign, as Rust `str::parse::<i32>`.

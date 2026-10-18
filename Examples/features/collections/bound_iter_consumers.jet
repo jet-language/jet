@@ -1,0 +1,31 @@
+// A let-bound iterator consumed by a terminal (to_list, collect, sum, join,
+// first) or by an adapter moves out of its binding exactly once: the consumer
+// clears the binding's drop flag, so scope exit neither moves nor drops it a
+// second time.
+fn run() {
+    nums :: [1, 2, 3, 4, 5]
+    listed :: nums.lazy()
+    print(listed.to_list())
+    collected :: nums.lazy()
+    print(collected.collect())
+    summed :: nums.lazy()
+    print(summed.sum())
+    joined :: nums.lazy()
+    print(joined.join("-"))
+    headed :: nums.lazy()
+    print(headed.first() ?? 0)
+    taken :: nums.lazy()
+    print(taken.take(2).to_list())
+    mapped :: nums.lazy()
+    print(mapped.map(n -> n * 10).to_list())
+    kept :: nums.lazy()
+    print(kept.filter(n -> n % 2 == 0).to_list())
+    tested :: nums.lazy()
+    print(tested.any(n -> n > 4))
+    // An iterator over owned Strings.
+    parts :: "a,b,c".split(",")
+    words :: parts.to_list()
+    print(words)
+    names :: ["ant", "bee"].lazy()
+    print(names.join("|"))
+}

@@ -1,0 +1,22 @@
+// D-BYTELIT1=B: a `[U8]{"…"}` byte value checks as one byte constant (the
+// generated Unicode assets spell megabytes this way) and behaves as any [U8]:
+// a top-level table, a slice, equality with an element list, decoding, a
+// local loop, and the empty body.
+HEADER :: [U8]{"JUCD\x01\x00\x11\x00"}
+
+fn run() {
+    print(HEADER.len())
+    print(HEADER[0])
+    print(HEADER[6])
+    window :: HEADER[4..<8]
+    print(window.len())
+    print(HEADER == [U8]{74, 85, 67, 68, 1, 0, 17, 0})
+    local :: [U8]{"ab"}
+    total := 0
+    loop byte in local -> total = total + Int.from_u8(byte)
+    print(total)
+    greeting :: String.from_bytes([U8]{"hi\x0Athere"}) ?? ""
+    print(greeting.len())
+    empty :: [U8]{""}
+    print(empty.len())
+}

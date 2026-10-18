@@ -224,7 +224,11 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
         // CmdInspect.rs Gates arm: CmdGates.rs `run` over the resolved entry
         // followed by the plane flags (filters and invocation writers).
         "gates" -> {
+            // copy: `file` stays with `file`, which is read again at line 229, and the new value
+            // owns its own.
             gate_args := [String]{file.copy()}
+            // copy: `option` stays in the iterated collection (`option` is a view of its element;
+            // no move out of an element, E0225) and the pushed row owns its own.
             loop option in request.options -> &gate_args.push(option.copy())
             return JetCLIPlan.Gates{file: file, args: gate_args, color: color, json: json, notice: notice}
         }
@@ -318,7 +322,7 @@ fn jet_cli_inspect_word(command: String) -> Bool Never! {
 // Route one inspect-group command: `argv` is the normalized argv (the
 // `--` tail included), `jet_argv` the words before `--`, and `args` their
 // positional words; `args[0]` is the command word.
-fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm]> JetCLIPlan Never! {
+fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     command :: args[0]
     inspect_env :: command == "inspect" && args.len() > 1 && args[1] == "env"
     if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)
@@ -395,6 +399,8 @@ fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
+    // copy: `path` stays with the caller (`path` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if path.starts_with("/") -> return path.copy()
     cwd :: cli_files.cwd() ?? "."
     "{cwd}/{path}"
@@ -432,9 +438,10 @@ fn jet_cli_inspect_entry(scope: JetCLIInspectScope, plane: String, color: Bool) 
         .File(path, _) -> root = path
     }
     notices := [String]{}
-    if jet_cli_find_project_entry(root, "inspect {plane}", color, &notices) == {
+    found_entry :: jet_cli_find_project_entry(root, "inspect {plane}", color, &notices)
+    if found_entry == {
         .Entry(entry) -> return JetCLIInspectEntry.File{path: entry.path, notice: notices.join("")}
-        .Refused(plan) -> return JetCLIInspectEntry.Refused{plan: jet_cli_with_notices(notices, plan)}
+        .Refused(plan) -> return JetCLIInspectEntry.Refused{plan: jet_cli_with_notices(notices, ^plan)}
         .Absent -> {}
     }
     JetCLIInspectEntry.File{path: jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE), notice: notices.join("")}
@@ -725,7 +732,7 @@ fn jet_cli_inspect_reads_bytes(file: String) -[FS]> Bool Never! {
 // parse project the Jet lexer and parser over the inline-package-masked
 // source, source-map reads the `// jet:` markers of generated Rust, and check
 // projects the checked file (InspectCompiler.jet, Compiler.rs `checked_value`).
-fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FFI.C, FFI.Asm]> JetCLIPlan Never! {
+fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     operation :: if args.len() > 1 -> args[1] else -> ""
     file :: if args.len() > 2 -> args[2] else -> ""
     reads :: operation == "lex" || operation == "parse" || operation == "check" || operation == "source-map" || operation == "source_map"
@@ -1466,16 +1473,21 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         if part == "" || part == "." || part == ".." -> clean = false
     }
     if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
-                return jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
-            }
+            checked :: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
+            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_replay_artifact(job, artifact, absolute) else -> jet_cli_replay_fail(job, "E3621", identity_what, "could not check `{job.file}` for MIR artifact identity", identity_fix, JET_DRIVER_EXIT_USER_ERROR))
         }
     }
+    output
+}
+
+// The replay artifact named by `artifact` for the checked entry at `absolute`.
+fn jet_cli_inspect_replay_artifact(job: JetCLIInspectJob, artifact: String, absolute: String) -> JetDriverVerbOutput {
     // Loader.rs `selected_project_root` of the entry's directory.
     directory :: jet_cli_parent(absolute) ?? "."
     root := directory
@@ -1505,9 +1517,20 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 // the checked program. Resolution's notices go out first. Unannotated
 // because the compile verbs are (Request.jet `jet_cli_compile_file`).
 fn jet_cli_inspect_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
-    output := jet_cli_inspect_run_job(job)
-    if job.notice != "" -> output.stderr = "{job.notice}{output.stderr}"
-    output
+    jet_cli_inspect_noticed(job.notice, jet_cli_inspect_run_job(job))
+}
+
+// A job's output behind resolution's notices.
+fn jet_cli_inspect_noticed(notice: String, output: ^JetDriverVerbOutput) -> JetDriverVerbOutput {
+    noticed := ^output
+    if notice != "" -> noticed.stderr = "{notice}{noticed.stderr}"
+    noticed
+}
+
+// A job that holds a compile result ends the process with its noticed
+// output from inside the scope that owns the result (jet_cli_finish).
+fn jet_cli_inspect_finish(job: JetCLIInspectJob, output: ^JetDriverVerbOutput) -> Never {
+    jet_cli_finish(jet_cli_inspect_noticed(job.notice, ^output))
 }
 
 fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
@@ -1515,7 +1538,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "provenance" -> return jet_cli_inspect_provenance_host(job)
     // Structure prints any retained partial facts ahead of failing diagnostics,
     // so it skips the generic check preflight below.
-    if job.action == "structure" -> return jet_cli_structure_host(job.file, job.color, job.json, job.threads)
+    if job.action == "structure" -> return jet_cli_structure_host(job.file, job.color, job.json, job.threads, job.notice)
     if !cli_files.is_file(job.file) {
         missing :: diagnostic_from_registry("E0603", None, "can't find the file `{jet_cli_inspect_absolute(job.file)}`", "a named `.jet` source path must point at an existing file", "check the spelling, or create the missing file")
         return jet_cli_inspect_check_failed(job, "", [Diagnostic]{missing})
@@ -1529,7 +1552,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, mode)
     if compiled == {
-        .Refused(refusal) -> output = refusal.copy()
+        .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
@@ -1543,6 +1566,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 else -> panic("inspect action has no canonical provider: {job.action}")
             }
+            jet_cli_inspect_finish(job, ^output)
         }
     }
     output
@@ -1587,9 +1611,10 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
 // cannot answer (the #4736 comptime read set) refuses the command rather than
 // reporting no runtime rows.
 fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared :: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Doc)
     if prepared == {
-        .Refused(output) -> return output
+        .Refused(refusal) -> output = ^refusal
         .Prepared(value, _) -> {
             request := ^value
             request.profile = job.profile
@@ -1600,17 +1625,18 @@ fn jet_cli_inspect_optimization_host(job: JetCLIInspectJob, source: String) -> J
             sources := request.authorized_sources
             query :: jet_driver_optimization_query(^request)
             errors :: jet_cli_errors(jet_driver_present_diagnostics(query.compile.diagnostics, sources, query.compile.generated_source_files))
-            if errors.len() > 0 -> return jet_cli_inspect_check_failed(job, source, errors)
-            if query.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
+            if query.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
             runtime := [JetCLIAccelerationRuntime]{}
             if job.action == "accel" {
-                runtime = jet_cli_acceleration_runtime_rows(query.profile, job.file, job.scope, job.subject) ?? return jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color)
+                runtime = jet_cli_acceleration_runtime_rows(query.profile, job.file, job.scope, job.subject) ?? jet_cli_inspect_finish(job, jet_cli_not_ported_output("inspect accel <runtime receipts: {err.message}>", job.color))
             }
             process :: cli_sys.get("JET_ADAPTER_CANONICAL_PASS_PROCESS") ?? "inspect"
             routes :: jet_cli_canonical_routes(query.canonical_routes, process)
-            return jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json)
+            jet_cli_inspect_finish(job, jet_cli_optimization_host(sources, query, job.action, job.scope, job.file, runtime, routes, job.color, job.json))
         }
     }
+    output
 }
 
 // jet-impact `ImpactEdge` / `ImpactRef`.
@@ -1806,7 +1832,11 @@ fn jet_cli_impact_walk(calls: [JetCLISemCall], symbol: String, depth_limit: Int,
     depths := [Int]{0}
     cursor := 0
     loop cursor < frontier.len() {
+        // copy: `frontier[cursor]` stays in its list (owner: `frontier`; no move out of an element,
+        // E0225) and the binding `current` owns its own.
         current :: frontier[cursor].copy()
+        // copy: `depths[cursor]` stays in its list (owner: `depths`; no move out of an element,
+        // E0225) and the binding `depth` owns its own.
         depth :: depths[cursor].copy()
         cursor += 1
         if depth >= depth_limit -> next

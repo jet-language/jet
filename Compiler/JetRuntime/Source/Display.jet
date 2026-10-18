@@ -28,14 +28,7 @@ fn display_put(address: I64, value: I64) {
     }
 }
 
-fn display_new(length: I64) -> I64 {
-    data :: if (length == I64{0}) -> I64{1} else -> jet_rt_alloc(length, I64{1})
-    text :: jet_rt_alloc(I64{24}, I64{8})
-    display_store(text, data)
-    display_store(text + I64{8}, length)
-    display_store(text + I64{16}, length)
-    text
-}
+fn display_new(length: I64) -> I64 { rt_text_with_length(length, length) }
 
 fn display_literal(word: I64, length: I64) -> I64 {
     text :: display_new(length)

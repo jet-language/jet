@@ -68,6 +68,7 @@ fn jet_cli_record_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) ->
 
 fn jet_cli_record_links_sort(links: [JetCLIRecordLink], field: String) -> [JetCLIRecordLink] JetCLIReadError! {
     normalized := links
+    normalized = loop fresh_item in normalized -> fresh_item
     &normalized.sort_by(jet_cli_record_link_order)
     loop index in 1..<normalized.len() {
         left :: normalized[index - 1]

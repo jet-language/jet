@@ -60,7 +60,7 @@ fn lower_queue_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 fn lower_queue_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
     ty :: lower_checked_type(c, instruction) ?? return false
     if lower_queue_element(ty) == None -> return false
-    row :: lower_prelude_row(p, call) ?? return false
+    row :: lower_prelude_row(p, m, call) ?? return false
     symbol :: lower_runtime_symbol(row)
     if symbol == "jet_deque_from" && args.len() == 1 {
         lower_queue_from(p, c, &m, &f, instruction, args[0].value)
@@ -306,8 +306,9 @@ fn lower_helper_queue_get(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem:
     lir_builder_finish(f.builder)
 }
 
-// Drop/clear walks only live ring slots; clone makes a linear independent
-// buffer, so discarded/spare slots never own another copy of an element.
+// Drop/clear walks only live ring slots; a copy (queue.list, queue.unique) is
+// a linear buffer, so discarded/spare slots never own another copy of an
+// element.
 fn lower_queue_retire(p: MIRProgram, m: &LowerModule, f: &LowerFunction, queue: LIRValueID, elem: MIRType, free: Bool) Never! {
     length :: lower_list_word(&f, queue, 0)
     cap :: lower_list_word(&f, queue, 8)
@@ -333,6 +334,14 @@ fn lower_helper_queue_copy(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
     source :: f.open_params[0].copy()
     dst :: f.open_params[1].copy()
+    lower_queue_copy_into(p, &m, &f, source, dst, elem, ring)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// Fills the header at `dst` with a linear buffer holding a clone of each of
+// `source`'s live elements in queue order (head 0 when `ring`).
+fn lower_queue_copy_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, dst: LIRValueID, elem: MIRType, ring: Bool) Never! {
     length :: lower_list_word(&f, source, 0)
     cap :: lower_list_word(&f, source, 8)
     head :: lower_list_word(&f, source, 24)
@@ -351,6 +360,88 @@ fn lower_helper_queue_copy(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem
     to :: lower_list_address(&f, data, counted.index, stride)
     lower_list_clone_element(p, &m, &f, from, to, elem)
     lower_record_loop_end(&f, counted)
+}
+
+// Queue clone glue shares the ring buffer (#5041 P2): the four header words
+// and one more owner of an allocated buffer.
+fn lower_helper_queue_clone(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    source :: f.open_params[0].copy()
+    target :: f.open_params[1].copy()
+    lower_copy_bytes(&f, target, 0, source, 0, 32)
+    lower_list_retain(&m, &f, target)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// Queue drop releases this owner of the ring; the last owner drops the live
+// slots and frees it.
+fn lower_helper_queue_drop(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    queue :: f.open_params[0].copy()
+    cap :: lower_list_word(&f, queue, 8)
+    zero :: lower_const(&f, 0)
+    owned :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: owned, condition: LIRCondition.Ne, left: cap, right: zero})
+    counted :: lower_new_block(&f)
+    drop :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: owned, then_target: lower_target(counted, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, counted, [LIRValueID]{})
+    data :: lower_list_data(&f, queue)
+    last :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{data}, Val(last))
+    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(drop, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, drop, [LIRValueID]{})
+    lower_queue_retire(p, &m, &f, queue, elem, true)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_queue_zero(&f, queue)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// queue.unique(header): the copy half of lower_list_make_unique for a ring.
+// A shared ring is replaced by a private linear copy (head 0); the old ring
+// loses this owner and is dropped here if every other owner released it.
+// For an element no owner can copy (lower_contains_uncopyable) the helper is
+// the identity, as box.unique's: Sema never lets such a ring be shared.
+fn lower_helper_queue_unique(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    seen := [String:Bool]{}
+    if lower_contains_uncopyable(p, m, elem, &seen) {
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        return lir_builder_finish(f.builder)
+    }
+    queue :: f.open_params[0].copy()
+    cap :: lower_list_word(&f, queue, 8)
+    zero :: lower_const(&f, 0)
+    owned :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: owned, condition: LIRCondition.Ne, left: cap, right: zero})
+    counted :: lower_new_block(&f)
+    detach :: lower_new_block(&f)
+    drop :: lower_new_block(&f)
+    install :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: owned, then_target: lower_target(counted, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, counted, [LIRValueID]{})
+    data :: lower_list_data(&f, queue)
+    sole :: lower_list_sole_owner(&f, data)
+    lower_seal(&f, LIRTerminator.Branch{condition: sole, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(detach, [LIRValueID]{})})
+    lower_start(&f, detach, [LIRValueID]{})
+    fresh :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: fresh, size: 32, align: 8})
+    lower_queue_copy_into(p, &m, &f, queue, fresh, elem, true)
+    last :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{data}, Val(last))
+    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(drop, [LIRValueID]{}), else_target: lower_target(install, [LIRValueID]{})})
+    lower_start(&f, drop, [LIRValueID]{})
+    lower_queue_retire(p, &m, &f, queue, elem, true)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(install, [LIRValueID]{})})
+    lower_start(&f, install, [LIRValueID]{})
+    lower_copy_bytes(&f, queue, 0, fresh, 0, 32)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }
@@ -545,15 +636,17 @@ fn lower_helper_queue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFun
     if glue.helper.starts_with("queue.push.") -> return lower_helper_queue_push(p, &m, glue, elem)
     if glue.helper.starts_with("queue.pop.") || glue.helper.starts_with("queue.peek.") || glue.helper == "queue.get" -> return lower_helper_queue_get(p, &m, glue, elem)
     if glue.helper == "queue.list" -> return lower_helper_queue_copy(p, &m, glue, elem, false)
-    if glue.clone -> return lower_helper_queue_copy(p, &m, glue, elem, true)
+    if glue.clone -> return lower_helper_queue_clone(&m, glue)
+    if glue.helper == "queue.unique" -> return lower_helper_queue_unique(p, &m, glue, elem)
+    if glue.helper == "" -> return lower_helper_queue_drop(p, &m, glue, elem)
     if glue.helper == "queue.contains" || glue.helper == "queue.delete" -> return lower_helper_queue_search(p, &m, glue, elem)
     if glue.helper == "queue.split" -> return lower_helper_queue_split(p, &m, glue, elem)
     if glue.helper == "queue.reverse" -> return lower_helper_queue_reverse(p, &m, glue, elem)
     if glue.helper == "queue.join" || glue.helper == "show" || glue.helper == "display" || glue.helper == "debug" -> return lower_helper_queue_render(p, &m, glue, elem)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     queue :: f.open_params[0].copy()
-    if glue.helper == "queue.clear" || glue.helper == "" {
-        lower_queue_retire(p, &m, &f, queue, elem, glue.helper == "")
+    if glue.helper == "queue.clear" {
+        lower_queue_retire(p, &m, &f, queue, elem, false)
     } else {
         lower_fail(&m, &f, "Queue helper {glue.helper} has no generator")
     }

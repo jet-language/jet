@@ -13,6 +13,7 @@ use jet_foundation.[
     Symbol,
     SymbolKind,
     TCallArg,
+    TDeclarationOwnership,
     TExpr,
     TExprKind,
     TFieldRef,
@@ -22,7 +23,6 @@ use jet_foundation.[
     Type,
     core_source_owns_type,
     symbol_id,
-    tir_call_arg_copy_fact,
 ]
 
 struct SemaStreamHandleSpec {
@@ -50,7 +50,7 @@ fn sema_stream_handle_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) | .Apply(name, _) -> {
             if core_source_owns_type(name) -> return None
-            loop owner in ([String]{"MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
+            loop owner in ([String]{"Sender", "Receiver", "MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
                 // The built-in `Path` has no declaring module: a canonical
                 // `<module>::Path` is a different record (`core.files.path`).
                 if name == owner || (owner != "Path" && name.ends_with("::{owner}")) -> return Val(owner)
@@ -76,6 +76,17 @@ fn sema_stream_handle_owner_module(owner: String) -> String Never! {
 fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_stream_handle_owner(ty) ?? return false
     if actual != owner -> return false
+    // The channel endpoints are compiler-owned builtins with no declaring
+    // module (Concurrency.jet `sema_call_concurrency_is_canonical_sender`):
+    // a user nominal of the same name shadows them.
+    if owner == "Sender" || owner == "Receiver" {
+        if program.registration_graph == .Val(graph) {
+            if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
+            fact :: sema_registration_core_builtin_owner(graph, owner) ?? return false
+            return fact.ownership == TDeclarationOwnership.Owned
+        }
+        return false
+    }
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
         if resolved == .Val(row) {
@@ -119,10 +130,8 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
             else -> Type.Int
         }
         if method == "close" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelClose, result_type: unit, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        if owner == "Sender" {
-            if method == "send" -> return Val(SemaStreamHandleSpec{operation: THandleOp.SenderSend, result_type: unit, params: [SemaCallParam]{sema_stream_handle_param("value", element, AccessConvention.Move)}, receiver_convention: AccessConvention.Read, effect_name: "Time.Wait"})
-            return None
-        }
+        // `Sender.send` is Concurrency.jet's route (payload crossing checks).
+        if owner == "Sender" -> return None
         if method == "receive" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelReceive, result_type: Type.Result{ok: element, err: Type.Named{name: "Closed"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "Time.Wait"})
         if method == "try_receive" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelTryReceive, result_type: Type.Option{inner: element}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_timer" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsTimer, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
@@ -318,9 +327,6 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         .None -> sema_ownership_check_call_arguments(&state, callee, params, &checked_args, scopes, &diagnostics)
     }
     if !ownership.accepted || !ownership.complete -> return None
-    loop index in 0..<values.len() {
-        if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> values[index] = sema_tir_node(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, values[index].span)
-    }
     Val(values)
 }
 

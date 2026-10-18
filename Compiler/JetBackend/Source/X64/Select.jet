@@ -21,7 +21,7 @@
 // and shifts need cl: rdx and rcx are saved around them with push/pop, so the
 // allocator may keep values there.
 
-use jet_foundation.[compiler_take_rows, compiler_threads_failure_text]
+use jet_foundation.[compiler_take_rows]
 
 enum X64RelocTarget {
     Function(id: LIRFunctionID)
@@ -46,10 +46,12 @@ struct X64CompiledFunction {
 // variable lives over which code range.
 struct X64LineRow { at: Int, line: Int }
 
-// A register (hardware number) or a frame slot at `offset` from rbp.
+// A register (hardware number), a frame slot at `offset` from rbp, or the
+// frame address rbp + `offset` itself (a StackSlot's address).
 enum X64DebugLocation {
     Register(reg: Int)
     Frame(offset: Int)
+    FrameAddress(offset: Int)
 }
 
 // LIRFunctionDebug.variables[variable] is at `location` for code offsets
@@ -170,11 +172,21 @@ fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
         from :: x64_float_operand(&emitter, src, single, 0)
         return x64_finish_float(&emitter, dst, from)
     }
-    if dst == .Imm(_) -> return
-    from :: x64_operand(&emitter, src, X64_R11)
+    if dst == .Imm(_) || dst == .Frame(_) -> return
     if dst == {
-        .Reg(to) -> { if from != to -> x64_mov_rr(&emitter.code, to, from) }
-        .Stack(slot) -> x64_store_slot(&emitter, slot, from)
+        // Loads, immediates and frame addresses go straight to the register.
+        .Reg(to) -> {
+            from :: x64_operand(&emitter, src, to)
+            if from != to -> x64_mov_rr(&emitter.code, to, from)
+        }
+        .Stack(slot) -> {
+            if x64_imm32(src) == .Val(value) {
+                x64_store_imm32(&emitter.code, X64_RBP, x64_slot_disp(emitter.saved.len(), slot), value)
+            } else {
+                operand :: x64_operand(&emitter, src, X64_R11)
+                x64_store_slot(&emitter, slot, operand)
+            }
+        }
         else -> {}
     }
 }
@@ -280,6 +292,10 @@ fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
             x64_mov_ri(&emitter.code, scratch, value)
             scratch
         }
+        .Frame(value) -> {
+            x64_lea(&emitter.code, scratch, X64_RBP, emitter.stack[value])
+            scratch
+        }
         .Folded -> panic("x64 selector read an eliminated address definition")
     }
 }
@@ -318,11 +334,44 @@ fn x64_condition(condition: LIRCondition) -> X64Cond Never! {
     }
 }
 
-fn x64_edge_moves(function: LIRFunction, allocation: X64Allocation, target: LIRJumpTarget) -> [X64Move] Never! {
-    params :: function.blocks[lir_block_index(function, target.block)].params
+// The first row of each block ID (lir_block_index's answer), built once per
+// function so every edge resolves without a block scan.
+fn x64_block_rows(function: LIRFunction) -> [Int:Int] Never! {
+    rows := [Int:Int]{}
+    loop (index, block) in function.blocks {
+        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("checked absent above")
+    }
+    rows
+}
+
+fn x64_block_row(rows: [Int:Int], id: LIRBlockID) -> Int Never! {
+    rows.get(id.value) ?? -1
+}
+
+// The parallel move on the edge to `target`: each block argument into its
+// parameter, and each value live into the target block whose segment there
+// holds another location than its segment here. `allocation.locations`
+// holds this block's locations (x64_enter_block). No-op moves are left out.
+fn x64_edge_moves(function: LIRFunction, allocation: X64Allocation, target: LIRJumpTarget, target_row: Int) -> [X64Move] Never! {
+    first :: allocation.block_segments[target_row]
     moves := [X64Move]{}
-    loop (position, arg) in target.args -> &moves.push(X64Move{src: allocation.locations[arg.value], dst: allocation.locations[params[position].value]})
+    loop (position, arg) in target.args {
+        move :: X64Move{src: allocation.locations[arg.value], dst: allocation.segment_locations[first + position]}
+        if move.src != move.dst -> &moves.push(move)
+    }
+    loop segment in (first + function.blocks[target_row].params.len())..<(first + allocation.block_entries[target_row]) {
+        move :: X64Move{src: allocation.locations[allocation.segment_values[segment]], dst: allocation.segment_locations[segment]}
+        if move.src != move.dst -> &moves.push(move)
+    }
     moves
+}
+
+// Point `allocation.locations` at block row `row`'s segments: inside a block
+// every value it reads holds its segment's location there.
+fn x64_enter_block(allocation: &X64Allocation, row: Int) Never! {
+    loop segment in allocation.block_segments[row]..<allocation.block_segments[row + 1] {
+        allocation.locations[allocation.segment_values[segment]] = allocation.segment_locations[segment]
+    }
 }
 
 fn x64_emit_jump(emitter: &X64Emitter, block: Int) Never! {
@@ -496,8 +545,8 @@ fn x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
 fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
     gaps :: x64_selection_gaps(program, function)
     if gaps.len() > 0 -> return X64CompileResult{function: None, debug: None, errors: gaps}
-    allocation :: x64_allocate(function)
-    uses :: allocation.folds.uses
+    allocation := x64_allocate(function)
+    x64_enter_block(&allocation, 0)
     frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
     emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack, returns: [Int]{}}
 
@@ -580,15 +629,29 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     positions := [Int]{}
     defining := [Bool]{}
     block_offsets := [Int]{}
+    block_rows :: x64_block_rows(function)
     loop (block_index, block) in function.blocks {
+        x64_enter_block(&allocation, block_index)
         &block_offsets.push(emitter.code.len())
         &positions.push(emitter.code.len())
         &defining.push(false)
         located :: block.lines.len() == block.insts.len() + 1
         fused := false
+        flags_set := false
+        // A Compare or Overflows whose only use is this block's Branch sets
+        // the flags the branch tests: no setcc/movzx/test round trip. When
+        // that Overflows repeats the Binary before it, the Binary's own
+        // arithmetic already left those flags: `add; jo`, no second add.
         if block.terminator == .Branch(condition, _, _) {
             if block.insts.len() > 0 {
-                if block.insts[block.insts.len() - 1] == .Compare(dst, _, left, _) -> fused = dst == condition && uses[dst.value] == 1 && !x64_is_float(function, left)
+                if block.insts[block.insts.len() - 1] == {
+                    .Compare(dst, _, left, _) -> fused = dst == condition && allocation.folds.uses[dst.value] == 1 && !x64_is_float(function, left)
+                    .Overflows(dst, op, left, right) -> {
+                        fused = dst == condition && allocation.folds.uses[dst.value] == 1
+                        if fused && block.insts.len() > 1 -> flags_set = x64_binary_sets_overflow(function, allocation.folds, block.insts[block.insts.len() - 2], op, left, right)
+                    }
+                    else -> {}
+                }
             }
         }
         loop (inst_index, inst) in block.insts {
@@ -600,7 +663,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         &positions.push(emitter.code.len())
         &defining.push(false)
         if located -> x64_debug_line(&lines, emitter.code.len(), block.lines[block.insts.len()])
-        x64_select_terminator(&emitter, function, allocation, block, block_index, fused)
+        x64_select_terminator(&emitter, function, allocation, block, block_index, fused, flags_set, block_rows)
     }
     &positions.push(emitter.code.len())
     loop fixup in emitter.fixups -> x64_patch_rel32(&emitter.code, fixup.at, block_offsets[fixup.block])
@@ -613,7 +676,7 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
         dwarf_cfa_restore_state(&cfi)
         cfa_at = at + 1
     }
-    debug :: X64FunctionDebug{lines: lines, body: body, cfi: cfi, ranges: x64_variable_ranges(function, allocation, positions, defining)}
+    debug :: X64FunctionDebug{lines: lines, body: body, cfi: cfi, ranges: x64_variable_ranges(function, allocation, emitter.stack, positions, defining)}
     X64CompileResult{
         function: Val(X64CompiledFunction{id: function.id, name: function.name, code: emitter.code, relocs: emitter.relocs}),
         debug: Val(debug),
@@ -621,31 +684,73 @@ fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Compile
     }
 }
 
-// Where each debug binding's value lives: its location over the code of its
-// interval, from after its definition (or its block's start, for a block
-// parameter) through its last position. A value bound twice to one
-// variable yields one range.
-fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
+// The debug location of a value held at `loc`; None for one with no storage.
+fn x64_debug_location(loc: X64Loc, saved: Int, stack: [Int]) -> X64DebugLocation? Never! {
+    if loc == {
+        .Reg(reg) -> Val(X64DebugLocation.Register{reg: reg})
+        .Xmm(reg, _) -> Val(X64DebugLocation.Register{reg: 16 + reg})
+        .Stack(slot) | .FloatStack(slot, _) -> Val(X64DebugLocation.Frame{offset: x64_slot_disp(saved, slot)})
+        .Frame(slot) -> Val(X64DebugLocation.FrameAddress{offset: stack[slot]})
+        .Imm(_) | .Folded -> None
+    }
+}
+
+// Where each debug binding's value lives: over the code of each of its
+// segments, from after its definition (or its block's start, for a block
+// parameter or live-in value) through the segment's last position, in that
+// segment's location. Segments that follow one another in the code in one
+// location yield one range. A value bound twice to one variable yields its
+// ranges once.
+fn x64_variable_ranges(function: LIRFunction, allocation: X64Allocation, stack: [Int], positions: [Int], defining: [Bool]) -> [X64VariableRange] Never! {
+    count :: function.values.len()
+    // Each value's segments in function order, as a chain from heads[value]
+    // through links.
+    heads := [Int]{}
+    tails := [Int]{}
+    loop _ in 0..<count {
+        &heads.push(-1)
+        &tails.push(-1)
+    }
+    links := [Int]{}
+    loop (segment, value) in allocation.segment_values {
+        &links.push(-1)
+        if heads[value] < 0 {
+            heads[value] = segment
+        } else {
+            links[tails[value]] = segment
+        }
+        tails[value] = segment
+    }
     ranges := [X64VariableRange]{}
     seen := [Int:Bool]{}
-    count :: function.values.len()
+    saved :: allocation.callee_saved.len()
     loop binding in function.debug.bindings {
         value :: binding.value.value
-        first :: allocation.starts[value]
-        if first < 0 -> next
+        if heads[value] < 0 -> next
         key :: binding.variable * count + value
         if seen.get(key) != None -> next
         &seen.add(key, true).drop("checked absent above")
-        start :: if defining[first] -> positions[first + 1] else -> positions[first]
-        end :: positions[allocation.ends[value] + 1]
-        if start >= end -> next
-        location :: if allocation.locations[value] == {
-            .Reg(reg) -> X64DebugLocation.Register{reg: reg}
-            .Xmm(reg, _) -> X64DebugLocation.Register{reg: 16 + reg}
-            .Stack(slot) | .FloatStack(slot, _) -> X64DebugLocation.Frame{offset: x64_slot_disp(allocation.callee_saved.len(), slot)}
-            .Imm(_) | .Folded -> { next }
+        open_start := -1
+        open_end := -1
+        open_location := X64DebugLocation.Register{reg: 0}
+        segment := heads[value]
+        loop segment >= 0 {
+            first :: allocation.segment_starts[segment]
+            start :: if defining[first] -> positions[first + 1] else -> positions[first]
+            end :: positions[allocation.segment_ends[segment] + 1]
+            if start < end && x64_debug_location(allocation.segment_locations[segment], saved, stack) == .Val(location) {
+                if open_start >= 0 && open_end == start && open_location == location {
+                    open_end = end
+                } else {
+                    if open_start >= 0 -> &ranges.push(X64VariableRange{variable: binding.variable, start: open_start, end: open_end, location: open_location})
+                    open_start = start
+                    open_end = end
+                    open_location = location
+                }
+            }
+            segment = links[segment]
         }
-        &ranges.push(X64VariableRange{variable: binding.variable, start: start, end: end, location: location})
+        if open_start >= 0 -> &ranges.push(X64VariableRange{variable: binding.variable, start: open_start, end: open_end, location: open_location})
     }
     ranges
 }
@@ -763,6 +868,55 @@ fn x64_select_binary_imm(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValu
     true
 }
 
+// The condition set exactly when `left op right` overflows: MUL's carry
+// tests unsigned range; IMUL's overflow tests signed range
+// (FixedArithmetic.rs:318-326).
+fn x64_overflow_condition(op: LIRBinaryOp) -> X64Cond Never! {
+    if op == .UAdd || op == .USub || op == .UMul -> return X64Cond.B
+    X64Cond.O
+}
+
+// The flags of `left op right` in rax (rdx preserved); returns the condition
+// set exactly when the operation overflows (x64_overflow_condition).
+fn x64_emit_overflow(emitter: &X64Emitter, locations: [X64Loc], op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> X64Cond Never! {
+    left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+    right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+    if op == .UMul && right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
+    x64_mov_rr(&emitter.code, X64_RAX, left_reg)
+    if op == .UMul -> x64_push(&emitter.code, X64_RDX)
+    if op == {
+        .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
+        .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
+        .UMul -> x64_mul(&emitter.code, X64_R11)
+        else -> x64_imul_rr(&emitter.code, X64_RAX, right_reg)
+    }
+    // POP does not alter MUL's carry flag.
+    if op == .UMul -> x64_pop(&emitter.code, X64_RDX)
+    x64_overflow_condition(op)
+}
+
+// Whether `inst`, the instruction before an `Overflows{op, left, right}`
+// fused into its block's branch, is the Binary of the same operands whose
+// selected arithmetic (`add`, `sub` or `imul`, then at most a flag-neutral
+// store of its result) already leaves the flags that Overflows tests, so
+// the branch is `op; jcc` with no second operation. Signed and unsigned
+// Add/Sub share one instruction; UMul's unsigned test is MUL's carry, which
+// the Binary's IMUL does not set, so it never fuses. A Binary that
+// selection folds into an address or skips emits no arithmetic.
+fn x64_binary_sets_overflow(function: LIRFunction, folds: X64AddressFolds, inst: LIRInst, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> Bool Never! {
+    if inst == .Binary(dst, binary_op, binary_left, binary_right) {
+        if binary_left != left || binary_right != right -> return false
+        if folds.skipped[dst.value] || folds.addresses[dst.value] != None || x64_is_float(function, dst) -> return false
+        if op == {
+            .Add | .UAdd -> return binary_op == .Add || binary_op == .UAdd
+            .Sub | .USub -> return binary_op == .Sub || binary_op == .USub
+            .Mul -> return binary_op == .Mul || binary_op == .UMul
+            else -> return false
+        }
+    }
+    false
+}
+
 struct X64SelectedAddress {
     base: Int
     index: Int
@@ -770,9 +924,14 @@ struct X64SelectedAddress {
     disp: Int
 }
 
+// A frame-address base folds into the displacement: `[rbp + slot + disp]`.
 fn x64_select_address(emitter: &X64Emitter, locations: [X64Loc], address: X64Address) -> X64SelectedAddress Never! {
-    base :: x64_operand(&emitter, locations[address.base.value], X64_R10)
     index :: if address.index == .Val(value) -> x64_operand(&emitter, locations[value.value], X64_R11) else -> -1
+    if locations[address.base.value] == .Frame(slot) {
+        disp :: emitter.stack[slot] + address.disp
+        if x64_fits_i32(disp) -> return X64SelectedAddress{base: X64_RBP, index: index, scale: address.scale, disp: disp}
+    }
+    base :: x64_operand(&emitter, locations[address.base.value], X64_R10)
     X64SelectedAddress{base: base, index: index, scale: address.scale, disp: address.disp}
 }
 
@@ -961,24 +1120,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             }
         }
         .Overflows(dst, op, left, right) -> {
-            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
-            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
-            // MUL's carry tests unsigned range; IMUL's overflow tests signed
-            // range (FixedArithmetic.rs:318-326). Preserve allocated rdx.
-            if op == .UMul && right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
-            x64_mov_rr(&emitter.code, X64_RAX, left_reg)
-            if op == .UMul -> x64_push(&emitter.code, X64_RDX)
-            if op == {
-                .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
-                .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
-                .UMul -> x64_mul(&emitter.code, X64_R11)
-                else -> x64_imul_rr(&emitter.code, X64_RAX, right_reg)
-            }
-            // POP does not alter MUL's carry flag.
-            if op == .UMul -> x64_pop(&emitter.code, X64_RDX)
+            cond :: x64_emit_overflow(&emitter, locations, op, left, right)
             reg :: x64_result_register(locations[dst.value], X64_RAX)
-            unsigned :: op == .UAdd || op == .USub || op == .UMul
-            x64_setcc(&emitter.code, if unsigned -> X64Cond.B else -> X64Cond.O, reg)
+            x64_setcc(&emitter.code, cond, reg)
             x64_movzx_r8(&emitter.code, reg, reg)
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
@@ -1006,11 +1150,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
             x64_store_indexed(&emitter.code, address.base, address.index, address.scale, address.disp, stored_reg, function.values[value.value].layout.size)
         }
-        .StackSlot(dst, _, _) -> {
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
-            x64_lea(&emitter.code, reg, X64_RBP, emitter.stack[dst.value])
-            x64_finish_result(&emitter, locations[dst.value], reg)
-        }
+        // The allocator gives every StackSlot result its frame address as
+        // location (RegAlloc.jet): uses fold or rematerialize it.
+        .StackSlot(_, _, _) -> {}
         .DataAddress(dst, data) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             at :: x64_lea_rip(&emitter.code, reg)
@@ -1023,10 +1165,17 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Function{id: target}})
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
+        .ThreadWord(dst, offset) -> {
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            x64_load_gs(&emitter.code, reg, offset)
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
     }
 }
 
-fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool) Never! {
+// `fused`: the block's last instruction sets the branch's flags (see
+// x64_compile_function); `flags_set`: the Binary before it already did.
+fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool, flags_set: Bool, block_rows: [Int:Int]) Never! {
     if block.terminator == {
         .Return(value) -> {
             if value == .Val(returned) {
@@ -1036,21 +1185,35 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
             x64_emit_epilogue(&emitter)
         }
         .Jump(target) -> {
-            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, target))
-            target_index :: lir_block_index(function, target.block)
+            target_index :: x64_block_row(block_rows, target.block)
+            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, target, target_index))
             if target_index != block_index + 1 -> x64_emit_jump(&emitter, target_index)
         }
         .Branch(condition, then_target, else_target) -> {
             cond := X64Cond.NE
             if fused {
-                if block.insts[block.insts.len() - 1] == .Compare(_, compare, left, right) -> cond = x64_emit_compare(&emitter, allocation.locations, compare, left, right)
+                if block.insts[block.insts.len() - 1] == {
+                    .Compare(_, compare, left, right) -> cond = x64_emit_compare(&emitter, allocation.locations, compare, left, right)
+                    .Overflows(_, op, left, right) -> cond = if flags_set -> x64_overflow_condition(op) else -> x64_emit_overflow(&emitter, allocation.locations, op, left, right)
+                    else -> {}
+                }
             } else {
                 reg :: x64_operand(&emitter, allocation.locations[condition.value], X64_R10)
                 x64_test_rr(&emitter.code, reg, reg)
             }
-            then_index :: lir_block_index(function, then_target.block)
-            else_index :: lir_block_index(function, else_target.block)
-            then_moves :: x64_edge_moves(function, allocation, then_target)
+            then_index :: x64_block_row(block_rows, then_target.block)
+            else_index :: x64_block_row(block_rows, else_target.block)
+            then_moves :: x64_edge_moves(function, allocation, then_target, then_index)
+            else_moves :: x64_edge_moves(function, allocation, else_target, else_index)
+            // The then block follows and the else edge moves nothing: one
+            // inverted jcc to the else block, then fall through (LLVM's
+            // branch layout) instead of `jcc then; jmp else`.
+            if then_index == block_index + 1 && else_moves.len() == 0 {
+                at :: x64_jcc_rel32(&emitter.code, x64_cond_invert(cond))
+                &emitter.fixups.push(X64BlockFixup{at: at, block: else_index})
+                x64_emit_parallel_moves(&emitter, then_moves)
+                return
+            }
             stub_at := -1
             if then_moves.len() == 0 {
                 at :: x64_jcc_rel32(&emitter.code, cond)
@@ -1058,7 +1221,7 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
             } else {
                 stub_at = x64_jcc_rel32(&emitter.code, cond)
             }
-            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, else_target))
+            x64_emit_parallel_moves(&emitter, else_moves)
             if stub_at >= 0 || else_index != block_index + 1 -> x64_emit_jump(&emitter, else_index)
             if stub_at >= 0 {
                 stub :: emitter.code.len()
@@ -1071,69 +1234,64 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
     }
 }
 
-// Lint, then compile every function. Lint issues stop compilation.
+// One function's back end once its LIR is final: its one LIR lint
+// (lir_lint_function_row; SPEED-500K D6) and, when the lint is clean, its
+// selection and encoding (x64_compile_function). `lint` holds the findings
+// as error rows; a function with findings (or one compiled with `lint_only`,
+// when the module's tables already have findings) has no compiled form.
+struct X64FunctionOutcome {
+    lint: [String]
+    result: X64CompileResult
+}
+
+fn x64_lint_error(issue: LIRLintIssue) -> String Never! {
+    "LIR lint: {issue.function} b{issue.block}: {issue.message}"
+}
+
+fn x64_compile_linted_row(program: LIRModule, index: Int, function: LIRFunction, lint_only: Bool) -> X64FunctionOutcome Never! {
+    lint := [String]{}
+    loop issue in lir_lint_function_row(program, index, function) -> &lint.push(x64_lint_error(issue))
+    if lint_only || lint.len() > 0 -> return X64FunctionOutcome{lint: lint, result: X64CompileResult{function: None, debug: None, errors: [String]{}}}
+    X64FunctionOutcome{lint: lint, result: x64_compile_function(program, function)}
+}
+
+// Files `result`, the compile of `function`, into the module rows: the
+// compiled function and its debug row, or (`keep_going`, the bootstrap native
+// feed) a trap of its signature when it has none, after its errors.
+fn x64_compile_file_result(result: ^X64CompileResult, keep_going: Bool, function: LIRFunction, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], errors: &[String]) Never! {
+    loop error in result.errors -> &errors.push(error)
+    compiled := ^result.function ?? {
+        if keep_going {
+            &functions.push(x64_trap_function(function))
+            &debug.push(x64_empty_debug())
+        }
+        return
+    }
+    &functions.push(^compiled)
+    &debug.push(^result.debug ?? x64_empty_debug())
+}
+
+// The one LIR lint and the compile of every function, in order, on the
+// calling thread: the module's tables first (lir_lint_module_rows), then
+// each function (x64_compile_linted_row). Lint findings stop the result at
+// the findings alone (table rows, then function rows in function order);
+// otherwise a function that does not compile is left out and its errors
+// stop the object. x64_compile_module_owned (Opt/Opt.jet) is the same compile
+// on the threads a native host admits, with the LIR passes of a level.
 fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
-    errors := [String]{}
-    loop issue in lir_lint_module(program) -> &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
-    if errors.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: errors}
+    lint := [String]{}
+    loop issue in lir_lint_module_rows(program) -> &lint.push(x64_lint_error(issue))
+    lint_only :: lint.len() > 0
     functions := [X64CompiledFunction]{}
     debug := [X64FunctionDebug]{}
-    loop function in program.functions {
-        result :: x64_compile_function(program, function)
-        loop error in result.errors -> &errors.push(error)
-        if result.function == .Val(compiled) {
-            &functions.push(compiled)
-            &debug.push(result.debug ?? X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
-        }
-    }
-    X64ModuleResult{functions: functions, debug: debug, errors: errors}
-}
-
-// JET_KEEP_GOING (the bootstrap native feed): x64_compile_module, except that
-// nothing stops it. Every lint finding is an error; a function a lint finding
-// names, whose selection reports gaps, or whose compilation stops (a panic,
-// caught at its task's join) compiles as a trap (x64_trap_function) with one
-// error naming it, so the function table stays whole and the object, link
-// and every later function still run and report. The module moves into the
-// tasks' shared inputs and back out, uncopied. It is never shipped: the
-// caller turns every error into a census row.
-fn x64_compile_module_keep_going(program: ^LIRModule) -> X64KeepGoingModule Never! {
     errors := [String]{}
-    trapped := [String:Bool]{}
-    loop issue in lir_lint_module(program) {
-        &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
-        if issue.function != "" -> trapped[issue.function] = true
+    loop (index, function) in program.functions {
+        outcome := x64_compile_linted_row(program, index, function, lint_only)
+        &lint.extend(compiler_take_rows<String>(&outcome.lint))
+        x64_compile_file_result(^outcome.result, false, function, &functions, &debug, &errors)
     }
-    inputs :: shared X64KeepGoingInputs{programs: [LIRModule]{^program}, trapped: ^trapped}
-    state :: shared X64KeepGoingState{position: 0, functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: ^errors}
-    x64_keep_going_functions(inputs, state) ?? panic("the keep-going x64 compile tasks failed")
-    module_back :: x64_keep_going_take_program(inputs) ?? panic("the keep-going x64 compile inputs were lost")
-    compiled :: x64_keep_going_take(state) ?? panic("the keep-going x64 compile state was lost")
-    X64KeepGoingModule{program: module_back, compiled: compiled}
-}
-
-struct X64KeepGoingModule {
-    program: LIRModule
-    compiled: X64ModuleResult
-}
-
-struct X64KeepGoingInputs {
-    // The one module, moved in for the compile and back out after.
-    programs: [LIRModule]
-    // Functions (by name) a lint finding names.
-    trapped: [String:Bool]
-}
-
-struct X64KeepGoingState {
-    position: Int
-    functions: [X64CompiledFunction]
-    debug: [X64FunctionDebug]
-    errors: [String]
-}
-
-fn x64_keep_going_take_program(inputs: Shared<X64KeepGoingInputs>) -> LIRModule {
-    permit :: inputs.guard_edit()
-    &permit.value.programs.pop() ?? panic("the keep-going x64 module left its shared inputs")
+    if lint.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, errors: lint}
+    X64ModuleResult{functions: functions, debug: debug, errors: errors}
 }
 
 // A function that only stops (ud2), with the identity and name of `function`.
@@ -1143,89 +1301,6 @@ fn x64_trap_function(function: LIRFunction) -> X64CompiledFunction Never! {
     X64CompiledFunction{id: function.id, name: function.name, code: code, relocs: [X64Reloc]{}}
 }
 
-fn x64_keep_going_empty_debug() -> X64FunctionDebug Never! {
+fn x64_empty_debug() -> X64FunctionDebug Never! {
     X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}}
-}
-
-fn x64_keep_going_take(state: Shared<X64KeepGoingState>) -> X64ModuleResult {
-    permit := state.guard_edit()
-    X64ModuleResult{functions: compiler_take_rows<X64CompiledFunction>(&permit.value.functions), debug: compiler_take_rows<X64FunctionDebug>(&permit.value.debug), errors: compiler_take_rows<String>(&permit.value.errors)}
-}
-
-// One task compiles from the current position to the end, writing each
-// function and the next position into `state` as it goes; a stopped task
-// leaves `position` at the function it was compiling, which becomes a trap,
-// and a new task compiles the rest.
-fn x64_keep_going_functions(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) {
-    count :: x64_keep_going_count(inputs)
-    loop {
-        reason :: x64_keep_going_attempt(inputs, state)
-        if x64_keep_going_position(state) >= count -> break
-        x64_keep_going_trap(inputs, state, reason)
-    }
-}
-
-fn x64_keep_going_count(inputs: Shared<X64KeepGoingInputs>) -> Int {
-    permit :: inputs.guard_read()
-    permit.value.programs[0].functions.len()
-}
-
-fn x64_keep_going_position(state: Shared<X64KeepGoingState>) -> Int {
-    permit :: state.guard_read()
-    permit.value.position
-}
-
-// The stop text when the task stopped, else "".
-fn x64_keep_going_attempt(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) -> String {
-    stopped := ""
-    task.group x64_compile {
-        head :: task x64_keep_going_part(inputs, state)
-        stopped = head.join() ?? compiler_threads_failure_text(err)
-    }
-    stopped
-}
-
-fn x64_keep_going_part(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>) -> String {
-    read :: inputs.guard_read()
-    permit := state.guard_edit()
-    // Passed straight through: a local binding of the guarded module would copy it.
-    x64_keep_going_rows(read.value.programs[0], read.value.trapped, &permit.value)
-    ""
-}
-
-fn x64_keep_going_rows(program: LIRModule, trapped: [String:Bool], state: &X64KeepGoingState) Never! {
-    loop state.position < program.functions.len() {
-        index :: state.position
-        if trapped.get(program.functions[index].name) != None {
-            &state.functions.push(x64_trap_function(program.functions[index]))
-            &state.debug.push(x64_keep_going_empty_debug())
-            state.position = index + 1
-            next
-        }
-        result :: x64_compile_function(program, program.functions[index])
-        loop error in result.errors -> &state.errors.push(error)
-        if result.function == .Val(compiled) {
-            &state.functions.push(compiled)
-            &state.debug.push(result.debug ?? x64_keep_going_empty_debug())
-        } else {
-            &state.functions.push(x64_trap_function(program.functions[index]))
-            &state.debug.push(x64_keep_going_empty_debug())
-        }
-        state.position = index + 1
-    }
-}
-
-fn x64_keep_going_trap(inputs: Shared<X64KeepGoingInputs>, state: Shared<X64KeepGoingState>, reason: String) {
-    read :: inputs.guard_read()
-    permit := state.guard_edit()
-    x64_keep_going_trap_row(read.value.programs[0], &permit.value, reason)
-}
-
-// The function at `state.position` stopped: one error, and its trap.
-fn x64_keep_going_trap_row(program: LIRModule, state: &X64KeepGoingState, reason: String) Never! {
-    index :: state.position
-    &state.errors.push("x64: {program.functions[index].name}: keep-going trap: compiling it stopped: {reason}")
-    &state.functions.push(x64_trap_function(program.functions[index]))
-    &state.debug.push(x64_keep_going_empty_debug())
-    state.position = index + 1
 }

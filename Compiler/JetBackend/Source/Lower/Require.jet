@@ -65,6 +65,8 @@ fn lower_require_locals(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
             return None
         }
         if slot.write_param >= 0 && !lower_is_inline(p, slot.ty) {
+            // copy: the write parameter's pointer is read while the require check emits into `&f`,
+            // so a view into f.params would be live across those writes.
             parameter :: f.params[slot.write_param].copy()
             address :: parameter ?? return None
             layout :: lower_value_layout(f, value)
@@ -119,7 +121,7 @@ fn lower_require_descriptor(m: &LowerModule, path: String, location: MIRPanicLoc
 }
 
 fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRRequireKind, condition: MIRValueID?, location: MIRPanicLoc, context: MIRPanicContext, values: [MIRValueID], always_stops: Bool) Never! {
-    _ := lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "require stop names missing Prelude call {call.value}")
+    _ := lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "require stop names missing Prelude call {call.value}")
     if kind == .Panic {
         if condition != None || values.len() != 1 -> return lower_fail(&m, &f, "panic requires one message and no condition")
     } else {

@@ -150,6 +150,89 @@ fn fx_lists() -> MIRProgram Never! {
     fx_list_program(b)
 }
 
+// #5041 P2: a List copy shares its buffer (one more owner); every writer
+// detaches a shared buffer first, so no holder sees another's write.
+// fn run() {
+//   xs := [1, 2, 3]; ys :: xs.copy(); xs.push(4); xs[0] = 9;
+//   print(xs.len()); print(ys.len()); print(xs[0]); print(ys[0]);
+//   zs := ys.copy(); print(zs.pop()!); print(ys.len()); print(zs.len());
+//   outer := [[1, 2], [3]]; saved :: outer.copy(); outer[0].push(5);
+//   print(outer[0].len()); print(saved[0].len()); print(saved[1][0]);
+// }
+// expect-stdout lists-cow: "4\n3\n9\n1\n3\n3\n2\n3\n2\n3\n"
+fn fx_lists_cow() -> MIRProgram Never! {
+    b := fx_builder()
+    ints :: fx_list_type(fx_int())
+    zero :: fx_int_const(&b, 0)
+    one :: fx_int_const(&b, 1)
+    two :: fx_int_const(&b, 2)
+    three :: fx_int_const(&b, 3)
+    root :: fx_local(&b, "xs", ints, mir_owned_ownership())
+    xs :: fx_owned(&b, ints, MIROperation.BuildList{values: [MIRValueID]{one, two, three}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: xs})
+    ys :: fx_owned(&b, ints, MIROperation.Copy{value: xs, fact: MIRCopyFact.Explicit})
+    four :: fx_int_const(&b, 4)
+    lent :: fx_value(&b, ints, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    _ := fx_list_method(&b, "list_push", lent, Val(root), [MIRValueID]{four}, fx_unit(), false)
+    slot :: fx_list_index_place(&b, root, zero, fx_int())
+    nine :: fx_int_const(&b, 9)
+    fx_do(&b, MIROperation.ReplacePlace{place: slot, value: nine})
+    xs_len :: fx_list_method(&b, "len", xs, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, xs_len)
+    ys_len :: fx_list_method(&b, "len", ys, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, ys_len)
+    xs_first :: fx_list_index(&b, xs, zero, fx_int(), false)
+    fx_print(&b, xs_first)
+    ys_first :: fx_list_index(&b, ys, zero, fx_int(), false)
+    fx_print(&b, ys_first)
+
+    zs_root :: fx_local(&b, "zs", ints, mir_owned_ownership())
+    zs :: fx_owned(&b, ints, MIROperation.Copy{value: ys, fact: MIRCopyFact.Explicit})
+    fx_do(&b, MIROperation.WritePlace{place: zs_root, value: zs})
+    optional :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    zs_lent :: fx_value(&b, ints, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: zs_root, access: MIRAccess.Write})
+    popped :: fx_list_method(&b, "list_pop", zs_lent, Val(zs_root), [MIRValueID]{}, optional, true)
+    last :: fx_copy(&b, fx_int(), MIROperation.OptionValue{subject: popped})
+    fx_print(&b, last)
+    fx_do(&b, MIROperation.Drop{value: popped, kind: MIRDropKind.Value})
+    ys_after :: fx_list_method(&b, "len", ys, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, ys_after)
+    zs_len :: fx_list_method(&b, "len", zs, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, zs_len)
+
+    nested :: fx_list_type(ints)
+    outer_root :: fx_local(&b, "outer", nested, mir_owned_ownership())
+    first :: fx_owned(&b, ints, MIROperation.BuildList{values: [MIRValueID]{one, two}, trait_coercion: None})
+    second :: fx_owned(&b, ints, MIROperation.BuildList{values: [MIRValueID]{three}, trait_coercion: None})
+    outer :: fx_owned(&b, nested, MIROperation.BuildList{values: [MIRValueID]{first, second}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: outer_root, value: outer})
+    saved :: fx_owned(&b, nested, MIROperation.Copy{value: outer, fact: MIRCopyFact.Explicit})
+    inner_place :: fx_list_index_place(&b, outer_root, zero, ints)
+    five :: fx_int_const(&b, 5)
+    inner_lent :: fx_value(&b, ints, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: inner_place, access: MIRAccess.Write})
+    _ := fx_list_method(&b, "list_push", inner_lent, Val(inner_place), [MIRValueID]{five}, fx_unit(), false)
+    outer_first :: fx_list_index(&b, outer, zero, ints, false)
+    outer_len :: fx_list_method(&b, "len", outer_first, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, outer_len)
+    saved_first :: fx_list_index(&b, saved, zero, ints, false)
+    saved_len :: fx_list_method(&b, "len", saved_first, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, saved_len)
+    saved_second :: fx_list_index(&b, saved, one, ints, false)
+    saved_value :: fx_list_index(&b, saved_second, zero, fx_int(), false)
+    fx_print(&b, saved_value)
+
+    fx_do(&b, MIROperation.Drop{value: saved, kind: MIRDropKind.Value})
+    outer_gone :: fx_owned(&b, nested, MIROperation.MovePlace{place: outer_root})
+    fx_do(&b, MIROperation.Drop{value: outer_gone, kind: MIRDropKind.Value})
+    zs_gone :: fx_owned(&b, ints, MIROperation.MovePlace{place: zs_root})
+    fx_do(&b, MIROperation.Drop{value: zs_gone, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: ys, kind: MIRDropKind.Value})
+    gone :: fx_owned(&b, ints, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
 // fn run() { strings := ["red", "blue"]; print(strings[0]); print("zzz"); print(strings[0]); }
 // The element read for print is Owned in MIR but neither stored nor returned:
 // it borrows the slot (Lower.jet lower_read_place). Before, its carrier kept

@@ -128,6 +128,9 @@ fn jet_cli_table(input_columns: ^[JetCLITableColumn], input_rows: ^[JetCLITableR
     JetCLIAdaptiveTable{columns: ^columns, rows: ^normalized_rows, truncated: truncated}
 }
 fn jet_cli_table_structured(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
+    // copy: `table.columns` stays with the caller (`table` is a read parameter: no move out of it,
+    // E0201) and the field `columns` owns its own. `table.rows` stays with the caller (`table` is a
+    // read parameter: no move out of it, E0201) and the field `rows` owns its own.
     JetCLIStructuredTable{columns: table.columns.copy(), rows: table.rows.copy(), truncated: table.truncated}
 }
 

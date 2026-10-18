@@ -34,7 +34,7 @@ static void show(HLL *value, const char *expected) {
     assert(memcmp(text->data, expected, (size_t)text->len) == 0); jet_rt_string_drop(text);
 }
 static void *adds(void *pointer) {
-    Text shared = {"shared",6,6};
+    Text shared = {"shared",6,0};
     for (unsigned i = 0; i < 1000; ++i) jet_rt_native_hll_add(pointer, &shared);
     return NULL;
 }

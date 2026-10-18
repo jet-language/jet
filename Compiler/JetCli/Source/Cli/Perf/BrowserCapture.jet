@@ -49,14 +49,14 @@ fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCL
             if path == "" || perf_text.has_control(path) || paths.has_key(path) || !jet_cli_perf_digest(fields[2]) -> return Err(jet_cli_read_error("browser source identity is invalid or duplicated"))
             if sources.len() >= 4096 -> return Err(jet_cli_read_error("browser source identities exceed their bound"))
             paths[path] = sources.len()
-            &sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [(name: String, kind: String)]{}})
+            &sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [(kind: String, name: String)]{}})
         } else if fields.len() == 4 && fields[0] == "symbol" {
             path :: jet_cli_perf_hex_text(fields[1])
             name :: jet_cli_perf_hex_text(fields[2])
             if !paths.has_key(path) || symbols.has_key(name) || !jet_cli_perf_browser_symbol(name) || (fields[3] != "fn" && fields[3] != "handler") -> return Err(jet_cli_read_error("browser symbol identity is invalid or duplicated"))
             if symbols.len() >= 4096 -> return Err(jet_cli_read_error("browser symbols exceed their bound"))
             index :: paths[path]
-            &sources[index].symbols.push((name: name, kind: fields[3]))
+            &sources[index].symbols.push((kind: fields[3], name: name))
             symbols[name] = path
         } else {
             return Err(jet_cli_read_error("browser source identity TSV is malformed"))

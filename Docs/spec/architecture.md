@@ -42,6 +42,14 @@ reject that component rather than reading invalid references. With `JET_DUMP_MIR
 also set, the checked lowering pipeline saves the pre-verification program at
 `<dump-path>.before-legality`; the usual post-optimization dump remains unchanged.
 
+The native compiler's `JET_MIR_LINT_EVERY_PASS=1` (the bootstrap host's
+`JET_BOOTSTRAP_MIR_LINT_EVERY_PASS`) turns on full verification: legality and
+MIR Lint run on the entry program and after every optimizer pass. A failure
+then names the pass whose output was rejected and carries the rejected
+function's MIR as text (locals, place rows, blocks, operations and their
+value and place operands). A rejected move names the moved root and both move
+positions in every mode.
+
 The native runtime object's `jet_rt_alloc` and `jet_rt_free` own C-carrier
 allocation. Generated Rust adapters allocate List result buffers through that
 same allocator because native List paths release them with `jet_rt_free`.
@@ -743,9 +751,9 @@ values and including their source files does not activate the host startup path
 or qualify a native supplier.
 
 The bootstrap host initializes every `JetDriverCompileRequest` field, including
-declared defaults, through checked field-symbol metadata. Ordinary bootstrap
-compilation keeps `comptime_stop_points` false; only native comptime selection
-enables it. The focused
+declared defaults, through checked field-symbol metadata. Compilation keeps
+`comptime_stop_points` false: compile-time code runs in the in-process
+evaluator, which refuses stop points, until native in-memory O0 lands. The focused
 [`bootstrap host field guard`](../../Tools/agent/bootstrap-host-fields.test.mjs)
 checks that new request fields have both an emitted initializer row and its
 metadata binding before the generated producer is built.

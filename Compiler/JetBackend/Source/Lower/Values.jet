@@ -181,7 +181,8 @@ fn lower_variant_members(p: MIRProgram, definition: MIRTypeDef, variant: MIRVari
     rows := [LowerMember]{}
     if variant.payload == {
         .Unit -> {}
-        .Single(inner) -> &rows.push(LowerMember{id: mir_field_id("{definition.key}.{variant.name}"), name: variant.name, offset: 0, ty: inner, boxed: lower_declared_boxed_edge(definition, variant.name)})
+        // copy: `inner` is a payload of read parameter `variant`, which keeps the original; field `ty` of the new LowerMember owns this one
+        .Single(inner) -> &rows.push(LowerMember{id: mir_field_id("{definition.key}.{variant.name}"), name: variant.name, offset: 0, ty: inner.copy(), boxed: lower_declared_boxed_edge(definition, variant.name)})
         .Named(fields) -> {
             loop row in lower_stored_fields(fields) -> &rows.push(LowerMember{id: row.id, name: row.name, offset: 0, ty: row.ty, boxed: lower_declared_boxed_edge(definition, "{variant.name}.{row.name}")})
         }
@@ -410,6 +411,8 @@ fn lower_close_type(p: MIRProgram, ty: MIRType) -> MIRType Never! {
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == .Alias(target) -> return lower_close_type(p, target)
     }
+    // copy: the closed type is a new owned MIRType. Otherwise it equals `ty`, the caller's MIR type
+    // (a read parameter), which stays on its MIR node.
     ty.copy()
 }
 
@@ -448,7 +451,11 @@ fn lower_close_receiver_slot(c: LowerContext, f: LowerFunction, slot: Int) -> Bo
 }
 
 fn lower_close_frame(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
+    // copy: the closing type is read while the Close frame emits into `&f`, so a view into
+    // f.closing would be live across those writes.
     ty := (f.closing.copy()) ?? return
+    // copy: the receiver value is read while the Close frame emits into `&f`, so a view into
+    // f.params would be live across those writes.
     receiver := (f.params[0].copy()) ?? return lower_fail(&m, &f, "Close receiver has no value")
     if !lower_is_inline(p, ty) {
         pointer_receiver :: if lower_repr(p, ty) == {
@@ -464,6 +471,8 @@ fn lower_close_frame(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
 }
 
 fn lower_close_forget(f: &LowerFunction) Never! {
+    // copy: the identity cell is read while forgetting it writes `&f`, so a view into
+    // f.close_identity would be live across those writes.
     cell :: (f.close_identity.copy()) ?? return
     zero :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
@@ -479,6 +488,8 @@ fn lower_close_transfer(c: LowerContext, f: &LowerFunction, value: MIRValueID) N
 // The structural role belongs to the original receiver's storage, not its
 // type. A rebind of that slot and every other value of T retain ordinary Close.
 fn lower_close_value_drop(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType, consume: Bool) Never! {
+    // copy: the identity cell is read while the drop emits into `&f`, so a view into
+    // f.close_identity would be live across those writes.
     cell :: (f.close_identity.copy()) ?? return lower_fail(&m, &f, "Close receiver has no identity cell")
     receiver :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: receiver, base: cell, offset: 0})

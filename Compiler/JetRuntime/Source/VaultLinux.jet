@@ -440,8 +440,8 @@ fn vault_identity_path(root: I64) -> I64 {
         return I64{0}
     }
     length :: base_length + (if separator -> I64{1} else -> I64{0}) + suffix_length
-    result :: jet_rt_alloc(I64{24}, I64{8})
-    data :: jet_rt_alloc(length + I64{1}, I64{1})
+    result :: rt_text_with_length(length, length + I64{1})
+    data :: rt_text_data(result)
     if dot { rt_text_put(data, I64{46}) } else { rt_text_bytes_copy(data, base_data, base_length) }
     cursor := base_length
     if separator {
@@ -450,9 +450,6 @@ fn vault_identity_path(root: I64) -> I64 {
     }
     rt_text_bytes_copy(data + cursor, scratch, suffix_length)
     rt_text_put(data + length, I64{0})
-    rt_text_store(result, data)
-    rt_text_store(result + I64{8}, length)
-    rt_text_store(result + I64{16}, length + I64{1})
     jet_rt_string_drop(owned_base)
     jet_rt_free(scratch, I64{64}, I64{8})
     result

@@ -155,7 +155,8 @@ fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, 
 }
 
 fn diagnostic_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    diagnostic_registry_with_edit(^diagnostic, edit)
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_edit(diagnostic.copy(), edit)
 }
 
 fn diagnostic_with_moment(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
@@ -189,24 +190,29 @@ fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -
 }
 
 fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
-    diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
 }
 
 fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     edit :: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
-    diagnostic_registry_with_edit_grade(^diagnostic, edit, applicability, safety)
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
 }
 
 fn diagnostic_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    diagnostic_registry_with_structured_edit(^diagnostic, edit)
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_structured_edit(diagnostic.copy(), edit)
 }
 
 fn diagnostic_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
-    diagnostic_registry_with_source_derived_suggestion(^diagnostic, span, new_text)
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_source_derived_suggestion(diagnostic.copy(), span, new_text)
 }
 
 fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
-    diagnostic_registry_with_alternative_edit(^diagnostic, edit)
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_alternative_edit(diagnostic.copy(), edit)
 }
 
 fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {

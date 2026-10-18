@@ -349,14 +349,19 @@ fn sema_inline_rewrite_type(rewrite: SemaInlineRewrite, ty: Type) -> Type Never!
         .Named(name) -> {
             if rewrite.types.get(name) == .Val(mapped) -> return mapped
             if rewrite.qualified.get(name) == .Val(target) -> return Type.Named{name: "{target.module_alias}.{target.member}"}
+            // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+            // consuming match), so an unchanged type is copied into the rebuilt program, while the
+            // caller's program keeps the original until it is replaced.
             ty.copy()
         }
         .List(inner) -> Type.List{element: sema_inline_rewrite_type(rewrite, inner)}
         .Shared(inner) -> Type.Shared{inner: sema_inline_rewrite_type(rewrite, inner)}
         .Option(inner) -> Type.Option{inner: sema_inline_rewrite_type(rewrite, inner)}
         .FixedList(inner, len) -> Type.FixedList{elem: sema_inline_rewrite_type(rewrite, inner), len: sema_inline_rewrite_measure(rewrite, len)}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_inline_rewrite_type(rewrite, inner)}
-        .Map(key, key_span, value) -> Type.Map{key: sema_inline_rewrite_type(rewrite, key), key_span: key_span, value: sema_inline_rewrite_type(rewrite, value)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inline_rewrite_type(rewrite, inner)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_inline_rewrite_type(rewrite, key), key_span: key_span.copy(), value: sema_inline_rewrite_type(rewrite, value)}
         .Result(ok, err) -> Type.Result{ok: sema_inline_rewrite_type(rewrite, ok), err: sema_inline_rewrite_type(rewrite, err)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             mapped := [Type]{}
@@ -370,8 +375,12 @@ fn sema_inline_rewrite_type(rewrite: SemaInlineRewrite, ty: Type) -> Type Never!
             Type.Tuple{fields: mapped}
         }
         .Union(members) -> Type.Union{members: sema_inline_rewrite_types(rewrite, members)}
-        .Quantity(base, dimension) -> Type.Quantity{base: sema_inline_rewrite_type(rewrite, base), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_inline_rewrite_type(rewrite, base), dimension: dimension.copy()}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inline_rewrite_type(rewrite, base), lo: lo, hi: hi}
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so an unchanged type kind is copied into the rebuilt program, while the
+        // caller's program keeps the original.
         else -> ty.copy()
     }
 }
@@ -384,6 +393,9 @@ fn sema_inline_rewrite_measure(rewrite: SemaInlineRewrite, measure: Measure) -> 
             if rewrite.values.get(name) == .Val(.Int(value, _, _, _)) {
                 if value >= 0 -> return Measure.Literal{kind: kind, value: value}
             }
+            // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+            // consuming match), so an unchanged measure is copied into the rebuilt program, while
+            // the caller's program keeps the original.
             measure.copy()
         }
         .Combined(kind, rule, left, right) -> {
@@ -399,6 +411,9 @@ fn sema_inline_rewrite_measure(rewrite: SemaInlineRewrite, measure: Measure) -> 
             }
             Measure.Combined{kind: kind, rule: rule, left: resolved_left, right: resolved_right}
         }
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so an unchanged measure kind is copied into the rebuilt program, while
+        // the caller's program keeps the original.
         else -> measure.copy()
     }
 }
@@ -412,13 +427,15 @@ fn sema_inline_value_at(value: Expr, span: Span) -> Expr Never! {
         .Char(text, _) -> Expr.Char{value: text, span: span}
         .Str(parts, _) -> Expr.Str{parts: parts, span: span}
         .EnumLit(type_name, variant, _, args, leading_dot, _) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: args, leading_dot: leading_dot, span: span}
+        // copy: the re-spanned value is a new owned Expr. Other kinds keep `value`, a module
+        // constant's expression that the constant table keeps for every other use site.
         else -> value.copy()
     }
 }
 
 // `limits.f(...)`: a call through a module's own `use limits.[f]`.
 fn sema_inline_qualified_call(rewrite: &SemaInlineRewrite, target: SemaInlineTarget, span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: target.module_alias, span: span}, method: target.member, method_span: span, owner_type_args: [Type]{}, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
+    Expr.MethodCall{receiver: Expr.Ident{name: target.module_alias, span: span}, method: target.member, method_span: span, owner_type_args: [Type]{}, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: None, resolved_ret: None}
 }
 
 fn sema_inline_rewrite_types(rewrite: SemaInlineRewrite, types: [Type]) -> [Type] Never! {
@@ -492,6 +509,9 @@ fn sema_inline_rewrite_or_fallback(rewrite: &SemaInlineRewrite, fallback: OrFall
         }
         .Return(value, span) -> OrFallback.Return{value: sema_inline_rewrite_optional_expr(&rewrite, value), span: span}
         .Panic(name_span, args) -> OrFallback.Panic{name_span: name_span, args: sema_inline_rewrite_call_args(&rewrite, args)}
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so an unchanged fallback is copied into the rebuilt program, while the
+        // caller's program keeps the original.
         else -> fallback.copy()
     }
 }
@@ -523,6 +543,9 @@ fn sema_inline_rewrite_typed_body(rewrite: &SemaInlineRewrite, body: TypedLitBod
         .Value(value) -> return TypedLitBody.Value{value: sema_inline_rewrite_expr(&rewrite, value)}
         else -> {}
     }
+    // copy: the rewrite walks the module program by borrowed payload views (Jet has no consuming
+    // match), so an unchanged typed body is copied into the rebuilt program, while the caller's
+    // program keeps the original.
     body.copy()
 }
 
@@ -562,7 +585,8 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .MemberSpread(base, members, span) -> return Expr.MemberSpread{base: sema_inline_rewrite_expr(&rewrite, base), members: members, span: span}
         .Spread(value, span) -> return Expr.Spread{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
         .MapLit(entries, span) -> return Expr.MapLit{entries: sema_inline_rewrite_pairs(&rewrite, entries), span: span}
-        .Index(base, index, span, kind) -> return Expr.Index{base: sema_inline_rewrite_expr(&rewrite, base), index: sema_inline_rewrite_expr(&rewrite, index), span: span, kind: kind}
+        // copy: `kind` is a payload of read parameter `expression`, which keeps the original; field `kind` of the new Expr.Index owns this one
+        .Index(base, index, span, kind) -> return Expr.Index{base: sema_inline_rewrite_expr(&rewrite, base), index: sema_inline_rewrite_expr(&rewrite, index), span: span, kind: kind.copy()}
         .Slice(base, start, end, range, span) -> return Expr.Slice{base: sema_inline_rewrite_expr(&rewrite, base), start: sema_inline_rewrite_expr(&rewrite, start), end: sema_inline_rewrite_expr(&rewrite, end), range: sema_inline_rewrite_optional_expr(&rewrite, range), span: span}
         .Range(start, end, exclusive, span) -> return Expr.Range{start: sema_inline_rewrite_expr(&rewrite, start), end: sema_inline_rewrite_expr(&rewrite, end), exclusive: exclusive, span: span}
         .Ident(name, span) -> {
@@ -575,10 +599,16 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
                 // A module is no value: Rust's name lookup has no `bank`.
                 if sema_inline_surface(rewrite, name) != None -> &rewrite.diagnostics.push(sema_unknown_name(name, span))
             }
+            // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+            // consuming match), so an expression the rewrite leaves alone is copied into the
+            // rebuilt program, while the caller's program keeps the original.
             return expression.copy()
         }
         .ComptimeName(name, span, _) -> {
             if rewrite.values.get(name) == .Val(value) -> return sema_inline_value_at(value, span)
+            // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+            // consuming match), so an expression the rewrite leaves alone is copied into the
+            // rebuilt program, while the caller's program keeps the original.
             return expression.copy()
         }
         .Call(call) -> {
@@ -605,12 +635,12 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .Place(value, access, span) -> return Expr.Place{value: sema_inline_rewrite_expr(&rewrite, value), access: access, span: span}
         .Field(base, member, span) -> return Expr.Field{base: sema_inline_rewrite_expr(&rewrite, base), member: member, span: span}
         .OptField(base, member, member_span, flatten, span) -> return Expr.OptField{base: sema_inline_rewrite_expr(&rewrite, base), member: member, member_span: member_span, flatten: flatten, span: span}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, checked_widen, _) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
             if receiver == .Ident(alias, alias_span) {
                 if sema_inline_surface(rewrite, alias) == .Val(surface) {
                     rewritten :: sema_inline_rewrite_module_call(&rewrite, surface, alias_span, method, method_span, type_args, args)
                     if rewritten == .Val(value) -> return value
-                    return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: recv_type, resolved_ret: resolved_ret, operator_rhs: operator_rhs, checked_widen: checked_widen, checked_callee: None}
+                    return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: recv_type, resolved_ret: resolved_ret}
                 }
             }
             mapped_receiver := receiver
@@ -625,7 +655,7 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
                     else -> {}
                 }
             }
-            return Expr.MethodCall{receiver: sema_inline_rewrite_expr(&rewrite, mapped_receiver), method: method, method_span: method_span, owner_type_args: sema_inline_rewrite_types(rewrite, owner_type_args), type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: mapped_recv_type, resolved_ret: sema_inline_rewrite_optional_type(rewrite, resolved_ret), operator_rhs: sema_inline_rewrite_optional_type(rewrite, operator_rhs), checked_widen: checked_widen, checked_callee: None}
+            return Expr.MethodCall{receiver: sema_inline_rewrite_expr(&rewrite, mapped_receiver), method: method, method_span: method_span, owner_type_args: sema_inline_rewrite_types(rewrite, owner_type_args), type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), recv_type: mapped_recv_type, resolved_ret: sema_inline_rewrite_optional_type(rewrite, resolved_ret)}
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, span) -> return Expr.OptMethodCall{receiver: sema_inline_rewrite_expr(&rewrite, receiver), method: method, method_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), span: span}
         .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) -> {
@@ -646,13 +676,17 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
             return Expr.StructLit{type_name: mapped_name, type_args: sema_inline_rewrite_types(rewrite, type_args), import_ns: mapped_ns, as_trait: as_trait, fields: sema_inline_rewrite_fields(&rewrite, fields), inferred: inferred, span: span}
         }
         .TypedLit(head, body, span) -> return Expr.TypedLit{head: sema_inline_rewrite_optional_type(rewrite, head), body: sema_inline_rewrite_typed_body(&rewrite, body), span: span}
-        .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> return Expr.EnumLit{type_name: sema_inline_mapped_name(rewrite, type_name), variant: variant, variant_span: variant_span, args: sema_inline_rewrite_enum_args(&rewrite, args), leading_dot: leading_dot, span: span}
-        .Tainted(value, tainted_tag, span) -> return Expr.Tainted{value: sema_inline_rewrite_expr(&rewrite, value), tag: tainted_tag, span: span}
+        // copy: `variant_span` is a payload of read parameter `expression`, which keeps the original; field `variant_span` of the new Expr.EnumLit owns this one
+        .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> return Expr.EnumLit{type_name: sema_inline_mapped_name(rewrite, type_name), variant: variant, variant_span: variant_span.copy(), args: sema_inline_rewrite_enum_args(&rewrite, args), leading_dot: leading_dot, span: span}
+        // copy: `tainted_tag` is a payload of read parameter `expression`, which keeps the original; field `tag` of the new Expr.Tainted owns this one
+        .Tainted(value, tainted_tag, span) -> return Expr.Tainted{value: sema_inline_rewrite_expr(&rewrite, value), tag: tainted_tag.copy(), span: span}
         .Present(value, span) -> return Expr.Present{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
-        .PatternTest(subject, pattern, span) -> return Expr.PatternTest{subject: sema_inline_rewrite_expr(&rewrite, subject), pattern: pattern, span: span}
+        // copy: `pattern` is a payload of read parameter `expression`, which keeps the original; field `pattern` of the new Expr.PatternTest owns this one
+        .PatternTest(subject, pattern, span) -> return Expr.PatternTest{subject: sema_inline_rewrite_expr(&rewrite, subject), pattern: pattern.copy(), span: span}
         .Ok(value, span) -> return Expr.Ok{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
         .Err(value, span) -> return Expr.Err{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
-        .Try(value, span, conversion, context) -> return Expr.Try{value: sema_inline_rewrite_expr(&rewrite, value), span: span, conversion: conversion, context: sema_inline_rewrite_optional_expr(&rewrite, context)}
+        // copy: `conversion` is a payload of read parameter `expression`, which keeps the original; field `conversion` of the new Expr.Try owns this one
+        .Try(value, span, conversion, context) -> return Expr.Try{value: sema_inline_rewrite_expr(&rewrite, value), span: span, conversion: conversion.copy(), context: sema_inline_rewrite_optional_expr(&rewrite, context)}
         .OrFallback(value, fallback, is_option, span) -> return Expr.OrFallback{value: sema_inline_rewrite_expr(&rewrite, value), fallback: sema_inline_rewrite_or_fallback(&rewrite, fallback), is_option: is_option, span: span}
         .If(cond, then_body, then_value, else_body, else_value, span) -> {
             mapped_cond :: sema_inline_rewrite_expr(&rewrite, cond)
@@ -676,6 +710,9 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .Paren(value, span) -> return Expr.Paren{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
         else -> {}
     }
+    // copy: the rewrite walks the module program by borrowed payload views (Jet has no consuming
+    // match), so an unchanged expression kind is copied into the rebuilt program, while the
+    // caller's program keeps the original.
     expression.copy()
 }
 
@@ -705,6 +742,9 @@ fn sema_inline_rewrite_binding(rewrite: &SemaInlineRewrite, binding: Binding) ->
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_inline_mapped_name(rewrite, type_name), type_span: type_span, fields: fields, rest: rest, span: span}
             .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: inner, fallback: sema_inline_rewrite_or_fallback(&rewrite, fallback), names: names, span: span}
+            // copy: the binding pattern is a payload view of the borrowed binding (Jet has no
+            // consuming match), so it is copied into the rebuilt program, while the caller's
+            // program keeps the original.
             else -> pattern.copy()
         })
     }
@@ -732,8 +772,12 @@ fn sema_inline_rewrite_optional_body(rewrite: &SemaInlineRewrite, body: [Stmt]?)
 
 fn sema_inline_rewrite_lvalue(rewrite: &SemaInlineRewrite, target: LValue) -> LValue Never! {
     if target == {
-        .Index(base, index, span, kind) -> LValue.Index{base: sema_inline_rewrite_expr(&rewrite, base), index: sema_inline_rewrite_expr(&rewrite, index), span: span, kind: kind}
+        // copy: `kind` is a payload of read parameter `target`, which keeps the original; field `kind` of the new LValue.Index owns this one
+        .Index(base, index, span, kind) -> LValue.Index{base: sema_inline_rewrite_expr(&rewrite, base), index: sema_inline_rewrite_expr(&rewrite, index), span: span, kind: kind.copy()}
         .Field(base, field, span) -> LValue.Field{base: sema_inline_rewrite_expr(&rewrite, base), field: field, span: span}
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so an unchanged assignment target is copied into the rebuilt program,
+        // while the caller's program keeps the original.
         else -> target.copy()
     }
 }
@@ -755,9 +799,11 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
             sema_inline_declare_binding(&rewrite, binding)
             Stmt.Val{binding: mapped}
         }
-        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_inline_rewrite_lvalue(&rewrite, target), op: op, op_span: op_span, value: sema_inline_rewrite_expr(&rewrite, value)}
+        // copy: `op` is a payload of read parameter `stmt`, which keeps the original; field `op` of the new Stmt.Assign owns this one
+        .Assign(target, op, op_span, value) -> Stmt.Assign{target: sema_inline_rewrite_lvalue(&rewrite, target), op: op.copy(), op_span: op_span, value: sema_inline_rewrite_expr(&rewrite, value)}
         .Return(value, span) -> Stmt.Return{value: sema_inline_rewrite_optional_expr(&rewrite, value), span: span}
-        .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_inline_rewrite_expr(&rewrite, cond), body: sema_inline_rewrite_stmts(&rewrite, body), span: span, arrow_body: arrow_body, label: label}
+        // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.While owns this one
+        .While(cond, body, span, arrow_body, label) -> Stmt.While{cond: sema_inline_rewrite_expr(&rewrite, cond), body: sema_inline_rewrite_stmts(&rewrite, body), span: span, arrow_body: arrow_body, label: label.copy()}
         .For(var, var_span, var2, kind, body, span, arrow_body, label, auto_vectorization) -> {
             mapped_kind :: if kind == {
                 .Range(start, end, step, exclusive) -> ForKind.Range{start: sema_inline_rewrite_expr(&rewrite, start), end: sema_inline_rewrite_expr(&rewrite, end), step: sema_inline_rewrite_optional_expr(&rewrite, step), exclusive: exclusive}
@@ -774,7 +820,8 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
         .ComptimeSwitch(subject, arms, else_body, span) -> Stmt.ComptimeSwitch{subject: sema_inline_rewrite_expr(&rewrite, subject), arms: sema_inline_rewrite_arms(&rewrite, arms), else_body: sema_inline_rewrite_optional_body(&rewrite, else_body), span: span}
         .BreakValue(value, span) -> Stmt.BreakValue{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
         .BreakLabelValue(name, name_span, value, span) -> Stmt.BreakLabelValue{name: name, name_span: name_span, value: sema_inline_rewrite_expr(&rewrite, value), span: span}
-        .Loop(body, span, arrow_body, label) -> Stmt.Loop{body: sema_inline_rewrite_stmts(&rewrite, body), span: span, arrow_body: arrow_body, label: label}
+        // copy: `label` is a payload of read parameter `stmt`, which keeps the original; field `label` of the new Stmt.Loop owns this one
+        .Loop(body, span, arrow_body, label) -> Stmt.Loop{body: sema_inline_rewrite_stmts(&rewrite, body), span: span, arrow_body: arrow_body, label: label.copy()}
         .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
             saved :: rewrite.locals.len()
             mapped_init :: sema_inline_rewrite_binding(&rewrite, init)
@@ -786,17 +833,22 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
             sema_inline_restore_locals(&rewrite, saved)
             Stmt.CountedLoop{init: mapped_init, cond: mapped_cond, step: mapped_step, body: mapped_body, span: span, arrow_body: arrow_body, label: label}
         }
-        .Unsafe(audit, audit_expr, body, span) -> Stmt.Unsafe{audit: audit, audit_expr: sema_inline_rewrite_optional_expr(&rewrite, audit_expr), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
-        .Impure(reason, reason_expr, body, span) -> Stmt.Impure{reason: reason, reason_expr: sema_inline_rewrite_optional_expr(&rewrite, reason_expr), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
+        // copy: `audit` is a payload of read parameter `stmt`, which keeps the original; field `audit` of the new Stmt.Unsafe owns this one
+        .Unsafe(audit, audit_expr, body, span) -> Stmt.Unsafe{audit: audit.copy(), audit_expr: sema_inline_rewrite_optional_expr(&rewrite, audit_expr), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
+        // copy: `reason` is a payload of read parameter `stmt`, which keeps the original; field `reason` of the new Stmt.Impure owns this one
+        .Impure(reason, reason_expr, body, span) -> Stmt.Impure{reason: reason.copy(), reason_expr: sema_inline_rewrite_optional_expr(&rewrite, reason_expr), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .Reactive(body, span) -> Stmt.Reactive{body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .Shield(body, span) -> Stmt.Shield{body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
-        .Switched(marker, body, span) -> Stmt.Switched{marker: marker, body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
+        // copy: `marker` is a payload of read parameter `stmt`, which keeps the original; field `marker` of the new Stmt.Switched owns this one
+        .Switched(marker, body, span) -> Stmt.Switched{marker: marker.copy(), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .Region(name, name_span, body, span) -> Stmt.Region{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .Policy(declarations, body, span) -> Stmt.Policy{declarations: declarations, body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .TaskGroup(name, name_span, limit, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, limit: sema_inline_rewrite_optional_expr(&rewrite, limit), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
-        .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding, body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
-        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: sema_inline_rewrite_expr(&rewrite, cond), cond_span: cond_span, then_body: sema_inline_rewrite_stmts(&rewrite, then_body), else_body: sema_inline_rewrite_optional_body(&rewrite, else_body), span: span, selected_then: selected_then}
+        // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
+        .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
+        // copy: `selected_then` is a payload of read parameter `stmt`, which keeps the original; field `selected_then` of the new Stmt.ComptimeIf owns this one
+        .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: sema_inline_rewrite_expr(&rewrite, cond), cond_span: cond_span, then_body: sema_inline_rewrite_stmts(&rewrite, then_body), else_body: sema_inline_rewrite_optional_body(&rewrite, else_body), span: span, selected_then: selected_then.copy()}
         .ComptimeBlock(body, is_template_loop, span) -> Stmt.ComptimeBlock{body: sema_inline_rewrite_stmts(&rewrite, body), is_template_loop: is_template_loop, span: span}
         .ContextBlock(fields, body, span) -> {
             mapped := [ContextField]{}
@@ -805,10 +857,15 @@ fn sema_inline_rewrite_stmt(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Nev
         }
         .Live(body, span) -> Stmt.Live{body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
         .AssumeDet(reason, reason_expr, body, span) -> Stmt.AssumeDet{reason: reason, reason_expr: sema_inline_rewrite_expr(&rewrite, reason_expr), body: sema_inline_rewrite_stmts(&rewrite, body), span: span}
-        .Transact(name, name_span, body, implicit, span) -> Stmt.Transact{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(&rewrite, body), implicit: implicit, span: span}
+        // copy: `name` and `name_span` are payloads of read parameter `stmt`, which keeps the originals; the new Stmt.Transact's fields own `name` and `name_span`
+        .Transact(name, name_span, body, implicit, span) -> Stmt.Transact{name: name.copy(), name_span: name_span.copy(), body: sema_inline_rewrite_stmts(&rewrite, body), implicit: implicit, span: span}
         .Yield(value, span) -> Stmt.Yield{value: sema_inline_rewrite_expr(&rewrite, value), span: span}
-        .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_inline_rewrite_exprs(&rewrite, args), args_span: args_span, body: sema_inline_rewrite_stmts(&rewrite, body), dsl: dsl, dot_span: dot_span, span: span}
+        // copy: `args_span` is a payload of read parameter `stmt`, which keeps the original; field `args_span` of the new Stmt.ScopeMember owns this one
+        .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_inline_rewrite_exprs(&rewrite, args), args_span: args_span.copy(), body: sema_inline_rewrite_stmts(&rewrite, body), dsl: dsl, dot_span: dot_span, span: span}
         .DeferClose(close, span) -> Stmt.DeferClose{close: sema_inline_rewrite_expr(&rewrite, close), span: span}
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so an unchanged statement kind is copied into the rebuilt program,
+        // while the caller's program keeps the original.
         else -> stmt.copy()
     }
 }
@@ -1194,14 +1251,13 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
             }
             if rewrite.diagnostics.len() != group_start -> next
             loop (index, local) in bound_locals {
-                target :: bound_targets[index]
-                if target.qualified {
-                    rewrite.qualified[local] = target
+                if bound_targets[index].qualified {
+                    rewrite.qualified[local] = bound_targets[index]
                 } else {
                     span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> declaration.span
-                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(target.module_alias, target.member), module_alias: target.module_alias.copy(), source_name: target.member.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
+                    rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(bound_targets[index].module_alias, bound_targets[index].member), module_alias: bound_targets[index].module_alias.copy(), source_name: bound_targets[index].member.copy(), span: span, visibility: if declaration.is_pub -> 2 else -> if declaration.is_package_pub -> 1 else -> 0}
                 }
-                if declaration.is_pub -> reexports[local] = target
+                if declaration.is_pub -> reexports[local] = bound_targets[index]
             }
         }
     }
@@ -1287,6 +1343,9 @@ fn sema_inline_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item Nev
             sema_inline_restore_locals(&rewrite, saved)
             Item.Test{value: updated}
         }
+        // copy: the rewrite walks the module program by borrowed payload views (Jet has no
+        // consuming match), so an unchanged item kind is copied into the rebuilt program, while the
+        // caller's program keeps the original.
         else -> item.copy()
     }
 }

@@ -1,0 +1,35 @@
+Error [E0201]: `s` cannot be moved from borrowed storage
+  --> tests/ui/move_from_borrowed_argument.jet:25:14
+    |
+ 25 |     consume(^s)
+    |              ^
+ Why: `s` is a read or write parameter, so its caller keeps the value; moving it here would copy it
+ Fix: Write `s.copy()` when `consume` should receive a copy, or declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201
+
+Error [E0201]: `s` cannot be moved from borrowed storage
+  --> tests/ui/move_from_borrowed_argument.jet:29:18
+    |
+ 29 |     sink(&slot, ^s)
+    |                  ^
+ Why: `s` is a read or write parameter, so its caller keeps the value; moving it here would copy it
+ Fix: Write `s.copy()` when `sink` should receive a copy, or declare the parameter `^` so the caller hands the value over
+More: jet-lang.dev/e/E0201
+
+Error [E0201]: `view` cannot be moved from borrowed storage
+  --> tests/ui/move_from_borrowed_argument.jet:34:14
+    |
+ 34 |     consume(^view)
+    |              ^^^^
+ Why: `view` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it
+ Fix: Write `view.copy()` when `consume` should receive a copy, or move the place itself with `^` when this scope owns it
+More: jet-lang.dev/e/E0201
+
+Error [E0201]: `s` cannot be moved from borrowed storage
+  --> tests/ui/move_from_borrowed_argument.jet:39:41
+    |
+ 39 |     loop s in sessions -> last = consume(^s)
+    |                                         ^
+ Why: `s` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it
+ Fix: Write `s.copy()` when `consume` should receive a copy, or move the place itself with `^` when this scope owns it
+More: jet-lang.dev/e/E0201

@@ -36,7 +36,7 @@ function body(path) {
 }
 const sorted = (dir) => readdirSync(resolve(repo, dir)).filter((name) => name.endsWith(".jet")).sort().map((name) => `${dir}/${name}`);
 const typePath = "Compiler/JetFoundation/Source/MIR/MIR.jet";
-const typeLine = read(typePath).split("\n").find((line) => line.startsWith("pub struct MIRTypeID "));
+const typeLine = read(typePath).split("\n").find((line) => /^(pub )?struct MIRTypeID /.test(line));
 if (!typeLine) throw new Error(`${typePath}: missing MIRTypeID`);
 const fixturePaths = sorted("Compiler/JetBackend/Tests/OptFixtures");
 if (fixturePaths.length === 0) throw new Error("no optimizer fixtures");

@@ -65,7 +65,9 @@ fn publish<T>(package: String, module_name: String, panel: String, field: String
     source :: "{package}::{module_name}"
     entity :: "{source}::{panel}"
     fields :: envelope_fields(package, module_name, panel, field)
-    core.devtools.__publish_payload(^source, ^entity, ^fields, ^field, ^value)
+    // copy: `field` and `value` are read parameters (the caller keeps them); the payload owns its own
+    // texts and value. An exact `^` on a read parameter is E0201.
+    core.devtools.__publish_payload(^source, ^entity, ^fields, field.copy(), value.copy())
 }
 
 #Test("devtools identity field envelope has canonical order and exact escapes") {

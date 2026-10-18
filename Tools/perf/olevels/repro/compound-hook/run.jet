@@ -1,0 +1,17 @@
+// r29g E0109 repro (from Tools/gauntlet/entries/nbody/jet/run.jet): compound assignment on a Vec3.
+// r29g stage3 `jet build run.jet` (2026-10-17): E0109 "Arithmetic needs matching number types" on
+// cases A, B, E and F (lines 7, 8, 12, 14); the binary forms C, D and G are accepted.
+fn run() {
+    v := Vec3(1.0, 2.0, 3.0)
+    w :: Vec3(0.5, 0.5, 0.5)
+    v += w                       // case A: Vec3 += Vec3            -> E0109
+    v -= w                       // case B: Vec3 -= Vec3            -> E0109
+    m :: Float{2.0}
+    s :: w * m                   // case C: Vec3 * Float            ok
+    v = v + s                    // case D: Vec3 + Vec3             ok
+    v += w * m                   // case E: Vec3 += Vec3 * Float    -> E0109 (nbody line 50)
+    b := (p: Vec3(0.0, 0.0, 0.0), v: Vec3(1.0, 1.0, 1.0), m: Float{3.0})
+    b.v -= w * (b.m * m)         // case F: field Vec3 -= Vec3 * F  -> E0109 (nbody line 24)
+    b.p = b.p + b.v * m          // case G: field = Vec3 + Vec3 * F ok
+    print("{v.x} {v.y} {v.z} {b.v.x} {b.p.x}")
+}

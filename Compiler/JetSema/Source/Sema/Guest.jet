@@ -12,6 +12,7 @@ use jet_foundation.[
     Type,
     type_name,
 ]
+use jet_parser.parser_guest_import_symbol
 
 // Rust `is_guest_import_marker`: the ratified `#Import(c)` spelling.
 fn sema_marker_is_guest_import(marker: Marker) -> Bool Never! {
@@ -32,20 +33,6 @@ fn sema_function_is_guest_export(function: Func) -> Bool Never! {
         if sema_marker_is_guest_export(marker) -> return true
     }
     false
-}
-
-// Rust `guest_import_symbol`: the fixed C symbol the parser stored as the
-// `#Import(c)` marker's compile-time fact. A missing or empty value is an
-// invalid declaration (the parser reported E3212), never an import.
-fn sema_guest_import_symbol(function: Func) -> String? Never! {
-    loop marker in function.markers {
-        if !sema_marker_is_guest_import(marker) -> next
-        if marker.ct == .Val(value) {
-            if value == .Str(symbol) && symbol != "" -> return Val(symbol)
-        }
-        return None
-    }
-    None
 }
 
 // Rust `guest_export_native_symbol`: the one native spelling of an exported
@@ -146,7 +133,7 @@ fn sema_guest_import_bridge_value(ty: Type) -> Bool Never! {
 }
 
 fn sema_guest_import_bridge_compatible(function: Func) -> Bool Never! {
-    if sema_guest_import_symbol(function) == None -> return false
+    if parser_guest_import_symbol(function) == None -> return false
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].convention == {
             .Read | .Write -> {
@@ -247,7 +234,7 @@ fn sema_guest_check_surfaces(graph: &SemaRegistrationGraph) {
         diagnostics := [Diagnostic]{}
         loop item in graph.modules[module_index].program.items {
             if item == .Func(function) {
-                if sema_guest_import_symbol(function) != None {
+                if parser_guest_import_symbol(function) != None {
                     if !sema_guest_check_c_signature(graph, module_index, function, &diagnostics) {
                         failed = true
                     } else if !sema_guest_import_bridge_compatible(function) {
@@ -270,7 +257,7 @@ fn sema_guest_check_surfaces(graph: &SemaRegistrationGraph) {
         loop item in graph.modules[module_index].program.items {
             if item == {
                 .Func(function) -> {
-                    if sema_guest_import_symbol(function) == .Val(symbol) -> sema_guest_record_symbol(&symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), &diagnostics)
+                    if parser_guest_import_symbol(function) == .Val(symbol) -> sema_guest_record_symbol(&symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), &diagnostics)
                     if module_index == entry_index && sema_function_is_guest_export(function) {
                         if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) -> has_text_export = true
                         sema_guest_record_symbol(&symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), &diagnostics)

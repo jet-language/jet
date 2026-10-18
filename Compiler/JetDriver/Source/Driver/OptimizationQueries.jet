@@ -53,6 +53,7 @@ fn jet_driver_optimization_query(request: ^JetDriverCompileRequest) -> JetDriver
             keys[function.id.value] = function.key
             positions[function.id.value] = index
         }
+        ordered = loop fresh_item in ordered -> fresh_item
         &ordered.sort_by((a, b) -> (keys[a.value] <=> keys[b.value]).then(a.value <=> b.value))
         loop identity in ordered {
             function :: program.functions[positions[identity.value]]

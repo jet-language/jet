@@ -111,7 +111,7 @@ fn parser_expression_form_loop_step(state: &JetParserState, depth: Int) -> Stmt?
         operator :: parser_bump(&state)
         value :: parser_parse_expression(&state, 1, depth + 1)
         target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span, operator)
-        return Val(Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
+        return Val(Stmt.Assign{target: ^target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
     }
     Val(Stmt.Expr{expr: step_expr.expr})
 }
@@ -153,7 +153,7 @@ fn parser_expression_form_loop_range_kind(state: &JetParserState, first: ParsedE
             else -> {}
         }
     }
-    ForKind.In{collection: first.expr, step: step_expr}
+    ForKind.In{collection: first.expr, step: ^step_expr}
 }
 
 fn parser_expression_form_loop_guard(state: &JetParserState, depth: Int) -> Expr? {
@@ -261,13 +261,13 @@ fn parser_expression_form_parse_counted_loop(state: &JetParserState, start: Span
                     operator :: parser_bump(&state)
                     value :: parser_parse_expression(&state, 1, depth + 1)
                     target :: parser_expression_lvalue(&state, step_expr.expr, step_expr.span, operator)
-                    Val(Stmt.Assign{target: target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
+                    Val(Stmt.Assign{target: ^target, op: parser_assignment_binop(operator.kind), op_span: operator.span, value: value.expr})
                 }
                 else -> Val(Stmt.Expr{expr: step_expr.expr})
             }
         }
     }
-    ParserExpressionFormCountedLoop{init: init, cond: condition.expr, step: step, span: parser_cover(start, condition.span)}
+    ParserExpressionFormCountedLoop{init: ^init, cond: condition.expr, step: ^step, span: parser_cover(start, condition.span)}
 }
 
 fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> ParsedExpr {
@@ -395,7 +395,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
                 clause :: clauses[index]
                 label := NamedSpan?{None}
                 if index == 0 -> label = Val(NamedSpan{name: collect_label, span: start.span})
-                nested = [Stmt]{Stmt.For{var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: clause.kind, body: nested, span: start.span, arrow_body: false, label: label, auto_vectorization: None}}
+                nested = [Stmt]{Stmt.For{var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: clause.kind, body: nested, span: start.span, arrow_body: false, label: ^label, auto_vectorization: None}}
                 index -= 1
             }
             if nested.len() > 0 -> loop_stmt = Val(nested[0])

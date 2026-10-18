@@ -173,8 +173,14 @@ fn jet_eval_static(machine: &JetEvalMachine, name: String, span: Span) -> JetEva
         jet_eval_compiler_fail(&machine, span, "MIR global `{name}` is not provided by the evaluation")
         return None
     }
+    // copy: the constant value (owner: the machine) is handed to jet_eval_constant_runtime /
+    // jet_eval_global_shared beside `&machine`; a view into machine would be live across that
+    // exclusive borrow (E0212), and the machine keeps its own row.
     constant :: machine.program.constants[row].value.copy()
     if constant == .SharedSite(site) {
+        // copy: the constant type (owner: the machine) is handed to jet_eval_global_shared beside
+        // `&machine`; a view into machine would be live across that exclusive borrow (E0212), and
+        // the machine keeps its own row.
         ty :: machine.program.constants[row].ty.copy()
         return jet_eval_global_shared(&machine, site, ty, span)
     }
@@ -1581,6 +1587,8 @@ fn jet_eval_unary_kernel_type(ty: MIRType) -> MIRType Never! {
         .Quantity(base, _) -> return jet_eval_unary_kernel_type(base)
         else -> {}
     }
+    // copy: the caller keeps its operand type (owner: the read parameter) and gets the kernel type
+    // as its own result (owner: the returned MIRType); other kinds map to a different type.
     ty.copy()
 }
 
@@ -1969,6 +1977,9 @@ fn jet_eval_window_path(machine: &JetEvalMachine, frame_index: Int, projections:
             operands[lookup.value] = result
         }
         if source == .Val(id) {
+            // copy: the frame's operand value (owner: the machine) is handed to the window path
+            // walk beside `&machine`; a view into machine would be live across that exclusive
+            // borrow (E0212), and the machine keeps its own row.
             value :: machine.frames[frame_index].values.get(id.value).copy() ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR window projection operand is unavailable")
                 return None

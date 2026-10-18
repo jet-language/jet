@@ -21,7 +21,7 @@ fn abi_bool_module(stack: Bool) -> LIRModule Never! {
     &values.push(abi_value(id, lir_layout_bool()))
     &params.push(LIRValueID{value: id})
     signature :: LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: layouts, result: Val(lir_layout_bool())}
-    block :: LIRBlock{id: LIRBlockID{value: 0}, params: params, insts: [LIRInst]{}, terminator: LIRTerminator.Return{value: Val(LIRValueID{value: id})}, lines: [Int]{0}}
+    block :: LIRBlock{id: LIRBlockID{value: 0}, params: params, insts: [LIRInst]{}, terminator: LIRTerminator.Return{value: Val(LIRValueID{value: id})}, lines: [Int]{0}, cold: false}
     function :: LIRFunction{id: LIRFunctionID{value: 0}, name: "bool_identity", signature: signature.id, values: values, blocks: [LIRBlock]{block}, debug: lir_function_debug_none()}
     LIRModule{signatures: [LIRSignature]{signature}, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
 }
@@ -67,7 +67,7 @@ fn abi_alignment_module(hosted: Bool) -> LIRModule Never! {
         &insts.push(LIRInst.Call{dst: None, signature: LIRSignatureID{value: 1}, callee: LIRCallee.Runtime{symbol: "jet_rt_alignment"}, args: [LIRValueID]{pointer}})
     }
     values :: [LIRValue]{abi_value(0, lir_layout_pointer()), abi_value(1, lir_layout_word())}
-    block :: LIRBlock{id: LIRBlockID{value: 0}, params: [LIRValueID]{}, insts: insts, terminator: LIRTerminator.Return{value: if hosted -> None else -> Val(zero)}, lines: loop _ in 0..<(insts.len() + 1) -> 0}
+    block :: LIRBlock{id: LIRBlockID{value: 0}, params: [LIRValueID]{}, insts: insts, terminator: LIRTerminator.Return{value: if hosted -> None else -> Val(zero)}, lines: loop _ in 0..<(insts.len() + 1) -> 0, cold: false}
     function :: LIRFunction{id: LIRFunctionID{value: 0}, name: "align64", signature: LIRSignatureID{value: 0}, values: values, blocks: [LIRBlock]{block}, debug: lir_function_debug_none()}
     LIRModule{signatures: signatures, functions: [LIRFunction]{function}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{1}}, align: 64, relocs: [LIRDataReloc]{}}}, debug: lir_module_debug_none()}
 }

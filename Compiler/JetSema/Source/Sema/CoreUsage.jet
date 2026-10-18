@@ -716,65 +716,74 @@ fn sema_core_collect_ast_import(imports: &[SemaCoreImport], declaration: ImportD
 // functions listed in `unshared` are collected as wrappers
 // (sema_core_collect_source_wrapper).
 fn sema_core_collect_items(items: [Item], owner: String, unshared: [String], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
-    loop item in items {
-        if item == {
-            .Func(function) -> {
-                if owner != "" && sema_core_string_contains(unshared, function.name) {
-                    sema_core_collect_source_wrapper(function, owner, imports, registered, &used, &spans, &callbacks)
-                } else {
-                    sema_core_collect_func(function, imports, registered, &used, &spans, &callbacks)
-                }
+    loop item in items -> sema_core_collect_item(item, owner, unshared, imports, registered, &used, &spans, &callbacks)
+}
+
+// Items `first..<last` of `items`, each read in place, in item order: a
+// module's items split into consecutive ranges note the same usages as one
+// walk of all of them (sema_core_collected_append joins the ranges).
+fn sema_core_collect_item_range(items: [Item], first: Int, last: Int, context: SemaCoreModuleContext, collected: &SemaCoreCollected) {
+    loop index in first..<last -> sema_core_collect_item(items[index], context.owner, context.unshared, context.imports, context.registered, &collected.used, &collected.spans, &collected.callbacks)
+}
+
+fn sema_core_collect_item(item: Item, owner: String, unshared: [String], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+    if item == {
+        .Func(function) -> {
+            if owner != "" && sema_core_string_contains(unshared, function.name) {
+                sema_core_collect_source_wrapper(function, owner, imports, registered, &used, &spans, &callbacks)
+            } else {
+                sema_core_collect_func(function, imports, registered, &used, &spans, &callbacks)
             }
-            .Struct(definition) -> {
-                loop field in definition.fields -> sema_core_collect_field(field, imports, registered, &used, &spans, &callbacks)
-                loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
-                loop block in definition.trait_impls -> sema_core_collect_trait_impl(block, imports, registered, &used, &spans, &callbacks)
-                sema_core_collect_stmts(definition.validate_block, imports, registered, &used, &spans, &callbacks)
-                loop binding in definition.cli_bindings -> sema_core_collect_expr(binding.target, imports, registered, &used, &spans, &callbacks)
-            }
-            .Enum(definition) -> {
-                loop variant in definition.variants {
-                    if variant.payload == {
-                        .Single(ty, span) -> sema_core_collect_type(ty, registered, &used, &spans, Val(span))
-                        .Named(fields) -> loop field in fields -> sema_core_collect_type(field.ty, registered, &used, &spans, Val(field.ty_span))
-                        .Unit -> {}
-                    }
-                    if variant.discriminant_expr != None -> sema_core_collect_expr(variant.discriminant_expr ?? Expr.Unit{span: variant.name_span}, imports, registered, &used, &spans, &callbacks)
-                }
-                loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
-                loop block in definition.trait_impls -> sema_core_collect_trait_impl(block, imports, registered, &used, &spans, &callbacks)
-            }
-            .Impl(definition) -> {
-                loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
-                loop associated in definition.assoc_type_impls -> sema_core_collect_type(associated.ty, registered, &used, &spans, Val(associated.span))
-            }
-            .Test(definition) -> {
-                sema_core_collect_params(definition.params, imports, registered, &used, &spans, &callbacks)
-                sema_core_collect_stmts(definition.body, imports, registered, &used, &spans, &callbacks)
-            }
-            .Const(definition) -> {
-                if definition.ty != None -> sema_core_collect_type(definition.ty ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(definition.name_span))
-                sema_core_collect_expr(definition.value, imports, registered, &used, &spans, &callbacks)
-            }
-            .Trait(definition) -> loop method in definition.methods -> sema_core_collect_trait_method(method, imports, registered, &used, &spans, &callbacks)
-            .ExternRust(block) -> loop function in block.functions -> sema_core_collect_extern(function, imports, registered, &used, &spans, &callbacks)
-            .TypeAlias(definition) -> sema_core_collect_type(definition.target, registered, &used, &spans, Val(definition.target_span))
-            .Distinct(definition) -> sema_core_collect_type(definition.base, registered, &used, &spans, Val(definition.base_span))
-            .ErrorConv(definition) -> sema_core_collect_stmts(definition.body, imports, registered, &used, &spans, &callbacks)
-            .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) {
-                    scoped := sema_core_import_copy(imports)
-                    // An inline module's own declarations and imports shadow
-                    // the generated Core names inside its body only.
-                    scoped_registered := registered
-                    sema_core_generated_scope_shadow_items(body, &scoped_registered)
-                    sema_core_generated_scope_import_markers(code_module.imports, &scoped_registered)
-                    loop declaration in code_module.imports -> sema_core_collect_ast_import(&scoped, declaration)
-                    sema_core_collect_items(body, "", [String]{}, scoped, scoped_registered, &used, &spans, &callbacks)
-                }
-            }
-            else -> {}
         }
+        .Struct(definition) -> {
+            loop field in definition.fields -> sema_core_collect_field(field, imports, registered, &used, &spans, &callbacks)
+            loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
+            loop block in definition.trait_impls -> sema_core_collect_trait_impl(block, imports, registered, &used, &spans, &callbacks)
+            sema_core_collect_stmts(definition.validate_block, imports, registered, &used, &spans, &callbacks)
+            loop binding in definition.cli_bindings -> sema_core_collect_expr(binding.target, imports, registered, &used, &spans, &callbacks)
+        }
+        .Enum(definition) -> {
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Single(ty, span) -> sema_core_collect_type(ty, registered, &used, &spans, Val(span))
+                    .Named(fields) -> loop field in fields -> sema_core_collect_type(field.ty, registered, &used, &spans, Val(field.ty_span))
+                    .Unit -> {}
+                }
+                if variant.discriminant_expr != None -> sema_core_collect_expr(variant.discriminant_expr ?? Expr.Unit{span: variant.name_span}, imports, registered, &used, &spans, &callbacks)
+            }
+            loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
+            loop block in definition.trait_impls -> sema_core_collect_trait_impl(block, imports, registered, &used, &spans, &callbacks)
+        }
+        .Impl(definition) -> {
+            loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
+            loop associated in definition.assoc_type_impls -> sema_core_collect_type(associated.ty, registered, &used, &spans, Val(associated.span))
+        }
+        .Test(definition) -> {
+            sema_core_collect_params(definition.params, imports, registered, &used, &spans, &callbacks)
+            sema_core_collect_stmts(definition.body, imports, registered, &used, &spans, &callbacks)
+        }
+        .Const(definition) -> {
+            if definition.ty != None -> sema_core_collect_type(definition.ty ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(definition.name_span))
+            sema_core_collect_expr(definition.value, imports, registered, &used, &spans, &callbacks)
+        }
+        .Trait(definition) -> loop method in definition.methods -> sema_core_collect_trait_method(method, imports, registered, &used, &spans, &callbacks)
+        .ExternRust(block) -> loop function in block.functions -> sema_core_collect_extern(function, imports, registered, &used, &spans, &callbacks)
+        .TypeAlias(definition) -> sema_core_collect_type(definition.target, registered, &used, &spans, Val(definition.target_span))
+        .Distinct(definition) -> sema_core_collect_type(definition.base, registered, &used, &spans, Val(definition.base_span))
+        .ErrorConv(definition) -> sema_core_collect_stmts(definition.body, imports, registered, &used, &spans, &callbacks)
+        .CodeModule(code_module) -> {
+            if code_module.body == .Val(body) {
+                scoped := sema_core_import_copy(imports)
+                // An inline module's own declarations and imports shadow
+                // the generated Core names inside its body only.
+                scoped_registered := registered
+                sema_core_generated_scope_shadow_items(body, &scoped_registered)
+                sema_core_generated_scope_import_markers(code_module.imports, &scoped_registered)
+                loop declaration in code_module.imports -> sema_core_collect_ast_import(&scoped, declaration)
+                sema_core_collect_items(body, "", [String]{}, scoped, scoped_registered, &used, &spans, &callbacks)
+            }
+        }
+        else -> {}
     }
 }
 
@@ -887,7 +896,7 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 sema_core_collect_expr(arg.expr, imports, registered, &used, &spans, &callbacks)
             }
         }
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
             constructor_name := sema_core_generated_receiver_key(receiver)
             if method == "new" && !sema_core_generated_shadowed(registered, constructor_name) && sema_core_generated_constructor_marked(registered, constructor_name) -> sema_core_note_usage(&used, &spans, "core.mem::pool_shared", None)
             if receiver == {
@@ -1225,29 +1234,69 @@ fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool Never! {
     false
 }
 
-// One walk over the module's program collects its Core usage. The registered
-// set holds the module's nominal names and its generated-context markers, so
-// the generated roots (`core.args::spec`, `core.mem::pool_shared`, ...) are
-// noted by the same walk that notes every other usage.
-fn sema_core_module_usage_from_registration(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, unshared_functions: [String], exact_int_reachable: Bool) -> SemaCoreModuleUsageResult {
+// What one module's Core-usage walk reads beside the items it walks: the
+// Core source owner (empty for a source module), the owner's unshared
+// wrappers (sema_core_source_unshared_functions), the module's Core-visible
+// imports, and the registered set: its nominal names and its
+// generated-context markers, so the generated roots (`core.args::spec`,
+// `core.mem::pool_shared`, ...) are noted by the same walk that notes every
+// other usage.
+struct SemaCoreModuleContext {
+    owner: String
+    unshared: [String]
+    imports: [SemaCoreImport]
+    registered: [String:Bool]
+}
+
+fn sema_core_module_context(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> SemaCoreModuleContext {
     registered := sema_core_registration_type_names(registration_module)
     sema_core_generated_context_markers(graph, registration_module, &registered)
-    imports :: sema_core_registration_imports(registration_module)
     owner :: if registration_module.module_identity.starts_with("<corelib>/") -> registration_module.module_name else -> ""
-    direct := [String]{}
-    spans := [SemaCoreUsageSpan]{}
-    callbacks := [String]{}
-    if exact_int_reachable -> sema_core_note_usage(&direct, &spans, "core.math::__exact_int__", None)
-    sema_core_generated_direct_item_roots(registration_module.program.items, &direct, &spans)
-    sema_core_collect_items(registration_module.program.items, owner, unshared_functions, imports, registered, &direct, &spans, &callbacks)
-    sema_core_collect_stmts(registration_module.program.script_body, imports, registered, &direct, &spans, &callbacks)
-    closure := sema_expand_core_reachable_closure(direct)
+    SemaCoreModuleContext{
+        owner: owner,
+        unshared: sema_core_source_unshared_functions(registration_module, call_facts),
+        imports: sema_core_registration_imports(registration_module),
+        registered: ^registered,
+    }
+}
+
+// What a walk noted: the sorted usage set, the first span of each usage in
+// walk order, and the sorted FFI callback keys.
+struct SemaCoreCollected {
+    used: [String]
+    spans: [SemaCoreUsageSpan]
+    callbacks: [String]
+}
+
+fn sema_core_collected_empty() -> SemaCoreCollected Never! {
+    SemaCoreCollected{used: [String]{}, spans: [SemaCoreUsageSpan]{}, callbacks: [String]{}}
+}
+
+// Notes `part`'s rows after the rows already in `collected`, as one walk
+// continuing past `collected`'s items would: the usage sets union (sorted),
+// a usage keeps its first span, the callback sets union.
+fn sema_core_collected_append(collected: &SemaCoreCollected, part: SemaCoreCollected) Never! {
+    loop usage in part.used -> sema_core_string_add(&collected.used, usage)
+    loop row in part.spans -> sema_core_note_usage(&collected.used, &collected.spans, row.usage, Val(row.span))
+    loop key in part.callbacks -> sema_core_string_add(&collected.callbacks, key)
+}
+
+// The module's Core usage from `items`, what its item ranges noted in item
+// order (joined by the caller), between the usages noted before any item
+// (`__exact_int__`, the generated roots) and its script body's.
+fn sema_core_module_usage_assemble(registration_module: SemaRegistrationModule, context: SemaCoreModuleContext, exact_int_reachable: Bool, items: SemaCoreCollected) -> SemaCoreModuleUsageResult {
+    collected := sema_core_collected_empty()
+    if exact_int_reachable -> sema_core_note_usage(&collected.used, &collected.spans, "core.math::__exact_int__", None)
+    sema_core_generated_direct_item_roots(registration_module.program.items, &collected.used, &collected.spans)
+    sema_core_collected_append(&collected, items)
+    sema_core_collect_stmts(registration_module.program.script_body, context.imports, context.registered, &collected.used, &collected.spans, &collected.callbacks)
+    closure := sema_expand_core_reachable_closure(collected.used)
     layer := jet_ring_prelude_closure_layer(closure)
     SemaCoreModuleUsageResult{
         module_identity: registration_module.module_identity,
         used_core: closure,
-        usage_spans: spans,
-        ffi_callback_keys: callbacks,
+        usage_spans: ^collected.spans,
+        ffi_callback_keys: ^collected.callbacks,
         closure: closure,
         inferred_layer: layer
     }

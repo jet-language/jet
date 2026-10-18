@@ -46,7 +46,7 @@ fn sema_authority_exprs_escape(values: [Expr], handle: String) -> Span? {
 fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
     if expr == {
         .Ident(name, span) -> if name == handle -> Val(span) else -> None
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_authority_bare(receiver, handle) -> return sema_authority_args_escape(args, handle, false)
             found :: sema_authority_expr_escape(receiver, handle)
             if found != None -> return found
@@ -74,7 +74,8 @@ fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
         .Unary(_, inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .MemberSpread(inner, _, _) | .Paren(inner, _) | .Spread(inner, _) -> sema_authority_expr_escape(inner, handle)
         .PatternTest(subject, _, _) -> sema_authority_expr_escape(subject, handle)
         .PtrFromAddr(_, _, _, addr, _) -> sema_authority_expr_escape(addr, handle)
-        .Binary(_, left, right, _) -> sema_authority_exprs_escape([Expr]{left, right}, handle)
+        // copy: `left` and `right` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `left` and `right`
+        .Binary(_, left, right, _) -> sema_authority_exprs_escape([Expr]{left.copy(), right.copy()}, handle)
         .CompareChain(operands, _, _, _) -> sema_authority_exprs_escape(operands, handle)
         .Call(call) -> sema_authority_args_escape(call.args, handle, true)
         .CallValue(callee, args, _) -> {
@@ -88,7 +89,8 @@ fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
             if range == .Val(value) -> return sema_authority_expr_escape(value, handle)
             sema_authority_exprs_escape([Expr]{start, end}, handle)
         }
-        .Range(start, end, _, _) -> sema_authority_exprs_escape([Expr]{start, end}, handle)
+        // copy: `start` and `end` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `start` and `end`
+        .Range(start, end, _, _) -> sema_authority_exprs_escape([Expr]{start.copy(), end.copy()}, handle)
         .ListLit(elements, _) -> sema_authority_exprs_escape(elements, handle)
         .TupleLit(fields, _, _) -> sema_authority_exprs_escape((loop field in fields -> field.value), handle)
         .MapLit(entries, _) -> {
@@ -288,7 +290,7 @@ fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) ->
     if expr == {
         .Ident(name, _) -> name == handle || sema_authority_contains(aliases, name)
         .Paren(inner, _) -> sema_authority_chain_rooted(inner, handle, aliases)
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
         else -> false
     }
 }
@@ -296,7 +298,7 @@ fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) ->
 fn sema_authority_narrowing_chain(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
     if expr == {
         .Paren(inner, _) -> sema_authority_narrowing_chain(inner, handle, aliases)
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
         else -> false
     }
 }
@@ -313,14 +315,16 @@ fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) ->
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found :: sema_authority_value_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
         .Field(inner, _, _) | .OptField(inner, _, _, _, _) | .Deref(inner, _) | .Unary(_, inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .MemberSpread(inner, _, _) | .Paren(inner, _) | .Spread(inner, _) | .Try(inner, _, _, _) | .PatternTest(inner, _, _) -> sema_authority_value_escape(inner, handle, aliases)
-        .Binary(_, left, right, _) -> sema_authority_values_escape([Expr]{left, right}, handle, aliases)
-        .Index(base, index, _, _) -> sema_authority_values_escape([Expr]{base, index}, handle, aliases)
+        // copy: `left` and `right` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `left` and `right`
+        .Binary(_, left, right, _) -> sema_authority_values_escape([Expr]{left.copy(), right.copy()}, handle, aliases)
+        // copy: `base` and `index` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `base` and `index`
+        .Index(base, index, _, _) -> sema_authority_values_escape([Expr]{base.copy(), index.copy()}, handle, aliases)
         .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> sema_authority_values_escape(operands, handle, aliases)
         .TupleLit(fields, _, _) -> sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
         .StructLit(_, _, _, _, fields, _, _) -> sema_authority_values_escape((loop field in fields -> field.value), handle, aliases)
@@ -330,7 +334,8 @@ fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) ->
             if fallback == .Value(fallback_value) -> return sema_authority_value_escape(fallback_value, handle, aliases)
             None
         }
-        .If(condition, _, then_value, _, else_value, _) -> sema_authority_values_escape([Expr]{condition, then_value, else_value}, handle, aliases)
+        // copy: `condition`, `then_value` and `else_value` are payloads of read parameter `expr`, which keeps the originals; the list literal owns `condition`, `then_value` and `else_value`
+        .If(condition, _, then_value, _, else_value, _) -> sema_authority_values_escape([Expr]{condition.copy(), then_value.copy(), else_value.copy()}, handle, aliases)
         .Lambda(lambda) -> {
             loop alias in aliases {
                 if sema_ownership_last_use_expr(expr, alias) -> return Val(lambda.span)
@@ -368,7 +373,7 @@ fn sema_authority_call_argument_escape(expr: Expr, handle: String, aliases: [Str
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found :: sema_authority_call_argument_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)

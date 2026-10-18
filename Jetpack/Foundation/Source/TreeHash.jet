@@ -487,18 +487,12 @@ struct FoundationDirectoryAuthority {
     fn revalidate(self) IOError! -[FS]> {
         foundation_ensure_directories_current(self.directories)
     }
-    // RuntimePolicy's domain is this ORIGINAL root inode, not a marker file.
+    // RuntimePolicy keys a session's nested claims by this ORIGINAL root inode.
     fn identity(self) -[FS]> FileID IOError! {
         self.revalidate()
         info :: self.directories[self.directories.len() - 1].handle.stat()
         self.revalidate()
         Ok(info.id)
-    }
-    fn lock(self) -[FS]> AdvisoryLock IOError! {
-        self.revalidate()
-        owner :: self.directories[self.directories.len() - 1].handle.lock()
-        self.revalidate()
-        Ok(owner)
     }
     // Markers are opened relative to the retained parent, never a pathname.
     // The RuntimePolicy caller validates regular-file kind and marker identity.

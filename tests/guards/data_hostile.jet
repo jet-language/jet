@@ -1,7 +1,6 @@
 use core.files as files
 
-// Repository-root paths deliberately match tests/data_hostile.rs.
-// KNOWN-FAILING #4802: the original requires `Limit group_mean:`, but the checked-in golden says `Limit query.group_by.mean:`. Keep the assertion unchanged.
+// Repository-root paths match the retired tests/data_hostile.rs.
 fn s3_guard_hostile_corpus() {
     output :: files.read("Examples/features/expected/tooling/data_hostile.out") ?? panic("read hostile data golden")
     needles :: [String]{
@@ -21,7 +20,7 @@ fn s3_guard_hostile_corpus() {
         "bad_quantile: InvalidArgument quantile:",
         "bad_window: InvalidArgument rolling_mean:",
         "hostile_svg_escaped: true",
-        "large_limit: Limit group_mean:",
+        "large_limit: Limit query.group_by.mean: max_groups 1 exceeded",
         "cancellation_sum: 1.0",
         "cancellation_mean: 0.3333333333333333",
     }

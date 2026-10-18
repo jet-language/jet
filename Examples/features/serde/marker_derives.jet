@@ -1,0 +1,31 @@
+// Rust `attach_type_markers`: a struct's or enum's `#…` markers request its
+// derives. `#Codable` is Encode + Decode; `#Comparable` orders by fields, and
+// an enum by declaration order. The parser fills `derives` from the markers,
+// so an explicit marker never reads as "not Encode" (E0905).
+use core.encoding.json as json
+
+#Codable
+struct Point {
+    first_x: Int
+    y: Int
+}
+
+#Comparable
+struct Version {
+    major: Int
+    minor: Int
+}
+
+#Comparable
+enum Level {
+    Low
+    High
+}
+
+fn run() {
+    print(json.to_string(Point{first_x: 1, y: 2}) ?? panic("JSON encode"))
+    back :: json.decode<Point>("{{\"first_x\":3,\"y\":4}}") ?? panic("JSON decode")
+    print(back.first_x + back.y)
+    print(Version{major: 1, minor: 2} < Version{major: 1, minor: 10})
+    print(Level.Low < Level.High)
+}

@@ -114,23 +114,9 @@ fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String
             break
         }
     }
-    loop position in 1..<evidence.len() {
-        current :: evidence[position].copy()
-        slot := position
-        loop slot > 0 && jet_cli_architecture_evidence_before(current, evidence[slot - 1]) {
-            evidence[slot] = evidence[slot - 1]
-            slot -= 1
-        }
-        evidence[slot] = current
-    }
+    &evidence.sort_by((left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) -> (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start).then(left.role <=> right.role))
     jet_cli_architecture_unique(&boundaries)
     JetCLIArchitectureRow{kind: kind, subject: subject, scope: if cross_module -> "cross-module" else -> "same-module", evidence: evidence, boundaries: boundaries, uncertainty: [String]{note, "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"}}
-}
-
-fn jet_cli_architecture_evidence_before(left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) -> Bool Never! {
-    if left.module_path != right.module_path -> return left.module_path < right.module_path
-    if left.span.start != right.span.start -> return left.span.start < right.span.start
-    left.role < right.role
 }
 
 fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] Never! {
@@ -179,23 +165,9 @@ fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] N
         &seen.push(identity)
         &rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
     }
-    loop position in 1..<rows.len() {
-        current :: rows[position].copy()
-        slot := position
-        loop slot > 0 && jet_cli_architecture_row_before(current, rows[slot - 1]) {
-            rows[slot] = rows[slot - 1]
-            slot -= 1
-        }
-        rows[slot] = current
-    }
+    &rows.sort_by((left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) -> (left.subject <=> right.subject).then(left.kind <=> right.kind).then(left.scope <=> right.scope))
     if rows.len() > 64 -> rows = rows[0..63]
     rows
-}
-
-fn jet_cli_architecture_row_before(left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) -> Bool Never! {
-    if left.subject != right.subject -> return left.subject < right.subject
-    if left.kind != right.kind -> return left.kind < right.kind
-    left.scope < right.scope
 }
 
 fn jet_cli_architecture_behavior() -> [JetCLIStatusValue] Never! {

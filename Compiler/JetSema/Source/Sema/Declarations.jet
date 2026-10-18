@@ -187,9 +187,13 @@ fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: Symbo
 // leaves. Another module's caller reads this registered signature, so the
 // declared contract is published here, before any body check runs.
 fn sema_function_signature_view_provenance(func: Func) -> ViewProvenanceMap? {
+    // copy: the signature publishes its own provenance map, while the inferred map stays on `func`
+    // (a read parameter, the registered declaration).
     if func.return_view_provenance != None -> return func.return_view_provenance.copy()
     declared :: func.declared_return_view_provenance ?? return None
     mutable :: if func.return_type == .Val(ret) -> sema_ownership_is_window_type(ret) else -> false
+    // copy: `published` gets its mutable flags rewritten, while the declared map stays on `func`,
+    // the caller's registered declaration.
     published := declared.copy()
     loop index in 0..<published.entries.len() {
         if published.entries[index].slot.len() == 0 -> published.entries[index].value.mutable = mutable

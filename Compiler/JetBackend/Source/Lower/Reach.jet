@@ -48,6 +48,8 @@ fn lower_reach_constant(q: &LowerPrepared, value: MIRConstant, parent: Int) Neve
 
 fn lower_reach_id(q: &LowerPrepared, id: U64, parent: Int) Never! {
     row :: q.checked_types.rows.get(id) ?? return
+    // copy: `ty` is read while lower_reach_* writes the prepared tables (`&q`, which appends
+    // checked types), so a view into q.checked_types would be live across those writes.
     ty :: q.checked_types.types[row].copy()
     lower_mono_intern_type(&q, ty, parent)
 }
@@ -81,8 +83,8 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
         }
         .TraitMethod(method, bound, receiver) -> {
             lower_mono_intern_type(&q, receiver, parent)
-            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, receiver, bound) == .Val(implementation) {
-                checked :: lower_trait_method(p, bound, method) ?? return
+            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, q.traits, receiver, bound) == .Val(implementation) {
+                checked :: lower_trait_method(p, q.traits, bound, method) ?? return
                 loop id in implementation.methods {
                     row :: q.source_rows.get(id.value) ?? next
                     if p.functions[row].name == checked.name -> lower_mono_request(p, &q, id, Val(receiver), type_args, parent, site).drop("concrete trait method")
@@ -245,7 +247,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         }
         .BuiltinMethod(call, receiver, _, _, _) -> {
             // `list.join` shows every element (Lists.jet lower_helper_list_join).
-            if lower_prelude_row(p, call) == .Val(row) {
+            if lower_prepared_prelude_row(p, q, call) == .Val(row) {
                 if lower_runtime_symbol(row) == "jet_iter_join" {
                     lower_lazy_reach_value(&q, function, facts, receiver, parent)
                 } else if lower_runtime_symbol(row) == "jet_deque_join" {
@@ -462,6 +464,8 @@ fn lower_reach_edges(p: MIRProgram, q: &LowerPrepared, first: Int, parent: Int, 
         cursor += 1
         if edge < 0 || q.edges_seen.get(edge) != None -> next
         &q.edges_seen.add(edge, true).drop("checked absent above")
+        // copy: the edge's function id is read while lower_reach_* writes `q` (the edge list grows
+        // as reach walks). A view into q.edges would be live across those writes.
         function :: q.edges[edge].function.copy()
         branch :: q.edges[edge].branch
         following :: q.edges[edge].next

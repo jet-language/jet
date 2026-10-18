@@ -201,6 +201,8 @@ fn lower_record_schema_with_handle(p: MIRProgram, ty: MIRType, runtime: LowerRun
             if args.len() != 0 -> next
             if schema.jet_name != row.jet_name -> next
             if !lower_record_shape_matches(p, definition, schema) -> return None
+            // copy: the caller gets an owned schema row, while the row stays in the global
+            // LOWER_RECORD_SCHEMAS table, which can't be moved from.
             return Val(schema.copy())
         }
         // A generated row (RuntimeRoutes.jet) is keyed by the runtime type the

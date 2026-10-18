@@ -26,6 +26,22 @@ still writes the generated Rust verbatim; its machine mode affects diagnostic
 failures, not the emitted program. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
+`jet emit --ast|--mir|--lir <file>` prints one compiler tier of a file:
+`--ast` the parsed syntax tree (parsing only), `--mir` the checked MIR of the
+entry package's functions, and `--lir` the LIR `jet build` lowers for them,
+before the LIR passes of its optimization level. `--fn NAME` keeps one
+function. Each tier is one tree. The text form
+indents each child two spaces. `--json` writes the same tree as the `emit`
+status, a `{kind, text, children}` node per line. MIR numbers each function's
+values, blocks, places, locals and scopes from zero (`v0`, `b0`, `p0`, `l0`,
+`s0`) and shows every value's type and ownership mode. LIR renumbers
+module-wide functions, signatures and data in order of first use and lists
+a called function it does not show as `declare fN name`. When `jet build`
+fails to lower a function, it writes that function's MIR and LIR as `<n>.mir`
+and `<n>.lir` beside the build output in `.jet/build/<stem>.ice/`; when it
+fails to compile a function to machine code, it writes that function's final
+LIR as `<n>.lir` there. The report names that directory.
+
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.
 Only the source-file collision is refused; an existing `.stderr` is replaced.
@@ -593,9 +609,10 @@ counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
 intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
 `cli.authority`) and the native backend's (`native.sources`,
-`native.rust_foreign`, `native.lower`, `native.object` with
-`native.optimize` under `--release`, `native.foreign`, `native.link`; one
-`native.build` for a test harness). The readable stream is written through
+`native.rust_foreign`, `native.lower`, `native.object` (per function: the LIR
+passes of the level, the one LIR check, x86-64 selection and encoding; then the
+object), `native.foreign`, `native.link`; one `native.build` for a test
+harness). The readable stream is written through
 `/dev/stderr`, so redirect stderr to a file with `2>>`, or use
 `--trace=FILE`. A trace that cannot be written stops; the compile does not.
 

@@ -46,6 +46,8 @@ fn lower_test_present(f: &LowerFunction, value: LIRValueID) -> LIRValueID Never!
 fn lower_test_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     signature :: m.mir_signatures[glue.function].copy()
+    // copy: the return layout is read while the invoke body pushes signatures into `m` (`&m`), so a
+    // view into m.signatures would be live across those writes.
     return_layout :: m.signatures[signature.value].result.copy()
     parameter_count :: m.signatures[signature.value].params.len()
     ty :: glue.ty
@@ -187,6 +189,8 @@ fn lower_test_checks(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
         }
         source :: lower_row_source(p, m, row)
         signature :: m.mir_signatures[row].copy()
+        // copy: the return layout is read while each check registers signatures in `m` (`&m`), so a
+        // view into m.signatures would be live across those writes.
         return_layout :: m.signatures[signature.value].result.copy()
         if source.form != .TopLevel || source.capture_params.len() > 0 || source.params.len() > 0 {
             lower_fail(&m, &f, "native output check {check.name} requires a checked zero-argument top-level function")

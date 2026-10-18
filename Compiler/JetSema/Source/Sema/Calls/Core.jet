@@ -558,6 +558,30 @@ fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment
     sema_expr_expected(typed, Val(expected), environment, program, &diagnostics)
 }
 
+// Rust core_call.rs `("core.math", "abs")`: `abs` takes Int, Float or F32
+// (D-FLOATW1) and Complex, returning the argument type (Float for Complex).
+// The Int form stays the routed source `abs`; a float or Complex argument is
+// the MathBuiltin `abs` that Rust `lower_core_math_abs` lowers it to, which is
+// the route `Complex.abs` already takes. Anything else is not handled here.
+fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.math" || member != "abs" || args.len() != 1 || type_args.len() != 0 || args[0].label != None -> return unhandled
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return unhandled
+    type_name := ""
+    result_ty := Type.Float
+    if probed.ty == Type.Float -> type_name = "Float"
+    if probed.ty == Type.Float32 {
+        type_name = "F32"
+        result_ty = Type.Float32
+    }
+    if probed.ty == (Type.Named{name: "Complex"}) -> type_name = "Complex"
+    if type_name == "" -> return unhandled
+    value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    magnitude :: sema_tir_node(result_ty, TExprKind.MathBuiltin{type_name: type_name, function: "abs", args: [TExpr]{value}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
+}
+
 // Width selection is the existing checked mathematical normalization; it is
 // separate from source forwarding and never widens F32 values.
 fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]) -> CoreCallRecord Never! {
@@ -584,7 +608,7 @@ fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params
         param :: params[index]
         &result.push(TCallArg{value: value, template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
-            mut_borrow: param.convention == AccessConvention.Write, clone: false, arc_clone: false,
+            mut_borrow: param.convention == AccessConvention.Write,
             fn_coerce: None, widen_to_vec: false,
             widen_to_union: sema_call_widen_union(param.ty ?? value.ty, value.ty),
             box_as_trait: sema_call_box_as_trait(param.ty ?? value.ty, value.ty, environment, program),
@@ -608,7 +632,7 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
         identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
         if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
-            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             value :: sema_tir_node(result_type, TExprKind.Call{callee: target.symbol.id, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
@@ -897,6 +921,8 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 }
 
 fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: Int, value: TExpr, span: Span) -> TExpr Never! {
+    // copy: the materialized argument is a new owned TExpr. Off the authority boundary it equals
+    // `value`, the caller's checked argument (a read parameter), which the caller keeps.
     if !core_call_authority_boundary_at(record, index) -> return value.copy()
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
     sema_tir_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},

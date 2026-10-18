@@ -214,13 +214,6 @@ fn jet_cli_language_symbols() -> [JetCLISymbol] Never! {
     symbols
 }
 
-// Symbols.rs `SemanticSymbolIndex::sort`: qualified name, module, identity.
-fn jet_cli_symbol_before(left: JetCLISymbol, right: JetCLISymbol) -> Bool Never! {
-    if left.qualified_name != right.qualified_name -> return left.qualified_name < right.qualified_name
-    if left.module_path != right.module_path -> return left.module_path < right.module_path
-    left.identity < right.identity
-}
-
 // Symbols.rs `SemanticSymbolIndex::new` (`push` keeps the last row of one
 // identity).
 fn jet_cli_symbol_index(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
@@ -234,15 +227,8 @@ fn jet_cli_symbol_index(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
             &unique.push(symbol)
         }
     }
-    loop index in 1..<unique.len() {
-        value :: unique[index].copy()
-        position := index
-        loop position > 0 && jet_cli_symbol_before(value, unique[position - 1]) {
-            unique[position] = unique[position - 1]
-            position -= 1
-        }
-        unique[position] = value
-    }
+    // Symbols.rs `SemanticSymbolIndex::sort`: qualified name, module, identity.
+    &unique.sort_by((left: JetCLISymbol, right: JetCLISymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
     unique
 }
 
@@ -857,6 +843,8 @@ fn jet_cli_symbol_display(modules: [JetDriverDocModule], module_path: String, na
         permit :: storage.guard_read()
         return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
     }
+    // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     name.copy()
 }
 

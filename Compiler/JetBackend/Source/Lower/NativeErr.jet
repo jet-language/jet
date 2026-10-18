@@ -45,7 +45,8 @@ fn lower_native_err_type(p: MIRProgram, ty: MIRType) -> Bool {
 fn lower_native_err_member(p: MIRProgram, ty: MIRType, id: MIRFieldID) -> MIRField? {
     definition :: lower_type_def(p, ty) ?? return None
     if definition.kind == .Struct(fields, _) {
-        loop field in lower_stored_fields(fields) { if field.id == id -> return Val(field.copy()) }
+        stored := lower_stored_fields(fields)
+        loop field in ^stored { if field.id == id -> return Val(^field) }
     }
     None
 }
@@ -83,7 +84,11 @@ fn lower_native_err_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, 
     done :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(none, [LIRValueID]{}), else_target: lower_target(some, [LIRValueID]{})})
     lower_start(&f, some, [LIRValueID]{})
-    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: cell})
+    // A frame box over the cell's word (#5041 P2): an owning read's Option
+    // glue copies it instead of counting Err88 storage.
+    view :: lower_frame_box(&f, 8)
+    lower_copy_bytes(&f, view, 0, cell, 0, 8)
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: view})
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, none, [LIRValueID]{})
     lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: null})
@@ -118,7 +123,13 @@ fn lower_native_err_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f
         if lower_value_owned(c, value.value) -> lower_map_drop_value(p, &m, &f, unused, field.ty)
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    box :: args[2]
+    // The cause handle moves out of its Option box by bytes; a shared box
+    // (#5041 P2) is first replaced by a private copy (lower_box_owned).
+    box := args[2]
+    loop value in fields {
+        field :: lower_native_err_member(p, ty, value.field) ?? return lower_fail(&m, &f, "native Err constructor field is missing")
+        if field.name == "cause" -> box = lower_box_owned(p, &m, &f, args[2], field.ty)
+    }
     null :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: null, value: 0})
     absent :: lower_flag(&f)

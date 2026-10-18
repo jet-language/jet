@@ -58,7 +58,7 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     watched[count++].frees=0;
 }
 static void done(void) { assert(interceptions); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void text_is(Text *t,const char *expected) {
     assert(t && t->length==(int64_t)strlen(expected));
     assert(!t->length || memcmp(t->data,expected,(size_t)t->length)==0);

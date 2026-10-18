@@ -1,7 +1,6 @@
 # Port of tests/cli_parts/bindings.rs:1405-1485; sources copied verbatim.
 # PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
 # Original example expected.out copied exactly; original cancellation C probe retained.
-# KNOWN-FAILING #4799: original copies missing Examples/interop/powershell/main.jet after main->run cutover; retain failing copy and all later predicates.
 # PENDING-GRAMMAR: is-file, copy from {root}.
 requires: tool:pwsh
 fixture: fixtures/powershell_roundtrip
@@ -10,8 +9,8 @@ exit: 0
 file: .jet/bindings/pwsh/libjet_pwsh_ops.a is-file
 file: .jet/bindings/pwsh/ops_worker.ps1 is-file
 file: .jet/bindings/pwsh/ops.provenance is-file
-copy: {root}/Examples/interop/powershell/main.jet main.jet
-step: jet run --profile=debug main.jet
+copy: {root}/Examples/interop/powershell/run.jet run.jet
+step: jet run --profile=debug run.jet
 exit: 0
 stdout: = powershell_bind_round_trips_datatree_state_and_cleans_workers.out
 step: cc cancel.c -L.jet/bindings/pwsh -l:libjet_pwsh_ops.a -lpthread -o cancel

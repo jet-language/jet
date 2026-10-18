@@ -358,6 +358,7 @@ fn jet_cli_sem_zone_name(zone: ParamZone) -> String Never! {
 
 // The callable a definition carries, when it is a function.
 fn jet_cli_sem_callable(definition: JetCLISemDef) -> JetCLISemCallable? Never! {
-    if definition.kind == .Function(callable) -> return Val(callable)
+    // copy: `callable` is a payload of read parameter `definition`, which keeps the original; the Val carrier owns this one
+    if definition.kind == .Function(callable) -> return Val(callable.copy())
     None
 }

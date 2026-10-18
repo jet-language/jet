@@ -51,13 +51,13 @@ fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [Dyn], hint: Strin
             &nonnull.push(value)
         }
     }
-    if nonnull.len() == 0 -> return Ok((ty: BoundType.Dynamic, nullable: true))
+    if nonnull.len() == 0 -> return Ok((nullable: true, ty: BoundType.Dynamic))
     first :: pkg_data_json_kind(nonnull[0])
     uniform := true
     loop value in nonnull {
         if pkg_data_json_kind(value) != first -> uniform = false
     }
-    if !uniform -> return Ok((ty: BoundType.Dynamic, nullable: nullable))
+    if !uniform -> return Ok((nullable: nullable, ty: BoundType.Dynamic))
     ty :: if first == {
         .Object -> BoundType.Named(pkg_data_add_json_record(&builder, hint, nonnull))
         .Array -> pkg_data_json_array_type(&builder, nonnull, hint)
@@ -66,7 +66,7 @@ fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [Dyn], hint: Strin
         .Number -> pkg_data_json_number_type(nonnull)
         else -> BoundType.Dynamic
     }
-    Ok((ty: ty, nullable: nullable))
+    Ok((nullable: nullable, ty: ty))
 }
 
 // A list over every element of every array; a nullable element type becomes

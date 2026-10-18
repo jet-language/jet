@@ -24,7 +24,6 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     measure_literal_value,
-    tir_call_arg_copy_fact,
 ]
 
 // S58: an inert numeric address is a place operation, not a by-value
@@ -55,8 +54,6 @@ fn sema_call_memory_call_arg(argument: CallArg, value: TExpr, borrow: Bool, mut_
         template_items: [SymbolID]{},
         borrow: borrow,
         mut_borrow: mut_borrow,
-        clone: argument.flags.implicit_clone,
-        arc_clone: argument.flags.shared_auto_clone,
         fn_coerce: None,
         widen_to_vec: false,
         widen_to_union: None,
@@ -264,13 +261,11 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
     parameter := SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload.ty), variadic: false}
     ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Write, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    stored := payload
-    if updated_args[0].flags.implicit_clone || updated_args[0].flags.shared_auto_clone -> stored = sema_tir_node(payload.ty, TExprKind.Clone{value: payload, fact: tir_call_arg_copy_fact(updated_args[0].flags.shared_auto_clone)}, payload.span)
     view := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
     result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view
     operation := if method == "try_alloc" -> THandleOp.AllocTryAlloc else -> THandleOp.AllocAlloc
     if !sema_call_memory_record_allocator_effect(name, method, result, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{stored}}, span)
+    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{payload}}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -313,7 +308,8 @@ fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable
 
 fn sema_call_memory_guard_ast_projection(expression: Expr) -> [String]? {
     lambda_value :: if expression == {
-        .Lambda(value) -> Val(value)
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Lambda(value) -> Val(value.copy())
         else -> None
     }
     lambda :: lambda_value ?? return None
@@ -344,7 +340,8 @@ fn sema_call_memory_guard_ast_projection(expression: Expr) -> [String]? {
 
 fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> [TFieldRef]? {
     lambda_value :: if value.kind == {
-        .Lambda(found) -> Val(found)
+        // copy: `found` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+        .Lambda(found) -> Val(found.copy())
         else -> None
     }
     lambda :: lambda_value ?? return None

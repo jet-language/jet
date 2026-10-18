@@ -2479,17 +2479,21 @@ fn jet_rust_emit_trait_impl_type(ty: MIRType, implementation: MIRImplDef) -> MIR
             if ret == .Val(value) -> substituted_ret = Val(jet_rust_emit_trait_impl_type(value, implementation))
             normalized.kind = MIRTypeKind.SendFn{params: substituted_params, ret: substituted_ret, conventions: conventions}
         }
-        .Apply(name, args) -> normalized.kind = MIRTypeKind.Apply{name: name, args: loop argument in args -> jet_rust_emit_trait_impl_type(argument, implementation)}
+        // copy: `name` is a payload of read parameter `ty`, which keeps the original; field `name` of the new MIRTypeKind.Apply owns this one
+        .Apply(name, args) -> normalized.kind = MIRTypeKind.Apply{name: name.copy(), args: loop argument in args -> jet_rust_emit_trait_impl_type(argument, implementation)}
         .Tuple(fields) -> {
             substituted := fields
             loop index in 0..<fields.len() -> substituted[index].ty = jet_rust_emit_trait_impl_type(fields[index].ty, implementation)
             normalized.kind = MIRTypeKind.Tuple{fields: substituted}
         }
-        .FixedList(elem, len) -> normalized.kind = MIRTypeKind.FixedList{elem: jet_rust_emit_trait_impl_type(elem, implementation), len: len}
+        // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new MIRTypeKind.FixedList owns this one
+        .FixedList(elem, len) -> normalized.kind = MIRTypeKind.FixedList{elem: jet_rust_emit_trait_impl_type(elem, implementation), len: len.copy()}
         .InlineRange(base, lo, hi) -> normalized.kind = MIRTypeKind.InlineRange{base: jet_rust_emit_trait_impl_type(base, implementation), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> normalized.kind = MIRTypeKind.Tagged{marker: marker, inner: jet_rust_emit_trait_impl_type(inner, implementation)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new MIRTypeKind.Tagged owns this one
+        .Tagged(marker, inner) -> normalized.kind = MIRTypeKind.Tagged{marker: marker.copy(), inner: jet_rust_emit_trait_impl_type(inner, implementation)}
         .Union(members) -> normalized.kind = MIRTypeKind.Union{members: loop member in members -> jet_rust_emit_trait_impl_type(member, implementation)}
-        .Quantity(base, dimension) -> normalized.kind = MIRTypeKind.Quantity{base: jet_rust_emit_trait_impl_type(base, implementation), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new MIRTypeKind.Quantity owns this one
+        .Quantity(base, dimension) -> normalized.kind = MIRTypeKind.Quantity{base: jet_rust_emit_trait_impl_type(base, implementation), dimension: dimension.copy()}
         else -> {}
     }
     normalized.identity = None
@@ -2768,6 +2772,9 @@ fn jet_rust_emit_impl_carrier_trait(ctx: &JetRustEmitContext, implementation: MI
     }
     identity :: owner_id ?? return None
     position :: jet_rust_emit_type_index(ctx, identity) ?? return None
+    // copy: `definition` is passed on after jet_rust_emit_declares_type_definition writes the emit
+    // context (`&ctx`, its declared-type cache), so a view into ctx.program.types would be live
+    // across that write.
     definition :: ctx.program.types[position].copy()
     if definition.id != identity -> return None
     if jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition) -> return None
@@ -2783,6 +2790,9 @@ fn jet_rust_emit_impl_owner_declared(ctx: &JetRustEmitContext, implementation: M
     }
     identity :: owner_id ?? return false
     position :: jet_rust_emit_type_index(ctx, identity) ?? return false
+    // copy: `definition` is read in the same expression as jet_rust_emit_declares_type_definition
+    // writes the emit context (`&ctx`), so a view into ctx.program.types would be live across that
+    // write.
     definition :: ctx.program.types[position].copy()
     definition.id == identity && jet_rust_emit_module_selected(ctx, definition.module_id) && jet_rust_emit_declares_type_definition(&ctx, definition)
 }
@@ -2856,6 +2866,9 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
             // The emitters below write through `ctx`, so they take a copy of
             // the row, as the one-row adapter this replaces did.
+            // copy: the impl's method row is read while emitting it writes the emit context
+            // (`&ctx`) and `lines`, so a view into ctx.program.functions would be live across those
+            // writes.
             function :: ctx.program.functions[function_index].copy()
             if function.id == method_id {
                 found = true

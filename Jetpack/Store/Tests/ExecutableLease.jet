@@ -87,7 +87,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     assert_eq(receipt.reference, reference)
     assert_eq(receipt.output_digest, snapshot.digest)
     reopened :: ExecutableLeaseProtocol.open(root) ?? panic("reopen")
-    assert((reopened.current_receipt(lease_id) ?? panic("current")) == Val(receipt))
+    assert((reopened.current_receipt(lease_id) ?? panic("current")) == Val((receipt)))
     reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, snapshot.digest) ?? panic("validate")
     other_digest :: "sha256-{pkg_sha256_hex("different output".bytes())}"
     assert(reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, other_digest) == .Err(_))
@@ -288,7 +288,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     assert_eq(rollback_receipt.output_digest, first.receipt.output_digest)
     assert_eq(rollback_receipt.snapshot_rel, first.receipt.snapshot_rel)
     current :: protocol.current_receipt(first.lease_id) ?? panic("current")
-    assert(current == Val(rollback_receipt))
+    assert(current == Val((rollback_receipt)))
     assert((protocol.read_generation(first.lease_id, second_receipt.generation) ?? panic("read second")) == second_receipt)
     close(^owner)
     files.remove_all(root).drop("test cleanup")

@@ -46,7 +46,7 @@ static void watch(void *p,int64_t n,int64_t a) {
     watched[count].p=p; watched[count].n=n; watched[count].a=a;
     watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(!memcmp(t->data,s,(size_t)t->length)); }

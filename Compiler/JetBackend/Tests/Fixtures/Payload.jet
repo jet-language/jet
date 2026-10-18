@@ -197,6 +197,82 @@ fn fx_payload_move() -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
 }
 
+// #5041 P2 A3: an Option/Result box copy shares the box (one more owner);
+// a write into it, or a move out of it, through a place detaches it first
+// (box.unique), and a payload take out of a box another owner holds copies
+// the payload and leaves the box to its other owners.
+// fn run() {
+//     a := present("x"); b := copy a
+//     a.value = "y"                // write through a shared box: detach
+//     print(a.value); print(b.value)
+//     r := Ok("keep"); s := copy r
+//     taken := ^s.value            // move out through a shared box: detach
+//     print(taken); print(r.value)
+//     c := copy b
+//     v := (^b)!                   // take from a box c shares: copy
+//     print(v); print(c.value)
+// }
+// expect-stdout boxes-cow: "y\nx\nkeep\nkeep\nx\nx\n"
+fn fx_boxes_cow() -> MIRProgram Never! {
+    text_maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_string(), err: fx_string()})
+    r := fx_builder()
+    a :: fx_local(&r, "a", text_maybe, mir_owned_ownership())
+    x :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "x"}})
+    a_value :: fx_owned(&r, text_maybe, MIROperation.Present{value: x})
+    fx_do(&r, MIROperation.WritePlace{place: a, value: a_value})
+    a_read :: fx_value(&r, text_maybe, fx_borrow(), MIROperation.ReadPlace{place: a})
+    b_value :: fx_owned(&r, text_maybe, MIROperation.Copy{value: a_read, fact: MIRCopyFact.Explicit})
+    b :: fx_local(&r, "b", text_maybe, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: b, value: b_value})
+    a_window :: fx_payload_place(&r, a, MIRPayloadKind.Option, fx_string(), MIRAccess.Write)
+    y :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "y"}})
+    fx_do(&r, MIROperation.ReplacePlace{place: a_window, value: y})
+    a_payload :: fx_payload_place(&r, a, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    a_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: a_payload})
+    fx_print(&r, a_now)
+    b_payload :: fx_payload_place(&r, b, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    b_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: b_payload})
+    fx_print(&r, b_now)
+
+    rr :: fx_local(&r, "r", result_ty, mir_owned_ownership())
+    keep :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "keep"}})
+    ok :: fx_owned(&r, result_ty, MIROperation.ResultOk{value: keep})
+    fx_do(&r, MIROperation.WritePlace{place: rr, value: ok})
+    r_read :: fx_value(&r, result_ty, fx_borrow(), MIROperation.ReadPlace{place: rr})
+    s_value :: fx_owned(&r, result_ty, MIROperation.Copy{value: r_read, fact: MIRCopyFact.Explicit})
+    s :: fx_local(&r, "s", result_ty, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: s, value: s_value})
+    s_moved :: fx_payload_place(&r, s, MIRPayloadKind.Result{ok: true}, fx_string(), MIRAccess.Move)
+    taken :: fx_owned(&r, fx_string(), MIROperation.MovePlace{place: s_moved})
+    fx_print(&r, taken)
+    r_payload :: fx_payload_place(&r, rr, MIRPayloadKind.Result{ok: true}, fx_string(), MIRAccess.Read)
+    r_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: r_payload})
+    fx_print(&r, r_now)
+
+    b_read :: fx_value(&r, text_maybe, fx_borrow(), MIROperation.ReadPlace{place: b})
+    c_value :: fx_owned(&r, text_maybe, MIROperation.Copy{value: b_read, fact: MIRCopyFact.Explicit})
+    c :: fx_local(&r, "c", text_maybe, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: c, value: c_value})
+    b_moved :: fx_value(&r, text_maybe, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: b})
+    v :: fx_owned(&r, fx_string(), MIROperation.OptionValue{subject: b_moved})
+    fx_print(&r, v)
+    c_payload :: fx_payload_place(&r, c, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    c_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: c_payload})
+    fx_print(&r, c_now)
+
+    fx_do(&r, MIROperation.Drop{value: v, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: b_moved, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: taken, kind: MIRDropKind.Value})
+    loop place in ([MIRPlaceID]{a, c, rr, s}) {
+        ty :: if place == rr || place == s -> result_ty else -> text_maybe
+        gone :: fx_owned(&r, ty, MIROperation.MovePlace{place: place})
+        fx_do(&r, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    }
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
 // A moved inline payload must stop borrowing its wrapper before the wrapper
 // drops. The loop edge reads the header after that Drop, just as walk's
 // `rest = ^e ?? []` in last_use_moves. Exercise all native payload wrappers.

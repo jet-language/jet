@@ -206,7 +206,8 @@ fn parser_layout_align_call(value: Expr) -> Call? {
     if value == .Call(call) && call.name == "align" {
         if call.args.len() == 1 -> return Val(call)
         if call.args.len() == 2 {
-            if call.args[0].expr == .Ident(name, _) && name == "target" -> return Val(call)
+            // copy: `call` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
+            if call.args[0].expr == .Ident(name, _) && name == "target" -> return Val(call.copy())
         }
     }
     None

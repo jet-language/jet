@@ -44,7 +44,7 @@ fn lir_sanitize_function(function: LIRFunction, check: LIRSignatureID) -> LIRFun
             loop lines.len() < insts.len() -> &lines.push(opt_debug_line(block, index))
         }
         &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: lines, cold: block.cold})
     }
     LIRFunction{id: function.id, name: function.name, signature: function.signature, values: values, blocks: blocks, debug: function.debug}
 }

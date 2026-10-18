@@ -53,7 +53,7 @@ fn db_value_payload(value: I64, kind: I64) -> I64 {
     kind :: rt_text_word(value)
     result :: db_value_new(kind)
     if (kind == I64{5}) {
-        tls_u8_list_copy_into(value + I64{8}, result + I64{8})
+        data_u8_list_copy_into(value + I64{8}, result + I64{8})
     } else {
         word := rt_text_word(value + I64{8})
         if (kind == I64{3}) -> word = jet_rt_string_clone(word)
@@ -66,7 +66,7 @@ fn db_value_payload(value: I64, kind: I64) -> I64 {
     if (value == I64{0}) -> return
     kind :: rt_text_word(value)
     if (kind == I64{3}) -> jet_rt_string_drop(rt_text_word(value + I64{8}))
-    if (kind == I64{5}) -> tls_u8_list_drop_buffer(value + I64{8})
+    if (kind == I64{5}) -> data_u8_list_drop_fields(value + I64{8})
     jet_rt_free(value, I64{32}, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_db_value(left: I64, right: I64) -> Bool {

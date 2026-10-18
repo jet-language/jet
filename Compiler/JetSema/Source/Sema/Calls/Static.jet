@@ -41,7 +41,6 @@ use jet_foundation.[
     expr_span,
     jet_target_layout_atomic_scalar_type,
     symbol_id,
-    tir_call_arg_copy_fact,
     type_identity_equal,
     type_name,
 ]
@@ -477,8 +476,10 @@ fn sema_call_builtin_static_shape(row: BuiltinStaticRow, callee: String, owner_t
 
 fn sema_call_builtin_static_carrier(result: Type) -> TFailureCarrier Never! {
     if result == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(inner) -> TFailureCarrier.Optional{value: inner}
+        // copy: `ok` and `err` are payloads of read parameter `result`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `inner` is a payload of read parameter `result`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(inner) -> TFailureCarrier.Optional{value: inner.copy()}
         else -> TFailureCarrier.Infallible
     }
 }
@@ -489,8 +490,6 @@ fn sema_call_builtin_static_call_arg(value: TExpr, argument: CallArg) -> TCallAr
         template_items: [SymbolID]{},
         borrow: argument.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
         mut_borrow: argument.convention == AccessConvention.Write,
-        clone: false,
-        arc_clone: false,
         fn_coerce: None,
         widen_to_vec: false,
         widen_to_union: None,
@@ -507,9 +506,11 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
         if index > 0 -> &rest.push(values[index])
     }
     if row.lowering == {
-        .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation, args: rest})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .ArgumentBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: operation.copy(), args: rest})
         .IntFromRadix -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: TBuiltinOp.IntFromRadix{line: line}, args: rest})
-        .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation, args: values})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation.copy(), args: values})
         .PreludeStatic(rooted, path, generics) -> {
             owner_args :: loop generic in generics -> if generic == {
                 .Jet(ty) -> TPreludeArg.Jet{ty: sema_inference_substitute_type_bindings(ty, bindings)}
@@ -520,10 +521,12 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
             reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
             Val(TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: rooted, path: path, generics: owner_args}, owner_type: None, method: reference, type_args: [Type]{}, args: call_args})
         }
-        .ArgumentHandle(operation) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: operation, args: rest})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.HandleMethod owns this one
+        .ArgumentHandle(operation) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: operation.copy(), args: rest})
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
-        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation})
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.NumericMethod owns this one
+        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation.copy()})
         .Precise(precise_type, function) -> Val(TExprKind.PreciseBuiltin{type_name: precise_type, function: function, args: values})
         .CoreCall(_, _) -> None
     }
@@ -547,16 +550,22 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     }
 
     values := [TExpr]{}
+    explicit_moves := [Bool]{}
     loop index in 0..<args.len() {
         value :: sema_call_builtin_static_argument(args[index], row.parameters[index], row, &bindings, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        &values.push(value)
+        // A written `^name` is a checked move, as for any consuming argument
+        // (Calls/Checking.jet): never a silent copy, E0201 on a read
+        // parameter. `shared name`'s operand carries no written `^`.
+        explicit :: args[index].convention == AccessConvention.Move && !args[index].flags.shared_operand && args[index].expr == .Ident(_, _) && !sema_ownership_type_is_copy(value.ty)
+        if explicit && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        &explicit_moves.push(explicit)
+        &values.push(sema_call_marked_move_value(&state, explicit, args[index].expr, ^value, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
     // Rust `finish_builtin_method` (and `shared x`'s `Shared.new` arm)
     // declares no parameter conventions for a builtin static: a written `^`
-    // on a field is the consuming argument's exact move, and on a bare name
-    // it is the plain read Rust infers, so neither is E0203. The name still
-    // moves here like an unmarked owning position: a borrowed parameter
-    // keeps its value, and a later use turns the move into a share.
+    // is the consuming argument's exact move. The bare name `shared x` moves
+    // here like an unmarked owning position: a borrowed parameter keeps its
+    // value, and a later use turns the move into a share.
     params := [SemaCallParam]{}
     ownership_args := args
     named_moves := [Int]{}
@@ -565,9 +574,13 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         if args[index].convention == AccessConvention.Move {
             if args[index].expr == {
                 .Ident(_, _) -> {
-                    convention = AccessConvention.Read
-                    ownership_args[index].convention = AccessConvention.Read
-                    &named_moves.push(index)
+                    if explicit_moves[index] {
+                        convention = AccessConvention.Move
+                    } else {
+                        convention = AccessConvention.Read
+                        ownership_args[index].convention = AccessConvention.Read
+                        &named_moves.push(index)
+                    }
                 }
                 else -> convention = AccessConvention.Move
             }
@@ -578,9 +591,6 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     loop index in named_moves {
         if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "`{callee}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    loop index in 0..<values.len() {
-        if ownership_args[index].flags.implicit_clone || ownership_args[index].flags.shared_auto_clone -> values[index] = sema_tir_node(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(ownership_args[index].flags.shared_auto_clone)}, values[index].span)
     }
 
     if expected == .Val(expected_type) {
@@ -686,7 +696,7 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
         if resolved.symbol.kind != SymbolKind.Type -> return None
-        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
+        row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) -> return None
         return Val(resolved.symbol)
@@ -790,7 +800,8 @@ fn sema_call_distinct_numeric_row(base: Type, method: String) -> BuiltinStaticRo
 }
 
 fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow) -> TNumericOp? {
-    if row.lowering == .Numeric(operation) -> return Val(operation)
+    // copy: `operation` is a payload of read parameter `row`, which keeps the original; the Val carrier owns this one
+    if row.lowering == .Numeric(operation) -> return Val(operation.copy())
     None
 }
 
@@ -834,11 +845,9 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
-    value := argument
-    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(ownership_args[0].flags.shared_auto_clone)}, value.span)
     success :: Type.Named{name: display_name}
     row :: numeric_row ?? {
-        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{owner: owner.id, argument: value, base: facts.base}, span)
+        constructed :: sema_tir_node(success, TExprKind.DistinctCtor{owner: owner.id, argument: argument, base: facts.base}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, &diagnostics)}
     }
     operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()
@@ -863,7 +872,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     }
     fallible :: base_fallible || (facts.range != None && !literal_in_range)
     result :: if fallible -> Type.Result{ok: success, err: Type.String} else -> success
-    converted :: sema_tir_node(result, TExprKind.DistinctConvert{owner: owner.id, argument: value, operation: operation, range: facts.range, fallible: fallible}, span)
+    converted :: sema_tir_node(result, TExprKind.DistinctConvert{owner: owner.id, argument: argument, operation: operation, range: facts.range, fallible: fallible}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 

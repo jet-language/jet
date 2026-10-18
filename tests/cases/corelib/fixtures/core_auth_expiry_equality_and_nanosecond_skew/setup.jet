@@ -28,16 +28,17 @@ fn run() {
     invalid_bytes[invalid_bytes.len() - 1] = if last == (U8{65}) -> U8{66} else -> U8{65}
     invalid :: String.from_bytes(invalid_bytes) ?? panic("invalid token UTF-8")
     source := files.read("clock.template") ?? panic("clock source")
-    // Original replacement order is deliberate, including TOKEN/SKEW_TOKEN and bound prefix collisions (#4812).
-    source = source.replace("TOKEN", token)
+    // Longest placeholder first: SKEW_TOKEN contains TOKEN, ABOVE_UPPER contains UPPER,
+    // and BELOW_LOWER contains LOWER.
     source = source.replace("SKEW_TOKEN", skew_token)
-    source = source.replace("NOW_NS", "{now_ns}")
     source = source.replace("SKEW_EXPIRY", "{skew_expiry}")
+    source = source.replace("ABOVE_UPPER", clock_jwt("9223372036854775808"))
+    source = source.replace("BELOW_LOWER", clock_jwt("-9223372036854776"))
+    source = source.replace("TOKEN", token)
+    source = source.replace("NOW_NS", "{now_ns}")
     source = source.replace("EQUALITY", clock_jwt("{now_secs}"))
     source = source.replace("UPPER", clock_jwt("9223372036854775"))
-    source = source.replace("ABOVE_UPPER", clock_jwt("9223372036854775808"))
     source = source.replace("LOWER", clock_jwt("-9223372036854775"))
-    source = source.replace("BELOW_LOWER", clock_jwt("-9223372036854776"))
     source = source.replace("I64_MAX", clock_jwt("9223372036854775807"))
     source = source.replace("I64_MIN", clock_jwt("-9223372036854775808"))
     source = source.replace("INVALID", invalid)

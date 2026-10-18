@@ -119,7 +119,7 @@ fn cli_u64_le(value: Int) -> [U8] Never! {
 // The (definition fingerprint, prompt-hook fingerprint) of one entry.
 // Typed plans already carry the exact source graph and lifecycle facts the
 // activation fingerprint uses; legacy `pkg.*` plans keep the parser path.
-fn cli_environment_entry_definition_fingerprint(project_dir: String, requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?) -[FS, Env]> (definition: String, hook: String?) Never! {
+fn cli_environment_entry_definition_fingerprint(project_dir: String, requested_preset: String?, requested_environment: String?, plan: RunPlan, secret_identity: String?) -[FS, Env, Exec, Time.Wait]> (definition: String, hook: String?) Never! {
     hook :: if plan.environment.source_files.len() == 0 -> env_hook_definition_fingerprint_with_selections(project_dir, requested_preset, requested_environment) else -> env_hook_definition_fingerprint_from_facts(project_dir, requested_preset, requested_environment, plan.environment)
     cli_environment_entry_definition_fingerprint_with_hook(requested_preset, requested_environment, plan, secret_identity, hook)
 }
@@ -263,7 +263,7 @@ fn cli_announce_env_ready(theme: Theme, project_dir: String, roots: HangarRoots,
 fn cli_record_env_entry_receipt(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     current :: stats.realized_set()
     selections :: stats.realized_entries()
-    stamp :: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections)
+    stamp :: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections) ?? return Err(CLIError.Store(err))
     if cli_read_env_entry_receipt(project_dir) == .Val(previous) {
         previous_display := [(name: String, version: String)]{}
         loop package in previous.packages {

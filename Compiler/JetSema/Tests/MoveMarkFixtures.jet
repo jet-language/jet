@@ -1,0 +1,54 @@
+// Assemble with production Bootstrap sources, replacing the CLI entry.
+// An explicit `^` move never lowers to a copy: a call argument `^p` / `^p.f`
+// on a read parameter is E0201, `^xs[i]` is E0225, and on an owned root it
+// is a checked move.
+use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+use jet_cli.[jet_cli_compile_file]
+use jet_foundation.[DIAGNOSTIC_ERROR]
+
+fn move_mark_fixture_reject(file: String, code: String) {
+    checked :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> {
+            if !refusal.stderr.contains(code) -> panic("{file}: refusal lost {code}")
+            return
+        }
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == code -> return
+            }
+            panic("{file}: expected checked refusal {code}")
+        }
+    }
+}
+
+fn move_mark_fixture_accept(file: String) {
+    checked :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
+            }
+        }
+    }
+}
+
+fn run() {
+    root :: "Compiler/JetSema/Tests/fixtures"
+    move_mark_fixture_reject("{root}/move_read_param_argument.jet", "E0201")
+    move_mark_fixture_reject("{root}/move_read_param_field_argument.jet", "E0201")
+    move_mark_fixture_reject("{root}/move_read_param_push.jet", "E0201")
+    move_mark_fixture_reject("{root}/move_element_argument.jet", "E0225")
+    move_mark_fixture_reject("{root}/move_element_push.jet", "E0225")
+    move_mark_fixture_reject("{root}/move_payload_read_param.jet", "E0201")
+    move_mark_fixture_reject("{root}/move_payload_subject_reuse.jet", "E0121")
+    move_mark_fixture_reject("{root}/move_static_read_param.jet", "E0201")
+    move_mark_fixture_reject("{root}/move_static_reuse.jet", "E0121")
+    move_mark_fixture_accept("{root}/move_owned_param_argument.jet")
+    move_mark_fixture_accept("{root}/move_payload_owned.jet")
+    move_mark_fixture_accept("{root}/move_payload_moved_subject.jet")
+    print("explicit move marks on call arguments: passed")
+}

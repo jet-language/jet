@@ -1,0 +1,863 @@
+// Transport-neutral resident development session, shared by Canvas and application views.
+use std.fs
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsJobPanelFact, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelProjection]
+use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventSink, JetDevtoolsEventSinkGuard, JetDevtoolsFreshnessFact, JetDevtoolsSelection, JetDevtoolsSourceIdentityFact, JetDevtoolsTimeCursor, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_TEXT_BYTES, JET_DEVTOOLS_PROTOCOL, JetDevtoolsLifecycleState]
+use jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsCommandReceipt, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDatabaseExplainResult, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
+use jet_devserver.SessionRecording.[RecordingError, ReplayCursor, ReplayProjection, SessionCheckpoint, SessionEvent, SessionIdentity, SessionRecording, TruncationFacts]
+use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[foundation_json_escape, parse_json, parse_json_with_limit]
+use jet_foundation.Persist.[PersistRejectReason]
+use jet_devserver.CapturePolicy.[CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact]
+use jet_devserver.WatchService.[PersistOutcome, SessionSnapshot, SessionBroker]
+
+// Rust: crates/jet-devserver/src/Session.rs:43
+DEVTOOLS_TEXT_LIMIT :: prep { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }
+// Rust: crates/jet-devserver/src/Session.rs:44
+MAX_CLIENT_ID :: prep { USize{128} }
+// Rust: crates/jet-devserver/src/Session.rs:45
+MAX_CLIENTS :: prep { USize{256} }
+// Rust: crates/jet-devserver/src/Session.rs:46
+CLIENT_TTL_MS :: prep { U64{160} }
+// Rust: crates/jet-devserver/src/Session.rs:47
+CLIENT_TTL :: prep { Duration.from_millis(CLIENT_TTL_MS) }
+// Rust: crates/jet-devserver/src/Session.rs:48
+MAX_RECEIPTS :: prep { USize{128} }
+// Rust: crates/jet-devserver/src/Session.rs:49
+MAX_RETAINED_VIEW_BYTES :: prep { USize{2 * 1024 * 1024} }
+// Rust: crates/jet-devserver/src/Session.rs:50
+// GATE #4494: canonical atomic storage and relaxed fetch-add.
+NEXT_SESSION_ID :: AtomicU64.new(1)
+// Rust: crates/jet-devserver/src/Session.rs:54
+struct LiveLineage { protocol: String; session_id: String; source_id: String; build_id: String; revision: String; world_id: String }
+// Rust: crates/jet-devserver/src/Session.rs:64
+struct LiveValueFact { value_id: String; type_identity: String; disposition: String; reason: String }
+// Rust: crates/jet-devserver/src/Session.rs:76
+enum CaptureSessionFact { Start(CaptureStartFact); Skip(CaptureSkip); Fault(CaptureFaultFact) }
+// Rust: crates/jet-devserver/src/Session.rs:82
+struct LiveReceipt { lineage: LiveLineage; values: [LiveValueFact] }
+// Rust: crates/jet-devserver/src/Session.rs:87
+struct Receipt { kind: String; status: String; before: String; after: String; client: String; output: String; live: LiveReceipt? }
+// Rust: crates/jet-devserver/src/Session.rs:98
+struct DebuggerSnapshot { state: String; session_id: String; source_id: String; revision: String; tier: String }
+// Rust: crates/jet-devserver/src/Session.rs:107
+struct RetainedView { revision: String; source_id: String; payload: String }
+// Rust: crates/jet-devserver/src/Session.rs:114
+struct DevtoolsSelectionFact { panel_id: String; item_key: String }
+// Rust: crates/jet-devserver/src/Session.rs:119
+alias DevtoolsSessionState :: JetDevtoolsLifecycleState
+// Rust: crates/jet-devserver/src/Session.rs:122
+struct DevtoolsStatusFact {
+    state: DevtoolsSessionState; diagnostic_code: String?; diagnostic: String?
+    accepted_revision: String?; last_good_revision: String?; run_target: String?; run_output: String?; test_state: String?
+}
+// Rust: crates/jet-devserver/src/Session.rs:137
+struct DevtoolsCommandCapabilities { project_rebuild: Bool; project_rebuild_reason: String? }
+// Rust: crates/jet-devserver/src/Session.rs:142
+struct ProjectRebuildExecutorGuard { available: Arc<Mutex<Bool>> }
+impl ProjectRebuildExecutorGuard {
+    // Rust: crates/jet-devserver/src/Session.rs:147
+    fn drop(self: Self) -> Unit {
+        // GATE #4494: mutex poison-aware locking.
+        if self.available.lock() == .Ok(available) -> *available = false
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:157
+struct DevtoolsProjection {
+    protocol: String; session_id: String; source_id: String?; build_id: String?; revision: String; world_id: String?
+    sequence: U64; observed_at: U64; panels: [JetDevtoolsEvent]; selection: DevtoolsSelectionFact?
+    status: DevtoolsStatusFact; command_capabilities: DevtoolsCommandCapabilities
+    command_receipts: [JetDevtoolsCommandReceipt]; reset: Bool; truncation: Bool
+}
+// Rust: crates/jet-devserver/src/Session.rs:176
+struct DevtoolsRecordingDivergence {
+    divergent: Bool; reason: String?; identity: SessionIdentity; expected_sequence: U64?; actual_sequence: U64?
+    retained_events: USize; dropped_events: U64; truncation: TruncationFacts
+}
+// Rust: crates/jet-devserver/src/Session.rs:187
+struct ResidentRecordingState { recording: SessionRecording; cursor: ReplayCursor; checkpoints: [String:SessionCheckpoint]; first_sequence: U64? }
+impl ResidentRecordingState {
+    // Rust: crates/jet-devserver/src/Session.rs:195
+    fn new(recording: SessionRecording, first_sequence: U64?) -> Self {
+        cursor :: recording.replay()
+        Self { recording: ^recording, cursor: ^cursor, checkpoints: {}, first_sequence }
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:206
+BROWSER_ASSET_WATCH_MAX_FILES :: prep { USize{4096} }
+// Rust: crates/jet-devserver/src/Session.rs:207
+BROWSER_ASSET_WATCH_MAX_EVENTS :: prep { USize{256} }
+// Rust: crates/jet-devserver/src/Session.rs:208
+BROWSER_ASSET_WATCH_MAX_PATH_BYTES :: prep { USize{1024} }
+// Rust: crates/jet-devserver/src/Session.rs:211
+struct BrowserAssetStamp { modified: SystemTime?; len: U64 }
+// Rust: crates/jet-devserver/src/Session.rs:217
+struct BrowserAssetChange { path: OSPath; kind: String }
+// Rust: crates/jet-devserver/src/Session.rs:222
+struct BrowserAssetWatcher { root: OSPath; known: [OSPath:BrowserAssetStamp] }
+impl BrowserAssetWatcher {
+    // Rust: crates/jet-devserver/src/Session.rs:228
+    fn for_entry(entry: String) -> Self {
+        parent :: OSPath.new(entry).parent().unwrap_or(OSPath.new("."))
+        watcher := Self { root: parent.join("assets"), known: {} }
+        watcher.snapshot()
+        watcher
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:240
+    fn reopen(self: Self, entry: String) -> Unit {
+        self.root = OSPath.new(entry).parent().unwrap_or(OSPath.new(".")).join("assets")
+        self.snapshot()
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:247
+    fn stamp(path: OSPath) -> BrowserAssetStamp? {
+        // GATE #4494: filesystem metadata and timestamps.
+        metadata :: fs.symlink_metadata(path).ok()
+        if !metadata.file_type().is_file() -> return .None
+        .Val(BrowserAssetStamp { modified: metadata.modified().ok(), len: metadata.len() })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:258
+    fn collect(path: OSPath, files: [OSPath:BrowserAssetStamp], skipped: USize) -> Unit {
+        if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES { *skipped = skipped.saturating_add(1); return }
+        metadata :: fs.symlink_metadata(path) ?? return
+        if metadata.file_type().is_symlink() { *skipped = skipped.saturating_add(1); return }
+        if metadata.file_type().is_file() {
+            if Self.stamp(path) == .Val(stamp) {
+                if path.to_string_lossy().len() <= BROWSER_ASSET_WATCH_MAX_PATH_BYTES -> files.insert(path.copy(), ^stamp) else -> *skipped = skipped.saturating_add(1)
+            }
+            return
+        }
+        if !metadata.file_type().is_dir() { *skipped = skipped.saturating_add(1); return }
+        entries :: fs.read_dir(path) ?? { *skipped = skipped.saturating_add(1); return }
+        children := entries.filter_map((entry) -> entry.ok()).map((entry) -> entry.path()).collect()
+        children.sort()
+        loop child in children {
+            Self.collect(&child, files, skipped)
+            if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES -> break
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:305
+    fn snapshot(self: Self) -> Unit {
+        files := [OSPath:BrowserAssetStamp]{}
+        skipped := USize{0}
+        Self.collect(&self.root, &files, &skipped)
+        self.known = ^files
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:312
+    fn poll(self: Self) -> ([BrowserAssetChange], USize) {
+        current := [OSPath:BrowserAssetStamp]{}
+        skipped := USize{0}
+        Self.collect(&self.root, &current, &skipped)
+        changes := [BrowserAssetChange]{}
+        paths := current.keys().cloned().collect()
+        paths.sort()
+        loop path in paths {
+            kind :: if self.known.get(&path) == {
+                .None -> "created"
+                .Val(previous) && previous != current.get(&path).unwrap() -> "changed"
+                .Val(_) -> { next }
+            }
+            changes.push(BrowserAssetChange { path: ^path, kind })
+        }
+        old_paths := self.known.keys().cloned().collect()
+        old_paths.sort()
+        loop path in old_paths {
+            if !current.contains_key(&path) -> changes.push(BrowserAssetChange { path: ^path, kind: "deleted" })
+        }
+        skipped = skipped.saturating_add(changes.len().saturating_sub(BROWSER_ASSET_WATCH_MAX_EVENTS))
+        changes.truncate(BROWSER_ASSET_WATCH_MAX_EVENTS)
+        self.known = ^current
+        (_0: changes, _1: skipped)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:343
+    fn frame(self: Self, session_id: String) -> String {
+        (changes, skipped) :: self.poll()
+        events :: changes.into_iter().filter_map((change) -> {
+            logical :: change.path.strip_prefix(&self.root).ok()
+            text :: logical.to_string_lossy().replace('\\', "/")
+            if text.is_empty() -> return .None
+            .Val("{{\"root\":{{\"id\":\"game\",\"path\":\".\"}},\"logical_path\":\"{foundation_json_escape("assets/{text}")}\",\"kind\":\"{foundation_json_escape(change.kind)}\"}}")
+        }).collect().join(",")
+        "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"{foundation_json_escape(session_id)}\",\"started_at_ms\":{unix_time_ms()},\"direction\":\"host_to_runtime\",\"events\":[{events}],\"skipped\":{skipped}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:371
+struct DevtoolsState { envelope: JetDevtoolsEnvelope }
+impl DevtoolsState {
+    // Rust: crates/jet-devserver/src/Session.rs:376
+    fn new(session_id: String) -> Self { Self { envelope: JetDevtoolsEnvelope.new(session_id, unix_time_ms()) } }
+}
+// Rust: crates/jet-devserver/src/Session.rs:388
+// GATE #4494: mutex/Arc ownership is retained across all resident state.
+struct ResidentDevSession {
+    source_transactions: SessionBroker
+    id: String; entry: String; canvas_host: String; canvas_port: U16; application_host: String; application_port: U16
+    current_revision: Mutex<String>; live_lineage: Mutex<LiveLineage?>; live_values: Mutex<[LiveValueFact]>
+    accepted_revision: Mutex<String>; last_good_revision: Mutex<String>; last_good_program: Mutex<String>
+    state: Mutex<String>; diagnostic_code: Mutex<String>; diagnostic: Mutex<String>; diagnostic_revision: Mutex<String>
+    selected_source_id: Mutex<String>; selected_output: Mutex<String>; selected_target: Mutex<String>
+    debugger: Mutex<DebuggerSnapshot>; test_state: Mutex<String>; capture_facts: Mutex<[CaptureSessionFact]>
+    last_good_views: Mutex<[String:RetainedView]>; clients: Mutex<[String:Instant]>; receipts: Mutex<[Receipt]>
+    devtools: Mutex<DevtoolsState>; browser_game_controls: Mutex<VecDeque<JetDevtoolsGameControlRequest>>
+    browser_asset_watcher: Mutex<BrowserAssetWatcher>; recording: Mutex<ResidentRecordingState?>
+    project_rebuild_executor: Arc<Mutex<Bool>>
+}
+impl ResidentDevSession {
+    // Rust: crates/jet-devserver/src/Session.rs:426
+    fn new(entry: String, canvas_port: U16, application_port: U16) -> Self { Self.new_with_canvas_host(entry, "127.0.0.1", canvas_port, application_port) }
+    // Rust: crates/jet-devserver/src/Session.rs:430
+    fn new_with_canvas_host(entry: String, canvas_host: String, canvas_port: U16, application_port: U16) -> Self {
+        Self.new_with_hosts(entry, canvas_host, canvas_port, "127.0.0.1", application_port)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:445
+    fn new_with_hosts(entry: String, canvas_host: String, canvas_port: U16, application_host: String, application_port: U16) -> Self {
+        serial :: NEXT_SESSION_ID.fetch_add(1, Ordering.Relaxed)
+        // GATE #4494: process identity.
+        id :: "jet-session-{std.process.id()}-{serial}"
+        Self {
+            source_transactions: SessionBroker.default(), id: id.copy(), entry, canvas_host, canvas_port, application_host, application_port,
+            current_revision: Mutex.new(""), live_lineage: Mutex.new(.None), live_values: Mutex.new([]),
+            accepted_revision: Mutex.new(""), last_good_revision: Mutex.new(""), last_good_program: Mutex.new(""), state: Mutex.new("starting"),
+            diagnostic_code: Mutex.new(""), diagnostic: Mutex.new(""), diagnostic_revision: Mutex.new(""),
+            selected_source_id: Mutex.new(""), selected_output: Mutex.new(""), selected_target: Mutex.new(""),
+            debugger: Mutex.new(DebuggerSnapshot { state: "idle", session_id: "", source_id: "", revision: "", tier: "" }),
+            test_state: Mutex.new("idle"), capture_facts: Mutex.new([]), last_good_views: Mutex.new({}), clients: Mutex.new({}),
+            receipts: Mutex.new([]), devtools: Mutex.new(DevtoolsState.new(id)), browser_game_controls: Mutex.new(VecDeque.new()),
+            browser_asset_watcher: Mutex.new(BrowserAssetWatcher.for_entry(entry)), recording: Mutex.new(.None), project_rebuild_executor: Arc.new(Mutex.new(false))
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:495
+    fn note_client(self: Self, client: String) -> Unit {
+        if !client_id_is_valid(client) -> return
+        now :: Instant.now()
+        clients :: self.clients.lock().unwrap()
+        expire_clients(&clients, now)
+        if !clients.contains_key(client) && clients.len() >= MAX_CLIENTS -> return
+        clients.insert(client, now)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:508
+    fn drop_client(self: Self, client: String) -> Unit {
+        if !client_id_is_valid(client) -> return
+        now :: Instant.now()
+        clients :: self.clients.lock().unwrap()
+        expire_clients(&clients, now)
+        clients.remove(client)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:520
+    fn browser_game_control_frame(self: Self) -> String Err! {
+        queued :: self.browser_game_controls.lock().unwrap()
+        frame := JetDevtoolsCommandEnvelope.new(self.id.copy(), unix_time_ms())
+        selected := [JetDevtoolsGameControlRequest]{}
+        loop _ in 0..32 {
+            request :: queued.pop_front() ?? break
+            frame.enqueue_command(.GameControl(request.copy()))
+            selected.push(^request)
+        }
+        if frame.serialize() == {
+            .Ok(body) -> {
+                loop request in &selected -> self.update_command_receipt(request.request_id, "relayed", .None)
+                body
+            }
+            .Err(error) -> {
+                loop request in selected.into_iter().rev() -> queued.push_front(^request)
+                .Err(^error)
+            }
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:551
+    fn browser_game_asset_frame(self: Self) -> String Err! {
+        watcher :: self.browser_asset_watcher.lock() ?? return .Err("browser asset watcher is poisoned")
+        watcher.frame(self.id)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:562
+    fn reopen_game_asset_watcher(self: &Self, entry: String) Err! {
+        trimmed := entry.trim() // #4303
+        if trimmed.is_empty() -> return .Err("browser game asset watcher entry must not be empty")
+        watcher :: self.browser_asset_watcher.lock() ?? return .Err("browser asset watcher is poisoned")
+        watcher.reopen(entry)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:577
+    fn devtools_events_since(self: Self, cursor: JetDevtoolsTimeCursor?) -> DevtoolsProjection {
+        current_revision :: (*self.current_revision.lock().unwrap()).copy()
+        observed_at :: unix_time_ms()
+        state :: self.devtools_lock()
+        envelope :: &state.envelope
+        source_identity :: envelope.source_identity.copy()
+        revision :: source_identity.as_ref().and_then((identity) -> identity.revision.copy()).unwrap_or(^current_revision)
+        latest :: envelope.latest_sequence().unwrap_or(0)
+        oldest :: envelope.oldest_sequence()
+        truncation :: envelope.truncated || cursor.is_some_and((cursor) -> oldest.is_some_and((oldest) -> cursor.saturating_add(1) < oldest))
+        reset :: envelope.reset || cursor.is_none() || truncation
+        panels :: envelope.events_since(cursor).cloned().collect()
+        selection :: envelope.view().selection().map((selection) -> DevtoolsSelectionFact { panel_id: selection.panel_id.copy(), item_key: selection.item_key.clone().unwrap_or_default() })
+        diagnostic_code :: (*self.diagnostic_code.lock().unwrap()).copy()
+        diagnostic :: (*self.diagnostic.lock().unwrap()).copy()
+        accepted_revision :: (*self.accepted_revision.lock().unwrap()).copy()
+        last_good_revision :: (*self.last_good_revision.lock().unwrap()).copy()
+        run_target :: (*self.selected_target.lock().unwrap()).copy()
+        run_output :: (*self.selected_output.lock().unwrap()).copy()
+        test_state :: (*self.test_state.lock().unwrap()).copy()
+        status :: DevtoolsStatusFact { state: envelope.lifecycle, diagnostic_code: optional_fact(diagnostic_code),
+            diagnostic: optional_fact(diagnostic), accepted_revision: optional_fact(accepted_revision), last_good_revision: optional_fact(last_good_revision),
+            run_target: optional_fact(run_target), run_output: optional_fact(run_output), test_state: optional_fact(test_state) }
+        DevtoolsProjection {
+            protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.id.copy(),
+            source_id: source_identity.as_ref().and_then((identity) -> identity.source_id.copy()),
+            build_id: source_identity.as_ref().and_then((identity) -> identity.build_id.copy()), revision: ^revision,
+            world_id: source_identity.as_ref().and_then((identity) -> identity.world_id.copy()), sequence: latest, observed_at, panels: ^panels, selection: ^selection,
+            status: ^status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.devtools_command_receipts(), reset, truncation
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:652
+    fn observe_source(self: Self, revision: String) -> Unit {
+        if revision.is_empty() -> return
+        *self.current_revision.lock().unwrap() = revision
+        accepted :: self.accepted_revision.lock().unwrap()
+        if accepted.is_empty() -> *accepted = revision
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:666
+    fn set_live_lineage(self: &Self, source_id: String, build_id: String, revision: String, world_id: String) Err! {
+        if [source_id, build_id, revision, world_id].iter().any((value) -> value.is_empty() || value.chars().any((ch) -> ch.is_control())) -> return .Err("live lineage is incomplete")
+        *self.live_lineage.lock().unwrap() = .Val(LiveLineage { protocol: "jet.live.v1", session_id: self.id.copy(), source_id, build_id, revision, world_id })
+        self.observe_source(revision)
+        self.set_devtools_source_identity(.Val(source_id), .Val(build_id), .Val(revision), .Val(world_id))
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:699
+    fn record_capture_start(self: &Self, fact: &CaptureStartFact) Err! {
+        self.validate_capture_identity(&fact.identity)
+        facts :: self.capture_facts.lock().unwrap()
+        facts.push(.Start(fact.copy()))
+        if fact.eligibility.skip() == .Val(skip) -> facts.push(.Skip(skip.copy()))
+        trim_capture_facts(&facts)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:711
+    fn record_capture_fault(self: &Self, fact: &CaptureFaultFact) Err! {
+        self.validate_capture_identity(&fact.identity)
+        facts :: self.capture_facts.lock().unwrap()
+        facts.push(.Fault(fact.copy()))
+        trim_capture_facts(&facts)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:719
+    fn capture_facts(self: Self) -> [CaptureSessionFact] { (*self.capture_facts.lock().unwrap()).copy() }
+    // Rust: crates/jet-devserver/src/Session.rs:723
+    fn validate_capture_identity(self: &Self, identity: &CaptureIdentity) Err! {
+        if !identity.is_exact() -> return .Err("capture identity is incomplete")
+        if identity.session_id != self.id -> return .Err("capture fact session does not match live session")
+        locked :: self.live_lineage.lock().unwrap()
+        lineage :: locked.as_ref() ?? return .Err("capture fact has no live lineage")
+        if identity.source_id != lineage.source_id || identity.build_id != lineage.build_id || identity.revision != lineage.revision -> return .Err("capture fact does not match live lineage")
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:745
+    fn record_live_transaction(self: &Self, snapshot: &SessionSnapshot, decisions: &[PersistOutcome]) Err! {
+        before :: (*self.accepted_revision.lock().unwrap()).copy()
+        self.set_live_lineage(snapshot.source_id, snapshot.build_id, snapshot.revision, snapshot.world_id)
+        values :: decisions.iter().map(persist_outcome_fact).collect()
+        *self.live_values.lock().unwrap() = values.copy()
+        lineage :: self.live_lineage.lock().unwrap().clone().expect("validated live lineage")
+        *self.accepted_revision.lock().unwrap() = snapshot.revision.copy()
+        self.push_receipt(Receipt { kind: "live_swap", status: "committed", before: ^before, after: snapshot.revision.copy(), client: "", output: "",
+            live: .Val(LiveReceipt { lineage: ^lineage, values: ^values }) })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:781
+    fn mark_building(self: Self) -> Unit {
+        *self.state.lock().unwrap() = "building"
+        self.publish_session_state("building", "", "")
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:786
+    fn mark_ready(self: Self) -> Unit {
+        *self.state.lock().unwrap() = "ready"
+        self.diagnostic_code.lock().unwrap().clear()
+        self.diagnostic.lock().unwrap().clear()
+        self.diagnostic_revision.lock().unwrap().clear()
+        self.publish_session_state("ready", "", "")
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:793
+    fn mark_error(self: Self, code: String, diagnostic: String) -> Unit {
+        *self.state.lock().unwrap() = "error"
+        *self.diagnostic_code.lock().unwrap() = code
+        *self.diagnostic.lock().unwrap() = diagnostic
+        *self.diagnostic_revision.lock().unwrap() = (*self.current_revision.lock().unwrap()).copy()
+        self.publish_session_state("error", code, diagnostic)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:801
+    fn mark_stopped(self: Self) -> Unit {
+        *self.state.lock().unwrap() = "stopped"
+        self.publish_session_state("stopped", "", "")
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:812
+    fn devtools_json(self: Self) -> String { self.devtools_lock().envelope.serialize().expect("resident devtools envelope must remain serializable") }
+    // Rust: crates/jet-devserver/src/Session.rs:819
+    fn devtools_panel_catalog(self: Self) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.canonical() }
+    // Rust: crates/jet-devserver/src/Session.rs:825
+    fn devtools_panels(self: Self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] JetDevtoolsPanelCatalogError! {
+        catalog :: self.devtools_panel_catalog()
+        state :: self.devtools_lock()
+        catalog.project(&state.envelope, host, grants)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:837
+    fn current_revision(self: Self) -> String { (*self.current_revision.lock().unwrap()).copy() }
+    // Rust: crates/jet-devserver/src/Session.rs:841
+    fn devtools_command_receipts(self: Self) -> [JetDevtoolsCommandReceipt] { jet_foundation.DevtoolsControl.jet_devtools_command_receipts(self.id) }
+    // Rust: crates/jet-devserver/src/Session.rs:845
+    fn devtools_command_capabilities(self: Self) -> DevtoolsCommandCapabilities {
+        reason :: if !self.project_rebuild_executor_available() -> .Val("no rebuild executor is registered for this host")
+            else if self.current_revision().is_empty() -> .Val("source revision is unavailable") else -> .None
+        DevtoolsCommandCapabilities { project_rebuild: reason.is_none(), project_rebuild_reason: ^reason }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:859
+    fn register_project_rebuild_executor(self: Self) -> ProjectRebuildExecutorGuard Err! {
+        available :: self.project_rebuild_executor.lock() ?? return .Err("project rebuild executor state is poisoned")
+        if *available -> return .Err("a project rebuild executor is already registered")
+        *available = true
+        drop(available)
+        ProjectRebuildExecutorGuard { available: Arc.clone(&self.project_rebuild_executor) }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:876
+    fn project_rebuild_executor_available(self: Self) -> Bool { self.project_rebuild_executor.lock().map((available) -> *available).unwrap_or(false) }
+    // Rust: crates/jet-devserver/src/Session.rs:883
+    fn validate_devtools_command_admission(self: &Self, command: &JetDevtoolsCommand) Err! {
+        command.validate()
+        if command.session_id() != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
+        if command == .ProjectRebuild(request) {
+            if !self.project_rebuild_executor_available() -> return .Err("no rebuild executor is registered for this host")
+            if request.expected_revision != self.current_revision() -> return .Err("source changed since this rebuild was requested")
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:902
+    fn enqueue_devtools_command(self: &Self, command: JetDevtoolsCommand) Err! {
+        self.validate_devtools_command_admission(&command)
+        jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:907
+    fn take_project_rebuild(self: Self) -> JetDevtoolsProjectRebuildRequest? Err! {
+        command :: self.poll_devtools_command() ?? return .None
+        if command == .ProjectRebuild(request) {
+            if request.session_id != self.id {
+                self.update_command_receipt(request.request_id, "failed", .Val("jet.devtools.v1 command session identity mismatch"))
+                return .Err("jet.devtools.v1 command session identity mismatch")
+            }
+            if !self.project_rebuild_executor_available() {
+                error :: "no rebuild executor is registered for this host"
+                self.update_command_receipt(request.request_id, "failed", .Val(error))
+                return .Err(error)
+            }
+            if request.expected_revision != self.current_revision() {
+                error :: "source changed since this rebuild was requested"
+                self.update_command_receipt(request.request_id, "failed", .Val(error))
+                return .Err(error)
+            }
+            self.update_command_receipt(request.request_id, "building", .None)
+            .Val(^request)
+        } else {
+            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(^command)
+            .None
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:939
+    fn finish_project_rebuild(self: &Self, request: &JetDevtoolsProjectRebuildRequest, result: Result<Unit,String>) Err! {
+        request.validate()
+        if request.session_id != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
+        if result == {
+            .Ok(_) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "completed", .None)
+            .Err(error) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "failed", .Val(^error))
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:968
+    fn publish_devtools_event_typed(self: Self, event: JetDevtoolsEvent) -> U64 Err! { self.push_devtools_event(^event) }
+    // Rust: crates/jet-devserver/src/Session.rs:972
+    fn enqueue_game_control(self: &Self, request: JetDevtoolsGameControlRequest) Err! { self.enqueue_devtools_command(.GameControl(^request)) }
+    // Rust: crates/jet-devserver/src/Session.rs:979
+    fn poll_devtools_command(self: Self) -> JetDevtoolsCommand? { jet_foundation.DevtoolsControl.jet_devtools_poll_command(self.id) }
+    // Rust: crates/jet-devserver/src/Session.rs:983
+    fn poll_database_explain(self: Self) -> JetDevtoolsDatabaseExplainRequest? { jet_foundation.DevtoolsControl.jet_devtools_poll_database_explain(self.id) }
+    // Rust: crates/jet-devserver/src/Session.rs:987
+    fn update_command_receipt(self: Self, request_id: String, status: String, error: String?) -> Unit {
+        _ :: jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request_id, status, ^error)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1003
+    fn dispatch_pending_devtools_commands(self: Self) -> USize Err! {
+        pending :: jet_foundation.DevtoolsControl.jet_devtools_command_count(self.id).min(32)
+        dispatched := USize{0}
+        loop _ in 0..pending {
+            command :: self.poll_devtools_command() ?? break
+            if command == {
+                .DatabaseExplain(request) -> {
+                    if request.session_id != self.id {
+                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
+                        return .Err("jet.devtools.v1 command session identity mismatch")
+                    }
+                    if jet_foundation.Devtools.jet_devtools_dispatch_database_explain(request.session_id, request.request_id, request.statement_identity, request.timeout_ms, request.max_rows) == {
+                        .Ok(_) -> {
+                            self.update_command_receipt(request.request_id, "dispatched", .None)
+                            dispatched = dispatched.saturating_add(1)
+                        }
+                        .Err(error) && error == "database EXPLAIN runtime callback is unavailable" -> {
+                            self.update_command_receipt(request.request_id, "waiting", .Val(error.copy()))
+                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
+                            return dispatched
+                        }
+                        .Err(error) -> {
+                            self.update_command_receipt(request.request_id, "rejected", .Val(error.copy()))
+                            result :: JetDevtoolsDatabaseExplainResult.new(request.session_id.copy(), request.request_id.copy(), request.statement_identity.copy(),
+                                "error", 0, false, 0, [], .Val("dispatch_failed"), .Val(^error))
+                                .and_then((result) -> self.publish_database_explain_result(^result, unix_time_ms(), "devserver"))
+                            if result == .Err(publish_error) {
+                                jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
+                                return .Err(^publish_error)
+                            }
+                            dispatched = dispatched.saturating_add(1)
+                        }
+                    }
+                }
+                .GameControl(request) -> {
+                    if request.session_id != self.id {
+                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
+                        return .Err("jet.devtools.v1 game control session identity mismatch")
+                    }
+                    payload :: request.render_json()
+                    if jet_foundation.Devtools.jet_devtools_dispatch_game_control(request.session_id, payload) == {
+                        .Ok(_) -> {
+                            self.update_command_receipt(request.request_id, "dispatched", .None)
+                            dispatched = dispatched.saturating_add(1)
+                        }
+                        .Err(error) && error == "game control runtime callback is unavailable" -> {
+                            if jet_foundation.Devtools.jet_devtools_write_game_control_relay(request.session_id, payload) == {
+                                .Ok(_) -> {
+                                    self.update_command_receipt(request.request_id, "relayed", .Val(error.copy()))
+                                    dispatched = dispatched.saturating_add(1)
+                                }
+                                .Err(relay_error) -> {
+                                    self.update_command_receipt(request.request_id, "waiting", .Val(relay_error.copy()))
+                                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
+                                    return .Err(^relay_error)
+                                }
+                            }
+                        }
+                        .Err(error) -> {
+                            self.update_command_receipt(request.request_id, "rejected", .Val(error.copy()))
+                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
+                            return .Err(^error)
+                        }
+                    }
+                }
+                .ProjectRebuild(request) -> {
+                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.ProjectRebuild(^request))
+                    return dispatched
+                }
+            }
+        }
+        dispatched
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1152
+    fn dispatch_pending_database_explain(self: Self) -> USize Err! { self.dispatch_pending_devtools_commands() }
+    // Rust: crates/jet-devserver/src/Session.rs:1159
+    fn publish_database_explain_result(self: Self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: U64, source: String) -> U64 Err! {
+        if result.session_id != self.id -> return .Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
+        result.validate()
+        event :: JetDevtoolsEvent.from_parts(timestamp_ms, source, "DatabaseExplainResult", result.statement_identity.copy(), result.render_json())
+        self.publish_devtools_event_typed(^event)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1179
+    fn ingest_devtools_envelope(self: Self, decoded: JetDevtoolsDecodedEnvelope) -> USize Err! {
+        decoded.validate()
+        if decoded.session_id() != self.id -> return .Err("jet.devtools.v1 envelope session identity mismatch")
+        if decoded == {
+            .Events(envelope) -> {
+                if envelope.source_identity.as_ref() == .Val(identity) {
+                    self.set_devtools_source_identity(identity.source_id.copy(), identity.build_id.copy(), identity.revision.copy(), identity.world_id.copy())
+                }
+                events :: envelope.events().cloned().collect()
+                count :: self.publish_panel_events(^events)
+                state :: self.devtools_lock()
+                state.envelope.set_selection(envelope.selection().cloned())
+                state.envelope.set_cursor(envelope.cursor())
+                state.envelope.set_lifecycle(envelope.lifecycle)
+                state.envelope.set_freshness(envelope.freshness)
+                state.envelope.privacy.loopback_only = envelope.privacy.loopback_only
+                state.envelope.privacy.payload_free_by_default = envelope.privacy.payload_free_by_default
+                state.envelope.privacy.published_payloads |= envelope.privacy.published_payloads
+                state.envelope.reset |= envelope.reset
+                state.envelope.truncated |= envelope.truncated
+                count
+            }
+            .Commands(envelope) -> {
+                commands :: envelope.commands().cloned().collect()
+                count :: commands.len()
+                loop command in &commands -> self.validate_devtools_command_admission(command)
+                game_count :: commands.iter().filter((command) -> if command == {
+                    .GameControl(_) -> true
+                    else -> false
+                }).count()
+                common_count :: count.saturating_sub(game_count)
+                queued_common :: jet_foundation.DevtoolsControl.jet_devtools_command_count(self.id)
+                if queued_common > JET_DEVTOOLS_MAX_COMMANDS.saturating_sub(common_count) -> return .Err("jet.devtools.v1 command queue is full")
+                browser_controls :: self.browser_game_controls.lock().unwrap()
+                if browser_controls.len() > JET_DEVTOOLS_MAX_COMMANDS.saturating_sub(game_count) -> return .Err("jet.devtools.v1 browser game command queue is full")
+                loop command in commands {
+                    if command == {
+                        .GameControl(request) -> {
+                            game_command :: JetDevtoolsCommand.GameControl(request.copy())
+                            browser_controls.push_back(^request)
+                            jet_foundation.DevtoolsControl.jet_devtools_record_command_receipt(JetDevtoolsCommandReceipt.for_command(&game_command, "queued", .None))
+                        }
+                        command -> jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
+                    }
+                }
+                count
+            }
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1254
+    fn publish_panel_events(self: Self, events: IntoIterator<JetDevtoolsEvent>) -> USize Err! {
+        count := USize{0}
+        loop event in events {
+            _ :: self.publish_devtools_event_typed(^event)
+            count = count.saturating_add(1)
+        }
+        count
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1266
+    fn publish_job_fact(self: Self, fact: JetDevtoolsJobPanelFact, source: String) -> U64 Err! {
+        event :: fact.to_protocol_event(source)
+        self.publish_devtools_event_typed(^event)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1276
+    fn scrub(self: Self, sequence: U64) -> ReplayProjection Err! {
+        projection :: (() -> {
+            recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+            state :: recording.as_mut() ?? return .Err(recording_unavailable())
+            state.cursor.seek(&state.recording, sequence).map_err(recording_error)
+        })()
+        if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
+        projection
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1296
+    fn scrub_time(self: Self, timestamp_ms: U64) -> ReplayProjection Err! {
+        projection :: (() -> {
+            recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+            state :: recording.as_mut() ?? return .Err(recording_unavailable())
+            state.cursor.seek_time(&state.recording, timestamp_ms).map_err(recording_error)
+        })()
+        if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
+        projection
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1316
+    fn step(self: Self) -> ReplayProjection Err! {
+        projection :: (() -> {
+            recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+            state :: recording.as_mut() ?? return .Err(recording_unavailable())
+            state.cursor.step_forward(&state.recording).map_err(recording_error)
+        })()
+        if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
+        projection
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1336
+    fn skip(self: Self, count: U64) -> ReplayProjection Err! {
+        projection :: (() -> {
+            recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+            state :: recording.as_mut() ?? return .Err(recording_unavailable())
+            loop _ in 0..count -> _ :: state.cursor.step_forward(&state.recording).map_err(recording_error)
+            state.recording.projection(&state.cursor).map_err(recording_error)
+        })()
+        if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
+        projection
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1362
+    fn checkpoint(self: Self, name: String) -> SessionCheckpoint Err! {
+        validate_devtools_text(name, "checkpoint name")
+        recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+        state :: recording.as_mut() ?? return .Err(recording_unavailable())
+        checkpoint :: state.recording.checkpoint(&state.cursor).map_err(recording_error)
+        state.checkpoints.insert(name, checkpoint.copy())
+        checkpoint
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1381
+    fn restore(self: Self, name: String) -> ReplayProjection Err! {
+        validate_devtools_text(name, "checkpoint name")
+        projection :: (() -> {
+            recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+            state :: recording.as_mut() ?? return .Err(recording_unavailable())
+            checkpoint :: state.checkpoints.get(name).cloned() ?? return .Err(RecordingError.CheckpointUnavailable.to_string())
+            state.cursor = state.recording.restore_checkpoint(&checkpoint).map_err(recording_error)
+            state.recording.projection(&state.cursor).map_err(recording_error)
+        })()
+        if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
+        projection
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1411
+    fn divergence(self: Self) -> DevtoolsRecordingDivergence Err! {
+        (envelope_sequence, envelope_identity) :: (() -> {
+            state :: self.devtools_lock()
+            (_0: state.envelope.latest_sequence(), _1: state.envelope.source_identity.copy())
+        })()
+        recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+        state :: recording.as_ref() ?? return .Err(recording_unavailable())
+        expected_sequence :: state.first_sequence.and_then((first) -> envelope_sequence.filter((sequence) -> *sequence >= first))
+        actual_sequence :: state.recording.events().last().map((event) -> event.sequence())
+        reason := String?{.None}
+        if envelope_identity.as_ref().map_or(true, (identity) ->
+            identity.source_id.as_ref() != .Val(&state.recording.identity().source_id) || identity.build_id.as_ref() != .Val(&state.recording.identity().build_id)) {
+            reason = .Val("resident source/build identity differs from recording")
+        } else if expected_sequence != actual_sequence -> reason = .Val("resident event tail differs from recording")
+        else if state.recording.projection(&state.cursor) == .Err(error) -> reason = .Val(error.to_string())
+        truncation :: state.recording.truncation()
+        DevtoolsRecordingDivergence { divergent: reason.is_some(), reason: ^reason, identity: state.recording.identity().copy(),
+            expected_sequence, actual_sequence, retained_events: state.recording.event_count(), dropped_events: truncation.dropped_events, truncation }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1454
+    fn recording_control(self: Self, payload: String) -> String Err! {
+        root :: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("recording control must be valid bounded JSON")
+        object :: object_map(&root) ?? return .Err("recording control must be a JSON object")
+        operation :: object.get("op").or_else(() -> object.get("action")).and_then(json_string) ?? return .Err("recording control must include string op")
+        if operation == {
+            "scrub" -> {
+                sequence :: object.get("sequence").and_then(json_u64) ?? return .Err("recording scrub requires non-negative sequence")
+                _ :: self.scrub(sequence)
+            }
+            "scrub_time" -> {
+                timestamp_ms :: object.get("timestamp_ms").and_then(json_u64) ?? return .Err("recording scrub_time requires non-negative timestamp_ms")
+                _ :: self.scrub_time(timestamp_ms)
+            }
+            "step" -> if object.get("direction").and_then(json_string) == {
+                .None | .Val("forward") -> _ :: self.step()?
+                .Val("backward") | .Val("reverse") -> { return .Err("recording step is forward-only") }
+                .Val(direction) -> { return .Err("unknown recording step direction `{direction}`") }
+            }
+            "skip" -> {
+                count :: object.get("count").and_then(json_u64) ?? return .Err("recording skip requires non-negative count")
+                _ :: self.skip(count)?
+            }
+            "checkpoint" -> {
+                name :: object.get("name").and_then(json_string) ?? return .Err("recording checkpoint requires string name")
+                _ :: self.checkpoint(name)?
+            }
+            "restore" -> {
+                name :: object.get("name").and_then(json_string) ?? return .Err("recording restore requires string name")
+                _ :: self.restore(name)?
+            }
+            "divergence" -> _ :: self.divergence()?
+            else -> { return .Err("unknown recording operation `{operation}`") }
+        }
+        self.recording_json()
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1522
+    fn recording_json(self: Self) -> String {
+        divergence :: self.divergence().ok()
+        recording :: self.recording.lock() ?? return recording_unavailable_json(self.id, "devtools recording state is unavailable because its lock is poisoned")
+        state :: recording.as_ref() ?? return recording_unavailable_json(self.id, "source/build identity is unavailable")
+        projection :: state.recording.projection(&state.cursor) ?? return recording_unavailable_json(self.id, err.to_string())
+        recording_json_for_state(self.id, state, &projection, divergence.as_ref())
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1546
+    fn set_devtools_source_identity(self: &Self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
+        recording_identity :: if {
+            source_id.as_ref() == .Val(source) && build_id.as_ref() == .Val(build) -> .Val(SessionIdentity.new(source, build).map_err(recording_error)?)
+            else -> .None
+        }
+        identity :: JetDevtoolsSourceIdentityFact.new(^source_id, ^build_id, ^revision, ^world_id)
+        first_sequence :: (() -> {
+            state :: self.devtools_lock()
+            state.envelope.set_source_identity(.Val(^identity))
+            if state.envelope.latest_sequence() == {
+                .Val(sequence) -> .Val(sequence.checked_add(1) ?? return .Err("devtools event sequence exhausted"))
+                .None -> .Val(1)
+            }
+        })()
+        self.set_recording_identity(^recording_identity, first_sequence)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1576
+    fn set_recording_identity(self: &Self, identity: SessionIdentity?, first_sequence: U64?) Err! {
+        recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+        if (_0: recording.as_ref(), _1: identity.as_ref()) == (_0: .Val(state), _1: .Val(identity)) {
+            if state.recording.identity() == identity -> return
+        }
+        *recording = if identity == {
+            .Val(identity) -> .Val(ResidentRecordingState.new(SessionRecording.new(^identity).map_err(recording_error), first_sequence))
+            .None -> .None
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1602
+    fn publish_hot_swap_decision(self: &Self, decision: &HotSwapDecision) Err! {
+        validate_devtools_text(decision.module_ref, "HotSwap module")
+        compatibility :: if decision.is_compatible() -> "compatible" else -> "incompatible"
+        reason :: decision.compatibility.reason().unwrap_or("")
+        (kept, reset) :: decision.state.iter().partition((fact) -> fact.is_preserved())
+        state :: decision.state.iter().map(retention_fact_json).collect().join(",")
+        change_facts :: decision.change_facts.iter().map(game_change_fact_json).collect().join(",")
+        kept_keys :: kept.iter().map((fact) -> fact.key.copy()).collect()
+        reset_keys :: reset.iter().map((fact) -> fact.key.copy()).collect()
+        fields :: "{{\"module\":{json_value(decision.module_ref)},\"compatibility\":{json_value(compatibility)},\"reason\":{json_value(reason)},\"changed\":{string_array_json(&decision.changed)},\"changed_functions\":{string_array_json(&decision.changed_functions)},\"state\":[{state}],\"kept\":{string_array_json(&kept_keys)},\"reset\":{string_array_json(&reset_keys)},\"rechecked_items\":{string_array_json(&decision.rechecked_items)},\"change_facts\":[{change_facts}]}}"
+        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", ^fields)
+        _ :: self.publish_devtools_event_typed(^event)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1664
+    fn set_devtools_selection(self: &Self, request: String) Err! {
+        root :: parse_json(request) ?? return .Err("devtools selection must be valid JSON")
+        object :: object_map(&root) ?? return .Err("devtools selection must be an object")
+        nested :: object.get("selection").and_then(object_map)
+        field :: (key: String) -> object.get(key).or_else(() -> nested.as_ref().and_then((selection) -> selection.get(key))).and_then(json_string).map((text) -> text.to_string())
+        clear :: object.get("clear").is_some_and((value) -> if value == {
+            .Bool(lit0) && lit0 == true -> true
+            else -> false
+        })
+            || object.get("selection") == .Val(.Null)
+        panel_id :: field("panel_id").or_else(() -> field("target"))
+        item_key :: field("item_key").or_else(() -> field("source_id")).or_else(() -> field("output"))
+        origin :: field("origin").unwrap_or("host")
+        validate_devtools_text(origin, "selection origin")
+        loop (value, label) in [(_0: panel_id.as_ref(), _1: "panel_id"), (_0: item_key.as_ref(), _1: "item_key")] {
+            if value == .Val(value) -> validate_devtools_text(value, label)
+        }
+        if !clear && panel_id.is_none() && item_key.is_none() -> return .Err("devtools selection has no selected value")
+        source_id :: field("source_id")
+        output :: field("output")
+        target :: field("target")
+        if clear {
+            *self.selected_source_id.lock().unwrap() = ""
+            *self.selected_output.lock().unwrap() = ""
+            *self.selected_target.lock().unwrap() = ""
+        } else {
+            if source_id.as_ref().or(item_key.as_ref()) == .Val(source) -> self.select_project_source(source)
+            self.select_output_values(output.as_ref(), target.as_ref().or(panel_id.as_ref()))
+        }
+        _ :: (() -> {
+            state :: self.devtools_lock()
+            if clear -> state.envelope.set_selection(.None)
+            else {
+                previous_panel :: state.envelope.view().selection().map((selection) -> selection.panel_id.copy())
+                selected_panel :: panel_id.clone().or(^previous_panel).unwrap_or_default()
+                selected_item :: item_key.clone().or_else(() -> state.envelope.view().selection().and_then((selection) -> selection.item_key.copy()))
+                state.envelope.set_selection(.Val(JetDevtoolsSelection.new(^selected_panel, ^selected_item)))
+            }
+        })()
+        panel_json :: if clear -> "null" else -> panel_id.as_ref().map(json_value).unwrap_or("null")
+        item_json :: if clear -> "null" else -> item_key.as_ref().map(json_value).unwrap_or("null")
+        fields :: "{{\"panel_id\":{panel_json},\"item_key\":{item_json},\"cleared\":{clear}}}"
+        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Selection", "session", ^fields)
+        _ :: self.publish_devtools_event_typed(^event)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1773
+    fn set_devtools_cursor(self: &Self, request: String) Err! {
+        root :: parse_json(request) ?? return .Err("devtools cursor must be valid JSON")
+        object :: object_map(&root) ?? return .Err("devtools cursor must be an object")
+        origin :: object.get("origin").and_then(json_string).unwrap_or("host")
+        validate_devtools_text(origin, "cursor origin")
+        cursor_value :: object.get("cursor").or_else(() -> object.get("sequence"))
+        sequence :: if cursor_value == {
+            .None | .Val(.Null) -> .None
+            .Val(.Object(entries)) -> {
+                cursor :: [String:Dyn]{entries.iter().cloned().collect()}
+                value :: cursor.get("sequence") ?? return .Err("devtools cursor must be a sequence")
+                .Val(json_u64(value) ?? return .Err("devtools cursor must be a sequence"))
+            }
+            .Val(value) -> .Val(json_u64(value) ?? return .Err("devtools cursor must be a sequence"))
+        }
+        { self.devtools_lock().envelope.set_cursor(sequence) }
+        sequence_json :: sequence.map((value) -> value.to_string()).unwrap_or("null")
+        fields :: "{{\"sequence\":{sequence_json}}}"
+        event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Cursor", "session", ^fields)
+        _ :: self.publish_devtools_event_typed(^event)
+    }
+}

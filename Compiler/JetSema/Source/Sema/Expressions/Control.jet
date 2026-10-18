@@ -82,8 +82,10 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, program: Se
 
 fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {
     if ty == {
-        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
-        .Option(value) -> TFailureCarrier.Optional{value: value}
+        // copy: `ok` and `err` are payloads of read parameter `ty`, which keeps the originals; the new TFailureCarrier.Result's fields own `ok` and `err`
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
+        // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
+        .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Infallible
         else -> TFailureCarrier.Infallible
     }
@@ -360,7 +362,7 @@ fn sema_expression_carrier_payload(ty: Type) -> Type? {
 fn sema_expression_propagating_call(expr: Expr) -> Bool Never! {
     if expr == {
         .Call(call) -> call.name != "Ok" && call.name != "Err"
-        .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> true
+        .MethodCall(_, _, _, _, _, _, _, _) -> true
         .CallValue(callee, args, _) -> !sema_call_value_is_inline_loop(callee, args)
         else -> false
     }
@@ -495,7 +497,7 @@ fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, 
             }
             return SemaFailureProvenance{callee: call.name, definition: definition, contract: contract}
         }
-        .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
+        .MethodCall(_, method, _, _, _, _, _, _) -> return SemaFailureProvenance{callee: "{method}()", definition: fallback, contract: "inferred failure contract"}
         else -> {}
     }
     SemaFailureProvenance{callee: "this fallible expression", definition: fallback, contract: "inferred failure contract"}
@@ -523,7 +525,7 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
         // Rust `inferable_failure_callee`: `alias.member(...)` through a
         // whole-module import names that module's source function, which the
         // bundle solve settles like a same-module callee.
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
             alias :: if receiver == {
                 .Ident(name, _) -> name
                 else -> { return None }
@@ -910,7 +912,8 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
             }
             return Val(Stmt.BreakLabelValue{name: root.name, name_span: root.span, value: value, span: expr_span(value)})
         }
-        .Return(value, span) -> return Val(Stmt.Return{value: value, span: span})
+        // copy: `value` is a payload of read parameter `fallback`, which keeps the original; field `value` of the new Stmt.Return owns this one
+        .Return(value, span) -> return Val(Stmt.Return{value: value.copy(), span: span})
         .Panic(name_span, args) -> {
             call := Call{name: "panic", name_span: name_span, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
             return Val(Stmt.Expr{expr: Expr.Call{call: call}})
@@ -1046,7 +1049,6 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
         return None
     }
-    fallback_payload :: checked_route.payload
     if checked_route.reaches_merge {
         sema_ownership_fork_rollback(&state, fork)
         joined :: sema_ownership_path_join(state, fork, sema_ownership_fork_base(fork), fallback_path, true, state.share_found)
@@ -1055,7 +1057,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     } else {
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
     }
-    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(fallback_payload, TExprKind.Unit, span)}
+    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(checked_route.payload, TExprKind.Unit, span)}
     // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
     // first its Result route (where `err` is bound and a value fallback is
@@ -1067,10 +1069,10 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
             else -> route_value
         }
         after_result :: sema_tir_node(ok, TExprKind.OrFallback{value: subject, fallback: failure_route, ambient_err: checked_route.ambient_err}, span)
-        mixed :: sema_tir_node(fallback_payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
+        mixed :: sema_tir_node(checked_route.payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
         return sema_expr_expected_owned(^mixed, expected, environment, program, &diagnostics)
     }
-    result :: sema_tir_node(fallback_payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
+    result :: sema_tir_node(checked_route.payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
     sema_expr_expected(result, expected, environment, program, &diagnostics)
 }
 
@@ -1087,7 +1089,7 @@ fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
     if value == {
         .Paren(inner, _) -> sema_fallback_unit_call_name(inner)
         .Call(call) -> Val(call.name)
-        .MethodCall(_, method, _, _, _, _, _, _, _, _, _) -> Val(method)
+        .MethodCall(_, method, _, _, _, _, _, _) -> Val(method)
         .CallValue(_, _, _) -> Val("this call")
         else -> None
     }
@@ -1098,6 +1100,9 @@ fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
 fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, fallback_state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaOrFallbackRoute? {
     fallback_payload := payload
     fallback_tir := TOrFallback?{None}
+    // copy: `outer_return_type` restores scopes.return_type after the fallback frame, which
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`, so the old
+    // value is copied out before it is overwritten.
     outer_return_type :: scopes.return_type.copy()
     outer_loop_depth := scopes.loop_depth
     sema_scope_enter(&scopes, &fallback_state, "or.fallback@{span.start}")
@@ -1115,6 +1120,8 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         ambient_err = Val(tir_symbol_local("err", span, symbol.id))
     }
     fallback_reaches_merge := false
+    // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback, which
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `context`.
     enclosing_err_denial :: context.fallback_err_denial.copy()
     context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
     // Ok(None) shares the mixed carrier's fallback but carries no report.
@@ -1281,7 +1288,8 @@ fn sema_expression_if_dispatch_subject(condition: Expr, else_value: Expr) -> Exp
 
 fn sema_expression_if_condition_subject(condition: Expr) -> Expr? {
     return if condition == {
-        .PatternTest(subject, _, _) -> Val(subject)
+        // copy: `subject` is a payload of read parameter `condition`, which keeps the original; the Val carrier owns this one
+        .PatternTest(subject, _, _) -> Val(subject.copy())
         .Binary(op, left, right, _) -> if {
             op == BinOp.And || op == BinOp.Or -> {
                 left_subject :: sema_expression_if_condition_subject(left)
@@ -1321,7 +1329,8 @@ fn sema_expression_if_condition_consumes_carrier(condition: Expr) -> Bool {
 
 fn sema_expression_if_replace_subject(condition: Expr, subject_span: Span, local: Expr) -> Expr {
     return if condition == {
-        .PatternTest(subject, pattern, span) -> if expr_span(subject) == subject_span -> Expr.PatternTest{subject: local, pattern: pattern, span: span} else -> condition
+        // copy: `pattern` is a payload of read parameter `condition`, which keeps the original; field `pattern` of the new Expr.PatternTest owns this one
+        .PatternTest(subject, pattern, span) -> if expr_span(subject) == subject_span -> Expr.PatternTest{subject: local, pattern: pattern.copy(), span: span} else -> condition
         .Binary(op, left, right, span) -> if {
             op == BinOp.And || op == BinOp.Or -> Expr.Binary{op: op, left: sema_expression_if_replace_subject(left, subject_span, local), right: sema_expression_if_replace_subject(right, subject_span, local), span: span}
             sema_expression_if_dispatch_comparison(op) && expr_span(left) == subject_span -> Expr.Binary{op: op, left: local, right: right, span: span}
@@ -1338,6 +1347,9 @@ fn sema_expression_if_rebind_chain(value: Expr, subject_span: Span, local: Expr)
         .Paren(inner, _) -> sema_expression_if_rebind_chain(inner, subject_span, local)
         .If(condition, then_body, then_value, else_body, else_value, span) -> {
             subject :: sema_expression_if_condition_subject(condition) ?? return value
+            // copy: the rebound chain is a new owned Expr. When the subject span differs it equals
+            // `value`, the caller's condition (a read parameter), which the caller keeps in its
+            // AST.
             if expr_span(subject) != subject_span -> return value.copy()
             Expr.If{cond: sema_expression_if_replace_subject(condition, subject_span, local), then_body: then_body, then_value: then_value, else_body: else_body, else_value: sema_expression_if_rebind_chain(else_value, subject_span, local), span: span}
         }
@@ -1419,13 +1431,26 @@ fn sema_expression_condition_binds(condition: Expr) -> Bool Never! {
 fn sema_expression_window_source(subject: Expr, scopes: SemaScopeTable) -> Expr? {
     return if subject == {
         .Paren(inner, _) -> sema_expression_window_source(inner, scopes)
-        .Place(value, access, _) -> if access == PlaceAccess.Write -> Val(value) else -> None
+        // copy: `value` is a payload of read parameter `subject`, which keeps the original; the Val carrier owns this one
+        .Place(value, access, _) -> if access == PlaceAccess.Write -> Val(value.copy()) else -> None
         .Ident(name, _) -> {
             if !name.starts_with("__jet_switch_subject_") -> return None
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             if scopes.bindings[index].access == AccessConvention.Write -> Val(subject) else -> None
         }
         else -> None
+    }
+}
+
+// Whether a pattern subject is spelled `^place`: the subject itself moves
+// into the match, so its payload bindings own what they bind and record no
+// subject places (`^name` is an ordinary move of an owned local, never a
+// take out of a subject that stays live).
+fn sema_expression_subject_moved(subject: Expr) -> Bool Never! {
+    return if subject == {
+        .Paren(inner, _) -> sema_expression_subject_moved(inner)
+        .Place(_, access, _) -> access == PlaceAccess.Take
+        else -> false
     }
 }
 
@@ -1551,6 +1576,19 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
             symbol :: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, &sources, &diagnostics)
+            // An explicit `^name` takes this payload out of its subject
+            // (sema_ownership_move_pattern_payload) when the subject stays
+            // live. A `^subject` moves into the match, so its bindings own
+            // their payloads; a list or map pattern names its whole subject,
+            // so its bindings record none.
+            collection :: if checked.pattern.shape == {
+                .List(_, _, _) | .Map(_, _, _) -> true
+                else -> false
+            }
+            // copy: the ownership state keeps the payload's subject places
+            // for a later `^name`, while the condition binding keeps them for
+            // its view provenance (sema_ownership_record_pattern_views).
+            if !window && !collection && !sema_expression_subject_moved(subject) -> sema_ownership_note_pattern_sources(&state, symbol, sources.copy())
             &bindings.push(SemaConditionBinding{symbol: symbol, window: window, sources: sources})
         }
         &facts.push(updated)
@@ -1960,6 +1998,8 @@ fn sema_expression_if_carrier(expected: Type?, then_ty: Type, else_ty: Type) -> 
 }
 
 fn sema_expression_lift_into_carrier(value: TExpr, carrier: Type) -> TExpr {
+    // copy: the lifted value is a new owned TExpr. When the carrier already matches it equals
+    // `value`, the caller's checked operand (a read parameter), which the caller keeps.
     if type_identity_equal(value.ty, carrier) -> return value.copy()
     sema_tir_node(carrier, TExprKind.Ok{value: value}, value.span)
 }

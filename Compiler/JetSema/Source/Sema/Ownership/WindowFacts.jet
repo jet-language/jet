@@ -307,7 +307,7 @@ fn sema_window_scan_expr(expr: Expr, param: String, scan: &SemaWindowScan) {
             if access == PlaceAccess.Write && sema_window_is_param(inner, param) -> scan.marks += 1
             sema_window_scan_expr(inner, param, &scan)
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _, _) -> {
             if receiver == .Place(inner, access, _) {
                 if access == PlaceAccess.Write && sema_window_is_param(inner, param) {
                     scan.accounted += 1

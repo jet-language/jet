@@ -1,7 +1,8 @@
-// RuntimePolicy root-inode advisory coordination. The existing held Directory
-// lock is the ONE kernel domain; marker names are never ownership evidence.
-// Every operation retains the original Foundation authority, including the
-// marker's parent, and never reopens a root pathname after acquisition.
+// RuntimePolicy root advisory coordination. The managed root's dedicated
+// regular lock file is the ONE kernel domain; marker names are never ownership
+// evidence. Every operation retains the original Foundation authority,
+// including the marker's parent, and revalidates that held chain around every
+// claim.
 //
 // Every scope of one canonical managed root shares `.jetpack.lock`, a regular
 // file outside the replaceable `.locks` marker directory. FILELOCK1 creates it
@@ -23,14 +24,15 @@ enum RuntimeLockState {
     Idle
 }
 
-// A held process lock. `owner` is the kernel lock on the canonical managed
-// root's dedicated regular file; `marker` pins the scope marker inode that
-// `path` must keep naming. Scope exit (or handing `owner` to a child through
-// `keep_open_for`) releases the kernel lock; both files always stay on disk.
+// A held process lock. `owner` is the FILELOCK1 lock on the canonical managed
+// root's dedicated regular file `owner_path`; `marker` pins the scope marker
+// inode that `path` must keep naming. Scope exit (or handing `owner` to a child
+// through `keep_open_for`) releases the kernel lock; both files always stay on
+// disk.
 struct RuntimeLock {
     path: String
     owner_path: String
-    owner: AdvisoryLock
+    owner: FileLock
     marker: FileReader
     authority: FoundationDirectoryAuthority
     marker_parent: FoundationDirectoryAuthority
@@ -59,7 +61,7 @@ struct RuntimeLockScope {
 }
 
 // Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
-// The marker stays on disk; later openers still lock the root, not this marker.
+// Both files stay on disk so every later opener locks the same owner inode.
 impl RuntimeLock.Close {
     fn close(^self) {}
 }
@@ -153,35 +155,21 @@ fn env_lock_open_scope(authority: FoundationDirectoryAuthority, scope: String) -
     Ok(RuntimeLockScope{authority: authority, marker_parent: marker_parent, marker: marker, name: name, path: path})
 }
 
-// Directory.lock's existing host leaf preserves WouldBlock as Other with its
-// typed raw OS code. Only the supported targets' EWOULDBLOCK means contention;
-// permission, unsupported, closed and every other failure remains an error.
-fn env_lock_would_block(error: IOError) -[Env]> Bool Never! {
-    if error == .Other(context) {
-        code :: context.os_code ?? return false
-        os :: sys.name()
-        if os == "linux" || os == "android" -> return code == 11
-        if os == "macos" || os == "ios" || os == "freebsd" || os == "dragonfly" || os == "openbsd" || os == "netbsd" -> return code == 35
-    }
-    false
+// FILELOCK1 on `<canonical managed root>/.jetpack.lock`: created owner-only,
+// a final link or a non-regular file is refused, and contention alone is None.
+// The retained root chain and the scope marker are revalidated after every
+// attempt, so a moved root or replaced marker never yields a claim.
+fn env_lock_try_owner(opened: RuntimeLockScope) -[FS, Env]> FileLock? IOError! {
+    attempted :: files.try_lock(env_lock_owner_path(opened.authority))
+    opened.authority.revalidate()
+    env_lock_validate_marker(opened.marker_parent, opened.marker, opened.name, opened.path)
+    Ok(attempted)
 }
-fn env_lock_try_owner(opened: RuntimeLockScope) -[FS, Env]> AdvisoryLock? IOError! {
-    if opened.authority.lock() == {
-        .Ok(owner) -> {
-            opened.authority.revalidate()
-            env_lock_validate_marker(opened.marker_parent, opened.marker, opened.name, opened.path)
-            Ok(Val(owner))
-        }
-        .Err(error) -> {
-            if !env_lock_would_block(error) -> return Err(error)
-            opened.authority.revalidate()
-            env_lock_validate_marker(opened.marker_parent, opened.marker, opened.name, opened.path)
-            Ok(None)
-        }
-    }
+fn env_lock_owner_path(authority: FoundationDirectoryAuthority) -> String Never! {
+    files.join(authority.path(), RUNTIME_LOCK_OWNER_FILE)
 }
-fn env_lock_hold(opened: RuntimeLockScope, owner: AdvisoryLock) -> RuntimeLock Never! {
-    RuntimeLock{path: opened.path, owner_path: opened.authority.path(), owner: owner, marker: opened.marker, authority: opened.authority, marker_parent: opened.marker_parent, marker_name: opened.name}
+fn env_lock_hold(opened: RuntimeLockScope, owner: FileLock) -> RuntimeLock Never! {
+    RuntimeLock{path: opened.path, owner_path: env_lock_owner_path(opened.authority), owner: owner, marker: opened.marker, authority: opened.authority, marker_parent: opened.marker_parent, marker_name: opened.name}
 }
 fn env_lock_check_marker_kind(parent: FoundationDirectoryAuthority, name: String, path: String) IOError! -[FS]> {
     info :: parent.entry_stat(name)

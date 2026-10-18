@@ -88,6 +88,8 @@ fn jet_cli_format_run(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOut
         order := [Int]{}
         loop index in 0..<dirty.len() -> &order.push(index)
         loop position in 1..<order.len() {
+            // copy: `order[position]` stays in its list (owner: `order`; no move out of an element,
+            // E0225) and the binding `current` owns its own.
             current :: order[position].copy()
             slot := position
             loop slot > 0 && relative[current] < relative[order[slot - 1]] {

@@ -1,0 +1,782 @@
+// The typed build-graph model behind `jet cc` / `jet c++`, ported 1:1 from
+// crates/jet-comptime Build/{handles,targets,actions_policy,
+// provenance_toolchains,errors_keys}.rs. Rust `BuildCapability` is
+// Foundation `BuildEffect`.
+//
+// Jet reserves `BuildContext`, `BuildPlan`, `BuildAction`, `BuildTarget`,
+// `BuildToolchain`, `BuildProbe`, `BuildSigningIdentity` and `BuildError`
+// for the `fn build` surface (SEMA_RESERVED_TYPES), and the Jetpack unit
+// already owns `ActionHandle` (the artifact store's action record handle).
+// These executor types carry the `Hermetic` prefix the Rust sandbox tests
+// alias them to (`BuildContext as HermeticBuildContext`).
+//
+// Ported surface: the graph `jet cc` builds (toolchains, probes, signing
+// identities, actions, targets, plans) and its executor. Not ported here:
+// WebAssembly build plugins, generated modules, legacy-wrapper imports,
+// computed fact contributions, compiler-owned package actions and the remote
+// builder; they belong to the `fn build` driver path, and the action key
+// encodes each one in its empty form exactly as Rust does for a plan that has
+// none.
+
+// Rust plan_graph.rs `MAX_ACTIONS`.
+BUILD_MAX_ACTIONS :: prep { 100000 }
+
+// A target within one context (Rust `TargetRef`; the typed `ExecutableTarget`
+// family converts into it, so every `add_*` returns this reference).
+struct TargetRef {
+    id: Int
+    context: Int
+}
+
+struct HermeticActionHandle {
+    id: Int
+    context: Int
+}
+
+struct ToolchainHandle {
+    id: Int
+    context: Int
+}
+
+struct SigningIdentityHandle {
+    id: Int
+    context: Int
+}
+
+struct ProbeHandle {
+    id: Int
+    context: Int
+}
+
+enum TargetKind {
+    Executable
+    Library
+    Test
+    AssetBundle
+    Doc
+    Install
+    Package
+    Publish
+
+    // Rust derived `Debug`.
+    fn debug_name(self) -> String Never! {
+        if self == {
+            .Executable -> "Executable"
+            .Library -> "Library"
+            .Test -> "Test"
+            .AssetBundle -> "AssetBundle"
+            .Doc -> "Doc"
+            .Install -> "Install"
+            .Package -> "Package"
+            .Publish -> "Publish"
+        }
+    }
+}
+
+// Rust `BuildPath::new`: non-blank, relative, with no `..`, root or prefix.
+fn build_path_new(path: String) -> String HermeticBuildError! {
+    if path.trim() == "" -> return Err(HermeticBuildError.EmptyPath)
+    if !build_path_is_relative_normal(path) -> return Err(HermeticBuildError.InvalidPath(path))
+    Ok(path)
+}
+
+// Rust `Path` component rules for a declared build path: not absolute and no
+// `..` component (`.` and empty components are dropped by `components()`).
+fn build_path_is_relative_normal(path: String) -> Bool Never! {
+    if path.starts_with("/") -> return false
+    loop part in path.split("/") {
+        if part == ".." -> return false
+    }
+    true
+}
+
+struct TargetSpec {
+    sources: [String]
+    inputs: [String]
+    outputs: [String]
+    deps: [TargetRef]
+    actions: [HermeticActionHandle]
+    probes: [ProbeHandle]
+    toolchain: ToolchainHandle?
+    signing_identity: SigningIdentityHandle?
+    metadata: [String: String]
+
+    fn new() -> TargetSpec Never! {
+        TargetSpec{
+            sources: [String]{}, inputs: [String]{}, outputs: [String]{}, deps: [TargetRef]{},
+            actions: [HermeticActionHandle]{}, probes: [ProbeHandle]{}, toolchain: None,
+            signing_identity: None, metadata: [String: String]{},
+        }
+    }
+
+    fn with_source(self, path: String) -> TargetSpec Never! {
+        updated := self
+        &updated.sources.push(path)
+        updated
+    }
+
+    fn with_input(self, path: String) -> TargetSpec Never! {
+        updated := self
+        &updated.inputs.push(path)
+        updated
+    }
+
+    fn with_output(self, path: String) -> TargetSpec Never! {
+        updated := self
+        &updated.outputs.push(path)
+        updated
+    }
+
+    fn with_dep(self, target: TargetRef) -> TargetSpec Never! {
+        updated := self
+        &updated.deps.push(target)
+        updated
+    }
+
+    fn with_action(self, action: HermeticActionHandle) -> TargetSpec Never! {
+        updated := self
+        &updated.actions.push(action)
+        updated
+    }
+
+    fn with_probe(self, probe: ProbeHandle) -> TargetSpec Never! {
+        updated := self
+        &updated.probes.push(probe)
+        updated
+    }
+
+    fn with_toolchain(self, toolchain: ToolchainHandle) -> TargetSpec Never! {
+        updated := self
+        updated.toolchain = Val(toolchain)
+        updated
+    }
+
+    fn with_signing_identity(self, identity: SigningIdentityHandle) -> TargetSpec Never! {
+        updated := self
+        updated.signing_identity = Val(identity)
+        updated
+    }
+
+    fn with_metadata(self, key: String, value: String) -> TargetSpec Never! {
+        updated := self
+        updated.metadata[key] = value
+        updated
+    }
+}
+
+struct HermeticBuildTarget {
+    id: Int
+    name: String
+    kind: TargetKind
+    sources: [String]
+    inputs: [String]
+    outputs: [String]
+    deps: [TargetRef]
+    actions: [HermeticActionHandle]
+    probes: [ProbeHandle]
+    toolchain: ToolchainHandle
+    signing_identity: SigningIdentityHandle?
+    metadata: [String: String]
+}
+
+enum BuildResourcePool {
+    CPU
+    Memory
+    Linker
+    Console
+    GPU
+    Custom(String)
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .CPU -> "cpu"
+            .Memory -> "memory"
+            .Linker -> "linker"
+            .Console -> "console"
+            .GPU -> "gpu"
+            .Custom(name) -> name
+        }
+    }
+
+    // Rust derived `Ord`: variant order, then the custom name.
+    fn rank(self) -> Int Never! {
+        if self == {
+            .CPU -> 0
+            .Memory -> 1
+            .Linker -> 2
+            .Console -> 3
+            .GPU -> 4
+            .Custom(_) -> 5
+        }
+    }
+}
+
+struct BuildResourcePoolSpec {
+    pool: BuildResourcePool
+    slots: Int
+}
+
+enum ActionCache {
+    Cached
+    UncachedPhony
+}
+
+// Distinct executable identities under one plan (E4-JP2 / #419).
+enum ActionKind {
+    Compile
+    Docs
+    Debug
+    SourceArchive
+    Generic
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Compile -> "compile"
+            .Docs -> "docs"
+            .Debug -> "debug"
+            .SourceArchive -> "source-archive"
+            .Generic -> "generic"
+        }
+    }
+
+    // Exact source bytes remain identity inputs when these surfaces can
+    // observe them.
+    fn observes_exact_source(self) -> Bool Never! {
+        self != ActionKind.Generic
+    }
+}
+
+struct ActionSpec {
+    inputs: [String]
+    outputs: [String]
+    argv: [String]
+    env: [String: String]
+    // Only allowlisted env keys enter the action identity. Empty means the
+    // declared `env` map itself is the allowlist. Kept sorted and unique
+    // (Rust `BTreeSet`).
+    env_allowlist: [String]
+    // Sorted by canonical effect rank and unique (Rust `BTreeSet`).
+    caps: [BuildEffect]
+    cache: ActionCache
+    kind: ActionKind
+    toolchain: ToolchainHandle?
+    probes: [ProbeHandle]
+    signing_identity: SigningIdentityHandle?
+    labels: [String: String]
+    helper_versions: [String: String]
+    // Sorted by rank, then custom name, and unique (Rust `BTreeSet`).
+    resource_pools: [BuildResourcePool]
+    variant_identity: String?
+
+    fn cached(argv: [String]) -> ActionSpec Never! {
+        ActionSpec{
+            inputs: [String]{}, outputs: [String]{}, argv: argv, env: [String: String]{},
+            env_allowlist: [String]{}, caps: [BuildEffect]{}, cache: ActionCache.Cached,
+            kind: ActionKind.Generic, toolchain: None, probes: [ProbeHandle]{}, signing_identity: None,
+            labels: [String: String]{}, helper_versions: [String: String]{},
+            resource_pools: [BuildResourcePool]{}, variant_identity: None,
+        }
+    }
+
+    fn uncached_phony(argv: [String]) -> ActionSpec Never! {
+        spec := ActionSpec.cached(argv)
+        spec.cache = ActionCache.UncachedPhony
+        spec
+    }
+
+    fn with_inputs(self, paths: [String]) -> ActionSpec Never! {
+        updated := self
+        loop path in paths -> &updated.inputs.push(path)
+        updated
+    }
+
+    fn with_outputs(self, paths: [String]) -> ActionSpec Never! {
+        updated := self
+        loop path in paths -> &updated.outputs.push(path)
+        updated
+    }
+
+    fn with_env(self, key: String, value: String) -> ActionSpec Never! {
+        updated := self
+        updated.env[key] = value
+        updated
+    }
+
+    fn with_env_allowlist(self, keys: [String]) -> ActionSpec Never! {
+        updated := self
+        loop key in keys -> build_insert_sorted_text(&updated.env_allowlist, key)
+        updated
+    }
+
+    fn with_kind(self, kind: ActionKind) -> ActionSpec Never! {
+        updated := self
+        updated.kind = kind
+        updated
+    }
+
+    fn with_helper_version(self, helper: String, version: String) -> ActionSpec Never! {
+        updated := self
+        updated.helper_versions[helper] = version
+        updated
+    }
+
+    fn with_cap(self, cap: BuildEffect) -> ActionSpec Never! {
+        updated := self
+        build_insert_effect(&updated.caps, cap)
+        updated
+    }
+
+    fn with_toolchain(self, toolchain: ToolchainHandle) -> ActionSpec Never! {
+        updated := self
+        updated.toolchain = Val(toolchain)
+        updated
+    }
+
+    fn with_probe(self, probe: ProbeHandle) -> ActionSpec Never! {
+        updated := self
+        &updated.probes.push(probe)
+        updated
+    }
+
+    fn with_signing_identity(self, identity: SigningIdentityHandle) -> ActionSpec Never! {
+        updated := self
+        updated.signing_identity = Val(identity)
+        updated
+    }
+
+    fn with_label(self, key: String, value: String) -> ActionSpec Never! {
+        updated := self
+        updated.labels[key] = value
+        updated
+    }
+
+    fn with_pool(self, pool: BuildResourcePool) -> ActionSpec Never! {
+        updated := self
+        build_insert_pool(&updated.resource_pools, pool)
+        updated
+    }
+
+    fn with_variant_identity(self, identity: String) -> ActionSpec Never! {
+        updated := self
+        updated.variant_identity = Val(identity)
+        updated
+    }
+}
+
+struct HermeticBuildAction {
+    id: Int
+    name: String
+    inputs: [String]
+    outputs: [String]
+    argv: [String]
+    env: [String: String]
+    env_allowlist: [String]
+    caps: [BuildEffect]
+    cache: ActionCache
+    kind: ActionKind
+    toolchain: ToolchainHandle
+    probes: [ProbeHandle]
+    signing_identity: SigningIdentityHandle?
+    labels: [String: String]
+    helper_versions: [String: String]
+    resource_pools: [BuildResourcePool]
+    variant_identity: String?
+}
+
+// Rust `BTreeSet<String>::insert`.
+fn build_insert_sorted_text(values: &[String], value: String) Never! {
+    if values.contains(value) -> return
+    &values.push(value)
+    &values.sort()
+}
+
+// Rust `BTreeSet<BuildCapability>::insert`.
+fn build_insert_effect(values: &[BuildEffect], ability: BuildEffect) Never! {
+    if values.contains(ability) -> return
+    &values.push(ability)
+    &values.sort_by(written -> written.rank())
+}
+
+// Rust `BTreeSet<BuildResourcePool>::insert`.
+fn build_insert_pool(values: &[BuildResourcePool], pool: BuildResourcePool) Never! {
+    loop existing in values {
+        if existing == pool -> return
+    }
+    &values.push(pool)
+    &values.sort_by((left: BuildResourcePool, right: BuildResourcePool) -> if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank())
+}
+
+struct LockRecord {
+    key: String
+    digest: String
+
+    fn new(key: String, digest: String) -> LockRecord Never! {
+        LockRecord{key, digest}
+    }
+}
+
+enum ProvenanceSource {
+    InferredHost
+    JetpackDependency(String)
+    AmbientRecord(String)
+    UserDeclared(String)
+}
+
+struct BuildProvenance {
+    source: ProvenanceSource
+    lock: LockRecord?
+
+    fn inferred_host() -> BuildProvenance Never! {
+        BuildProvenance{source: ProvenanceSource.InferredHost, lock: None}
+    }
+
+    fn jetpack_dependency(dep: String, lock: LockRecord) -> BuildProvenance Never! {
+        BuildProvenance{source: ProvenanceSource.JetpackDependency(dep), lock: Val(lock)}
+    }
+
+    fn ambient_record(record: String) -> BuildProvenance Never! {
+        BuildProvenance{source: ProvenanceSource.AmbientRecord(record), lock: None}
+    }
+
+    fn user_declared(source: String, lock: LockRecord?) -> BuildProvenance Never! {
+        BuildProvenance{source: ProvenanceSource.UserDeclared(source), lock}
+    }
+}
+
+struct SDKIdentity {
+    name: String
+    version: String
+    provenance: BuildProvenance
+
+    fn new(name: String, version: String, provenance: BuildProvenance) -> SDKIdentity Never! {
+        SDKIdentity{name, version, provenance}
+    }
+}
+
+struct LinkerIdentity {
+    name: String
+    provenance: BuildProvenance
+
+    fn new(name: String, provenance: BuildProvenance) -> LinkerIdentity Never! {
+        LinkerIdentity{name, provenance}
+    }
+}
+
+// Sysroot identity for cross compilation (E4-JP15).
+struct SysrootIdentity {
+    name: String
+    path_digest: String
+    provenance: BuildProvenance
+
+    fn new(name: String, path_digest: String, provenance: BuildProvenance) -> SysrootIdentity Never! {
+        SysrootIdentity{name, path_digest, provenance}
+    }
+}
+
+struct SigningIdentitySpec {
+    label: String
+    provenance: BuildProvenance
+
+    fn new(label: String, provenance: BuildProvenance) -> SigningIdentitySpec Never! {
+        SigningIdentitySpec{label, provenance}
+    }
+}
+
+struct HermeticBuildSigningIdentity {
+    id: Int
+    name: String
+    label: String
+    provenance: BuildProvenance
+}
+
+enum ToolchainRole {
+    Host
+    Target
+}
+
+// How an action resolves its executable. Declared-only is the hermetic path
+// of provisioned toolchains: no executable may come from PATH or an
+// undeclared filesystem spelling.
+enum ToolchainResolution {
+    Ambient
+    DeclaredOnly
+}
+
+// A read-only host directory made visible to a sandboxed action. `identity`
+// empty means the source path itself is the identity.
+struct BuildMount {
+    source: String
+    destination: String
+    identity: String
+}
+
+struct ToolchainSpec {
+    role: ToolchainRole
+    host_triple: String
+    target_triple: String
+    sdk: SDKIdentity?
+    linker: LinkerIdentity?
+    sysroot: SysrootIdentity?
+    tools: [String: String]
+    resolution: ToolchainResolution
+    mounts: [BuildMount]
+    provenance: BuildProvenance
+
+    fn target(target_triple: String, provenance: BuildProvenance) -> ToolchainSpec Never! {
+        ToolchainSpec{
+            role: ToolchainRole.Target, host_triple: "host", target_triple: target_triple,
+            sdk: None, linker: None, sysroot: None, tools: [String: String]{},
+            resolution: ToolchainResolution.Ambient, mounts: [BuildMount]{}, provenance: provenance,
+        }
+    }
+
+    fn host(host_triple: String, provenance: BuildProvenance) -> ToolchainSpec Never! {
+        ToolchainSpec{
+            role: ToolchainRole.Host, host_triple: host_triple, target_triple: host_triple,
+            sdk: None, linker: None, sysroot: None, tools: [String: String]{},
+            resolution: ToolchainResolution.Ambient, mounts: [BuildMount]{}, provenance: provenance,
+        }
+    }
+
+    fn with_host_triple(self, host_triple: String) -> ToolchainSpec Never! {
+        updated := self
+        updated.host_triple = host_triple
+        updated
+    }
+
+    fn with_sdk(self, sdk: SDKIdentity) -> ToolchainSpec Never! {
+        updated := self
+        updated.sdk = Val(sdk)
+        updated
+    }
+
+    fn with_linker(self, linker: LinkerIdentity) -> ToolchainSpec Never! {
+        updated := self
+        updated.linker = Val(linker)
+        updated
+    }
+
+    fn with_sysroot(self, sysroot: SysrootIdentity) -> ToolchainSpec Never! {
+        updated := self
+        updated.sysroot = Val(sysroot)
+        updated
+    }
+
+    fn with_tool(self, name: String, path: String) -> ToolchainSpec Never! {
+        updated := self
+        updated.tools[name] = path
+        updated
+    }
+
+    // Require every action executable to be named by this toolchain.
+    fn declared_only(self) -> ToolchainSpec Never! {
+        updated := self
+        updated.resolution = ToolchainResolution.DeclaredOnly
+        updated
+    }
+
+    fn with_read_only_mount_identity(self, source: String, destination: String, identity: String) -> ToolchainSpec Never! {
+        updated := self
+        &updated.mounts.push(BuildMount{source, destination, identity})
+        updated
+    }
+}
+
+struct HermeticBuildToolchain {
+    id: Int
+    name: String
+    role: ToolchainRole
+    host_triple: String
+    target_triple: String
+    sdk: SDKIdentity?
+    linker: LinkerIdentity?
+    sysroot: SysrootIdentity?
+    tools: [String: String]
+    resolution: ToolchainResolution
+    mounts: [BuildMount]
+    provenance: BuildProvenance
+}
+
+enum ReproducibilityClass {
+    Reproducible
+    Ambient
+
+    // Rust derived `Debug`.
+    fn debug_name(self) -> String Never! {
+        if self == {
+            .Reproducible -> "Reproducible"
+            .Ambient -> "Ambient"
+        }
+    }
+}
+
+enum ProbeKind {
+    FindProgram(program: String)
+    PkgConfig(package: String, min_version: String?)
+    HeaderCheck(header: String)
+    CompileCheck(name: String, includes: [String], code: String)
+}
+
+struct ProbeSpec {
+    kind: ProbeKind
+    reproducibility: ReproducibilityClass
+    provenance: BuildProvenance
+    toolchain: ToolchainHandle?
+
+    fn find_program(program: String) -> ProbeSpec Never! {
+        ProbeSpec{kind: ProbeKind.FindProgram{program}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None}
+    }
+
+    fn pkg_config(package: String) -> ProbeSpec Never! {
+        ProbeSpec{kind: ProbeKind.PkgConfig{package, min_version: None}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("pkg_config"), toolchain: None}
+    }
+
+    fn header_check(header: String) -> ProbeSpec Never! {
+        ProbeSpec{kind: ProbeKind.HeaderCheck{header}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("header_check"), toolchain: None}
+    }
+
+    fn compile_check(name: String, includes: [String], code: String) -> ProbeSpec Never! {
+        ProbeSpec{kind: ProbeKind.CompileCheck{name, includes, code}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("compile_check"), toolchain: None}
+    }
+
+    fn with_min_version(self, version: String) -> ProbeSpec Never! {
+        updated := self
+        if self.kind == {
+            .PkgConfig(package, _) -> updated.kind = ProbeKind.PkgConfig{package, min_version: Val(version)}
+            else -> {}
+        }
+        updated
+    }
+
+    fn with_toolchain(self, toolchain: ToolchainHandle) -> ProbeSpec Never! {
+        updated := self
+        updated.toolchain = Val(toolchain)
+        updated
+    }
+
+    fn with_reproducibility(self, reproducibility: ReproducibilityClass) -> ProbeSpec Never! {
+        updated := self
+        updated.reproducibility = reproducibility
+        updated
+    }
+
+    fn with_provenance(self, provenance: BuildProvenance) -> ProbeSpec Never! {
+        updated := self
+        updated.provenance = provenance
+        updated
+    }
+}
+
+struct HermeticBuildProbe {
+    id: Int
+    name: String
+    kind: ProbeKind
+    reproducibility: ReproducibilityClass
+    provenance: BuildProvenance
+    toolchain: ToolchainHandle
+}
+
+enum BuildNameKind {
+    Target
+    Action
+    Toolchain
+    SigningIdentity
+    Probe
+}
+
+// One dependency cycle in traversal order; the first name repeats last.
+struct DependencyCycle {
+    nodes: [String]
+
+    // The rendered loop: `` `a` -> `b` -> `a` ``. Rust `Debug` prints it too.
+    fn chain(self) -> String Never! {
+        rendered :: loop node in self.nodes -> "`{node}`"
+        rendered.join(" -> ")
+    }
+}
+
+// The graph refusals reachable from the ported surface, with their Rust
+// variant names (`PackagedPlugin` carries the action-budget refusal).
+#Error
+enum HermeticBuildError {
+    EmptyTargetName
+    EmptyActionName
+    EmptyToolchainName
+    EmptySigningIdentityName
+    EmptyProbeName
+    DuplicateTargetName(String)
+    DuplicateActionName(String)
+    DuplicateToolchainName(String)
+    DuplicateSigningIdentityName(String)
+    DuplicateProbeName(String)
+    EmptyPath
+    InvalidPath(String)
+    EmptyToolchainTriple(String)
+    EmptyIdentityField(String)
+    MissingLockedProvenance(String)
+    EmptyProbeField(String)
+    EmptyActionArgv(String)
+    EmptyEnvName(String)
+    UndeclaredEnvName(action: String, key: String)
+    CachedActionWithoutOutputs(String)
+    PhonyActionWithoutCaps(String)
+    PhonyActionWithOutputs(String)
+    DuplicateActionOutput(action: String, output: String)
+    DuplicateBuildOutput(output: String, first_action: String, second_action: String)
+    UnknownTarget(Int)
+    UnknownAction(Int)
+    UnknownToolchain(Int)
+    UnknownSigningIdentity(Int)
+    UnknownProbe(Int)
+    PackagedPlugin(String)
+    TargetDependencyCycle(DependencyCycle)
+    ActionDependencyCycle(DependencyCycle)
+
+    // Rust derived `Debug` (`{error:?}`), the text graph reports print.
+    fn debug_text(self) -> String Never! {
+        if self == {
+            .EmptyTargetName -> "EmptyTargetName"
+            .EmptyActionName -> "EmptyActionName"
+            .EmptyToolchainName -> "EmptyToolchainName"
+            .EmptySigningIdentityName -> "EmptySigningIdentityName"
+            .EmptyProbeName -> "EmptyProbeName"
+            .DuplicateTargetName(name) -> "DuplicateTargetName({build_debug_quote(name)})"
+            .DuplicateActionName(name) -> "DuplicateActionName({build_debug_quote(name)})"
+            .DuplicateToolchainName(name) -> "DuplicateToolchainName({build_debug_quote(name)})"
+            .DuplicateSigningIdentityName(name) -> "DuplicateSigningIdentityName({build_debug_quote(name)})"
+            .DuplicateProbeName(name) -> "DuplicateProbeName({build_debug_quote(name)})"
+            .EmptyPath -> "EmptyPath"
+            .InvalidPath(path) -> "InvalidPath({build_debug_quote(path)})"
+            .EmptyToolchainTriple(name) -> "EmptyToolchainTriple({build_debug_quote(name)})"
+            .EmptyIdentityField(name) -> "EmptyIdentityField({build_debug_quote(name)})"
+            .MissingLockedProvenance(name) -> "MissingLockedProvenance({build_debug_quote(name)})"
+            .EmptyProbeField(name) -> "EmptyProbeField({build_debug_quote(name)})"
+            .EmptyActionArgv(name) -> "EmptyActionArgv({build_debug_quote(name)})"
+            .EmptyEnvName(name) -> "EmptyEnvName({build_debug_quote(name)})"
+            .UndeclaredEnvName(action, key) -> "UndeclaredEnvName {{ action: {build_debug_quote(action)}, key: {build_debug_quote(key)} }}"
+            .CachedActionWithoutOutputs(name) -> "CachedActionWithoutOutputs({build_debug_quote(name)})"
+            .PhonyActionWithoutCaps(name) -> "PhonyActionWithoutCaps({build_debug_quote(name)})"
+            .PhonyActionWithOutputs(name) -> "PhonyActionWithOutputs({build_debug_quote(name)})"
+            .DuplicateActionOutput(action, output) -> "DuplicateActionOutput {{ action: {build_debug_quote(action)}, output: {build_debug_quote(output)} }}"
+            .DuplicateBuildOutput(output, first_action, second_action) -> "DuplicateBuildOutput {{ output: {build_debug_quote(output)}, first_action: {build_debug_quote(first_action)}, second_action: {build_debug_quote(second_action)} }}"
+            .UnknownTarget(id) -> "UnknownTarget(TargetId({id}))"
+            .UnknownAction(id) -> "UnknownAction(ActionId({id}))"
+            .UnknownToolchain(id) -> "UnknownToolchain(ToolchainId({id}))"
+            .UnknownSigningIdentity(id) -> "UnknownSigningIdentity(SigningIdentityId({id}))"
+            .UnknownProbe(id) -> "UnknownProbe(ProbeId({id}))"
+            .PackagedPlugin(detail) -> "PackagedPlugin({build_debug_quote(detail)})"
+            .TargetDependencyCycle(cycle) -> "TargetDependencyCycle({cycle.chain()})"
+            .ActionDependencyCycle(cycle) -> "ActionDependencyCycle({cycle.chain()})"
+        }
+    }
+}
+
+// Rust `{:?}` of a `String`.
+fn build_debug_quote(text: String) -> String Never! {
+    foundation_debug_quoted(text, 34)
+}
+
+// Rust `dependency_cycle_text`: the whole loop, why it cannot build, the fix.
+fn build_dependency_cycle_text(kind: String, cycle: DependencyCycle) -> String Never! {
+    "{kind} dependency graph contains a cycle: {cycle.chain()}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain"
+}

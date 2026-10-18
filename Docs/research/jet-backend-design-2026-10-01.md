@@ -121,7 +121,9 @@ read-only data; each table's ID equals its index.
   before emitting the template bytes. Allocation treats asm as a call.
   Supported templates contain word-register push/pop, mov (register,
   immediate, qword memory), movzx byte loads, syscall, indirect register
-  calls, lock cmpxchg, xchg, and pause. Memory addresses admit a base register
+  calls, lock cmpxchg, xchg, pause, cld/std, and the string moves `rep
+  movsb`/`rep movsq` (they write rcx, rsi and rdi; a template that sets the
+  direction flag clears it again). Memory addresses admit a base register
   or named input with an optional signed-32-bit `+ displacement`.
   Callee-saved/frame registers, unsupported syntax, unbalanced stacks,
   misaligned calls, missing/duplicate return anchors, and named input reads
@@ -597,7 +599,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `Constant` String | `DataAddress` of the literal's bytes, `Const` length, call `jet_rt_string_from_static(ptr, len) -> String` |
 | `Copy` | the same value for dropless word, flag and tag carriers; `jet_rt_int_clone` for owned exact Int (packed tag fast path, BigInt retains one reference); `jet_rt_string_clone` for a String; clone glue for boxes; a fresh `StackSlot` filled by clone glue for an owned inline aggregate (a borrowing copy names the source) |
 | `Move`, `AttachTag`, transparent `Convert` | the same value |
-| exact-Int `+ - *` (Prelude route, arity 2) | inline test (`(x ^ (x << 1)) >= 0` on both operands), native op (Mul also checks `Overflows`), inline test of the result, else the route's runtime symbol; joined in a block parameter |
+| exact-Int `+ - *` (Prelude route, arity 2) | inline test of each operand (`Overflows(Add, x, x)`: doubling an inline word does not overflow; `add; jo slow`), native op (Mul also checks `Overflows`), the same inline test of the result, else the route's runtime symbol in a cold block laid out after the hot code; joined in a block parameter |
 | exact-Int other ops (division family, pow, shifts, bit ops) | call of the route's runtime symbol with `(left, right)`, plus `(file_ptr, file_len, line)` for routes of arity 4 |
 | exact-Int comparison (Primitive) | native `Compare` when both are inline, else `jet_int_compare(l, r)` compared with 0 |
 | word `+ - *` (Primitive) | `Binary`; with `overflow: Trap`, an `Overflows` test branches to `jet_rt_panic_overflow` first |
@@ -1084,11 +1086,21 @@ CString helpers called directly by `Lower/CForeign.jet` have a checked
 lowering-only ABI table in `runtime-route-abi.mjs`; they are not invented Rust
 routes. Packing borrows an E4 header and returns an owned NUL buffer; unpacking
 returns an owned E4 header; freeing takes pointer and size including NUL.
-For Jet-owned routes, generated `LowerRoute.native_lists` is true. Lists of
-records cross directly as native inline element buffers, with the checked
-record's native stride (for example SocketAddr56), not arrays of record
-handles. Seed routes retain the handle-buffer conversions. Both use the
-same data-pointer/length C call shape, and record schemas remain checked.
+For Jet-owned routes, generated `LowerRoute.native_lists` is true; it admits
+nested List carriers (a List of Lists or of Text crosses as native headers
+and buffers). Lists of Core records cross every route, Jet-owned or seed, as
+a buffer of eight-byte record handles that the lowering rebuilds natively
+(`list.record_handles` / `lower_record_list_from_runtime`), never as inline
+rows: the runtime record shape (nullable OptText words, sequence owners,
+DirEntry24, FieldError16) is not the native inline row, so a provider cannot
+write one. A List of opaque handles (`[SocketAddr]`: JetSocketAddr boxes) is
+a buffer of those handle words. `jet_std_fs_list_dir_raw`, `jet_dyn_field`,
+the codec failure lists and `message_parts` build or read handle buffers;
+`jet_net_raw_resolve_ordered` publishes Socket56 boxes behind handle words
+(its inline-row worker output stays internal to the HTTP build resolver).
+Both use the same data-pointer/length C call shape, and record schemas remain
+checked; a native fixture reads a field of a route-returned record List so a
+shape drift fails as a wrong value, not as a pointer-sized allocation.
 StreamCursor's native cutover is one complete export family: all Cursor/Reader
 routes, clone/drop, and the borrowed Cursor buffer projection are Jet-owned.
 G1 rejects a partial family before generating routes; it retains logical
@@ -1367,7 +1379,7 @@ zero-extended words, so a branch tests the whole register.
 | `Div Rem` | `mov rax, l; mov r11, r; push rdx; cqo; idiv r11; pop rdx` (Rem takes rdx) |
 | `Shl Shr` | `mov rax, l; mov r11, r; push rcx; mov rcx, r11; shl/sar rax, cl; pop rcx` |
 | `Compare` | `cmp l, r; setcc r8; movzx r, r8`, or fused into the block's `cmp` + `jcc` when the branch is its only use |
-| `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx` |
+| `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx`; fused into the block's `jcc` when the branch is its only use, and then without the `mov`/`add` when the Binary right before it already computed `l op r` (`add; jo`) |
 | `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; 1/2/4-byte layouts use zero-extending byte/word/dword loads and matching stores |
 | `DataAddress` | `lea r, [rip + disp32]`, a data relocation |
 | `Call` | stack arguments pushed last to first (8 bytes of padding first for an odd count), Float arguments `movq xmm_i, r`, then parallel moves into rdi, rsi, rdx, rcx, r8, r9; `call rel32` with a function or runtime relocation; `add rsp` for the stack arguments; a Bool result is `movzx rax, al` first (System V defines only al), a Float result `movq rax, xmm0` |
@@ -3851,6 +3863,44 @@ DataTree/DataEvent runtime byte paths use `RT_HOST_U8_STRIDE` and host U8
 accessors; their C witnesses default to canonical packed stride1 and keep all
 byte indexing/allocation expectations derived from their stride constant.
 
+
+### Native synchronous Event provider
+
+`JetRuntime/Source/Events.jet` is the Jet-native provider of the synchronous
+Event family (D-EVENT1=D), one meaning with `ReactiveEventWatch.rs`
+JetEventPolicy/JetEventTrace/JetSubscription/JetEventScope/JetEvent. Its
+single-thread shared cells use plain counts: an `Event<T>` handle is its
+EventCore (strong/weak counts and the ordered listener list); a Subscription
+holds a weak count on the core and its listener id; each listener holds one
+count per owner (the core's list and every dispatch snapshot), so a handler
+that unsubscribes itself or a later listener keeps its running closure alive
+and the skipped listener is never invoked. Dispatch snapshots the active
+listeners in priority order (highest first), registration order among equal
+priorities; a once listener is consumed before its handler runs; nested emits
+dispatch immediately (AllowDepthFirst, the sole policy). A cancelled scope
+returns an inactive Subscription and releases the handler unregistered; the
+last EventScope handle cancels, unsubscribing every tracked Subscription; the
+last Event handle releases its handlers while Subscriptions outlive it. A
+handler stop ends the dispatch and leaves the trace null. `emit` holds its own
+strong count for the whole dispatch (Rust: `&self` on the `Rc`), so a handler
+that drops the last Event handle leaves the core alive until `emit` returns.
+
+The backend (`Lower/Events.jet`) lowers every `core.event` ClosureMethod row and
+`core.event.__event_with_policy` to these exports. A handler is the moved
+closure box with the typed `lazy.callback` adapter (the payload's native slot
+is lent to each handler, which reads it) and `lazy.callback.drop` as its
+release; a consumed owned payload is released after the dispatch. Sema
+(`Calls/EventHandles.jet`) produces `THandleOp.EventMethod` with the Rust
+method table (`Collections.rs` event/subscription/event_scope/event_trace
+method returns); handlers are retained `Fn(T) -> Unit` callbacks.
+`JetRuntime/Tests/EventProviderWitness.c` links the real object with
+`--wrap=jet_rt_alloc --wrap=jet_rt_free` and checks registration order,
+priority, once, unsubscribe (also mid-dispatch), cancelled-scope registration,
+scope and Event teardown, nested emit, the last Event handle dropped mid-emit
+(freed blocks are poisoned), trace text, and that every scenario
+returns to its allocation baseline. `Examples/features/concurrency/event_lifecycle.jet`
+is the end-to-end golden. AsyncEvent, Hook and DecisionHook are not part of
+this provider.
 
 ### Native Process value enums
 

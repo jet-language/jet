@@ -3,7 +3,7 @@
 // policy carrier is jet-foundation Authority.rs `ApplicationAuthority` and
 // jet-pkg-model EffectBudget.rs `project_application_effects` and
 // `application_policy_diagnostic`). The program's required effects are the
-// checked entry's solved effect row; its policy is the beginner floor, the
+// direct effects of every function the checked entry reaches; its policy is the beginner floor, the
 // entry package's `authority.holds`, and the `--allow`/`--deny` rows of this
 // invocation. A required right the policy denies, or one it leaves
 // undecided, stops the command with E1803 before anything is built.
@@ -13,6 +13,8 @@ use jet_driver.[
 ]
 use jet_foundation.[
     Diagnostic,
+    MIRFunctionID,
+    MIRProgram,
     diagnostic_from_registry,
 ]
 use jet_sema.[
@@ -122,16 +124,38 @@ fn jet_cli_policy_effects(names: [String]) -> [String] Never! {
     jet_cli_sorted_set(rights)
 }
 
+// EffectBudget.rs `entry_effects`: the application requires the direct
+// effects of every function its entry reaches along checked call edges.
+// The maximal row an open-world call (an unannotated function value, an
+// extern) seeds into `solved` is a ceiling fact (E0743), not a required
+// right, so it never widens the authority the application must hold.
+fn jet_cli_entry_required_effects(program: MIRProgram, entry: MIRFunctionID) -> [String] Never! {
+    by_key := [String:Int]{}
+    pending := [Int]{}
+    loop (index, function) in program.functions {
+        if by_key.get(function.key) == None -> by_key[function.key] = index
+        if function.id == entry -> &pending.push(index)
+    }
+    seen := [Int:Bool]{}
+    required := [String]{}
+    loop pending.len() > 0 {
+        index :: &pending.pop() ?? break
+        if seen.get(index) != None -> next
+        seen[index] = true
+        loop effect_name in program.functions[index].effects.direct -> &required.push(effect_name)
+        loop edge in program.functions[index].effects.call_edges {
+            if by_key.get(edge) == .Val(callee) -> &pending.push(callee)
+        }
+    }
+    required
+}
+
 // EffectBudget.rs `project_application_effects` plus CmdCompile.rs
 // `merge_invocation_authority`.
 fn jet_cli_application_authority(result: JetDriverCompileResult, invocation: JetCLIInvocationAuthority?) -> JetCLIAuthority Never! {
     required := [String]{}
     if result.mir == .Val(program) {
-        if result.entry_function == .Val(entry) {
-            loop function in program.functions {
-                if function.id == entry -> required = function.effects.solved
-            }
-        }
+        if result.entry_function == .Val(entry) -> required = jet_cli_entry_required_effects(program, entry)
     }
     authority := JetCLIAuthority{required: jet_cli_sorted_set(required), granted: jet_cli_sorted_set(JET_CLI_AMBIENT_BASIC_EFFECTS), denied: [String]{}, authority: JET_CLI_APPLICATION_DEFAULT}
     policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}

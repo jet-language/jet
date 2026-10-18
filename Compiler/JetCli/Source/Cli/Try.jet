@@ -40,7 +40,8 @@ impl JetCLIReadError -> JetCLITryError { return JetCLITryError.Read{error: self}
 fn jet_cli_try_error_output(error: JetCLITryError) -> JetDriverVerbOutput Never! {
     if error == {
         .Read(problem) -> jet_cli_try_fail(problem.message)
-        .Output(output) -> output
+        // copy: `output` is a payload of read parameter `error`, which keeps the original; the returned value owns this one
+        .Output(output) -> output.copy()
     }
 }
 
@@ -95,6 +96,8 @@ fn jet_cli_try_absolute(raw: String) -> String JetCLIReadError! {
     Ok("{cwd}/{raw}")
 }
 fn jet_cli_try_resolve(plan_path: String, raw: String) -> String Never! {
+    // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if raw.starts_with("/") -> return raw.copy()
     "{jet_cli_parent(plan_path) ?? "."}/{raw}"
 }
@@ -252,7 +255,7 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
             index := JetCLISemIndex?{None}
             if disk && checked.complete {
                 if checked.product == {
-                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})) }
+                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile)) }
                     .CheckedCompilerValue(_) -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query returned an unrequested compiler value")}) }
                     .Failed -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query completed without its requested checked product")}) }
                 }

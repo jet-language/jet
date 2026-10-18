@@ -38,7 +38,8 @@ fn ofxi_leaf() -> LIRFunction Never! {
 }
 
 fn ofxi_check(before: LIRModule, caller_body: String) -> Bool Never! {
-    after :: lir_inline_module(before)
+    // copy: the expected text and the input lint below read `before`.
+    after :: lir_inline_module(before.copy())
     header :: lir_print_module(LIRModule{signatures: before.signatures, functions: [LIRFunction]{}, data: before.data, debug: before.debug})
     expected := "{header}{caller_body}\n"
     loop (index, function) in before.functions {
@@ -212,7 +213,8 @@ fn ofxi_limit(size: Int, calls: Int, expected_sites: Int) -> Bool Never! {
     loop _ in 0..<size -> ofxi_call(&leaf, None, 1, LIRCallee.Runtime{symbol: "effect"}, [LIRValueID]{})
     lir_builder_seal(&leaf, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
     before :: ofxi_module([LIRFunction]{lir_builder_finish(b), lir_builder_finish(leaf)})
-    after :: lir_inline_module(before)
+    // copy: `before` is printed and linted below.
+    after :: lir_inline_module(before.copy())
     print("=== {before.functions[0].name} before ===\n{lir_print_module(before)}=== {before.functions[0].name} after ===\n{lir_print_module(after)}")
     passed := true
     loop issue in lir_lint_module(before) {
@@ -256,6 +258,70 @@ fn ofxi_alias_refusal(different_drop: Bool) -> Bool Never! {
     ofxi_check(ofxi_module([LIRFunction]{lir_builder_finish(b), lir_builder_finish(leaf)}), expected)
 }
 
+// Bottom-up order: f0 -> f1 (a wrapper) -> f2 (the leaf). f1 is visited
+// first and absorbs f2, so f0 inlines f1's final body and keeps no call;
+// the one-level inliner left `call f2` in f0. The leaf stays as it was.
+fn ofxi_chain_module() -> LIRModule Never! {
+    b := ofxi_builder(0, "chain-caller", 0)
+    x :: lir_builder_word(&b)
+    y :: lir_builder_word(&b)
+    ofxi_call(&b, Val(y), 0, ofxi_function(1), [LIRValueID]{x})
+    caller :: ofx_finish(&b, [LIRValueID]{x}, y)
+    w := ofxi_builder(1, "chain-wrapper", 0)
+    a :: lir_builder_word(&w)
+    r :: lir_builder_word(&w)
+    ofxi_call(&w, Val(r), 0, ofxi_function(2), [LIRValueID]{a})
+    wrapper :: ofx_finish(&w, [LIRValueID]{a}, r)
+    leaf := ofxi_leaf()
+    leaf.id = LIRFunctionID{value: 2}
+    ofxi_module([LIRFunction]{caller, wrapper, leaf})
+}
+
+fn ofxi_direct_calls(function: LIRFunction) -> Int Never! {
+    count := 0
+    loop block in function.blocks {
+        loop inst in block.insts {
+            if inst == .Call(_, _, callee, _) {
+                if callee == .Function(_) -> count += 1
+            }
+        }
+    }
+    count
+}
+
+fn ofxi_chain(optimized: Bool) -> Bool Never! {
+    before :: ofxi_chain_module()
+    // copy: the leaf check below compares against `before`.
+    after :: if optimized -> lir_optimize_module(before.copy(), 1) else -> lir_inline_module(before.copy())
+    label :: if optimized -> "chain-o1" else -> "chain-inline"
+    print("=== {label} after ===\n{lir_print_module(after)}")
+    passed := true
+    loop issue in lir_lint_module(after) {
+        print("FAIL {label} output lint f{issue.function} b{issue.block}: {issue.message}")
+        passed = false
+    }
+    if ofxi_direct_calls(after.functions[0]) != 0 || ofxi_direct_calls(after.functions[1]) != 0 {
+        print("FAIL {label}: a wrapper call survived")
+        passed = false
+    }
+    leaf_text :: lir_print_module(LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{after.functions[2]}, data: [LIRData]{}, debug: before.debug})
+    if leaf_text != lir_print_module(LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{before.functions[2]}, data: [LIRData]{}, debug: before.debug}) {
+        print("FAIL {label}: the leaf changed")
+        passed = false
+    }
+    if optimized {
+        // O1 folds the whole chain to the leaf's own arithmetic.
+        expected :: "fn f0 chain-caller: s0\n  b0(v0: i64):\n    v1: i64 = const 1\n    v2: i64 = add v0, v1\n    ret v2\n"
+        caller_text :: lir_print_module(LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{after.functions[0]}, data: [LIRData]{}, debug: before.debug})
+        if caller_text != expected {
+            print("FAIL {label} expected:\n{expected}")
+            passed = false
+        }
+    }
+    if passed -> print("PASS {label}")
+    passed
+}
+
 fn opt_fixtures_inline() -> Bool Never! {
     passed := true
     if !ofxi_leaf_case(false) -> passed = false
@@ -275,5 +341,7 @@ fn opt_fixtures_inline() -> Bool Never! {
     if !ofxi_limit(0, 2, 2) -> passed = false
     if !ofxi_alias_refusal(true) -> passed = false
     if !ofxi_alias_refusal(false) -> passed = false
+    if !ofxi_chain(false) -> passed = false
+    if !ofxi_chain(true) -> passed = false
     passed
 }

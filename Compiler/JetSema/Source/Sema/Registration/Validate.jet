@@ -1,0 +1,161 @@
+// D-VALIDATE1 (Rust `CheckerValidate.rs` `process_validate_blocks`): a
+// struct's `validate { … }` block becomes, before registration, the ordinary
+// method `impl T { fn validate(value: T) -> T [FieldError]! }`. Every rule is
+// `check(condition, at: field, "message")`; the method collects one
+// `FieldError{path: "field", reason: message}` per failing rule and returns
+// them all, or the value when every rule holds. The method is `pure`, so the
+// ordinary purity check confines conditions and messages to pure calls. The
+// generated decode of a struct with a block returns `T.validate(decoded)`
+// (sema_serde_items_struct_decode_body).
+use jet_foundation.[
+    Diagnostic,
+    Expr,
+    Func,
+    ImplDef,
+    Item,
+    NamedType,
+    Param,
+    Span,
+    Stmt,
+    StructDef,
+    Type,
+    ast_func,
+    ast_visit_expr,
+]
+
+// The rule statement's name (Syntax `VALIDATE_CHECK_FN`).
+SEMA_VALIDATE_CHECK :: "check"
+SEMA_VALIDATE_ERRORS :: "__errors"
+SEMA_VALIDATE_VALUE :: "value"
+
+struct SemaValidateRule {
+    cond: Expr
+    field: String
+    message: Expr
+}
+
+// Rust `process_validate_blocks`: one generated impl per struct with a
+// non-empty block, after the written items. A block with a malformed rule
+// reports it and generates nothing.
+fn sema_validate_blocks(items: &[Item], diagnostics: &[Diagnostic]) {
+    generated := [Item]{}
+    loop index in 0..<items.len() {
+        if items[index] == .Struct(definition) {
+            if definition.validate_block.len() == 0 -> next
+            implementation :: sema_validate_impl(definition, &diagnostics) ?? next
+            &generated.push(Item.Impl{value: implementation})
+        }
+    }
+    loop item in generated -> &items.push(item)
+}
+
+// Rust `synthesize_validate_impl`.
+fn sema_validate_impl(definition: StructDef, diagnostics: &[Diagnostic]) -> ImplDef? {
+    fields := [String:Bool]{}
+    loop field in definition.fields -> fields[field.name] = true
+    rules := [SemaValidateRule]{}
+    valid := true
+    loop statement in definition.validate_block {
+        if sema_validate_rule(statement, fields, &diagnostics) == .Val(rule) {
+            &rules.push(rule)
+        } else {
+            valid = false
+        }
+    }
+    if !valid -> return None
+    Val(sema_validate_build(definition, rules, definition.validate_span ?? definition.name_span))
+}
+
+// Rust `extract_check_rule`: `check(condition, at: field, message)` with a
+// bare sibling field after `at:`. A malformed rule reports its one problem
+// and gives None.
+fn sema_validate_rule(statement: Stmt, fields: [String:Bool], diagnostics: &[Diagnostic]) -> SemaValidateRule? {
+    if statement == .Expr(expression) {
+        if expression == .Call(call) {
+            if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return sema_validate_refuse(sema_validate_e0353(call.name_span), &diagnostics)
+            if call.args[0].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[0].span), &diagnostics)
+            at_label :: call.args[1].label ?? return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
+            if at_label.name != "at" -> return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
+            if call.args[2].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[2].span), &diagnostics)
+            if call.args[1].expr == .Ident(name, name_span) {
+                if fields.get(name) == None -> return sema_validate_refuse(sema_validate_e0354(name, name_span), &diagnostics)
+                return Val(SemaValidateRule{cond: call.args[0].expr.copy(), field: name.copy(), message: call.args[2].expr.copy()})
+            }
+            return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
+        }
+    }
+    sema_validate_refuse(sema_validate_e0353(sema_user_text_stmt_span(statement)), &diagnostics)
+}
+
+fn sema_validate_refuse(diagnostic: ^Diagnostic, diagnostics: &[Diagnostic]) -> SemaValidateRule? Never! {
+    &diagnostics.push(diagnostic)
+    None
+}
+
+fn sema_validate_e0353(span: Span) -> Diagnostic Never! {
+    sema_error("E0353", span, "a `validate` rule must be `check(condition, at: field, \"message\")`", "D-VALIDATE1: every statement in a `validate {{ … }}` block is a `check` call — the first argument is the rule's condition, `at:` names the field the failure is reported against, and the last argument is the message text", "write: check(<condition>, at: <field>, \"<message>\")")
+}
+
+fn sema_validate_e0354(name: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0354", span, "`at: {name}` doesn't name a field on this struct", "D-VALIDATE1: `check(…, at: field, …)`'s `at:` argument must be a bare field name declared on the same struct — it's how the reported `FieldError.path` is chosen", "fix the field name, or add the field to the struct")
+}
+
+// Rust `build_validate_impl`. A rule reads its struct's fields by their bare
+// names (D-FIELDPOL1, Rust `rewrite_field_refs` onto `value`): each field a
+// rule names is bound to `value.<field>` in the rules' own block, so the
+// rules and messages read exactly those fields and `value` stays the
+// parameter after the block.
+fn sema_validate_build(definition: StructDef, rules: [SemaValidateRule], span: Span) -> ImplDef {
+    fields := [String:Bool]{}
+    loop field in definition.fields -> fields[field.name] = true
+    referenced :: sema_validate_referenced_fields(rules, fields)
+    checks := [Stmt]{}
+    loop name in referenced -> &checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
+    loop rule in rules {
+        failure :: sema_serde_items_field_error_value(sema_serde_items_string(rule.field, span), rule.message.copy(), span)
+        push :: Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "push", [Expr]{failure}, span)}
+        &checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond.copy(), span), [Stmt]{push}, span))
+    }
+    body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span}, true, span)}
+    &body.push(sema_serde_items_if(Expr.Bool{value: true, span: span}, checks, span))
+    has_errors :: sema_serde_items_not(sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "is_empty", [Expr]{}, span), span)
+    &body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span}, span)}, span))
+    &body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span}, span))
+    target :: Type.Named{name: definition.name}
+    function := ast_func("validate", span, span)
+    function.is_pub = definition.is_pub
+    function.is_package_pub = definition.is_package_pub
+    function.params = [Param]{sema_serde_items_param(SEMA_VALIDATE_VALUE, target.copy(), span)}
+    function.return_type = Val(sema_data_result(target, sema_data_decode_error()))
+    function.return_type_span = Val(span)
+    // S60/E3401: the purity check covers the whole synthesized rule body.
+    function.is_pure = true
+    function.body = body
+    ImplDef{span: span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: [Func]{function}, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}
+}
+
+// The struct fields the rules' conditions and messages name, in order of
+// first reference.
+struct SemaValidateNames {
+    fields: [String:Bool]
+    found: [String]
+}
+
+fn sema_validate_referenced_fields(rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
+    state :: shared SemaValidateNames{fields: fields, found: [String]{}}
+    // Each visit is written at its call, where it takes the visitor's effect row.
+    loop rule in rules {
+        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(state, expression))
+        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(state, expression))
+    }
+    permit :: state.guard_read()
+    permit.value.found.copy()
+}
+
+fn sema_validate_note_name(state: Shared<SemaValidateNames>, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+    if expression == .Ident(name, _) {
+        permit :: state.guard_edit()
+        if permit.value.fields.get(name) == None || permit.value.found.contains(name) -> return
+        &permit.value.found.push(name.copy())
+    }
+}

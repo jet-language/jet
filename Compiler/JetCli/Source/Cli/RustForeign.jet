@@ -132,6 +132,8 @@ fn jet_cli_rust_foreign_link_identity(program: MIRProgram) -[FS, Env]> String Je
             &artifacts.push("{artifact.path.len()}:{artifact.path}:{digest}")
         }
         &artifacts.sort()
+        // copy: `unit.dependency_dirs` stays in the iterated collection (`unit` is a view of its
+        // element; no move out of an element, E0225) and the binding `dirs` owns its own.
         dirs := unit.dependency_dirs.copy()
         &dirs.sort()
         &rows.push("{unit.id.value}:{unit.crate_spec.len()}:{unit.crate_spec}:{unit.cache_identity}:{artifacts.join("|")}:{dirs.join("|")}")
@@ -487,6 +489,8 @@ fn jet_cli_rust_foreign_build(plan: JetDriverRustForeignPlan, cache: String, sou
         jet_cli_rust_foreign_trace_workspace(source) ?? return Err(err)
     } else -> {
         path :: if temporary == {
+            // copy: `directory` is a payload view of `temporary`, which keeps the retained
+            // workspace alive until the build ends; `path` owns its own text.
             .Val(directory) -> directory.path.copy()
             .None -> { return Err(jet_cli_rust_foreign_io("private FFI workspace was not retained")) }
         }

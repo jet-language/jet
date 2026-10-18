@@ -88,12 +88,13 @@ fn sema_value_method_tuple_struct(result: Type) -> String Never! {
 
 fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value: TExpr, typed: [TExpr], result: Type, line: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExprKind {
     if row.lowering == {
-        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: typed}
+        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.BuiltinMethod owns this one
+        .Builtin(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation.copy(), args: typed}
         .StringSlice -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.Slice{line: line}, args: typed}
         .StringRangeSlice -> {
             zero_start := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             zero_end := sema_tir_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-            TExprKind.Slice{base: receiver_value, start: zero_start, end: zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
+            TExprKind.Slice{base: receiver_value, start: ^zero_start, end: ^zero_end, range: Val(typed[0]), location: sema_expression_panic_location(environment, program, scopes, span)}
         }
         .StringSplitOnce -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringSplitOnce{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
         .StringCutLast -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.StringCutLast{tuple_struct: sema_value_method_tuple_struct(result)}, args: typed}
@@ -140,7 +141,7 @@ fn sema_value_method_option_map(receiver: Expr, receiver_value: TExpr, inner: Ty
 }
 
 fn sema_value_method_source_arg(value: TExpr) -> TCallArg Never! {
-    TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
 // D-FAIL-CARRIER1=A: preserve the old seed TIR method_calls.rs:4287-4288:

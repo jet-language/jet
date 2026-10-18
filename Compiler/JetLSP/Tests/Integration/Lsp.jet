@@ -1,0 +1,440 @@
+// Rust: tests/lsp.rs:1
+// M13 LSP integration suite: scripted JSON transcripts and latency bench.
+use jet_foundation.Dyn.[Dyn]
+use jet_foundation.JSON.[json_get, json_str, parse_json]
+use std.[fs, env, thread]
+use std.process.[Command, Stdio]
+use std.io.[Read, Write]
+use std.sync.[Arc, Mutex, MutexGuard, OnceLock]
+use common.[Scratch]
+// GATE #4494: actual native child-process pipes, mutexes, threads and filesystem.
+
+// Rust: tests/lsp.rs:22
+fn jet_bin() -> OSPath { OSPath.from(env.binary_path("jet")) }
+// Rust: tests/lsp.rs:26
+fn lsp_process_lock() -> Mutex<()> {
+    LOCK :: OnceLock<Mutex<()>>.new()
+    LOCK.get_or_init(() -> Mutex.new(_))
+}
+// Rust: tests/lsp.rs:31
+fn lock_unpoisoned<T>(mutex: Mutex<T>) -> MutexGuard<T> {
+    mutex.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+}
+// Rust: tests/lsp.rs:37
+fn lock_lsp_process() -> MutexGuard<()> { lock_unpoisoned(lsp_process_lock()) }
+// Rust: tests/lsp.rs:53
+fn send_msg(stdin: &Write, json: &String) {
+    stdin.write_all("Content-Length: {json.len()}{Char{13}}\n{Char{13}}\n{json}".as_bytes()).unwrap()
+    stdin.flush().unwrap()
+}
+// Rust: tests/lsp.rs:58
+fn read_msg(stdout: Read) -> String {
+    header := String.new()
+    buf := [0u8]
+    loop {
+        stdout.read_exact(&buf).unwrap()
+        header.push(Char{buf[0]})
+        if header.ends_with("{Char{13}}\n{Char{13}}\n") -> break
+    }
+    len :: header.lines().find_map(line -> line.strip_prefix("Content-Length:").map(n -> n.trim()))
+        .expect("Content-Length").parse<USize>().unwrap()
+    body := [U8].repeat(0, len)
+    stdout.read_exact(&body).unwrap()
+    String.from_utf8(^body).unwrap()
+}
+// Rust: tests/lsp.rs:79
+fn request_lsp(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> String {
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
+    loop {
+        body :: read_msg(stdout)
+        parsed :: parse_json(body).expect("valid LSP response")
+        if json_get(parsed, "id") == Dyn.Int(id) -> return ^body
+    }
+}
+// Rust: tests/lsp.rs:101
+// Keep every message preceding the matching response, preserving arrival order.
+fn request_lsp_collect(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> (Dyn, [Dyn]) {
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
+    before := [Dyn]()
+    loop {
+        parsed :: parse_json(read_msg(stdout)).expect("valid LSP message")
+        if json_get(parsed, "id") == Dyn.Int(id) -> return (_0: ^parsed, _1: ^before)
+        before.push(^parsed)
+    }
+}
+// Rust: tests/lsp.rs:123
+fn published_diagnostics_for(messages: [Dyn], uri: String) -> [&Dyn] {
+    messages.iter().filter(message -> json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics")
+        .filter_map(message -> json_get(message, "params"))
+        .filter(params -> json_get(params, "uri").and_then(json_str) == uri).collect()
+}
+// Rust: tests/lsp.rs:134
+fn error_count(published: Dyn) -> USize {
+    json_array_field(published, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "severity") == Dyn.Int(1)).count()
+}
+// Rust: tests/lsp.rs:141
+fn json_string(s: String) -> String {
+    out := String.from("\"")
+    loop c in s.chars() {
+        if c == {
+            '"' -> out.push_str("\\\"")
+            '\\' -> out.push_str("\\\\")
+            '\n' -> out.push_str("\\n")
+            Char{13} -> out.push_str("\\r")
+            '\t' -> out.push_str("\\t")
+            else -> out.push(c)
+        }
+    }
+    out.push('"')
+    ^out
+}
+// Rust: tests/lsp.rs:157
+fn json_object_field(value: Dyn, key: String) -> Dyn {
+    json_get(value, key).unwrap_or_else(() -> panic("missing JSON field `{key}`"))
+}
+// Rust: tests/lsp.rs:161
+fn json_array(value: Dyn, context: String) -> [Dyn] {
+    if value == {
+        .Array(values) -> values
+        else -> { panic("{context} is not an array: {value}") }
+    }
+}
+// Rust: tests/lsp.rs:168
+fn json_array_field(value: Dyn, key: String) -> [Dyn] { json_array(json_object_field(value, key), "JSON field `{key}`") }
+// Rust: tests/lsp.rs:175
+fn json_values_equal(left: Dyn, right: Dyn) -> Bool {
+    if {
+        left == Dyn.Null && right == Dyn.Null -> true
+        left == Dyn.Bool(left) && right == Dyn.Bool(right) -> left == right
+        left == Dyn.Int(left) && right == Dyn.Int(right) -> left == right
+        left == Dyn.Float(left) && right == Dyn.Float(right) -> left == right
+        left == Dyn.Number(left) && right == Dyn.Number(right) -> left == right
+        left == Dyn.Text(left).bit_or(Dyn.TypedText(left)) && right == Dyn.Text(right).bit_or(Dyn.TypedText(right)) -> left == right
+        left == Dyn.Bytes(left) && right == Dyn.Bytes(right) -> left == right
+        left == Dyn.Array(left) && right == Dyn.Array(right) -> left.len() == right.len() && left.iter().zip(right).all((left, right) -> json_values_equal(left, right))
+        left == Dyn.Object(left) && right == Dyn.Object(right) -> left.len() == right.len() && left.iter().all((key, left) -> right.iter().find_map((right_key, right) -> if right_key == key -> right else -> none).is_some_and(right -> json_values_equal(left, right)))
+        else -> false
+    }
+}
+// Rust: tests/lsp.rs:206
+fn assert_json_values_equal(label: &String, actual: &Dyn, expected: &Dyn) {
+    assert(json_values_equal(actual, expected), "{label}: actual={actual}, expected={expected}")
+}
+// Rust: tests/lsp.rs:214
+struct DecodedSemanticToken { text: String, token_type: U32, modifiers: U32 }
+// Rust: tests/lsp.rs:220
+fn semantic_data_from_response(resp: String) -> [U32] {
+    data_key :: "\"data\""
+    start :: resp.find(data_key).expect("semantic token data")
+    after_key := resp[start + data_key.len()..<resp.len()] // #4303
+    array_start :: after_key.find('[').expect("data array")
+    after_array := after_key[array_start + 1..<after_key.len()] // #4303
+    array_end :: after_array.find(']').expect("data array end")
+    after_array[0..<array_end].split(',').filter_map(n -> n.trim().parse<U32>().ok()).collect()
+}
+// Rust: tests/lsp.rs:233
+fn decode_semantic_tokens(src: String, resp: String) -> [DecodedSemanticToken] {
+    data :: semantic_data_from_response(resp)
+    lines :: src.lines().collect()
+    out := [DecodedSemanticToken]()
+    line := 0u32
+    start := 0u32
+    loop chunk in data.chunks_exact(5) {
+        line += chunk[0]
+        start = if chunk[0] == 0 -> start + chunk[1] else -> chunk[1]
+        len :: chunk[2]
+        text :: lines.get(USize{line}).and_then(line_text -> {
+            s :: USize{start}
+            e :: s + USize{len}
+            line_text.get(s..e)
+        }).unwrap_or("").to_string()
+        out.push(DecodedSemanticToken{text: ^text, token_type: chunk[3], modifiers: chunk[4]})
+    }
+    ^out
+}
+// Rust: tests/lsp.rs:266
+fn assert_semantic_token(tokens: &[DecodedSemanticToken], text: &String, token_type: U32, modifier: U32) {
+    assert(tokens.iter().any(t -> t.text == text && t.token_type == token_type && (t.modifiers.bit_and(modifier)) != 0), "missing semantic token `{text}` type {token_type} modifier {modifier}; got {tokens}")
+}
+// Rust: tests/lsp.rs:284
+LSP_CAPABILITY_COVERAGE :: [
+    (_0: "textDocumentSync", _1: "lsp_incremental_sync_range_edit_updates_document"),
+    (_0: "documentFormattingProvider", _1: "lsp_formatting_and_range_formatting_return_edits"),
+    (_0: "documentRangeFormattingProvider", _1: "lsp_formatting_and_range_formatting_return_edits"),
+    (_0: "documentOnTypeFormattingProvider", _1: "lsp_on_type_formatting_returns_brace_edits"),
+    (_0: "codeActionProvider", _1: "lsp_teaching_autocorrect_let_to_val"),
+    (_0: "completionProvider", _1: "lsp_completion_returns_items"),
+    (_0: "signatureHelpProvider", _1: "lsp_signature_help_returns_active_parameter"),
+    (_0: "documentSymbolProvider", _1: "lsp_document_symbol_returns_checked_outline"),
+    (_0: "workspaceSymbolProvider", _1: "lsp_wave2_navigation_features"),
+    (_0: "foldingRangeProvider", _1: "lsp_wave2_navigation_features"),
+    (_0: "documentHighlightProvider", _1: "lsp_wave2_navigation_features"),
+    (_0: "selectionRangeProvider", _1: "lsp_wave2_navigation_features"),
+    (_0: "documentLinkProvider", _1: "lsp_document_links_and_code_lenses"),
+    (_0: "codeLensProvider", _1: "lsp_document_links_and_code_lenses"),
+    (_0: "hoverProvider", _1: "lsp_hover_returns_signature"),
+    (_0: "definitionProvider", _1: "lsp_definition_returns_location"),
+    (_0: "referencesProvider", _1: "lsp_references_finds_all_uses"),
+    (_0: "renameProvider", _1: "lsp_rename_produces_workspace_edit"),
+    (_0: "renameProvider.prepare", _1: "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy"),
+    (_0: "semanticTokensProvider", _1: "lsp_semantic_tokens_returns_data"),
+    (_0: "semanticTokensProvider.full", _1: "lsp_semantic_tokens_returns_data"),
+    (_0: "semanticTokensProvider.range", _1: "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy"),
+    (_0: "semanticTokensProvider.delta", _1: "lsp_semantic_tokens_delta_returns_full_fallback"),
+    (_0: "inlayHintProvider", _1: "lsp_inlay_hints_returns_type_labels"),
+    (_0: "callHierarchyProvider", _1: "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy"),
+    (_0: "typeHierarchyProvider", _1: "lsp_type_hierarchy_trait_impls"),
+    (_0: "workspace", _1: "lsp_workspace_symbols_follow_all_roots_and_folder_changes"),
+    (_0: "executeCommandProvider", _1: "lsp_execute_command_impact_returns_report"),
+    (_0: "resources", _1: "lsp_mcp_environment_resources_are_read_only")
+]
+// Rust: tests/lsp.rs:355
+fn advertised_capabilities(init: String) -> [String] {
+    cap_start :: init.find("\"capabilities\"")
+    if cap_start == none -> return []
+    open_rel :: init[cap_start.unwrap()..<init.len()].find('{')
+    if open_rel == none -> return []
+    out := [String]()
+    depth := 0usize
+    in_string := false
+    escape := false
+    string_start := 0usize
+    last_string := String?{none}
+    bytes :: init.as_bytes()
+    i := cap_start.unwrap() + open_rel.unwrap()
+    loop i < bytes.len() {
+        b :: bytes[i]
+        if in_string {
+            if escape -> escape = false
+            else if b == (U8{92}) -> escape = true
+            else if b == (U8{34}) {
+                last_string = init[string_start..i].to_string()
+                in_string = false
+            }
+            i += 1
+            next
+        }
+        if b == {
+            34 -> { in_string = true; string_start = i + 1 }
+            123 -> depth += 1
+            125 -> { depth = depth.saturating_sub(1); if depth == 0 -> break }
+            58 -> if depth == 1 { key :: last_string.take(); if key != none -> out.push(^key.unwrap()) } else -> {}
+        }
+        i += 1
+    }
+    if init.contains("\"renameProvider\"") && init.contains("\"prepareProvider\": true") -> out.push("renameProvider.prepare")
+    if init.contains("\"semanticTokensProvider\"") {
+        if init.contains("\"full\"") -> out.push("semanticTokensProvider.full")
+        if init.contains("\"range\": true") -> out.push("semanticTokensProvider.range")
+        if init.contains("\"delta\": true") -> out.push("semanticTokensProvider.delta")
+    }
+    out.sort()
+    out.dedup()
+    ^out
+}
+
+// Rust: tests/lsp.rs:432
+// Minimal transcript JSON extractor; all byte offsets and original malformed-input behavior retained.
+module transcript_parser {
+    // Rust: tests/lsp.rs:434
+    struct Step { send_raw: String?, open_uri: String?, expect_contains: [String], expect_notification: Bool }
+    // Rust: tests/lsp.rs:445
+    struct Transcript { description: String, source: String, steps: [Step] }
+    // Rust: tests/lsp.rs:453
+    fn unescape(s: String) -> String {
+        out := String.with_capacity(s.len())
+        chars := s.chars()
+        loop {
+            c :: chars.next()
+            if c == none -> break
+            if c.unwrap() != '\\' { out.push(c.unwrap()); next }
+            if chars.next() == {
+                some('"') -> out.push('"')
+                some('\\') -> out.push('\\')
+                some('/') -> out.push('/')
+                some('n') -> out.push('\n')
+                some('r') -> out.push(Char{13})
+                some('t') -> out.push('\t')
+                some('b') -> out.push(Char{8})
+                some('f') -> out.push(Char{12})
+                some('u') -> {
+                    hex :: chars.by_ref().take(4).collect<String>()
+                    if U32.from_str_radix(hex, 16) == {
+                        .Ok(n) -> { c :: Char.from_u32(n); if c != none -> out.push(c.unwrap()) }
+                        .Err(_) -> {}
+                    }
+                }
+                some(other) -> { out.push('\\'); out.push(other) }
+                none -> break
+            }
+        }
+        ^out
+    }
+    // Rust: tests/lsp.rs:489
+    fn extract_string_field(json: String, key: String) -> String? {
+        needle :: "\"{key}\""
+        pos :: json.find(needle)
+        after := json[pos + needle.len()..<json.len()].trim_start() // #4303
+        after := after.strip_prefix(':')?.trim_start() // #4303
+        after := after.strip_prefix('"')? // #4303
+        end := 0usize
+        bytes :: after.as_bytes()
+        loop {
+            if end >= bytes.len() -> return none
+            if bytes[end] == (U8{92}) { end += 2; next }
+            if bytes[end] == (U8{34}) -> break
+            end += 1
+        }
+        unescape(after[0..<end])
+    }
+    // Rust: tests/lsp.rs:515
+    fn skip_ws(s: String) -> String { s.trim_start_matches(c -> c.is_ascii_whitespace()) }
+    // Rust: tests/lsp.rs:520
+    fn find_matching_close(s: String, open: Char, close: Char) -> USize? {
+        depth := 0usize
+        in_str := false
+        bytes :: s.as_bytes()
+        i := 0usize
+        loop i < bytes.len() {
+            b :: bytes[i]
+            if in_str {
+                if b == (U8{92}) { i += 2; next }
+                if b == (U8{34}) -> in_str = false
+            } else {
+                c :: s[i..<s.len()].chars().next().unwrap()
+                if c == '"' -> in_str = true
+                else if c == open -> depth += 1
+                else if c == close { depth -= 1; if depth == 0 -> { return i } }
+            }
+            i += c_len(bytes, i)
+        }
+        none
+    }
+    // Rust: tests/lsp.rs:553
+    fn c_len(bytes: [U8], i: USize) -> USize {
+        b :: bytes[i]
+        if b < 0x80 -> 1 else if b < 0xE0 -> 2 else if b < 0xF0 -> 3 else -> 4
+    }
+    // Rust: tests/lsp.rs:567
+    fn extract_string_array(s: String) -> [String] {
+        s := skip_ws(s) // #4303
+        if !s.starts_with('[') -> return []
+        close :: find_matching_close(s, '[', ']')
+        if close == none -> return []
+        inner := s[1..close.unwrap()] // #4303
+        result := [String]()
+        remaining := skip_ws(inner) // #4303
+        loop !remaining.is_empty() {
+            remaining = skip_ws(remaining)
+            if remaining.starts_with(']') || remaining.is_empty() -> break
+            if remaining.starts_with('"') {
+                rest := remaining[1..<remaining.len()] // #4303
+                end := 0usize
+                bytes :: rest.as_bytes()
+                loop {
+                    if end >= bytes.len() -> break
+                    if bytes[end] == (U8{92}) { end += 2; next }
+                    if bytes[end] == (U8{34}) -> break
+                    end += 1
+                }
+                result.push(unescape(rest[0..<end]))
+                remaining = skip_ws(rest[end + 1..<rest.len()])
+            } else { break }
+            remaining = skip_ws(remaining.trim_start_matches(','))
+        }
+        ^result
+    }
+    // Rust: tests/lsp.rs:612
+    fn extract_object(s: String) -> (String, String)? {
+        s := skip_ws(s) // #4303
+        if !s.starts_with('{') -> return none
+        close :: find_matching_close(s, '{', '}')
+        (_0: s[0..<close + 1].to_string(), _1: s[close + 1..<s.len()])
+    }
+    // Rust: tests/lsp.rs:621
+    fn parse(content: String) -> Transcript {
+        description :: extract_string_field(content, "description").unwrap_or_default()
+        source :: extract_string_field(content, "source").expect("transcript must have 'source'")
+        steps_needle :: "\"steps\""
+        steps_pos :: content.find(steps_needle).expect("transcript must have 'steps'")
+        after_steps := content[steps_pos + steps_needle.len()..<content.len()].trim_start() // #4303
+        after_colon := after_steps.strip_prefix(':').unwrap().trim_start() // #4303
+        close_bracket :: find_matching_close(after_colon, '[', ']').expect("steps array must close")
+        steps_inner := after_colon[1..close_bracket] // #4303
+        steps := [Step]()
+        remaining := skip_ws(steps_inner) // #4303
+        loop !remaining.is_empty() {
+            remaining = skip_ws(remaining)
+            if remaining.is_empty() -> break
+            extracted :: extract_object(remaining)
+            if extracted == none -> break
+            (step_obj, rest) :: extracted.unwrap()
+            remaining = skip_ws(rest.trim_start_matches(','))
+            steps.push(parse_step(step_obj))
+        }
+        Transcript{description: ^description, source: ^source, steps: ^steps}
+    }
+    // Rust: tests/lsp.rs:664
+    fn parse_step(obj: String) -> Step {
+        send_needle :: "\"send\""
+        open_needle :: "\"open\""
+        ec_needle :: "\"expect_contains\""
+        en_needle :: "\"expect_notification\""
+        send_pos :: obj.find(send_needle)
+        send_raw :: if send_pos != none {
+            after := skip_ws(obj[send_pos.unwrap() + send_needle.len()..<obj.len()]) // #4303
+            after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+            extract_object(after).map((o, _) -> ^o)
+        } else -> none
+        open_uri :: if send_raw == none {
+            open_pos :: obj.find(open_needle)
+            if open_pos != none {
+                after := skip_ws(obj[open_pos.unwrap() + open_needle.len()..<obj.len()]) // #4303
+                after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+                extract_object(after).and_then((open_obj, _) -> extract_string_field(open_obj, "uri"))
+            } else { none }
+        } else -> none
+        ec_pos :: obj.find(ec_needle)
+        expect_contains :: if ec_pos != none {
+            after := skip_ws(obj[ec_pos.unwrap() + ec_needle.len()..<obj.len()]) // #4303
+            after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+            extract_string_array(after)
+        } else -> []
+        en_pos :: obj.find(en_needle)
+        expect_notification :: if en_pos != none {
+            after := skip_ws(obj[en_pos.unwrap() + en_needle.len()..<obj.len()]) // #4303
+            after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+            !after.starts_with("null")
+        } else -> false
+        Step{send_raw: ^send_raw, open_uri: ^open_uri, expect_contains: ^expect_contains, expect_notification: expect_notification}
+    }
+}
+// Rust: tests/lsp.rs:722
+fn run_json_transcript_file(jet: &OSPath, path: &OSPath) {
+    _guard :: lock_lsp_process()
+    content :: fs.read_to_string(path).unwrap_or_else(e -> panic("read {path}: {e}"))
+    transcript :: transcript_parser.parse(content)
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    loop step in transcript.steps {
+        if step.open_uri != none {
+            uri :: step.open_uri.unwrap()
+            open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(transcript.source)}}}}}}}"
+            send_msg(&stdin, open)
+            if step.expect_notification {
+                notif :: read_msg(&stdout)
+                assert(notif.contains("publishDiagnostics"), "[{path.display()}] open step: expected publishDiagnostics, got: {notif}")
+                loop expect in step.expect_contains -> assert(notif.contains(expect.as_str()), "[{path.display()}] expected {expect} in notification, got:\n{notif}")
+            }
+        } else if step.send_raw != none {
+            send_msg(&stdin, step.send_raw.unwrap())
+            if !step.expect_contains.is_empty() {
+                resp :: read_msg(&stdout)
+                loop expect in step.expect_contains -> assert(resp.contains(expect.as_str()), "[{path.display()}] expected {expect} in response, got:\n{resp}")
+            }
+        }
+    }
+    drop(^stdin)
+    _ :: child.wait()
+}

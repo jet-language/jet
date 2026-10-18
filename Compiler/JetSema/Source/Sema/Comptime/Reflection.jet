@@ -639,9 +639,8 @@ fn sema_comptime_reflection_layout_field(facts: LayoutFacts, name: String) -> Fi
 }
 
 fn sema_comptime_reflection_layout_field_info(name: String, ty: Type, target: JetTargetLayout, guarantee: String, source: String, facts: FieldLayoutFacts?) -> TComptimeValue Never! {
-    field :: facts.copy()
-    offset :: if field == .Val(value) -> value.offset else -> None
-    size :: if field == .Val(value) -> value.size else -> None
+    offset :: if facts == .Val(value) -> value.offset else -> None
+    size :: if facts == .Val(value) -> value.size else -> None
     sema_comptime_reflection_struct("LayoutFieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "ty", value: TComptimeValue.String{value: type_name(ty)}},
@@ -944,7 +943,7 @@ fn sema_comptime_reflection_append_arithmetic_expr(expr: Expr, values: &[TCompti
             sema_comptime_reflection_append_arithmetic_expr(start, &values)
             sema_comptime_reflection_append_arithmetic_expr(end, &values)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(receiver, &values)
             loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
         }

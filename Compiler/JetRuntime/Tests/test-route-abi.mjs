@@ -94,4 +94,39 @@ const lifecycle = parseRuntimeExports("// runtime-init: 3\n#Export(c) fn jet_ini
 assert.equal(lifecycle.get("jet_init").lifecycle, "init 3");
 assert.equal(lifecycle.get("jet_fini").lifecycle, "fini 1");
 assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn jet_init() { }\n", "Source/Test.jet"), /exceeds 65535/);
+// Record Lists cross every route as handle buffers (Lower/Routes.jet
+// lower_record_list_element), whatever the provider's ownership. The census
+// below freezes the routes whose carriers hold a List of a schema record, so
+// a new Jet provider returning or reading one is reviewed against that
+// contract (a provider handing back inline rows surfaces as a pointer-sized
+// allocation in the first `entry.field` read), and keeps the native witness
+// that reads a field of `files.list_dir`'s result.
+{
+  const { readFileSync } = await import("node:fs");
+  const { dirname, join, resolve } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const routeText = readFileSync(join(root, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+  const schemas = new Set([...routeText.matchAll(/LowerRecordSchema\{jet_name: "([^"]+)"/g)].map((match) => match[1]));
+  const recordLists = new Set();
+  for (const [, symbol, carriers] of routeText.matchAll(/LowerRoute\{symbol: "([^"]+)", export: "[^"]+", native_lists: (?:true|false), (params: .*?, result: LowerRouteResult\..*?)\},\n/g)) {
+    for (const [, name] of carriers.matchAll(/List\{elem: LowerRouteCarrier\.Handle\{name: "([^"]+)"\}\}/g)) if (schemas.has(name)) recordLists.add(symbol);
+  }
+  // Seed (Rust) adapters always exchanged handle buffers; the Jet-owned rows
+  // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw, message_parts)
+  // build or read the same shape.
+  const reviewed = [
+    "jet_binary_pattern_match", "jet_dyn_at", "jet_dyn_bool", "jet_dyn_field", "jet_dyn_float", "jet_dyn_int", "jet_dyn_text",
+    "jet_email::envelope", "jet_email::envelope_parts", "jet_email::message_parts", "jet_log_record_emit_raw",
+    "jet_net_dns_srv", "jet_net_dns_srv_at_lookup", "jet_net_dns_srv_lookup",
+    "jet_ring_log_debug_fields", "jet_ring_log_error_fields", "jet_ring_log_info_fields", "jet_ring_log_warn_fields",
+    "jet_rt_codec_decode_bool", "jet_rt_codec_decode_char", "jet_rt_codec_decode_float", "jet_rt_codec_decode_i16", "jet_rt_codec_decode_i32",
+    "jet_rt_codec_decode_i64", "jet_rt_codec_decode_i8", "jet_rt_codec_decode_int", "jet_rt_codec_decode_string", "jet_rt_codec_decode_u16",
+    "jet_rt_codec_decode_u32", "jet_rt_codec_decode_u64", "jet_rt_codec_decode_u8", "jet_rt_codec_parse_json", "jet_rt_codec_parse_toml",
+    "jet_rt_codec_parse_yaml", "jet_rt_codec_under", "jet_std_fs_list_dir_raw", "jet_text_pattern_match",
+  ].filter((symbol) => routeText.includes(`LowerRoute{symbol: "${symbol}"`));
+  assert.deepEqual([...recordLists].sort(), reviewed.sort(), "a route carrying a List of schema records must be reviewed against the handle-buffer contract");
+  const fixture = readFileSync(join(root, "Compiler/JetBackend/Tests/Fixtures/Values.jet"), "utf8");
+  assert.match(fixture, /expect-requires-route qualified-dir-entries jet_std_fs_list_dir_raw/, "the native list_dir witness must read a DirEntry field");
+}
 console.log("runtime route ABI: CHECK OK");

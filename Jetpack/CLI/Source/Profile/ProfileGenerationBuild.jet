@@ -189,14 +189,14 @@ fn cli_build_package_generation_body(verification: &StoreVerification, cache: &W
     cli_write_synced(files.join(generation_dir, PACKAGE_PROFILE_META_FILE), metadata.bytes())
     owner :: cli_package_profile_owner(project_dir)
     if targets.len() > 0 {
-        prepared :: store_prepare_profile_generation_root(&verification, roots, owner, plan.name, generation, witness, targets, cli_now_secs())
-        store_commit_profile_generation_root(&verification, roots, prepared, cli_now_secs())
+        prepared :: store_prepare_profile_generation_root(&verification, roots, owner, plan.name, generation, witness, targets, cli_now_secs()) ?? return Err(CLIError.Store(err))
+        store_commit_profile_generation_root(&verification, roots, prepared, cli_now_secs()) ?? return Err(CLIError.Store(err))
     }
     cli_write_synced(files.join(generation_dir, PACKAGE_PROFILE_COMPLETE_FILE), "{witness}\n".bytes())
-    store_sync_store_directory(generation_dir)
-    store_sync_store_directory(generations)
+    store_sync_store_directory(generation_dir) ?? return Err(CLIError.Store(err))
+    store_sync_store_directory(generations) ?? return Err(CLIError.Store(err))
     stage.publish(final_generation_dir)
-    store_sync_store_directory(generations)
+    store_sync_store_directory(generations) ?? return Err(CLIError.Store(err))
     Ok(generation)
 }
 
@@ -435,7 +435,7 @@ fn cli_copy_package_projection(root: String, selected: [String: PackageOutputNod
             }
         }
     }
-    store_sync_store_directory(root)
+    store_sync_store_directory(root) ?? return Err(CLIError.Store(err))
 }
 
 fn cli_safe_projection_path(root: String, relative: String) -> String CLIError! {
@@ -473,7 +473,7 @@ fn cli_cleanup_package_generation_stages(directory: String) CLIError! -[FS]> {
         files.remove_all(entry.path)
         removed = true
     }
-    if removed -> store_sync_store_directory(directory)
+    if removed -> store_sync_store_directory(directory) ?? return Err(CLIError.Store(err))
 }
 
 fn cli_next_package_generation(state: String) -[FS]> Int CLIError! {
@@ -564,7 +564,7 @@ fn cli_read_package_generation_record(verification: &StoreVerification, state: S
     if actual_root_hash != root_hash -> return Err(CLIError.Other("profile generation root hash disagrees with its lock"))
     project_dir :: files.dirname(files.dirname(files.dirname(state)))
     if project_dir == "" -> return Err(CLIError.Other("profile generation state has no project root"))
-    store_validate_profile_generation_root(&verification, pkg_resolve_roots(), cli_package_profile_owner(project_dir), expected_profile, generation, marker, sorted_targets)
+    store_validate_profile_generation_root(&verification, pkg_resolve_roots(), cli_package_profile_owner(project_dir), expected_profile, generation, marker, sorted_targets) ?? return Err(CLIError.Store(err))
     Ok(PackageGenerationRecord{generation: generation, fingerprint: fingerprint, witness: marker, metadata: metadata})
 }
 
@@ -623,7 +623,7 @@ fn cli_activate_package_generation(verification: &StoreVerification, project_dir
     if cli_stat_optional(partial) != None -> files.remove(partial)
     cli_write_synced(partial, pointer.bytes())
     cli_finalize_profile_pointer(partial, files.join(state, PACKAGE_PROFILE_CURRENT_FILE))
-    store_sync_store_directory(state)
+    store_sync_store_directory(state) ?? return Err(CLIError.Store(err))
     current :: cli_read_package_current_pointer(&verification, state) ?? return Err(CLIError.Other("profile current pointer disappeared after publication"))
     if current.generation != generation || current.witness != record.witness -> return Err(CLIError.Other("profile current pointer failed post-write verification"))
     Ok(record)

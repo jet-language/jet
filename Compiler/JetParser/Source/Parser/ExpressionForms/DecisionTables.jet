@@ -194,7 +194,7 @@ fn parser_expression_form_dispatch_atom(state: &JetParserState, depth: Int) -> P
     }
     rhs :: parser_parse_expression_dispatch_atom(&state, depth + 1)
     span :: parser_cover(lhs.span, rhs.span)
-    ParsedExpr{expr: Expr.Binary{op: comparator_op, left: lhs.expr, right: rhs.expr, span: span}, span: span}
+    ParsedExpr{expr: Expr.Binary{op: ^comparator_op, left: lhs.expr, right: rhs.expr, span: span}, span: span}
 }
 
 fn parser_expression_form_combine(left: Expr, right: Expr, op: BinOp) -> Expr {
@@ -214,7 +214,7 @@ fn parser_expression_form_arm_atom(state: &JetParserState, subject: Expr, op: Bi
         .PatternTest(_, _, _) -> true
         .Bool(_, _) -> prefer_predicate
         .Unary(unary_op, _, _) -> unary_op == UnOp.Not
-        .Ident(_, _) | .Field(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> prefer_predicate
+        .Ident(_, _) | .Field(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _) -> prefer_predicate
         else -> false
     }
     if is_predicate -> return raw.expr
@@ -400,7 +400,7 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
         condition :: parser_parse_subjectless_arm_head(&state)
         parser_expect_unified_arrow(&state, "after a value guard condition")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
-        &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
+        &arms.push(ParserExpressionFormArm{cond: ^condition, body: branch.body, value: branch.value})
         // A fatal arm error ends the table, as Rust's `?` does; malformed
         // input that consumed nothing must not retry forever either.
         if parser_aborting(&state) -> break
@@ -457,7 +457,7 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
         condition :: parser_parse_if_arm_head(&state, subject, subject, op)
         parser_expect_unified_arrow(&state, "after a value dispatch arm head")
         branch :: parser_expression_form_selected_value(&state, depth + 1)
-        &arms.push(ParserExpressionFormArm{cond: condition, body: branch.body, value: branch.value})
+        &arms.push(ParserExpressionFormArm{cond: ^condition, body: branch.body, value: branch.value})
         if parser_aborting(&state) -> break
         if state.position == arm_position -> parser_bump(&state)
         last_arm_end = branch.span.end
@@ -527,7 +527,7 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int, lint_styl
     }
     span :: parser_cover(start.span, end)
     if lint_style && (chained || parser_authored_line_break(state, branch_start, state.position)) -> parser_prefer_arm_table(&state, start.span, parts, saved_diagnostics)
-    ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: else_body, else_value: else_value, span: span}, span: span}
+    ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: ^else_body, else_value: ^else_value, span: span}, span: span}
 }
 
 // D-LAMBDA-INFER1: a bare single-parameter lambda `m -> m.hp > 0`; its

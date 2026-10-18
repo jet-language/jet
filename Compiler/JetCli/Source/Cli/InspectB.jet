@@ -711,6 +711,8 @@ fn jet_cli_inspect_positionals(args: [String]) -> [String] Never! {
 
 // `cwd.join(raw)` for a relative path.
 fn jet_cli_inspect_absolutize(raw: String) -[FS, Env]> String Never! {
+    // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if raw.starts_with("/") -> return raw.copy()
     cwd :: cli_files.cwd() ?? "."
     jet_cli_authority_path(cwd, raw)
@@ -812,11 +814,17 @@ fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
 // the first non-flag word is the entry, the second an optional Output
 // address; the host selects the Output through the canonical query.
 fn jet_cli_inspect_output(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
+    // copy: each positional (owner: the caller's `args`, a read parameter: no move out of it,
+    // E0201) is copied into the filtered list (owner: `positionals`).
     positionals :: loop argument in args if !argument.starts_with("-") -> argument.copy()
     if positionals.len() == 0 {
         return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/features/tooling/output_callable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
     }
+    // copy: `positionals[1]` stays in its list (owner: `positionals`; no move out of an element,
+    // E0225) and the arm's value owns its own.
     address :: if positionals.len() > 1 -> Val(positionals[1].copy()) else -> None
+    // copy: `positionals[0]` stays in its list (owner: `positionals`; no move out of an element,
+    // E0225) and the field `file` owns its own.
     JetCLIPlan.Output{file: positionals[0].copy(), address: address, color: color, json: json}
 }
 

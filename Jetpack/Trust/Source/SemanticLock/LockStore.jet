@@ -30,12 +30,12 @@ fn trust_semantic_lock_atomic_commit(project: String, lock: SemanticLockFile) Tr
     machine := stripped.copy()
     if {
         stripped.trim() == "" -> {
-            fresh := pkg_lock_parse("version = 1\n")
+            fresh := pkg_lock_parse("version = 1\n") ?? return Err(trust_lock_error(err))
             pkg_lock_ensure_build_stamp(project, &fresh)
             machine = pkg_lock_write(fresh)
         }
         else -> {
-            parsed := pkg_lock_parse(stripped)
+            parsed := pkg_lock_parse(stripped) ?? return Err(trust_lock_error(err))
             if parsed.build_stamp == None {
                 pkg_lock_ensure_build_stamp(project, &parsed)
                 machine = pkg_lock_write(parsed)
@@ -44,7 +44,7 @@ fn trust_semantic_lock_atomic_commit(project: String, lock: SemanticLockFile) Tr
     }
     semantic :: trust_write_semantic_lock(lock)
     body :: if machine.trim() == "" -> "version = 1\n\n{semantic}" else -> "{machine.trim_end()}\n\n{semantic}"
-    pkg_lock_write_atomically(project, body.bytes())
+    pkg_lock_write_atomically(project, body.bytes()) ?? return Err(trust_lock_error(err))
 }
 
 // Rust `merge_revalidate_commit`: merge three ways, refuse conflicts before

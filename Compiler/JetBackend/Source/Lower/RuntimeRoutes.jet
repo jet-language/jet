@@ -5087,6 +5087,8 @@ LOWER_RUNTIME_ROUTE_KEY_ROWS :: prep { [Int]{
 
 fn lower_runtime_route(symbol: String) -> LowerRoute? {
     position :: lower_key_row(LOWER_RUNTIME_ROUTE_KEYS, LOWER_RUNTIME_ROUTE_KEY_ROWS, symbol) ?? return None
+    // copy: the caller gets an owned route row, while the row stays in the global
+    // LOWER_RUNTIME_ROUTES table, which can't be moved from.
     Val(LOWER_RUNTIME_ROUTES[position].copy())
 }
 
@@ -7156,10 +7158,14 @@ LOWER_NATIVE_PROVIDER_HANDLE_KEY_ROWS :: prep { [Int]{
 
 fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {
     if lower_key_row(LOWER_RUNTIME_HANDLE_KEYS, LOWER_RUNTIME_HANDLE_KEY_ROWS, name) == .Val(position) {
+        // copy: the caller gets an owned handle row, while the row stays in the global
+        // LOWER_RUNTIME_HANDLES table, which can't be moved from.
         return Val(LOWER_RUNTIME_HANDLES[position].copy())
     }
     // Existing Rust rows win in seed mode; absent nominals may use a provider.
     position :: lower_key_row(LOWER_NATIVE_PROVIDER_HANDLE_KEYS, LOWER_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    // copy: the caller gets an owned handle row, while the row stays in the global
+    // LOWER_NATIVE_PROVIDER_HANDLES table, which can't be moved from.
     Val(LOWER_NATIVE_PROVIDER_HANDLES[position].copy())
 }
 
@@ -8397,6 +8403,8 @@ LOWER_HANDLE_FIELD_KEY_ROWS :: prep { [Int]{
 
 fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {
     position :: lower_key_row(LOWER_HANDLE_FIELD_KEYS, LOWER_HANDLE_FIELD_KEY_ROWS, "{runtime} {field}") ?? return None
+    // copy: the caller gets an owned field row, while the row stays in the global
+    // LOWER_HANDLE_FIELDS table, which can't be moved from.
     Val(LOWER_HANDLE_FIELDS[position].copy())
 }
 enum LowerEnvironmentOp { Bytes Set Remove Columns Compare Seed Text }
@@ -8412,6 +8420,8 @@ LOWER_ENVIRONMENT_ROUTES :: prep { [LowerEnvironmentRoute]{
     LowerEnvironmentRoute{symbol: "jet_rt_logical_env_get", export: "jet_rt_logical_env_get", op: LowerEnvironmentOp.Text, arity: 1},
 } }
 fn lower_environment_route(symbol: String) -> LowerEnvironmentRoute? {
+    // copy: the caller gets an owned route row, while the row stays in the global
+    // LOWER_ENVIRONMENT_ROUTES table, which can't be moved from.
     loop route in LOWER_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }
     None
 }
@@ -8720,6 +8730,8 @@ LOWER_NATIVE_TYPE_KEY_ROWS :: prep { [Int]{
 } }
 fn lower_native_type(name: String) -> LowerNativeType? {
     position :: lower_key_row(LOWER_NATIVE_TYPE_KEYS, LOWER_NATIVE_TYPE_KEY_ROWS, name) ?? return None
+    // copy: the caller gets an owned type row, while the row stays in the global LOWER_NATIVE_TYPES
+    // table, which can't be moved from.
     Val(LOWER_NATIVE_TYPES[position].copy())
 }
 struct LowerNativeExport { symbol: String, jet_name: String, op: String, member: String }
@@ -10492,6 +10504,8 @@ LOWER_NATIVE_EXPORT_KEY_ROWS :: prep { [Int]{
 } }
 fn lower_native_export(symbol: String) -> LowerNativeExport? {
     position :: lower_key_row(LOWER_NATIVE_EXPORT_KEYS, LOWER_NATIVE_EXPORT_KEY_ROWS, symbol) ?? return None
+    // copy: the caller gets an owned export row, while the row stays in the global
+    // LOWER_NATIVE_EXPORTS table, which can't be moved from.
     Val(LOWER_NATIVE_EXPORTS[position].copy())
 }
 // All possible external C imports, mechanically derived from the ABI tables.
@@ -13588,6 +13602,7 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_rt_mem_arena_release",
     "jet_rt_mem_arena_reset",
     "jet_rt_mem_arena_retain",
+    "jet_rt_mem_move",
     "jet_rt_mem_registry_init",
     "jet_rt_mem_resources",
     "jet_rt_native_atexit",

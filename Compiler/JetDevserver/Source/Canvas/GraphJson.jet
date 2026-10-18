@@ -1,0 +1,529 @@
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:1
+use std.fmt.[format]
+use jet_driver.Diagnostics.[Span]
+use jet_driver.AST as AST
+use jet_foundation.Names.[NameLedger, NameVisibility]
+use jet_semindex.[SourceSpan]
+use jet_devserver.Canvas.DebugSourceGit.[span_overlaps]
+use jet_devserver.Canvas.GraphHelpers.[line_start, snippet]
+use jet_devserver.Canvas.GraphProjection.[GraphBuilder, InlineRec, NodeRec, PinRec, WireRec]
+use jet_devserver.Canvas.ValidationJson.[attr_bounds, attr_span, attr_string, json_str, json_strs, span_json]
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:11
+use jet_devserver.Canvas.NodeCatalog as node_catalog
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:14
+fn add_node(g: &GraphBuilder, id: String, descriptor_id: String, title: String, span: SourceSpan, x: I32, y: I32, badges: [String], affordances: [String]) {
+    descriptor :: node_catalog.descriptor_for_id(descriptor_id)
+    g.nodes.push(NodeRec(id: id.to_string(), kind: descriptor.kind.to_string(), archetype: descriptor.archetype.to_string(), title: title.to_string(), span: span, x: x, y: y, badges: ^badges, affordances: ^affordances, meta_json: .None))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:40
+fn add_pin(g: GraphBuilder, node_id: String, name: String, direction: String, ty: String, ability: String, fallible: Bool) -> String {
+    id :: "{node_id}:{direction}:{name}"
+    span :: g.nodes.iter().find((n) -> n.id == node_id).map((n) -> n.span).unwrap_or(SourceSpan(start: 0, end: 0))
+    g.pins.push(PinRec(id: id.clone(), node_id: node_id.to_string(), name: name.to_string(), direction: direction.to_string(), ty: ty.to_string(), role: .None, pattern_source: .None, ability: ability.to_string(), fallible: fallible, effect_grant_need: .None, span: span, pattern_source_span: .None, append_op: .None, element_index: .None))
+    id
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:75
+fn add_arm_pin(g: GraphBuilder, node_id: String, name: String, pattern_source: String, pattern_span: SourceSpan) -> String {
+    id :: "{node_id}:output:{name}"
+    if !g.pins.iter().any((pin) -> pin.id == id) {
+        g.pins.push(PinRec(id: id.clone(), node_id: node_id.to_string(), name: name.to_string(), direction: "output", ty: "exec", role: .Some("arm"), pattern_source: .Some(pattern_source.to_string()), ability: "control", fallible: false, effect_grant_need: .None, span: pattern_span, pattern_source_span: .Some(pattern_span), append_op: .Some("edit_pattern_arm"), element_index: .None))
+    }
+    id
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:104
+fn set_pin_source_span(g: &GraphBuilder, pin_id: String, span: SourceSpan) {
+    if g.pins.iter_mut().find((pin) == .Val(pin) -> pin.id == pin_id) { pin.span = span }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:110
+fn set_pin_append(g: &GraphBuilder, pin_id: String, op: String, index: Usize) {
+    if g.pins.iter_mut().find((pin) == .Val(pin) -> pin.id == pin_id) {
+        pin.append_op = .Some(op.to_string())
+        pin.element_index = .Some(index)
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:117
+fn add_wire(g: &GraphBuilder, from_pin: String, to_pin: String, kind: String) {
+    add_wire_with_span(g, from_pin, to_pin, kind, .None)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:121
+fn add_wire_with_span(g: &GraphBuilder, from_pin: String, to_pin: String, kind: String, span: SourceSpan?) {
+    g.next_wire += 1
+    g.wires.push(WireRec(id: "{g.graph_id}:wire:{g.next_wire}", from_pin: from_pin.to_string(), to_pin: to_pin.to_string(), kind: kind.to_string(), span: span, from_span: .None, to_span: .None))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:140
+fn add_control_wire(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: SourceSpan, to_span: SourceSpan) {
+    g.next_wire += 1
+    g.wires.push(WireRec(id: "{g.graph_id}:wire:{g.next_wire}", from_pin: from_pin.to_string(), to_pin: to_pin.to_string(), kind: "control", span: .Some(to_span), from_span: .Some(from_span), to_span: .Some(to_span)))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:159
+fn add_region(g: &GraphBuilder, ordinal: Usize, kind: String, title: String, span: Span) {
+    g.regions.push("{{\"region_id\":{json_str(format("{}:region:{}:{}", g.graph_id, ordinal, kind))},\"kind\":{json_str(kind)},\"title\":{json_str(title)},\"source_span\":{span_json(span.into())}}}")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:175
+fn add_authority_region(g: &GraphBuilder, ordinal: Usize, title: String, required_effects: &[String], granted_effects: &[String], denied_effects: &[String], binding: String?, span: Span) {
+    authority :: binding.map((name) -> "Authority handle `{name}`").unwrap_or("lexical #FX authority")
+    g.regions.push("{{\"region_id\":{json_str(format("{}:region:{}:authority", g.graph_id, ordinal))},\"kind\":\"authority\",\"title\":{json_str(title)},\"required_effects\":{json_strs(required_effects)},\"granted_effects\":{json_strs(granted_effects)},\"denied_effects\":{json_strs(denied_effects)},\"authority\":{json_str(authority)},\"source_span\":{span_json(span.into())}}}")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:200
+fn meta_attr_json(meta: AST.MetaAttr?) -> String? {
+    value :: meta?
+    facts :: value.facts()
+    if facts.category.is_none() && !facts.tunable -> return .None
+    category :: facts.category.as_ref().map((s) -> json_str(s)).unwrap_or("null")
+    .Some("{{\"category\":{category},\"tunable\":{if facts.tunable { "true" } else { "false" }}}}")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:218
+fn add_source_comment_regions(g: &GraphBuilder, src: String, f: &AST.Func) {
+    func_span :: func_source_span(f)
+    loop hint in canvas_comment_hints(src) {
+        if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) -> next
+        g.regions.push("{{\"region_id\":{json_str(comment_region_id(g.graph_id, hint.anchor))},\"kind\":\"comment\",\"title\":{json_str(hint.title)},\"color\":{json_str(hint.color)},\"alpha\":{json_str(hint.alpha)},\"bounds\":{{\"x\":{hint.bounds.0},\"y\":{hint.bounds.1},\"w\":{hint.bounds.2},\"h\":{hint.bounds.3}}},\"source_span\":{span_json(hint.anchor)},\"hint_span\":{span_json(hint.hint_span)}}}")
+    }
+    loop hint in canvas_collapse_hints(src) {
+        if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) -> next
+        g.regions.push("{{\"region_id\":{json_str(collapse_region_id(g.graph_id, hint.anchor))},\"kind\":\"collapse\",\"title\":{json_str(hint.title)},\"source_span\":{span_json(hint.anchor)},\"hint_span\":{span_json(hint.hint_span)}}}")
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:252
+fn hint_belongs_to_function(src: String, anchor: SourceSpan, hint_span: SourceSpan, func_span: SourceSpan) -> Bool {
+    if span_overlaps(anchor, func_span) || span_overlaps(hint_span, func_span) -> return true
+    if hint_span.start < func_span.end -> return false
+    hint_span.start < next_function_start(src, func_span.end)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:267
+fn next_function_start(src: String, offset: Usize) -> Usize {
+    cursor := offset.min(src.len())
+    loop line in src[cursor..<src.len()].split_inclusive('\n') {
+        trimmed := line.trim_start() // #4303
+        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") || trimmed.starts_with("pub(package) fn ") {
+            return cursor + line.len() - trimmed.len()
+        }
+        cursor += line.len()
+    }
+    src.len()
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:282
+fn add_execution_overlay(g: &GraphBuilder, src: String, body: &[AST.Stmt]) {
+    exec_nodes :: g.nodes.iter().filter((node) -> node_wants_exec(node)).cloned().collect()
+    loop node in exec_nodes {
+        if node.kind != "entry" { _ :: ensure_exec_pin(g, node.id, "exec", "input", node.span, .None) }
+        if node_has_arm_pins(g, node.id) {
+            _ :: ensure_exec_pin(g, node.id, "else", "output", node.span, .Some("else"))
+        } else if node.kind == "loop" {
+            _ :: ensure_exec_pin(g, node.id, "body", "output", node.span, .Some("loop_body"))
+            _ :: ensure_exec_pin(g, node.id, "done", "output", node.span, .Some("loop_done"))
+        } else if node.kind == "return" {
+            _ :: ensure_exec_pin(g, node.id, "return", "output", node.span, .Some("early_return"))
+        } else if node.kind == "branch" || (node.kind == "function" && node.archetype == "control") {
+            _ :: ensure_exec_pin(g, node.id, "then", "output", node.span, .None)
+            _ :: ensure_exec_pin(g, node.id, "else", "output", node.span, .Some("else"))
+        } else if node.kind != "return" {
+            _ :: ensure_exec_pin(g, node.id, "then", "output", node.span, .None)
+        }
+    }
+    entry :: g.nodes.iter().find((node) -> node.kind == "entry") ?? return
+    entry_id :: entry.id.clone()
+    entry_span :: entry.span
+    flow :: execution_block(g, src, body)
+    if flow.entry == .Val(input) { add_control_wire_once(g, "{entry_id}:output:then", input.pin, entry_span, input.span) }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:334
+fn node_has_arm_pins(g: GraphBuilder, node_id: String) -> Bool {
+    g.pins.iter().any((pin) -> pin.node_id == node_id && pin.direction == "output" && pin.role.as_ref() == .Some("arm"))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:340
+#Derive(Clone)
+struct ExecutionEndpoint {
+    pin: String,
+    span: SourceSpan,
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:346
+#Derive(Default)
+struct ExecutionFlow {
+    entry: ExecutionEndpoint?,
+    exits: [ExecutionEndpoint],
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:352
+fn execution_block(g: GraphBuilder, src: String, stmts: [AST.Stmt]) -> ExecutionFlow {
+    flow := ExecutionFlow.default()
+    exits := [ExecutionEndpoint]{}
+    reachable := true
+    loop stmt in stmts {
+        if !reachable -> break
+        current := execution_stmt(g, src, stmt)
+        entry :: current.entry.clone() ?? {
+            if !current.exits.is_empty() {
+                exits = ^current.exits
+                reachable = true
+            }
+            next
+        }
+        if flow.entry.is_none() { flow.entry = .Some(entry.clone()) }
+        loop previous in exits { add_control_wire_once(g, previous.pin, entry.pin, previous.span, entry.span) }
+        exits = ^current.exits
+        reachable = !exits.is_empty()
+    }
+    flow.exits = ^exits
+    flow
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:383
+fn execution_stmt(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlow {
+    if stmt is {
+        .Switch(arms: arms, else_body: else_body, ..) | .ComptimeSwitch(arms: arms, else_body: else_body, ..) -> {
+            node :: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
+            exits := [ExecutionEndpoint]{}
+            loop (index, arm) in arms.iter().enumerate() {
+                output_name :: if node_has_arm_pins(g, node.id) { "arm{index + 1}" } else if index == 0 { "then" } else { "" }
+                output :: if !output_name.is_empty() -> exec_output(g, node.id, output_name) else -> .None
+                append_branch_path(g, src, output, arm.body, node.span, &exits)
+            }
+            else_output :: exec_output(g, node.id, "else")
+            if else_body.as_ref() == .Val(body) {
+                append_branch_path(g, src, else_output, body, node.span, &exits)
+            } else if else_output == .Val(output) {
+                exits.push(ExecutionEndpoint(pin: ^output, span: node.span))
+            }
+            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+        }
+        .ComptimeIf(then_body: then_body, else_body: else_body, ..) -> {
+            node :: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
+            exits := [ExecutionEndpoint]{}
+            then_output :: exec_output(g, node.id, "then")
+            append_branch_path(g, src, then_output, then_body, node.span, &exits)
+            if else_body.as_ref() == .Val(body) {
+                else_output :: exec_output(g, node.id, "else")
+                append_branch_path(g, src, else_output, body, node.span, &exits)
+            } else if exec_output(g, node.id, "else") == .Val(output) {
+                exits.push(ExecutionEndpoint(pin: ^output, span: node.span))
+            }
+            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+        }
+        .While(body: body, ..) | .For(body: body, ..) | .Loop(body: body, ..) | .CountedLoop(body: body, ..) -> {
+            node :: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
+            body_output :: exec_output(g, node.id, "body")
+            body_flow :: execution_block(g, src, body)
+            if body_output == .Val(output) {
+                if body_flow.entry == .Val(body_entry) { add_control_wire_once(g, output, body_entry.pin, node.span, body_entry.span) }
+                loop exit in body_flow.exits { add_control_wire_once(g, exit.pin, "{node.id}:input:exec", exit.span, node.span) }
+            }
+            exits :: exec_output(g, node.id, "done").into_iter().map((pin) -> ExecutionEndpoint(pin: ^pin, span: node.span)).collect()
+            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+        }
+        .Switched(marker: marker, body: body, ..) -> {
+            if AST.switched_off(marker) -> ExecutionFlow.default() else -> execution_block(g, src, body)
+        }
+        .Unsafe(body: body, ..) | .Impure(body: body, ..) | .Reactive(body: body, ..) | .Shield(body: body, ..) | .Region(body: body, ..) | .Policy(body: body, ..) | .TaskGroup(body: body, ..) | .Layout(body: body, ..) | .AuthorityScope(body: body, ..) | .ComptimeBlock(body: body, ..) | .ContextBlock(body: body, ..) | .Live(body: body, ..) | .AssumeDet(body: body, ..) | .Transact(body: body, ..) | .ScopeMember(body: body, ..) -> execution_block(g, src, body)
+        _ -> {
+            node :: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
+            terminal :: if stmt is {
+                .Return(..) | .Break(..) | .BreakValue(..) | .BreakLabel(..) | .BreakLabelValue(..) | .Continue(..) | .ContinueLabel(..) -> true
+                _ -> false
+            }
+            exits :: if terminal -> [] else -> exec_output(g, node.id, "then").into_iter().map((pin) -> ExecutionEndpoint(pin: ^pin, span: node.span)).collect()
+            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+        }
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:536
+fn append_branch_path(g: &GraphBuilder, src: String, output: String?, body: &[AST.Stmt], owner_span: SourceSpan, exits: &[ExecutionEndpoint]) {
+    pin :: output ?? return
+    body_flow := execution_block(g, src, body)
+    if body_flow.entry == .Val(entry) {
+        add_control_wire_once(g, pin, entry.pin, owner_span, entry.span)
+        exits.extend(^body_flow.exits)
+    } else {
+        exits.push(ExecutionEndpoint(pin: ^pin, span: owner_span))
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:559
+fn direct_execution_node(g: GraphBuilder, stmt: AST.Stmt) -> NodeRec? {
+    anchor :: stmt_execution_anchor(stmt)?
+    g.nodes.iter().filter((node) -> node_wants_exec(node) && node.kind != "entry").find((node) -> {
+        if stmt is {
+            .Val(binding) -> node.kind == "binding" && node.title == binding.name && node.span.start == binding.name_span.start
+            _ -> node.span.start == anchor.start && node.span.end == anchor.end
+        }
+    }).cloned()
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:575
+fn stmt_execution_anchor(stmt: AST.Stmt) -> SourceSpan? {
+    .Some(if stmt is {
+        .Val(binding) -> binding.name_span.into()
+        .Assign(target: target, ..) -> target.span().into()
+        .Expr(expr) -> expr_execution_anchor(expr)
+        .Return(_, span) | .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) | .BreakValue(_, span) | .BreakLabelValue(_, _, _, span) | .Yield(_, span) -> span.into()
+        .DeferClose(span: span, ..) | .Unsafe(span: span, ..) | .Impure(span: span, ..) | .Reactive(span: span, ..) | .Shield(span: span, ..) | .Region(span: span, ..) | .Policy(span: span, ..) | .TaskGroup(span: span, ..) | .Layout(span: span, ..) | .AuthorityScope(span: span, ..) | .ComptimeBlock(span: span, ..) | .ContextBlock(span: span, ..) | .Live(span: span, ..) | .AssumeDet(span: span, ..) | .Transact(span: span, ..) | .ScopeMember(span: span, ..) | .Switch(span: span, ..) | .ComptimeSwitch(span: span, ..) | .ComptimeIf(span: span, ..) | .While(span: span, ..) | .For(span: span, ..) | .Loop(span: span, ..) | .CountedLoop(span: span, ..) | .Switched(span: span, ..) -> span.into()
+    })
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:615
+fn expr_execution_anchor(expr: AST.Expr) -> SourceSpan {
+    if expr is {
+        .Call(call) -> call.name_span.into()
+        .MethodCall(method_span: method_span, ..) -> method_span.into()
+        .Try(_, span, ..) -> span.into()
+        .OrFallback(value: value, ..) -> expr_execution_anchor(value)
+        _ -> expr.span().into()
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:628
+fn exec_input(node: NodeRec) -> ExecutionEndpoint? {
+    if node.kind == "entry" -> return .None
+    .Some(ExecutionEndpoint(pin: "{node.id}:input:exec", span: node.span))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:635
+fn exec_output(g: GraphBuilder, node_id: String, name: String) -> String? {
+    g.pins.iter().find((pin) -> pin.node_id == node_id && pin.direction == "output" && pin.name == name).map((pin) -> pin.id.clone())
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:642
+fn add_control_wire_once(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: SourceSpan, to_span: SourceSpan) {
+    if g.wires.iter().any((wire) -> wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin) -> return
+    add_control_wire(g, from_pin, to_pin, from_span, to_span)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:658
+fn node_wants_exec(node: NodeRec) -> Bool {
+    node.archetype == "entry" || node.archetype == "function_exec" || node.archetype == "control"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:665
+fn ensure_exec_pin(g: GraphBuilder, node_id: String, name: String, direction: String, span: SourceSpan, role: String?) -> String {
+    id :: "{node_id}:{direction}:{name}"
+    if !g.pins.iter().any((pin) -> pin.id == id) {
+        g.pins.push(PinRec(id: id.clone(), node_id: node_id.to_string(), name: name.to_string(), direction: direction.to_string(), ty: "exec", role: role.map((s) -> s.to_string()), pattern_source: .None, ability: "control", fallible: false, effect_grant_need: .None, span: span, pattern_source_span: .None, append_op: .None, element_index: .None))
+    }
+    id
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:695
+fn func_source_span(f: AST.Func) -> SourceSpan { f.span.into() }
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:699
+#Derive(Clone)
+struct CommentHint {
+    anchor: SourceSpan,
+    hint_span: SourceSpan,
+    title: String,
+    color: String,
+    alpha: String,
+    bounds: (I32, I32, I32, I32),
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:709
+fn canvas_comment_hints(src: String) -> [CommentHint] {
+    out := [CommentHint]{}
+    offset := Usize{0}
+    loop line in src.split_inclusive('\n') {
+        trimmed := line.trim() // #4303
+        if trimmed.strip_prefix("// canvas:comment") == .Val(body) {
+            anchor :: attr_span(body, "span").unwrap_or(SourceSpan(start: 0, end: 0))
+            out.push(CommentHint(anchor: anchor, hint_span: SourceSpan(start: offset, end: offset + line.trim_end_matches('\n').len()), title: attr_string(body, "title").unwrap_or("Comment"), color: attr_string(body, "color").unwrap_or("#2563eb"), alpha: attr_string(body, "alpha").unwrap_or("0.18"), bounds: attr_bounds(body, "bounds").unwrap_or((0, 0, 360, 180))))
+        }
+        offset += line.len()
+    }
+    out
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:733
+fn comment_region_id(graph_id: String, span: SourceSpan) -> String {
+    "{graph_id}:comment:{span.start}-{span.end}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:737
+fn canvas_collapse_hints(src: String) -> [CommentHint] {
+    out := [CommentHint]{}
+    offset := Usize{0}
+    loop line in src.split_inclusive('\n') {
+        trimmed := line.trim() // #4303
+        if trimmed.strip_prefix("// canvas:collapse") == .Val(body) {
+            anchor :: attr_span(body, "span").unwrap_or(SourceSpan(start: 0, end: 0))
+            out.push(CommentHint(anchor: anchor, hint_span: SourceSpan(start: offset, end: offset + line.trim_end_matches('\n').len()), title: attr_string(body, "title").unwrap_or("Collapsed"), color: "#64748b", alpha: "0.16", bounds: (0, 0, 360, 120)))
+        }
+        offset += line.len()
+    }
+    out
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:761
+fn collapse_region_id(graph_id: String, span: SourceSpan) -> String {
+    "{graph_id}:collapse:{span.start}-{span.end}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:765
+fn add_inline(g: &GraphBuilder, node_id: String, ordinal: Usize, role: String, src: String, span: Span) {
+    source :: snippet(src, span)
+    id :: "{g.graph_id}:inline:{ordinal}:{role}"
+    g.inline_exprs.push(InlineRec(id: ^id, node_id: node_id.to_string(), role: role.to_string(), source: ^source, span: span.into()))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:784
+fn graph_to_json(g: GraphBuilder, f: AST.Func, src: String, visibility: String) -> String {
+    nodes :: g.nodes.iter().map((n) -> node_json(n)).collect().join(",")
+    pins :: g.pins.iter().map((p) -> pin_json(p)).collect().join(",")
+    wires :: g.wires.iter().map((w) -> wire_json(w)).collect().join(",")
+    inline :: g.inline_exprs.iter().map((i) -> inline_json(i)).collect().join(",")
+    exit_nodes :: g.nodes.iter().filter((n) -> n.kind == "return").map((n) -> json_str(n.id)).collect().join(",")
+    "{{\"graph_id\":{json_str(g.graph_id)},\"title\":{json_str(f.name)},\"function\":{function_metadata_json(src, f, visibility)},\"event_views\":[{callback_event_view_json(g.graph_id, f).unwrap_or_default()}],\"entry_node\":{json_str(format("{}:entry", g.graph_id))},\"exit_nodes\":[{exit_nodes}],\"nodes\":[{nodes}],\"pins\":[{pins}],\"wires\":[{wires}],\"regions\":[{g.regions.join(",")}],\"inline_exprs\":[{inline}],\"rails\":{rails_json(g)},\"layout_hints\":{{\"algorithm\":\"source-order-v1\",\"direction\":\"data-left-to-right/control-top-to-bottom\"}}}}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:823
+fn function_metadata_json(src: String, f: &AST.Func, visibility: String) -> String {
+    params :: f.params.iter().map((p) -> {
+        default :: p.default.as_ref().map((expr) -> json_str(snippet(src, expr.span()))).unwrap_or("null")
+        "{{\"name\":{json_str(p.name)},\"type\":{json_str(p.ty.name())},\"ability\":{json_str(p.convention.sigil())},\"default\":{if p.default.is_some() { "true" } else { "false" }},\"default_source\":{default},\"source_span\":{span_json(p.name_span.into())}}}"
+    }).collect().join(",")
+    ret :: f.effective_return_type().name()
+    effects :: f.declared_effects.as_ref().map((effects) -> effects.iter().map(((name, _)) -> json_str(name)).collect().join(",")).unwrap_or_default()
+    effect_via :: f.effect_via.as_ref().map(((param, _)) -> json_str(param)).unwrap_or("null")
+    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(src, f, visibility))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{if f.is_pure { "true" } else { "false" }},\"unsafe\":{if f.is_unsafe { "true" } else { "false" }},\"effects\":[{effects}],\"effect_via\":{effect_via},\"returns\":{json_str(ret)},\"params\":[{params}],\"meta\":{meta_attr_json(f.meta.as_ref()).unwrap_or("null")},\"source_span\":{span_json(func_source_span(f))},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:879
+fn ledger_function_visibility(ledger: NameLedger, module_idx: Usize, name: String) -> String {
+    if ledger.declaration(module_idx, name).map((declaration) -> declaration.visibility) is {
+        .Some(.Package) -> "package"
+        .Some(.Public) -> "public"
+        .Some(.Private) | .None -> "private"
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:895
+fn function_signature_text(src: String, f: &AST.Func, visibility: String) -> String {
+    out := "".to_string()
+    if visibility == "package" { out.push_str("pub(package) ") } else if visibility == "public" { out.push_str("pub ") }
+    out.push_str("fn ")
+    out.push_str(f.name)
+    out.push('(')
+    out.push_str(f.params.iter().map((p) -> {
+        s := "{p.name}: {p.ty.name()}"
+        if p.default.as_ref() == .Val(default) {
+            s.push('{')
+            s.push_str(snippet(src, default.span()))
+            s.push('}')
+        }
+        s
+    }).collect().join(", "))
+    out.push(')')
+    out.push(' ')
+    out.push_str(f.effective_return_type().name())
+    if (param, _) :: f.effect_via.as_ref() {
+        out.push_str(" -[via ")
+        out.push_str(param)
+        out.push_str("]>")
+    } else if f.declared_effects.as_ref() == .Val(effects) {
+        out.push_str(" -[")
+        out.push_str(effects.iter().map(((name, _)) -> name.as_str()).collect().join(", "))
+        out.push_str("]>")
+    } else if f.is_pure { out.push_str(" -[]>") }
+    out
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:943
+fn doc_comment_before(src: String, name_start: Usize) -> String {
+    docs := [String]{}
+    cursor := line_start(src, name_start)
+    loop cursor > 0 {
+        prev_end :: cursor.saturating_sub(1)
+        prev_start :: line_start(src, prev_end)
+        line := src[prev_start..prev_end].trim() // #4303
+        if line.strip_prefix("///") == .Val(doc) {
+            text := doc.trim() // #4303
+            docs.push(text.to_string())
+            cursor = prev_start
+            next
+        }
+        if line.is_empty() {
+            cursor = prev_start
+            next
+        }
+        break
+    }
+    docs.reverse()
+    docs.join("\n")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:965
+fn callback_event_view_json(graph_id: String, f: &AST.Func) -> String? {
+    event :: callback_event_name(f.name)?
+    .Some("{{\"event_id\":{json_str(format("{}:event:{}", graph_id, event))},\"kind\":\"callback_event\",\"title\":{json_str(event)},\"function\":{json_str(f.name)},\"entry_node\":{json_str(format("{}:entry", graph_id))},\"semantics\":\"ordinary_jet_function\",\"dispatch\":\"framework_callback\",\"pending_first_class_events\":\"#286\",\"source_span\":{span_json(func_source_span(f))}}}")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:977
+fn callback_event_name(name: String) -> String? {
+    name.strip_prefix("on_").filter((rest) -> !rest.is_empty()).map((rest) -> rest.to_string())
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:983
+fn rails_json(g: GraphBuilder) -> String {
+    kinds := [String]{}
+    push_rail(&kinds, "control")
+    if !g.wires.is_empty() || !g.pins.is_empty() { push_rail(&kinds, "data") }
+    if g.wires.iter().any((w) -> w.kind == "fallible") || g.pins.iter().any((p) -> p.fallible) { push_rail(&kinds, "fallible") }
+    if g.regions.iter().any((r) -> r.contains("\"kind\":\"task.group\"")) || g.nodes.iter().any((n) -> n.title == ".task" || n.title == "spawn" || n.title.ends_with(".spawn")) { push_rail(&kinds, "async") }
+    if g.nodes.iter().any((n) -> n.badges.iter().any((b) -> b == "effects")) || g.regions.iter().any((r) -> r.contains("\"kind\":\"authority\"")) { push_rail(&kinds, "effect") }
+    if g.regions.iter().any((r) -> r.contains("\"kind\":\"unsafe\"") || r.contains("\"kind\":\"comptime\"")) { push_rail(&kinds, "proof") }
+    push_rail(&kinds, "debug")
+    "{{\"kinds\":[{json_strs(kinds)}],\"debug_overlay\":\"idle\",\"source\":\"front-end facts\"}}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:1023
+fn push_rail(kinds: &[String], kind: String) {
+    if !kinds.iter().any((k) -> k == kind) { kinds.push(kind.to_string()) }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:1029
+fn node_json(n: NodeRec) -> String {
+    descriptor :: node_catalog.descriptor_for(n.kind, n.archetype)
+    meta :: n.meta_json.as_ref().cloned().unwrap_or("null")
+    "{{\"node_id\":{json_str(n.id)},\"node_descriptor_id\":{json_str(descriptor.id)},\"kind\":{json_str(n.kind)},\"archetype\":{json_str(n.archetype)},\"title\":{json_str(n.title)},\"source_span\":{span_json(n.span)},\"layout\":{{\"x\":{n.x},\"y\":{n.y}}},\"badges\":[{json_strs(n.badges)}],\"edit_affordances\":[{json_strs(n.affordances)}],\"meta\":{meta}}}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:1052
+fn pin_json(p: PinRec) -> String {
+    grant :: p.effect_grant_need.as_ref().map((s) -> json_str(s)).unwrap_or("null")
+    role :: p.role.as_ref().map((s) -> json_str(s)).unwrap_or("null")
+    pattern_source :: p.pattern_source.as_ref().map((s) -> json_str(s)).unwrap_or("null")
+    pattern_source_span :: p.pattern_source_span.map((span) -> span_json(span)).unwrap_or("null")
+    append_op :: p.append_op.as_ref().map((s) -> json_str(s)).unwrap_or("null")
+    element_index :: p.element_index.map((n) -> n.to_string()).unwrap_or("null")
+    "{{\"pin_id\":{json_str(p.id)},\"node_id\":{json_str(p.node_id)},\"name\":{json_str(p.name)},\"direction\":{json_str(p.direction)},\"type\":{json_str(p.ty)},\"role\":{role},\"pattern_source\":{pattern_source},\"pattern_source_span\":{pattern_source_span},\"append_op\":{append_op},\"element_index\":{element_index},\"ability\":{json_str(p.ability)},\"fallible\":{if p.fallible { "true" } else { "false" }},\"effect_grant_need\":{grant},\"source_span\":{span_json(p.span)}}}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:1100
+fn wire_json(w: WireRec) -> String {
+    source_span :: w.span.map((span) -> span_json(span)).unwrap_or("null")
+    from_span :: w.from_span.map((span) -> span_json(span)).unwrap_or("null")
+    to_span :: w.to_span.map((span) -> span_json(span)).unwrap_or("null")
+    "{{\"wire_id\":{json_str(w.id)},\"from_pin\":{json_str(w.from_pin)},\"to_pin\":{json_str(w.to_pin)},\"wire_kind\":{json_str(w.kind)},\"source_span\":{source_span},\"from_source_span\":{from_span},\"to_source_span\":{to_span}}}"
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:1122
+fn inline_json(i: InlineRec) -> String {
+    "{{\"inline_expr_id\":{json_str(i.id)},\"node_id\":{json_str(i.node_id)},\"role\":{json_str(i.role)},\"source\":{json_str(i.source)},\"source_span\":{span_json(i.span)},\"editable\":true}}"
+}

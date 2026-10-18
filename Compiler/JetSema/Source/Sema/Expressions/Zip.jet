@@ -25,8 +25,10 @@ fn sema_expression_zip_family_name(name: String) -> Bool Never! {
 fn sema_expression_zip_sequence_elem(ty: Type) -> Type? {
     if ty == {
         .Tagged(_, inner) -> return sema_expression_zip_sequence_elem(inner)
-        .List(inner) -> return Val(inner)
-        .FixedList(inner, _) -> return Val(inner)
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .List(inner) -> return Val(inner.copy())
+        // copy: `inner` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
+        .FixedList(inner, _) -> return Val(inner.copy())
         .Apply(name, args) -> {
             if (name == "Iter" || name == "ViewIter") && args.len() == 1 -> return Val(args[0])
         }

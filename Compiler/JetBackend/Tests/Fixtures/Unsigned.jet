@@ -202,7 +202,7 @@ fn fx_bool_abi_module() -> LIRModule Never! {
         &values.push(LIRValue{id: test, layout: lir_layout_bool(), drop: LIRDrop.Trivial, jet_type: None})
         &insts.push(LIRInst.Const{dst: expected, value: position % 2})
         &insts.push(LIRInst.Compare{dst: test, condition: LIRCondition.Eq, left: params[position], right: expected})
-        &blocks.push(LIRBlock{id: LIRBlockID{value: step}, params: if step == 0 -> params else -> [LIRValueID]{}, insts: insts, terminator: LIRTerminator.Branch{condition: test, then_target: LIRJumpTarget{block: LIRBlockID{value: step + 1}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 8}, args: [LIRValueID]{}}}, lines: fx_unlocated(insts.len())})
+        &blocks.push(LIRBlock{id: LIRBlockID{value: step}, params: if step == 0 -> params else -> [LIRValueID]{}, insts: insts, terminator: LIRTerminator.Branch{condition: test, then_target: LIRJumpTarget{block: LIRBlockID{value: step + 1}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 8}, args: [LIRValueID]{}}}, lines: fx_unlocated(insts.len()), cold: false})
         insts = [LIRInst]{}
     }
     // Success reads the second word via a dynamic byte offset, covering
@@ -220,16 +220,16 @@ fn fx_bool_abi_module() -> LIRModule Never! {
         LIRInst.Const{dst: offset, value: 8},
         LIRInst.PointerAdd{dst: address, base: base, offset: offset},
         LIRInst.Load{dst: result, base: address, offset: 0},
-    }, terminator: LIRTerminator.Return{value: Val(result)}, lines: fx_unlocated(4)})
+    }, terminator: LIRTerminator.Return{value: Val(result)}, lines: fx_unlocated(4), cold: false})
     failure :: LIRValueID{value: values.len()}
     &values.push(LIRValue{id: failure, layout: lir_layout_word(), drop: LIRDrop.Trivial, jet_type: None})
-    &blocks.push(LIRBlock{id: LIRBlockID{value: 8}, params: [LIRValueID]{}, insts: [LIRInst]{LIRInst.Const{dst: failure, value: 7}}, terminator: LIRTerminator.Return{value: Val(failure)}, lines: fx_unlocated(1)})
+    &blocks.push(LIRBlock{id: LIRBlockID{value: 8}, params: [LIRValueID]{}, insts: [LIRInst]{LIRInst.Const{dst: failure, value: 7}}, terminator: LIRTerminator.Return{value: Val(failure)}, lines: fx_unlocated(1), cold: false})
     LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: layouts, result: Val(lir_layout_word())},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None},
     }, functions: [LIRFunction]{
         LIRFunction{id: LIRFunctionID{value: 0}, name: "choose", signature: LIRSignatureID{value: 0}, values: values, blocks: blocks, debug: lir_function_debug_none()},
-        LIRFunction{id: LIRFunctionID{value: 1}, name: "pressure", signature: LIRSignatureID{value: 1}, values: [LIRValue]{}, blocks: [LIRBlock]{LIRBlock{id: LIRBlockID{value: 0}, params: [LIRValueID]{}, insts: [LIRInst]{}, terminator: LIRTerminator.Return{value: None}, lines: fx_unlocated(0)}}, debug: lir_function_debug_none()},
+        LIRFunction{id: LIRFunctionID{value: 1}, name: "pressure", signature: LIRSignatureID{value: 1}, values: [LIRValue]{}, blocks: [LIRBlock]{LIRBlock{id: LIRBlockID{value: 0}, params: [LIRValueID]{}, insts: [LIRInst]{}, terminator: LIRTerminator.Return{value: None}, lines: fx_unlocated(0), cold: false}}, debug: lir_function_debug_none()},
     }, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, align: 8, bytes: [U8]{U8{7}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{9}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}, relocs: [LIRDataReloc]{}}}, debug: lir_module_debug_none()}
 }
 

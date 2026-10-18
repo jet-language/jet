@@ -38,15 +38,22 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
             expanding :: loop seen_name in seen {
                 if seen_name == name -> break true
             } ?? false
+            // copy: the substituted type is a new owned Type. During recursive expansion it equals
+            // `ty`, the caller's type (a read parameter), which stays in the signature.
             if expanding -> return ty.copy()
+            // copy: the substituted type is a new owned Type. For an unbound name it equals `ty`,
+            // the caller's type (a read parameter), which stays in the signature.
             value :: sema_inference_binding_type(name, bindings, seen) ?? return ty.copy()
+            // copy: the substituted type is a new owned Type. For a self-binding it equals `ty`,
+            // the caller's type (a read parameter), which stays in the signature.
             if type_identity_equal(value, ty) -> return ty.copy()
             next_seen := seen
             &next_seen.push(name)
             sema_inference_substitute_type_inner(value, bindings, next_seen)
         }
         .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, seen)}
-        .Map(key, key_span, value) -> Type.Map{key: sema_inference_substitute_type_inner(key, bindings, seen), key_span: key_span, value: sema_inference_substitute_type_inner(value, bindings, seen)}
+        // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_inference_substitute_type_inner(key, bindings, seen), key_span: key_span.copy(), value: sema_inference_substitute_type_inner(value, bindings, seen)}
         .Shared(inner) -> Type.Shared{inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
         .Option(inner) -> Type.Option{inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
         .Result(ok, err) -> Type.Result{ok: sema_inference_substitute_type_inner(ok, bindings, seen), err: sema_inference_substitute_type_inner(err, bindings, seen)}
@@ -63,14 +70,17 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
             normalized :: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inference_substitute_type_inner(field.ty, bindings, seen)}
             Type.Tuple{fields: normalized}
         }
-        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen), len: length}
+        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
+        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen), len: length.copy()}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inference_substitute_type_inner(base, bindings, seen), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
+        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
         .Union(members) -> {
             normalized :: loop member in members -> sema_inference_substitute_type_inner(member, bindings, seen)
             Type.Union{members: normalized}
         }
-        .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen), dimension: dimension}
+        // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen), dimension: dimension.copy()}
         else -> ty
     }
 }

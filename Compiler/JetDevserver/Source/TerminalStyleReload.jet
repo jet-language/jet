@@ -1,0 +1,707 @@
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1
+// Style facts only; widget trees, focus, cursor and application model remain with the host.
+use jet_foundation.[Dyn, TEXT_NUL]
+use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
+use jet_foundation.SHA256 as SHA256
+use std.collections.[VecDeque]
+// GATE #4494: shared immutable snapshots and transactional mutex ownership.
+use std.sync.[Arc, Mutex]
+
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:17
+TERMINAL_STYLE_PROTOCOL :: "jet.devtools.v1"
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:19
+MAX_TERMINAL_STYLE_SOURCE_BYTES :: 64 * 1024
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:21
+MAX_TERMINAL_STYLE_ERROR_BYTES :: 512
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:23
+MAX_TERMINAL_STYLE_DEPENDENCIES :: 256
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:25
+MAX_TERMINAL_STYLE_ROLES :: 32
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:27
+MAX_TERMINAL_STYLE_ID_BYTES :: 256
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:29
+MAX_TERMINAL_STYLE_SUBSCRIBERS :: 256
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:31
+MAX_TERMINAL_STYLE_NOTIFICATIONS :: 256
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:34
+MAX_TERMINAL_STYLE_REQUEST_BYTES :: 256 * 1024
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:38
+enum TerminalStyleErrorCode {
+    SourceTooLarge; InvalidSourceIdentity; InvalidDependency; InvalidFingerprint; InvalidStyle; TooManyDependencies; TooManyRoles; RevisionOverflow
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:50
+    fn as_str(self) -> String {
+        if self == { .SourceTooLarge -> "style_source_too_large", .InvalidSourceIdentity -> "style_source_identity"
+            .InvalidDependency -> "style_dependency", .InvalidFingerprint -> "style_fingerprint", .InvalidStyle -> "style_parse"
+            .TooManyDependencies -> "style_dependency_limit", .TooManyRoles -> "style_role_limit", .RevisionOverflow -> "style_revision_overflow" }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:65
+impl TerminalStyleErrorCode.Display { fn display(self) -> String { self.as_str() } }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:72
+#Error
+struct TerminalStyleFactError {
+    code: TerminalStyleErrorCode; message: String
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:78
+    fn new(code: TerminalStyleErrorCode, message: String) -> TerminalStyleFactError {
+        TerminalStyleFactError{code, message: bounded_text(message, MAX_TERMINAL_STYLE_ERROR_BYTES)}
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:87
+impl TerminalStyleFactError.Display { fn display(self) -> String { "{self.code.as_str()}: {self.message}" } }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:97
+enum TerminalColorProfile {
+    Monochrome; Ansi16; Ansi256; TrueColor
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:105
+    fn as_str(self) -> String { if self == {
+        .Monochrome -> "monochrome"
+        .Ansi16 -> "ansi16"
+        .Ansi256 -> "ansi256"
+        .TrueColor -> "truecolor"
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:114
+    fn parse(value: String) -> TerminalColorProfile? {
+        value := value.trim() // #4303
+        if value.to_ascii_lowercase() == {
+            "monochrome" -> .Val(.Monochrome)
+            "ansi16" -> .Val(.Ansi16)
+            "ansi256" -> .Val(.Ansi256)
+            "truecolor" -> .Val(.TrueColor)
+            else -> None
+        }
+    }
+    fn default() -> TerminalColorProfile { .Monochrome }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:128
+enum TerminalColorMode {
+    Auto; Always; Never
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:135
+    fn as_str(self) -> String { if self == {
+        .Auto -> "auto"
+        .Always -> "always"
+        .Never -> "never"
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:145
+    fn parse(value: String) -> TerminalColorMode {
+        value := value.trim() // #4303
+        if value.to_ascii_lowercase() == {
+            "always" -> .Always
+            "never" -> .Never
+            else -> .Auto
+        }
+    }
+    fn default() -> TerminalColorMode { .Auto }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:157
+struct TerminalCapabilityFacts {
+    profile: TerminalColorProfile; mode: TerminalColorMode; is_tty: Bool; term_is_dumb: Bool; no_color: Bool
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:165
+    fn default() -> TerminalCapabilityFacts { TerminalCapabilityFacts.new(.Monochrome, .Auto, false, true, false) }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:177
+    fn new(profile: TerminalColorProfile, mode: TerminalColorMode, is_tty: Bool, term_is_dumb: Bool, no_color: Bool) -> TerminalCapabilityFacts {
+        TerminalCapabilityFacts{profile, mode, is_tty, term_is_dumb, no_color}
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:196
+    fn from_environment(term: String?, colorterm: String?, is_tty: Bool, no_color: Bool, mode: TerminalColorMode) -> TerminalCapabilityFacts {
+        term := term.unwrap_or("").trim(); colorterm := colorterm.unwrap_or("").trim() // #4303
+        term :: term.to_ascii_lowercase(); colorterm :: colorterm.to_ascii_lowercase(); term_is_dumb :: term == "dumb"
+        enabled :: if mode == {
+            .Always -> true
+            .Never -> false
+            .Auto -> is_tty && !term_is_dumb && !no_color
+        }
+        profile :: if !enabled -> TerminalColorProfile.Monochrome else if colorterm == "truecolor" || colorterm == "24bit" -> TerminalColorProfile.TrueColor
+            else if term.contains("256color") -> TerminalColorProfile.Ansi256 else -> TerminalColorProfile.Ansi16
+        TerminalCapabilityFacts.new(profile, mode, is_tty, term_is_dumb, no_color)
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:223
+    fn color_enabled(self) -> Bool { if self.mode == {
+        .Always -> true
+        .Never -> false
+        .Auto -> self.is_tty && !self.term_is_dumb && !self.no_color
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:234
+    fn fingerprint(self) -> String {
+        canonical :: "terminal-capabilities-v1{TEXT_NUL}profile={self.profile.as_str()};mode={self.mode.as_str()};tty={U8(self.is_tty)};dumb={U8(self.term_is_dumb)};no_color={U8(self.no_color)};"
+        SHA256.sha256_hex(canonical.as_bytes())
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:250
+enum TerminalStyleDependencyKind {
+    Source; Capability; Layout; ValueType
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:257
+    fn as_str(self) -> String { if self == {
+        .Source -> "source"
+        .Capability -> "capability"
+        .Layout -> "layout"
+        .ValueType -> "value_type"
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:270
+struct TerminalStyleDependency {
+    kind: TerminalStyleDependencyKind; id: String; fingerprint: String
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:277
+    fn new(kind: TerminalStyleDependencyKind, id: String, fingerprint: String) -> TerminalStyleDependency TerminalStyleFactError! {
+        validate_identity(id).map_err((message) -> TerminalStyleFactError.new(.InvalidDependency, message))
+        validate_sha256(fingerprint).map_err((message) -> {kind, id: ^id, fingerprint: ^fingerprint})
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:298
+    fn from_bytes(kind: TerminalStyleDependencyKind, id: String, bytes: [U8]) -> TerminalStyleDependency TerminalStyleFactError! {
+        TerminalStyleDependency.new(kind, ^id, SHA256.sha256_hex(bytes))
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:310
+struct TerminalStyleFingerprintFacts {
+    source_id: String; source_fingerprint: String; dependencies: [TerminalStyleDependency]; capabilities: TerminalCapabilityFacts
+    layout_fingerprint: String; type_fingerprint: String; fingerprint: String
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:320
+    fn new(source_id: String, source: String, dependencies: [TerminalStyleDependency], capabilities: TerminalCapabilityFacts, layout_fingerprint: String, type_fingerprint: String) -> TerminalStyleFingerprintFacts TerminalStyleFactError! {
+        validate_identity(source_id).map_err((message) -> TerminalStyleFactError.new(.InvalidSourceIdentity, message))
+        if source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES -> return Err(TerminalStyleFactError.new(.SourceTooLarge, "style source exceeds {MAX_TERMINAL_STYLE_SOURCE_BYTES} bytes"))
+        if dependencies.len() > MAX_TERMINAL_STYLE_DEPENDENCIES -> return Err(TerminalStyleFactError.new(.TooManyDependencies, "style has {dependencies.len()} dependencies; limit is {MAX_TERMINAL_STYLE_DEPENDENCIES}"))
+        dependencies := ^dependencies; &dependencies.sort()
+        loop pair in dependencies.windows(2) {
+            if pair[0].kind == pair[1].kind && pair[0].id == pair[1].id -> return Err(TerminalStyleFactError.new(.InvalidDependency, "duplicate {pair[0].id} dependency identity"))
+        }
+        loop dependency in dependencies {
+            validate_identity(dependency.id).map_err((message) -> TerminalStyleFactError.new(.InvalidDependency, message))
+            validate_sha256(dependency.fingerprint).map_err((message) -> TerminalStyleFactError.new(.InvalidFingerprint, message))
+        }
+        layout_fingerprint :: validate_optional_fingerprint(^layout_fingerprint, "layout fingerprint")
+        type_fingerprint :: validate_optional_fingerprint(^type_fingerprint, "value-type fingerprint")
+        source_fingerprint :: SHA256.sha256_hex(source.as_bytes())
+        fingerprint :: facts_fingerprint(source_id, source_fingerprint, dependencies, capabilities, layout_fingerprint, type_fingerprint)
+        Ok(TerminalStyleFingerprintFacts{source_id: ^source_id, source_fingerprint, dependencies: ^dependencies, capabilities, layout_fingerprint, type_fingerprint, fingerprint})
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:399
+    fn dependency(self, kind: TerminalStyleDependencyKind, id: String) -> TerminalStyleDependency? { self.dependencies.iter().find((d) -> d.kind == kind && d.id == id) }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:410
+fn facts_fingerprint(source_id: String, source_fingerprint: String, dependencies: [TerminalStyleDependency], capabilities: TerminalCapabilityFacts, layout_fingerprint: String, type_fingerprint: String) -> String {
+    canonical := "terminal-style-facts-v1{TEXT_NUL}"
+    frame(&canonical, source_id); frame(&canonical, source_fingerprint); frame(&canonical, capabilities.fingerprint())
+    frame(&canonical, layout_fingerprint); frame(&canonical, type_fingerprint)
+    loop dependency in dependencies { frame(&canonical, dependency.kind.as_str()); frame(&canonical, dependency.id); frame(&canonical, dependency.fingerprint) }
+    SHA256.sha256_hex(canonical.as_bytes())
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:435
+struct TerminalStyleEdit {
+    source_id: String; source: String; dependencies: [TerminalStyleDependency]; capabilities: TerminalCapabilityFacts
+    layout_fingerprint: String; type_fingerprint: String
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:444
+    fn new(source_id: String, source: String) -> TerminalStyleEdit {
+        TerminalStyleEdit{source_id: ^source_id, source: ^source, dependencies: [], capabilities: TerminalCapabilityFacts.default(), layout_fingerprint: "", type_fingerprint: ""}
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:455
+    fn with_capabilities(self: TerminalStyleEdit, capabilities: TerminalCapabilityFacts) -> TerminalStyleEdit { self := ^self; self.capabilities = capabilities; ^self }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:460
+    fn with_dependencies(self: TerminalStyleEdit, dependencies: [TerminalStyleDependency]) -> TerminalStyleEdit { self := ^self; self.dependencies = ^dependencies; ^self }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:465
+    fn with_layout_fingerprint(self: TerminalStyleEdit, fingerprint: String) -> TerminalStyleEdit { self := ^self; self.layout_fingerprint = ^fingerprint; ^self }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:470
+    fn with_type_fingerprint(self: TerminalStyleEdit, fingerprint: String) -> TerminalStyleEdit { self := ^self; self.type_fingerprint = ^fingerprint; ^self }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:475
+    fn bound_source(self: TerminalStyleEdit) -> TerminalStyleEdit {
+        self := ^self
+        if self.source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES {
+            end := USize{0}
+            loop character in self.source.chars() { end += character.len_utf8(); if end > MAX_TERMINAL_STYLE_SOURCE_BYTES -> break }
+            &self.source.truncate(end)
+        }
+        ^self
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:493
+enum TerminalStyleRole {
+    Accent; Dim; Success; Warn; Error; Invert; Border; Bold
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:504
+    fn as_str(self) -> String { if self == {
+        .Accent -> "accent"
+        .Dim -> "dim"
+        .Success -> "success"
+        .Warn -> "warn"
+        .Error -> "error"
+        .Invert -> "invert"
+        .Border -> "border"
+        .Bold -> "bold"
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:517
+    fn parse(value: String) -> TerminalStyleRole? { if value == {
+        "accent" -> .Val(.Accent)
+        "dim" -> .Val(.Dim)
+        "success" -> .Val(.Success)
+        "warn" -> .Val(.Warn)
+        "error" -> .Val(.Error)
+        "invert" -> .Val(.Invert)
+        "border" -> .Val(.Border)
+        "bold" -> .Val(.Bold)
+        else -> None
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:535
+enum TerminalStyleValue {
+    Plain; Sgr(String)
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:540
+    fn sgr(self) -> String? { if self == {
+        .Plain -> None
+        .Sgr(value) -> .Val(value)
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:547
+    fn paint(self, text: String) -> String { if self == {
+        .Plain -> text.to_string()
+        .Sgr(sgr) -> "{Char{27}}[{sgr}m{text}{Char{27}}[0m"
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:559
+struct TerminalStyleDocument {
+    roles: [TerminalStyleRole:TerminalStyleValue]
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:563
+    fn parse(source: String) -> TerminalStyleDocument TerminalStyleParseError! {
+        if source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES -> return Err(TerminalStyleParseError.new(0, .SourceTooLarge, "style source exceeds {MAX_TERMINAL_STYLE_SOURCE_BYTES} bytes"))
+        if source.bytes().any((byte) -> byte.is_ascii_control() && byte != 10 && byte != 13 && byte != 9) -> return Err(TerminalStyleParseError.new(0, .InvalidStyle, "style source contains a control byte"))
+        roles := [TerminalStyleRole:TerminalStyleValue]{}
+        loop (index, line) in source.lines().enumerate() {
+            line_number :: index + 1; line := line.trim() // #4303
+            if line.is_empty() || line.starts_with('#') || line.starts_with("//") -> next
+            (raw_role, raw_value) :: line.split_once('=').ok_or_else(() -> TerminalStyleParseError.new(line_number, .InvalidStyle, "expected role=value"))
+            role_name := raw_role.trim() // #4303
+            role :: TerminalStyleRole.parse(role_name).ok_or_else(() -> TerminalStyleParseError.new(line_number, .InvalidStyle, "unknown semantic style role"))
+            if roles.contains_key(role) -> return Err(TerminalStyleParseError.new(line_number, .InvalidStyle, "style role is declared more than once"))
+            if roles.len() >= MAX_TERMINAL_STYLE_ROLES -> return Err(TerminalStyleParseError.new(line_number, .TooManyRoles, "style exceeds {MAX_TERMINAL_STYLE_ROLES} roles"))
+            raw_value := raw_value.trim() // #4303
+            value :: parse_style_value(raw_value).map_err((message) -> TerminalStyleParseError.new(line_number, .InvalidStyle, message))
+            &roles.insert(role, ^value)
+        }
+        if roles.is_empty() -> return Err(TerminalStyleParseError.new(0, .InvalidStyle, "style source declares no semantic roles"))
+        Ok(TerminalStyleDocument{roles: ^roles})
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:634
+    fn roles(self) -> [TerminalStyleRole:TerminalStyleValue] { &self.roles }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:638
+    fn value(self, role: TerminalStyleRole) -> TerminalStyleValue? { self.roles.get(role) }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:646
+#Error
+struct TerminalStyleParseError {
+    line: USize; code: TerminalStyleErrorCode; message: String
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:652
+    fn new(line: USize, code: TerminalStyleErrorCode, message: String) -> TerminalStyleParseError { TerminalStyleParseError{line, code, message: bounded_text(message, MAX_TERMINAL_STYLE_ERROR_BYTES)} }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:662
+impl TerminalStyleParseError.Display {
+    fn display(self) -> String { if self.line == 0 -> "{self.code.as_str()}: {self.message}" else -> "{self.code.as_str()} at line {self.line}: {self.message}" }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:673
+fn parse_style_value(value: String) -> TerminalStyleValue Err! {
+    if value == "plain" -> return Ok(.Plain)
+    value :: if value == {
+        "black" -> "30"
+        "red" -> "31"
+        "green" -> "32"
+        "yellow" -> "33"
+        "blue" -> "34"
+        "magenta" -> "35"
+        "cyan" -> "36"
+        "white" -> "37"
+        "bold" -> "1"
+        "dim" -> "2"
+        else -> value
+    }
+    if value.is_empty() || value.len() > 128 -> return Err("style SGR value is empty or too long")
+    normalized := ""
+    loop (index, part) in value.split(';').enumerate() {
+        if part.is_empty() -> return Err("style SGR value has an empty code")
+        code :: part.parse<U16>().map_err((_) -> "style SGR value has a non-numeric code")
+        if code > 255 -> return Err("style SGR code exceeds 255")
+        if index > 0 -> &normalized.push(';')
+        &normalized.push_str("{code}")
+    }
+    Ok(.Sgr(^normalized))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:716
+struct TerminalStyleSnapshot {
+    revision: U64; source_id: String; roles: [TerminalStyleRole:TerminalStyleValue]; facts: TerminalStyleFingerprintFacts
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:723
+    fn fingerprint(self) -> String { self.facts.fingerprint }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:727
+    fn capabilities(self) -> TerminalCapabilityFacts { self.facts.capabilities }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:731
+    fn value(self, role: TerminalStyleRole) -> TerminalStyleValue? { self.roles.get(role) }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:735
+    fn paint(self, role: TerminalStyleRole, text: String) -> String {
+        if self.roles.get(role) == .Val(value) { if self.facts.capabilities.color_enabled() -> return value.paint(text) }
+        text.to_string()
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:746
+enum TerminalStyleRestartReason {
+    SourceIdentityChanged; LayoutFingerprintChanged; TypeFingerprintChanged
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:752
+    fn as_str(self) -> String { if self == {
+        .SourceIdentityChanged -> "source_identity_changed"
+        .LayoutFingerprintChanged -> "layout_fingerprint_changed"
+        .TypeFingerprintChanged -> "type_fingerprint_changed"
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:764
+enum TerminalStyleChangeKind {
+    Initial; Unchanged; StyleOnly; CapabilityOnly; RestartRequired(TerminalStyleRestartReason); Invalid
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:773
+    fn as_str(self) -> String { if self == {
+        .Initial -> "initial"
+        .Unchanged -> "unchanged"
+        .StyleOnly -> "style_only"
+        .CapabilityOnly -> "capability_only"
+        .RestartRequired(_) -> "restart_required"
+        .Invalid -> "invalid"
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:787
+fn classify_change(previous: TerminalStyleSnapshot?, next: TerminalStyleSnapshot) -> TerminalStyleChangeKind {
+    if previous == .Val(previous) {
+        if previous.source_id != next.source_id || previous.facts.source_id != next.facts.source_id -> return .RestartRequired(.SourceIdentityChanged)
+        if previous.facts.layout_fingerprint != next.facts.layout_fingerprint || !dependencies_equal(previous, next, .Layout) -> return .RestartRequired(.LayoutFingerprintChanged)
+        if previous.facts.type_fingerprint != next.facts.type_fingerprint || !dependencies_equal(previous, next, .ValueType) -> return .RestartRequired(.TypeFingerprintChanged)
+        if previous.facts.fingerprint == next.facts.fingerprint -> return .Unchanged
+        style_inputs_changed :: previous.facts.source_fingerprint != next.facts.source_fingerprint || previous.facts.dependencies != next.facts.dependencies
+        if !style_inputs_changed && previous.facts.capabilities != next.facts.capabilities -> return .CapabilityOnly
+        .StyleOnly
+    } else { .Initial }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:832
+fn dependencies_equal(previous: TerminalStyleSnapshot, next: TerminalStyleSnapshot, kind: TerminalStyleDependencyKind) -> Bool {
+    previous.facts.dependencies.iter().filter((d) -> d.kind == kind).map((d) -> (_0: d.id, _1: d.fingerprint))
+        .eq(next.facts.dependencies.iter().filter((d) -> d.kind == kind).map((d) -> (_0: d.id, _1: d.fingerprint)))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:856
+struct TerminalStyleErrorFact {
+    code: TerminalStyleErrorCode; source_id: String; attempted_fingerprint: String?; revision: U64; message: String
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:864
+    fn is_bounded(self) -> Bool { self.message.len() <= MAX_TERMINAL_STYLE_ERROR_BYTES && self.source_id.len() <= MAX_TERMINAL_STYLE_ID_BYTES && self.attempted_fingerprint.as_ref().is_none_or((value) -> value.len() == 64) }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:873
+    fn render(self) -> String { fingerprint :: self.attempted_fingerprint.as_ref().unwrap_or("none"); "{self.code.as_str()} source={self.source_id} revision={self.revision} fingerprint={fingerprint} detail={self.message}" }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:885
+struct TerminalStyleReloadReceipt {
+    revision: U64; change: TerminalStyleChangeKind; snapshot: Arc<TerminalStyleSnapshot>?; error: TerminalStyleErrorFact?
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:894
+    fn applied(self) -> Bool { if self.change == {
+        .Initial | .StyleOnly | .CapabilityOnly -> true
+        else -> false
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:903
+    fn restart_required(self) -> Bool { if self.change == {
+        .RestartRequired(_) -> true
+        else -> false
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:907
+    fn rejected(self) -> Bool { self.change == TerminalStyleChangeKind.Invalid }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:916
+struct TerminalStyleReloadNotification { revision: U64; change: TerminalStyleChangeKind; prior_fingerprint: String?; candidate_fingerprint: String?; error: TerminalStyleErrorFact? }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:926
+struct TerminalStyleSubscriberId { value: U64 }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:930
+#Error
+enum TerminalStyleSubscribeError { LimitReached }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:934
+impl TerminalStyleSubscribeError.Display { fn display(self) -> String { "terminal style subscriber limit reached" } }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:943
+struct SubscriberMailbox { notifications: VecDeque<TerminalStyleReloadNotification> }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:947
+struct ReloadState {
+    current: Arc<TerminalStyleSnapshot>?; pending: TerminalStyleEdit?; last_error: TerminalStyleErrorFact?
+    next_subscriber: U64; subscribers: [TerminalStyleSubscriberId:SubscriberMailbox]
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:960
+struct TerminalStyleReload {
+    state: Mutex<ReloadState>
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:965
+    fn default() -> TerminalStyleReload { TerminalStyleReload.new() }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:971
+    fn new() -> TerminalStyleReload { TerminalStyleReload{state: Mutex.new(ReloadState{current: None, pending: None, last_error: None, next_subscriber: 1, subscribers: {}})} }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:984
+    fn reload(self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
+        state := self.state.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
+        apply_locked(&state, edit.bound_source())
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:991
+    fn enqueue(self, edit: TerminalStyleEdit) -> () {
+        state := self.state.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()); state.pending = .Val(edit.bound_source())
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:996
+    fn has_pending(self) -> Bool { self.state.lock().unwrap_or_else((p) -> p.into_inner()).pending.is_some() }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1005
+    fn flush(self) -> TerminalStyleReloadReceipt? {
+        state := self.state.lock().unwrap_or_else((p) -> p.into_inner())
+        if &state.pending.take() == .Val(edit) -> .Val(apply_locked(&state, ^edit)) else -> None
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1011
+    fn revision(self) -> U64 { self.state.lock().unwrap_or_else((p) -> p.into_inner()).current.as_ref().map((s) -> s.revision).unwrap_or(0) }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1022
+    fn last_valid(self) -> Arc<TerminalStyleSnapshot>? { self.state.lock().unwrap_or_else((p) -> p.into_inner()).current.clone() }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1030
+    fn error_fact(self) -> TerminalStyleErrorFact? { self.state.lock().unwrap_or_else((p) -> p.into_inner()).last_error.clone() }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1038
+    fn subscribe(self) -> TerminalStyleSubscriberId TerminalStyleSubscribeError! {
+        state := self.state.lock().unwrap_or_else((p) -> p.into_inner())
+        if state.subscribers.len() >= MAX_TERMINAL_STYLE_SUBSCRIBERS -> return Err(.LimitReached)
+        id :: TerminalStyleSubscriberId{value: state.next_subscriber}; state.next_subscriber = state.next_subscriber.saturating_add(1)
+        &state.subscribers.insert(id, SubscriberMailbox{notifications: VecDeque.new()})
+        Ok(id)
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1054
+    fn unsubscribe(self, id: TerminalStyleSubscriberId) -> Bool {
+        state := self.state.lock().unwrap_or_else((p) -> p.into_inner()); &state.subscribers.remove(id).is_some()
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1064
+    fn drain_notifications(self, id: TerminalStyleSubscriberId) -> [TerminalStyleReloadNotification] {
+        state := self.state.lock().unwrap_or_else((p) -> p.into_inner())
+        if &state.subscribers.get_mut(id) == .Val(mailbox) -> std.mem.take(&mailbox.notifications).into_iter().collect() else -> []
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1082
+    fn reset(self) -> () { state := self.state.lock().unwrap_or_else((p) -> p.into_inner()); state.current = None; state.pending = None; state.last_error = None }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1090
+fn apply_locked(state: ReloadState, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
+    current :: state.current.clone(); revision :: current.as_ref().map((s) -> s.revision).unwrap_or(0)
+    attempted_fingerprint :: if edit.source.len() <= MAX_TERMINAL_STYLE_SOURCE_BYTES -> .Val(SHA256.sha256_hex(edit.source.as_bytes())) else -> None
+    candidate := build_snapshot(edit) ?? {
+        fact :: TerminalStyleErrorFact{code: err.code(), source_id: bounded_identity(edit.source_id), attempted_fingerprint: attempted_fingerprint.clone(), revision, message: bounded_text(err.message(), MAX_TERMINAL_STYLE_ERROR_BYTES)}
+        state.last_error = .Val(fact.clone())
+        receipt :: TerminalStyleReloadReceipt{revision, change: .Invalid, snapshot: current.clone(), error: .Val(fact.clone())}
+        notify(&state, TerminalStyleReloadNotification{revision, change: .Invalid, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: attempted_fingerprint, error: .Val(^fact)})
+        return receipt
+    }
+    change :: classify_change(current.as_deref(), candidate); candidate_fingerprint :: .Val(candidate.fingerprint().to_string())
+    if change == {
+        .Unchanged -> { state.last_error = None; TerminalStyleReloadReceipt{revision, change, snapshot: ^current, error: None} }
+        .RestartRequired(reason) -> {
+            state.last_error = None
+            receipt :: TerminalStyleReloadReceipt{revision, change: .RestartRequired(reason), snapshot: current.clone(), error: None}
+            notify(&state, TerminalStyleReloadNotification{revision, change: .RestartRequired(reason), prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint, error: None})
+            receipt
+        }
+        .Initial | .StyleOnly | .CapabilityOnly -> {
+            if revision.checked_add(1) == .Val(next_revision) {
+                candidate.revision = next_revision; snapshot :: Arc.new(^candidate); state.current = .Val(snapshot.clone()); state.last_error = None
+                notify(&state, TerminalStyleReloadNotification{revision: next_revision, change, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: .Val(snapshot.fingerprint().to_string()), error: None})
+                TerminalStyleReloadReceipt{revision: next_revision, change, snapshot: .Val(snapshot), error: None}
+            } else {
+                fact :: TerminalStyleErrorFact{code: .RevisionOverflow, source_id: bounded_identity(edit.source_id), attempted_fingerprint: attempted_fingerprint.clone(), revision, message: "style revision counter exhausted"}
+                state.last_error = .Val(fact.clone())
+                receipt :: TerminalStyleReloadReceipt{revision, change: .Invalid, snapshot: current.clone(), error: .Val(fact.clone())}
+                notify(&state, TerminalStyleReloadNotification{revision, change: .Invalid, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: attempted_fingerprint, error: .Val(^fact)})
+                receipt
+            }
+        }
+        .Invalid -> { panic("candidate parsing produced invalid change") }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1221
+fn build_snapshot(edit: TerminalStyleEdit) -> TerminalStyleSnapshot BuildError! {
+    document :: TerminalStyleDocument.parse(edit.source).map_err((error) -> BuildError.Parse(error))
+    facts :: TerminalStyleFingerprintFacts.new(edit.source_id.clone(), edit.source, edit.dependencies.clone(), edit.capabilities, edit.layout_fingerprint.clone(), edit.type_fingerprint.clone()).map_err((error) -> {revision: 0, source_id: edit.source_id.clone(), roles: ^document.roles, facts})
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1240
+#Error
+enum BuildError {
+    Parse(TerminalStyleParseError); Facts(TerminalStyleFactError)
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1246
+    fn code(self) -> TerminalStyleErrorCode { if self == {
+        .Parse(error) -> error.code
+        .Facts(error) -> error.code
+    } }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1253
+    fn message(self) -> String { if self == {
+        .Parse(error) -> error.to_string()
+        .Facts(error) -> error.to_string()
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1261
+fn notify(state: ReloadState, notification: TerminalStyleReloadNotification) -> () {
+    loop mailbox in &state.subscribers.values_mut() {
+        if mailbox.notifications.len() >= MAX_TERMINAL_STYLE_NOTIFICATIONS -> _ :: &mailbox.notifications.pop_front()
+        &mailbox.notifications.push_back(notification.clone())
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1270
+fn validate_identity(value: String) Err! {
+    if value.is_empty() -> return Err("style identity must not be empty")
+    if value.len() > MAX_TERMINAL_STYLE_ID_BYTES -> return Err("style identity exceeds {MAX_TERMINAL_STYLE_ID_BYTES} bytes")
+    if value.chars().any((c) -> c.is_control()) -> return Err("style identity contains a control character")
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1286
+fn validate_sha256(value: String) Err! {
+    if value.len() != 64 || !value.bytes().all((byte) -> byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) -> return Err("style dependency fingerprint must be lowercase SHA-256")
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1297
+fn validate_optional_fingerprint(value: String, label: String) -> String TerminalStyleFactError! {
+    if value.len() > MAX_TERMINAL_STYLE_ID_BYTES || value.chars().any((c) -> c.is_control()) -> return Err(TerminalStyleFactError.new(.InvalidFingerprint, "{label} is not a bounded stable string"))
+    Ok(^value)
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1307
+fn frame(output: String, value: String) -> () { &output.push_str("{value.len()}"); &output.push(':'); &output.push_str(value); &output.push(';') }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1314
+fn bounded_text(value: String, max_bytes: USize) -> String {
+    output := ""
+    loop character in value.chars() {
+        if character.is_control() -> next
+        if output.len() + character.len_utf8() > max_bytes -> break
+        &output.push(character)
+    }
+    ^output
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1328
+fn bounded_identity(value: String) -> String { bounded_text(value, MAX_TERMINAL_STYLE_ID_BYTES) }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1352
+struct TerminalStyleHostSource {
+    source_id: String; capabilities: TerminalCapabilityFacts
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1357
+    fn new(source_id: String, capabilities: TerminalCapabilityFacts) -> TerminalStyleHostSource TerminalStyleFactError! {
+        validate_identity(source_id).map_err((message) -> {source_id: ^source_id, capabilities})
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1377
+enum TerminalStyleHostUnavailableReason {
+    SourceNotInjected; NoStyleApplied; MalformedRequest; MissingSource
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1388
+    fn as_str(self) -> String { if self == {
+        .SourceNotInjected -> "source_not_injected"
+        .NoStyleApplied -> "no_style_applied"
+        .MalformedRequest -> "malformed_request"
+        .MissingSource -> "missing_source"
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1402
+enum TerminalStyleHostRejection {
+    Invalid(TerminalStyleErrorFact); RestartRequired(TerminalStyleRestartReason)
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1410
+    fn code(self) -> String { if self == {
+        .Invalid(fact) -> fact.code.as_str()
+        .RestartRequired(reason) -> reason.as_str()
+    } }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1421
+#Error
+enum TerminalStyleHostOutcome {
+    Applied{revision: U64, change: TerminalStyleChangeKind}; Unavailable(TerminalStyleHostUnavailableReason); Rejected(TerminalStyleHostRejection)
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1437
+struct TerminalStyleHostAdapter {
+    reload: TerminalStyleReload; source: Mutex<TerminalStyleHostSource?>
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1443
+    fn default() -> TerminalStyleHostAdapter { TerminalStyleHostAdapter.new() }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1449
+    fn new() -> TerminalStyleHostAdapter { TerminalStyleHostAdapter{reload: TerminalStyleReload.new(), source: Mutex.new(.None)} }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1466
+    fn inject(self, source: TerminalStyleHostSource) -> () {
+        guard := self.source.lock().unwrap_or_else((p) -> p.into_inner())
+        identity_changed :: guard.as_ref().is_some_and((previous) -> previous.source_id != source.source_id)
+        guard = .Val(^source); drop(^guard)
+        if identity_changed -> self.reload.reset()
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1481
+    fn is_injected(self) -> Bool { self.source.lock().unwrap_or_else((p) -> p.into_inner()).is_some() }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1495
+    fn apply_json(self, body: String) -> (TerminalStyleHostOutcome, String) {
+        source :: self.source.lock().unwrap_or_else((p) -> p.into_inner()).clone()
+        if source == .Val(source) {
+            revision :: self.reload.revision()
+            edit :: parse_style_request(body, source, revision) ?? { event :: outcome_json(err, None); return (_0: err, _1: event) }
+            receipt :: self.reload.reload(^edit); outcome :: host_outcome_from_receipt(receipt)
+            event :: outcome_json(outcome, receipt.snapshot.as_deref()); (_0: outcome, _1: event)
+        } else {
+            outcome :: TerminalStyleHostOutcome.Unavailable(.SourceNotInjected); event :: outcome_json(outcome, None); (_0: outcome, _1: event)
+        }
+    }
+    // Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1525
+    fn current_json(self) -> (TerminalStyleHostOutcome, String) {
+        if self.reload.last_valid() == .Val(snapshot) {
+            outcome :: TerminalStyleHostOutcome.Applied{revision: snapshot.revision, change: .Unchanged}
+            event :: outcome_json(outcome, .Val(snapshot)); (_0: outcome, _1: event)
+        } else {
+            outcome :: TerminalStyleHostOutcome.Unavailable(.NoStyleApplied); event :: outcome_json(outcome, None); (_0: outcome, _1: event)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1546
+fn malformed_request() -> TerminalStyleHostOutcome { .Unavailable(.MalformedRequest) }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1550
+fn parse_style_request(body: String, source: TerminalStyleHostSource, revision: U64) -> TerminalStyleEdit TerminalStyleHostOutcome! {
+    value :: parse_json_with_limit(body, MAX_TERMINAL_STYLE_REQUEST_BYTES).map_err((_) -> malformed_request())
+    object :: object_map(value).map_err((_) -> malformed_request())
+    style_source :: if object.get("source") == {
+        .Val(.Text(text)) -> text.clone()
+        else -> { return Err(.Unavailable(.MissingSource)) }
+    }
+    edit := TerminalStyleEdit.new(source.source_id.clone(), ^style_source).with_capabilities(source.capabilities)
+    if object.get("layout_fingerprint") == .Val(.Text(layout)) -> edit = edit.with_layout_fingerprint(layout.clone())
+    if object.get("type_fingerprint") == .Val(.Text(fingerprint)) -> edit = edit.with_type_fingerprint(fingerprint.clone())
+    if object.get("dependencies") == .Val(entries) {
+        entries :: if entries == {
+            .Array(entries) -> entries
+            else -> { return Err(malformed_request()) }
+        }
+        dependencies := [TerminalStyleDependency]{}
+        loop entry in entries {
+            fields :: object_map(entry).map_err((_) -> malformed_request())
+            kind :: if fields.get("kind") == {
+                .Val(.Text(kind)) -> parse_dependency_kind(kind).ok_or_else(() -> malformed_request())
+                else -> { return Err(malformed_request()) }
+            }
+            id :: if fields.get("id") == {
+                .Val(.Text(id)) -> id.clone()
+                else -> { return Err(malformed_request()) }
+            }
+            fingerprint :: if fields.get("fingerprint") == {
+                .Val(.Text(fingerprint)) -> fingerprint.clone()
+                else -> { return Err(malformed_request()) }
+            }
+            dependency :: TerminalStyleDependency.new(kind, ^id, ^fingerprint).map_err((error) -> TerminalStyleHostOutcome.Rejected(.Invalid(TerminalStyleErrorFact{
+                code: error.code, source_id: bounded_identity(source.source_id), attempted_fingerprint: None, revision, message: error.message})))
+            &dependencies.push(^dependency)
+        }
+        edit = edit.with_dependencies(^dependencies)
+    }
+    Ok(^edit)
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1612
+fn object_map(value: Dyn) -> [String:Dyn] Err! {
+    if value == .Object(fields) -> Ok(fields.iter().cloned().collect()) else -> Err("terminal style request must be an object")
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1619
+fn parse_dependency_kind(value: String) -> TerminalStyleDependencyKind? { if value == {
+    "source" -> .Val(.Source)
+    "capability" -> .Val(.Capability)
+    "layout" -> .Val(.Layout)
+    "value_type" -> .Val(.ValueType)
+    else -> None
+} }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1629
+fn host_outcome_from_receipt(receipt: TerminalStyleReloadReceipt) -> TerminalStyleHostOutcome {
+    if receipt.change == {
+        .Initial | .StyleOnly | .CapabilityOnly | .Unchanged -> .Applied{revision: receipt.revision, change: receipt.change}
+        .RestartRequired(reason) -> .Rejected(.RestartRequired(reason))
+        .Invalid -> {
+            fact :: receipt.error.clone().unwrap_or_else(() -> {code: .InvalidStyle, source_id: "", attempted_fingerprint: None, revision: receipt.revision, message: "style candidate was rejected"})
+            .Rejected(.Invalid(fact))
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1654
+fn outcome_json(outcome: TerminalStyleHostOutcome, snapshot: TerminalStyleSnapshot?) -> String {
+    output := String.with_capacity(256)
+    &output.push_str("{{\"protocol\":\""); &output.push_str(TERMINAL_STYLE_PROTOCOL); &output.push('"')
+    if outcome == {
+        .Applied{revision, change} -> {
+            &output.push_str(",\"outcome\":\"applied\",\"revision\":{revision},\"change\":\"{change.as_str()}\"")
+            if snapshot == .Val(snapshot) -> &output.push_str(",\"fingerprint\":\"{foundation_json_escape(snapshot.fingerprint())}\"")
+        }
+        .Rejected(rejection) -> {
+            &output.push_str(",\"outcome\":\"rejected\",\"code\":\"{rejection.code()}\"")
+            if rejection == .Invalid(fact) -> &output.push_str(",\"message\":\"{foundation_json_escape(fact.message)}\"")
+        }
+        .Unavailable(reason) -> &output.push_str(",\"outcome\":\"unavailable\",\"reason\":\"{reason.as_str()}\"")
+    }
+    &output.push('}'); ^output
+}

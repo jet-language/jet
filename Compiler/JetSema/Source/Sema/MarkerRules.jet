@@ -457,15 +457,6 @@ fn sema_marker_rules_builtin_index(registry: SemaScopeMembersMarkerRegistry, mar
     sema_marker_rules_catalog_rule_index(registry.applied_rules, marker.name)
 }
 
-fn sema_marker_rules_same_declaration(left: Marker, right: Marker) -> Bool Never! {
-    if left.declaration_module != None || right.declaration_module != None -> return left.declaration_module == right.declaration_module && left.declaration_span == right.declaration_span
-    left.name == right.name
-}
-
-fn sema_marker_rules_same_occurrence(left: Marker, right: Marker) -> Bool Never! {
-    left.name_span.start == right.name_span.start && left.name_span.end == right.name_span.end && sema_marker_rules_same_declaration(left, right)
-}
-
 fn sema_marker_rules_menu_index(menus: [TAppliedRuleArgumentMenu], name: String) -> Int? {
     loop (index, menu) in menus {
         if menu.name == name {
@@ -1056,7 +1047,7 @@ fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (si
         &params.push(TAppliedRuleParameter{name: parameter.name, kind: kind, source_type: source_type, default_source: default_source})
         &expected_types.push(parameter.ty)
     }
-    (signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type}, expected_types: expected_types, variadic_expected_type: variadic_expected_type)
+    (expected_types: expected_types, signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type}, variadic_expected_type: variadic_expected_type)
 }
 
 fn sema_marker_rules_declared_site_error(marker: Marker, rule: SemaScopeMembersMarkerRule) -> Diagnostic {
@@ -1093,13 +1084,32 @@ fn sema_marker_rules_fact_allows(rule: TAppliedRule, application: AppliedRuleApp
     false
 }
 
-fn sema_marker_rules_append_application(applications: &[AppliedRuleApplication], application: AppliedRuleApplication) Never! {
-    loop existing in applications {
-        if sema_marker_rules_same_occurrence(existing.marker, application.marker) && existing.target == application.target {
-            return
-        }
+// Identity of a marker's declaration: the module and declaration span of a
+// declared rule (a marker with a declaration module matches only that module
+// and span), else its name. Equal keys exactly when two markers name the same
+// declaration, so dedupes probe a map instead of rescanning the list.
+fn sema_marker_rules_declaration_key(marker: Marker) -> String Never! {
+    if marker.declaration_module == {
+        .Val(owner_module) -> "m{owner_module.len()}:{owner_module}|{sema_marker_rules_span_key(marker.declaration_span)}"
+        else -> "n:{marker.name}"
     }
-    &applications.push(application)
+}
+
+// Identity of a marker occurrence: its name span and its declaration.
+fn sema_marker_rules_occurrence_key(marker: Marker) -> String Never! {
+    "{marker.name_span.start}:{marker.name_span.end}|{sema_marker_rules_declaration_key(marker)}"
+}
+
+fn sema_marker_rules_span_key(span: Span?) -> String Never! {
+    if span == {
+        .Val(at) -> "{at.start}:{at.end}"
+        else -> "-"
+    }
+}
+
+// Same occurrence on the same target.
+fn sema_marker_rules_application_key(application: AppliedRuleApplication) -> String Never! {
+    "{sema_marker_rules_occurrence_key(application.marker)}|{sema_marker_rules_span_key(application.target)}"
 }
 
 fn sema_marker_rules_attach(markers: [Marker], target: Span, site: RuleSite, applications: &[AppliedRuleApplication]) Never! {
@@ -1144,27 +1154,33 @@ fn sema_marker_rules_item_applications(item: Item, applications: &[AppliedRuleAp
 
 fn sema_marker_rules_applications(program: Program) -> [AppliedRuleApplication] Never! {
     applications := program.rule_facts
+    recorded := [String:Bool]{}
+    loop fact in program.rule_facts -> recorded[sema_marker_rules_application_key(fact)] = true
     collected := [AppliedRuleApplication]{}
     loop item in program.items -> sema_marker_rules_item_applications(item, &collected)
     loop application in collected {
-        recorded :: loop fact in program.rule_facts {
-            if sema_marker_rules_same_occurrence(fact.marker, application.marker) && fact.target == application.target -> break true
-        } ?? false
-        if !recorded -> &applications.push(application)
+        if recorded.get(sema_marker_rules_application_key(application)) == None -> &applications.push(application)
     }
+    if program.applied_rules.len() == 0 -> return applications
+    present := [String:Bool]{}
+    loop application in applications -> present[sema_marker_rules_application_key(application)] = true
     loop application in program.applied_rules {
-        sema_marker_rules_append_application(&applications, application)
+        key :: sema_marker_rules_application_key(application)
+        if present.get(key) != None -> next
+        present[key] = true
+        &applications.push(application)
     }
     applications
 }
 
-fn sema_marker_rules_application_at(program: Program, marker: Marker) -> AppliedRuleApplication? {
-    loop application in sema_marker_rules_applications(program) {
-        if application.marker.name == marker.name && application.marker.name_span.start == marker.name_span.start && application.marker.name_span.end == marker.name_span.end {
-            return Val(application)
-        }
+// Marker name and name span -> the first of `applications` there.
+fn sema_marker_rules_application_rows(applications: [AppliedRuleApplication]) -> [String:Int] Never! {
+    rows := [String:Int]{}
+    loop (index, application) in applications {
+        key :: "{application.marker.name_span.start}:{application.marker.name_span.end}|{application.marker.name}"
+        if rows.get(key) == None -> rows[key] = index
     }
-    None
+    rows
 }
 
 fn sema_marker_rules_is_guest_marker(marker: Marker, site: RuleSite?) -> Bool Never! {
@@ -1354,17 +1370,15 @@ fn sema_marker_rules_collect_program(program: Program) -> [Marker] Never! {
     loop item in program.items {
         sema_marker_rules_collect_item(item, &markers)
     }
+    present := [String:Bool]{}
+    loop existing in markers -> present[sema_marker_rules_occurrence_key(existing)] = true
     loop application in sema_marker_rules_applications(program) {
         if application.target == None {
             next
         }
-        duplicate := false
-        loop existing in markers {
-            if sema_marker_rules_same_occurrence(existing, application.marker) {
-                duplicate = true
-            }
-        }
-        if !duplicate {
+        key :: sema_marker_rules_occurrence_key(application.marker)
+        if present.get(key) == None {
+            present[key] = true
             &markers.push(application.marker)
         }
     }
@@ -1379,18 +1393,17 @@ fn sema_marker_rules_marker_is_known(registry: SemaScopeMembersMarkerRegistry, m
 }
 
 fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistry, program: Program, markers: [Marker], diagnostics: &[Diagnostic]) {
-    seen := [Marker]{}
+    seen := [String:Bool]{}
+    applications :: sema_marker_rules_applications(program)
+    application_rows :: sema_marker_rules_application_rows(applications)
     loop marker in markers {
-        duplicate := false
-        loop occurrence in seen {
-            if sema_marker_rules_same_occurrence(occurrence, marker) -> duplicate = true
-        }
-        if duplicate {
+        occurrence :: sema_marker_rules_occurrence_key(marker)
+        if seen.get(occurrence) != None {
             next
         }
-        &seen.push(marker)
-        application :: sema_marker_rules_application_at(program, marker)
-        site := if application == .Val(fact) -> fact.site else -> None
+        seen[occurrence] = true
+        application_row :: application_rows.get("{marker.name_span.start}:{marker.name_span.end}|{marker.name}") ?? -1
+        site := if application_row >= 0 -> applications[application_row].site else -> None
         if sema_marker_rules_is_guest_marker(marker, site) {
             next
         }
@@ -1467,7 +1480,7 @@ fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, pr
 }
 
 fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
-    seen := [AppliedRuleApplication]{}
+    seen := [String:Bool]{}
     loop application in sema_marker_rules_applications(program) {
         builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
         repeatable := false
@@ -1495,30 +1508,23 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
         if repeatable {
             next
         }
-        found := false
-        loop existing in seen {
-            if sema_marker_rules_same_declaration(existing.marker, application.marker) && existing.target == application.target {
-                found = true
-            }
-        }
-        if found {
+        // Same declaration on the same target.
+        key :: "{sema_marker_rules_declaration_key(application.marker)}|{sema_marker_rules_span_key(application.target)}"
+        if seen.get(key) != None {
             &diagnostics.push(sema_marker_rules_repeated_error(application.marker))
         }
-        &seen.push(application)
+        seen[key] = true
     }
 }
 
 fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry, source_program: Program, markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], result: &SemaMarkerRulesCheckResult) {
-    seen := [Marker]{}
+    seen := [String:Bool]{}
     loop marker in markers {
-        duplicate := false
-        loop occurrence in seen {
-            if sema_marker_rules_same_occurrence(occurrence, marker) -> duplicate = true
-        }
-        if duplicate {
+        occurrence :: sema_marker_rules_occurrence_key(marker)
+        if seen.get(occurrence) != None {
             next
         }
-        &seen.push(marker)
+        seen[occurrence] = true
         builtin_index := sema_marker_rules_builtin_index(registry, marker)
         if builtin_index != None {
             rule := registry.applied_rules[builtin_index ?? 0]
@@ -1739,7 +1745,7 @@ fn sema_inline_always_scan_expr(expression: Expr, scan: &SemaInlineAlwaysScan) {
             if call.name == scan.target -> scan.self_recursive = true
             sema_inline_always_scan_args(call.args, &scan)
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
             if method == scan.target -> scan.self_recursive = true
             sema_inline_always_scan_expr(receiver, &scan)
             sema_inline_always_scan_args(args, &scan)

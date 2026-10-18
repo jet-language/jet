@@ -1,0 +1,797 @@
+// Bounded source-identified preview/playground host; rendering stays with Canvas.
+use std.collections.[BTreeSet]
+use std.time.[Duration, Instant] // GATE #4494: native monotonic clock.
+use jet_foundation.Devtools.[JetDevtoolsFreshnessState, JetDevtoolsSourceSpan]
+use jet_foundation.JSON.json_escape as preview_json_escape
+
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:19
+CANVAS_PREVIEW_SCHEMA_VERSION :: prep { U32{1} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:20
+CANVAS_PREVIEW_MAX_PREVIEWS :: prep { USize{64} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:21
+CANVAS_PREVIEW_MAX_SELECTED :: prep { USize{16} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:22
+CANVAS_PREVIEW_MAX_CONTEXTS :: prep { USize{16} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:23
+CANVAS_PREVIEW_MAX_INPUTS :: prep { USize{32} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:24
+CANVAS_PREVIEW_MAX_INPUT_BYTES :: prep { USize{16 * 1024} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:25
+CANVAS_PREVIEW_MAX_TEXT_BYTES :: prep { USize{16 * 1024} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:26
+CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES :: prep { USize{16 * 1024} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:27
+CANVAS_PREVIEW_MAX_FRAME_BYTES :: prep { USize{4 * 1024 * 1024} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:28
+CANVAS_PREVIEW_MAX_RESIDENT_BYTES :: prep { USize{16 * 1024 * 1024} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:29
+CANVAS_PREVIEW_MAX_CLIENTS :: prep { USize{16} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:30
+CANVAS_PREVIEW_CLIENT_IDLE_SECS :: prep { U64{60} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:31
+CANVAS_PREVIEW_MAX_DIMENSION :: prep { U32{16_384} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:32
+CANVAS_PREVIEW_MAX_SCALE :: prep { U16{8} }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:36
+alias CanvasPreviewSourceSpan :: JetDevtoolsSourceSpan
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:43
+struct CanvasPreviewSourceIdentity {
+    source_id: String; build_id: String; revision: String; span: CanvasPreviewSourceSpan
+}
+impl CanvasPreviewSourceIdentity {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:51
+    fn new(source_id: String, build_id: String, revision: String, span: CanvasPreviewSourceSpan) -> Self {
+        Self { source_id: source_id, build_id: build_id, revision: revision, span: span }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:65
+    fn validate(&self) CanvasPreviewError! {
+        preview_text(self.source_id, "source id", CANVAS_PREVIEW_MAX_TEXT_BYTES)
+        preview_text(self.build_id, "build id", CANVAS_PREVIEW_MAX_TEXT_BYTES)
+        preview_text(self.revision, "revision", CANVAS_PREVIEW_MAX_TEXT_BYTES)
+        self.span.validate() ?? {
+            _ :: err
+            throw .InvalidSource("source span is invalid")
+        }
+        if self.span.source_id != self.source_id -> throw .InvalidSource("source span identity does not match preview source")
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:82
+enum CanvasPreviewKind { Preview; Playground }
+impl CanvasPreviewKind {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:88
+    fn as_str(self) -> String { if self == {
+        .Preview -> "preview"
+        .Playground -> "playground"
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:97
+enum CanvasPreviewDevice { Phone; Tablet; Desktop; Custom(String) }
+impl CanvasPreviewDevice {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:105
+    fn as_str(&self) -> String { if self == {
+        .Phone -> "phone"
+        .Tablet -> "tablet"
+        .Desktop -> "desktop"
+        .Custom(value) -> value
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:116
+struct CanvasPreviewViewport { device: CanvasPreviewDevice; width: U32; height: U32; scale: U16 }
+impl CanvasPreviewViewport {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:124
+    fn new(device: CanvasPreviewDevice, width: U32, height: U32, scale: U16) -> Self CanvasPreviewError! {
+        viewport := Self { device: device, width: width, height: height, scale: scale }
+        viewport.validate()
+        viewport
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:140
+    fn phone() -> Self { Self { device: .Phone, width: 390, height: 844, scale: 2 } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:149
+    fn tablet() -> Self { Self { device: .Tablet, width: 834, height: 1_119, scale: 2 } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:158
+    fn desktop() -> Self { Self { device: .Desktop, width: 1_280, height: 800, scale: 1 } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:167
+    fn validate(&self) CanvasPreviewError! {
+        if self.width == 0 || self.height == 0 -> throw .InvalidViewport("viewport dimensions must be positive")
+        if self.width > CANVAS_PREVIEW_MAX_DIMENSION || self.height > CANVAS_PREVIEW_MAX_DIMENSION -> throw .InvalidViewport("viewport dimension exceeds the preview bound")
+        if self.scale == 0 || self.scale > CANVAS_PREVIEW_MAX_SCALE -> throw .InvalidViewport("viewport scale is outside the preview bound")
+        if self.device == .Custom(name) -> preview_text(name, "viewport device", 128)
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:193
+enum CanvasPreviewTheme { System; Light; Dark; HighContrast; Custom(String) }
+impl CanvasPreviewTheme {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:202
+    fn as_str(&self) -> String { if self == {
+        .System -> "system"
+        .Light -> "light"
+        .Dark -> "dark"
+        .HighContrast -> "high-contrast"
+        .Custom(value) -> value
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:214
+enum CanvasPreviewAccessibility { Default; ReducedMotion; LargeText; HighContrast; ScreenReader; Custom(String) }
+impl CanvasPreviewAccessibility {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:224
+    fn as_str(&self) -> String { if self == {
+        .Default -> "default"
+        .ReducedMotion -> "reduced-motion"
+        .LargeText -> "large-text"
+        .HighContrast -> "high-contrast"
+        .ScreenReader -> "screen-reader"
+        .Custom(value) -> value
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:237
+enum CanvasPreviewLifecycle { Initial; Loading; Loaded; Empty; Error; Offline; Custom(String) }
+impl CanvasPreviewLifecycle {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:248
+    fn as_str(&self) -> String { if self == {
+        .Initial -> "initial"
+        .Loading -> "loading"
+        .Loaded -> "loaded"
+        .Empty -> "empty"
+        .Error -> "error"
+        .Offline -> "offline"
+        .Custom(value) -> value
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:262
+struct CanvasPreviewTraits { theme: CanvasPreviewTheme; locale: String; accessibility: CanvasPreviewAccessibility; lifecycle: CanvasPreviewLifecycle }
+impl CanvasPreviewTraits {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:270
+    fn default() -> Self { Self { theme: .System, locale: "en-US", accessibility: .Default, lifecycle: .Initial } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:281
+    fn validate(&self) CanvasPreviewError! {
+        preview_text(self.locale, "locale", 128)
+        loop (value, field) in [(_0: self.theme.as_str(), _1: "theme"), (_0: self.accessibility.as_str(), _1: "accessibility"), (_0: self.lifecycle.as_str(), _1: "lifecycle")] -> preview_text(value, field, 128)
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:295
+enum CanvasPreviewEffect { Read(String); Write(String); Network(String); Clock; Custom(String) }
+impl CanvasPreviewEffect {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:304
+    fn capability(&self) -> String { if self == {
+        .Read(value) -> value
+        .Write(value) -> value
+        .Network(value) -> value
+        .Clock -> "Clock.Read"
+        .Custom(value) -> value
+    } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:314
+    fn validate(&self) CanvasPreviewError! { preview_text(self.capability(), "preview effect", 256) }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:322
+struct CanvasPreviewAuthority { loopback_only: Bool; capabilities: BTreeSet<String> }
+impl CanvasPreviewAuthority {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:328
+    fn development() -> Self { Self.new(true) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:335
+    fn new(loopback_only: Bool) -> Self { Self { loopback_only: loopback_only, capabilities: BTreeSet.new() } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:342
+    fn loopback_only(&self) -> Bool { self.loopback_only }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:346
+    fn capabilities(&self) -> Iterator<String> { self.capabilities.iter() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:350
+    fn with_capability(self, capability: String) -> Self CanvasPreviewError! {
+        preview_text(capability, "authority capability", 256)
+        self.capabilities.insert(capability)
+        self
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:357
+    fn allows_capability(&self, requested: String) -> Bool {
+        self.capabilities.iter().any((held) -> held == requested || requested.strip_prefix(held).is_some_and((tail) -> tail.starts_with('.') || tail.starts_with(':') || tail.starts_with('/')))
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:366
+    fn allows_effect(&self, effect_ref: &CanvasPreviewEffect, loopback: Bool) -> Bool { (!self.loopback_only || loopback) && self.allows_capability(effect_ref.capability()) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:370
+    fn attenuate(&self, capabilities: [String]) -> Self CanvasPreviewError! {
+        narrowed := Self.new(self.loopback_only)
+        loop capability in capabilities {
+            preview_text(capability, "authority capability", 256)
+            if !self.allows_capability(capability) -> throw .CapabilityDenied(capability)
+            narrowed.capabilities.insert(capability)
+        }
+        narrowed
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:387
+enum CanvasPreviewInput { Text(String); Bool(Bool); Integer(I64); Float(F64) }
+impl CanvasPreviewInput {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:395
+    fn validate(&self) CanvasPreviewError! {
+        if self == {
+            .Text(value) -> preview_text(value, "preview input", CANVAS_PREVIEW_MAX_INPUT_BYTES)
+            .Float(value) -> if !value.is_finite() -> throw .InvalidInput("preview float input must be finite") else -> {}
+        }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:405
+    fn encoded_len(&self) -> USize { if self == {
+        .Text(value) -> value.len()
+        .Bool(_) -> 1
+        .Integer(_) -> 8
+        .Float(_) -> 8
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:416
+struct CanvasPreviewInputOverride { name: String; value: CanvasPreviewInput }
+impl CanvasPreviewInputOverride {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:422
+    fn new(name: String, value: CanvasPreviewInput) -> Self CanvasPreviewError! {
+        input := Self { name: name, value: value }; input.validate()?; input
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:431
+    fn validate(&self) CanvasPreviewError! { preview_text(self.name, "preview input name", 256)?; self.value.validate() }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:442
+struct CanvasPreviewContext { id: String; source: CanvasPreviewSourceIdentity; values: [String:CanvasPreviewInput]; resident_bytes: USize }
+impl CanvasPreviewContext {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:449
+    fn new(id: String, source: CanvasPreviewSourceIdentity, values: [CanvasPreviewInputOverride]) -> Self CanvasPreviewError! {
+        preview_text(id, "preview context id", 256)
+        source.validate()
+        context := Self { id: id, source: source, values: {}, resident_bytes: 0 }
+        loop value in values {
+            value.validate()
+            if context.values.len() >= CANVAS_PREVIEW_MAX_INPUTS -> throw .TooManyInputs
+            if context.values.contains_key(value.name) -> throw .DuplicateInput(value.name)
+            context.resident_bytes = context.resident_bytes.saturating_add(value.name.len()).saturating_add(value.value.encoded_len())
+            if context.resident_bytes > CANVAS_PREVIEW_MAX_INPUT_BYTES -> throw .InputBudgetExceeded
+            context.values.insert(value.name, value.value)
+        }
+        context
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:486
+    fn values(&self) -> [String:CanvasPreviewInput] { &self.values }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:490
+    fn resident_bytes(&self) -> USize { self.resident_bytes }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:498
+struct CanvasPreviewCallback { id: String }
+impl CanvasPreviewCallback {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:503
+    fn checked(id: String) -> Self CanvasPreviewError! { preview_text(id, "preview callback id", 256)?; Self { id: id } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:511
+struct CanvasPreviewDescriptor {
+    kind: CanvasPreviewKind; name: String; callback: CanvasPreviewCallback; source: CanvasPreviewSourceIdentity
+    viewport: CanvasPreviewViewport; traits: CanvasPreviewTraits
+    effects: BTreeSet<CanvasPreviewEffect> // GATE #4499: retain enum equality/order.
+    authority: CanvasPreviewAuthority; inputs: [String:CanvasPreviewInput]; context_id: String?
+}
+impl CanvasPreviewDescriptor {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:525
+    fn new(kind: CanvasPreviewKind, name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self {
+        Self { kind: kind, name: name, callback: callback, source: source, viewport: CanvasPreviewViewport.desktop(), traits: CanvasPreviewTraits.default(), effects: BTreeSet.new(), authority: CanvasPreviewAuthority.development(), inputs: {}, context_id: .None }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:545
+    fn preview(name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self { Self.new(.Preview, name, callback, source) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:553
+    fn playground(name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self { Self.new(.Playground, name, callback, source) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:561
+    fn kind(&self) -> CanvasPreviewKind { self.kind }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:565
+    fn name(&self) -> String { self.name }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:569
+    fn callback(&self) -> CanvasPreviewCallback { &self.callback }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:573
+    fn source(&self) -> CanvasPreviewSourceIdentity { &self.source }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:577
+    fn viewport(&self) -> CanvasPreviewViewport { &self.viewport }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:581
+    fn traits(&self) -> CanvasPreviewTraits { &self.traits }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:585
+    fn effects(&self) -> Iterator<CanvasPreviewEffect> { self.effects.iter() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:589
+    fn authority(&self) -> CanvasPreviewAuthority { &self.authority }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:593
+    fn inputs(&self) -> [String:CanvasPreviewInput] { &self.inputs }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:597
+    fn context_id(&self) -> String? { self.context_id }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:601
+    fn set_viewport(&self, viewport: CanvasPreviewViewport) CanvasPreviewError! { viewport.validate()?; self.viewport = viewport }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:607
+    fn set_authority(&self, authority: CanvasPreviewAuthority) -> Unit { self.authority = authority }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:611
+    fn add_effect(&self, effect_ref: CanvasPreviewEffect) CanvasPreviewError! { effect_ref.validate()?; self.effects.insert(effect_ref) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:617
+    fn set_input(&self, input: CanvasPreviewInputOverride) CanvasPreviewError! {
+        input.validate()
+        if self.inputs.len() >= CANVAS_PREVIEW_MAX_INPUTS && !self.inputs.contains_key(input.name) -> throw .TooManyInputs
+        self.inputs.insert(input.name, input.value)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:626
+    fn validate(&self) CanvasPreviewError! {
+        preview_text(self.name, "preview name", 256)
+        self.callback.checked_id()?; self.source.validate()?; self.viewport.validate()?; self.traits.validate()
+        loop effect_ref in self.effects {
+            effect_ref.validate()
+            if !self.authority.allows_capability(effect_ref.capability()) -> throw .CapabilityDenied(effect_ref.capability().to_string())
+        }
+        keys := self.inputs.keys().collect(); keys.sort()
+        loop name in keys { preview_text(name, "preview input name", 256)?; self.inputs[name].validate() }
+        if self.inputs.len() > CANVAS_PREVIEW_MAX_INPUTS -> throw .TooManyInputs
+        if self.context_id == .Val(context_id) -> preview_text(context_id, "preview context id", 256)
+    }
+}
+impl CanvasPreviewCallback {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:658
+    fn checked_id(&self) CanvasPreviewError! { preview_text(self.id, "preview callback id", 256) }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:664
+struct CanvasPreviewPolicy {
+    max_previews: USize; max_selected: USize; max_contexts: USize; max_inputs: USize
+    max_frame_bytes: USize; max_resident_bytes: USize; max_diagnostic_bytes: USize; max_clients: USize; client_idle_secs: U64
+}
+impl CanvasPreviewPolicy {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:677
+    fn default() -> Self {
+        Self { max_previews: CANVAS_PREVIEW_MAX_PREVIEWS, max_selected: CANVAS_PREVIEW_MAX_SELECTED, max_contexts: CANVAS_PREVIEW_MAX_CONTEXTS, max_inputs: CANVAS_PREVIEW_MAX_INPUTS, max_frame_bytes: CANVAS_PREVIEW_MAX_FRAME_BYTES, max_resident_bytes: CANVAS_PREVIEW_MAX_RESIDENT_BYTES, max_diagnostic_bytes: CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES, max_clients: CANVAS_PREVIEW_MAX_CLIENTS, client_idle_secs: CANVAS_PREVIEW_CLIENT_IDLE_SECS }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:693
+    fn validate(&self) CanvasPreviewError! {
+        if self.max_previews == 0 || self.max_previews > CANVAS_PREVIEW_MAX_PREVIEWS || self.max_selected == 0 || self.max_selected > CANVAS_PREVIEW_MAX_SELECTED || self.max_contexts > CANVAS_PREVIEW_MAX_CONTEXTS || self.max_inputs > CANVAS_PREVIEW_MAX_INPUTS || self.max_frame_bytes == 0 || self.max_frame_bytes > CANVAS_PREVIEW_MAX_FRAME_BYTES || self.max_resident_bytes == 0 || self.max_resident_bytes > CANVAS_PREVIEW_MAX_RESIDENT_BYTES || self.max_diagnostic_bytes == 0 || self.max_diagnostic_bytes > CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES || self.max_clients == 0 || self.max_clients > CANVAS_PREVIEW_MAX_CLIENTS || self.client_idle_secs == 0 -> throw .InvalidPolicy
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:717
+enum CanvasPreviewStatus { Unrendered; Building; Ready; Error; Stale; Closed }
+impl CanvasPreviewStatus {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:727
+    fn as_str(&self) -> String { if self == {
+        .Unrendered -> "unrendered"
+        .Building -> "building"
+        .Ready -> "ready"
+        .Error -> "error"
+        .Stale -> "stale"
+        .Closed -> "closed"
+    } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:740
+struct CanvasPreviewDiagnostic { code: String; message: String; source: CanvasPreviewSourceIdentity }
+impl CanvasPreviewDiagnostic {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:747
+    fn new(code: String, message: String, source: CanvasPreviewSourceIdentity, max_bytes: USize) -> Self CanvasPreviewError! {
+        diagnostic := Self { code: code, message: message, source: source }
+        preview_text(diagnostic.code, "preview diagnostic code", 128)
+        preview_text(diagnostic.message, "preview diagnostic", max_bytes)
+        diagnostic.source.validate()
+        diagnostic
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:766
+struct CanvasPreviewRendered<T> { value: T; bytes: USize }
+impl<T> CanvasPreviewRendered<T> {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:772
+    fn new(value: T, bytes: USize) -> Self { Self { value: value, bytes: bytes } }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:778
+struct CanvasPreviewRenderError { code: String; message: String }
+impl CanvasPreviewRenderError {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:784
+    fn new(code: String, message: String) -> Self CanvasPreviewError! {
+        error := Self { code: code, message: message }
+        preview_text(error.code, "preview render error code", 128)
+        preview_text(error.message, "preview render error", CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES)
+        error
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:797
+struct CanvasPreviewFrame<T> { value: T; source: CanvasPreviewSourceIdentity; bytes: USize; sequence: U64 }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:805
+struct CanvasPreviewSnapshot<T> {
+    session_id: String; name: String; kind: CanvasPreviewKind; source: CanvasPreviewSourceIdentity
+    status: CanvasPreviewStatus; freshness: JetDevtoolsFreshnessState
+    current: CanvasPreviewFrame<T>?; last_good: CanvasPreviewFrame<T>?; diagnostic: CanvasPreviewDiagnostic?; sequence: U64
+}
+impl<T: Clone> CanvasPreviewSnapshot<T> {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:820
+    fn to_json(&self) -> String {
+        diagnostic := self.diagnostic.as_ref().map((value) -> "{{\"code\":\"{preview_json_escape(value.code)}\",\"message\":\"{preview_json_escape(value.message)}\",\"source\":{preview_source_json(value.source)}}}").unwrap_or_else(() -> "null")
+        current_source := self.current.as_ref().map((frame) -> preview_source_json(frame.source)).unwrap_or_else(() -> "null")
+        last_good_source := self.last_good.as_ref().map((frame) -> preview_source_json(frame.source)).unwrap_or_else(() -> "null")
+        "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"session_id\":\"{preview_json_escape(self.session_id)}\",\"name\":\"{preview_json_escape(self.name)}\",\"kind\":\"{self.kind.as_str()}\",\"status\":\"{self.status.as_str()}\",\"freshness\":\"{self.freshness.as_str()}\",\"current\":{self.current.is_some()},\"last_good\":{self.last_good.is_some()},\"current_source\":{current_source},\"last_good_source\":{last_good_source},\"diagnostic\":{diagnostic},\"sequence\":{self.sequence}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:863
+struct PreviewRecord<T> {
+    descriptor: CanvasPreviewDescriptor; status: CanvasPreviewStatus; freshness: JetDevtoolsFreshnessState
+    last_good: CanvasPreviewFrame<T>?; diagnostic: CanvasPreviewDiagnostic?; sequence: U64
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:873
+struct CanvasPreviewConnection { session_id: String; client_id: String; generation: U64; cursor: U64 }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:879
+struct PreviewClientLease { generation: U64; cursor: U64; loopback: Bool; last_seen: Instant }
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:889
+struct CanvasPreviewSession<T: Clone> {
+    id: String; secret: String; authority: CanvasPreviewAuthority; policy: CanvasPreviewPolicy
+    registry: CanvasPreviewRegistry; records: [String:PreviewRecord<T>]; clients: [String:PreviewClientLease]
+    resident_bytes: USize; sequence: U64; closed: Bool
+}
+impl<T: Clone> CanvasPreviewSession<T> {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:903
+    fn new(id: String, secret: String, authority: CanvasPreviewAuthority) -> Self CanvasPreviewError! { Self.with_policy(id, secret, authority, CanvasPreviewPolicy.default()) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:911
+    fn with_policy(id: String, secret: String, authority: CanvasPreviewAuthority, policy: CanvasPreviewPolicy) -> Self CanvasPreviewError! {
+        preview_text(id, "preview session id", 256)?; preview_text(secret, "preview session secret", 256)?; policy.validate()
+        Self { id: id, secret: secret, authority: authority, policy: policy, registry: CanvasPreviewRegistry.default(), records: {}, clients: {}, resident_bytes: 0, sequence: 0, closed: false }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:936
+    fn id(&self) -> String { self.id }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:940
+    fn authority(&self) -> CanvasPreviewAuthority { &self.authority }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:944
+    fn policy(&self) -> CanvasPreviewPolicy { &self.policy }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:948
+    fn registry(&self) -> CanvasPreviewRegistry { &self.registry }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:952
+    fn resident_bytes(&self) -> USize { self.resident_bytes }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:956
+    fn register_context(&self, context: CanvasPreviewContext) CanvasPreviewError! {
+        self.ensure_open()
+        if self.registry.contexts_len() >= self.policy.max_contexts -> throw .TooManyContexts
+        self.registry.insert_context(context)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:964
+    fn select(&self, name: String) CanvasPreviewError! {
+        self.ensure_open()
+        if self.registry.selected_len() >= self.policy.max_selected && !self.registry.is_selected(name) -> throw .TooManySelected
+        self.registry.select(name)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:974
+    fn select_many(&self, names: [String]) CanvasPreviewError! {
+        self.ensure_open()
+        if names.len() > self.policy.max_selected -> throw .TooManySelected
+        self.registry.select_many(names)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:986
+    fn clear_selection(&self) -> Unit { self.registry.clear_selection() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:990
+    fn selected_names(&self) -> [String] { self.registry.selected_names() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:994
+    fn descriptor(&self, name: String) -> CanvasPreviewDescriptor CanvasPreviewError! {
+        record := self.records.get(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
+        &record.descriptor
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1001
+    fn snapshot(&self, name: String) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+        record := self.records.get(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
+        self.snapshot_record(name, record)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1009
+    fn snapshots(&self) -> [CanvasPreviewSnapshot<T>] {
+        keys := self.records.keys().collect(); keys.sort()
+        keys.iter().map((name) -> self.snapshot_record(name, self.records[name])).collect()
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1016
+    fn mark_building(&self, name: String) CanvasPreviewError! {
+        self.ensure_open()
+        sequence := self.bump_sequence(); record := self.record_mut(name)
+        record.status = .Building
+        record.freshness = if record.last_good.is_some() -> .Stale else -> .Unknown
+        record.diagnostic = .None; record.sequence = sequence
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1031
+    fn mark_stale(&self, name: String, code: String, message: String) CanvasPreviewError! {
+        self.ensure_open()
+        source := self.descriptor(name)?.source().clone()
+        diagnostic := CanvasPreviewDiagnostic.new(code, message, source, self.policy.max_diagnostic_bytes)
+        sequence := self.bump_sequence(); record := self.record_mut(name)
+        record.status = .Stale; record.freshness = .Stale; record.diagnostic = .Val(diagnostic); record.sequence = sequence
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1054
+    fn mark_error(&self, name: String, code: String, message: String) CanvasPreviewError! {
+        self.ensure_open()
+        source := self.descriptor(name)?.source().clone()
+        diagnostic := CanvasPreviewDiagnostic.new(code, message, source, self.policy.max_diagnostic_bytes)
+        sequence := self.bump_sequence(); record := self.record_mut(name)
+        record.status = .Error; record.freshness = .Stale; record.diagnostic = .Val(diagnostic); record.sequence = sequence
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1080
+    fn evaluate(&self, name: String, render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+        descriptor := self.descriptor(name)?.clone()
+        if descriptor.effects().next().is_some() -> throw .AuthorityRequired
+        self.evaluate_inner(name, descriptor, render)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1098
+    fn evaluate_authorized(&self, connection: &CanvasPreviewConnection, name: String, requested_effects: [CanvasPreviewEffect], render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+        self.touch(connection)?
+        descriptor := self.descriptor(name)?.clone()
+        self.authorize_descriptor(descriptor, connection, requested_effects)?
+        self.evaluate_inner(name, descriptor, render)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1117
+    fn evaluate_inner(&self, name: String, descriptor: CanvasPreviewDescriptor, render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+        self.mark_building(name)?
+        context := descriptor.context_id().and_then((id) -> self.registry.context(id).cloned())
+        // GATE #4494: native panic boundary, no fabricated render on unwind.
+        rendered := std.panic.catch_unwind(std.panic.AssertUnwindSafe(() -> render(descriptor, context.as_ref())))
+        if rendered == {
+            .Ok(.Ok(rendered)) -> self.publish_inner(name, descriptor.source().clone(), rendered)
+            .Ok(.Err(error)) -> { self.mark_error(name, error.code, error.message)?; throw .RenderFailed }
+            .Err(_) -> { self.mark_error(name, "E_PREVIEW_PANIC", "preview callback panicked")?; throw .RenderFailed }
+        }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1154
+    fn publish(&self, name: String, source: CanvasPreviewSourceIdentity, rendered: CanvasPreviewRendered<T>) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+        descriptor := self.descriptor(name)
+        if descriptor.effects().next().is_some() -> throw .AuthorityRequired
+        self.publish_inner(name, source, rendered)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1167
+    fn publish_inner(&self, name: String, source: CanvasPreviewSourceIdentity, rendered: CanvasPreviewRendered<T>) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+        source.validate()
+        descriptor := self.descriptor(name)
+        if source != descriptor.source() -> throw .SourceMismatch
+        if rendered.bytes == 0 || rendered.bytes > self.policy.max_frame_bytes -> throw .FrameTooLarge
+        old_bytes := self.records.get(name).and_then((record) -> record.last_good.as_ref()).map_or(0, (frame) -> frame.bytes)
+        new_resident := self.resident_bytes.saturating_sub(old_bytes).saturating_add(rendered.bytes)
+        if new_resident > self.policy.max_resident_bytes -> throw .ResidentBudgetExceeded
+        sequence := self.bump_sequence()
+        frame := CanvasPreviewFrame<T> { value: rendered.value, source: source, bytes: rendered.bytes, sequence: sequence }
+        record := self.record_mut(name)
+        record.status = .Ready; record.freshness = .Fresh; record.last_good = .Val(frame); record.diagnostic = .None; record.sequence = sequence
+        self.resident_bytes = new_resident
+        self.snapshot(name)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1210
+    fn authorize_descriptor(&self, descriptor: &CanvasPreviewDescriptor, connection: &CanvasPreviewConnection, requested_effects: [CanvasPreviewEffect]) CanvasPreviewError! {
+        if connection.session_id != self.id -> throw .Unauthorized
+        if !connection_is_loopback(self.clients.get(connection.client_id)) -> throw .LoopbackRequired
+        requested := BTreeSet<&CanvasPreviewEffect>{requested_effects.iter().collect()} // GATE #4499
+        declared := BTreeSet<&CanvasPreviewEffect>{descriptor.effects.iter().collect()}
+        if requested != declared -> throw .EffectSetMismatch
+        loop effect_ref in descriptor.effects {
+            if !descriptor.authority.allows_effect(effect_ref, true) || !self.authority.allows_effect(effect_ref, true) -> throw .CapabilityDenied(effect_ref.capability().to_string())
+        }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1239
+    fn connect(&self, client_id: String, presented_secret: String, loopback: Bool) -> CanvasPreviewConnection CanvasPreviewError! {
+        self.ensure_open()
+        _ :: self.prune_expired_at(Instant.now())
+        preview_text(client_id, "preview client id", 256)
+        self.authorize_connection(presented_secret, loopback)
+        self.open_client(client_id, loopback, 0)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1254
+    fn reconnect(&self, connection: &CanvasPreviewConnection, presented_secret: String, loopback: Bool) -> CanvasPreviewConnection CanvasPreviewError! {
+        self.ensure_open()?; self.authorize_connection(presented_secret, loopback)
+        generation := self.clients.get(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)?.generation
+        if generation != connection.generation || connection.session_id != self.id -> throw .StaleConnection
+        self.open_client(connection.client_id.clone(), loopback, connection.cursor.min(self.sequence))
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1277
+    fn touch(&self, connection: &CanvasPreviewConnection) CanvasPreviewError! {
+        self.ensure_open()
+        if connection.session_id != self.id -> throw .StaleConnection
+        lease := self.clients.get_mut(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)
+        if lease.generation != connection.generation -> throw .StaleConnection
+        lease.last_seen = Instant.now()
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1293
+    fn acknowledge(&self, connection: &CanvasPreviewConnection, cursor: U64) CanvasPreviewError! {
+        self.touch(connection)
+        if cursor > self.sequence -> throw .InvalidCursor
+        lease := self.clients.get_mut(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)
+        lease.cursor = cursor
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1310
+    fn disconnect(&self, connection: &CanvasPreviewConnection) CanvasPreviewError! {
+        lease := self.clients.get(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)
+        if connection.session_id != self.id || lease.generation != connection.generation -> throw .StaleConnection
+        _ :: self.clients.remove(connection.client_id)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1322
+    fn prune_expired(&self) -> USize { self.prune_expired_at(Instant.now()) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1326
+    fn prune_expired_at(&self, now: Instant) -> USize {
+        timeout := Duration.from_secs(self.policy.client_idle_secs); before := self.clients.len()
+        self.clients.retain((_, lease) -> now.saturating_duration_since(lease.last_seen) <= timeout)
+        before.saturating_sub(self.clients.len())
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1334
+    fn close(&self) -> Unit {
+        self.closed = true; self.clients.clear(); self.records.clear(); self.registry = CanvasPreviewRegistry.default(); self.resident_bytes = 0
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1342
+    fn is_closed(&self) -> Bool { self.closed }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1346
+    fn to_json(&self) -> String {
+        snapshots := self.snapshots().iter().map((snapshot) -> snapshot.to_json()).collect().join(",")
+        selected := self.registry.selected_names().iter().map((name) -> "\"{preview_json_escape(name)}\"").collect().join(",")
+        "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"session_id\":\"{preview_json_escape(self.id)}\",\"closed\":{self.closed},\"selected\":[{selected}],\"resident_bytes\":{self.resident_bytes},\"sequence\":{self.sequence},\"previews\":[{snapshots}]}}"
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1370
+    fn open_client(&self, client_id: String, loopback: Bool, cursor: U64) -> CanvasPreviewConnection CanvasPreviewError! {
+        generation := self.clients.get(client_id).map_or(1, (lease) -> lease.generation.saturating_add(1))
+        if !self.clients.contains_key(client_id) && self.clients.len() >= self.policy.max_clients -> throw .TooManyClients
+        self.clients.insert(client_id.clone(), PreviewClientLease { generation: generation, cursor: cursor, loopback: loopback, last_seen: Instant.now() })
+        CanvasPreviewConnection { session_id: self.id.clone(), client_id: client_id, generation: generation, cursor: cursor }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1400
+    fn authorize_connection(&self, presented_secret: String, loopback: Bool) CanvasPreviewError! {
+        if !constant_time_equal(self.secret, presented_secret) -> throw .Unauthorized
+        if self.authority.loopback_only() && !loopback -> throw .LoopbackRequired
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1410
+    fn record_mut(&self, name: String) -> PreviewRecord<T> CanvasPreviewError! { self.records.get_mut(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string())) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1416
+    fn snapshot_record(&self, name: String, record: &PreviewRecord<T>) -> CanvasPreviewSnapshot<T> {
+        CanvasPreviewSnapshot<T> { session_id: self.id.clone(), name: name.to_string(), kind: record.descriptor.kind(), source: record.descriptor.source().clone(), status: record.status.clone(), freshness: record.freshness,
+            current: if record.freshness == .Fresh -> record.last_good.clone() else -> .None,
+            last_good: record.last_good.clone(), diagnostic: record.diagnostic.clone(), sequence: record.sequence }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1433
+    fn bump_sequence(&self) -> U64 { self.sequence = self.sequence.saturating_add(1); self.sequence }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1438
+    fn ensure_open(&self) CanvasPreviewError! { if self.closed -> throw .SessionClosed }
+}
+impl<T: Clone> Drop for CanvasPreviewSession<T> {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1448
+    fn drop(&self) -> Unit { self.clients.clear(); self.records.clear(); self.registry.clear(); self.resident_bytes = 0 }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:1460
+struct CanvasPreviewRegistry { descriptors: [String:CanvasPreviewDescriptor]; contexts: [String:CanvasPreviewContext]; selected: BTreeSet<String> }
+impl CanvasPreviewRegistry {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1459
+    fn default() -> Self { Self { descriptors: {}, contexts: {}, selected: BTreeSet.new() } }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1467
+    fn new(descriptors: [CanvasPreviewDescriptor]) -> Self CanvasPreviewError! {
+        registry := Self.default()
+        loop descriptor in descriptors -> registry.insert(descriptor)
+        registry
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1478
+    fn insert(&self, descriptor: CanvasPreviewDescriptor) CanvasPreviewError! {
+        descriptor.validate()
+        if self.descriptors.len() >= CANVAS_PREVIEW_MAX_PREVIEWS -> throw .TooManyPreviews
+        if self.descriptors.contains_key(descriptor.name()) -> throw .DuplicatePreview(descriptor.name().to_string())
+        self.descriptors.insert(descriptor.name().to_string(), descriptor)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1493
+    fn replace(&self, descriptor: CanvasPreviewDescriptor) CanvasPreviewError! {
+        descriptor.validate()
+        if !self.descriptors.contains_key(descriptor.name()) -> return self.insert(descriptor)
+        self.descriptors.insert(descriptor.name().to_string(), descriptor)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1503
+    fn remove(&self, name: String) CanvasPreviewError! {
+        _ :: self.descriptors.remove(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
+        self.selected.remove(name)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1511
+    fn get(&self, name: String) -> CanvasPreviewDescriptor? { self.descriptors.get(name) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1515
+    fn descriptors(&self) -> Iterator<CanvasPreviewDescriptor> {
+        keys := self.descriptors.keys().collect(); keys.sort()
+        keys.into_iter().map((key) -> &self.descriptors[key])
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1519
+    fn len(&self) -> USize { self.descriptors.len() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1523
+    fn is_empty(&self) -> Bool { self.descriptors.is_empty() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1527
+    fn select(&self, name: String) CanvasPreviewError! {
+        if !self.descriptors.contains_key(name) -> throw .UnknownPreview(name.to_string())
+        if self.selected.len() >= CANVAS_PREVIEW_MAX_SELECTED && !self.selected.contains(name) -> throw .TooManySelected
+        self.selected.insert(name.to_string())
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1538
+    fn select_many(&self, names: [String]) CanvasPreviewError! {
+        if names.len() > CANVAS_PREVIEW_MAX_SELECTED -> throw .TooManySelected
+        loop name in names { if !self.descriptors.contains_key(name) -> throw .UnknownPreview(name.clone()) }
+        self.selected.clear(); self.selected.extend(names)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1556
+    fn clear_selection(&self) -> Unit { self.selected.clear() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1560
+    fn selected_names(&self) -> [String] { self.selected.iter().cloned().collect() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1564
+    fn selected_len(&self) -> USize { self.selected.len() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1568
+    fn is_selected(&self, name: String) -> Bool { self.selected.contains(name) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1572
+    fn insert_context(&self, context: CanvasPreviewContext) CanvasPreviewError! {
+        if self.contexts.len() >= CANVAS_PREVIEW_MAX_CONTEXTS -> throw .TooManyContexts
+        if self.contexts.contains_key(context.id) -> throw .DuplicateContext(context.id)
+        context.source.validate()
+        self.contexts.insert(context.id.clone(), context)
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1584
+    fn context(&self, id: String) -> CanvasPreviewContext? { self.contexts.get(id) }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1588
+    fn contexts_len(&self) -> USize { self.contexts.len() }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1592
+    fn validate(&self) CanvasPreviewError! {
+        loop descriptor in self.descriptors() {
+            descriptor.validate()
+            if descriptor.context_id() == .Val(context_id) {
+                context := self.contexts.get(context_id).ok_or_else(() -> CanvasPreviewError.UnknownContext(context_id.to_string()))
+                if context.source != descriptor.source() -> throw .ContextSourceMismatch
+            }
+        }
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1608
+    fn to_json(&self) -> String {
+        descriptors := self.descriptors().map((descriptor) -> {
+            "{{\"name\":\"{preview_json_escape(descriptor.name())}\",\"kind\":\"{descriptor.kind().as_str()}\",\"callback\":\"{preview_json_escape(descriptor.callback().id)}\",\"source\":{preview_source_json(descriptor.source())},\"viewport\":{{\"device\":\"{preview_json_escape(descriptor.viewport().device.as_str())}\",\"width\":{descriptor.viewport().width},\"height\":{descriptor.viewport().height},\"scale\":{descriptor.viewport().scale}}},\"selected\":{self.selected.contains(descriptor.name())}}}"
+        }).collect().join(",")
+        selected := self.selected.iter().map((name) -> "\"{preview_json_escape(name)}\"").collect().join(",")
+        "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"selected\":[{selected}],\"contexts\":{self.contexts.len()},\"descriptors\":[{descriptors}]}}"
+    }
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1641
+    fn clear(&self) -> Unit { self.descriptors.clear(); self.contexts.clear(); self.selected.clear() }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:1649
+#Error
+enum CanvasPreviewError {
+    InvalidText { field: String, reason: String }; InvalidSource(String); InvalidViewport(String); InvalidInput(String)
+    InvalidPolicy; TooManyPreviews; TooManySelected; TooManyContexts; TooManyInputs
+    DuplicatePreview(String); UnknownPreview(String); DuplicateContext(String); UnknownContext(String); DuplicateInput(String)
+    InputBudgetExceeded; AuthorityWidened; AuthorityRequired; CapabilityDenied(String); EffectSetMismatch
+    LoopbackRequired; Unauthorized; TooManyClients; StaleConnection; InvalidCursor; FrameTooLarge
+    ResidentBudgetExceeded; SourceMismatch; ContextSourceMismatch; RenderFailed; SessionClosed
+}
+impl CanvasPreviewError {
+    // Rust: crates/jet-devserver/src/Canvas/preview.rs:1683
+    fn to_string(&self) -> String {
+        if self == {
+            .InvalidText { field, reason } -> "invalid {field}: {reason}"
+            .InvalidSource(reason) -> "invalid preview source: {reason}"
+            .InvalidViewport(reason) -> "invalid preview viewport: {reason}"
+            .InvalidInput(reason) -> "invalid preview input: {reason}"
+            .InvalidPolicy -> "preview policy exceeds the bounded session contract"
+            .TooManyPreviews -> "preview registry is full"
+            .TooManySelected -> "preview selection exceeds the bounded limit"
+            .TooManyContexts -> "preview context registry is full"
+            .TooManyInputs -> "preview input overrides exceed the bounded limit"
+            .DuplicatePreview(name) -> "preview `{name}` is duplicated"
+            .UnknownPreview(name) -> "unknown preview `{name}`"
+            .DuplicateContext(id) -> "preview context `{id}` is duplicated"
+            .UnknownContext(id) -> "unknown preview context `{id}`"
+            .DuplicateInput(name) -> "preview input `{name}` is duplicated"
+            .InputBudgetExceeded -> "preview input budget exceeded"
+            .AuthorityWidened -> "preview authority widens the session authority"
+            .AuthorityRequired -> "preview effects require an authorized connection"
+            .CapabilityDenied(capability) -> "preview capability `{capability}` is denied"
+            .EffectSetMismatch -> "requested preview effects do not match the checked declaration"
+            .LoopbackRequired -> "preview session requires a loopback connection"
+            .Unauthorized -> "preview session authorization failed"
+            .TooManyClients -> "preview session client limit reached"
+            .StaleConnection -> "preview connection is stale; reconnect and resync"
+            .InvalidCursor -> "preview cursor is outside the session history"
+            .FrameTooLarge -> "preview frame exceeds the bounded frame limit"
+            .ResidentBudgetExceeded -> "preview resident frame budget exceeded"
+            .SourceMismatch -> "preview frame source identity does not match the checked declaration"
+            .ContextSourceMismatch -> "preview context source identity does not match the checked declaration"
+            .RenderFailed -> "preview callback failed; the last-good frame remains visible as stale"
+            .SessionClosed -> "preview session is closed"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:1721
+fn preview_text(value: String, field: String, max_bytes: USize) CanvasPreviewError! {
+    trimmed := value.trim() // #4303
+    if trimmed.is_empty() -> throw .InvalidText { field: field, reason: "must not be empty" }
+    if value.len() > max_bytes -> throw .InvalidText { field: field, reason: "exceeds the bounded text size" }
+    if value.chars().any((ch) -> ch.is_control()) -> throw .InvalidText { field: field, reason: "must not contain control characters" }
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:1743
+fn preview_source_json(source: CanvasPreviewSourceIdentity) -> String {
+    "{{\"source_id\":\"{preview_json_escape(source.source_id)}\",\"build_id\":\"{preview_json_escape(source.build_id)}\",\"revision\":\"{preview_json_escape(source.revision)}\",\"span\":{{\"source_id\":\"{preview_json_escape(source.span.source_id)}\",\"file\":\"{preview_json_escape(source.span.file)}\",\"start_line\":{source.span.start_line},\"start_column\":{source.span.start_column},\"end_line\":{source.span.end_line},\"end_column\":{source.span.end_column}}}}}"
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:1758
+fn constant_time_equal(left: String, right: String) -> Bool {
+    difference := left.len().bit_xor(right.len())
+    width := left.len().max(right.len())
+    loop index in 0..width {
+        left_byte := left.as_bytes().get(index).copied().unwrap_or(0)
+        right_byte := right.as_bytes().get(index).copied().unwrap_or(0)
+        difference |= USize{(left_byte.bit_xor(right_byte))}
+    }
+    difference == 0
+}
+// Rust: crates/jet-devserver/src/Canvas/preview.rs:1769
+fn connection_is_loopback(lease: PreviewClientLease?) -> Bool { lease.is_some_and((lease) -> lease.loopback) }

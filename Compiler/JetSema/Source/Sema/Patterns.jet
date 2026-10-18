@@ -755,6 +755,8 @@ fn sema_pattern_map_resolve_key(key: TExpr, env: SemaScopeEnvironment, program: 
             }
         }
     }
+    // copy: the resolved key is a new owned TExpr. When nothing resolves it equals `key`, the
+    // pattern's checked key (a read parameter), which stays on the pattern.
     key.copy()
 }
 
@@ -816,6 +818,34 @@ fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagno
         .Val(text) -> &diagnostics.push(diagnostic_with_source_derived_suggestion(diagnostic, pattern_span, text))
         .None -> &diagnostics.push(diagnostic)
     }
+}
+
+// S31/D-OPT-LIFT1=A with D-PATTERN-HOLE-NAME1=A (#4713): `subject == Val(name)`
+// binds `name` in every expression position. In a value position a name that
+// already holds a value is this E0118; `Val((name))` is the comparison with
+// the held value (a parenthesized payload constructs it). Conditions report a
+// held name when they declare their bindings
+// (sema_expression_declare_condition_bindings), which keeps the D-FLOWTYPE1
+// refinement `x == .Val(x)` that every `x != None` test is rewritten into.
+fn sema_pattern_test_reused_payload_name(pattern: Pattern, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    name := ""
+    name_span := Span{start: 0, end: 0}
+    if pattern == {
+        .Present(binding, binding_span, inner, _) -> if inner == None {
+            name = binding
+            name_span = binding_span
+        }
+        .Variant(variant, slots, _, _) -> if variant == "Val" && slots.len() == 1 {
+            if slots[0] == .Bind(bound, bound_span) {
+                name = bound
+                name_span = bound_span
+            }
+        }
+        else -> {}
+    }
+    if name == "" || sema_pattern_hole_name_available(name, scopes) -> return false
+    &diagnostics.push(sema_error("E0118", name_span, "`Val({name})` would make a new `{name}`, but `{name}` already holds a value", "a payload name after `==` introduces a new name; it does not compare with an existing value", "write `Val(({name}))` to compare with the existing value, or pick a new name to bind"))
+    true
 }
 
 // S20: Jet text has only the `\n`, `\t`, `\"`, `\\` escapes plus doubled
@@ -1007,6 +1037,8 @@ fn sema_pattern_normalize_contextual(pattern: Pattern, subject_ty: Type, env: Se
         }
         else -> {}
     }
+    // copy: the normalized pattern is a new owned Pattern. Otherwise it equals `pattern`, the
+    // caller's AST pattern (a read parameter), which the caller keeps.
     pattern.copy()
 }
 
@@ -1084,17 +1116,16 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
                 return SemaPatternValidation{shape: TPatternShape.Or{alternatives: [TPatternShape]{}, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
             }
             results :: loop alternative in alternatives -> sema_pattern_validate_internal(subject_ty, alternative, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
-            first :: results[0]
             shapes :: loop result in results -> result.shape
-            complete := first.complete
+            complete := results[0].complete
             loop index in 1..<results.len() {
                 alternative :: results[index]
-                if !alternative.complete || !sema_pattern_facts_equal(first.bindings, alternative.bindings) {
+                if !alternative.complete || !sema_pattern_facts_equal(results[0].bindings, alternative.bindings) {
                     &diagnostics.push(sema_error("E0317", span, "or-pattern alternatives bind different names or types", "every alternative must bind the same names at the same types", "rename bindings so all alternatives agree"))
                     complete = false
                 }
             }
-            SemaPatternValidation{shape: TPatternShape.Or{alternatives: shapes, span: span}, enum_type: first.enum_type, bindings: first.bindings, complete: complete}
+            SemaPatternValidation{shape: TPatternShape.Or{alternatives: shapes, span: span}, enum_type: results[0].enum_type, bindings: results[0].bindings, complete: complete}
         }
     }
 }

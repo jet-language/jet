@@ -37,11 +37,19 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     old_block_count :: function.blocks.len()
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
     // Unreachable blocks are dropped by moving the kept ones out and back
-    // (two pops keep their order); a block is never copied.
+    // (two pops keep their order); a block is never copied. The values the
+    // dropped blocks defined are noted for the scope deadlines below.
     kept_blocks := [MIRBasicBlock]{}
+    removed_values := [U64:Bool]{}
     loop {
         block :: &function.blocks.pop() ?? break
-        if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(^block)
+        if reachable_rows.get(block.id.value) != None {
+            &kept_blocks.push(^block)
+        } else {
+            loop instruction in block.instructions {
+                if instruction.result == .Val(result) -> &removed_values.add(result.value, true).drop("a value id may repeat")
+            }
+        }
     }
     loop {
         block :: &kept_blocks.pop() ?? break
@@ -114,6 +122,17 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     loop {
         value :: &kept_values.pop() ?? break
         &function.values.push(^value)
+    }
+    // A scope deadline the dropped blocks defined names no value any more:
+    // the scope keeps no deadline, as inline expansion clears one
+    // (InlineAlways mir_pass_inline_clear_dead_scope_deadlines). A deadline
+    // still defined in a kept block stays, so an illegal one is still
+    // rejected by legality.
+    if removed_values.len() > 0 {
+        loop scope_index in 0..<function.scopes.len() {
+            deadline :: function.scopes[scope_index].deadline ?? next
+            if removed_values.get(deadline.value) != None && live_values.get(deadline.value) == None -> function.scopes[scope_index].deadline = None
+        }
     }
     // Only phi operands change below, so the predecessor map stays exact.
     predecessors :: mir_pass_predecessor_map(function)

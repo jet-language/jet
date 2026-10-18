@@ -1,0 +1,138 @@
+// A read-only binding of a value `if` whose arms copy places
+// (`n :: if c -> a.f else -> b[i]`, or a `:=` of it nothing writes) borrows
+// the place of the arm taken when its scope leaves every arm's root alone and
+// never consumes it (#5041). So does a value match whose arm reads a payload
+// of its own pattern over such a root (`n :: if s == { .V(p) -> p ... }`). An
+// arm computing a fresh value moves it into a holder the binding borrows,
+// dropped at scope end. A binding whose root changes while it is still read,
+// one that is consumed, and an arm whose root is bound inside the arm keep a
+// copy of their own.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+enum Shape {
+    Boxed(blob: Blob)
+    Pair(left: Blob, right: Blob)
+    Empty
+}
+
+// Both arms are places of read parameters.
+fn pick(left: Blob, right: Blob, first: Bool) -> String {
+    chosen :: if first -> left.text else -> right.text
+    "{chosen}:{chosen.len()}"
+}
+
+// An element of a local the scope leaves alone, an element of a read
+// parameter, and a fresh value (held by the holder) down an else chain.
+fn mixed(rows: [Blob], k: Int) -> Int {
+    local := [Blob]{Blob{data: [Int]{1, 2}, text: "p"}, Blob{data: [Int]{3}, text: "q"}}
+    row :: if k == 0 -> local[0] else -> if k == 1 -> rows[0] else -> Blob{data: [Int]{7, 8, 9}, text: "fresh!"}
+    row.data.len() + row.text.len()
+}
+
+// Whole locals as arms.
+fn whole(k: Int) -> Int {
+    a := Blob{data: [Int]{1, 2, 3}, text: "aa"}
+    b := Blob{data: [Int]{4}, text: "b"}
+    picked :: if k > 0 -> a else -> b
+    picked.data.len() + a.data.len()
+}
+
+// A `:=` binding nothing writes, made on every turn of a loop: the holder of
+// the padding arm is dropped at the end of each turn.
+fn looped(rows: [Blob]) -> Int {
+    total := 0
+    loop i in 0..<3 {
+        row := if i < rows.len() -> rows[i] else -> Blob{data: [Int]{i, i}, text: "pad"}
+        total += row.data.len() * 100 + row.text.len()
+    }
+    total
+}
+
+// Rejected: the root changes while the binding is still read, so the binding
+// holds the value from before the change.
+fn changed(k: Int) -> String {
+    rows := [Blob]{Blob{data: [Int]{1}, text: "old"}, Blob{data: [Int]{2}, text: "other"}}
+    row :: if k > 0 -> rows[0] else -> rows[1]
+    rows[0] = Blob{data: [Int]{}, text: "new"}
+    rows[1].text = "new1"
+    "{row.text} {rows[0].text}"
+}
+
+// Rejected: a consumed binding is a value of its own; its root stays whole.
+fn consumed(k: Int) -> Int {
+    rows := [Blob]{Blob{data: [Int]{1, 2}, text: "a"}}
+    row :: if k > 0 -> rows[0] else -> Blob{data: [Int]{}, text: "b"}
+    kept := [Blob]{}
+    &kept.push(row)
+    &kept[0].data.push(5)
+    kept[0].data.len() * 10 + rows[0].data.len()
+}
+
+// Rejected: an arm whose root is bound inside the arm dies at the arm's end,
+// so the binding never borrows past it.
+fn arm_local(k: Int) -> String {
+    label :: if {
+        k > 0 -> {
+            made :: Blob{data: [Int]{1}, text: "made"}
+            print("arm {made.data.len()}")
+            made.text
+        }
+        else -> "none"
+    }
+    "{label}!"
+}
+
+// A payload of each arm's own pattern over a local the scope leaves alone,
+// and a fresh value (held by the holder) in the else arm.
+fn payload_arm(k: Int) -> Int {
+    shape := if k == 0 -> Shape.Boxed{blob: Blob{data: [Int]{1}, text: "boxed"}} else -> if k == 1 -> Shape.Pair{left: Blob{data: [Int]{1, 2}, text: "l"}, right: Blob{data: [Int]{3}, text: "r"}} else -> Shape.Empty
+    picked :: if shape == {
+        .Boxed(blob) -> blob
+        .Pair(_, right) -> right
+        else -> Blob{data: [Int]{}, text: "empty"}
+    }
+    picked.data.len() * 10 + picked.text.len()
+}
+
+// An or-pattern payload of a read parameter.
+fn either(shape: Shape) -> String {
+    chosen :: if shape == {
+        .Boxed(blob) | .Pair(blob, _) -> blob
+        else -> Blob{data: [Int]{}, text: "none"}
+    }
+    chosen.text
+}
+
+// Rejected: the subject the payload came from changes while the binding is
+// still read, so the binding holds the payload from before the change.
+fn payload_changed(k: Int) -> String {
+    shape := Shape.Boxed{blob: Blob{data: [Int]{k}, text: "before"}}
+    picked :: if shape == {
+        .Boxed(blob) -> blob
+        else -> Blob{data: [Int]{}, text: "none"}
+    }
+    shape = Shape.Empty
+    "{picked.text} {picked.data.len()}"
+}
+
+fn run() {
+    left :: Blob{data: [Int]{1}, text: "L"}
+    right :: Blob{data: [Int]{2}, text: "RR"}
+    print(pick(left, right, true))
+    print(pick(left, right, false))
+    rows :: [Blob]{Blob{data: [Int]{5}, text: "rowtext"}}
+    print("mixed {mixed(rows, 0)} {mixed(rows, 1)} {mixed(rows, 2)}")
+    print("whole {whole(1)} {whole(0)}")
+    print("looped {looped(rows)}")
+    print("changed {changed(1)} / {changed(0)}")
+    print("consumed {consumed(1)} {consumed(0)}")
+    print("arm_local {arm_local(1)} {arm_local(0)}")
+    print("payload_arm {payload_arm(0)} {payload_arm(1)} {payload_arm(2)}")
+    boxed :: Shape.Boxed{blob: Blob{data: [Int]{}, text: "boxed"}}
+    pair :: Shape.Pair{left: Blob{data: [Int]{}, text: "l"}, right: Blob{data: [Int]{}, text: "r"}}
+    print("either {either(boxed)} {either(pair)} {either(Shape.Empty)}")
+    print("payload_changed {payload_changed(1)}")
+}

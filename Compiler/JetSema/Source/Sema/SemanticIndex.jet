@@ -722,7 +722,7 @@ fn sema_compiler_index_expr_shape(expression: Expr) -> String {
         .Place(_, _, _) -> 24
         .Field(_, _, _) -> 25
         .OptField(_, _, _, _, _) -> 26
-        .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> 27
+        .MethodCall(_, _, _, _, _, _, _, _) -> 27
         .StructLit(_, _, _, _, _, _, _) -> 28
         .TypedLit(_, _, _) -> 29
         .EnumLit(_, _, _, _, _, _) -> 30
@@ -756,7 +756,7 @@ fn sema_compiler_index_expr_structural_span(expression: Expr) -> Span {
             if call.args.len() > 0 -> end = expr_span(call.args[call.args.len() - 1].expr).end + 1
             Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, method_span, _, args, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args, _, _) | .OptMethodCall(receiver, _, method_span, _, args, _) -> {
             end := method_span.end + 2
             if args.len() > 0 -> end = expr_span(args[args.len() - 1].expr).end + 1
             Span{start: expr_span(receiver).start, end: end}
@@ -972,7 +972,7 @@ fn sema_compiler_index_walk_expr(state: &SemaCompilerIndexWalkState, expression:
     &state.parents.push(id)
     if expression == {
         .Call(call) -> sema_compiler_index_walk_call_args(&state, call.args, module_path)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             sema_compiler_index_walk_expr_slot(&state, "receiver", receiver, module_path)
             sema_compiler_index_walk_call_args(&state, args, module_path)
         }
@@ -1567,56 +1567,52 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
         )
         &records.push(record)
     }
-    loop i in 1..<records.len() {
-        value := records[i]
-        j := i
-        loop j > 0 && (
-            records[j - 1].subject > value.subject
-            || (records[j - 1].subject == value.subject && records[j - 1].claim > value.claim)
-        ) {
-            records[j] = records[j - 1]
-            j -= 1
-        }
-        records[j] = value
-    }
+    // Stable, as the insertion sort this replaces: equal (subject, claim) keep record order.
+    &records.sort_by((left: DerivationRecord, right: DerivationRecord) -> (left.subject <=> right.subject).then(left.claim <=> right.claim))
     values := [TComptimeValue]{}
     loop record in records -> &values.push(sema_compiler_index_derivation_value(record))
     SemaCompilerIndexDerivationFacts{value: TComptimeValue.List{values: values}, complete: complete}
 }
-fn sema_compiler_index_function_views(functions: [TFunc], key: String) -> TComptimeValue Never! {
-    loop function in functions {
-        if function.key == key -> return sema_compiler_index_view_provenance_values(function.return_view_provenance)
+// Function key -> the view provenance values of the first checked function
+// with that key (module, then declaration, order), built once per index; a
+// definition that is no function reads an empty list.
+fn sema_compiler_index_function_views(graph: SemaGraphResult) -> [String:TComptimeValue] Never! {
+    views := [String:TComptimeValue]{}
+    loop checked_module in graph.modules {
+        loop function in checked_module.functions {
+            if views.get(function.key) == None -> views[function.key] = sema_compiler_index_view_provenance_values(function.return_view_provenance)
+        }
     }
-    TComptimeValue.List{values: [TComptimeValue]{}}
+    views
 }
 
-fn sema_compiler_index_append_definition(symbol: Symbol, registered_module: SemaRegistrationModule, functions: [TFunc], definitions: &[TComptimeValue], seen: &[String]) Never! {
-    if seen.contains(symbol.id.key) -> return
-    &seen.push(symbol.id.key)
-    &definitions.push(sema_compiler_index_definition(symbol, registered_module, sema_compiler_index_function_views(functions, symbol.id.key)))
+fn sema_compiler_index_append_definition(symbol: Symbol, registered_module: SemaRegistrationModule, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) Never! {
+    if seen.get(symbol.id.key) != None -> return
+    seen[symbol.id.key] = true
+    &definitions.push(sema_compiler_index_definition(symbol, registered_module, views.get(symbol.id.key) ?? TComptimeValue.List{values: [TComptimeValue]{}}))
 }
 
-fn sema_compiler_index_append_checked_local(local: TLocal, module_identity: String, owner: String, registered_module: SemaRegistrationModule, functions: [TFunc], definitions: &[TComptimeValue], seen: &[String]) Never! {
+fn sema_compiler_index_append_checked_local(local: TLocal, module_identity: String, owner: String, registered_module: SemaRegistrationModule, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) Never! {
     local_id :: local.symbol_id ?? return
     symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_name: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
-    sema_compiler_index_append_definition(symbol, registered_module, functions, &definitions, &seen)
+    sema_compiler_index_append_definition(symbol, registered_module, views, &definitions, &seen)
 }
 
-fn sema_compiler_index_collect_checked_locals(body: [TStmt], module_identity: String, owner: String, registered_module: SemaRegistrationModule, functions: [TFunc], definitions: &[TComptimeValue], seen: &[String]) Never! {
+fn sema_compiler_index_collect_checked_locals(body: [TStmt], module_identity: String, owner: String, registered_module: SemaRegistrationModule, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) Never! {
     loop statement in body {
         if statement == {
-            .Let(local, _, _, _, _, _) -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, functions, &definitions, &seen)
+            .Let(local, _, _, _, _, _) -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, views, &definitions, &seen)
             .TupleDestructure(temp, _, _, binds, _) -> {
-                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, functions, &definitions, &seen)
-                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, functions, &definitions, &seen)
+                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, views, &definitions, &seen)
+                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, views, &definitions, &seen)
             }
             .StructDestructure(temp, _, _, binds, _) -> {
-                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, functions, &definitions, &seen)
-                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, functions, &definitions, &seen)
+                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, views, &definitions, &seen)
+                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, views, &definitions, &seen)
             }
             .ListDestructure(temp, _, _, _, _, elements, _) -> {
-                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, functions, &definitions, &seen)
-                loop local in elements -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, functions, &definitions, &seen)
+                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, views, &definitions, &seen)
+                loop local in elements -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, views, &definitions, &seen)
             }
             else -> {}
         }
@@ -1625,29 +1621,26 @@ fn sema_compiler_index_collect_checked_locals(body: [TStmt], module_identity: St
 
 fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerSemanticIndexFacts {
     definitions := [TComptimeValue]{}
-    definition_keys := [String]{}
-    checked_functions := [TFunc]{}
-    loop checked_module in graph.modules {
-        loop function in checked_module.functions -> &checked_functions.push(function)
-    }
+    definition_keys := [String:Bool]{}
+    function_views :: sema_compiler_index_function_views(graph)
     references := [TComptimeValue]{}
     calls := [TComptimeValue]{}
     effects := [TComptimeValue]{}
     outputs := [TComptimeValue]{}
     state_graphs := [TComptimeValue]{}
     loop registered_module_index in 0..<registration.modules.len() {
-        loop symbol_index in 0..<registration.modules[registered_module_index].symbols.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].symbols[symbol_index], registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
+        loop symbol_index in 0..<registration.modules[registered_module_index].symbols.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].symbols[symbol_index], registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
         loop nominal_index in 0..<registration.modules[registered_module_index].nominals.len() {
-            sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
-            loop field_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].fields.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].fields[field_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
-            loop variant_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].variants.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].variants[variant_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
-            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].methods[method_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
-            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].trait_methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].trait_methods[method_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
+            sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
+            loop field_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].fields.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].fields[field_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
+            loop variant_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].variants.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].variants[variant_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
+            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].methods[method_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
+            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].trait_methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].trait_methods[method_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
         }
         loop implementation_index in 0..<registration.modules[registered_module_index].impls.len() {
-            sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
-            loop method_index in 0..<registration.modules[registered_module_index].impls[implementation_index].methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].methods[method_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
-            loop associated_index in 0..<registration.modules[registered_module_index].impls[implementation_index].associated_types.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].associated_types[associated_index].symbol, registration.modules[registered_module_index], checked_functions, &definitions, &definition_keys)
+            sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
+            loop method_index in 0..<registration.modules[registered_module_index].impls[implementation_index].methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].methods[method_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
+            loop associated_index in 0..<registration.modules[registered_module_index].impls[implementation_index].associated_types.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].associated_types[associated_index].symbol, registration.modules[registered_module_index], function_views, &definitions, &definition_keys)
         }
         loop constant_index in 0..<registration.modules[registered_module_index].constants.len() {
             if registration.modules[registered_module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
@@ -1679,7 +1672,7 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
         loop reference in checked_module.name_references {
             target_index := sema_registration_module_index(registration, reference.symbol.module_name) ?? module_index
             target_module :: registration.modules[target_index]
-            sema_compiler_index_append_definition(reference.symbol, target_module, checked_functions, &definitions, &definition_keys)
+            sema_compiler_index_append_definition(reference.symbol, target_module, function_views, &definitions, &definition_keys)
             &references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path))
         }
         loop function in checked_module.functions {
@@ -1687,9 +1680,9 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
             loop parameter in function.params {
                 parameter_id :: parameter.local.symbol_id ?? next
                 parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: checked_module.module_identity, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
-                sema_compiler_index_append_definition(parameter_symbol, registered_module, checked_functions, &definitions, &definition_keys)
+                sema_compiler_index_append_definition(parameter_symbol, registered_module, function_views, &definitions, &definition_keys)
             }
-            sema_compiler_index_collect_checked_locals(function.body, checked_module.module_identity, function.key, registered_module, checked_functions, &definitions, &definition_keys)
+            sema_compiler_index_collect_checked_locals(function.body, checked_module.module_identity, function.key, registered_module, function_views, &definitions, &definition_keys)
         }
         loop call in checked_module.call_facts {
             value :: sema_compiler_index_call(call, checked_module.module_path) ?? next

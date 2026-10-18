@@ -23,7 +23,7 @@ struct MigratedRef {
         target :: pkg_ref_split_last_selector(halves.before)
         if target.empty_half -> return unchanged
         selector :: pkg_ref_first_selector(source.selector, target.selector, prefix.policy)
-        canonical :: if selector.copy() == {
+        canonical :: if selector == {
             .Val(value) -> if value != "" -> "{target.source}{REF_PROVIDER_AT}{source.source}{REF_CHANNEL_MARKER}{value}" else -> "{target.source}{REF_PROVIDER_AT}{source.source}"
             .None -> "{target.source}{REF_PROVIDER_AT}{source.source}"
         }
@@ -72,9 +72,9 @@ fn pkg_ref_starts_with_whitespace(text: String) -> Bool Never! {
 
 // Split `package#selector` at the last `#`, mirroring `pkg_ref_split_selector`.
 fn pkg_ref_split_last_selector(text: String) -> (source: String, selector: String?, empty_half: Bool) Never! {
-    parts :: text.cut_last(REF_CHANNEL_MARKER) ?? return (source: text, selector: None, empty_half: false)
+    parts :: text.cut_last(REF_CHANNEL_MARKER) ?? return (empty_half: false, selector: None, source: text)
     empty_half :: parts.before == "" || parts.after == ""
-    (source: parts.before, selector: Val(parts.after), empty_half: empty_half)
+    (empty_half: empty_half, selector: Val(parts.after), source: parts.before)
 }
 
 // The selector a migrated ref keeps: the source-side selector, then the

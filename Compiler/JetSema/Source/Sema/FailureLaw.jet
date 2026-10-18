@@ -28,13 +28,13 @@ use jet_foundation.[
     TextEdit,
     Type,
     ast_func,
+    core_call_typed_signature,
+    core_module_export,
     core_module_has_type,
     diagnostic_registry_row,
     diagnostic_with_edit_grade,
     expr_span,
     symbol_id,
-    tir_expr_children,
-    tir_stmt_children,
     type_name,
 ]
 use jet_parser.[
@@ -314,17 +314,19 @@ struct SemaPreludeDemandWalk {
 // One expression of the demand walk: a propagation site whose conversion is
 // this module's prelude routine for a Core error family member reaching `Err`
 // demands it (first site per routine), then its children are walked in place
-// (sema_effect_walk_expr_children), in the order tir_expr_children gives them.
-fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
+// (sema_effect_walk_expr_children), in the order tir_each_expr_child visits them.
+fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int, expression: TExpr) {
     conversion :: if expression.kind == {
-        .Try(_, value, _) -> Val(value)
-        .TryWithContext(_, _, value, _, _, _) -> Val(value)
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .Try(_, value, _) -> Val(value.copy())
+        // copy: `value` is a payload of read parameter `expression`, which keeps the original; the Val carrier owns this one
+        .TryWithContext(_, _, value, _, _, _) -> Val(value.copy())
         else -> None
     }
     if conversion == .Val(value) {
         if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, expression.span)
     }
-    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller_key, expression)
+    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller, expression)
 }
 
 fn sema_prelude_conversion_demand_add(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
@@ -363,7 +365,7 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
     facts :: SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
     ignored := [Diagnostic]{}
     loop function in functions {
-        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, function.key, statement)
+        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, sema_effect_caller_slot(facts, function.key), statement)
     }
     demands :: sema_prelude_demand_walk_take(walk_state)
     complete := true
@@ -448,7 +450,7 @@ fn sema_failure_items_nominal_is_error(items: [Item], module_identity: String, l
 fn sema_failure_alias_target_is_error(target_name: String, module_identity: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, module_identity, target_name) ?? return None
-        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
+        row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
         home :: graph.modules[row.module_index]
         return sema_failure_items_nominal_is_error(home.program.items, home.module_identity, sema_error_conversion_leaf(target_name), seen, environment, program)
     }
@@ -739,7 +741,7 @@ struct SemaDropStatement {
 
 fn sema_stmt_check_drop(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
     if expr == {
-        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, _, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
             reason :: sema_drop_reason_problem(args)
             if reason == .Val(problem) -> &diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
@@ -811,27 +813,78 @@ fn sema_never_return_is_err(value: Expr) -> Bool {
 }
 
 // D-NEVER2=B (E2423): the declared bottom contract must have no normal exit.
-fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool Never! {
+// Rust `body_flow`: `panic`, and a call whose resolved callee promises `Never`
+// (a direct call, or a member called through a module alias).
+fn sema_never_expr_diverges(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
-        .Paren(inner, _) -> return sema_never_expr_diverges(inner, environment, scopes)
+        .Paren(inner, _) -> return sema_never_expr_diverges(inner, environment, program, scopes)
         .Call(call) -> {
             if call.name == "panic" -> return true
             index :: sema_scope_resolve_index(scopes, call.name) ?? return false
-            // `Never Never!` has no failure route, so its call diverges like
-            // `Never`; a fallible `Never E!` call can still return its `Err`.
             if sema_scope_binding_type(environment, scopes, index) == .Val(symbol_type) {
                 if symbol_type == .Fn(_, ret, _, _, _, _) {
-                    if ret == (Val(Type.Named{name: "Never"})) -> return true
-                    return ret == (Val(Type.Result{ok: Type.Named{name: "Never"}, err: Type.Named{name: "Never"}}))
+                    declared :: ret ?? return false
+                    return sema_never_callee_return_diverges(declared)
                 }
             }
             return false
         }
+        .MethodCall(receiver, method, _, _, _, args, _, _) -> return sema_never_module_call_diverges(receiver, method, args.len(), environment, program, scopes)
         else -> return sema_stmt_refutable_expr_diverges(expr)
     }
 }
 
-fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+// A callee's declared return: `Never Never!` has no failure route, so its call
+// diverges like `Never`; a fallible `Never E!` call can still return its `Err`.
+fn sema_never_callee_return_diverges(ret: Type) -> Bool Never! {
+    never :: Type.Named{name: "Never"}
+    declared :: sema_expr_unwrap_tag(ret)
+    if declared == {
+        .Result(ok, err) -> ok == never && err == never
+        else -> declared == never
+    }
+}
+
+// Rust `core_call_diverges` / `imported_call_diverges`: `alias.member(...)`
+// (or `alias.leaf.member(...)` into a Core submodule) through a visible,
+// unshadowed Core or source module alias diverges when the member it resolves
+// to promises `Never` (`cli_process.exit(code)`).
+fn sema_never_module_call_diverges(receiver: Expr, method: String, arity: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
+    path :: sema_expr_core_module_receiver_path(receiver) ?? return false
+    if !sema_expr_core_module_alias_visible(path.alias, scopes) -> return false
+    nested :: path.leaves.len() > 0
+    found := sema_call_core_import_target(environment, program, path.alias)
+    if found == None && !nested -> found = sema_call_source_import_target(environment, program, path.alias)
+    imported :: found ?? return false
+    if !sema_call_core_import_is_unshadowed(environment, program, scopes, imported) -> return false
+    member :: sema_call_core_import_member(imported, method) ?? return false
+    module_name := imported.module_name
+    module_identity := imported.module_identity
+    if nested {
+        if imported.item != None -> return false
+        loop leaf in path.leaves {
+            module_name = "{module_name}.{leaf}"
+            if core_module_export(module_name) == None -> return false
+        }
+        module_identity = sema_call_core_module_identity(environment, program, module_name) ?? ""
+    }
+    if core_call_typed_signature(module_name, member, arity) == .Val(signature) {
+        if signature.return_type == .Val(ret) {
+            if sema_never_callee_return_diverges(ret) -> return true
+        }
+    }
+    if module_identity == "" -> return false
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, module_identity) ?? return false
+        export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return false
+        row :: sema_call_export_function_row(environment, program, export) ?? return false
+        declared :: graph.modules[row.module_index].functions[row.row].declaration.return_type ?? return false
+        return sema_never_callee_return_diverges(declared)
+    }
+    false
+}
+
+fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     declared :: func.return_type ?? return true
     never_success :: if declared == {
         .Named(name) -> name == "Never"
@@ -841,7 +894,7 @@ fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, s
     if !never_success -> return true
     loop statement in func.body {
         if statement == .Expr(expr) {
-            if sema_never_expr_diverges(expr, environment, scopes) -> return true
+            if sema_never_expr_diverges(expr, environment, program, scopes) -> return true
         }
         if sema_stmt_refutable_statement_exits(statement) -> return true
     }

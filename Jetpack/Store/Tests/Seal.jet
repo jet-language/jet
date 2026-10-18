@@ -45,7 +45,7 @@ fn store_test_make_writable(path: String) Never! {
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
     assert(files.is_dir(files.join(roots.hangar_dir(), "cas")))
-    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val((digest)))
     store_reset_verified_digest_hash_count(&verification, object)
     assert_eq(store_try_entry_output_hash(&verification, roots, ingested.entry) ?? panic("hash"), digest)
     assert_eq(store_verified_digest_hash_count(&verification, object), 0)
@@ -81,7 +81,7 @@ fn store_test_make_writable(path: String) Never! {
     store_reset_verified_digest_hash_count(&verification, object)
     assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 1)
     assert_eq(store_verified_digest_hash_count(&verification, object), 0)
-    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val((digest)))
     store_test_drop_roots(roots)
 }
 
@@ -132,7 +132,7 @@ fn store_test_make_writable(path: String) Never! {
     ingested :: store_test_seal_fixture(&verification, roots, "audit", "seal-test")
     object :: ingested.entry.out
     digest :: ingested.entry.envelope.output_hash
-    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, roots.hangar_dir()) ?? panic("check") == Val((digest)))
     payload :: files.join(object, "payload")
     store_test_make_writable(payload)
     seconds :: store_test_mtime_seconds(payload)
@@ -155,12 +155,12 @@ fn store_test_make_writable(path: String) Never! {
     digest :: ingested.entry.envelope.output_hash
     hangar :: roots.hangar_dir()
     store_arm_command_memo(&verification)
-    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val((digest)))
     // Drift the tuple identity mid-command: one command holds one coherent
     // verified view (D-JPK-VERIFYONCE1=A), so the memoized verdict stands.
     payload :: files.join(object, "payload")
     store_test_set_mtime(payload, store_test_mtime_seconds(payload) + 7)
-    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val(digest))
+    assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val((digest)))
     // Forgetting the seal forgets the memo too.
     store_remove_seal(&verification, object, hangar) ?? panic("remove seal")
     assert(store_check_seal(&verification, object, hangar) ?? panic("check") == None)

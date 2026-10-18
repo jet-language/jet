@@ -56,6 +56,7 @@ fn sema_unsafe_inspect(modules: [SemaGateModule], gates: GateSet) -> UnsafeInspe
         }
     }
     sema_unsafe_package_surface(modules, &result)
+    result.gates = loop fresh_item in result.gates -> fresh_item
     &result.gates.sort_by((a: UnsafeGateInspection, b: UnsafeGateInspection) -> (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end))
     result
 }
@@ -305,7 +306,8 @@ fn sema_unsafe_mode(value: PolicyValue) -> String Never! {
 }
 
 fn sema_unsafe_assertion(statement: Stmt) -> (names: [String], span: Span)? Never! {
-    expression :: (if statement == .Expr(value) -> Val(value) else -> Expr?{None}) ?? return None
+    // copy: `value` is a payload of read parameter `statement`, which keeps the original; the Val carrier owns this one
+    expression :: (if statement == .Expr(value) -> Val(value.copy()) else -> Expr?{None}) ?? return None
     call :: (if expression == .Call(value) -> Val(value) else -> Call?{None}) ?? return None
     if call.name != "__jet_unsafe_assert" -> return None
     names := [String]{}
@@ -427,7 +429,7 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
             &out.push(SemaUnsafeOperation{kind: "raw_pointer", span: span, required: ["no_alias"]})
             sema_unsafe_expr_operations(inner, &out)
         }
-        .MethodCall(receiver, method, span, _, _, args, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, span, _, _, args, _, _) -> {
             if method == {
                 "volatile_read" -> {
                     &out.push(SemaUnsafeOperation{kind: "volatile_read", span: span, required: ["valid_ptr", "aligned"]})

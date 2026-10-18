@@ -37,7 +37,7 @@ fn cli_declared_images(plan: EnvPlan) -> String Never! {
 }
 
 fn cli_render_env_diagnostic(src: String, error: EnvModelEvalError) Never! -[IO, Time.Wait]> {
-    terminal_write_output(diagnostics_render_all(ENV_FILE, src, [Diagnostic]{error.diagnostic}))
+    terminal_write_output(diagnostic_render_all(ENV_FILE, src, [Diagnostic]{error.diagnostic}, false))
 }
 
 fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
@@ -76,8 +76,9 @@ fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIPars
     // Non-environment package images consume the project-local
     // `.jet/build/<name>` output; environment images consume verified
     // Hangar package outputs instead.
-    project_root :: driver_selected_project_root(dir) ?? {
-        theme.error("couldn't resolve the image project root", "{err.what}: {err.why}", "repair the package/workspace authority and retry the image build")
+    root_cache := WorkspaceDeclarationCache.new()
+    project_root :: jet_cli_selected_project_root(&root_cache, dir) ?? {
+        theme.error("couldn't resolve the image project root", "{err.diagnostic.what}: {err.diagnostic.why}", "repair the package/workspace authority and retry the image build")
         return EXIT_USAGE
     }
     roots :: pkg_resolve_roots()

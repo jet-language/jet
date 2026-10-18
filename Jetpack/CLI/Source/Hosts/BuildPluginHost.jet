@@ -32,12 +32,12 @@ fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wai
     component_path :: args[1]
     expected_manifest_digest :: args[2]
     expected_component_digest :: args[3]
-    manifest :: comptime_read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES) ?? {
-        term.eprint("couldn't read build-plugin manifest: {err}")
+    manifest :: cli_read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES) ?? {
+        term.eprint("couldn't read build-plugin manifest: {err.message}")
         return EXIT_USAGE
     }
-    component :: comptime_read_packaged_file_bounded(component_path, "component", BUILD_PLUGIN_MAX_COMPONENT_BYTES) ?? {
-        term.eprint("couldn't read build-plugin component: {err}")
+    component :: cli_read_packaged_file_bounded(component_path, "component", BUILD_PLUGIN_MAX_COMPONENT_BYTES) ?? {
+        term.eprint("couldn't read build-plugin component: {err.message}")
         return EXIT_USAGE
     }
     if ContentDigest.from_bytes(manifest).as_str() != expected_manifest_digest {
@@ -45,7 +45,7 @@ fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wai
         return EXIT_USAGE
     }
     spec :: WasmComponentPluginSpec.load_packaged_bytes(manifest, component) ?? {
-        term.eprint("couldn't verify build-plugin package: {err}")
+        term.eprint("couldn't verify build-plugin package: {err.message}")
         return EXIT_USAGE
     }
     if spec.component_digest.as_str() != expected_component_digest {

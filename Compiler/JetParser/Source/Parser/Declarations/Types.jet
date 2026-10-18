@@ -89,7 +89,7 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
     }
     parser_expect(&state, TOKEN_SEMI, "after a distinct type declaration")
     markers :: modifiers.markers
-    value :: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), quantity: None, name: parser_value(state, name), name_span: name.span, base: base.ty, base_span: base.span, range: range_value, span: parser_cover(start, end)}
+    value :: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), quantity: None, name: parser_value(state, name), name_span: name.span, base: base.ty, base_span: base.span, range: ^range_value, span: parser_cover(start, end)}
     Item.Distinct{value: value}
 }
 
@@ -244,8 +244,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after unit-family members")
     if base == None && !derived_without_base && (dimension != None || has_conversion) && members.len() > 0 {
-        first :: members[0]
-        base = Val(NamedSpan{name: first.name, span: first.name_span})
+        base = Val(NamedSpan{name: members[0].name, span: members[0].name_span})
     }
     if base == {
         .Val(base_value) -> {

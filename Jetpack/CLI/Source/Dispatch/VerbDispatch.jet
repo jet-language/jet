@@ -146,7 +146,7 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
     // be refused before migration, profile drift repair, or any command.
     if pkg_check_invocation_flags(cli_current_dir(), cli_before_argument_separator(args)) == .Err(error) {
         loop diagnostic in error.diagnostics {
-            terminal_write_output(diagnostics_render_all("command line", "", [Diagnostic]{diagnostic}))
+            terminal_write_output(diagnostic_render_all("command line", "", [Diagnostic]{diagnostic}, false))
         }
         return EXIT_USAGE
     }

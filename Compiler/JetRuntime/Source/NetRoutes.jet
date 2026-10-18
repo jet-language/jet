@@ -142,7 +142,7 @@ fn net_route_resolve(host: I64, port: I64, operation: I64, wait_operation: I64, 
     if net_route_numeric(host, port, rows, length) -> return I64{1}
     scratch :: jet_rt_alloc(I64{8}, I64{8})
     net_put(scratch, I64{0}, I64{0})
-    result :: jet_net_raw_resolve_ordered(host, port, rows, length, scratch)
+    result :: net_resolve_rows(host, port, rows, length, scratch)
     if (result == I64{0}) {
         if !net_route_wait_stop(wait_operation, error) {
             failure :: net_word(scratch, I64{0})

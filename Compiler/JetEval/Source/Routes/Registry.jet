@@ -126,6 +126,9 @@ fn jet_eval_route_failure_is_result(fallibility: MIRCallFallibility) -> Bool Nev
 }
 
 fn jet_eval_route_success(value: JetEvalRuntimeValue, fallibility: MIRCallFallibility) -> JetEvalRuntimeValue Never! {
+    // copy: the caller's route value (owner: the read parameter, which callers still discharge) and
+    // the success value (owner: the result) are both live; the evaluator's aliases are retired by
+    // its own drop protocol, not by Jet moves.
     if fallibility == MIRCallFallibility.Infallible -> return value.copy()
     if value == {
         .Absent(_) | .Result(_, _) -> value

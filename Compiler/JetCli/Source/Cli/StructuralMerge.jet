@@ -93,15 +93,7 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
                 }
                 &units.push(JetCLIStructUnit{fact: fact, source: jet_cli_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
             }
-            loop position in 1..<units.len() {
-                unit :: units[position].copy()
-                destination := position
-                loop destination > 0 && units[destination - 1].fact.span.start > unit.fact.span.start {
-                    units[destination] = units[destination - 1]
-                    destination -= 1
-                }
-                units[destination] = unit
-            }
+            &units.sort_by((left: JetCLIStructUnit, right: JetCLIStructUnit) -> left.fact.span.start <=> right.fact.span.start)
             cursor := 0
             loop row in 0..<units.len() {
                 units[row].leading = if cursor <= units[row].fact.span.start -> jet_cli_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
@@ -224,15 +216,7 @@ fn jet_cli_struct_diff(before: JetCLIStructDocument, after: JetCLIStructDocument
     loop (row, unit) in after.units {
         if !used[row] -> &changes.push(jet_cli_struct_change(0, "added", unit, Val(unit), None))
     }
-    loop position in 1..<changes.len() {
-        change :: changes[position].copy()
-        destination := position
-        loop destination > 0 && (changes[destination - 1].stable_id > change.stable_id || (changes[destination - 1].stable_id == change.stable_id && changes[destination - 1].rank > change.rank)) {
-            changes[destination] = changes[destination - 1]
-            destination -= 1
-        }
-        changes[destination] = change
-    }
+    &changes.sort_by((left: JetCLIStructChange, right: JetCLIStructChange) -> (left.stable_id <=> right.stable_id).then(left.rank <=> right.rank))
     changes
 }
 
@@ -241,10 +225,18 @@ fn jet_cli_struct_conflict(kind: String, base: JetCLIStructUnit, ours: JetCLIStr
 }
 
 fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: &[JetCLIStructConflict]) -> String Never! {
+    // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if ours == theirs -> return ours.copy()
+    // copy: `theirs` stays with the caller (`theirs` is a read parameter: no move out of it, E0201)
+    // and the new value owns its own.
     if ours == base -> return theirs.copy()
+    // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
+    // the new value owns its own.
     if theirs == base -> return ours.copy()
     &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{mir_sha256_hex(ours)}", theirs: "sha256:{mir_sha256_hex(theirs)}"})
+    // copy: `base` stays with the caller (`base` is a read parameter: no move out of it, E0201) and
+    // the returned value owns its own.
     base.copy()
 }
 
@@ -469,9 +461,10 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
     }
     documents := [JetCLIStructDocument]{}
     loop path in paths {
-        if jet_cli_struct_load(path) == {
-            .Failed(output) -> return output.copy()
-            .Document(document) -> &documents.push(document)
+        loaded :: jet_cli_struct_load(path)
+        if loaded == {
+            .Failed(output) -> return ^output
+            .Document(document) -> &documents.push(^document)
         }
     }
     if command == "diff" {
@@ -499,8 +492,9 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
         return jet_cli_struct_fail("structural merge produced source that does not parse", "resolve edits manually; no output was written")
     }
     output :: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
-    if jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, false, None, JetDriverCompileMode.Doc, None) == {
-        .Refused(refusal) -> return refusal.copy()
+    compiled :: jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, false, None, JetDriverCompileMode.Doc, None)
+    if compiled == {
+        .Refused(refusal) -> return ^refusal
         .Compiled(result, _) -> {
             if jet_cli_errors(result.diagnostics).len() > 0 {
                 return jet_cli_struct_index_error("merged output did not pass parser and sema", result.diagnostics)

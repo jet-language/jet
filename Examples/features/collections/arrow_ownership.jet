@@ -2,7 +2,7 @@ use core.data.arrow as arrow
 
 // D-COLUMNAR-BOUNDARY1=A: a foreign adapter supplies this already-checked
 // typed owner. The ordinary query path remains the only aggregation path.
-fn consume(batch: arrow.DataArrowBatch<()>) {
+fn consume(batch: ^arrow.DataArrowBatch<()>) {
     imported :: arrow.import(^batch)
     query :: arrow.query(^imported) ?? panic("Arrow query")
     rows :: query.collect() ?? panic("collect Arrow rows")

@@ -105,14 +105,7 @@ fn http_body_closure_drop(closure: I64) {
     _ := http_body_stopped()
 }
 
-fn http_body_text_drop(text: I64) {
-    if (text == I64{0}) {
-        return
-    }
-    capacity :: http_body_word(wrapping(text + I64{16}))
-    if (capacity != I64{0}) { jet_rt_free(http_body_word(text), capacity, I64{1}) }
-    jet_rt_free(text, I64{24}, I64{8})
-}
+fn http_body_text_drop(text: I64) { jet_rt_string_drop(text) }
 
 #Export(c) fn jet_rt_http_body_list_drop(list: I64) {
     if (list == I64{0}) {

@@ -169,6 +169,8 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback identity has no adapter row", "every CCallback operation names one checked callback adapter", None)
             return
         }
+        // copy: the callback row is read while each trampoline writes the emit context (`&ctx`) and
+        // `lines`, so a view into ctx.program.callbacks would be live across those writes.
         callback :: ctx.program.callbacks[position].copy()
         if callback.symbol.len() == 0 || (symbols.get(callback.symbol) ?? false) {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback symbol is empty or emitted more than once", "each callback adapter exports one unique non-empty symbol", None)

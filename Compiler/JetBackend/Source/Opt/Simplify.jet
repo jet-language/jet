@@ -10,6 +10,8 @@
 // exact result outside the signed 64-bit range) is left to the machine.
 // Float operations are never folded (signed zeros, NaN payloads).
 
+use jet_foundation.[compiler_take_rows]
+
 OPT_I64_MIN :: prep { -9223372036854775808 }
 OPT_I64_MAX :: prep { 9223372036854775807 }
 
@@ -70,7 +72,8 @@ fn opt_rename_inst(facts: OptFacts, inst: LIRInst) -> LIRInst Never! {
             }
             LIRInst.Call{dst: dst, signature: signature, callee: renamed, args: opt_ids(facts, args)}
         }
-        .InlineAsm(dst, args, regs, result, code) -> LIRInst.InlineAsm{dst: dst, args: opt_ids(facts, args), regs: regs, result: result, code: code}
+        // copy: `dst` is a payload of read parameter `inst`, which keeps the original; field `dst` of the new LIRInst.InlineAsm owns this one
+        .InlineAsm(dst, args, regs, result, code) -> LIRInst.InlineAsm{dst: dst.copy(), args: opt_ids(facts, args), regs: regs, result: result, code: code}
         .Drop(value) -> LIRInst.Drop{value: opt_id(facts, value)}
         .Overflows(dst, op, left, right) -> LIRInst.Overflows{dst: dst, op: op, left: opt_id(facts, left), right: opt_id(facts, right)}
         .Load(dst, base, offset) -> LIRInst.Load{dst: dst, base: opt_id(facts, base), offset: offset}
@@ -80,6 +83,7 @@ fn opt_rename_inst(facts: OptFacts, inst: LIRInst) -> LIRInst Never! {
         .FunctionAddress(_, _) -> inst
         .Convert(dst, src) -> LIRInst.Convert{dst: dst, src: opt_id(facts, src)}
         .StackSlot(_, _, _) -> inst
+        .ThreadWord(_, _) -> inst
     }
 }
 
@@ -278,8 +282,6 @@ fn opt_defs(function: LIRFunction) -> OptDefs Never! {
 
 // `Compare(Ge|Lt, Or(x, c), 0)` with a non-negative constant c tests the sign
 // of x alone: or-ing a word whose sign bit is clear never changes the sign.
-// Exact Int lowering builds this shape for the inline test of a variable and
-// a constant operand.
 fn opt_sign_test(facts: OptFacts, defs: OptDefs, function: LIRFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> OptRewrite? {
     if condition != .Ge && condition != .Lt -> return None
     if !facts.known[right.value] || facts.consts[right.value] != 0 -> return None
@@ -362,7 +364,7 @@ fn opt_fold_sweep(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
         }
         if terminator != block.terminator -> changed = true
         &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: terminator, lines: lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: terminator, lines: lines, cold: block.cold})
     }
     function.blocks = blocks
     changed
@@ -424,12 +426,23 @@ fn opt_predecessor_counts(function: LIRFunction, rows: [Int:Int]) -> [Int] Never
 // block reads directly (the empty block dominates the reader) refuses the
 // bypass: that read would lose its definition (`outside`, opt_outside_uses).
 fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    // copy: the threaded target is a new owned jump target. With no row it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     row :: rows.get(target.block.value) ?? return target.copy()
+    // copy: the threaded target is a new owned jump target. For the entry row it equals `target`,
+    // the caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     if row == 0 -> return target.copy()
     hop :: function.blocks[row]
+    // copy: the threaded target is a new owned jump target. For a non-empty hop it equals `target`,
+    // the caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     if hop.insts.len() != 0 -> return target.copy()
+    // copy: the threaded target is a new owned jump target. When a hop parameter escapes it equals
+    // `target`, the caller's terminator edge (a read parameter), which stays in the block being
+    // rebuilt.
     loop param in hop.params { if outside[param.value] -> return target.copy() }
     if hop.terminator == .Jump(onward) {
+        // copy: the threaded target is a new owned jump target. For a self-loop it equals `target`,
+        // the caller's terminator edge (a read parameter), which stays in the block being rebuilt.
         if onward.block == hop.id -> return target.copy()
         args := [LIRValueID]{}
         loop arg in onward.args {
@@ -441,6 +454,8 @@ fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], ta
         }
         return LIRJumpTarget{block: onward.block, args: args}
     }
+    // copy: the threaded target is a new owned jump target. Otherwise it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     target.copy()
 }
 
@@ -481,46 +496,81 @@ fn opt_thread(function: &LIRFunction) -> Bool Never! {
             else -> block.terminator
         }
         if terminator != block.terminator -> changed = true
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines, cold: block.cold})
     }
     function.blocks = blocks
     changed
 }
 
 // A block that jumps to a block with no other predecessor absorbs it: the
-// successor's parameters become aliases of the jump's arguments.
+// successor's parameters become aliases of the jump's arguments. An edge that
+// adopts an argument into a parameter with other drop glue (lower_adopt: a
+// trivial word or pointer into an owner) is the only spelling of that
+// adoption, so it is never merged; aliasing would drop the obligation
+// (inline_alias_safe refuses the same change at call entries).
+//
+// One pass in block order: a block absorbs its successor, then (its
+// terminator is now the successor's) the next, until its jump no longer
+// qualifies; an absorbed block is skipped and the list is compacted once.
+// This is the result of rescanning from the first block after every merge:
+// a merge moves the successor's edges to the block, so no other block's
+// terminator, edge count or drop comparison changes (the successor's
+// parameters alias arguments of the same drop glue), and the rescan's first
+// candidate is the merging block again or a later one.
 fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
+    rows :: opt_block_rows(function)
+    counts :: opt_predecessor_counts(function, rows)
+    absorbed := [Bool]{}
+    loop _ in function.blocks -> &absorbed.push(false)
     changed := false
-    loop {
-        rows :: opt_block_rows(function)
-        counts :: opt_predecessor_counts(function, rows)
-        merged := false
-        loop (index, block) in function.blocks {
-            if merged -> break
-            if block.terminator == .Jump(target) {
-                row :: rows.get(target.block.value) ?? -1
-                if row > 0 && row != index && counts[row] == 1 {
-                    successor :: function.blocks[row]
-                    loop (position, param) in successor.params -> facts.alias[param.value] = opt_root(facts, target.args[position].value)
-                    insts := block.insts
-                    loop inst in successor.insts -> &insts.push(inst)
-                    lines := [Int]{}
-                    loop at in 0..<block.insts.len() -> &lines.push(opt_debug_line(block, at))
-                    loop at in 0..<(successor.insts.len() + 1) -> &lines.push(opt_debug_line(successor, at))
-                    function.blocks[index] = LIRBlock{id: block.id, params: block.params, insts: insts, terminator: successor.terminator, lines: lines}
-                    kept := [LIRBlock]{}
-                    loop (other, candidate) in function.blocks {
-                        if other != row -> &kept.push(candidate)
-                    }
-                    function.blocks = kept
-                    merged = true
-                }
+    loop index in 0..<function.blocks.len() {
+        if absorbed[index] -> next
+        loop {
+            jump := LIRJumpTarget?{None}
+            if function.blocks[index].terminator == .Jump(found) -> jump = Val(found.copy())
+            target :: jump ?? { break }
+            row :: rows.get(target.block.value) ?? -1
+            if row <= 0 || row == index || absorbed[row] || counts[row] != 1 || !opt_merge_keeps_drops(function, facts, function.blocks[row], target) -> break
+            loop (position, param) in function.blocks[row].params -> facts.alias[param.value] = opt_root(facts, target.args[position].value)
+            // The block's own source lines stay when they describe its
+            // instructions, else they are unknown (opt_debug_line); then the
+            // successor's, for its instructions and its terminator.
+            block_count :: function.blocks[index].insts.len()
+            successor_count :: function.blocks[row].insts.len()
+            if function.blocks[index].lines.len() == block_count + 1 {
+                _ := &function.blocks[index].lines.pop()
+            } else {
+                function.blocks[index].lines = [Int]{}
+                loop _ in 0..<block_count -> &function.blocks[index].lines.push(0)
             }
+            if function.blocks[row].lines.len() == successor_count + 1 {
+                successor_lines := compiler_take_rows<Int>(&function.blocks[row].lines)
+                &function.blocks[index].lines.extend(^successor_lines)
+            } else {
+                loop _ in 0..<(successor_count + 1) -> &function.blocks[index].lines.push(0)
+            }
+            successor_insts := compiler_take_rows<LIRInst>(&function.blocks[row].insts)
+            &function.blocks[index].insts.extend(^successor_insts)
+            terminator :: function.blocks[row].terminator.copy()
+            function.blocks[index].terminator = terminator
+            absorbed[row] = true
+            changed = true
         }
-        if !merged -> break
-        changed = true
     }
-    changed
+    if !changed -> return false
+    blocks := compiler_take_rows<LIRBlock>(&function.blocks)
+    loop (index, block) in blocks {
+        if !absorbed[index] -> &function.blocks.push(block)
+    }
+    true
+}
+
+// Every parameter of `successor` has the drop glue of its argument's root.
+fn opt_merge_keeps_drops(function: LIRFunction, facts: OptFacts, successor: LIRBlock, target: LIRJumpTarget) -> Bool Never! {
+    loop (position, param) in successor.params {
+        if function.values[param.value].drop != function.values[opt_root(facts, target.args[position].value)].drop -> return false
+    }
+    true
 }
 
 fn opt_inst_has_effect(inst: LIRInst) -> Bool Never! {
@@ -641,7 +691,7 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
             }
         }
         &lines.push(opt_debug_line(block, block.insts.len()))
-        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: block.terminator, lines: lines})
+        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: block.terminator, lines: lines, cold: block.cold})
     }
     // Drop the arguments of removed parameters on every edge.
     rewired := [LIRBlock]{}
@@ -651,7 +701,7 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
             .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: condition, then_target: opt_live_args(function, rows, live, then_target), else_target: opt_live_args(function, rows, live, else_target)}
             else -> block.terminator
         }
-        &rewired.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines})
+        &rewired.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines, cold: block.cold})
     }
     function.blocks = rewired
     changed
@@ -660,7 +710,11 @@ fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
 // `target` without the arguments of its block's dead parameters; `function`
 // still holds the parameter lists from before the removal.
 fn opt_live_args(function: LIRFunction, rows: [Int:Int], live: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    // copy: the pruned target is a new owned jump target. With no row it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     row :: rows.get(target.block.value) ?? return target.copy()
+    // copy: the pruned target is a new owned jump target. For the entry row it equals `target`, the
+    // caller's terminator edge (a read parameter), which stays in the block being rebuilt.
     if row == 0 -> return target.copy()
     args := [LIRValueID]{}
     loop (position, param) in function.blocks[row].params {
@@ -695,7 +749,7 @@ fn opt_compact(function: LIRFunction) -> LIRFunction Never! {
         loop param in block.params -> &params.push(opt_n(map, param))
         insts := [LIRInst]{}
         loop inst in block.insts -> &insts.push(opt_renumber_inst(map, inst))
-        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: opt_renumber_terminator(map, block.terminator), lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: opt_renumber_terminator(map, block.terminator), lines: block.lines, cold: block.cold})
     }
     debug := function.debug
     bindings := [LIRDebugBinding]{}
@@ -744,6 +798,7 @@ fn opt_renumber_inst(map: [Int], inst: LIRInst) -> LIRInst Never! {
         .FunctionAddress(dst, target) -> LIRInst.FunctionAddress{dst: opt_n(map, dst), function: target}
         .Convert(dst, src) -> LIRInst.Convert{dst: opt_n(map, dst), src: opt_n(map, src)}
         .StackSlot(dst, size, align) -> LIRInst.StackSlot{dst: opt_n(map, dst), size: size, align: align}
+        .ThreadWord(dst, offset) -> LIRInst.ThreadWord{dst: opt_n(map, dst), offset: offset}
     }
 }
 
@@ -796,7 +851,7 @@ fn opt_rename_all(function: &LIRFunction, facts: OptFacts) Never! {
     loop block in function.blocks {
         insts := [LIRInst]{}
         loop inst in block.insts -> &insts.push(opt_rename_inst(facts, inst))
-        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator), lines: block.lines})
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator), lines: block.lines, cold: block.cold})
     }
     function.blocks = blocks
     bindings := [LIRDebugBinding]{}

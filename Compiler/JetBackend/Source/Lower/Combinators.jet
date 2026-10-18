@@ -5,7 +5,7 @@
 // jet_option_map_ref). The receiver is a borrowed read, so kept elements are
 // copies; a closure argument moved into the method is dropped after it.
 use jet_foundation.[
-    MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType,
+    MIRCallArg, MIRInstruction, MIRPollKind, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType,
     MIRTypeKind, MIRTupleField, MIRValueID, mir_nominal_ref, mir_type_display_name,
     mir_type_from_kind,
 ]
@@ -99,16 +99,68 @@ fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, clo
     out
 }
 
+// A typed owner live across an inline callback, released if the callback
+// stops; `present` (when set) is the flag under which it is initialized.
+struct LowerCallbackOwner {
+    value: LIRValueID
+    ty: MIRType
+    present: LIRValueID?
+}
+
+fn lower_callback_owner(value: LIRValueID, ty: MIRType) -> LowerCallbackOwner Never! {
+    LowerCallbackOwner{value: value, ty: ty, present: None}
+}
+
+// After an inline closure-box call in a stop-point module (#4720): a
+// delivered Stop leaves the callback's result unwritten, so the element loop
+// neither reads it nor calls again. The stop path releases exactly the
+// owners live across the call and a moved closure, each in its own cleanup
+// scope (as lower_sort_release), then enters the instruction's checked
+// Propagate edge (lower_numeric_stopped). The test is lower_poll's
+// Propagate (lower_session_branch). Nothing outside a stop-point module.
+fn lower_callback_guard(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, owners: [LowerCallbackOwner], closure: LIRValueID, closure_ty: MIRType, moved_closure: Bool) Never! {
+    if !m.stop_points -> return
+    stop :: lower_new_block(&f)
+    resume :: lower_new_block(&f)
+    lower_session_branch(&m, &f, MIRPollKind.Propagate, lower_target(stop, [LIRValueID]{}), lower_target(resume, [LIRValueID]{}))
+    lower_start(&f, stop, [LIRValueID]{})
+    loop owner in owners {
+        skip := LIRBlockID?{None}
+        if owner.present == .Val(flag) {
+            release :: lower_new_block(&f)
+            after :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: flag, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(after, [LIRValueID]{})})
+            lower_start(&f, release, [LIRValueID]{})
+            skip = Val(after)
+        }
+        scope :: lower_stop_cleanup_enter(&m, &f)
+        lower_map_drop_value(p, &m, &f, owner.value, owner.ty)
+        lower_stop_cleanup_leave(&m, &f, scope)
+        if skip == .Val(after) {
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(after, [LIRValueID]{})})
+            lower_start(&f, after, [LIRValueID]{})
+        }
+    }
+    if moved_closure {
+        scope :: lower_stop_cleanup_enter(&m, &f)
+        lower_map_drop_value(p, &m, &f, closure, closure_ty)
+        lower_stop_cleanup_leave(&m, &f, scope)
+    }
+    lower_numeric_stopped(p, Val(c), &m, &f)
+    lower_start(&f, resume, [LIRValueID]{})
+}
+
 fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], call: MIRPreludeCallID) Never! {
-    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
+    row :: lower_prelude_row(p, m, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
     if row.module_name == "core.collections" && row.member == "edit_disjoint" && lower_runtime_symbol(row) == "jet_edit_disjoint" -> return lower_disjoint_edit(p, c, &m, &f, instruction, receiver, args)
     if lower_parallel_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
+    if lower_event_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
-    // An inline element loop would keep running past a callback that ended
-    // in Stopped and consume its unwritten result; in a stop-point module
-    // (#4720) only the OCB1 runtime kernels (LazyIter.jet) carry callbacks.
-    if m.stop_points -> return lower_fail(&m, &f, "inline ClosureMethod {row.module_name}.{row.member} in a stop-point module is not lowered at O0 yet")
+    // An inline element loop calls the closure box directly; in a stop-point
+    // module (#4720) every call is followed by lower_callback_guard, so a
+    // stopped callback's unwritten result is never read and no later
+    // element is visited.
     if lower_map_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     symbol :: lower_runtime_symbol(row)
     receiver_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, unsupported)
@@ -139,6 +191,7 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         lower_start(&f, present, [LIRValueID]{})
         item :: lower_read_at(p, &f, option, 0, inner) ?? return
         out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mapped) ?? return
+        lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{}, closure, closure_ty, closure_arg.access == .Move)
         boxed :: lower_pointer(&f)
         lower_alloc(&m, &f, boxed, lower_option_box_size(p, mapped))
         lower_write_at(p, &f, boxed, 0, out, mapped)
@@ -174,9 +227,11 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
         if symbol != "jet_list_filter" {
             out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, produced) ?? return
+            lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{lower_callback_owner(dst, result_ty)}, closure, closure_ty, closure_arg.access == .Move)
             lower_call_helper(&m, &f, "list.push", result_ty, [LIRValueID]{dst, out}, None)
         } else {
             keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return
+            lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{lower_callback_owner(dst, result_ty)}, closure, closure_ty, closure_arg.access == .Move)
             kept :: lower_new_block(&f)
             skip :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(kept, [LIRValueID]{}), else_target: lower_target(skip, [LIRValueID]{})})
@@ -212,8 +267,10 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         stepped := current
         if folds {
             stepped = lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, item}, result_ty) ?? return
+            lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{}, closure, closure_ty, closure_arg.access == .Move)
         } else {
             keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return
+            lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{}, closure, closure_ty, closure_arg.access == .Move)
             counted :: lower_new_block(&f)
             join :: lower_new_block(&f)
             lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(counted, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{current})})
@@ -268,6 +325,7 @@ fn lower_closure_search(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     lower_seal(&f, LIRTerminator.Branch{condition: pending, then_target: lower_target(test, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{decision})})
     lower_start(&f, test, [LIRValueID]{})
     keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return
+    lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{}, closure, closure_ty, closure_arg.access == .Move)
     if position {
         lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(join, [LIRValueID]{index}), else_target: lower_target(join, [LIRValueID]{decision})})
     } else {
@@ -359,6 +417,7 @@ fn lower_map_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
             &callback_args.push(lower_map_callback_input(p, &m, &f, closure_ty, 1, value, shape.value))
         }
         keep :: lower_call_closure_box(p, &m, &f, closure, callback_args, mir_type_from_kind(MIRTypeKind.Bool)) ?? return true
+        lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{}, closure, closure_ty, closure_arg.access == .Move)
         done :: lower_target(each.done, [LIRValueID]{keep})
         next_target :: lower_target(next_block, [LIRValueID]{})
         lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: if all -> next_target else -> done, else_target: if all -> done else -> next_target})
@@ -379,6 +438,7 @@ fn lower_map_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         value_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 1, value, shape.value)
         call_ty :: if filtering -> mir_type_from_kind(MIRTypeKind.Bool) else -> output.value
         out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{key_arg, value_arg}, call_ty) ?? return true
+        lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{lower_callback_owner(dst, result_ty)}, closure, closure_ty, closure_arg.access == .Move)
         skipped := LIRBlockID?{None}
         if filtering {
             kept :: lower_new_block(&f)
@@ -433,6 +493,9 @@ fn lower_map_closure_fold(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     key_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 1, key, shape.key)
     value_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 2, value, shape.value)
     out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, key_arg, value_arg}, result_ty) ?? return
+    held := [LowerCallbackOwner]{}
+    if !lower_closure_param_moves(closure_ty, 0) -> &held.push(lower_callback_owner(current, result_ty))
+    lower_callback_guard(p, c, &m, &f, held, closure, closure_ty, closure_arg.access == .Move)
     if !lower_closure_param_moves(closure_ty, 0) -> lower_map_drop_value(p, &m, &f, current, result_ty)
     if inline -> lower_write_at(p, &f, dst, 0, out, result_ty)
     lower_each_end(&f, each, if inline -> [LIRValueID]{} else -> [LIRValueID]{out})
@@ -470,6 +533,12 @@ fn lower_closure_extreme_by(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     best_key :: each.state[1]
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
     key :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, key_ty) ?? return
+    if m.stop_points {
+        // The best key so far is initialized once an element was chosen.
+        chosen_yet :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: chosen_yet, condition: LIRCondition.Ge, left: best_at, right: zero})
+        lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{LowerCallbackOwner{value: best_key, ty: key_ty, present: Val(chosen_yet)}}, closure, closure_ty, closure_arg.access == .Move)
+    }
     chosen_block :: lower_new_block(&f)
     weigh :: lower_new_block(&f)
     keep :: lower_new_block(&f)
@@ -544,6 +613,7 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     outer :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, outer.address, 0, elem) ?? return
     part :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, part_ty) ?? return lower_fail(&m, &f, unsupported)
+    lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{lower_callback_owner(dst, result_ty)}, closure, closure_ty, closure_arg.access == .Move)
     inner :: lower_each_begin(p, &f, part, produced, [LIRValueID]{})
     value := lower_read_at(p, &f, inner.address, 0, produced) ?? return
     if lower_needs_drop(p, m, produced) {
@@ -569,9 +639,9 @@ fn lower_closure_each(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
-    if lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) == .Val(out) {
-        lower_map_drop_value(p, &m, &f, out, ret)
-    }
+    produced :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret)
+    lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{}, closure, closure_ty, closure_arg.access == .Move)
+    if produced == .Val(out) -> lower_map_drop_value(p, &m, &f, out, ret)
     lower_each_end(&f, each, [LIRValueID]{})
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
     lower_alias_absent(&f, instruction)
@@ -590,6 +660,9 @@ fn lower_closure_update_first(p: MIRProgram, c: LowerContext, m: &LowerModule, f
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
     keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return
+    held := [LowerCallbackOwner]{}
+    if owned -> &held.push(lower_callback_owner(replacement, elem))
+    lower_callback_guard(p, c, &m, &f, held, closure, closure_ty, closure_arg.access == .Move)
     hit :: lower_new_block(&f)
     miss :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(miss, [LIRValueID]{})})
@@ -632,6 +705,7 @@ fn lower_closure_group_by(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
     item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
     key :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, shape.key) ?? return
+    lower_callback_guard(p, c, &m, &f, [LowerCallbackOwner]{lower_callback_owner(dst, result_ty)}, closure, closure_ty, closure_arg.access == .Move)
     found :: lower_word(&f)
     lower_call_helper(&m, &f, "map.find", result_ty, [LIRValueID]{dst, key}, Val(found))
     present :: lower_flag(&f)
@@ -692,6 +766,9 @@ fn lower_closure_fold_owned(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
         item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
         out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{dst, item}, result_ty) ?? return
+        held := [LowerCallbackOwner]{}
+        if !consumed -> &held.push(lower_callback_owner(dst, result_ty))
+        lower_callback_guard(p, c, &m, &f, held, closure, closure_ty, closure_arg.access == .Move)
         if consumed -> lower_write_at(p, &f, dst, 0, out, result_ty)
         else -> lower_replace_stored(p, &m, &f, dst, 0, out, result_ty)
         lower_each_end(&f, each, [LIRValueID]{})
@@ -700,6 +777,9 @@ fn lower_closure_fold_owned(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
         item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
         current :: each.state[0]
         stepped :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, item}, result_ty) ?? return
+        held := [LowerCallbackOwner]{}
+        if !consumed -> &held.push(lower_callback_owner(current, result_ty))
+        lower_callback_guard(p, c, &m, &f, held, closure, closure_ty, closure_arg.access == .Move)
         if !consumed -> lower_map_drop_value(p, &m, &f, current, result_ty)
         lower_each_end(&f, each, [LIRValueID]{stepped})
         dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -884,7 +964,9 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     if by_key {
         item_address :: lower_list_address(&f, data, fill.at, stride)
         item :: lower_read_at(p, &f, item_address, 0, elem) ?? return
-        computed :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        called :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        // The key moves out of the callback's Result by bytes (lower_box_owned).
+        computed :: if key_err != None -> lower_box_owned(p, &m, &f, called, ret) else -> called
         lower_sort_callback_guard(p, c, &m, &f, order, keys, None, length, fill.at, key_ty, by_key, closure, closure_ty, closure_arg.access == .Move)
         key_slot :: lower_list_address(&f, keys, fill.at, key_stride)
         if key_err == .Val(err_ty) {
@@ -1092,8 +1174,31 @@ fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_start(&f, finish, [LIRValueID]{dst})
 }
 
-// Frees a box's own `bytes` (its payload already moved out).
+// Gives up one owner of a box whose payload already moved out (#5041 P2):
+// the last owner frees the box's own `bytes`; a box other owners still hold
+// stays theirs (a move out of a shared box copied the payload instead,
+// Lower.jet lower_read_box_member). A null box (an absent Option) is none.
 fn lower_free_shell(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, bytes: Int) Never! {
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: boxed, right: null})
+    held :: lower_new_block(&f)
+    free :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(held, [LIRValueID]{})})
+    lower_start(&f, held, [LIRValueID]{})
+    last :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_block_release", [LIRValueID]{boxed}, Val(last))
+    lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(free, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, free, [LIRValueID]{})
+    lower_free_box_bytes(&m, &f, boxed, bytes)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// Frees the box `boxed` of `bytes` whose last owner this already is.
+fn lower_free_box_bytes(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, bytes: Int) Never! {
     size :: lower_const(&f, if bytes < 8 -> 8 else -> bytes)
     align :: lower_const(&f, 8)
     lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{boxed, size, align}, None)
