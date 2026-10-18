@@ -84,6 +84,31 @@ struct LowerFunctionKey {
     value: Int
 }
 
+// The registries whose rows register under a key (LowerKeyedRow.registry).
+LOWER_KEYED_SIGNATURE :: 0
+LOWER_KEYED_GLUE :: 1
+LOWER_KEYED_DATA :: 2
+LOWER_KEYED_DEBUG_TYPE :: 3
+LOWER_KEYED_DEBUG_FILE :: 4
+
+// One keyed registration of a thread's module: registry row `row` under
+// `key` (a debug file's key is the source file id `file`), in registration
+// order, so the merge reads each row's key from this log instead of scanning
+// every registry map of the module (lower_remap_open).
+struct LowerKeyedRow {
+    registry: Int
+    row: Int
+    key: String
+    file: U64
+}
+
+// Records a keyed registration (only in a thread's module; the serial
+// lowering records nothing).
+fn lower_keyed_record(m: &LowerModule, registry: Int, row: Int, key: String, file: U64) Never! {
+    if !m.parted -> return
+    &m.keyed_rows.push(LowerKeyedRow{registry: registry, row: row, key: key.copy(), file: file})
+}
+
 fn lower_marks(m: LowerModule) -> LowerMarks Never! {
     LowerMarks{signatures: m.signatures.len(), data: m.data.len(), debug_types: m.debug_types.len(), debug_files: m.debug_files.len(), glue: m.glue.len(), issues: m.issues.len(), fixups: m.static_fixups.len(), extents: m.extents.len(), keys: m.function_keys.len(), sites: m.shared_sites.len(), exports: m.export_rows.len()}
 }
@@ -506,7 +531,9 @@ fn lower_workers_unmapped(count: Int) -> [Int] Never! {
     rows
 }
 
-// The keys of module `local`'s rows past `bases`, by row.
+// The keys of module `local`'s rows past `bases`, by row, read from its
+// registration log (every keyed row of a thread's module is logged once, at
+// its registration, and no registry key is ever removed or rebound).
 fn lower_remap_open(local: LowerModule, bases: LowerMarks, remap: &LowerRemap) Never! {
     remap.ready = true
     remap.signatures = lower_workers_unmapped(local.signatures.len() - bases.signatures)
@@ -516,33 +543,27 @@ fn lower_remap_open(local: LowerModule, bases: LowerMarks, remap: &LowerRemap) N
     remap.glue = lower_workers_unmapped(local.glue.len() - bases.glue)
     signature_keys := [String]{}
     loop _ in bases.signatures..<local.signatures.len() -> &signature_keys.push("")
-    loop (key, row) in local.signature_rows {
-        if row >= bases.signatures -> signature_keys[row - bases.signatures] = key.copy()
-    }
-    remap.signature_keys = ^signature_keys
     glue_keys := [String]{}
     loop _ in bases.glue..<local.glue.len() -> &glue_keys.push("")
-    loop (key, row) in local.glue_rows {
-        if row >= bases.glue -> glue_keys[row - bases.glue] = key.copy()
-    }
-    remap.glue_keys = ^glue_keys
     data_keys := [String?]{}
     loop _ in bases.data..<local.data.len() -> &data_keys.push(None)
-    loop (text, row) in local.data_rows {
-        if row >= bases.data -> data_keys[row - bases.data] = Val(text.copy())
-    }
-    remap.data_keys = ^data_keys
     debug_keys := [String?]{}
     loop _ in bases.debug_types..<local.debug_types.len() -> &debug_keys.push(None)
-    loop (key, row) in local.debug_type_rows {
-        if row >= bases.debug_types -> debug_keys[row - bases.debug_types] = Val(key.copy())
-    }
-    remap.debug_keys = ^debug_keys
     file_keys := [U64]{}
     loop _ in bases.debug_files..<local.debug_files.len() -> &file_keys.push(U64{0})
-    loop (file, row) in local.debug_file_rows {
-        if row >= bases.debug_files -> file_keys[row - bases.debug_files] = file
+    loop keyed in local.keyed_rows {
+        if {
+            keyed.registry == LOWER_KEYED_SIGNATURE -> signature_keys[keyed.row - bases.signatures] = keyed.key.copy()
+            keyed.registry == LOWER_KEYED_GLUE -> glue_keys[keyed.row - bases.glue] = keyed.key.copy()
+            keyed.registry == LOWER_KEYED_DATA -> data_keys[keyed.row - bases.data] = Val(keyed.key.copy())
+            keyed.registry == LOWER_KEYED_DEBUG_TYPE -> debug_keys[keyed.row - bases.debug_types] = Val(keyed.key.copy())
+            else -> file_keys[keyed.row - bases.debug_files] = keyed.file
+        }
     }
+    remap.signature_keys = ^signature_keys
+    remap.glue_keys = ^glue_keys
+    remap.data_keys = ^data_keys
+    remap.debug_keys = ^debug_keys
     remap.file_keys = ^file_keys
 }
 

@@ -304,11 +304,13 @@ struct LowerModule {
     stop_points: Bool
     task_stop_points: Bool
     // Parallel lowering (Workers.jet): set in each thread's copy of the
-    // module, which then records the extent of every keyed registration that
-    // creates other rows, every constant carrying a function ID, and the
+    // module, which then records every keyed registration (its registry, row
+    // and key: lower_keyed_record), the extent of every keyed registration
+    // that creates other rows, every constant carrying a function ID, and the
     // native export symbols it registers, in order, so the merge can drop,
     // renumber and replay them.
     parted: Bool{false}
+    keyed_rows: [LowerKeyedRow]{[LowerKeyedRow]{}}
     extents: [LowerExtent]{[LowerExtent]{}}
     function_keys: [LowerFunctionKey]{[LowerFunctionKey]{}}
     export_rows: [String]{[String]{}}
@@ -791,8 +793,10 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     }
     // The caller gets its program back as it came.
     lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
-    lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy(), debug: LIRModuleDebug{directory: "", files: m.debug_files.copy(), types: m.debug_types.copy()}}
-    issues := m.issues.copy()
+    // The module's registries move into the result: nothing reads `m`'s
+    // signatures, data, debug tables or issues after this.
+    lowered :: LIRModule{signatures: ^m.signatures, functions: functions, data: ^m.data, debug: LIRModuleDebug{directory: "", files: ^m.debug_files, types: ^m.debug_types}}
+    issues := ^m.issues
     if issues.len() > 0 && !keep_going {
         lowered_entry = None
         finalizer = None
@@ -1611,6 +1615,7 @@ fn lower_glue_register(m: &LowerModule, role: String, ty: MIRType, clone: Bool, 
     // copy: the glue registry row owns its type, while `ty` is the caller's MIR type (a read
     // parameter), which stays on its MIR node.
     &m.glue.push(LowerGlue{key: key, ty: ty.copy(), id: id, clone: clone, helper: helper, function: -1})
+    lower_keyed_record(&m, LOWER_KEYED_GLUE, row, row_key, U64{0})
     &m.glue_rows.add(row_key, row).drop("checked absent above")
     id
 }
@@ -1644,6 +1649,7 @@ fn lower_signature(m: &LowerModule, params: [LIRLayout], result: LIRLayout?) -> 
     // copy: the signature row owns its layouts, while `params`/`result` are the caller's layout
     // lists (read parameters), often reused for the call that follows.
     &m.signatures.push(LIRSignature{id: id, convention: LIRCallConv.SystemV, params: params.copy(), result: result.copy()})
+    lower_keyed_record(&m, LOWER_KEYED_SIGNATURE, id.value, key, U64{0})
     &m.signature_rows.add(key, id.value).drop("checked absent above")
     id
 }
@@ -1672,6 +1678,7 @@ fn lower_data(m: &LowerModule, text: String) -> LIRDataID Never! {
     loop byte in text.bytes() -> &bytes.push(byte)
     id :: LIRDataID{value: m.data.len()}
     &m.data.push(LIRData{id: id, bytes: bytes, align: 1, relocs: [LIRDataReloc]{}})
+    lower_keyed_record(&m, LOWER_KEYED_DATA, id.value, text, U64{0})
     &m.data_rows.add(text.copy(), id.value).drop("checked absent above")
     id
 }
