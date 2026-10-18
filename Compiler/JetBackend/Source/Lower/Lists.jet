@@ -821,8 +821,7 @@ fn lower_list_sole_owner(f: &LowerFunction, data: LIRValueID) -> LIRValueID Neve
 fn lower_helper_list_unique(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_family_entry(p, glue.ty) ?? panic("list.unique helper has no List-family entry")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    seen := [String:Bool]{}
-    if lower_contains_uncopyable(p, m, elem, &seen) {
+    if lower_type_contains_uncopyable(p, &m, elem) {
         lower_seal(&f, LIRTerminator.Return{value: None})
         return lir_builder_finish(f.builder)
     }

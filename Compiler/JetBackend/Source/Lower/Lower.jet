@@ -239,6 +239,9 @@ struct LowerModule {
     // Type identity key -> whether the type reaches a Close owner
     // (PartialDrop.jet lower_partial_frame), once per module.
     contains_close: [String:Bool]{[String:Bool]{}}
+    // Type identity key -> whether the type reaches a member no owner can
+    // copy (lower_type_contains_uncopyable), once per module.
+    contains_uncopyable: [String:Bool]{[String:Bool]{}}
     // The type cache (lower_repr_of), lent to the function being lowered:
     // one row, or none while a function holds it.
     types: [LowerTypeCache]{[LowerTypeCache]{LowerTypeCache{reprs: [String:LowerRepr]{}, sizes: [String:LowerSize]{}, members: [String:[LowerMember]]{}, drops: [String:Bool]{}}}}
@@ -5517,7 +5520,19 @@ fn lower_borrowed_box_hops(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 }
 
 // Whether `ty` reaches a member no owner can copy: a Close owner, a runtime
-// handle without clone, or an atomic (cycles cut by `seen`, as
+// handle without clone, or an atomic; once per type for the whole module. A
+// fresh lower_contains_uncopyable walk answers exactly that reachability
+// (its `seen` set only cuts cycles), so the cached answer is the walk's own.
+fn lower_type_contains_uncopyable(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Bool Never! {
+    key :: mir_type_identity_key(ty)
+    if m.contains_uncopyable.get(key) == .Val(known) -> return known
+    seen := [String:Bool]{}
+    found :: lower_contains_uncopyable(p, m, ty, &seen)
+    &m.contains_uncopyable.add(key, found).drop("checked absent above")
+    found
+}
+
+// The walk behind lower_type_contains_uncopyable (cycles cut by `seen`, as
 // lower_contains_close walks).
 fn lower_contains_uncopyable(p: MIRProgram, m: LowerModule, ty: MIRType, seen: &[String:Bool]) -> Bool Never! {
     key :: mir_type_identity_key(ty)
@@ -5566,8 +5581,7 @@ fn lower_read_box_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     if !lower_member_moves(c, instruction, owner) || !lower_value_owned(c, result) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
     // A member Sema never lets anyone copy (a Close owner, a handle without
     // clone, an atomic) never sits in a box another owner holds: taken.
-    seen := [String:Bool]{}
-    if lower_contains_uncopyable(p, m, ty, &seen) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
+    if lower_type_contains_uncopyable(p, &m, ty) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
     boxes := lower_borrowed_box_hops(p, c, &m, &f, owner)
     loop holder in holders -> &boxes.push(holder)
     if boxes.len() == 0 -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
@@ -7773,8 +7787,7 @@ fn lower_box_copy(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIR
 // and its helper does nothing.
 fn lower_helper_box_unique(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    seen := [String:Bool]{}
-    if lower_contains_uncopyable(p, m, glue.ty, &seen) {
+    if lower_type_contains_uncopyable(p, &m, glue.ty) {
         lower_seal(&f, LIRTerminator.Return{value: None})
         return lir_builder_finish(f.builder)
     }
