@@ -41,10 +41,39 @@ fn shared_borrow_unpin(cell: I64) {
     shared_count_release(cell, true)
 }
 
+// A contended acquire spins briefly before it blocks. Most holds (a queue
+// claim, a counter, a row move) end within a microsecond, while a blocking
+// wait makes the scheduler start a compensation worker
+// (scheduler_blocking_wait_enter: a 1 GiB-stack pthread_create) that retires
+// as soon as the waits drop; a traced 16-thread compiler pass created
+// hundreds of thousands of such threads. Each round releases the mutex,
+// pauses SHARED_SPIN_PAUSES times and takes it again; after SHARED_SPIN_ROUNDS
+// rounds the caller blocks as before, so a wait that really lasts is still
+// compensated and nothing about ordering or deadlock-freedom changes (the
+// mutex is never held while pausing). Returns false when the caller should
+// block.
+SHARED_SPIN_ROUNDS :: prep { I64{64} }
+SHARED_SPIN_PAUSES :: prep { I64{32} }
+
+fn shared_spin(mutex: I64, round: I64) -> Bool {
+    if (round >= SHARED_SPIN_ROUNDS) -> return false
+    sync_mutex_unlock(mutex)
+    pauses := I64{0}
+    #Unsafe("x86 pause only hints that this thread is waiting in a spin loop; no memory is touched") {
+        loop pauses < SHARED_SPIN_PAUSES {
+            os_spin_pause()
+            pauses += I64{1}
+        }
+    }
+    sync_mutex_lock(mutex)
+    true
+}
+
 fn shared_acquire(shared: I64, editable: Bool) {
     mutex :: shared + I64{8}
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(shared + I64{40}, I64{1})
+    round := I64{0}
     loop {
         available :: sync_load(shared + I64{32}) == I64{0} && (if editable -> sync_load(shared + I64{24}) == I64{0} else -> sync_load(shared + I64{40}) == I64{0})
         if available {
@@ -57,6 +86,10 @@ fn shared_acquire(shared: I64, editable: Bool) {
             }
             sync_mutex_unlock(mutex)
             return
+        }
+        if shared_spin(mutex, round) {
+            round += I64{1}
+            next
         }
         // These callback doors pass cancelled=||false in the Rust kernel.
         // Compensation is required, but cancellation must not change meaning.
@@ -493,6 +526,7 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
     mutex :: cell + I64{8}
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(cell + I64{40}, I64{1})
+    round := I64{0}
     loop {
         if (cancel_flag != I64{0} && sync_load(cancel_flag) != I64{0}) || condition_interrupted() {
             if editable -> _ := sync_add(cell + I64{40}, I64{-1})
@@ -511,6 +545,10 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
             sync_store(guard + I64{16}, I64{1})
             sync_mutex_unlock(mutex)
             return true
+        }
+        if shared_spin(mutex, round) {
+            round += I64{1}
+            next
         }
         scheduler_blocking_wait_enter()
         _ := sync_cond_wait(cell + I64{16}, mutex, sync_deadline(I64{10000000}))
