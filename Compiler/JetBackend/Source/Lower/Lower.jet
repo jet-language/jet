@@ -560,6 +560,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     // `types` answers); the caller's own index rows come back at the end.
     caller_id_rows :: program.type_id_rows.copy()
     caller_key_rows :: program.type_key_rows.copy()
+    caller_trait_rows :: program.trait_name_rows.copy()
     lower_attach_type_index(&program)
     prepared := lower_prepare_roots(program, all_roots, shared_sites_dynamic, native_pack, imports, ^runtime_intrinsics)
     loop issue in test_issues -> &prepared.issues.push(issue)
@@ -817,7 +818,7 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         }
     }
     // The caller gets its program back as it came.
-    lower_restore_type_index(&program, caller_id_rows, caller_key_rows)
+    lower_restore_type_index(&program, caller_id_rows, caller_key_rows, caller_trait_rows)
     // The module's registries move into the result: nothing reads `m`'s
     // signatures, data, debug tables or issues after this.
     lowered :: LIRModule{signatures: ^m.signatures, functions: functions, data: ^m.data, debug: LIRModuleDebug{directory: "", files: ^m.debug_files, types: ^m.debug_types}}
@@ -1094,14 +1095,25 @@ fn lower_attach_type_index(program: &MIRProgram) Never! {
         if first != row || ambiguous.get(definition.name) != None -> next
         if key_rows.get(definition.name) == None -> _ := &key_rows.add(definition.name, row)
     }
+    // The first row of each trait key or name, as the scan lower_trait_ref
+    // made found it: a row is recorded under each of its spellings the first
+    // time that spelling is met, so the row under a spelling is the first
+    // row whose key or name is that spelling.
+    trait_rows := [String:Int]{}
+    loop (row, definition) in program.traits {
+        if trait_rows.get(definition.key) == None -> _ := &trait_rows.add(definition.key, row)
+        if trait_rows.get(definition.name) == None -> _ := &trait_rows.add(definition.name, row)
+    }
     program.type_id_rows = ^id_rows
     program.type_key_rows = ^key_rows
+    program.trait_name_rows = ^trait_rows
 }
 
 // Puts back the index rows `program` carried before lower_attach_type_index.
-fn lower_restore_type_index(program: &MIRProgram, id_rows: [U64:Int], key_rows: [String:Int]) Never! {
+fn lower_restore_type_index(program: &MIRProgram, id_rows: [U64:Int], key_rows: [String:Int], trait_rows: [String:Int]) Never! {
     program.type_id_rows = id_rows.copy()
     program.type_key_rows = key_rows.copy()
+    program.trait_name_rows = trait_rows.copy()
 }
 
 // A copy of `program` with its type index attached (lower_attach_type_index).
@@ -1156,9 +1168,9 @@ fn lower_type_row(p: MIRProgram, name: MIRNominalRef, identity: MIRTypeID?) -> I
 
 // The definition of a nominal type, instantiated with its applied arguments
 // when the declaration is generic (Mono.jet lower_instantiate_definition).
+// Readers that only inspect the declaration take lower_type_def_row and read
+// `p.types[row]` in place: this returns an owned copy per lookup.
 fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
-    // An anonymous union is its structural enum declaration (MIRRust.rs
-    // structural_type_def_for: the definition named by the type's identity).
     if ty.kind == .Union(_) {
         if ty.identity == .Val(identity) -> return lower_type_def_by_id(p, identity)
         return None
@@ -1175,19 +1187,42 @@ fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
     None
 }
 
-fn lower_type_def_by_id(p: MIRProgram, id: MIRTypeID) -> MIRTypeDef? {
-    if p.type_id_rows.len() > 0 {
-        row :: p.type_id_rows.get(id.value) ?? return None
-        // copy: the type definition is returned as an owned MIRTypeDef, while `p` is the caller's
-        // MIR program (a read parameter), which keeps its type rows.
-        return Val(p.types[row].copy())
+// The row of `p.types` that is lower_type_def(p, ty)'s definition itself:
+// the declaration an anonymous union's identity names, or the declaration
+// an Apply names when it is not generic (a generic one is instantiated per
+// use, so it has no row). -1 when lower_type_def(p, ty) is None or an
+// instantiation. A reader of the declaration's own fields (its kind, key,
+// name, boxed edges) reads `p.types[row]` in place instead of a copy.
+fn lower_type_def_row(p: MIRProgram, ty: MIRType) -> Int Never! {
+    // An anonymous union is its structural enum declaration (MIRRust.rs
+    // structural_type_def_for: the definition named by the type's identity).
+    if ty.kind == .Union(_) {
+        if ty.identity == .Val(identity) -> return lower_type_row_by_id(p, identity)
+        return -1
     }
+    if ty.kind == .Apply(name, _) {
+        row :: lower_type_row(p, name, ty.identity)
+        if row < 0 || p.types[row].generic_params.len() != 0 -> return -1
+        return row
+    }
+    -1
+}
+
+// The first row of `p.types` declaring `id`, -1 when none does.
+fn lower_type_row_by_id(p: MIRProgram, id: MIRTypeID) -> Int Never! {
+    if p.type_id_rows.len() > 0 -> return p.type_id_rows.get(id.value) ?? -1
     loop row in 0..<p.types.len() {
-        // copy: the type definition is returned as an owned MIRTypeDef, while `p` is the caller's
-        // MIR program (a read parameter), which keeps its type rows.
-        if p.types[row].id == id -> return Val(p.types[row].copy())
+        if p.types[row].id == id -> return row
     }
-    None
+    -1
+}
+
+fn lower_type_def_by_id(p: MIRProgram, id: MIRTypeID) -> MIRTypeDef? {
+    row :: lower_type_row_by_id(p, id)
+    if row < 0 -> return None
+    // copy: the type definition is returned as an owned MIRTypeDef, while `p` is the caller's
+    // MIR program (a read parameter), which keeps its type rows.
+    Val(p.types[row].copy())
 }
 
 // Whether lower_type_def(p, ty) has a definition, without instantiating or
@@ -1366,6 +1401,8 @@ fn lower_return_types(m: &LowerModule, f: &LowerFunction) Never! {
 // holds none).
 fn lower_repr_of(p: MIRProgram, f: &LowerFunction, ty: MIRType) -> LowerRepr Never! {
     if f.types.len() == 0 -> return lower_repr(p, ty)
+    // A scalar's repr is read off its kind faster than its key is spelled.
+    if ty.kind == .Int | .Float | .Bool | .Char | .String | .Float32 | .IntN(_, _) -> return lower_repr(p, ty)
     key :: lower_repr_key(ty) ?? return lower_repr(p, ty)
     if f.types[0].reprs.get(key) == .Val(known) -> return known
     repr :: lower_repr(p, ty)
@@ -1434,8 +1471,9 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Option(_) -> LowerRepr.Boxed{ty: ty}
         // `A | B`: a box of its structural enum (one payload per member).
         .Union(_) -> {
-            definition :: lower_type_def(p, ty) ?? return LowerRepr.Unsupported{reason: "union {mir_type_display_name(ty)} without a definition"}
-            if definition.kind == .Enum(_, _) -> LowerRepr.Boxed{ty: ty} else -> LowerRepr.Unsupported{reason: "union {mir_type_display_name(ty)}"}
+            row :: lower_type_def_row(p, ty)
+            if row < 0 -> return LowerRepr.Unsupported{reason: "union {mir_type_display_name(ty)} without a definition"}
+            if p.types[row].kind == .Enum(_, _) -> LowerRepr.Boxed{ty: ty} else -> LowerRepr.Unsupported{reason: "union {mir_type_display_name(ty)}"}
         }
         .List(elem) -> lower_list_repr(p, ty, elem)
         // `[T#N]` is carried as the List of its N elements (Lists.jet).
@@ -1496,6 +1534,10 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
                     return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
                 }
             }
+            // The declaration is read in place; only an instantiated
+            // (generic) definition is materialized.
+            row :: lower_type_def_row(p, ty)
+            if row >= 0 -> return lower_repr_declared(p, ty, name, runtime, schema, p.types[row])
             definition :: lower_type_def(p, ty) ?? {
                 // A Core type with no Jet definition is the runtime's own
                 // value behind an owned handle (RuntimeRoutes.jet).
@@ -1503,27 +1545,34 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
                 clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
                 return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
             }
-            if definition.kind == {
-                .Struct(_, _) -> LowerRepr.Inline{ty: ty}
-                .Enum(variants, _) -> {
-                    // A runtime-owned Core enum is not a native enum box,
-                    // even when its Jet declaration supplies the variants.
-                    // Only record schemas with explicit ABI adapters retain
-                    // their native layout at runtime boundaries.
-                    if definition.key.starts_with("<corelib>/") && schema == None && !lower_native_declared_shape(p, name.name) {
-                        if runtime == .Val(handle) {
-                            clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
-                            return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
-                        }
-                    }
-                    if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
-                }
-                .Distinct(base, _) -> lower_repr(p, base)
-                .Alias(target) -> lower_repr(p, target)
-                else -> LowerRepr.Unsupported{reason: "type {name.name}"}
-            }
+            lower_repr_declared(p, ty, name, runtime, schema, definition)
         }
         else -> LowerRepr.Unsupported{reason: "type {mir_type_display_name(ty)}"}
+    }
+}
+
+// lower_repr of an Apply type `ty` naming `name` whose definition is
+// `definition` (the declaration itself, or its instantiation): `runtime` and
+// `schema` are lower_repr's own lookups for `ty`.
+fn lower_repr_declared(p: MIRProgram, ty: MIRType, name: MIRNominalRef, runtime: LowerRuntimeHandle?, schema: LowerRecordSchema?, definition: MIRTypeDef) -> LowerRepr Never! {
+    if definition.kind == {
+        .Struct(_, _) -> LowerRepr.Inline{ty: ty}
+        .Enum(variants, _) -> {
+            // A runtime-owned Core enum is not a native enum box,
+            // even when its Jet declaration supplies the variants.
+            // Only record schemas with explicit ABI adapters retain
+            // their native layout at runtime boundaries.
+            if definition.key.starts_with("<corelib>/") && schema == None && !lower_native_declared_shape(p, name.name) {
+                if runtime == .Val(handle) {
+                    clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
+                    return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
+                }
+            }
+            if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
+        }
+        .Distinct(base, _) -> lower_repr(p, base)
+        .Alias(target) -> lower_repr(p, target)
+        else -> LowerRepr.Unsupported{reason: "type {name.name}"}
     }
 }
 
