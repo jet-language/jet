@@ -1,7 +1,7 @@
 // W8 exact printed expectations, including unchanged value IDs and forwarded
 // header parameters. Every witness lints both input and output via ofx_check.
 fn olicm_check(function: LIRFunction, body: String) -> Bool Never! {
-    ofx_check(function, lir_licm_function(function), ofx_expected(function, body))
+    ofx_check(function, lir_licm_function(function.copy()), ofx_expected(function, body))
 }
 
 fn olicm_arithmetic(name: String, op: LIRBinaryOp, divisor: Int?, variant: Bool) -> Bool Never! {
@@ -105,7 +105,7 @@ fn olicm_preheader() -> Bool Never! {
     lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Jump{target: ofacts_target(30, [LIRValueID]{variant})})
     lir_builder_seal(&b, LIRBlockID{value: 50}, [LIRValueID]{}, LIRTerminator.Return{value: Val(invariant)})
     function :: lir_builder_finish(b)
-    after :: lir_licm_function(function)
+    after :: lir_licm_function(function.copy())
     expected :: "  b0(v0: i64, v1: i64, v2: i8):\n    br v2, b10(), b20()\n  b10():\n    jmp b51(v0)\n  b20():\n    jmp b51(v1)\n  b30(v3: i64):\n    v5: i64 = add v3, v0\n    br v2, b40(), b50()\n  b40():\n    jmp b30(v5)\n  b50():\n    ret v4\n  b51(v6: i64):\n    v4: i64 = add v0, v1\n    jmp b30(v6)"
     passed := ofx_check(function, after, ofx_expected(function, expected))
     if after.values.len() != 7 -> return false

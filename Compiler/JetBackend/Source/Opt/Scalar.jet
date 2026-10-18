@@ -277,29 +277,25 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
     Val(function)
 }
 
-fn lir_scalar_replace_function(original: LIRFunction) -> LIRFunction Never! {
+// The function moves through; without a slot to replace, or with none
+// replaced, the body comes back as it was.
+fn lir_scalar_replace_function(function: ^LIRFunction) -> LIRFunction Never! {
+    owned := ^function
     slots := [LIRInst]{}
-    loop block in original.blocks { loop inst in block.insts { if inst == .StackSlot(_, _, _) -> &slots.push(inst) } }
-    // copy: the scalar-replaced function is a new owned LIRFunction. With no slots it equals
-    // `original`, the caller's function (a read parameter; the CSE/simplify chain and fixtures keep
-    // it).
-    if slots.len() == 0 -> return original.copy()
-    dom :: opt_dominators(original)
+    loop block in owned.blocks { loop inst in block.insts { if inst == .StackSlot(_, _, _) -> &slots.push(inst) } }
+    if slots.len() == 0 -> return owned
+    dom :: opt_dominators(owned)
     frontiers :: opt_scalar_frontiers(dom)
-    function := original
     changed := false
     loop inst in slots {
         if inst == .StackSlot(slot, size, _) {
-            if opt_scalar_fields(function, slot, size, dom) == .Val(fields) {
-                if opt_scalar_slot(function, slot, fields, dom, frontiers) == .Val(replaced) {
-                    function = replaced
+            if opt_scalar_fields(owned, slot, size, dom) == .Val(fields) {
+                if opt_scalar_slot(owned, slot, fields, dom, frontiers) == .Val(replaced) {
+                    owned = replaced
                     changed = true
                 }
             }
         }
     }
-    // copy: the scalar-replaced function is a new owned LIRFunction. Unchanged, it equals
-    // `original`, the caller's function (a read parameter; the CSE/simplify chain and fixtures keep
-    // it).
-    if changed -> opt_compact(function) else -> original.copy()
+    if changed -> opt_compact(^owned) else -> owned
 }

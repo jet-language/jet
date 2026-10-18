@@ -173,13 +173,15 @@ fn inline_alias_safe(caller: LIRFunction, callee: LIRFunction, consumed: [Bool],
 // `functions[id]` is a one-row list holding function `id`'s body, read only
 // for a callee whose final body is measured (`sizes[id]` at most 40), which
 // is never missing: a caller runs only after every such callee is final, and
-// a final body is released only after its last caller has run.
-fn inline_caller(functions: [[LIRFunction]], original: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
-    function := original
+// a final body is released only after its last caller has run. The caller
+// moves through: with no eligible call (inline_selects) it comes back as it
+// was; otherwise its blocks are rebuilt around the cloned callees.
+fn inline_caller(functions: [[LIRFunction]], caller: ^LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
+    function := ^caller
     uses := [Int]{}
-    loop _ in original.values -> &uses.push(0)
+    loop _ in function.values -> &uses.push(0)
     operands := [LIRValueID]{}
-    loop block in original.blocks {
+    loop block in function.blocks {
         loop inst in block.insts {
             lir_inst_uses_into(inst, &operands)
             loop value in operands -> uses[value.value] = uses[value.value] + 1
@@ -187,43 +189,32 @@ fn inline_caller(functions: [[LIRFunction]], original: LIRFunction, recursive: [
         lir_terminator_uses_into(block.terminator, &operands)
         loop value in operands -> uses[value.value] = uses[value.value] + 1
     }
+    if !inline_selects(functions, function, recursive, sizes, consumed, uses) -> return function
     fresh_block := 0
-    loop block in original.blocks { if block.id.value >= fresh_block -> fresh_block = block.id.value + 1 }
+    loop block in function.blocks { if block.id.value >= fresh_block -> fresh_block = block.id.value + 1 }
     expanded := 0
-    changed := false
     blocks := [LIRBlock]{}
-    loop block in original.blocks {
+    original := compiler_take_rows<LIRBlock>(&function.blocks)
+    loop block in original {
         current := block.id
         params := block.params
         insts := [LIRInst]{}
         lines := [Int]{}
         loop (index, inst) in block.insts {
-            selected := -1
-            result := inline_no_result()
-            args := [LIRValueID]{}
-            if inst == .Call(dst, signature, callee, arguments) {
-                if callee == .Function(target) {
-                    id :: target.value
-                    if id >= 0 && id < functions.len() {
-                        if !recursive[id] && sizes[id] <= 40 && expanded + sizes[id] <= 200 {
-                            candidate :: functions[id][0]
-                            if candidate.signature == signature && candidate.blocks.len() > 0 && inline_alias_safe(original, candidate, consumed[id], uses, arguments) {
-                                selected = id
-                                result = dst
-                                args = arguments
-                            }
-                        }
-                    }
-                }
-            }
+            selected :: inline_select(functions, function, recursive, sizes, consumed, uses, inst, expanded)
             if selected < 0 {
                 &insts.push(inst)
                 &lines.push(opt_debug_line(block, index))
                 next
             }
+            result := inline_no_result()
+            args := [LIRValueID]{}
+            if inst == .Call(dst, _, _, arguments) {
+                result = dst
+                args = arguments
+            }
             callee :: functions[selected][0]
             expanded += sizes[selected]
-            changed = true
             // Entry parameters are aliases of the call arguments. LIR lint
             // forbids an edge back to the entry, so these need no phi nodes.
             map := [Int]{}
@@ -268,12 +259,43 @@ fn inline_caller(functions: [[LIRFunction]], original: LIRFunction, recursive: [
         &lines.push(opt_debug_line(block, block.insts.len()))
         &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: block.terminator, lines: lines, cold: block.cold})
     }
-    if !changed -> return function
     function.blocks = blocks
     // A callee with only Unreachable exits leaves the old suffix dead. Prune
     // it and compact its now-undefined values, without simplifying any effects.
     _ := opt_drop_unreachable(&function)
-    opt_compact(function)
+    opt_compact(^function)
+}
+
+// The callee `inst` inlines into `caller` with `expanded` instructions
+// already inlined before it, or -1: a direct call of a non-recursive
+// function whose final body is eligible and fits the caller's budget, with
+// the call's signature, a body, and alias-safe entry parameters.
+fn inline_select(functions: [[LIRFunction]], caller: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]], uses: [Int], inst: LIRInst, expanded: Int) -> Int Never! {
+    if inst == .Call(_, signature, callee, arguments) {
+        if callee == .Function(target) {
+            id :: target.value
+            if id >= 0 && id < functions.len() {
+                if !recursive[id] && sizes[id] <= 40 && expanded + sizes[id] <= 200 {
+                    candidate :: functions[id][0]
+                    if candidate.signature == signature && candidate.blocks.len() > 0 && inline_alias_safe(caller, candidate, consumed[id], uses, arguments) -> return id
+                }
+            }
+        }
+    }
+    -1
+}
+
+// Whether any call of `caller` inlines: the selection every instruction
+// gets in order, with the budget the earlier selections used.
+fn inline_selects(functions: [[LIRFunction]], caller: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]], uses: [Int]) -> Bool Never! {
+    expanded := 0
+    loop block in caller.blocks {
+        loop inst in block.insts {
+            selected :: inline_select(functions, caller, recursive, sizes, consumed, uses, inst, expanded)
+            if selected >= 0 -> return true
+        }
+    }
+    false
 }
 
 // P5 over every function, the call graph, and the bottom-up visit order.
@@ -314,9 +336,11 @@ fn lir_inline_start(program: ^LIRModule) -> LIRInlineState Never! {
 }
 
 // Function `id` with its eligible direct calls inlined from the final
-// bodies of its (already visited) callees.
-fn lir_inline_step(state: LIRInlineState, id: Int) -> LIRFunction Never! {
-    inline_caller(state.functions, state.functions[id][0], state.recursive, state.sizes, state.consumed)
+// bodies of its (already visited) callees. The body moves out of its row
+// (empty until lir_inline_finish puts the final one back).
+fn lir_inline_step(state: &LIRInlineState, id: Int) -> LIRFunction Never! {
+    body := &state.functions[id].pop() ?? panic("the inline state has no body for function {id}")
+    inline_caller(state.functions, ^body, state.recursive, state.sizes, state.consumed)
 }
 
 // The inline facts of a final body: its instruction count (the size every
@@ -368,7 +392,7 @@ fn lir_inline_module(program: ^LIRModule) -> LIRModule Never! {
         // copy: plain Int function id; lir_inline_finish writes `state`, so the id
         // cannot stay a view into `state.order`.
         id :: state.order[position].copy()
-        inlined :: lir_inline_step(state, id)
+        inlined :: lir_inline_step(&state, id)
         lir_inline_finish(&state, id, ^inlined)
     }
     lir_inline_result(^state)

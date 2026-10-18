@@ -51,12 +51,12 @@ fn olops_cse_bitcast(shared: Bool) -> Bool Never! {
     lir_builder_push(&b, LIRInst.Bitcast{dst: c, src: x})
     if (!shared) {
         function :: ofx_finish(&b, [LIRValueID]{x}, c)
-        return olops_unchanged(function, lir_cse_function(function))
+        return olops_unchanged(function, lir_cse_function(function.copy()))
     }
     d :: olops_float(&b)
     lir_builder_push(&b, LIRInst.Binary{dst: d, op: LIRBinaryOp.Add, left: a, right: c})
     function :: ofx_finish(&b, [LIRValueID]{x}, d)
-    ofx_check(function, lir_cse_function(function), ofx_expected(function, "  b0(v0: i64):\n    v1: f64 = bitcast v0\n    v3: f64 = add v1, v1\n    ret v3"))
+    ofx_check(function, lir_cse_function(function.copy()), ofx_expected(function, "  b0(v0: i64):\n    v1: f64 = bitcast v0\n    v3: f64 = add v1, v1\n    ret v3"))
 }
 
 fn olops_cse_asm_barrier() -> Bool Never! {
@@ -69,7 +69,7 @@ fn olops_cse_asm_barrier() -> Bool Never! {
     lir_builder_push(&b, LIRInst.Load{dst: y, base: p, offset: 0})
     z :: ofx_binary(&b, LIRBinaryOp.Add, x, y)
     function :: ofx_finish(&b, [LIRValueID]{p}, z)
-    olops_unchanged(function, lir_cse_function(function))
+    olops_unchanged(function, lir_cse_function(function.copy()))
 }
 
 fn olops_licm_bitcast() -> Bool Never! {
@@ -97,7 +97,7 @@ fn olops_licm_asm_clobber() -> Bool Never! {
     lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Jump{target: ofacts_target(10, [LIRValueID]{})})
     lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(loaded)})
     function :: lir_builder_finish(b)
-    olops_unchanged(function, lir_licm_function(function))
+    olops_unchanged(function, lir_licm_function(function.copy()))
 }
 
 fn olops_scalar_escape(asm: Bool) -> Bool Never! {

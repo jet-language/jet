@@ -68,7 +68,7 @@ fn ofx_expected(before: LIRFunction, body: String) -> String Never! {
 }
 
 fn ofx_simplify(function: LIRFunction, body: String) -> Bool Never! {
-    ofx_check(function, lir_simplify_function(function), ofx_expected(function, body))
+    ofx_check(function, lir_simplify_function(function.copy()), ofx_expected(function, body))
 }
 
 fn ofx_fold(name: String, op: LIRBinaryOp, left: Int, right: Int, expected: Int) -> Bool Never! {
@@ -86,7 +86,7 @@ fn ofx_refuse(name: String, op: LIRBinaryOp, left: Int, right: Int) -> Bool Neve
     y :: ofx_const(&b, right)
     z :: ofx_binary(&b, op, x, y)
     function :: ofx_finish(&b, [LIRValueID]{}, z)
-    ofx_check(function, lir_simplify_function(function), lir_print_module(ofx_module(function)))
+    ofx_check(function, lir_simplify_function(function.copy()), lir_print_module(ofx_module(function)))
 }
 
 fn ofx_identity(name: String, op: LIRBinaryOp, constant: Int, zero: Bool, same: Bool) -> Bool Never! {
@@ -136,7 +136,7 @@ fn ofx_float() -> Bool Never! {
     lir_builder_push(&b, LIRInst.Const{dst: y, value: 0})
     lir_builder_push(&b, LIRInst.Binary{dst: z, op: LIRBinaryOp.Add, left: x, right: y})
     function :: ofx_finish(&b, [LIRValueID]{}, z)
-    ofx_check(function, lir_simplify_function(function), lir_print_module(ofx_module(function)))
+    ofx_check(function, lir_simplify_function(function.copy()), lir_print_module(ofx_module(function)))
 }
 
 fn ofx_sign() -> Bool Never! {

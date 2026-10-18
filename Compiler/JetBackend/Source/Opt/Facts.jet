@@ -142,31 +142,32 @@ fn opt_inline_test_value(function: LIRFunction, inst: LIRInst) -> Int? {
     None
 }
 
-fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
-    function := original
-    defs :: opt_defs(function)
-    dom :: opt_dominators(function)
+// The function moves through: an inline test P3 proves becomes `Const 0`
+// in place, and nothing else changes.
+fn lir_inline_facts_function(function: ^LIRFunction) -> LIRFunction Never! {
+    owned := ^function
+    consts :: opt_const_defs(owned)
+    dom :: opt_dominators(owned)
     tests := [Int?]{}
     facts := [Bool]{}
-    loop (index, value) in function.values {
+    loop (index, value) in owned.values {
         &tests.push(None)
         inline := false
-        if value.layout == lir_layout_word() {
-            if defs.insts[index] == .Val(inst) {
-                if inst == .Const(_, constant) -> inline = constant >= -4611686018427387904 && constant <= 4611686018427387903
-            }
+        if value.layout == lir_layout_word() && consts.known[index] {
+            constant :: consts.consts[index]
+            inline = constant >= -4611686018427387904 && constant <= 4611686018427387903
         }
         &facts.push(inline)
     }
-    loop block in function.blocks {
+    loop block in owned.blocks {
         loop inst in block.insts {
-            if lir_inst_def(inst) == .Val(dst) -> tests[dst.value] = opt_inline_test_value(function, inst)
+            if lir_inst_def(inst) == .Val(dst) -> tests[dst.value] = opt_inline_test_value(owned, inst)
         }
     }
     undo := [Int]{}
     count := 0
     marks := [Int]{}
-    loop _ in function.blocks -> &marks.push(0)
+    loop _ in owned.blocks -> &marks.push(0)
     loop event in opt_dom_events(dom) {
         if event < 0 {
             row :: -event - 1
@@ -182,29 +183,23 @@ fn lir_inline_facts_function(original: LIRFunction) -> LIRFunction Never! {
         // not claim its condition failed on arrival. Entry has no incoming fact.
         if row != 0 && dom.predecessors[row].len() == 1 {
             predecessor :: dom.predecessors[row][0].copy()
-            if function.blocks[predecessor].terminator == .Branch(condition, then_target, else_target) {
-                if else_target.block == function.blocks[row].id {
+            if owned.blocks[predecessor].terminator == .Branch(condition, then_target, else_target) {
+                if else_target.block == owned.blocks[row].id {
                     if tests[condition.value] == .Val(value) -> opt_inline_record(&facts, &undo, &count, value)
                 }
                 // Preserve facts through single-edge block parameters.
-                on_then :: then_target.block == function.blocks[row].id
-                loop (index, param) in function.blocks[row].params {
+                on_then :: then_target.block == owned.blocks[row].id
+                loop (index, param) in owned.blocks[row].params {
                     arg :: if on_then -> then_target.args[index].value else -> else_target.args[index].value
                     if facts[arg] -> opt_inline_record(&facts, &undo, &count, param.value)
                 }
             }
         }
-        insts := [LIRInst]{}
-        loop inst in function.blocks[row].insts {
-            rewritten := inst
-            if lir_inst_def(inst) == .Val(dst) {
-                if tests[dst.value] == .Val(value) {
-                    if facts[value] -> rewritten = LIRInst.Const{dst: dst, value: 0}
-                }
-            }
-            &insts.push(rewritten)
+        loop index in 0..<owned.blocks[row].insts.len() {
+            dst :: lir_inst_def(owned.blocks[row].insts[index]) ?? next
+            value :: tests[dst.value] ?? next
+            if facts[value] -> owned.blocks[row].insts[index] = LIRInst.Const{dst: dst, value: 0}
         }
-        function.blocks[row].insts = insts
     }
-    function
+    owned
 }
