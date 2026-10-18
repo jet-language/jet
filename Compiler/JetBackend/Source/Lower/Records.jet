@@ -175,7 +175,7 @@ fn lower_native_glue_import(p: MIRProgram, m: &LowerModule, caller: String, symb
             }
         }
         id :: lower_native_record_id(&m, record_ty, row.op, row.member)
-        &m.native_exports.add(symbol, id).drop("native symbol is registered once")
+        lower_native_export_register(&m, symbol, id)
         return
     }
     if !row.op.starts_with("handle.") {
@@ -187,7 +187,14 @@ fn lower_native_glue_import(p: MIRProgram, m: &LowerModule, caller: String, symb
         &m.issues.push(LIRLoweringIssue{function: caller, message: "native export {symbol} has unsupported handle operation {op}"})
         return
     }
+    lower_native_export_register(&m, symbol, id)
+}
+
+// Registers `symbol` as native export `id`; under parallel lowering the
+// symbol is also recorded in order, so the merge replays it (Workers.jet).
+fn lower_native_export_register(m: &LowerModule, symbol: String, id: LIRFunctionID) Never! {
     &m.native_exports.add(symbol, id).drop("native symbol is registered once")
+    if m.parted -> &m.export_rows.push(symbol.copy())
 }
 fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
     lower_record_schema_with_handle(p, ty, lower_runtime_handle_type(p, ty))

@@ -236,9 +236,14 @@ struct LowerModule {
     // file's line starts (Numeric.jet lower_source_line).
     line_rows: [U64:Int]{[U64:Int]{}}
     line_starts: [[Int]]{[[Int]]{}}
-    // Type identity key -> whether the type reaches a Close owner
-    // (PartialDrop.jet lower_partial_frame), once per module.
+    // Type identity key (or checked identity, `*_ids`) -> whether the type
+    // reaches a Close owner (PartialDrop.jet lower_type_contains_close) and
+    // whether it reaches a member no owner can copy
+    // (lower_type_contains_uncopyable), once per module.
     contains_close: [String:Bool]{[String:Bool]{}}
+    contains_close_ids: [U64:Bool]{[U64:Bool]{}}
+    contains_uncopyable: [String:Bool]{[String:Bool]{}}
+    contains_uncopyable_ids: [U64:Bool]{[U64:Bool]{}}
     // The type cache (lower_repr_of), lent to the function being lowered:
     // one row, or none while a function holds it.
     types: [LowerTypeCache]{[LowerTypeCache]{LowerTypeCache{reprs: [String:LowerRepr]{}, sizes: [String:LowerSize]{}, members: [String:[LowerMember]]{}, drops: [String:Bool]{}}}}
@@ -298,13 +303,15 @@ struct LowerModule {
     // without reading a stopped result.
     stop_points: Bool
     task_stop_points: Bool
-    // Parallel body lowering (Workers.jet): set in each thread's copy of the
+    // Parallel lowering (Workers.jet): set in each thread's copy of the
     // module, which then records the extent of every keyed registration that
-    // creates other rows, and every constant carrying a function ID, so the
-    // merge can drop and renumber them.
+    // creates other rows, every constant carrying a function ID, and the
+    // native export symbols it registers, in order, so the merge can drop,
+    // renumber and replay them.
     parted: Bool{false}
     extents: [LowerExtent]{[LowerExtent]{}}
     function_keys: [LowerFunctionKey]{[LowerFunctionKey]{}}
+    export_rows: [String]{[String]{}}
 }
 
 // Read-only facts about the MIR function being lowered.
@@ -691,13 +698,20 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
         loop symbol in imports -> lower_native_glue_import(program, &m, "external C consumer", symbol)
         loop function in functions -> lower_native_glue_rewrite(program, &m, function)
     }
-    // Glue and helpers may register more, so the list grows while it is walked.
+    // Glue and helpers may register more, so the list grows while it is
+    // walked: on the threads in waves when the bodies were parted
+    // (lower_glue_waves), else row by row here.
     cursor := 0
     dispatchers := [Int]{}
     glue_functions := [LIRFunction?]{}
     emitted := 0
     inventory :: lower_trait_key_count(m)
     loop {
+        if workers > 1 && !keep_going {
+            waved := lower_glue_waves(program, ^m, cursor, workers, native_pack, &dispatchers, &glue_functions)
+            m = ^waved.state
+            cursor = waved.cursor
+        }
         loop cursor < m.glue.len() {
             // copy: the glue row is read while lowering it pushes more glue and signatures into `m`
             // (`&m`). A view into m.glue would dangle when that list grows.
@@ -3119,12 +3133,11 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
         if lower_release_owning_read(&plan, p, function, uses, phi_edges, pinned, successors, predecessors, slots, place_slots, projected_places, row) -> next
         _ := &eligible.remove(row.slot)
     }
-    // Per slot * block count + block: the slot may enter the block empty, or
-    // holding a value; per slot: whether both are computed.
-    blocks :: function.blocks.len()
-    empty_in := [Int:Bool]{}
-    full_in := [Int:Bool]{}
-    flowed := [Int:Bool]{}
+    // Per flowed slot (`flowed`: slot -> its pair of rows in `flows`), per
+    // block: whether the slot may enter the block empty (row 2r), or holding
+    // a value (row 2r + 1).
+    flows := [[Bool]]{}
+    flowed := [Int:Int]{}
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
         // Slot -> the kind of its last event so far in this block.
@@ -3141,19 +3154,21 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
                         empty = kind == LOWER_SLOT_EMPTIED
                         full = kind == LOWER_SLOT_FILLED
                     } else {
-                        if flowed.get(slot) == None {
-                            _ := &flowed.add(slot, true)
+                        pair := flowed.get(slot) ?? -1
+                        if pair < 0 {
+                            pair = flows.len() /% 2
+                            _ := &flowed.add(slot, pair)
                             starts := [Int]{}
                             at := event_heads.get(slot) ?? -1
                             loop at >= 0 {
                                 &starts.push(event_block[at])
                                 at = event_next[at]
                             }
-                            lower_release_slot_flow(&empty_in, successors, events, starts, count, slot, LOWER_SLOT_EMPTIED, if cleared -> entry else -> -1)
-                            lower_release_slot_flow(&full_in, successors, events, starts, count, slot, LOWER_SLOT_FILLED, if cleared -> -1 else -> entry)
+                            &flows.push(lower_release_slot_flow(successors, events, starts, count, slot, LOWER_SLOT_EMPTIED, if cleared -> entry else -> -1))
+                            &flows.push(lower_release_slot_flow(successors, events, starts, count, slot, LOWER_SLOT_FILLED, if cleared -> -1 else -> entry))
                         }
-                        empty = empty_in.get(slot * blocks + block) != None
-                        full = full_in.get(slot * blocks + block) != None
+                        empty = flows[2 * pair][block]
+                        full = flows[2 * pair + 1][block]
                     }
                     if cleared && event != 0 {
                         if full -> _ := &plan.write_drops.add(instruction.id.value, empty)
@@ -3311,38 +3326,40 @@ fn lower_release_event_kind(event: Int) -> Int Never! {
     if event < 0 -> LOWER_SLOT_EMPTIED else -> LOWER_SLOT_FILLED
 }
 
-// Marks in `reached` (keyed slot * block count + block) the blocks `slot`
-// may enter in state `kind` (LOWER_SLOT_EMPTIED or LOWER_SLOT_FILLED): a
-// forward may-analysis from the function's `entry` block (when >= 0) and
-// from each block (among `starts`) whose last event of the slot (`events`,
-// keyed block * `count` + slot) is of that kind; a block with no event of
-// the slot passes its entry state on.
-fn lower_release_slot_flow(reached: &[Int:Bool], successors: [[Int]], events: [Int:Int], starts: [Int], count: Int, slot: Int, kind: Int, entry: Int) Never! {
-    base :: slot * successors.len()
+// Per block, whether `slot` may enter it in state `kind` (LOWER_SLOT_EMPTIED
+// or LOWER_SLOT_FILLED): a forward may-analysis from the function's `entry`
+// block (when >= 0) and from each block (among `starts`) whose last event of
+// the slot (`events`, keyed block * `count` + slot) is of that kind; a block
+// with no event of the slot passes its entry state on.
+fn lower_release_slot_flow(successors: [[Int]], events: [Int:Int], starts: [Int], count: Int, slot: Int, kind: Int, entry: Int) -> [Bool] Never! {
+    reached := [Bool]{}
+    loop _ in successors -> &reached.push(false)
     pending := [Int]{}
     if entry >= 0 {
-        _ := &reached.add(base + entry, true)
+        reached[entry] = true
         &pending.push(entry)
     }
     loop block in starts {
         if (events.get(block * count + slot) ?? 0) != kind -> next
         loop target in successors[block] {
-            if reached.get(base + target) != None -> next
-            _ := &reached.add(base + target, true)
+            if reached[target] -> next
+            reached[target] = true
             &pending.push(target)
         }
     }
     cursor := 0
     loop cursor < pending.len() {
+        // copy: plain Int block index; the loop below pushes onto `pending`.
         block :: pending[cursor].copy()
         cursor += 1
         if events.get(block * count + slot) != None -> next
         loop target in successors[block] {
-            if reached.get(base + target) != None -> next
-            _ := &reached.add(base + target, true)
+            if reached[target] -> next
+            reached[target] = true
             &pending.push(target)
         }
     }
+    reached
 }
 
 // The last position in `block` at which the borrowed read `read` (at
@@ -5505,7 +5522,28 @@ fn lower_borrowed_box_hops(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 }
 
 // Whether `ty` reaches a member no owner can copy: a Close owner, a runtime
-// handle without clone, or an atomic (cycles cut by `seen`, as
+// handle without clone, or an atomic; once per type for the whole module
+// (by the checked identity when the type has one, else by its identity key,
+// the same partition mir_type_identity_key spells). A fresh
+// lower_contains_uncopyable walk answers exactly that reachability (its
+// `seen` set only cuts cycles), so the cached answer is the walk's own.
+fn lower_type_contains_uncopyable(p: MIRProgram, m: &LowerModule, ty: MIRType) -> Bool Never! {
+    if ty.identity == .Val(identity) {
+        if m.contains_uncopyable_ids.get(identity.value) == .Val(known) -> return known
+        seen := [String:Bool]{}
+        found :: lower_contains_uncopyable(p, m, ty, &seen)
+        &m.contains_uncopyable_ids.add(identity.value, found).drop("checked absent above")
+        return found
+    }
+    key :: mir_type_identity_key(ty)
+    if m.contains_uncopyable.get(key) == .Val(known) -> return known
+    seen := [String:Bool]{}
+    found :: lower_contains_uncopyable(p, m, ty, &seen)
+    &m.contains_uncopyable.add(key, found).drop("checked absent above")
+    found
+}
+
+// The walk behind lower_type_contains_uncopyable (cycles cut by `seen`, as
 // lower_contains_close walks).
 fn lower_contains_uncopyable(p: MIRProgram, m: LowerModule, ty: MIRType, seen: &[String:Bool]) -> Bool Never! {
     key :: mir_type_identity_key(ty)
@@ -5554,8 +5592,7 @@ fn lower_read_box_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     if !lower_member_moves(c, instruction, owner) || !lower_value_owned(c, result) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
     // A member Sema never lets anyone copy (a Close owner, a handle without
     // clone, an atomic) never sits in a box another owner holds: taken.
-    seen := [String:Bool]{}
-    if lower_contains_uncopyable(p, m, ty, &seen) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
+    if lower_type_contains_uncopyable(p, &m, ty) -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
     boxes := lower_borrowed_box_hops(p, c, &m, &f, owner)
     loop holder in holders -> &boxes.push(holder)
     if boxes.len() == 0 -> return lower_read_member(p, c, &m, &f, instruction, owner, dst, box, offset, ty)
@@ -7761,8 +7798,7 @@ fn lower_box_copy(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIR
 // and its helper does nothing.
 fn lower_helper_box_unique(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    seen := [String:Bool]{}
-    if lower_contains_uncopyable(p, m, glue.ty, &seen) {
+    if lower_type_contains_uncopyable(p, &m, glue.ty) {
         lower_seal(&f, LIRTerminator.Return{value: None})
         return lir_builder_finish(f.builder)
     }

@@ -253,6 +253,33 @@ struct LIRModule {
     debug: LIRModuleDebug
 }
 
+// Block id -> the first row of `function.blocks` with that id (the lint,
+// the passes and the x64 back end each resolve CFG edges through it). The
+// map is a sorted entry list that moves every later entry on an insert, so
+// the rows go in by ascending id (through a dense first-row table over the
+// ids, which lowering and inlining number from 0): each insert appends, and
+// the map is the same one a layout-order build gives.
+fn lir_block_rows(function: LIRFunction) -> [Int:Int] Never! {
+    highest := -1
+    loop block in function.blocks { if block.id.value > highest -> highest = block.id.value }
+    first := [Int]{}
+    loop _ in 0..<(highest + 1) -> &first.push(-1)
+    rows := [Int:Int]{}
+    loop (index, block) in function.blocks {
+        id :: block.id.value
+        if id < 0 {
+            // Never produced by lowering or inlining; the lint reports it.
+            if rows.get(id) == None -> &rows.add(id, index).drop("checked absent above")
+            next
+        }
+        if first[id] < 0 -> first[id] = index
+    }
+    loop (id, row) in first {
+        if row >= 0 -> &rows.add(id, row).drop("each id once, ascending")
+    }
+    rows
+}
+
 fn lir_layout_word() -> LIRLayout Never! {
     LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
 }
