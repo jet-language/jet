@@ -105,8 +105,12 @@ fn jet_cli_native_c_tools() -[FS, Env, Exec, Time.Wait]> JetCLINativeCTools JetC
     Ok(JetCLINativeCTools{compiler: compiler, archiver: archiver, target: target.output})
 }
 
-// Hash the compiler/archiver bytes, target and every flag (policy included).
-fn jet_cli_native_c_identity(identity: &[U8], schema: String, tools: JetCLINativeCTools, flags: [String]) JetCLIForeignLinkError! -[FS]> {
+// Hash the compiler/archiver bytes, target, every flag (policy included) and
+// the compiler wrapper's environment inputs: a Nix cc wrapper adds
+// NIX_CFLAGS_COMPILE(_BEFORE) and the NIX_HARDENING_ENABLE features to every
+// compile, so two environments with the same tool bytes can emit different
+// objects and must not share a store entry.
+fn jet_cli_native_c_identity(identity: &[U8], schema: String, tools: JetCLINativeCTools, flags: [String]) JetCLIForeignLinkError! -[FS, Env]> {
     jet_cli_foreign_hash_field(&identity, "schema", schema.bytes())
     jet_cli_foreign_hash_field(&identity, "target", tools.target.bytes())
     loop (index, tool) in ([String]{tools.compiler, tools.archiver}) {
@@ -116,6 +120,9 @@ fn jet_cli_native_c_identity(identity: &[U8], schema: String, tools: JetCLINativ
     loop flag in flags -> jet_cli_foreign_hash_field(&identity, "flag", flag.bytes())
     loop flag in JET_CLI_NATIVE_C_FLAGS -> jet_cli_foreign_hash_field(&identity, "policy-flag", flag.bytes())
     loop feature in JET_CLI_NATIVE_C_HARDENING_REMOVED -> jet_cli_foreign_hash_field(&identity, "policy-hardening-removed", feature.bytes())
+    loop name in ([String]{"NIX_CFLAGS_COMPILE", "NIX_CFLAGS_COMPILE_BEFORE", "NIX_HARDENING_ENABLE"}) {
+        jet_cli_foreign_hash_field(&identity, "env-{name}", (cli_sys.get(name) ?? "").bytes())
+    }
     Ok(())
 }
 
@@ -193,7 +200,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     paths = jet_cli_sorted_set(paths)
     sources := [String]{}
     identity := [U8]{}
-    jet_cli_native_c_identity(&identity, "jet-native-c-v3", tools, flags) ?? return Err(err)
+    jet_cli_native_c_identity(&identity, "jet-native-c-v4", tools, flags) ?? return Err(err)
     loop path in paths {
         content :: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C input `{path}`: {err}"))
         relative :: path.removeprefix("{directory}/")
@@ -341,7 +348,7 @@ fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, 
     // the native static link adds the c@path code-generation constraints.
     flags :: [String]{"-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables"}
     identity := [U8]{}
-    jet_cli_native_c_identity(&identity, "jet-native-inline-c-v2", tools, flags) ?? return Err(err)
+    jet_cli_native_c_identity(&identity, "jet-native-inline-c-v3", tools, flags) ?? return Err(err)
     store_root :: "{cache}/inline"
     cli_files.create_dir_all(store_root) ?? return Err(jet_cli_foreign_link_error("couldn't create inline C cache `{store_root}`: {err}"))
     probe :: "{store_root}/probe-{cli_sys.pid()}"
