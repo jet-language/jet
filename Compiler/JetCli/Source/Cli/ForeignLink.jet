@@ -49,51 +49,6 @@ fn jet_cli_native_c_command(argv: [String]) -[Env, Exec]> cli_process.ProcessSpe
     spec
 }
 
-// One C compiler command of a batch: its receipt, or why it never ran.
-struct JetCLINativeCOutcome { receipt: ProcessReceipt?, failure: String }
-
-// One launched child of a batch and the command it runs.
-struct JetCLINativeCChild { index: Int, child: ProcessChild }
-
-// Runs the C compiler commands `commands` (jet_cli_native_c_command) as
-// child processes, at most one per reported core at a time, and returns
-// their outcomes in command order. Each command reads its own input and
-// writes only its own output, so every receipt, object and the archive
-// joined from them in command order are those of running the commands one
-// after another. Callers report the first failed command, as before.
-fn jet_cli_native_c_run_all(commands: [[String]]) -[Env, Exec, Time.Wait]> [JetCLINativeCOutcome] Never! {
-    width :: cli_sys.cpu_count()
-    outcomes := [JetCLINativeCOutcome]{}
-    start := 0
-    loop start < commands.len() {
-        end := start + width
-        if end > commands.len() -> end = commands.len()
-        // Per command of this wave: why it could not start, "" once launched.
-        launch_failures := [String]{}
-        children := [JetCLINativeCChild]{}
-        loop index in start..<end {
-            child :: jet_cli_native_c_command(commands[index]).spawn() ?? {
-                &launch_failures.push("{err}")
-                next
-            }
-            &launch_failures.push("")
-            &children.push(JetCLINativeCChild{index: index, child: child})
-        }
-        // Reap every launched child, in command order.
-        loop running in children {
-            loop outcomes.len() < running.index -> &outcomes.push(JetCLINativeCOutcome{receipt: None, failure: launch_failures[outcomes.len() - start]})
-            receipt :: running.child.wait() ?? {
-                &outcomes.push(JetCLINativeCOutcome{receipt: None, failure: "{err}"})
-                next
-            }
-            &outcomes.push(JetCLINativeCOutcome{receipt: Val(receipt), failure: ""})
-        }
-        loop outcomes.len() < end -> &outcomes.push(JetCLINativeCOutcome{receipt: None, failure: launch_failures[outcomes.len() - start]})
-        start = end
-    }
-    outcomes
-}
-
 // The selected C compiler and archiver for the native x86-64 linker.
 struct JetCLINativeCTools { compiler: String, archiver: String, target: String }
 
@@ -202,20 +157,14 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     }
     if sources.len() == 0 -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` has neither a static archive nor C sources in `{directory}`"))
     // Hash what the compiler will consume, including every system/header
-    // input. Compile these immutable preprocessed bytes on a cache miss. The
-    // units preprocess and compile as parallel C compiler children
-    // (jet_cli_native_c_run_all); their outputs are read in unit order.
-    commands := [[String]]{}
+    // input. Compile these immutable preprocessed bytes on a cache miss.
+    preprocessed := [String]{}
     loop source in sources {
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
         loop flag in ([String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source}) -> &argv.push(flag)
-        &commands.push(argv)
-    }
-    preprocessed := [String]{}
-    loop (index, outcome) in jet_cli_native_c_run_all(commands) {
-        receipt :: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't preprocess C dependency `{lib}`: {outcome.failure}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
+        receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't preprocess C dependency `{lib}`: {err}"))
+        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{source}`: {receipt.errors}"))
         jet_cli_foreign_hash_field(&identity, "preprocessed", receipt.output.bytes())
         &preprocessed.push(receipt.output)
     }
@@ -225,33 +174,19 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     if jet_cli_native_c_cached(archive) -> return Ok(archive)
     cli_files.create_dir_all(store) ?? return Err(jet_cli_foreign_link_error("couldn't create C object cache `{store}`: {err}"))
     temporary :: "{store}/build-{cli_sys.pid()}"
-    // The store outlives a crashed build; its leftovers (an archive `ar`
-    // would add to) never reach this one.
-    cli_files.remove_all(temporary).drop("an absent previous build directory is expected")
     cli_files.create_dir_all(temporary) ?? return Err(jet_cli_foreign_link_error("couldn't create C build directory: {err}"))
     objects := [String]{}
-    compiles := [[String]]{}
-    // A unit whose staging fails stops the build after the units before it
-    // compiled, as when each unit was staged and compiled in turn.
-    staging_failure := String?{None}
     loop (index, source) in preprocessed {
         staged_source :: "{temporary}/{index}.i"
-        cli_files.write(staged_source, source) ?? {
-            staging_failure = Val("couldn't stage preprocessed C source: {err}")
-            break
-        }
+        cli_files.write(staged_source, source) ?? return Err(jet_cli_foreign_link_error("couldn't stage preprocessed C source: {err}"))
         object :: "{temporary}/{index}.o"
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
         loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", staged_source, "-o", object}) -> &argv.push(flag)
-        &compiles.push(argv)
+        receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't compile C dependency `{lib}`: {err}"))
+        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
         &objects.push(object)
     }
-    loop (index, outcome) in jet_cli_native_c_run_all(compiles) {
-        receipt :: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't compile C dependency `{lib}`: {outcome.failure}"))
-        if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected `{sources[index]}`: {receipt.errors}"))
-    }
-    if staging_failure == .Val(failure) -> return Err(jet_cli_foreign_link_error(failure))
     jet_cli_native_c_publish(tools, lib, temporary, objects, archive) ?? return Err(err)
     Ok(archive)
 }
@@ -345,34 +280,19 @@ fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, 
     store_root :: "{cache}/inline"
     cli_files.create_dir_all(store_root) ?? return Err(jet_cli_foreign_link_error("couldn't create inline C cache `{store_root}`: {err}"))
     probe :: "{store_root}/probe-{cli_sys.pid()}"
-    // The store outlives a crashed probe; its leftovers never reach this one.
-    cli_files.remove_all(probe).drop("an absent previous probe directory is expected")
     cli_files.create_dir_all(probe) ?? return Err(jet_cli_foreign_link_error("couldn't create inline C build directory: {err}"))
     // Hash what the compiler will consume, including every system header.
-    // The units preprocess and compile as parallel C compiler children
-    // (jet_cli_native_c_run_all); their outputs are read in unit order. A
-    // unit whose staging fails stops after the units before it ran, as when
-    // each unit was staged and preprocessed in turn.
-    commands := [[String]]{}
-    staging_failure := String?{None}
     loop (index, unit) in units {
         source :: "{probe}/inline_{index}.c"
-        cli_files.write(source, unit) ?? {
-            staging_failure = Val("couldn't stage inline C source: {err}")
-            break
-        }
+        cli_files.write(source, unit) ?? return Err(jet_cli_foreign_link_error("couldn't stage inline C source: {err}"))
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
         loop flag in ([String]{jet_cli_native_c_build_map(probe), "-E", "-P", source}) -> &argv.push(flag)
-        &commands.push(argv)
-    }
-    loop (index, outcome) in jet_cli_native_c_run_all(commands) {
-        receipt :: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't preprocess inline C: {outcome.failure}"))
+        receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't preprocess inline C: {err}"))
         if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
-        jet_cli_foreign_hash_field(&identity, "inline_{index}.c", units[index].bytes())
+        jet_cli_foreign_hash_field(&identity, "inline_{index}.c", unit.bytes())
         jet_cli_foreign_hash_field(&identity, "preprocessed", receipt.output.bytes())
     }
-    if staging_failure == .Val(failure) -> return Err(jet_cli_foreign_link_error(failure))
     key :: mir_sha256_hex_bytes(mir_sha256_bytes(identity[0..<identity.len()]))
     store :: "{store_root}/{key}"
     archive :: "{store}/libjet_inline_native.a"
@@ -382,24 +302,17 @@ fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, 
     }
     cli_files.create_dir_all(store) ?? return Err(jet_cli_foreign_link_error("couldn't create inline C cache `{store}`: {err}"))
     temporary :: "{store}/build-{cli_sys.pid()}"
-    // The store outlives a crashed build; its leftovers (an archive `ar`
-    // would add to) never reach this one.
-    cli_files.remove_all(temporary).drop("an absent previous build directory is expected")
     cli_files.rename(probe, temporary) ?? return Err(jet_cli_foreign_link_error("couldn't stage inline C build directory: {err}"))
     objects := [String]{}
-    compiles := [[String]]{}
     loop index in 0..<units.len() {
         source :: "{temporary}/inline_{index}.c"
         object :: "{temporary}/inline_{index}.o"
         argv := [String]{tools.compiler}
         loop flag in flags -> &argv.push(flag)
         loop flag in ([String]{jet_cli_native_c_build_map(temporary), "-c", source, "-o", object}) -> &argv.push(flag)
-        &compiles.push(argv)
-        &objects.push(object)
-    }
-    loop (index, outcome) in jet_cli_native_c_run_all(compiles) {
-        receipt :: outcome.receipt ?? return Err(jet_cli_foreign_link_error("couldn't compile inline C: {outcome.failure}"))
+        receipt :: jet_cli_native_c_command(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't compile inline C: {err}"))
         if !receipt.success -> return Err(jet_cli_foreign_link_error("C compiler rejected inline C unit {index}: {receipt.errors}"))
+        &objects.push(object)
     }
     proof := [String]{tools.compiler, "-shared", "-Wl,--no-undefined"}
     loop object in objects -> &proof.push(object)
@@ -446,10 +359,7 @@ fn jet_cli_native_c_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetC
 fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
     root :: sources.root
-    // Every archive key hashes the tools, flags, source and preprocessed
-    // bytes, never a project path, so one store beside the FFI cache serves
-    // every project and every compiler stage; a fresh project starts warm.
-    cache :: "{jet_cli_rust_foreign_cache()}/clinks"
+    cache :: "{root}/.jet/clinks/objects"
     declarations :: sources.declarations
     libraries := program.cffi.direct_links
     if libraries.len() == 0 {
