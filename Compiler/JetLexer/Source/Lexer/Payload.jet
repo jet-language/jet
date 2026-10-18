@@ -346,10 +346,13 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
     diagnostic.labels = shifted_labels
 }
 
-fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables) -> LexedTokens {
+// The tokens of `facts`, which cover `source[from..<to]`: the gaps between
+// facts are checked from `from` to `to` (the whole source for a one-range
+// lex; a range of a chunked lex ends between tokens).
+fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables) -> LexedTokens {
     tokens := [Token]{}
     diagnostics := [Diagnostic]{}
-    cursor := 0
+    cursor := from
     index := 0
     fact_count :: facts.len() /% 4
     loop index < fact_count {
@@ -363,13 +366,13 @@ fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allo
         cursor = end
         index += 1
     }
-    gap_diagnostic(source, facts, cursor, source.len(), config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
+    gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
     LexedTokens{tokens: tokens, diagnostics: diagnostics}
 }
 
 fn lex_payload_at_depth(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables) -> LexedTokens {
     facts :: raw_token_facts(source, config_surface)
-    lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth, &tables)
+    lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth, 0, source.len(), &tables)
 }
 
 fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, tables: &TokenTables, diagnostics: &[Diagnostic]) -> [Token] {
