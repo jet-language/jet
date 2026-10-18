@@ -74,11 +74,14 @@ fn consumed(k: Int) -> Int {
 // Rejected: an arm whose root is bound inside the arm dies at the arm's end,
 // so the binding never borrows past it.
 fn arm_local(k: Int) -> String {
-    label :: if k > 0 -> {
-        made :: Blob{data: [Int]{1}, text: "made"}
-        print("arm {made.data.len()}")
-        made.text
-    } else -> "none"
+    label :: if {
+        k > 0 -> {
+            made :: Blob{data: [Int]{1}, text: "made"}
+            print("arm {made.data.len()}")
+            made.text
+        }
+        else -> "none"
+    }
     "{label}!"
 }
 
