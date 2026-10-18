@@ -4447,18 +4447,97 @@ fn sema_name_first_aliases(rows: ^[MIRNameAlias]) -> [MIRNameAlias] Never! {
     kept
 }
 
+// The keys of the reference rows seen so far: the interned ids of a row's
+// module path and kind, its definition span, and its semantic identity's id
+// plus one (0 for none), in an open-addressing hash over parallel columns,
+// so a row is deduplicated without formatting and interning one String per
+// row.
+struct SemaNameReferenceKeys {
+    path: [Int]
+    kind: [Int]
+    start: [Int]
+    end: [Int]
+    identity: [Int]
+    // 0 is empty, otherwise the key's row plus one.
+    slots: [Int]
+    mask: Int
+}
+
+SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS :: 1024
+
+fn sema_name_reference_keys() -> SemaNameReferenceKeys Never! {
+    slots := [Int]{}
+    loop _ in 0..<SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS -> &slots.push(0)
+    SemaNameReferenceKeys{path: [Int]{}, kind: [Int]{}, start: [Int]{}, end: [Int]{}, identity: [Int]{}, slots: slots, mask: SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS - 1}
+}
+
+// Only the hash reads a part's magnitude: equality compares the parts
+// themselves, so a negative span bound folds onto its positive twin's slot.
+fn sema_name_reference_hash_mix(hash: U64, part: Int) -> U64 Never! {
+    magnitude :: if part < 0 -> 0 - part else -> part
+    (hash.bit_xor(U64{magnitude})).wrapping_mul(U64{0x100000001b3})
+}
+
+// FNV-1a over the five key parts, as a slot index under `mask`.
+fn sema_name_reference_slot(mask: Int, path: Int, kind: Int, start: Int, end: Int, identity: Int) -> Int Never! {
+    hash := U64{0x811c9dc5}
+    hash = sema_name_reference_hash_mix(hash, path)
+    hash = sema_name_reference_hash_mix(hash, kind)
+    hash = sema_name_reference_hash_mix(hash, start)
+    hash = sema_name_reference_hash_mix(hash, end)
+    hash = sema_name_reference_hash_mix(hash, identity)
+    Int.from_u64(hash.bit_and(U64{mask}))
+}
+
+fn sema_name_reference_keys_grow(keys: &SemaNameReferenceKeys) Never! {
+    capacity :: (keys.mask + 1) * 2
+    mask :: capacity - 1
+    slots := [Int]{}
+    loop _ in 0..<capacity -> &slots.push(0)
+    loop row in 0..<keys.path.len() {
+        slot := sema_name_reference_slot(mask, keys.path[row], keys.kind[row], keys.start[row], keys.end[row], keys.identity[row])
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = row + 1
+    }
+    keys.slots = ^slots
+    keys.mask = mask
+}
+
+// Whether the key is already in `keys`, recording it when it is new.
+fn sema_name_reference_seen(keys: &SemaNameReferenceKeys, path: Int, kind: Int, start: Int, end: Int, identity: Int) -> Bool Never! {
+    slot := sema_name_reference_slot(keys.mask, path, kind, start, end, identity)
+    loop keys.slots[slot] != 0 {
+        row :: keys.slots[slot] - 1
+        if keys.path[row] == path && keys.kind[row] == kind && keys.start[row] == start && keys.end[row] == end && keys.identity[row] == identity -> return true
+        slot = (slot + 1).bit_and(keys.mask)
+    }
+    row :: keys.path.len()
+    &keys.path.push(path)
+    &keys.kind.push(kind)
+    &keys.start.push(start)
+    &keys.end.push(end)
+    &keys.identity.push(identity)
+    keys.slots[slot] = row + 1
+    if (row + 1) * 2 > keys.mask -> sema_name_reference_keys_grow(&keys)
+    false
+}
+
+// The first row per key, in order. A row's key is its module path, kind,
+// definition span and semantic identity (present or not): the strings are
+// interned in one table, so two rows have the same key exactly when their
+// ids, span bounds and identity ids agree.
 fn sema_name_first_references(rows: [MIRNameReference]) -> [MIRNameReference] Never! {
-    seen := name_table()
+    parts := name_table()
+    seen := sema_name_reference_keys()
     kept := [MIRNameReference]{}
     loop row in rows {
-        // The path is length-prefixed and the identity is last, so no two
-        // distinct rows share a key.
         identity :: if row.semantic_identity == {
-            .Val(value) -> "+{value}"
-            else -> "-"
+            .Val(value) -> name_index(name_intern(&parts, value)) + 1
+            else -> 0
         }
-        key :: "{row.module_path.len()}:{row.module_path}|{row.kind}|{row.def_span.start}:{row.def_span.end}|{identity}"
-        if !sema_name_first_seen(&seen, key) -> next
+        path :: name_index(name_intern(&parts, row.module_path))
+        kind :: name_index(name_intern(&parts, row.kind))
+        if sema_name_reference_seen(&seen, path, kind, row.def_span.start, row.def_span.end, identity) -> next
         &kept.push(row)
     }
     kept
