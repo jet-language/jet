@@ -3119,12 +3119,11 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
         if lower_release_owning_read(&plan, p, function, uses, phi_edges, pinned, successors, predecessors, slots, place_slots, projected_places, row) -> next
         _ := &eligible.remove(row.slot)
     }
-    // Per slot * block count + block: the slot may enter the block empty, or
-    // holding a value; per slot: whether both are computed.
-    blocks :: function.blocks.len()
-    empty_in := [Int:Bool]{}
-    full_in := [Int:Bool]{}
-    flowed := [Int:Bool]{}
+    // Per flowed slot (`flowed`: slot -> its pair of rows in `flows`), per
+    // block: whether the slot may enter the block empty (row 2r), or holding
+    // a value (row 2r + 1).
+    flows := [[Bool]]{}
+    flowed := [Int:Int]{}
     loop (block, row) in function.blocks {
         if !reachable[block] -> next
         // Slot -> the kind of its last event so far in this block.
@@ -3141,19 +3140,21 @@ fn lower_release_write_drops(plan: &LowerReleasePlan, p: MIRProgram, m: LowerMod
                         empty = kind == LOWER_SLOT_EMPTIED
                         full = kind == LOWER_SLOT_FILLED
                     } else {
-                        if flowed.get(slot) == None {
-                            _ := &flowed.add(slot, true)
+                        pair := flowed.get(slot) ?? -1
+                        if pair < 0 {
+                            pair = flows.len() /% 2
+                            _ := &flowed.add(slot, pair)
                             starts := [Int]{}
                             at := event_heads.get(slot) ?? -1
                             loop at >= 0 {
                                 &starts.push(event_block[at])
                                 at = event_next[at]
                             }
-                            lower_release_slot_flow(&empty_in, successors, events, starts, count, slot, LOWER_SLOT_EMPTIED, if cleared -> entry else -> -1)
-                            lower_release_slot_flow(&full_in, successors, events, starts, count, slot, LOWER_SLOT_FILLED, if cleared -> -1 else -> entry)
+                            &flows.push(lower_release_slot_flow(successors, events, starts, count, slot, LOWER_SLOT_EMPTIED, if cleared -> entry else -> -1))
+                            &flows.push(lower_release_slot_flow(successors, events, starts, count, slot, LOWER_SLOT_FILLED, if cleared -> -1 else -> entry))
                         }
-                        empty = empty_in.get(slot * blocks + block) != None
-                        full = full_in.get(slot * blocks + block) != None
+                        empty = flows[2 * pair][block]
+                        full = flows[2 * pair + 1][block]
                     }
                     if cleared && event != 0 {
                         if full -> _ := &plan.write_drops.add(instruction.id.value, empty)
@@ -3311,38 +3312,40 @@ fn lower_release_event_kind(event: Int) -> Int Never! {
     if event < 0 -> LOWER_SLOT_EMPTIED else -> LOWER_SLOT_FILLED
 }
 
-// Marks in `reached` (keyed slot * block count + block) the blocks `slot`
-// may enter in state `kind` (LOWER_SLOT_EMPTIED or LOWER_SLOT_FILLED): a
-// forward may-analysis from the function's `entry` block (when >= 0) and
-// from each block (among `starts`) whose last event of the slot (`events`,
-// keyed block * `count` + slot) is of that kind; a block with no event of
-// the slot passes its entry state on.
-fn lower_release_slot_flow(reached: &[Int:Bool], successors: [[Int]], events: [Int:Int], starts: [Int], count: Int, slot: Int, kind: Int, entry: Int) Never! {
-    base :: slot * successors.len()
+// Per block, whether `slot` may enter it in state `kind` (LOWER_SLOT_EMPTIED
+// or LOWER_SLOT_FILLED): a forward may-analysis from the function's `entry`
+// block (when >= 0) and from each block (among `starts`) whose last event of
+// the slot (`events`, keyed block * `count` + slot) is of that kind; a block
+// with no event of the slot passes its entry state on.
+fn lower_release_slot_flow(successors: [[Int]], events: [Int:Int], starts: [Int], count: Int, slot: Int, kind: Int, entry: Int) -> [Bool] Never! {
+    reached := [Bool]{}
+    loop _ in successors -> &reached.push(false)
     pending := [Int]{}
     if entry >= 0 {
-        _ := &reached.add(base + entry, true)
+        reached[entry] = true
         &pending.push(entry)
     }
     loop block in starts {
         if (events.get(block * count + slot) ?? 0) != kind -> next
         loop target in successors[block] {
-            if reached.get(base + target) != None -> next
-            _ := &reached.add(base + target, true)
+            if reached[target] -> next
+            reached[target] = true
             &pending.push(target)
         }
     }
     cursor := 0
     loop cursor < pending.len() {
+        // copy: plain Int block index; the loop below pushes onto `pending`.
         block :: pending[cursor].copy()
         cursor += 1
         if events.get(block * count + slot) != None -> next
         loop target in successors[block] {
-            if reached.get(base + target) != None -> next
-            _ := &reached.add(base + target, true)
+            if reached[target] -> next
+            reached[target] = true
             &pending.push(target)
         }
     }
+    reached
 }
 
 // The last position in `block` at which the borrowed read `read` (at
