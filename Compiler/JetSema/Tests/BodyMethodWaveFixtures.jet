@@ -167,9 +167,14 @@ fn method_wave_product_witnesses(graph: SemaRegistrationGraph, checked: SemaGrap
         }
     }
     method_wave_require(jobs.len() == 2, "real host-reaching method and adjacent normal method are registered")
-    part := SemaBodyPart{scopes: ^scopes, items: ^jobs, bodies: [SemaPreparedBody]{}}
-    method_wave_require(sema_check_body_part_in(environment, program, memory_plan, &part, 0) == 2, "both real method jobs were checked by the canonical worker")
-    method_wave_require(part.bodies.len() == 2, "both worker products are present")
+    plan :: shared SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}, replay: [Bool]{}, observe: false}
+    order := [Int]{0, 1}
+    replay := [Bool]{}
+    sema_check_body_plan_fill(plan, ^jobs, ^order, ^replay)
+    queue :: shared SemaBodyQueue{next: 0}
+    part := SemaBodyPart{scopes: ^scopes, bodies: [SemaPreparedBody]{}, positions: [Int]{}}
+    method_wave_require(sema_check_body_part_in(environment, program, memory_plan, &part, plan, queue, 0) == 2, "both real method jobs were checked by the canonical worker")
+    method_wave_require(part.bodies.len() == 2 && part.positions[0] == 0 && part.positions[1] == 1, "both worker products are present, in claim order")
     first :: if part.bodies[0] == {
         .Checked(body) -> body.wanted_hooks
         .Replay(_) -> panic("a cold host witness became a replay descriptor")
