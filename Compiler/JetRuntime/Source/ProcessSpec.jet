@@ -219,8 +219,33 @@ fn jet_std_process_cmd_owned(cmd: I64) -> I64 {
     encoding_store(result + PROCESS_SPEC_CWD, jet_rt_string_clone(cwd))
     result
 }
+// The last env/env_remove for a name wins: each forgets the other's earlier rows for it.
+// `stride` is 16 for [name, value] set rows and 8 for removal names; dropped rows free their texts.
+fn process_spec_env_forget(list: I64, stride: I64, name: I64) {
+    length :: encoding_word(list + DATA_SEQUENCE_LENGTH)
+    data :: encoding_word(list + DATA_SEQUENCE_DATA)
+    kept := I64{0}
+    at := I64{0}
+    loop at < length {
+        row :: data + at * stride
+        if jet_rt_string_eq(encoding_word(row), name) {
+            jet_rt_string_drop(encoding_word(row))
+            if (stride == I64{16}) -> jet_rt_string_drop(encoding_word(row + I64{8}))
+        } else {
+            if (kept != at) {
+                encoding_store(data + kept * stride, encoding_word(row))
+                if (stride == I64{16}) -> encoding_store(data + kept * stride + I64{8}, encoding_word(row + I64{8}))
+            }
+            kept += I64{1}
+        }
+        at += I64{1}
+    }
+    encoding_store(list + DATA_SEQUENCE_LENGTH, kept)
+}
 #Export(c) fn jet_process_spec_env(value: I64, name: I64, text: I64) -> I64 {
     result :: jet_rt_handle_clone_process_spec(value)
+    process_spec_env_forget(encoding_word(result + PROCESS_SPEC_ENV_REMOVE), DATA_TREE_ELEMENT_BYTES, name)
+    process_spec_env_forget(encoding_word(result + PROCESS_SPEC_ENV_SET), DATA_TREE_ENTRY_BYTES, name)
     list :: encoding_word(result + PROCESS_SPEC_ENV_SET)
     slot :: data_sequence_reserve(list, DATA_TREE_ENTRY_BYTES)
     encoding_store(slot + DATA_TREE_ENTRY_KEY, jet_rt_string_clone(name))
@@ -230,6 +255,8 @@ fn jet_std_process_cmd_owned(cmd: I64) -> I64 {
 }
 #Export(c) fn jet_process_spec_env_remove(value: I64, name: I64) -> I64 {
     result :: jet_rt_handle_clone_process_spec(value)
+    process_spec_env_forget(encoding_word(result + PROCESS_SPEC_ENV_SET), DATA_TREE_ENTRY_BYTES, name)
+    process_spec_env_forget(encoding_word(result + PROCESS_SPEC_ENV_REMOVE), DATA_TREE_ELEMENT_BYTES, name)
     process_text_list_push(encoding_word(result + PROCESS_SPEC_ENV_REMOVE), name)
     result
 }

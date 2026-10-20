@@ -378,7 +378,7 @@ fn lower_test_call_override(p: MIRProgram, m: &LowerModule, f: &LowerFunction) N
         lower_fail(&m, &f, "the package test entry was not lowered")
         return
     }
-    source :: p.functions[row]
+    source :: lower_row_source(p, m, row)
     suite :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_test_suite_new", [LIRValueID]{}, Val(suite))
     signature :: m.mir_signatures[row].copy()
