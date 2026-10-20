@@ -69,9 +69,6 @@ use jet_foundation.[
 use jet_parser.[
     JetFormatResult,
     jet_format_source,
-    jfmt_retired_interpolation_selector_edits,
-    jfmt_retired_print_family_edits,
-    jfmt_retired_type_edits,
 ]
 use jet_sema.sema_user_template_ct_value
 
@@ -1084,10 +1081,6 @@ struct JetCLIFmtFile {
     original: String
     formatted: String
     changed: Bool
-    retired_interpolation_selectors: Int
-    retired_print_family_spellings: Int
-    retired_type_names: Int
-    retired_target_spellings: Int
     io_error: String?
     diagnostics: [Diagnostic]
     report: String?
@@ -1180,19 +1173,6 @@ fn jet_cli_fmt_plural(count: Int, singular: String, plural: String) -> String Ne
     if count == 1 -> singular else -> plural
 }
 
-// The `jet fmt` statuses for one formatted source: `run_fmt_stdin` order
-// (targets, selectors, print family, Core containers) or, `in_batch`, the
-// `run_fmt` write-mode order and print-family wording.
-fn jet_cli_fmt_statuses(label: String, file: JetCLIFmtFile, in_batch: Bool) -> String Never! {
-    targets :: if file.retired_target_spellings > 0 -> "{label}: rewrote {file.retired_target_spellings} retired target {jet_cli_fmt_plural(file.retired_target_spellings, "spelling", "spellings")} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)\n" else -> ""
-    selectors :: if file.retired_interpolation_selectors > 0 -> "{label}: rewrote {file.retired_interpolation_selectors} retired interpolation {jet_cli_fmt_plural(file.retired_interpolation_selectors, "selector", "selectors")} from `#` to `:` (D-ONCE-HASH1)\n" else -> ""
-    types :: if file.retired_type_names > 0 -> "{label}: rewrote {file.retired_type_names} retired Core container {jet_cli_fmt_plural(file.retired_type_names, "name", "names")} (D-COLLNAME1=A)\n" else -> ""
-    print_wording :: if in_batch -> " from `#` to `:`" else -> ""
-    print_family :: if file.retired_print_family_spellings > 0 -> "{label}: rewrote {file.retired_print_family_spellings} retired print-family {jet_cli_fmt_plural(file.retired_print_family_spellings, "spelling", "spellings")}{print_wording} (D-ONCE-PRINT1=A)\n" else -> ""
-    if in_batch -> return "{selectors}{print_family}{targets}{types}"
-    "{targets}{selectors}{print_family}{types}"
-}
-
 // CmdCompile.rs `is_package_manifest_file` (D-ECO-FILEROOT1=A): the one
 // reserved Package root filename; its `config.jet`/`env.jet` siblings are
 // ordinary modules.
@@ -1200,21 +1180,14 @@ fn jet_cli_fmt_is_package_manifest_file(origin: String) -> Bool Never! {
     jet_cli_fmt_file_name(origin) == PACKAGE_FILE
 }
 
-// CmdCompile.rs `rewrite_retired_package_targets`.
-fn jet_cli_fmt_rewrite_retired_package_targets(source: String, origin: String) -> RetiredRewrite {
-    if jet_cli_fmt_is_typed_package_source(source, origin) -> return pkg_rewrite_retired_targets(source)
-    RetiredRewrite{text: source, count: 0}
-}
-
 // CmdCompile.rs `format_package_manifest_for_fmt`: `package.jet` is formatted
 // only by the typed Package model. A manifest the model cannot read stops the
 // run with its registered manifest diagnostic (E1206 and family); a layout
 // the model declines (authored comments) is left exactly as written.
 fn jet_cli_fmt_package_manifest(source: String, origin: String) -> JetCLIFmtSource {
-    materialized :: pkg_rewrite_retired_targets(source).text
-    if PackageFacts.parse(materialized, origin) == .Err(error) -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_parse_diagnostic(origin, error)})
-    if pkg_format_source(materialized, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
-    jet_cli_fmt_formatted(materialized)
+    if PackageFacts.parse(source, origin) == .Err(error) -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_parse_diagnostic(origin, error)})
+    if pkg_format_source(source, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
+    jet_cli_fmt_formatted(source)
 }
 
 // The module policy that turns every implicit copy site into a Safe `.copy()` edit.
@@ -1267,7 +1240,7 @@ fn jet_cli_fmt_format_source(source: String, origin: String, explicit_copies: Bo
         marked = copies.text
     }
     copy_marks_inserted :: marked != source
-    materialized :: jet_cli_fmt_rewrite_retired_package_targets(marked, origin).text
+    materialized :: marked
     // A Config binding also parses as ordinary Jet, but its record fields
     // belong to the Package model; prefer that formatter so the file keeps
     // the shape the typed loader accepts.
@@ -1286,17 +1259,13 @@ fn jet_cli_fmt_format_source(source: String, origin: String, explicit_copies: Bo
 fn jet_cli_fmt_one(path: String, source: String, request: JetCLIFmtRequest) -> JetCLIFmtFile {
     formatted :: jet_cli_fmt_format_source(source, path, request.explicit_copies, request.simplify, request.color)
     if formatted.report != None || formatted.diagnostics.len() > 0 {
-        return JetCLIFmtFile{path: path, original: source, formatted: "", changed: false, retired_interpolation_selectors: 0, retired_print_family_spellings: 0, retired_type_names: 0, retired_target_spellings: 0, io_error: None, diagnostics: formatted.diagnostics, report: formatted.report}
+        return JetCLIFmtFile{path: path, original: source, formatted: "", changed: false, io_error: None, diagnostics: formatted.diagnostics, report: formatted.report}
     }
     JetCLIFmtFile{
         path: path,
         original: source,
         formatted: formatted.text,
         changed: formatted.text != source,
-        retired_interpolation_selectors: jfmt_retired_interpolation_selector_edits(source).len(),
-        retired_print_family_spellings: jfmt_retired_print_family_edits(source).len(),
-        retired_type_names: jfmt_retired_type_edits(source).len(),
-        retired_target_spellings: jet_cli_fmt_rewrite_retired_package_targets(source, path).count,
         io_error: None,
         diagnostics: [Diagnostic]{},
         report: None,
@@ -1821,9 +1790,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         }
         .Fmt(request) -> output = jet_cli_format_run(request, request.json)
         .FmtLang(argv, color) -> output = jet_cli_external_fmt(argv, color)
-        .Fix(file, dry_run, edition, all, color, quiet, json, notice) -> {
+        .Fix(file, dry_run, all, color, quiet, json, notice) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_fix_run(file, dry_run, edition, all, color, quiet, json)
+            output = jet_cli_fix_run(file, dry_run, all, color, quiet, json)
         }
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(inspect_plan) -> output = jet_cli_inspect_b_host(inspect_plan)

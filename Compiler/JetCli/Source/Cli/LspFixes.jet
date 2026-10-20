@@ -1,6 +1,5 @@
 // Source/LSP/Check.rs fix projections shared by CLI fixes and code actions.
 use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, TextEdit]
-use jet_parser.[jfmt_retired_interpolation_selector_edits, jfmt_retired_print_family_edits, jfmt_retired_type_edits]
 use jet_driver.jet_driver_apply_edits
 
 struct JetCLIFix {
@@ -35,15 +34,6 @@ fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Neve
 
 fn jet_cli_collect_fixes_from_diagnostics(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] Never! {
     fixes := jet_cli_fixes_from_diagnostics(diagnostics)
-    loop edit in jfmt_retired_interpolation_selector_edits(source) {
-        &fixes.push(JetCLIFix{title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)", edit: edit, applicability: .Safe, safety: .Formatting})
-    }
-    loop edit in jfmt_retired_print_family_edits(source) {
-        &fixes.push(JetCLIFix{title: "rewrite retired print-family spelling (D-ONCE-PRINT1)", edit: edit, applicability: .Safe, safety: .Formatting})
-    }
-    loop edit in jfmt_retired_type_edits(source) {
-        &fixes.push(JetCLIFix{title: "rewrite retired Core container name (D-COLLNAME1=A)", edit: edit, applicability: .Safe, safety: .Formatting})
-    }
     fixes
 }
 

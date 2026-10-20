@@ -95,7 +95,7 @@ enum JetCLIPlan {
     FmtLang(argv: [String], color: Bool)
     // Normal diagnostic fixes use the shared edit engine and a held codemod
     // transaction. Memory fixes retain their independent witness consumer.
-    Fix(file: String, dry_run: Bool, edition: String?, all: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
+    Fix(file: String, dry_run: Bool, all: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
@@ -1521,14 +1521,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             } else if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
                 file = "{target}.jet"
             }
-            edition := String?{None}
-            loop argument in jet_argv {
-                if argument.starts_with("--edition=") {
-                    edition = Val(argument.removeprefix("--edition="))
-                    break
-                }
-            }
-            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), edition: edition, all: jet_argv.contains("--all"), color: color, quiet: quiet, json: json, notice: notice}
+            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), all: jet_argv.contains("--all"), color: color, quiet: quiet, json: json, notice: notice}
         }
         "gc" -> return jet_cli_gc(argv, args, color, json)
         "cache" -> return JetCLIPlan.Cache{args: jet_cli_tail(argv, 1), json: json}

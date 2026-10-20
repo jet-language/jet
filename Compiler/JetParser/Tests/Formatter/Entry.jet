@@ -8,35 +8,6 @@ fn fmt_core_stable(source: String) -> String {
     assert(fmt_core_ok(formatted) == formatted)
     formatted
 }
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2492
-#Test("retired_selector_rewrites_through_the_parser_and_formatter") {
-    selectors :: [String]{"Debug", "Pretty", "Fixed", "Grouped", "Hex", "Unit", "Unit"}
-    arguments :: [String]{"", "", "(2)", "(2)", "(16)", "(name)", "(bare)"}
-    loop index in 0..<selectors.len() {
-        selector :: selectors[index]
-        argument :: arguments[index]
-        source :: "fn run() {{\n    print(\"{{x#{selector}{argument}}}\")\n}}\n"
-        edits :: jfmt_retired_interpolation_selector_edits(source)
-        assert(edits.len() == 1)
-        bytes :: source.bytes()
-        assert((String.from_bytes(bytes[edits[0].span.start..<edits[0].span.end]) ?? panic("selector span is ASCII")) == "#")
-        formatted :: fmt_core_ok(source)
-        fragment :: "print(\"{{x:{selector}{argument}}}\")"
-        assert(formatted.contains(fragment))
-        assert(jfmt_retired_interpolation_selector_edits(formatted).len() == 0)
-    }
-    ordinary :: "fn run() {{ print(\"#Debug\") }}\n"
-    assert(jfmt_retired_interpolation_selector_edits(ordinary).len() == 0)
-}
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2534
-#Test("retired_core_type_edits_skip_plain_strings") {
-    source :: "Deque.new()\nprint(\"Deque\")"
-    edits :: jfmt_retired_type_edits(source)
-    assert(edits.len() == 1)
-    assert(edits[0].new_text == "Queue")
-    expected :: "Queue.new()\nprint(\"Deque\")\n"
-    assert(fmt_core_ok(source) == expected)
-}
 // Rust: crates/jet-parser/src/Formatter/mod.rs:2551
 #Test("trailing_transaction_comment_stays_inside_transaction_block") {
     source :: `fn transfer(from: Shared<Account>, amount: Int) {
