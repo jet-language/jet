@@ -4758,14 +4758,34 @@ fn jet_driver_runnable_test_count(graph: SemaRegistrationGraph) -> Int Never! {
 
 // Checked named tests and selected Check Outputs share the canonical Test
 // harness, in declaration order. Coverage remains a separate request route.
-fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: String, graph: &SemaGraphResult, functions: &[MIRFunction], diagnostics: &[Diagnostic]) -> JetCodegenJobTestArtifacts Never! {
+// The modules whose tests a test run collects: the entry, plus every member file of the
+// entry's package namespace (a package's tests are all of its #Tests).
+fn jet_driver_test_modules(load: JetDriverLoadResult) -> [String:Bool] Never! {
+    members := [String:Bool]{}
+    members[load.entry_module_identity] = true
+    namespace := ""
+    package := ""
+    loop loaded in load.modules {
+        if loaded.module_identity == load.entry_module_identity {
+            namespace = loaded.namespace.copy()
+            package = loaded.package_identity.copy()
+        }
+    }
+    if namespace.len() == 0 -> return members
+    loop loaded in load.modules {
+        if loaded.namespace == namespace && loaded.package_identity == package -> members[loaded.module_identity] = true
+    }
+    members
+}
+
+fn jet_driver_test_artifacts(package_identity: String, test_modules: [String:Bool], graph: &SemaGraphResult, functions: &[MIRFunction], diagnostics: &[Diagnostic]) -> JetCodegenJobTestArtifacts Never! {
     tests := [TTestFact]{}
     keys := [String]{}
     wanted := [String:Bool]{}
     output_checks := [TOutputCheckFact]{}
     loop module_index in 0..<graph.modules.len() {
         graph_module :: graph.modules[module_index]
-        if graph_module.module_identity != entry_module_identity -> next
+        if test_modules.get(graph_module.module_identity) == None -> next
         loop fact in graph_module.tests {
             &tests.push(fact)
             &keys.push(fact.key)
@@ -6376,7 +6396,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // `lower_artifact_rows`): the checked tests' facts and their one Test
     // harness, lowered while the tests' checked TIR rows are still resident.
     test_artifacts := JetCodegenJobTestArtifacts?{None}
-    if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, load.entry_module_identity, &checked_graph, &lowered.functions, &load.diagnostics))
+    if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, jet_driver_test_modules(load), &checked_graph, &lowered.functions, &load.diagnostics))
     jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.facts", -1)
     // The checked TIR functions are as large as the MIR lowered from them;
     // they leave the graph before MIR assembly and optimization and drop

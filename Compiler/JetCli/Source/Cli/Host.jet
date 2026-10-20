@@ -827,12 +827,9 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     cli_files.remove(binary).drop("the harness is one-shot; a leftover binary is harmless")
     passed :: ran.receipt.success
     show :: options.capture == "all" || (!passed && options.capture == "failed")
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
-    if show {
-        output.stdout = ran.output
-        output.stderr = ran.errors
-    }
-    output
+    // The canonical report always prints; the children's own streams follow the capture policy.
+    if show -> return JetDriverVerbOutput{stdout: ran.output, stderr: ran.errors, exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
+    JetDriverVerbOutput{stdout: ran.receipt.output, stderr: ran.receipt.errors, exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
 }
 
 fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
@@ -1846,13 +1843,13 @@ fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, thr
         } else if compiled == .Refused(refusal) {
             cli_term.eprint(refusal.stderr)
         }
-        cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)\n")
+        cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
         loop jet_cli_dev_stamp(root) == stamp -> cli_time.sleep(200ms)
         if child == .Val(running) {
             running.kill().drop("the program may already have exited")
             running.wait().drop("the stopped program's status is not reported")
         }
-        cli_term.eprint("jet dev: change detected, rebuilding\n")
+        cli_term.eprint("jet dev: change detected, rebuilding")
     }
 }
 
