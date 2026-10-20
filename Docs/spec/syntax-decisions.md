@@ -57,7 +57,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` | `D-METHOD-FOOTPRINT1=A; D-SPREAD1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
-| `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
+| `{ … }` | typed anonymous value | `D-POLICY-WORD1` |
 | <code>`</code> | raw ordinary String fence | `D-RAWSTR1` |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) | `D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A` |
 | `,` | separator with optional trailing item in every comma list | `D-TRAILCOMMA1` |
@@ -1047,7 +1047,7 @@ elsewhere the result is an ordinary list of that length. Sema desugars before
 inference; no TIR node. S76 `[T#N]` fixed-size lists are unaffected.
 **D-FANOUT2** (no `s.{…}` second axis) is moot.
 
-**D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = .{…}` on
+**D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = {…}` on
 lane/vector types; overlapping writes diagnosed (E3110/E3111).
 **D-VECARITH1**: element-wise `+ - * /` closed to compiler-provided lane and
 linalg types; user structs use methods.
@@ -1175,7 +1175,7 @@ against the head exactly like an expected-type position. A one-expression body
 follows the 2026-09-28 amendment below; any other mismatched body is the
 ordinary type error (teach `from_*` when a conversion
 was intended). Scalar literal bodies keep comptime range checks in the E0135 /
-E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `.{ … }` or
+E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `{ … }` or
 plain `[ … ]`; both elaborate against the element type. Examples:
 `U8{ 250 }`, `[U8]{ 42, 0, 0 }`, `[U8#3]{ 255, 128, 0 }`,
 `[String:Int]{}`, `Int{ fetch_rows() }`, `[[U8]]{ { 1, 0 }, [0, 1] }`,
@@ -1196,7 +1196,7 @@ the head's literal notation applies, so a list head reads the expression as its
 single element. The rule is deterministic: `[Int]{[1, 2, 3].map(n -> n * 2)}`
 is the three-element list; `[[Int]]{xs}` is a one-element list when
 `xs: [Int]` and the whole value when `xs: [[Int]]`; `[String:Int]{m}` is the
-map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
+map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`) always
 use element notation.
 For a scalar conversion, the head is the result type; a nonliteral body is
 checked in its own type before conversion. Thus `Int{I64{value}}` produces an
@@ -1423,7 +1423,7 @@ rounding enum, and narrow `digits` through the checked exact-Int adapter. Kernel
 success values regain the destination unit identity; reason text stays in the
 checked String failure carrier.
 
-Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
+Per D-PACKAGE-POLICY-SCOPE1, `policy: { explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
 `#Policy(explicit_units)` does the same at module, function, or block scope.
 The normal D-MARK-SCOPE1 inheritance/provenance law applies.
@@ -1444,7 +1444,7 @@ accepts_kilometers(1500meter)
 // fix: Kilometer.from_meter_rounded(1500meter, .NearestEven, digits: 0)
 
 # package.jet
-policy: .{ explicit_units: true }
+policy: { explicit_units: true }
 
 #Policy(explicit_units)
 module dosing
@@ -1780,7 +1780,7 @@ dependency. The record shows the locked integrity hash, transparency entry,
 publisher identity, and build attestation. Integrity remains enforced by
 E1204. Other evidence is shown as `verified` or `recorded` when present and
 is not required by default. The package may select one floor in the existing
-authority block: `authority: .{ trust: { require: none|logged|attested } }`.
+authority block: `authority: { trust: { require: none|logged|attested } }`.
 `none` is the default, `logged` requires transparency evidence, and `attested`
 requires build-attestation evidence. This amends D-AUTHORITY-MANIFEST1's trust
 block with `require:`. Human and JSON output read the same record; no second
@@ -2258,7 +2258,7 @@ D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D, and D-META-AUTO1=A, 2026-08-06,
 cards #1267/#1545)*: every structurally derivable built-in capability
 (`Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode`)
 auto-derives whenever every field qualifies. `Encode` + `Decode` is the
-`Codable` family. The package default is on. `policy: .{ lints: .{ deny: [auto_derive] } }`
+`Codable` family. The package default is on. `policy: { lints: { deny: [auto_derive] } }`
 refuses silent generation for that package. At a type site, a bare trait
 marker opts in and `!` refuses compiler generation: `#!Printable` or
 `#[!Debug, !Equatable, Printable]`; `#!Codable` refuses both wire directions.
@@ -2560,7 +2560,7 @@ The concrete terminal view uses the ratified existing route:
 
 **D-PACKAGE-POLICY-SCOPE1=A — package `policy:` holds a typed field value**
 *(ratified 2026-07-16, card #657)*: the package-echelon `policy:` field
-settled by D-POLICY-WORD1 holds a typed `.{ ... }` value whose governance
+settled by D-POLICY-WORD1 holds a typed `{ ... }` value whose governance
 keys are ordinary fields, written like every other Package role field, with
 bare top-level `name:`/`version:` identity — not the `#Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
@@ -2577,16 +2577,16 @@ which extracts a shared `policy:` value into a named `Config` when needed;
 # package.jet — policy: reads beside bare Package identity
 name:     "meter"
 version:  "1.0.0"
-policy:   .{
+policy:   {
     unsafe: .Deny,
-    effects: .{ ".": -[]> }
+    effects: { ".": -[]> }
 }
 
 # Source/sensor.jet — a function writes the memory denial on its signature
 fn sensor() -[!Mem.Alloc(above: 2048)]> { }
 
 # Package policy may only tighten safety, never authorize it:
-policy: .{ unsafe: .Allow }
+policy: { unsafe: .Allow }
 // error E1206: `policy.unsafe` must be `.Deny` or `.Paths([...])`
 // and cannot authorize unsafe code; each operation still needs
 // `#Unsafe("reason")` at the exact block or function.
@@ -2618,8 +2618,8 @@ nested per-scope markers, no block-valued args for the same job). Unknown
 member is a teaching error listing the scope's vocabulary. Typing `.` in
 statement position inside a marker block completes members. Disambiguation:
 the required trailing block separates it from leading-dot enum values
-(D-ENUMDOT1); the identifier after the dot separates it from `.{ }`
-construction and S74 destructuring. Other block markers may declare members
+(D-ENUMDOT1); the identifier after the dot separates it from `{ }`
+construction (which has no dot, D-LIT-DOT1) and S74 destructuring. Other block markers may declare members
 under the same law — each addition is an API decision, not a syntax one.
 
 **D-PROVENANCE1=B — Binding-level provenance tracking (superseded by
@@ -5131,7 +5131,7 @@ in generated Rust (`/* jet-reactive-upgrade: … */`) and `jet report`. Events a
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
 `EventPolicy`, and `EventTrace`. Render backends implement measure/layout/paint
 (`JetBackend`; `NullBackend`/`TuiBackend` shipped). The typed dot-construction
-UI-tree spelling (`.Button.{ label: "OK" }`) is ratified but unbuilt. The shipped
+UI-tree spelling (`.Button{ label: "OK" }`) is ratified but unbuilt. The shipped
 `ui.*` surface is the callable `core.ui` API, including `ui.text`, `ui.button`,
 `ui.box`, and `ui.mount`; it does not include that spelling. The spelling decision
 reopens with card #1588's architecture result. `Style` is one flat record; motion
@@ -5277,21 +5277,21 @@ packages, never compiler deps.
 
 **D-SHAPE5a=A — Package roles are typed fields**: each role is a named field
 whose package schema fixes one role type. Its value uses the existing
-expected-type record form `.{ ... }`; writing the role type explicitly produces
+expected-type record form `{ ... }`; writing the role type explicitly produces
 the same typed value:
 
 ```jet
-greeter: Package :: .{
+greeter: Package :: {
     name: "greeter"
     version: "1.0.0"
-    sources: .{ roots: ["Source"] }
+    sources: { roots: ["Source"] }
 }
 ```
 
 The exact view may pin those same role types without changing meaning:
 
 ```jet
-greeter: Package :: .{
+greeter: Package :: {
     name: "greeter"
     version: "1.0.0"
     sources: Package.Sources{ roots: ["Source"] }
@@ -5299,7 +5299,7 @@ greeter: Package :: .{
 ```
 
 There is no package-only identity wrapper and no untyped, dotless identity
-record. This decision reuses ordinary `.{ ... }` and
+record. This decision reuses ordinary `{ ... }` and
 `Type{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
 production, formatter form, editor grammar, snapshot, or executable example.
 
@@ -5338,7 +5338,7 @@ typed sections; section-qualified names such as `packages.api`,
 The root type is `Package` (D-ECO-ROOTNAME1=I).
 
 ```text
-root: <Root> :: <Root>.{
+root: <Root> :: <Root>{
     packages: {
         api: Package{ source: "apps/api" }
     }
@@ -7254,8 +7254,8 @@ with the `#Job(.Ship)` fix.
 
 **D-JPK-PKGOVERRIDE1=B — keyed override record inside `overlay`**: a
 package's version/flags/env/patch overrides live under one
-`overrides: { <pkg>: .{ … } }` typed record per overlay (D-JPK-OVERLAY1),
-using the standard `.{ }` construction. Patches are file references
+`overrides: { <pkg>: { … } }` typed record per overlay (D-JPK-OVERLAY1),
+using the standard `{ }` construction. Patches are file references
 (`patch("...")`), never inline diffs. Conflicting overlays resolve through
 the same named-tier/`Priority(n)` mechanism ratified for jetos
 (D-JOS-PRIORITY1) — one conflict model shared by jetpack and jetos.
@@ -7297,8 +7297,8 @@ categories, screenshots), one-click Install writes the declarative
 generated source diff visible on demand ("View source"), never forced.
 
 **D-JOS-APPMODULE1=B — one `apps` record, one field per app**: `user.<name>`
-carries a single `apps: .{ … }` record; each known app gets one lowercase
-field, its config type inferred from the field (`.{ }`, D-DOTCTOR2) — the
+carries a single `apps: { … }` record; each known app gets one lowercase
+field, its config type inferred from the field (`{ }`, D-DOTCTOR2) — the
 type name never appears. Every app's config supports standard `package:`,
 `extraConfig:` (verbatim passthrough), and `files:` fields. Presence in the
 record means installed and configured; no `enable:` ceremony.
@@ -7381,7 +7381,7 @@ return means success, and `?` carries failure without lifecycle result types.
 *(ratified 2026-07-15)*: `jet test` runs every Check Output. Singular intents
 select in order: explicit address, legacy zero-config entry, sole compatible
 Output, checked `defaults:` entry, then an ambiguity error listing choices.
-`jet run --output api package.jet` is the explicit form; `defaults: .{ run: app };`
+`jet run --output api package.jet` is the explicit form; `defaults: { run: app };`
 is checked against the Package's Executable Output addresses. Explicit
 selection wins even when a legacy `fn run` exists, but accepts only an
 Executable or Service; Check Outputs remain plural under `jet test`. Defaults
@@ -7508,7 +7508,7 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — compiler facts carry `$`. A fact is a `$` member of its subject (`T.$layout`, `T.$fields`, `field.$name`, `Severity.$range`, `send_report.$effects`, `value.$origin`); build facts hang off `$build` (`$build.os`, `.profile`, `.settings.*`, `.stamp.*`) and package facts off `$package` (`$package.name`, `$package.version`); `$phase` and `$program` are the other subjectless roots. Marker and fact declarations mark compiler metadata the same way: `marker Audited($sites: [.Type], $repeatable: false)`, `fact Flow($holds: .Value, $safe: .Gain, $gates: [])`, `migration … $irreversible`. `@TYPE(T)`, `@FUNCTION(f)`, `@METHOD`, `@CLOSURE` and `@VALUE(v)` are removed in favour of subject members; `@SOURCE()` and `@TYPES()` keep their registry spelling until a ballot names a `$` root. The lexer reads `$name` as one word; programs never declare a `$` name (E0003), and config surfaces read the same word as the `$NAME` environment read (D-ONCE-DOLLAR1=B). Every retired `@` fact spelling (`T.@layout`, `@build.os`, `@build.package.name`, `@sites:`, `@PHASE()`) teaches E0003 with a machine-applicable `$` respelling (retirement row `fact-mark`). Template name splices carry `$` too (D-NAME-SPLICE1=B, below); `@run.jet` filenames and `pkg@provider#v` references are unchanged (D-AT-INFIX1=A).
 - **D-NAME-SPLICE1=B** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — inside a derive or marker template the fact sigil also splices a template binding: `fn $method(self)` and `impl $type_name` name a declaration from text, `self.$field` and `rhs.$field` read the member named by a loop value, `.$left` matches the variant it names, and `{$count}` or a bare `$count` reads the binding's build-time value. A `$` word that names no template binding, or that is read on a bound value (`field.$name`), stays a compiler fact. The retired `@` splice (`fn @method`, `self.@field`, `.@left`, `{@count}`) teaches E0388 with a machine-applicable `$` respelling, which completes the #3662 cutover: prefix `@` in code marks only a live link.
 - **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
-- **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
+- **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
 - **D-ONCE-HASH1=B** — interpolation format selectors respell to colon (`{x:Fixed(2)}`, `{user:Debug}`); `#` keeps its three non-colliding jobs: applied rules, fixed-size lists (`[T#4]`), and package version pins.
 
@@ -7558,25 +7558,25 @@ are defined below. D-HARDENED1 supplies the named hardened profile and its
 foreign-edge checks; runtime sentry behavior remains in the shared Prelude
 seam.
 
-**D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `.copy()` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `x.copy()` is the one copy spelling (D-COPY-WORD1); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: .{ copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
+**D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `.copy()` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `x.copy()` is the one copy spelling (D-COPY-WORD1); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: { copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
 
 **D-CONC-FREEZE1=A — `freeze` and `^`-captures** *(ratified 2026-08-12, card #1889)*: `freeze(x)` is a prefix verb returning a deeply immutable value; bare task captures of frozen values are legal because no race can exist; writing to a frozen value is a compile error naming the freeze site; freezing twice is the identity. `^x` in a group-child capture consumes the value into the task (existing use-after-move E0121 applies afterward). Baseline corrected per review: D-TASKBORROW1=A already lets lexical `task.group` children borrow readable places where non-overlap is provable, and D-CONC-SHARE1=A already replaces `Shared.read/.edit` closures with `shared expr` plus ordinary field access — `freeze` covers what neither does: sharing past provable non-overlap and past the lexical group, without a lock. E1101's fix menu becomes: give it (`^`), freeze it (`freeze`), or share it (`shared`). Extends D-TASKBORROW1; composes with D-CONC-SHARE1; `Shared`/`Cell` semantics unchanged.
 
-**D-MEM-SENTRY1=A — dev-tier sentries for `#Unsafe`** *(ratified 2026-08-12, card #1889)*: default `jet run` guards raw operations inside `#Unsafe` gates — released allocator storage is quarantined and poisoned, while a stack place registered by `mem.address_of` or raw-of is tied to the owning Jet frame token and expires when that frame/scope exits; writes are checked against allocation provenance the runtime already tracks (no new storage declaration exists or is added). Stack expiry marks the allocation dead without poisoning bytes. Heap, static, and foreign lifetime handling keeps its existing provenance and quarantine behavior, and an unframed stack address is never made process-global live. A violation is a located runtime fault (registered report family — registered and snapshot-tested by #1892 before any code ships, per I4) naming the gate and the unmet obligation, and it feeds the `jet audit memory` ledger. Interaction with D-UNSAFE-OBLIG1, stated precisely: required obligations keep their compile-time law — a runtime witness never substitutes for a required static discharge; sentries watch the operations whose obligations were asserted or `.Skip`-ped, and a fault is evidence the assertion was false on that run. **This decision is an owner-ratified I9 instrumentation carve-out, named here**: the dev and hardened tiers report a fault for operations whose release meaning is undefined behavior inside a gate; release without `harden` runs unwatched. Sentry logic lives in the Prelude; engines marshal (AGENTS.md I9). Refusal exit exists at both scopes: `#Policy(sentries: .Off)` and `policy: .{ sentries: .Off }` keep the dev tier but drop the instrumentation. The hardened shipping profile is D-HARDENED1 (card #1888), which reuses this kernel and keeps safe Jet unchanged.
+**D-MEM-SENTRY1=A — dev-tier sentries for `#Unsafe`** *(ratified 2026-08-12, card #1889)*: default `jet run` guards raw operations inside `#Unsafe` gates — released allocator storage is quarantined and poisoned, while a stack place registered by `mem.address_of` or raw-of is tied to the owning Jet frame token and expires when that frame/scope exits; writes are checked against allocation provenance the runtime already tracks (no new storage declaration exists or is added). Stack expiry marks the allocation dead without poisoning bytes. Heap, static, and foreign lifetime handling keeps its existing provenance and quarantine behavior, and an unframed stack address is never made process-global live. A violation is a located runtime fault (registered report family — registered and snapshot-tested by #1892 before any code ships, per I4) naming the gate and the unmet obligation, and it feeds the `jet audit memory` ledger. Interaction with D-UNSAFE-OBLIG1, stated precisely: required obligations keep their compile-time law — a runtime witness never substitutes for a required static discharge; sentries watch the operations whose obligations were asserted or `.Skip`-ped, and a fault is evidence the assertion was false on that run. **This decision is an owner-ratified I9 instrumentation carve-out, named here**: the dev and hardened tiers report a fault for operations whose release meaning is undefined behavior inside a gate; release without `harden` runs unwatched. Sentry logic lives in the Prelude; engines marshal (AGENTS.md I9). Refusal exit exists at both scopes: `#Policy(sentries: .Off)` and `policy: { sentries: .Off }` keep the dev tier but drop the instrumentation. The hardened shipping profile is D-HARDENED1 (card #1888), which reuses this kernel and keeps safe Jet unchanged.
 
 **D-FFI-CAP1=A — capability sigils across the FFI boundary** *(ratified 2026-08-12, card #1889)*: extern signatures may accept `&` and `^` and a returned foreign handle may declare `#Close(fn)`. Corrected per review — `&` keeps its exact D-MEM1 meaning: **exclusive access for exactly this call** (the foreign side may read and write through it, must not retain it; no copy). `^` gives: the foreign side owns and frees; the Jet name dies. `#Close(fn)` joins the `close(^)` protocol — the named function runs exactly once or the program does not compile (S63 handle precedent). The `extern c "lib" { … }` block is not part of the current surface; the tier uses the ratified D-FFI-UNIFY1 structure (`<lang>.<lib>` mounts, `#FFI` bodies, `extern rust "crate@version"` + `= "rust::path"`) rather than minting a parallel declaration form. Capability-tier functions are generated bindings, so the existing D-FFI-UNIFY1 rule stands: bindings are callable directly; raw symbols outside bindings still require `#Unsafe`. Tier behavior follows the existing FFI law (JIT/dev reports the native boundary; native build executes it); the web tier is out of scope for native FFI per that same law. Amends the D-FFI-UNIFY1 by-value-only rule; E0702 narrows from a ban to a gate; the by-value floor stays the default tier.
 
 **D-MEM-GUARANTEE1=A — the guarantee dial** *(ratified 2026-08-12, card #1889)*: `package.jet` policy gains `contain: [deps]` — the named dependencies compile with tracked-handle pointers inside a fence, so a wild write there faults with a report instead of corrupting the program's heap, at a cost confined to the fence — and `harden: true`, which keeps D-MEM-SENTRY1's sentries in release **and contains every foreign dependency** (with `harden: true` no dependency may report TRUSTED). `jet inspect guarantees` () prints the per-component truth: proven, watched, fenced, or TRUSTED. **Named amendment to D-PACKAGE-POLICY-SCOPE1**: `contain` and `harden` are the first package-only policy keys — they govern dependencies and the build profile, not lexical source scopes, so they deliberately have no `#Policy` mirror; the mirror law continues to hold for every scope-governing key (`copies`, `sentries`). Both keys only tighten. Explicitly decoupled from gc (owner ruling): gc is a lifetime convenience and never a safety mechanism. R9 preserved: single files need no manifest and cannot use these keys; their guarantee line reads "your code: proven; externs: trusted". Freestanding targets report "prover + audit only" honestly.
 
-**D-HARDENED1=A — named hardened execution profile** *(ratified 2026-08-28, card #1888)*: `--profile=hardened` is a reserved profile for `jet build`, `jet test`, and `jet run`. It keeps release optimization while setting the same package hardening fact as `policy: .{ harden: true }`: every dependency is fenced and every reached `#Unsafe` sentry remains active. Ordinary `release` keeps its existing unwatched behavior unless package policy enables hardening. The profile adds no user syntax, dependency, or alternate memory mechanism. It reuses D-MEM-SENTRY1's shared Prelude kernel for raw-pointer range, liveness, and alignment checks; FFI `&` edges validate the call-only exclusive reference, and raw `Ptr<T>` edges retain strict provenance checks. Runtime-visible allocations crossing a foreign boundary use the same sentry and quarantine path. Hardened faults use the registered R08xx report with source file/line, gate reason, operation/obligation, and repair detail. Safe Jet-only programs omit sentry initialization and remain on the zero-overhead generated path. Native FFI remains subject to D-FFI-CAP1; web has no native FFI surface. The accepted residual is foreign code writing through an unseen pointer into safe storage; quarantine and boundary checks narrow but do not claim to detect that case.
+**D-HARDENED1=A — named hardened execution profile** *(ratified 2026-08-28, card #1888)*: `--profile=hardened` is a reserved profile for `jet build`, `jet test`, and `jet run`. It keeps release optimization while setting the same package hardening fact as `policy: { harden: true }`: every dependency is fenced and every reached `#Unsafe` sentry remains active. Ordinary `release` keeps its existing unwatched behavior unless package policy enables hardening. The profile adds no user syntax, dependency, or alternate memory mechanism. It reuses D-MEM-SENTRY1's shared Prelude kernel for raw-pointer range, liveness, and alignment checks; FFI `&` edges validate the call-only exclusive reference, and raw `Ptr<T>` edges retain strict provenance checks. Runtime-visible allocations crossing a foreign boundary use the same sentry and quarantine path. Hardened faults use the registered R08xx report with source file/line, gate reason, operation/obligation, and repair detail. Safe Jet-only programs omit sentry initialization and remain on the zero-overhead generated path. Native FFI remains subject to D-FFI-CAP1; web has no native FFI surface. The accepted residual is foreign code writing through an unseen pointer into safe storage; quarantine and boundary checks narrow but do not claim to detect that case.
 
 **D-TEAMPOLICY1=A — package team policy ceilings** *(ratified 2026-08-28, card #2329)*:
 `package.jet` may carry one normalized `policy:` record for the team's
 dependency, source, and expert boundaries. The canonical fields are:
 
 ```jet
-policy: .{
-    effects: .{ "src": -[IO.Read]> },
+policy: {
+    effects: { "src": -[IO.Read]> },
     unsafe: .Paths(["src/ffi"]),
     expert: .Deny,
     deps: .List(["serde"])
@@ -7950,7 +7950,7 @@ and `[Int]{1, 2, 3, 4}`. An enum payload writes `.Password{username: u}`. An
 anonymous record writes `{port: 8080, on: true}`. This amends every
 `Type{ body }` row — D-DOTCTOR3=A's universal head, D-UNIFYLIT1=A's domain-text
 and byte-pattern heads, D-REGEX-LIT1=D, D-BOUND-HEAD1=A, D-BINPAT1=A,
-D-UNINIT-SENTINEL2=A, and the `[T].{}` / `[K:V].{}` empty forms — to the
+D-UNINIT-SENTINEL2=A, and the `[T]{}` / `[K:V]{}` empty forms — to the
 dotless spelling. The dotted form is retired: E0320's class teaches the dotless
 direction, and the reflex that E0320 punished is now the correct spelling.
 
@@ -9745,7 +9745,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-VERDICT-1231-2` | #Persist is a marker on a bare module binding (name :: / name :=), not on comptime. Example: … | `c0fdcyi6` |
 | `D-VERDICT-1254-1` | Full JIT/AOT parity required: no case may work under jet build/--release and fail under defau… | `c07z598z` |
 | `D-VERDICT-1304-1` | Implicit lossless widening covers floats as well as whole numbers. An F32 moves on its own in… | `c0b0tifp` |
-| `D-VERDICT-1306-1` | A: name :: Layout.{ Constraint… } (D-DOTCTOR3 element body). Retire layout NAME { } with teac… | `c0boayud` |
+| `D-VERDICT-1306-1` | A: name :: Layout{ Constraint… } (D-DOTCTOR3 element body). Retire layout NAME { } with teac… | `c0boayud` |
 | `D-VERDICT-1308-1` | Retire the comptime keyword. Beginner default is implicit compile-time folding (no keyword). … | `c0lw893m` |
 | `D-VERDICT-1308-2` | The conditional-compilation form is spelled '#Known if' (e.g. '#Known if build.os == { .Linux… | `c0lw893m` |
 | `D-VERDICT-1320-1` | Respell the D-EACH1 fence as symmetric $[ ... ]$ (open $[, close ]$). Expression-position fen… | `c0bx03jx` |
@@ -9911,7 +9911,7 @@ static rung: compiler facts are not claims. No assumed rung: gates keep their ki
 - **D-GRADE-POLICY1=A —** policy.claims.min names the floor with its count. It tightens only, like every
 policy field. A claim below the floor is a diagnostic whose fix names the command that can raise it when a
 generator exists, or the property test to write when one does not. **Technical:** Amends the
-D-PACKAGE-POLICY-SCOPE1 field set with claims: .{ min: <rung> }. Rungs per D-GRADE1 option D; a count is part
+D-PACKAGE-POLICY-SCOPE1 field set with claims: { min: <rung> }. Rungs per D-GRADE1 option D; a count is part
 of the rung, no max field, obeys tighten-only. 
 - **D-SHAPE-ONE1=A —** Every format reads the same field facts, and database rows and FFI layout join now.
 **Technical:** Rejected by the rival review: database migration from a field diff has no table identity or
@@ -9927,7 +9927,7 @@ core.args gains decode<T>() with the same signature family as env.decode. Binds 
 - **D-LIVE1=A —** Saving a file swaps the changed functions into the running program. #Persist values survive
 as ratified. A layout change to a pinned type still triggers the ratified announced restart, unless
 D-LIVE-PERSIST1 selects migration for #PublishedSchema types. Every save prints one line naming swapped
-functions, kept values, and any restart. jet dev --restart refuses swap for the session; dev: .{ swap: false }
+functions, kept values, and any restart. jet dev --restart refuses swap for the session; dev: { swap: false }
 refuses it for the package. **Technical:** Amends D-DEV4 and D-DEVMODE1 defaults (swap first, rerun only when
 swap is impossible). D-HOTSWAP1 layout rule unchanged. Module mutation law unchanged: #Persist remains the one
 writable module binding (D-PERSIST-DEVSTATE1=A). Precondition carded before the flip: a long-lived edit test
@@ -9976,7 +9976,7 @@ No format change to .jetproof (D-JPROOF1) or .jetproof-replay (D-JREPLAY1). Inde
 one line per artifact, keyed by target.inputSha256 and report_id or artifact_id. Example row: `{target: 9f3a…,
 tool: prove, engine: dev-tir-v1, kind: replay, id: c10aee50}`; a different engine is a second row, and one
 changed source byte changes target. Retention: 256 MB per project by default, oldest disposable
-groups are evicted, settable in package.jet under dev: .{ records: .{ budget: … } }. `jet build --verify` follows the one contract
+groups are evicted, settable in package.jet under dev: { records: { budget: … } }. `jet build --verify` follows the one contract
 shared with D-BUILD-NOCHANGE1. Choosing B amends two clauses for `jet dev` only: D-JREPLAY1's invocation unit
 and D-RUN-RECORD1's unchanged-preflight clause. One `jet dev` invocation is one consent scope over many runs,
 and the dev tier captures the safe form by default. Consent is a digest over target identity, capture mode,
