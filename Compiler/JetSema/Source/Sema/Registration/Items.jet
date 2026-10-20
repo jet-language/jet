@@ -3122,7 +3122,13 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     sema_registration_push_import_binding(&graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule, target_module_index: submodule_index, visibility: import_visibility})
                     next
                 }
-                resolved :: sema_registration_resolve_export(graph, target_index, item.original, source_identity, source_package, [String]{})
+                // A dependency package is one namespace: a member its import landed on stands for
+                // the package, so a name another member file declares resolves through that file.
+                export_index := target_index
+                if sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
+                    if sema_registration_namespace_owner(graph, target_index, item.original) == .Val(owner) -> export_index = owner.module_index
+                }
+                resolved :: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package, [String]{})
                 if resolved == {
                     .Val(export) -> {
                         duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_owner(graph, module_index, local) != None)
