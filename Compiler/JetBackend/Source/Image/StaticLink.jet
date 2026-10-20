@@ -2133,8 +2133,8 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], request: ^X64ResidentLi
             &symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
         }
         segments := [X64ResidentSegment]{
-            X64ResidentSegment{address: LINK_BASE, file_size: layout.r_end - LINK_BASE, memory_size: layout.r_end - LINK_BASE, align: LINK_PAGE, flags: 4},
-            X64ResidentSegment{address: layout.text_start, file_size: layout.text_end - layout.text_start, memory_size: layout.text_end - layout.text_start, align: LINK_PAGE, flags: 5},
+            {address: LINK_BASE, file_size: layout.r_end - LINK_BASE, memory_size: layout.r_end - LINK_BASE, align: LINK_PAGE, flags: 4},
+            {address: layout.text_start, file_size: layout.text_end - layout.text_start, memory_size: layout.text_end - layout.text_start, align: LINK_PAGE, flags: 5},
         }
         if layout.has_rw -> &segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
         tls := X64ResidentSegment?{None}

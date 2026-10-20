@@ -128,15 +128,15 @@ struct FlashTestParseError { args: [String], message: String }
 // #4381 PATH BEGIN: original args test retained; optional Core Path must have one nominal identity.
 #Test("flash bespoke args every branch and help short circuit") {
     failures :: [FlashTestParseError]{
-        FlashTestParseError{args: [String]{"--target"}, message: "`--target` needs a value"},
-        FlashTestParseError{args: [String]{"--image="}, message: "`--image` needs a value"},
-        FlashTestParseError{args: [String]{"--audit", "--quiet"}, message: "`--audit` needs a value"},
-        FlashTestParseError{args: [String]{"--adapter="}, message: "`--adapter` needs a value"},
-        FlashTestParseError{args: [String]{"--adapter", "bad"}, message: "unknown flash adapter `bad` (use probe-rs, openocd, or emulator)"},
-        FlashTestParseError{args: [String]{"--json=true"}, message: "unexpected flash argument `--json=true`"},
-        FlashTestParseError{args: [String]{"--quiet=true"}, message: "unexpected flash argument `--quiet=true`"},
-        FlashTestParseError{args: [String]{"--help=true"}, message: "unexpected flash argument `--help=true`"},
-        FlashTestParseError{args: [String]{"image.elf"}, message: "unexpected flash argument `image.elf`"},
+        {args: [String]{"--target"}, message: "`--target` needs a value"},
+        {args: [String]{"--image="}, message: "`--image` needs a value"},
+        {args: [String]{"--audit", "--quiet"}, message: "`--audit` needs a value"},
+        {args: [String]{"--adapter="}, message: "`--adapter` needs a value"},
+        {args: [String]{"--adapter", "bad"}, message: "unknown flash adapter `bad` (use probe-rs, openocd, or emulator)"},
+        {args: [String]{"--json=true"}, message: "unexpected flash argument `--json=true`"},
+        {args: [String]{"--quiet=true"}, message: "unexpected flash argument `--quiet=true`"},
+        {args: [String]{"--help=true"}, message: "unexpected flash argument `--help=true`"},
+        {args: [String]{"image.elf"}, message: "unexpected flash argument `image.elf`"},
     }
     loop row in failures {
         error := ""
@@ -181,21 +181,21 @@ struct FlashTestParseError { args: [String], message: String }
 struct FlashTestAuditError { text: String, message: String }
 #Test("private raw audit scanner preserves tokens and rejects malformed top-level fields") {
     rows :: [FlashTestAuditError]{
-        FlashTestAuditError{text: "[]", message: "top-level value is not an object"},
-        FlashTestAuditError{text: "{{1:2}}", message: "expected a JSON string"},
-        FlashTestAuditError{text: "{{\"\\u006eame\":\"a\"}}", message: "escaped object keys are not supported"},
-        FlashTestAuditError{text: "{{\"name\" \"a\"}}", message: "object key is not followed by `:`"},
-        FlashTestAuditError{text: "{{\"a\":1,\"a\":2}}", message: "duplicate top-level field `a`"},
-        FlashTestAuditError{text: "{{\"a\":1,}}", message: "object has a trailing comma"},
-        FlashTestAuditError{text: "{{\"a\":1 \"b\":2}}", message: "object field is not followed by `,` or `}}`"},
-        FlashTestAuditError{text: "{{}}x", message: "trailing bytes after target audit object"},
-        FlashTestAuditError{text: "{{\"a\":\"\\uX000\"}}", message: "malformed JSON unicode escape"},
-        FlashTestAuditError{text: "{{\"a\":\"\n\"}}", message: "JSON string contains a control character"},
-        FlashTestAuditError{text: "{{\"a\":\"x", message: "unterminated JSON string"},
-        FlashTestAuditError{text: "{{\"a\":", message: "missing JSON value"},
-        FlashTestAuditError{text: "{{\"a\":}}", message: "empty JSON value"},
-        FlashTestAuditError{text: "{{\"a\":[}}", message: "mismatched JSON delimiters"},
-        FlashTestAuditError{text: "{{\"a\":[1", message: "unterminated JSON value"},
+        {text: "[]", message: "top-level value is not an object"},
+        {text: "{{1:2}}", message: "expected a JSON string"},
+        {text: "{{\"\\u006eame\":\"a\"}}", message: "escaped object keys are not supported"},
+        {text: "{{\"name\" \"a\"}}", message: "object key is not followed by `:`"},
+        {text: "{{\"a\":1,\"a\":2}}", message: "duplicate top-level field `a`"},
+        {text: "{{\"a\":1,}}", message: "object has a trailing comma"},
+        {text: "{{\"a\":1 \"b\":2}}", message: "object field is not followed by `,` or `}}`"},
+        {text: "{{}}x", message: "trailing bytes after target audit object"},
+        {text: "{{\"a\":\"\\uX000\"}}", message: "malformed JSON unicode escape"},
+        {text: "{{\"a\":\"\n\"}}", message: "JSON string contains a control character"},
+        {text: "{{\"a\":\"x", message: "unterminated JSON string"},
+        {text: "{{\"a\":", message: "missing JSON value"},
+        {text: "{{\"a\":}}", message: "empty JSON value"},
+        {text: "{{\"a\":[}}", message: "mismatched JSON delimiters"},
+        {text: "{{\"a\":[1", message: "unterminated JSON value"},
     }
     loop row in rows {
         error := ""
@@ -994,10 +994,10 @@ fn flash_test_host_for_machine(machine: MIRTargetMachine) -> FlashTestHost Never
 
 #Test("flash canonical status projection retains ordered nested object pairs") {
     tree :: CanonicalJSON.Object([CanonicalJSONField]{
-        CanonicalJSONField{key: "z", value: CanonicalJSON.Array([CanonicalJSON]{
+        {key: "z", value: CanonicalJSON.Array([CanonicalJSON]{
             CanonicalJSON.Object([CanonicalJSONField]{
-                CanonicalJSONField{key: "z", value: CanonicalJSON.Bool(true)},
-                CanonicalJSONField{key: "a", value: CanonicalJSON.Integer("17")}})})},
+                {key: "z", value: CanonicalJSON.Bool(true)},
+                {key: "a", value: CanonicalJSON.Integer("17")}})})},
         CanonicalJSONField{key: "a", value: CanonicalJSON.Null}})
     projected :: jet_cli_flash_status_value(tree)
     if projected == .Object(fields) {

@@ -903,8 +903,8 @@ fn sema_call_check_channel(call: Call, expected: Type?, environment: SemaScopeEn
     }
     element := sema_call_resolved_type(call.type_args[0], environment, program)
     result_type := Type.Tuple{fields: [TypeTupleField]{
-        TypeTupleField{name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{element}}},
-        TypeTupleField{name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{element}}},
+        {name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{element}}},
+        {name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{element}}},
     }}
     member_bytes :: if call.args.len() == 0 -> [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{99}, U8{104}, U8{97}, U8{110}, U8{110}, U8{101}, U8{108}, U8{46}, U8{110}, U8{101}, U8{119}} else -> [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{99}, U8{104}, U8{97}, U8{110}, U8{110}, U8{101}, U8{108}, U8{46}, U8{98}, U8{111}, U8{117}, U8{110}, U8{100}, U8{101}, U8{100}}
     member :: String.from_bytes(member_bytes) ?? return SemaDirectSpecialCheck{handled: true, value: None}

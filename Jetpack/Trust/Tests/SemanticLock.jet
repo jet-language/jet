@@ -65,8 +65,8 @@ dependencies = ["app"]
 #Test("live lock text keeps machine sections beside semantic sections") {
     semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
-        LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
-        LockInput{name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+        {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
+        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
     }
     semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
     assert_eq(trust_semantic_lock_issues(semantic).len(), 0)
@@ -117,8 +117,8 @@ dependencies = ["app"]
 #Test("input follows cycle and missing target fail revalidate") {
     lock := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     lock.inputs = [LockInput]{
-        LockInput{name: "a", url: "u-a", follows: "b"},
-        LockInput{name: "b", url: "u-b", follows: "a"}
+        {name: "a", url: "u-a", follows: "b"},
+        {name: "b", url: "u-b", follows: "a"}
     }
     assert(trust_test_has_issue(trust_semantic_lock_issues(lock), "InputCycle"))
     lock.inputs = [LockInput]{LockInput{name: "home", url: "u", follows: "missing"}}

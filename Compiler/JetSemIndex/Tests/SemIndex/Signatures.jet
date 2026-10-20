@@ -1,9 +1,9 @@
 fn semindex_signature_test_contract() -> [SymParamContract] Never! {
     [SymParamContract]{
-        SymParamContract{name: "host", label: "host", zone: .PositionalOnly},
-        SymParamContract{name: "seconds", label: "timeout", zone: .Either},
-        SymParamContract{name: "enabled", label: "tls", zone: .LabelOnly},
-        SymParamContract{name: "rest", label: "rest", zone: .LabelOnly},
+        {name: "host", label: "host", zone: .PositionalOnly},
+        {name: "seconds", label: "timeout", zone: .Either},
+        {name: "enabled", label: "tls", zone: .LabelOnly},
+        {name: "rest", label: "rest", zone: .LabelOnly},
     }
 }
 // Rust tests/lsp.rs:2522–2582 binder inputs from the original connect fixture.
@@ -22,10 +22,10 @@ fn semindex_signature_test_contract() -> [SymParamContract] Never! {
 }
 #Test("semindex_binder_duplicate_labels_consume_first_unclaimed_eligible_slot") {
     contract :: [SymParamContract]{
-        SymParamContract{name: "hidden", label: "same", zone: .PositionalOnly},
-        SymParamContract{name: "first", label: "same", zone: .Either},
-        SymParamContract{name: "second", label: "same", zone: .Either},
-        SymParamContract{name: "last", label: "last", zone: .LabelOnly},
+        {name: "hidden", label: "same", zone: .PositionalOnly},
+        {name: "first", label: "same", zone: .Either},
+        {name: "second", label: "same", zone: .Either},
+        {name: "last", label: "last", zone: .LabelOnly},
     }
     assert_eq(semindex_binder_active_parameter(None, 2, [String]{"same", "same"}, contract, 4), 0)
     assert_eq(semindex_binder_active_parameter(None, 3, [String]{"same", "same"}, contract, 4), 3)
@@ -35,8 +35,8 @@ fn semindex_signature_test_contract() -> [SymParamContract] Never! {
 }
 #Test("semindex_function_parameter_parts_preserves_public_call_surface") {
     params :: [SymNameType]{
-        SymNameType{name: "host", ty: .String}, SymNameType{name: "seconds", ty: .Int},
-        SymNameType{name: "enabled", ty: .Bool}, SymNameType{name: "rest", ty: .String},
+        {name: "host", ty: .String}, SymNameType{name: "seconds", ty: .Int},
+        {name: "enabled", ty: .Bool}, SymNameType{name: "rest", ty: .String},
     }
     assert_eq(semindex_function_parameter_parts(params, semindex_signature_test_contract(), [Bool]{false, false, false, true}), [String]{"host: String", "/", "timeout seconds: Int", "*", "tls enabled: Bool", "rest: ...String"})
     assert_eq(semindex_function_parameter_parts(params, [SymParamContract]{}, [Bool]{}), [String]{"host: String", "seconds: Int", "enabled: Bool", "rest: String"})

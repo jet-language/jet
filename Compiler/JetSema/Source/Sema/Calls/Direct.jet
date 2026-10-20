@@ -911,9 +911,9 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     }
     message_expr :: message ?? Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span}
     fields :: [ExprField]{
-        ExprField{name: "message", name_span: expr_span(message_expr), value: message_expr},
-        ExprField{name: "code", name_span: span, value: sema_call_default_err_optional(code, code_span, span)},
-        ExprField{name: "cause", name_span: span, value: sema_call_default_err_optional(cause, cause_span, span)},
+        {name: "message", name_span: expr_span(message_expr), value: message_expr},
+        {name: "code", name_span: span, value: sema_call_default_err_optional(code, code_span, span)},
+        {name: "cause", name_span: span, value: sema_call_default_err_optional(cause, cause_span, span)},
     }
     struct_expr :: Expr.StructLit{type_name: "Err", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span}
     payload :: sema_check_expression(struct_expr, Val(Type.Named{name: "Err"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None

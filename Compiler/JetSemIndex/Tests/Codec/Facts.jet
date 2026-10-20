@@ -41,8 +41,8 @@ fn semindex_fact_status_consumer(raw: String, value: StatusValue, exact: Bool) N
 #Test("semindex_json_view_provenance_keeps_slots_alternatives_and_projections") {
     // tests/semindex.rs:954–956 union fragments on the returned-view record.
     union :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{
-        ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 0}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
-        ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+        {source: ViewSourceFact.Parameter{index: 0}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+        {source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
     }, mutable: false}
     assert_eq(semindex_json_view_provenance(union), `{"output_path":[],"sources":[{"source":{"kind":"parameter","index":0},"projections":[{"kind":"range"}]},{"source":{"kind":"parameter","index":1},"projections":[{"kind":"range"}]}],"mutable":false}`)
     // Aggregate slots, receiver/static sources, ordered projection paths and
@@ -77,8 +77,8 @@ fn semindex_fact_status_consumer(raw: String, value: StatusValue, exact: Bool) N
     function :: SemIndexSymbolKind.Function{
         params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "a", ty: "Int"}, SemIndexNameTypeFact{name: "a", ty: "[String]"}},
         call_contract: [SemIndexCallContractEntry]{
-            SemIndexCallContractEntry{label: "timeout seconds", zone: "either", variadic: false},
-            SemIndexCallContractEntry{label: "rest", zone: "positional_only", variadic: true},
+            {label: "timeout seconds", zone: "either", variadic: false},
+            {label: "rest", zone: "positional_only", variadic: true},
         },
         ret: None,
     }
@@ -109,8 +109,8 @@ fn semindex_fact_status_consumer(raw: String, value: StatusValue, exact: Bool) N
     contract :: TraitContractFact{
         trait_name: "CheckedText",
         associated_types: [SemIndexAssociatedTypeFact]{
-            SemIndexAssociatedTypeFact{name: "Error", implementation: Val("PatternError")},
-            SemIndexAssociatedTypeFact{name: "Item", implementation: None},
+            {name: "Error", implementation: Val("PatternError")},
+            {name: "Item", implementation: None},
         },
         methods: [String]{"fn check(text: String) PatternError! -[]>", "fn encode_hole<T: Printable>(value: T) -[]> String"},
     }
@@ -160,8 +160,8 @@ fn semindex_fact_status_consumer(raw: String, value: StatusValue, exact: Bool) N
         inferred: [String]{"IO", "FS.Write"},
         maximal: true,
         provenance: [EffectProvenance]{
-            EffectProvenance{effect_name: "FS.Write", call_path: [String]{"main::run", "main::save"}, spans: [SourceSpan]{SourceSpan{start: 30, end: 36}, SourceSpan{start: 4, end: 9}}},
-            EffectProvenance{effect_name: "IO", call_path: [String]{}, spans: [SourceSpan]{}},
+            {effect_name: "FS.Write", call_path: [String]{"main::run", "main::save"}, spans: [SourceSpan]{SourceSpan{start: 30, end: 36}, SourceSpan{start: 4, end: 9}}},
+            {effect_name: "IO", call_path: [String]{}, spans: [SourceSpan]{}},
         },
     }
     assert_eq(semindex_json_effect(effect_fact), `{"function":"main::run","direct":["IO"],"callees":["main::save","main::log","main::save"],"inferred":["IO","FS.Write"],"maximal":true,"provenance":[{"effect":"FS.Write","call_path":["main::run","main::save"],"spans":[{"start":30,"end":36},{"start":4,"end":9}]},{"effect":"IO","call_path":[],"spans":[]}]}`)
@@ -188,13 +188,13 @@ fn semindex_fact_status_consumer(raw: String, value: StatusValue, exact: Bool) N
         owner: "Door",
         module_path: "main",
         states: [StateNodeFact]{
-            StateNodeFact{name: "Closed", terminal: false, reachable: Val(true), span: SourceSpan{start: 20, end: 26}},
-            StateNodeFact{name: "Orphan", terminal: true, reachable: Val(false), span: SourceSpan{start: 34, end: 40}},
-            StateNodeFact{name: "Pending", terminal: true, reachable: None, span: SourceSpan{start: 42, end: 49}},
+            {name: "Closed", terminal: false, reachable: Val(true), span: SourceSpan{start: 20, end: 26}},
+            {name: "Orphan", terminal: true, reachable: Val(false), span: SourceSpan{start: 34, end: 40}},
+            {name: "Pending", terminal: true, reachable: None, span: SourceSpan{start: 42, end: 49}},
         },
         transitions: [StateTransitionFact]{
-            StateTransitionFact{operation: "close", from: None, to: "Closed"},
-            StateTransitionFact{operation: "hold", from: Val("Closed"), to: "Closed"},
+            {operation: "close", from: None, to: "Closed"},
+            {operation: "hold", from: Val("Closed"), to: "Closed"},
         },
     }
     assert_eq(semindex_json_state_graph(graph), `{"owner":"Door","module":"main","states":[{"name":"Closed","terminal":false,"reachable":true,"span":{"start":20,"end":26}},{"name":"Orphan","terminal":true,"reachable":false,"span":{"start":34,"end":40}},{"name":"Pending","terminal":true,"reachable":null,"span":{"start":42,"end":49}}],"transitions":[{"operation":"close","from":null,"to":"Closed"},{"operation":"hold","from":"Closed","to":"Closed"}]}`)
@@ -253,12 +253,12 @@ fn semindex_codec_test_parameter(name: String, default_fact: CallableDefaultFact
         }},
         failure_contract: CallableFactAvailability<FailureContract>.Checked{value: FailureContract.Explicit{success: Type.Bool, error: Type.Named{name: "ReadError"}}},
         returned_views: [ViewProvenanceFact]{ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{
-            ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+            {source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
         }, mutable: false}},
         policies: [CallablePolicy]{CallablePolicy{name: "retry", arguments: [String]{"3", "delay"}}},
         generic_parameters: CallableFactAvailability<[TypeParam]>.Checked{value: [TypeParam]{
-            TypeParam{name: "T", name_span: Span{start: 3, end: 4}, bounds: [String]{}, prep: None},
-            TypeParam{name: "U", name_span: Span{start: 6, end: 7}, bounds: [String]{"Printable"}, prep: None},
+            {name: "T", name_span: Span{start: 3, end: 4}, bounds: [String]{}, prep: None},
+            {name: "U", name_span: Span{start: 6, end: 7}, bounds: [String]{"Printable"}, prep: None},
         }},
         metadata_producer_status: MetadataProducerStatus.NotImplemented,
     }

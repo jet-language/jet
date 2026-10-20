@@ -143,16 +143,16 @@ fn comparison_record_to_json(record: ComparisonRecord) -> CanonicalJSON Comparis
     first_difference := CanonicalJSON.Null
     if record.first_difference == .Val(index) -> first_difference = CanonicalJSON.Integer("{index}")
     canonical_json_object([CanonicalJSONField]{
-        CanonicalJSONField{key: "contamination", value: comparison_optional_string_json(record.contamination)},
-        CanonicalJSONField{key: "discarded_cases", value: CanonicalJSON.Integer("{record.discarded_cases}")},
-        CanonicalJSONField{key: "first_difference", value: first_difference},
-        CanonicalJSONField{key: "reason", value: comparison_optional_string_json(record.reason)},
-        CanonicalJSONField{key: "reduced_counterexample", value: reduced},
-        CanonicalJSONField{key: "relation", value: CanonicalJSON.String(observation_relation_as_str(record.relation))},
-        CanonicalJSONField{key: "samples", value: CanonicalJSON.Array(samples)},
-        CanonicalJSONField{key: "schema_version", value: CanonicalJSON.Integer("{record.schema_version}")},
-        CanonicalJSONField{key: "status", value: CanonicalJSON.String(comparison_status_as_str(record.status))},
-        CanonicalJSONField{key: "universal_proof", value: CanonicalJSON.Bool(record.universal_proof)},
+        {key: "contamination", value: comparison_optional_string_json(record.contamination)},
+        {key: "discarded_cases", value: CanonicalJSON.Integer("{record.discarded_cases}")},
+        {key: "first_difference", value: first_difference},
+        {key: "reason", value: comparison_optional_string_json(record.reason)},
+        {key: "reduced_counterexample", value: reduced},
+        {key: "relation", value: CanonicalJSON.String(observation_relation_as_str(record.relation))},
+        {key: "samples", value: CanonicalJSON.Array(samples)},
+        {key: "schema_version", value: CanonicalJSON.Integer("{record.schema_version}")},
+        {key: "status", value: CanonicalJSON.String(comparison_status_as_str(record.status))},
+        {key: "universal_proof", value: CanonicalJSON.Bool(record.universal_proof)},
     })
 }
 
@@ -187,11 +187,11 @@ fn comparison_strings_json(values: [String]) -> CanonicalJSON Never! {
 // Rust `comparison_observation_json`.
 fn comparison_observation_json(observation: ComparisonObservation) -> CanonicalJSON ComparisonRecordError! {
     canonical_json_object([CanonicalJSONField]{
-        CanonicalJSONField{key: "cleanup", value: comparison_strings_json(observation.cleanup)},
-        CanonicalJSONField{key: "mutation", value: comparison_optional_string_json(observation.mutation)},
-        CanonicalJSONField{key: "ordered_effects", value: comparison_strings_json(observation.ordered_effects)},
-        CanonicalJSONField{key: "raw", value: CanonicalJSON.String(observation.raw)},
-        CanonicalJSONField{key: "typed_failure", value: comparison_optional_string_json(observation.typed_failure)},
+        {key: "cleanup", value: comparison_strings_json(observation.cleanup)},
+        {key: "mutation", value: comparison_optional_string_json(observation.mutation)},
+        {key: "ordered_effects", value: comparison_strings_json(observation.ordered_effects)},
+        {key: "raw", value: CanonicalJSON.String(observation.raw)},
+        {key: "typed_failure", value: comparison_optional_string_json(observation.typed_failure)},
     })
 }
 
@@ -205,12 +205,12 @@ fn comparison_identity_json(identity: ComparisonIdentity) -> CanonicalJSON Compa
     seed := CanonicalJSON.Null
     if identity.seed == .Val(number) -> seed = CanonicalJSON.Integer("{number}")
     canonical_json_object([CanonicalJSONField]{
-        CanonicalJSONField{key: "case_id", value: CanonicalJSON.String(identity.case_id)},
-        CanonicalJSONField{key: "input_id", value: CanonicalJSON.String(identity.input_id)},
-        CanonicalJSONField{key: "seed", value: seed},
-        CanonicalJSONField{key: "source", value: CanonicalJSON.String(identity.source)},
-        CanonicalJSONField{key: "target", value: CanonicalJSON.String(identity.target)},
-        CanonicalJSONField{key: "tool", value: CanonicalJSON.String(identity.tool)},
+        {key: "case_id", value: CanonicalJSON.String(identity.case_id)},
+        {key: "input_id", value: CanonicalJSON.String(identity.input_id)},
+        {key: "seed", value: seed},
+        {key: "source", value: CanonicalJSON.String(identity.source)},
+        {key: "target", value: CanonicalJSON.String(identity.target)},
+        {key: "tool", value: CanonicalJSON.String(identity.tool)},
     })
 }
 
@@ -219,11 +219,11 @@ fn comparison_sample_json(sample: ComparisonSample) -> CanonicalJSON ComparisonR
     declared_equal := CanonicalJSON.Null
     if sample.declared_equal == .Val(flag) -> declared_equal = CanonicalJSON.Bool(flag)
     canonical_json_object([CanonicalJSONField]{
-        CanonicalJSONField{key: "candidate", value: comparison_observation_json(sample.candidate)},
-        CanonicalJSONField{key: "candidate_replay", value: comparison_optional_observation_json(sample.candidate_replay)},
-        CanonicalJSONField{key: "declared_equal", value: declared_equal},
-        CanonicalJSONField{key: "identity", value: comparison_identity_json(sample.identity)},
-        CanonicalJSONField{key: "reference", value: comparison_observation_json(sample.reference)},
-        CanonicalJSONField{key: "reference_replay", value: comparison_optional_observation_json(sample.reference_replay)},
+        {key: "candidate", value: comparison_observation_json(sample.candidate)},
+        {key: "candidate_replay", value: comparison_optional_observation_json(sample.candidate_replay)},
+        {key: "declared_equal", value: declared_equal},
+        {key: "identity", value: comparison_identity_json(sample.identity)},
+        {key: "reference", value: comparison_observation_json(sample.reference)},
+        {key: "reference_replay", value: comparison_optional_observation_json(sample.reference_replay)},
     })
 }

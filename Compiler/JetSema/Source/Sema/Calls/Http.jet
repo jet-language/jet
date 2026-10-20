@@ -781,14 +781,14 @@ fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, cont
         import_ns: None,
         as_trait: None,
         fields: [ExprField]{
-            ExprField{name: "name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
-            ExprField{name: "value_type", name_span: field_span, value: sema_call_http_form_enum("WebFormValueType", value_variant, field_span)},
-            ExprField{name: "required", name_span: field_span, value: Expr.Bool{value: true, span: field_span}},
-            ExprField{name: "default", name_span: field_span, value: Expr.Absent{span: field_span}},
-            ExprField{name: "label", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
-            ExprField{name: "control", name_span: field_span, value: sema_call_http_form_enum("WebFormControl", control_variant, field_span)},
-            ExprField{name: "group", name_span: field_span, value: Expr.Absent{span: field_span}},
-            ExprField{name: "wire_name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
+            {name: "name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
+            {name: "value_type", name_span: field_span, value: sema_call_http_form_enum("WebFormValueType", value_variant, field_span)},
+            {name: "required", name_span: field_span, value: Expr.Bool{value: true, span: field_span}},
+            {name: "default", name_span: field_span, value: Expr.Absent{span: field_span}},
+            {name: "label", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
+            {name: "control", name_span: field_span, value: sema_call_http_form_enum("WebFormControl", control_variant, field_span)},
+            {name: "group", name_span: field_span, value: Expr.Absent{span: field_span}},
+            {name: "wire_name", name_span: field_span, value: sema_call_http_form_text(field.name, field_span)},
         },
         inferred: false,
         span: field_span,
@@ -942,8 +942,8 @@ fn sema_call_http_sync(record: CoreCallRecord, args: [CallArg], type_args: [Type
         &values.push(value)
     }
     params := [SemaCallParam]{
-        SemaCallParam{label: "", name: "value", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false},
-        SemaCallParam{label: "over", name: "over", zone: ParamZone.LabelOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false},
+        {label: "", name: "value", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false},
+        {label: "over", name: "over", zone: ParamZone.LabelOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false},
     }
     ownership := sema_ownership_check_call_arguments(&state, "{record.module_name}.sync", params, &updated_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaDirectSpecialCheck{handled: true, value: None}

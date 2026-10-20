@@ -73,8 +73,8 @@ fn semindex_test_callable(effects: CallableEffectsFact, failure: CallableFactAva
     assert_eq(signature.error_types(), Val([Type]{union}))
     assert_eq(signature.error_names(), Val([String]{"ReadError | ParseError"}))
     signature.policies = [CallablePolicy]{
-        CallablePolicy{name: "retry", arguments: [String]{"3", "delay"}},
-        CallablePolicy{name: "trace", arguments: [String]{}},
+        {name: "retry", arguments: [String]{"3", "delay"}},
+        {name: "trace", arguments: [String]{}},
     }
     assert_eq(signature.policy_names(), [String]{"retry(3, delay)", "trace()"})
 }
@@ -131,7 +131,7 @@ fn semindex_test_callable(effects: CallableEffectsFact, failure: CallableFactAva
 
 #Test("view_provenance_canonical_preserves_source_paths_and_access") {
     provenance := ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{
-        ViewSourcePathFact{source: ViewSourceFact.Receiver, projections: [ViewProjectionFact]{ViewProjectionFact.Field{name: "data"}, ViewProjectionFact.Index, ViewProjectionFact.Range}},
+        {source: ViewSourceFact.Receiver, projections: [ViewProjectionFact]{ViewProjectionFact.Field{name: "data"}, ViewProjectionFact.Index, ViewProjectionFact.Range}},
     }, mutable: true}
     assert_eq(provenance.canonical(), "slot:$;receiver;access:write;path:field:data/index/range")
     provenance.sources = [ViewSourcePathFact]{ViewSourcePathFact{source: ViewSourceFact.Static{module_path: "mód", name: "values"}, projections: [ViewProjectionFact]{}}}

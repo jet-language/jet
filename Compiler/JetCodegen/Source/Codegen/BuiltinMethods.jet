@@ -950,8 +950,8 @@ fn jet_codegen_lower_builtin_option_zip(builder: &JetCodegenBuilder, program: Je
     right_raw := jet_codegen_emit_value(&builder, program, expression.span, right_source_type, MIROperation.OptionValue{subject: right})
     right_value := jet_codegen_builtin_option_zip_value(&builder, program, expression.span, right_raw, right_source_type, fields[1].ty)
     tuple_fields := [MIRFieldValue]{
-        MIRFieldValue{field: jet_codegen_host_field_id(builder, program, tuple_type, fields[0].name), value: left_value},
-        MIRFieldValue{field: jet_codegen_host_field_id(builder, program, tuple_type, fields[1].name), value: right_value},
+        {field: jet_codegen_host_field_id(builder, program, tuple_type, fields[0].name), value: left_value},
+        {field: jet_codegen_host_field_id(builder, program, tuple_type, fields[1].name), value: right_value},
     }
     tuple := jet_codegen_emit_value(&builder, program, expression.span, tuple_type, MIROperation.Tuple{type_id: tuple_owner, fields: tuple_fields})
     present := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Present{value: tuple})

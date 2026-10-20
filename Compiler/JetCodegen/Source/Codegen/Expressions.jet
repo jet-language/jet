@@ -1739,9 +1739,9 @@ fn jet_codegen_lower_range_value(builder: &JetCodegenBuilder, program: JetCodege
     lowered_end := jet_codegen_lower_expr(&builder, program, end)
     lowered_exclusive := jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: exclusive}})
     fields := [MIRFieldValue]{
-        MIRFieldValue{field: jet_codegen_range_record_field_id("start"), value: lowered_start},
-        MIRFieldValue{field: jet_codegen_range_record_field_id("end"), value: lowered_end},
-        MIRFieldValue{field: jet_codegen_range_record_field_id("exclusive"), value: lowered_exclusive},
+        {field: jet_codegen_range_record_field_id("start"), value: lowered_start},
+        {field: jet_codegen_range_record_field_id("end"), value: lowered_end},
+        {field: jet_codegen_range_record_field_id("exclusive"), value: lowered_exclusive},
     }
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StructLiteral{type_id: mir_type_id(JET_CODEGEN_RANGE_RECORD), fields: fields, extra: None, boxed_fields: [MIRFieldID]{}}})
 }
@@ -2141,8 +2141,8 @@ fn jet_codegen_lower_compare_chain(builder: &JetCodegenBuilder, program: JetCode
     false_predecessor := builder.current
     jet_codegen_switch_block(&builder, program, join_block)
     incoming := [MIRPhiIncoming]{
-        MIRPhiIncoming{block: true_predecessor, value: true_value},
-        MIRPhiIncoming{block: false_predecessor, value: false_value},
+        {block: true_predecessor, value: true_value},
+        {block: false_predecessor, value: false_value},
     }
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
@@ -6042,8 +6042,8 @@ fn jet_codegen_lower_guarded_pattern_range(builder: &JetCodegenBuilder, program:
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
     jet_codegen_switch_block(&builder, program, join_block)
     incoming := [MIRPhiIncoming]{
-        MIRPhiIncoming{block: matched_predecessor, value: range_test},
-        MIRPhiIncoming{block: missed_predecessor, value: false_value},
+        {block: matched_predecessor, value: range_test},
+        {block: missed_predecessor, value: false_value},
     }
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: incoming})
 }
@@ -6108,8 +6108,8 @@ fn jet_codegen_lower_guarded_nested_pattern(builder: &JetCodegenBuilder, program
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
     jet_codegen_switch_block(&builder, program, join_block)
     incoming := [MIRPhiIncoming]{
-        MIRPhiIncoming{block: matched_predecessor, value: nested_test},
-        MIRPhiIncoming{block: missed_predecessor, value: false_value},
+        {block: matched_predecessor, value: nested_test},
+        {block: missed_predecessor, value: false_value},
     }
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: incoming})
 }
@@ -7569,8 +7569,8 @@ fn jet_codegen_lower_pattern_shape_condition(builder: &JetCodegenBuilder, progra
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
     jet_codegen_switch_block(&builder, program, join_block)
     incoming := [MIRPhiIncoming]{
-        MIRPhiIncoming{block: unmatched_predecessor, value: test.value},
-        MIRPhiIncoming{block: matched_predecessor, value: test.value},
+        {block: unmatched_predecessor, value: test.value},
+        {block: matched_predecessor, value: test.value},
     }
     jet_codegen_emit_value(&builder, program, subject.span, Type.Bool, MIROperation.Phi{incoming: incoming})
 }

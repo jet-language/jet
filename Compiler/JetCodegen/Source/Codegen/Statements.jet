@@ -966,8 +966,8 @@ fn jet_codegen_for_in_item_type(collection: TExpr, method_kind: TForInMethod?) -
     if collection.ty == {
         .List(elem) | .FixedList(elem, _) -> elem
         .Map(key, _, value) -> Type.Tuple{fields: [TypeTupleField]{
-            TypeTupleField{name: "key", ty: key},
-            TypeTupleField{name: "value", ty: value},
+            {name: "key", ty: key},
+            {name: "value", ty: value},
         }}
         .Apply(name, args) -> if (name == "View" || name == "ViewMut" || name == "ComputeViewMut") && args.len() == 1 -> args[0] else -> collection.ty
         else -> collection.ty
@@ -1744,8 +1744,8 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
         box_as_trait: None,
     }
     call_args := [TCallArg]{
-        TCallArg{value: index, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(index.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
-        TCallArg{value: value, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
+        {value: index, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(index.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
+        {value: value, template_items: [SymbolID]{}, borrow: !jet_codegen_is_scalar_type(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false},
     }
     lowered_call_args := if {
         direct_target != None -> {

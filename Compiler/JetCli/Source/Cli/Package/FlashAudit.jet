@@ -354,17 +354,17 @@ fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJS
     // of an element, E0225) and the new `CanonicalJSON.String` value owns its own.
     loop value in facts.config -> &config.push(CanonicalJSON.String(value.copy()))
     CanonicalJSON.Object([CanonicalJSONField]{
-        CanonicalJSONField{key: "adapter", value: CanonicalJSON.String(jet_target_programmer_adapter_name(facts.adapter))},
-        CanonicalJSONField{key: "chip", value: jet_cli_flash_optional_json(facts.chip)},
-        CanonicalJSONField{key: "config", value: CanonicalJSON.Array(config)},
-        CanonicalJSONField{key: "cpu", value: jet_cli_flash_optional_json(facts.cpu)},
+        {key: "adapter", value: CanonicalJSON.String(jet_target_programmer_adapter_name(facts.adapter))},
+        {key: "chip", value: jet_cli_flash_optional_json(facts.chip)},
+        {key: "config", value: CanonicalJSON.Array(config)},
+        {key: "cpu", value: jet_cli_flash_optional_json(facts.cpu)},
         // copy: `facts.executable` stays with the caller (`facts` is a read parameter: no move out
         // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
-        CanonicalJSONField{key: "executable", value: CanonicalJSON.String(facts.executable.copy())},
-        CanonicalJSONField{key: "interface", value: jet_cli_flash_optional_json(facts.interface)},
-        CanonicalJSONField{key: "machine", value: jet_cli_flash_optional_json(facts.machine)},
-        CanonicalJSONField{key: "reset", value: CanonicalJSON.Bool(facts.reset)},
-        CanonicalJSONField{key: "speed_khz", value: if facts.speed_khz == .Val(speed) -> CanonicalJSON.Integer("{speed}") else -> CanonicalJSON.Null},
+        {key: "executable", value: CanonicalJSON.String(facts.executable.copy())},
+        {key: "interface", value: jet_cli_flash_optional_json(facts.interface)},
+        {key: "machine", value: jet_cli_flash_optional_json(facts.machine)},
+        {key: "reset", value: CanonicalJSON.Bool(facts.reset)},
+        {key: "speed_khz", value: if facts.speed_khz == .Val(speed) -> CanonicalJSON.Integer("{speed}") else -> CanonicalJSON.Null},
     })
 }
 // copy: `text` is a payload view of `value` (owner: the caller, a read parameter: no move out of

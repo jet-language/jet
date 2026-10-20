@@ -269,16 +269,16 @@ fn target_test_provider(name: String, hash: String) -> MIRProviderContract Never
     empty :: MIRTargetRegisterFact{name: "", offset: 18446744073709551615, width: .U64, access: .ReadWrite, volatile: true}
     outside :: MIRTargetRegisterFact{name: "", offset: 0, width: .U32, access: .ReadWrite, volatile: true}
     hardware.register_blocks = [MIRTargetRegisterBlockFact]{
-        MIRTargetRegisterBlockFact{name: "", base: 18446744073709551615, size: MIRByteSize{bytes: 1}, registers: [MIRTargetRegisterFact]{empty, outside}},
-        MIRTargetRegisterBlockFact{name: "", base: 0, size: MIRByteSize{bytes: 0}, registers: [MIRTargetRegisterFact]{}},
+        {name: "", base: 18446744073709551615, size: MIRByteSize{bytes: 1}, registers: [MIRTargetRegisterFact]{empty, outside}},
+        {name: "", base: 0, size: MIRByteSize{bytes: 0}, registers: [MIRTargetRegisterFact]{}},
     }
     hardware.interrupts = [MIRTargetInterruptFact]{
-        MIRTargetInterruptFact{name: "", vector: 1, forbidden_effects: [String]{"bogus", "FS.Read"}, bounded: true},
-        MIRTargetInterruptFact{name: "", vector: 1, forbidden_effects: [String]{}, bounded: false},
+        {name: "", vector: 1, forbidden_effects: [String]{"bogus", "FS.Read"}, bounded: true},
+        {name: "", vector: 1, forbidden_effects: [String]{}, bounded: false},
     }
     hardware.dma_channels = [MIRTargetDMAChannelFact]{
-        MIRTargetDMAChannelFact{name: "", channel: 1, transfer_width: .U8, ownership: .Borrowed, max_transfer_bytes: Val(0)},
-        MIRTargetDMAChannelFact{name: "", channel: 1, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None},
+        {name: "", channel: 1, transfer_width: .U8, ownership: .Borrowed, max_transfer_bytes: Val(0)},
+        {name: "", channel: 1, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None},
     }
     errors :: jet_target_hardware_validate(hardware, [MIRMemoryRegion]{})
     assert_eq(errors, [MIRTargetMachineError]{
@@ -353,7 +353,7 @@ fn target_test_provider(name: String, hash: String) -> MIRProviderContract Never
     assert(jet_target_hardware_validate(hardware, [MIRMemoryRegion]{}).is_empty())
     assert(!jet_target_provider_valid(target_test_provider("provider", "sha256:a b")))
     hardware.interrupts = [MIRTargetInterruptFact]{
-        MIRTargetInterruptFact{name: "IRQ", vector: 1, forbidden_effects: [String]{"z-invalid", "a-invalid", "z-invalid"}, bounded: true},
+        {name: "IRQ", vector: 1, forbidden_effects: [String]{"z-invalid", "a-invalid", "z-invalid"}, bounded: true},
     }
     assert_eq(jet_target_hardware_validate(hardware, [MIRMemoryRegion]{}), [MIRTargetMachineError]{
         .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "a-invalid"},

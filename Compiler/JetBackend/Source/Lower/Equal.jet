@@ -135,8 +135,8 @@ fn lower_helper_equal(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFun
         lower_equal_sequence(p, &m, &f, left, right, lower_list_stride(p, elem), [LowerMember]{LowerMember{id: mir_field_id("element"), name: "element", offset: 0, ty: elem, boxed: false}}, differ)
     } else if lower_map_shape(p, ty) == .Val(shape) {
         members :: [LowerMember]{
-            LowerMember{id: mir_field_id("key"), name: "key", offset: shape.key_offset, ty: shape.key, boxed: false},
-            LowerMember{id: mir_field_id("value"), name: "value", offset: shape.value_offset, ty: shape.value, boxed: false},
+            {id: mir_field_id("key"), name: "key", offset: shape.key_offset, ty: shape.key, boxed: false},
+            {id: mir_field_id("value"), name: "value", offset: shape.value_offset, ty: shape.value, boxed: false},
         }
         lower_equal_sequence(p, &m, &f, left, right, shape.stride, members, differ)
     } else if lower_inline_type(p, ty) == .Val(aggregate) {

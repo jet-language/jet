@@ -102,10 +102,10 @@ fn jet_cli_receipt_diff_projection(diffs: [JetCLIReceiptFieldDiff]) -> Canonical
     values := [CanonicalJSON]{}
     loop diff in diffs {
         fields :: [CanonicalJSONField]{
-            CanonicalJSONField{key: "after", value: diff.after ?? CanonicalJSON.Null},
-            CanonicalJSONField{key: "before", value: diff.before ?? CanonicalJSON.Null},
-            CanonicalJSONField{key: "field", value: CanonicalJSON.String(diff.field)},
-            CanonicalJSONField{key: "section", value: CanonicalJSON.String(diff.section)},
+            {key: "after", value: diff.after ?? CanonicalJSON.Null},
+            {key: "before", value: diff.before ?? CanonicalJSON.Null},
+            {key: "field", value: CanonicalJSON.String(diff.field)},
+            {key: "section", value: CanonicalJSON.String(diff.section)},
         }
         &values.push(canonical_json_object(fields) ?? panic("unique field diff keys"))
     }

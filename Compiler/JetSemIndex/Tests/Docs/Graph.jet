@@ -128,27 +128,27 @@ fn doc_test_retained_item(module_path: String, name: String, kind: String, start
     assert_eq(items[6].summary, "other module")
     location :: doc_source_for(doc_test_os_path("/project"), doc_test_os_path("/project/main.jet"), "main", "", Span{start: 0, end: 0})
     modules := [DocModule]{
-        DocModule{name: "z", path: "a.jet", public: false, summary: "", source: location},
-        DocModule{name: "a", path: "z.jet", public: true, summary: "", source: location},
-        DocModule{name: "a", path: "a.jet", public: true, summary: "", source: location},
+        {name: "z", path: "a.jet", public: false, summary: "", source: location},
+        {name: "a", path: "z.jet", public: true, summary: "", source: location},
+        {name: "a", path: "a.jet", public: true, summary: "", source: location},
     }
     doc_sort_modules(&modules)
     assert_eq(modules[0].name, "a")
     assert_eq(modules[1].name, "z")
     assert_eq(modules[2].path, "z.jet")
     impls := [DocImpl]{
-        DocImpl{kind: "trait_impl", type_name: "A", trait_name: Val("Z"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
-        DocImpl{kind: "inherent_impl", type_name: "A", trait_name: None, module_path: "a.jet", public: true, methods: [String]{}, source: location},
-        DocImpl{kind: "trait_impl", type_name: "A", trait_name: Val("B"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
+        {kind: "trait_impl", type_name: "A", trait_name: Val("Z"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
+        {kind: "inherent_impl", type_name: "A", trait_name: None, module_path: "a.jet", public: true, methods: [String]{}, source: location},
+        {kind: "trait_impl", type_name: "A", trait_name: Val("B"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
     }
     doc_sort_impls(&impls)
     assert_eq(impls[0].trait_name, None)
     assert_eq(impls[1].trait_name, Val("B"))
     assert_eq(impls[2].trait_name, Val("Z"))
     tests := [DocTest]{
-        DocTest{module_path: "z.jet", line: 1, setup: [String]{"other"}, expectations: [DocExpectation]{}, source: location},
-        DocTest{module_path: "a.jet", line: 8, setup: [String]{"later"}, expectations: [DocExpectation]{}, source: location},
-        DocTest{module_path: "a.jet", line: 2, setup: [String]{"first"}, expectations: [DocExpectation]{}, source: location},
+        {module_path: "z.jet", line: 1, setup: [String]{"other"}, expectations: [DocExpectation]{}, source: location},
+        {module_path: "a.jet", line: 8, setup: [String]{"later"}, expectations: [DocExpectation]{}, source: location},
+        {module_path: "a.jet", line: 2, setup: [String]{"first"}, expectations: [DocExpectation]{}, source: location},
     }
     doc_sort_tests(&tests)
     assert_eq(tests[0].setup[0], "first")

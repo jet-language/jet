@@ -99,14 +99,14 @@ struct CacheProvenance {
 
     fn validate(self) TrustRootError! {
         fields :: [TrustProvenanceField]{
-            TrustProvenanceField{name: "reference", value: self.reference},
-            TrustProvenanceField{name: "source", value: self.source},
-            TrustProvenanceField{name: "builder", value: self.builder},
-            TrustProvenanceField{name: "action", value: self.action},
-            TrustProvenanceField{name: "output", value: self.output},
-            TrustProvenanceField{name: "platform", value: self.platform},
-            TrustProvenanceField{name: "sandbox", value: self.sandbox},
-            TrustProvenanceField{name: "policy", value: self.policy}
+            {name: "reference", value: self.reference},
+            {name: "source", value: self.source},
+            {name: "builder", value: self.builder},
+            {name: "action", value: self.action},
+            {name: "output", value: self.output},
+            {name: "platform", value: self.platform},
+            {name: "sandbox", value: self.sandbox},
+            {name: "policy", value: self.policy}
         }
         loop field in fields {
             if trust_blank_or_multiline(field.value) -> return Err(TrustRootError.CacheReceiptInvalid{detail: "cache provenance {field.name} is empty or contains a newline"})

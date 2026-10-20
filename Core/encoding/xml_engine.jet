@@ -1887,11 +1887,11 @@ impl Limits {
     // Rust: crates/jet-foundation/src/XmlPull.rs:4800
     fn validate(self: Limits) XMLFault! {
         checks :: [LimitCheck]{
-            LimitCheck{name: "max_depth", value: self.max_depth, minimum: 1, maximum: 4096}, LimitCheck{name: "max_nodes", value: self.max_nodes, minimum: 1, maximum: 1_000_000_000},
-            LimitCheck{name: "max_attributes_per_element", value: self.max_attributes_per_element, minimum: 0, maximum: 1_000_000},
-            LimitCheck{name: "max_name_bytes", value: self.max_name_bytes, minimum: 1, maximum: 1_048_576}, LimitCheck{name: "max_text_bytes", value: self.max_text_bytes, minimum: 0, maximum: 1_073_741_824},
-            LimitCheck{name: "max_entity_declarations", value: self.max_entity_declarations, minimum: 0, maximum: 1_000_000}, LimitCheck{name: "max_entity_depth", value: self.max_entity_depth, minimum: 0, maximum: 256},
-            LimitCheck{name: "max_entity_replacement_bytes", value: self.max_entity_replacement_bytes, minimum: 0, maximum: 1_073_741_824}
+            {name: "max_depth", value: self.max_depth, minimum: 1, maximum: 4096}, LimitCheck{name: "max_nodes", value: self.max_nodes, minimum: 1, maximum: 1_000_000_000},
+            {name: "max_attributes_per_element", value: self.max_attributes_per_element, minimum: 0, maximum: 1_000_000},
+            {name: "max_name_bytes", value: self.max_name_bytes, minimum: 1, maximum: 1_048_576}, LimitCheck{name: "max_text_bytes", value: self.max_text_bytes, minimum: 0, maximum: 1_073_741_824},
+            {name: "max_entity_declarations", value: self.max_entity_declarations, minimum: 0, maximum: 1_000_000}, LimitCheck{name: "max_entity_depth", value: self.max_entity_depth, minimum: 0, maximum: 256},
+            {name: "max_entity_replacement_bytes", value: self.max_entity_replacement_bytes, minimum: 0, maximum: 1_073_741_824}
         }
         loop check in checks {
             if check.value < check.minimum || check.value > check.maximum { return Err(XMLFault.limit("XML limit `{check.name}` must be between {check.minimum} and {check.maximum}")) }

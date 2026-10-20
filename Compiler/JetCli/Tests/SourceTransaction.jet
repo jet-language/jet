@@ -16,8 +16,8 @@ fn run() {
     cli_files.write("{root}/first.jet", "first") ?? panic("first source")
     cli_files.write("{root}/second.jet", "second") ?? panic("second source")
     changes :: [JetCLISourceChange]{
-        JetCLISourceChange{path: "{root}/first.jet", before: "first".bytes(), after: "updated first".bytes()},
-        JetCLISourceChange{path: "{root}/second.jet", before: "second".bytes(), after: "updated second".bytes()},
+        {path: "{root}/first.jet", before: "first".bytes(), after: "updated first".bytes()},
+        {path: "{root}/second.jet", before: "second".bytes(), after: "updated second".bytes()},
     }
     log :: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{})
     path :: jet_cli_commit_source_changes(root, changes, "test.log.json", log) ?? panic("commit")

@@ -273,10 +273,10 @@ struct JetNotebook {
         loop dependency in self.cells[index].depends_on -> notebook_document_cache_walk(self, dependency, &seen, &nodes)
         &nodes.push(notebook_document_cache_node(self.cells[index]))
         material :: canonical_json_object([CanonicalJSONField]{
-            CanonicalJSONField{key: "cache_policy", value: .String(NOTEBOOK_OUTPUT_CACHE_POLICY)},
-            CanonicalJSONField{key: "environment_hash", value: .String(self.environment_hash)},
-            CanonicalJSONField{key: "trust_policy", value: .String(NOTEBOOK_TRUST_POLICY_VERSION)},
-            CanonicalJSONField{key: "cells", value: .Array(nodes)},
+            {key: "cache_policy", value: .String(NOTEBOOK_OUTPUT_CACHE_POLICY)},
+            {key: "environment_hash", value: .String(self.environment_hash)},
+            {key: "trust_policy", value: .String(NOTEBOOK_TRUST_POLICY_VERSION)},
+            {key: "cells", value: .Array(nodes)},
         }) ?? panic("closure identity has unique keys")
         Val(canonical_json_sha256(material))
     }
@@ -353,9 +353,9 @@ fn notebook_document_cache_node(cell: NotebookCell) -> CanonicalJSON Never! {
     dependencies := [CanonicalJSON]{}
     loop dependency in cell.depends_on -> &dependencies.push(.String(dependency))
     canonical_json_object([CanonicalJSONField]{
-        CanonicalJSONField{key: "id", value: .String(cell.id)},
-        CanonicalJSONField{key: "source", value: .String(cell.source)},
-        CanonicalJSONField{key: "depends_on", value: .Array(dependencies)},
+        {key: "id", value: .String(cell.id)},
+        {key: "source", value: .String(cell.source)},
+        {key: "depends_on", value: .Array(dependencies)},
     }) ?? panic("closure cell identity has unique keys")
 }
 fn notebook_document_append(material: &[U8], text: String) Never! { loop byte in text.bytes() -> &material.push(byte) }

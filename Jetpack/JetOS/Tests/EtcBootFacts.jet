@@ -47,10 +47,10 @@ fn jetos_identity_test_system(options: [OptionPlan]) -> SystemPlan Never! {
     defaults :: jetos_boot_profile(jetos_identity_test_system([OptionPlan]{}))
     assert_eq(jetos_render_boot_facts_parts(defaults, "null"), "{{\"loader\":\"Limine\",\"kernel\":\"CachyOS\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
     system :: jetos_identity_test_system([OptionPlan]{
-        OptionPlan{key: "boot.loader", value: ".Grub"},
-        OptionPlan{key: "boot.kernel", value: "\"/kernel\""},
-        OptionPlan{key: "init.path", value: "\"/init\""},
-        OptionPlan{key: "boot.initrd.modules", value: "[\"zfs\", \"nvme\"]"}
+        {key: "boot.loader", value: ".Grub"},
+        {key: "boot.kernel", value: "\"/kernel\""},
+        {key: "init.path", value: "\"/init\""},
+        {key: "boot.initrd.modules", value: "[\"zfs\", \"nvme\"]"}
     })
     assert_eq(jetos_render_boot_facts_parts(jetos_boot_profile(system), "null"), "{{\"loader\":\"Grub\",\"kernel\":\"/kernel\",\"init\":\"/init\",\"initrd_modules\":[\"zfs\",\"nvme\"],\"kernel_package\":null}}")
 }
@@ -79,19 +79,19 @@ fn jetos_identity_test_system(options: [OptionPlan]) -> SystemPlan Never! {
 #Test("JetOS native etc option aliases sorted accounts and swap policies") {
     root :: files.tmpdir("jetos-identity-users-") ?? panic("identity scratch")
     system :: jetos_identity_test_system([OptionPlan]{
-        OptionPlan{key: "network.hostname", value: "\"fallback-host\""},
-        OptionPlan{key: "network.hostName", value: "\"preferred-host\""},
-        OptionPlan{key: "filesystem.timezone", value: "\"UTC\""},
-        OptionPlan{key: "filesystem.root.device", value: "\"/dev/root\""},
-        OptionPlan{key: "filesystem.root.type", value: ".BTRFS"},
-        OptionPlan{key: "filesystem.swap.z.device", value: "\"/dev/swap\""},
-        OptionPlan{key: "filesystem.swap.z.priority", value: "7"},
-        OptionPlan{key: "filesystem.swap.a.enabled", value: "true"},
-        OptionPlan{key: "users.zoe.enable", value: "true"},
-        OptionPlan{key: "users.ada.home", value: "\"/srv/ada\""},
-        OptionPlan{key: "users.ada.shell", value: "\"/bin/bash\""},
-        OptionPlan{key: "groups.wheel.members", value: "[\"ada\", \"zoe\"]"},
-        OptionPlan{key: "groups.empty.enable", value: "true"}
+        {key: "network.hostname", value: "\"fallback-host\""},
+        {key: "network.hostName", value: "\"preferred-host\""},
+        {key: "filesystem.timezone", value: "\"UTC\""},
+        {key: "filesystem.root.device", value: "\"/dev/root\""},
+        {key: "filesystem.root.type", value: ".BTRFS"},
+        {key: "filesystem.swap.z.device", value: "\"/dev/swap\""},
+        {key: "filesystem.swap.z.priority", value: "7"},
+        {key: "filesystem.swap.a.enabled", value: "true"},
+        {key: "users.zoe.enable", value: "true"},
+        {key: "users.ada.home", value: "\"/srv/ada\""},
+        {key: "users.ada.shell", value: "\"/bin/bash\""},
+        {key: "groups.wheel.members", value: "[\"ada\", \"zoe\"]"},
+        {key: "groups.empty.enable", value: "true"}
     })
     jetos_write_etc_tree(root, system) ?? panic("write etc")
     assert_eq(files.read(files.join(root, "etc/hostname")) ?? panic("hostname"), "preferred-host\n")

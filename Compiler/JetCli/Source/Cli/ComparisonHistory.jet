@@ -32,12 +32,12 @@ fn jet_cli_comparison_evidence(run: JetCLIComparisonRun, target: String, artifac
     evidence := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, jet_cli_comparison_evidence_outcome(record.status), count, source_ref, build, revision)
     binding :: run.binding
     evidence.attachments = [EvidenceAttachment]{
-        EvidenceAttachment{name: "boundary", value: binding.boundary_digest},
-        EvidenceAttachment{name: "source-identity", value: binding.source_identity},
-        EvidenceAttachment{name: "replacement-identity", value: binding.replacement_identity},
-        EvidenceAttachment{name: "tool-identity", value: binding.tool_identity},
-        EvidenceAttachment{name: "target-identity", value: binding.target_identity},
-        EvidenceAttachment{name: "coverage", value: binding.coverage_digest},
+        {name: "boundary", value: binding.boundary_digest},
+        {name: "source-identity", value: binding.source_identity},
+        {name: "replacement-identity", value: binding.replacement_identity},
+        {name: "tool-identity", value: binding.tool_identity},
+        {name: "target-identity", value: binding.target_identity},
+        {name: "coverage", value: binding.coverage_digest},
     }
     loop assumption in binding.assumptions -> &evidence.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
     &evidence.attachments.push(EvidenceAttachment{name: "comparison-artifact", value: artifact_id})

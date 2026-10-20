@@ -275,11 +275,11 @@ fn fx_sentry_scopes_check() -> Bool Never! {
     run := fx_function("run", b, fx_unit())
     run.unsafe_gate = Val(MIRUnsafeGate{file: "fixture.jet", line: 7, reason: "function gate", enabled: true, fenced: false})
     run.scopes = [MIRScope]{
-        MIRScope{id: unsafe_scope, kind: MIRScopeKind.Unsafe, span: fx_span(), name: Val("fenced"), deadline: None, facts: [MIRScopeFact]{
+        {id: unsafe_scope, kind: MIRScopeKind.Unsafe, span: fx_span(), name: Val("fenced"), deadline: None, facts: [MIRScopeFact]{
             MIRScopeFact{key: "sentry_enabled", value: "false"},
             MIRScopeFact{key: "sentry_fenced", value: "true"},
         }},
-        MIRScope{id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("disabled"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "false"}}},
+        {id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("disabled"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "false"}}},
     }
     program :: fx_program([MIRFunction]{run}, [MIRTypeDef]{})
     lowered :: lir_lower_callables(program, [MIRFunctionID]{run.id})
@@ -328,8 +328,8 @@ fn fx_deadline_scopes_check() -> Bool Never! {
     fx_block(&b, 2, MIRTerminator.Stopped)
     run := fx_function("run", b, fx_unit())
     run.scopes = [MIRScope]{
-        MIRScope{id: outer, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
-        MIRScope{id: inner, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
+        {id: outer, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
+        {id: inner, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
     }
     lowered :: lir_lower_callables(fx_program([MIRFunction]{run}, [MIRTypeDef]{}), [MIRFunctionID]{run.id})
     if lowered.issues.len() != 0 {

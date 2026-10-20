@@ -61,10 +61,10 @@ fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: S
     plan :: build_replay_plan(turns, 4, Val("")) ?? panic("plan")
     assert_eq(plan.from_id, 4)
     assert_eq(plan.steps, [ReplayStep]{
-        ReplayStep{turn_id: 9, input: "later but recorded first", kind: StepKind.ConfirmEffect},
-        ReplayStep{turn_id: 4, input: "", kind: StepKind.Auto},
-        ReplayStep{turn_id: 4, input: "", kind: StepKind.ConfirmEffect},
-        ReplayStep{turn_id: 6, input: "retained", kind: StepKind.Auto},
+        {turn_id: 9, input: "later but recorded first", kind: StepKind.ConfirmEffect},
+        {turn_id: 4, input: "", kind: StepKind.Auto},
+        {turn_id: 4, input: "", kind: StepKind.ConfirmEffect},
+        {turn_id: 6, input: "retained", kind: StepKind.Auto},
     })
     // Building and inspecting the plan must not change session facts.
     assert_eq(turns, original)

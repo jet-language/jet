@@ -98,8 +98,8 @@ fn semindex_package_status_consumer(raw: String, value: StatusValue, exact: Bool
         PackageGrant{package: "a", rights: [String]{}},
         PackageGrant{package: "z", rights: [String]{"FS"}},
     }, trust: None, providers: [ProviderAuthority]{
-        ProviderAuthority{provider: "remote", registry: "https://host/raw", allow: [String]{"b", "a", "b"}, deny: [String]{}},
-        ProviderAuthority{provider: "remote", registry: "other", allow: [String]{}, deny: [String]{"x"}},
+        {provider: "remote", registry: "https://host/raw", allow: [String]{"b", "a", "b"}, deny: [String]{}},
+        {provider: "remote", registry: "other", allow: [String]{}, deny: [String]{"x"}},
     }}
     assert_eq(semindex_json_package_authority(authority), `{"holds":{"allow":null,"deny":[]},"grants":{"z":["IO","IO"],"a":[],"z":["FS"]},"trust":null,"providers":{"remote":{"registry":"https://host/raw","allow":["b","a","b"],"deny":[]},"remote":{"registry":"other","allow":[],"deny":["x"]}}}`)
     trust :: TrustPolicy{default: None, ci_prompt: Val(TrustDecision.Deny), services: [ServiceTrust]{ServiceTrust{service: "z", decision: TrustDecision.Prompt}, ServiceTrust{service: "z", decision: TrustDecision.Allow}}, require: None}
@@ -437,8 +437,8 @@ fn run() {}
     assert(rendered.contains(`"payload":[-0,null,[]],"provenance":["first","first","last"]`))
     assert(rendered.contains(`"inline_configs":{"empty":{"name":null,"version":"","source":null`))
     facts.authority.providers = [ProviderAuthority]{
-        ProviderAuthority{provider: "same", registry: "one", allow: [String]{}, deny: [String]{}},
-        ProviderAuthority{provider: "same", registry: "two", allow: [String]{}, deny: [String]{}},
+        {provider: "same", registry: "one", allow: [String]{}, deny: [String]{}},
+        {provider: "same", registry: "two", allow: [String]{}, deny: [String]{}},
     }
     if package_facts_status_value(facts) == {
         .Err(error) -> assert_eq(error.message, "duplicate status field `same`")

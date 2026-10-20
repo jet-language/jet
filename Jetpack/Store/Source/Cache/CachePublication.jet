@@ -1004,9 +1004,9 @@ fn store_cache_publish_endpoint(endpoint: CacheEndpoint, info: NarInfo, nar: [U8
     receipt_text :: store_cache_encode_receipt(receipt)
     receipt_key :: store_cache_receipt_key(store_name)
     store_cache_publish_remote_atomic(endpoint, [CacheRemoteObject]{
-        CacheRemoteObject{key: info.url, bytes: nar},
-        CacheRemoteObject{key: info_key, bytes: signed_text.bytes()},
-        CacheRemoteObject{key: receipt_key, bytes: receipt_text.bytes()},
+        {key: info.url, bytes: nar},
+        {key: info_key, bytes: signed_text.bytes()},
+        {key: receipt_key, bytes: receipt_text.bytes()},
     })
     Ok(CacheTransferProof{signed_fingerprint: store_cache_fingerprint_for_info(signed), witness: Val(receipt.witness), receipt_version: Val(receipt.version), receipt_expires_unix: Val(receipt.expires_unix)})
 }

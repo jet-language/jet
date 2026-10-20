@@ -31,10 +31,10 @@
 }
 #Test("semindex_expand_objects_sort_keys_stably_without_losing_duplicate_values") {
     value :: ExpandValue.Object{entries: [ExpandObjectEntry]{
-        ExpandObjectEntry{key: "z", value: ExpandValue.String{value: "last"}},
-        ExpandObjectEntry{key: "a", value: ExpandValue.Number{value: 1}},
-        ExpandObjectEntry{key: "z", value: ExpandValue.Null},
-        ExpandObjectEntry{key: "a", value: ExpandValue.Array{values: [ExpandValue]{ExpandValue.Number{value: 3}, ExpandValue.Number{value: 2}, ExpandValue.Number{value: 3}}}},
+        {key: "z", value: ExpandValue.String{value: "last"}},
+        {key: "a", value: ExpandValue.Number{value: 1}},
+        {key: "z", value: ExpandValue.Null},
+        {key: "a", value: ExpandValue.Array{values: [ExpandValue]{ExpandValue.Number{value: 3}, ExpandValue.Number{value: 2}, ExpandValue.Number{value: 3}}}},
     }}
     assert_eq(semindex_json_expand_value(value), `{"a":1,"a":[3,2,3],"z":"last","z":null}`)
     if value == .Object(entries) {
@@ -198,9 +198,9 @@ fn semindex_expanded_status_boundary(index: SemIndex, projection: ExpandProjecti
 // CP-REPORT-STATUS-API public insert/constructor/encoder reaches this lane.
 #Test("semindex_expand_typed_tree_refuses_sorted_duplicates_without_collapsing_values") {
     duplicate :: ExpandValue.Object{entries: [ExpandObjectEntry]{
-        ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: 1}},
-        ExpandObjectEntry{key: "a", value: ExpandValue.Null},
-        ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: 2}},
+        {key: "z", value: ExpandValue.Number{value: 1}},
+        {key: "a", value: ExpandValue.Null},
+        {key: "z", value: ExpandValue.Number{value: 2}},
     }}
     if semindex_status_expand_value(duplicate) == {
         .Ok(_) -> { panic("duplicate expand key must be refused by canonical StatusFields") }
@@ -216,8 +216,8 @@ fn semindex_expanded_status_boundary(index: SemIndex, projection: ExpandProjecti
     projection :: ExpandProjection{selection: "value", lenses: [ExpandLens]{
         ExpandLens{name: "facts", summary: "", facts: [ExpandValue]{
             ExpandValue.Object{entries: [ExpandObjectEntry]{
-                ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: -42}},
-                ExpandObjectEntry{key: "a", value: ExpandValue.Array{values: [ExpandValue]{ExpandValue.Null, ExpandValue.String{value: ""}, ExpandValue.Bool{value: false}}}},
+                {key: "z", value: ExpandValue.Number{value: -42}},
+                {key: "a", value: ExpandValue.Array{values: [ExpandValue]{ExpandValue.Null, ExpandValue.String{value: ""}, ExpandValue.Bool{value: false}}}},
             }},
         }},
     }}

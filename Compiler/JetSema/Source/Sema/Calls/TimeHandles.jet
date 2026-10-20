@@ -244,7 +244,7 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
         &values.push(count)
     }
     ownership_params := [SemaCallParam]{
-        SemaCallParam{label: "items", name: "items", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: if method == "shuffle" -> AccessConvention.Write else -> AccessConvention.Read, ty: Val(Type.List{element: element}), variadic: false},
+        {label: "items", name: "items", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: if method == "shuffle" -> AccessConvention.Write else -> AccessConvention.Read, ty: Val(Type.List{element: element}), variadic: false},
     }
     if method == "weighted_pick" -> &ownership_params.push(SemaCallParam{label: "weights", name: "weights", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.List{element: Type.Float}), variadic: false})
     if method == "sample" -> &ownership_params.push(SemaCallParam{label: "count", name: "count", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})

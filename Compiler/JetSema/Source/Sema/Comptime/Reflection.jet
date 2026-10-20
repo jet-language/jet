@@ -476,11 +476,11 @@ fn sema_comptime_reflection_fact_value(kind: String, name: String, members: [Str
     range_value :: if range == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none()
     dimension_value :: if dimension == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none()
     fields := [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "kind", value: fact_kind},
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
-        SemaComptimeReflectionField{name: "members", value: sema_comptime_reflection_string_list(members)},
-        SemaComptimeReflectionField{name: "range", value: range_value},
-        SemaComptimeReflectionField{name: "dimension", value: dimension_value},
+        {name: "kind", value: fact_kind},
+        {name: "name", value: TComptimeValue.String{value: name}},
+        {name: "members", value: sema_comptime_reflection_string_list(members)},
+        {name: "range", value: range_value},
+        {name: "dimension", value: dimension_value},
     }
     option_names :: ["measure", "exactness", "layout", "classification", "nominal", "obligation", "state", "sendability", "view_provenance", "movedness", "attribution", "origin", "unit_scale_provenance", "maturity"]
     loop option_name in option_names {
@@ -1363,32 +1363,32 @@ fn sema_comptime_reflection_type_info_fields(
     base: String?,
 ) -> TComptimeValue Never! {
     values := [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
+        {name: "name", value: TComptimeValue.String{value: name}},
     }
     if kind != "distinct" -> &values.push(SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}})
     &values.extend([SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "layout", value: layout},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span)},
-        SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: fields}},
-        SemaComptimeReflectionField{name: "methods", value: TComptimeValue.List{values: methods}},
-        SemaComptimeReflectionField{name: "type_params", value: TComptimeValue.List{values: type_params}},
-        SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers.markers}},
-        SemaComptimeReflectionField{name: "expanded_markers", value: TComptimeValue.List{values: markers.expanded_markers}},
-        SemaComptimeReflectionField{name: "states", value: states},
-        SemaComptimeReflectionField{name: "transitions", value: transitions},
-        SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
-        SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
+        {name: "layout", value: layout},
+        {name: "span", value: sema_comptime_reflection_span(span)},
+        {name: "fields", value: TComptimeValue.List{values: fields}},
+        {name: "methods", value: TComptimeValue.List{values: methods}},
+        {name: "type_params", value: TComptimeValue.List{values: type_params}},
+        {name: "markers", value: TComptimeValue.List{values: markers.markers}},
+        {name: "expanded_markers", value: TComptimeValue.List{values: markers.expanded_markers}},
+        {name: "states", value: states},
+        {name: "transitions", value: transitions},
+        {name: "facts", value: TComptimeValue.List{values: facts}},
+        {name: "dimensions", value: TComptimeValue.List{values: dimensions}},
     })
     if base == .Val(value) -> &values.push(SemaComptimeReflectionField{name: "base", value: TComptimeValue.String{value: value}})
     &values.extend([SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "implements", value: TComptimeValue.List{values: implements}},
-        SemaComptimeReflectionField{name: "trait_contracts", value: TComptimeValue.List{values: trait_contracts}},
+        {name: "implements", value: TComptimeValue.List{values: implements}},
+        {name: "trait_contracts", value: TComptimeValue.List{values: trait_contracts}},
     })
     if kind == "distinct" -> &values.push(SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}})
     &values.extend([SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_path}},
-        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
-        SemaComptimeReflectionField{name: "kind", value: TComptimeValue.String{value: kind}},
+        {name: "module", value: TComptimeValue.String{value: module_path}},
+        {name: "identity", value: TComptimeValue.String{value: identity}},
+        {name: "kind", value: TComptimeValue.String{value: kind}},
     })
     sema_comptime_reflection_struct("TypeInfo", values)
 }

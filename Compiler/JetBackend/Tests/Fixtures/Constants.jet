@@ -374,10 +374,10 @@ fn fx_constants_bytes() -> MIRProgram Never! {
 // canonical Map insertion semantics, not an assumed serialized order.
 fn fx_constant_marker_status() -> MIRConstant Never! {
     MIRConstant.Map{entries: [MIRConstMapEntry]{
-        MIRConstMapEntry{key: MIRConstKey.String{value: "z.jet"}, value: MIRConstant.String{value: "old"}},
-        MIRConstMapEntry{key: MIRConstKey.String{value: "a.jet"}, value: MIRConstant.String{value: "PASS"}},
-        MIRConstMapEntry{key: MIRConstKey.String{value: "z.jet"}, value: MIRConstant.String{value: "FAIL"}},
-        MIRConstMapEntry{key: MIRConstKey.String{value: "m.jet"}, value: MIRConstant.String{value: "PASS"}},
+        {key: MIRConstKey.String{value: "z.jet"}, value: MIRConstant.String{value: "old"}},
+        {key: MIRConstKey.String{value: "a.jet"}, value: MIRConstant.String{value: "PASS"}},
+        {key: MIRConstKey.String{value: "z.jet"}, value: MIRConstant.String{value: "FAIL"}},
+        {key: MIRConstKey.String{value: "m.jet"}, value: MIRConstant.String{value: "PASS"}},
     }}
 }
 
@@ -439,9 +439,9 @@ fn fx_constants_map_u64() -> MIRProgram Never! {
     b := fx_builder()
     map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_narrow(false, 64), value: fx_string()})
     constant :: MIRConstant.Map{entries: [MIRConstMapEntry]{
-        MIRConstMapEntry{key: MIRConstKey.BigInt{decimal: "18446744073709551615"}, value: MIRConstant.String{value: "MAX"}},
-        MIRConstMapEntry{key: MIRConstKey.Int{value: 0}, value: MIRConstant.String{value: "ZERO"}},
-        MIRConstMapEntry{key: MIRConstKey.BigInt{decimal: "9223372036854775808"}, value: MIRConstant.String{value: "HIGH"}},
+        {key: MIRConstKey.BigInt{decimal: "18446744073709551615"}, value: MIRConstant.String{value: "MAX"}},
+        {key: MIRConstKey.Int{value: 0}, value: MIRConstant.String{value: "ZERO"}},
+        {key: MIRConstKey.BigInt{decimal: "9223372036854775808"}, value: MIRConstant.String{value: "HIGH"}},
     }}
     literal :: fx_owned(&b, map_ty, MIROperation.Constant{value: constant})
     global :: fx_owned(&b, map_ty, MIROperation.Global{name: "fixture.unsigned_status"})

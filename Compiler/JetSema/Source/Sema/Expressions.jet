@@ -3690,8 +3690,8 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     }
     if point_method != "" {
         arguments :: [CallArg]{
-            CallArg{convention: AccessConvention.Read, expr: left, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
-            CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            {convention: AccessConvention.Read, expr: left, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
+            {convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         }
         constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, recv_type: None, resolved_ret: None}
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

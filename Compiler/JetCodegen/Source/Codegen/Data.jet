@@ -80,8 +80,8 @@ fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, program: JetCodegenP
 
 fn jet_codegen_data_pair_type() -> Type Never! {
     Type.Tuple{fields: [TypeTupleField]{
-        TypeTupleField{name: "key", ty: Type.String},
-        TypeTupleField{name: "value", ty: jet_codegen_dyn_type()},
+        {name: "key", ty: Type.String},
+        {name: "value", ty: jet_codegen_dyn_type()},
     }}
 }
 
@@ -227,8 +227,8 @@ fn jet_codegen_lower_optional_encode(builder: &JetCodegenBuilder, program: JetCo
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
     jet_codegen_switch_block(&builder, program, join_block)
     incoming := [MIRPhiIncoming]{
-        MIRPhiIncoming{block: present_end, value: encoded},
-        MIRPhiIncoming{block: absent_end, value: null},
+        {block: present_end, value: encoded},
+        {block: absent_end, value: null},
     }
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
