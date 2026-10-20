@@ -480,8 +480,7 @@ fn jet_rust_emit_entry_error_exit(ctx: &JetRustEmitContext, function: MIRFunctio
     "{root}{helper}(format!(\"{{:?}}\", {error}))"
 }
 
-fn jet_rust_emit_entry_output(ctx: &JetRustEmitContext, output: MIREntryOutput, value: String, app: Bool) -> String Never! {
-    if app -> return "{value}.serve();"
+fn jet_rust_emit_entry_output(ctx: &JetRustEmitContext, output: MIREntryOutput, value: String) -> String Never! {
     if output == {
         .NoOutput | .ReturnValue -> "let _ = {value};"
         .StandardOutput -> "print!(\"{{}}\", {value});"
@@ -489,27 +488,13 @@ fn jet_rust_emit_entry_output(ctx: &JetRustEmitContext, output: MIREntryOutput, 
     }
 }
 
-fn jet_rust_emit_type_is_app(ty: MIRType) -> Bool Never! {
-    if ty.kind == {
-        .Apply(name, _) -> name.name == "App"
-        .Result(ok, _) -> {
-            if ok.kind == {
-                .Apply(name, _) -> name.name == "App"
-                else -> false
-            }
-        }
-        else -> false
-    }
-}
-
 fn jet_rust_emit_entry_invoke(ctx: &JetRustEmitContext, function: MIRFunction, call: String, output: MIREntryOutput, serves_until_stopped: Bool, service: Bool, indent: String, lines: &[String]) Never! {
-    app :: serves_until_stopped && jet_rust_emit_type_is_app(function.return_type)
     action :: if function.failure == {
         .Diverges(_) -> call
-        .Infallible -> jet_rust_emit_entry_output(&ctx, output, call, app)
+        .Infallible -> jet_rust_emit_entry_output(&ctx, output, call)
         .Result(_, _) | .Optional(_) -> {
             error :: jet_rust_emit_entry_error_exit(&ctx, function, "__jet_error", service)
-            value :: jet_rust_emit_entry_output(&ctx, output, "__jet_value", app)
+            value :: jet_rust_emit_entry_output(&ctx, output, "__jet_value")
             "match {call} {{ Ok(__jet_value) => {{ {value} }}, Err(__jet_error) => {{ {error} }} }}"
         }
     }
