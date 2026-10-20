@@ -127,8 +127,9 @@
     result
 }
 
+// A fresh copy: the argument may be shared or a static literal, so its bytes are never rewritten.
 fn rt_text_ascii(value: I64, upper: Bool) -> I64 {
-    result :: jet_rt_string_clone(value)
+    result :: rt_text_copy(rt_text_data(value), rt_text_len(value))
     data :: rt_text_data(result)
     length :: rt_text_len(result)
     at := I64{0}
