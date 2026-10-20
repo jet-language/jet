@@ -128,7 +128,7 @@ hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
 Core catalog changes also require the canonical structure registry and enum/
 record payload projections. Regenerate them with `gen-core-tables --write`
-and `generate-structure-registry.mjs`; refreshing the surface ledger alone
+(the structure registry is edited directly); refreshing the surface ledger alone
 does not keep the assembled compiler's catalog or source hashes current.
 Before releasing a producer, pin every live compiler target and read-only
 snapshot in an active `proofq/*plan*` document: the disk guard reads these plans

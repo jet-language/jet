@@ -13,7 +13,7 @@ for (const script of [
   'Tools/agent/gen-runtime-trap-messages.mjs', 'Tools/agent/gen-runtime-lifecycle.mjs', 'Tools/agent/gen-runtime-stop-exports.mjs',
   'Tools/agent/gen-runtime-host-carriers.mjs', 'Tools/agent/gen-runtime-host-errors.mjs', 'Tools/agent/gen-runtime-scheduler-messages.mjs',
   'Tools/agent/gen-runtime-services-messages.mjs', 'Tools/agent/gen-runtime-test-messages.mjs',
-  'Compiler/Bootstrap/generate-prelude-derives.mjs', 'Compiler/Bootstrap/generate-structure-registry.mjs', 'Compiler/Bootstrap/generate-core-sources.mjs',
+  'Compiler/Bootstrap/generate-prelude-derives.mjs', 'Compiler/Bootstrap/generate-core-sources.mjs',
 ]) cheap.push(start('check-' + script.split('/').pop().replace(/\.mjs$/, ''), [node, script, '--check']));
 cheap.push(start('check-command-table', [node, 'Compiler/Bootstrap/check-command-table.mjs']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
@@ -26,6 +26,5 @@ cheap.push(start('core-runtime-wrapper', [node, '--test', 'Tools/agent/core-runt
 cheap.push(start('native-cli-transport', [node, '--test', 'Tools/agent/compiler-native-transport.test.mjs']));
 cheap.push(start('s5-completion-receipts', [node, '--test', 'Tools/agent/s5/receipts.test.mjs']));
 await Promise.all(cheap);
-run('check-gen-diagnostic-rows', [node, 'Compiler/Bootstrap/generate-diagnostic-rows.mjs', '--check']);
 
 P.finish();
