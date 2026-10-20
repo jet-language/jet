@@ -87,7 +87,8 @@ use jet_sema.[
     sema_source_words,
 ]
 
-JET_DRIVER_LATEST_EDITION :: prep { "2028" }
+// The one language edition (greenfield: one meaning, no edition-gated behaviour).
+JET_DRIVER_EDITION :: "2026"
 
 // S51 (Rust `Syntax::FIRST_PARTY_RESERVED`): first-party short names reserved
 // before packages land. A local module may not take one as its alias or root.
@@ -1000,7 +1001,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
-        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
+        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     if manifest_file_index != None && retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
@@ -1020,7 +1021,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     tokens :: lexed.tokens
     name := ""
     version := String?{None}
-    edition := JET_DRIVER_LATEST_EDITION
+    edition := JET_DRIVER_EDITION
     runtime_ceiling := MIRRuntimeLayer?{None}
     allocator_policy := MIRAllocatorPolicy.HostedDefault
     authority_allow := [String]?{None}
@@ -1207,8 +1208,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         if token.kind == TOKEN_RBRACE && brace_depth > 0 -> brace_depth -= 1
         index += 1
     }
-    if edition != "2026" && edition != "2027" && edition != "2028" {
-        &diagnostics.push(jet_driver_diagnostic_without_span("E2001", "package manifest requests an unsupported language edition", "this compiler supports editions 2026, 2027, and 2028", "select one of the editions supported by this toolchain"))
+    if edition != JET_DRIVER_EDITION {
+        &diagnostics.push(jet_driver_diagnostic_without_span("E2001", "package manifest requests an unsupported language edition", "this compiler supports edition 2026", "set `edition: \"2026\"` in package.jet"))
     }
     if name.len() == 0 {
         // An inline body words it as the canonical Package field parser does.
@@ -3647,7 +3648,7 @@ fn jet_driver_core_library_catalog(core_sources: [JetDriverCoreSource]) -> JetDr
     package :: JetDriverPackageInfo{
         root_index: -1, root_path: JET_DRIVER_CORE_SOURCE_ROOT,
         identity: JET_DRIVER_CORE_SOURCE_ROOT, name: "core", version: "",
-        edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None,
+        edition: JET_DRIVER_EDITION, runtime_ceiling: None,
         allocator_policy: MIRAllocatorPolicy.HostedDefault,
         authority_allow: None, authority_deny: None, authority_needs: [String]{},
         entry: None, manifest_path: None, inline_package: false,

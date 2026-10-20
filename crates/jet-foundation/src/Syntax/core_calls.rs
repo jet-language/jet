@@ -1638,7 +1638,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3d55444a7b90a9a5311af51ac393a296c5491bfa3efe2384f6d639c210f38562
+// Source SHA-256: 545aaf9592f48143ef19b358ca10b3a3cc240faa2943c3c3db5778bac7e40593
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto", "__jetc_open_directory"),
@@ -2018,7 +2018,6 @@ pub static CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.crypto", "__jetc_close", "jet_crypto_jetc_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::source_owned("core.crypto", "__migrate_v1", &[true, true, true, true]),
     CoreCallRecord::new("core.data", "__host_path_is_file", "jet_data_host_path_is_file", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.encoding", "__edition", "", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot(),
     CoreCallRecord::new("core.http.server", "__serve", "jet_http_mux_serve", false, &[true, false, false, false]).without_direct_aot(),
     CoreCallRecord::new("core.http.server", "__bind", "jet_http_server_bind", false, &[true, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot(),
     CoreCallRecord::new("core.http.server", "__static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true, false, false, false]).without_direct_aot(),

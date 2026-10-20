@@ -296,10 +296,6 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MIRCoreCallID, route: MIR
     if row.module_name == "core.data.plot" && row.member == "__plot_aggregate_none" && row.interpreter_route == CoreCallInterpreterRoute.TypedIntrinsic {
         return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{type_name: "JetDataPlotAggregate", variant: "None", args: [TComptimeEnumArg]{}}})
     }
-    if row.module_name == "core.encoding" && row.member == "__edition" {
-        year :: Int.parse(machine.program.facts.edition) ?? return jet_eval_route_not_supported(&machine, span, "resolved package edition is not an integer")
-        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: year}})
-    }
     if row.interpreter_route == CoreCallInterpreterRoute.TypedIntrinsic && jet_eval_route_core_encoding_module(row.module_name) {
         data :: jet_eval_route_args(args, &machine, span) ?? return None
         return jet_eval_route_core_encoding(row, data, fallibility, &machine, span)

@@ -5670,11 +5670,6 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
         .MathBuiltin(type_name, function, args) -> jet_codegen_lower_math_builtin(&builder, program, expression, type_name, function, args)
         .CoreCall(record, args, _, type_args, widen_to_vec, data_plan, failure) -> {
             canonical_record := jet_codegen_canonical_core_record(record)
-            if canonical_record.module_name == "core.encoding" && canonical_record.member == "__edition" {
-                // The loader resolved this fact; codecs own every edition policy.
-                year :: Int.parse(program.edition) ?? panic("resolved package edition is not an integer")
-                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Int{value: year, width: None, spelling: None}})
-            }
             if canonical_record.module_name == "core.encoding.xml" && canonical_record.member == "decode" {
                 return jet_codegen_lower_xml_typed_decode(&builder, program, expression, args, type_args, data_plan) ?? panic("checked typed XML decode has no target type")
             }

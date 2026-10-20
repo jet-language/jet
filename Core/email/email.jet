@@ -70,8 +70,8 @@ fn base64_value(byte: U8) -> Int? Never! {
     None
 }
 
-// Do not use the edition-sensitive public base64 decoder: DKIM environment
-// keys always require canonical standard base64 with no whitespace.
+// DKIM environment keys are canonical standard base64 with no whitespace,
+// decoded straight into a zeroizing Secret.
 fn decode_dkim(text: Secret) -> Secret EmailError! {
     invalid :: "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"
     #Unsafe("DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret") {
@@ -398,7 +398,7 @@ fn decode_ca_base64(text: String) -> [U8] EmailError! {
     assert_eq(defaults.max_auth_challenge_bytes, 4096)
 }
 
-#Test("DKIM environment base64 stays canonical in every edition") {
+#Test("DKIM environment base64 is canonical") {
     assert(decode_dkim(Secret.from_text("")) == .Err(_))
     assert(decode_dkim(Secret.from_text("AB==")) == .Err(_))
     assert(decode_dkim(Secret.from_text("AA==")) == .Err(_))
