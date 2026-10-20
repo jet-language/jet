@@ -333,6 +333,10 @@ fn jet_codegen_find_source_nominal_identity(nominals: JetCodegenNominalIndex, cu
     if scope >= 0 {
         if nominals.scope_nominals[scope].get(name) == .Val(local) -> return Val(local)
     }
+    // A `use` binding brings it in from another source package.
+    if nominals.import_nominals.get(current_module_identity) == .Val(imported) {
+        if imported.get(name) == .Val(found) -> return Val(found)
+    }
     // A sibling member file of the same namespace package declares it.
     if nominals.module_packages.get(current_module_identity) == .Val(package) {
         if nominals.package_nominals.get(package) == .Val(names) {

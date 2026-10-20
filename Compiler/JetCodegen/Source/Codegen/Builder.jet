@@ -939,6 +939,9 @@ struct JetCodegenNominalIndex {
     // and package -> each nominal name its members declare -> that nominal (first declaration).
     module_packages: [String:String]
     package_nominals: [String:[String:JetCodegenNominalIdentity]]
+    // Module identity -> each nominal its `use` bindings bring in from another source package,
+    // under the local name (Core imports keep the Core registry route).
+    import_nominals: [String:[String:JetCodegenNominalIdentity]]
     // Per scope: each Core builtin owner name -> the owners of that name the
     // scope's modules declare, in module and owner order.
     scope_owners: [[String:[JetCodegenNominalCandidate]]]
@@ -1069,6 +1072,33 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         }
         package_nominals[semantic_module.package_identity] = names
     }
+    module_rows := [String:Int]{}
+    loop (row, semantic_module) in modules {
+        if module_rows.get(semantic_module.module_identity) == None -> module_rows[semantic_module.module_identity] = row
+    }
+    import_nominals := [String:[String:JetCodegenNominalIdentity]]{}
+    loop semantic_module in modules {
+        imported := [String:JetCodegenNominalIdentity]{}
+        loop import_row in semantic_module.imports {
+            if import_row.target_module_identity.starts_with("<corelib>/") -> next
+            loop binding in import_row.bindings {
+                if imported.get(binding.local) != None -> next
+                found := JetCodegenNominalIdentity?{None}
+                if module_rows.get(binding.target_module_identity) == .Val(row) {
+                    target :: modules[row]
+                    if target.nominal_positions.get(binding.original) == .Val(position) {
+                        key :: jet_codegen_nominal_type_key(target.module_identity, target.nominals[position])
+                        found = Val(JetCodegenNominalIdentity{module_identity: target.module_identity, name: binding.original, key: key, qualified_name: key})
+                    }
+                }
+                if found == None && package_nominals.get(import_row.target_package_identity) == .Val(names) {
+                    if names.get(binding.original) == .Val(sibling) -> found = Val(sibling)
+                }
+                if found == .Val(identity) -> imported[binding.local] = identity
+            }
+        }
+        if imported.len() > 0 -> import_nominals[semantic_module.module_identity] = imported
+    }
     scope_nominals := [[String:JetCodegenNominalIdentity]]{}
     scope_owners := [[String:[JetCodegenNominalCandidate]]]{}
     loop members in scope_modules {
@@ -1106,6 +1136,7 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         scope_nominals: scope_nominals,
         module_packages: module_packages,
         package_nominals: package_nominals,
+        import_nominals: import_nominals,
         scope_owners: scope_owners,
         corelib_nominals: corelib_nominals,
         qualified_nominals: qualified_nominals,
