@@ -333,6 +333,12 @@ fn jet_codegen_find_source_nominal_identity(nominals: JetCodegenNominalIndex, cu
     if scope >= 0 {
         if nominals.scope_nominals[scope].get(name) == .Val(local) -> return Val(local)
     }
+    // A sibling member file of the same namespace package declares it.
+    if nominals.module_packages.get(current_module_identity) == .Val(package) {
+        if nominals.package_nominals.get(package) == .Val(names) {
+            if names.get(name) == .Val(sibling) -> return Val(sibling)
+        }
+    }
     // A bare `Err` the current module does not declare is the one original
     // Prelude default error, which its own registered module owns.
     if name == "Err" -> return jet_codegen_default_err_identity(nominals)

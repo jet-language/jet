@@ -83,6 +83,7 @@ use jet_foundation.[
 use jet_sema.[
     SemaGraphModuleResult,
     sema_registration_is_compiler_owned_enum,
+    sema_registration_package_is_namespace,
 ]
 
 struct JetCodegenBinding {
@@ -934,6 +935,10 @@ struct JetCodegenNominalIndex {
     // Per scope: each declared nominal name -> its identity in the first
     // module of that identity declaring the name.
     scope_nominals: [[String:JetCodegenNominalIdentity]]
+    // A namespace package's member files share one scope: module identity -> its package,
+    // and package -> each nominal name its members declare -> that nominal (first declaration).
+    module_packages: [String:String]
+    package_nominals: [String:[String:JetCodegenNominalIdentity]]
     // Per scope: each Core builtin owner name -> the owners of that name the
     // scope's modules declare, in module and owner order.
     scope_owners: [[String:[JetCodegenNominalCandidate]]]
@@ -1051,6 +1056,19 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
             }
         }
     }
+    module_packages := [String:String]{}
+    package_nominals := [String:[String:JetCodegenNominalIdentity]]{}
+    loop semantic_module in modules {
+        if !sema_registration_package_is_namespace(semantic_module.package_identity) -> next
+        module_packages[semantic_module.module_identity] = semantic_module.package_identity
+        names := package_nominals.get(semantic_module.package_identity) ?? [String:JetCodegenNominalIdentity]{}
+        loop nominal in semantic_module.nominals {
+            if names.get(nominal.symbol.name) != None -> next
+            key :: jet_codegen_nominal_type_key(semantic_module.module_identity, nominal)
+            names[nominal.symbol.name] = JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal.symbol.name, key: key, qualified_name: key}
+        }
+        package_nominals[semantic_module.package_identity] = names
+    }
     scope_nominals := [[String:JetCodegenNominalIdentity]]{}
     scope_owners := [[String:[JetCodegenNominalCandidate]]]{}
     loop members in scope_modules {
@@ -1086,6 +1104,8 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
         scope_rows: scope_rows,
         named_modules: named_modules,
         scope_nominals: scope_nominals,
+        module_packages: module_packages,
+        package_nominals: package_nominals,
         scope_owners: scope_owners,
         corelib_nominals: corelib_nominals,
         qualified_nominals: qualified_nominals,
