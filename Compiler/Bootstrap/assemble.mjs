@@ -38,30 +38,12 @@ const sourceRoots = [
   "Compiler/JetCli/Source",
   "Compiler/Bootstrap",
 ];
+// Command ports with no CLI caller yet (Compiler/JetCli/Commands) and the REPL
+// console, notebook and history-host ports (Compiler/JetRepl/Console) are their own
+// packages, outside these source roots and the compiler assembly closure.
 const excludedSourceRoots = [
   // Native host glue remains a Rust/backend concern, not aggregate Jet input.
   "Compiler/Bootstrap/Host",
-  // The post-merge Publication dependency-command leaf has no CLI caller yet.
-  // Keep it in the repository without expanding the compiler assembly closure.
-  "Compiler/JetCli/Source/Cli/Dependency.jet",
-  // These post-merge command ports likewise have no dispatch callers and were
-  // not in the pre-merge compiler inventory. Preserve that assembly boundary.
-  "Compiler/JetCli/Source/Cli/Jobs.jet",
-  "Compiler/JetCli/Source/Cli/Package/Bundle.jet",
-  "Compiler/JetCli/Source/Cli/Package/FlashAudit.jet",
-  "Compiler/JetCli/Source/Cli/Package/FlashPlan.jet",
-  "Compiler/JetCli/Source/Cli/Package/NativeBundle.jet",
-  "Compiler/JetCli/Source/Cli/Package/NativeFlash.jet",
-  "Compiler/JetCli/Source/Cli/Supply.jet",
-  "Compiler/JetCli/Source/Cli/ToolchainPin.jet",
-  // The REPL console, notebook and history-host ports (crates/jet-repl beyond
-  // lib.rs) are tool surfaces outside the compiler assembly closure.
-  "Compiler/JetRepl/Source/Console",
-  "Compiler/JetRepl/Source/ConsoleHost.jet",
-  "Compiler/JetRepl/Source/Docs.jet",
-  "Compiler/JetRepl/Source/Notebook",
-  "Compiler/JetRepl/Source/Repl",
-  "Compiler/JetRepl/Source/Sql.jet",
 ];
 
 function fail(message) {
