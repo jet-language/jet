@@ -4058,6 +4058,18 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                             }
                         }
                     }
+                    // `use dep.[a, b]` selects members of a declared package dependency:
+                    // the dependency package is one namespace, so any of its files stands for it.
+                    if target_index == None && core_module == None {
+                        source_package :: jet_driver_find_package_by_root(catalog.packages, unit.root_index)
+                        if source_package == .Val(package_index) && jet_driver_find_dependency(catalog.packages[package_index], module_alias) != None {
+                            target_index = jet_driver_find_module_import_target(unit, module_alias, scoped.declaration.inline_version, catalog.packages, source_units, source_index_result.index, module_alias_span, &diagnostics)
+                            if target_index == .Val(dependency_index) && !queued[dependency_index] {
+                                queued[dependency_index] = true
+                                &pending.push(dependency_index)
+                            }
+                        }
+                    }
                     selected_index :: target_index ?? {
                         if core_module == None -> &diagnostics.push(jet_driver_diagnostic("E0610", module_alias_span, "no module named `{module_alias}` in scope", "the alias must refer to a module imported earlier in this file", "add `import … as {module_alias}`  before this `use`"))
                         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
