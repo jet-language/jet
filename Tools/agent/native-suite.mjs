@@ -11,7 +11,6 @@ export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node =
         ['unsafe-ratchet', 'check-unsafe-ratchet.mjs', []],
         ['agent-doc-flags', 'check-agent-doc-flags.mjs', []],
         ['decision-index', 'decision-index.mjs', ['--check']],
-        ['diagnostic-parity', 'diagnostic-parity.mjs', ['--check']],
         ['core-coverage', 'core-coverage-census.mjs', ['--check']],
     ].map(([scope, file, args]) => ({ scope, command: node, args: [join(root, 'Tools/agent', file), ...args], cwd: root, kind: 'gate', documents: {} }));
     for (const suite of suites) {

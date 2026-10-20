@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const registry = readFileSync(resolve(root, 'Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet'), 'utf8');
 function field(name) {
-  const row = registry.split('DiagnosticRegistryRow{').find(row => row.startsWith('\n        code: "E3013",'));
+  const row = registry.split(/DiagnosticRegistryRow\{|\n    \{(?=\n        code:)/).find(row => row.startsWith('\n        code: "E3013",'));
   if (!row) throw Error('missing runtime diagnostic E3013');
   const value = new RegExp(`\\n        ${name}: ("(?:[^"\\\\]|\\\\.)*"),`).exec(row);
   if (!value) throw Error(`missing E3013.${name}`);

@@ -14,7 +14,7 @@ const defectsOnly = process.argv.includes("--defects-only");
 if (process.argv.slice(2).some((arg) => arg !== "--check" && arg !== "--defects-only")) throw new Error("usage: gen-runtime-trap-messages.mjs [--check] [--defects-only]");
 
 function field(code, name) {
-  const row = registry.split("DiagnosticRegistryRow{").find((row) => row.startsWith(`\n        code: "${code}",`));
+  const row = registry.split(/DiagnosticRegistryRow\{|\n    \{(?=\n        code:)/).find((row) => row.startsWith(`\n        code: "${code}",`));
   if (!row) throw new Error(`missing runtime row ${code}`);
   const value = new RegExp(`\\n        ${name}: ("(?:[^"\\\\]|\\\\.)*"),`).exec(row);
   if (!value) throw new Error(`missing ${code}.${name}`);

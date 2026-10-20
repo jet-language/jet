@@ -44,7 +44,7 @@ const literals = {
 };
 const registry = readFileSync(resolve(root, 'Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet'), 'utf8');
 for (const code of ['R0801', 'R0802', 'R0803']) {
-  const row = registry.split('DiagnosticRegistryRow{').find(row => row.startsWith(`\n        code: "${code}",`));
+  const row = registry.split(/DiagnosticRegistryRow\{|\n    \{(?=\n        code:)/).find(row => row.startsWith(`\n        code: "${code}",`));
   if (!row) throw new Error(`missing runtime row ${code}`);
   for (const name of ['what', 'why', 'fix']) {
     const value = new RegExp(`\\n        ${name}: ("(?:[^"\\\\]|\\\\.)*"),`).exec(row);

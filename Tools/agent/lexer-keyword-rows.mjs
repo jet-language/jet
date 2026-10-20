@@ -29,7 +29,7 @@ export function keywordRows(mapping, syntax, tokens, tags) {
   const rows = [];
   const spellings = new Set(), kinds = new Set(), mappedTags = new Set();
   for (const line of body.split("\n").map((line) => line.trim()).filter(Boolean)) {
-    const arm = line.match(/^LexerKeyword\{constant: "(\w+)", kind: "(Kw\w+)", tag: "(K_\w+)"\},$/);
+    const arm = line.match(/^(?:LexerKeyword)?\{constant: "(\w+)", kind: "(Kw\w+)", tag: "(K_\w+)"\},$/);
     if (!arm) fail(`unparsed keyword row: ${line}`);
     const [, constant, kind, tag] = arm;
     const values = constants.get(constant) ?? [];
@@ -90,7 +90,7 @@ export function renderKeywordSpans(rows) {
   for (const [length, group] of [...lengths].sort(([a], [b]) => a - b)) {
     out += `        ${length} -> {\n${branches(group, 0, "            ")}        }\n`;
   }
-  return out + `        else -> K_IDENT\n    }\n    // D-TIME-IN1=C: only exact in becomes a member after a postfix dot.\n    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT\n    kind\n}\n${CLOSE}`;
+  return out + `        else -> K_IDENT\n    }\n    // Only exact in becomes a member after a postfix dot.\n    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT\n    kind\n}\n${CLOSE}`;
 }
 
 export function replaceKeywordSpans(source, generated) {
