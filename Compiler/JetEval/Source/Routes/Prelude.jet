@@ -1491,6 +1491,9 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
         build_symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
         if build_symbol == "jet_comptime_host_method" -> return jet_eval_host_row(&machine, row, args, result_ty, span)
     }
+    // `?` resets the error journey on success. The evaluator keeps no ambient journey (a
+    // failure carries its own report facts), so the reset has nothing to clear.
+    if jet_eval_errors_owns_row(row) && row.member == "journey_reset" -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     if row.abi == MIRPreludeABI.Control || row.abi == MIRPreludeABI.Effect -> return jet_eval_route_not_supported(&machine, span, "effectful or control Prelude route")
     if row.module_name == "core.prelude" && row.member == "keep" {
         symbol :: mir_symbol_name(row.symbol)
