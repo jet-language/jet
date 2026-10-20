@@ -224,7 +224,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     }
     value :: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
         build_session_abort(&session)
-        &errors.push(jet_driver_diagnostic_without_span("E3502", "build must return a BuildPlan from this build context", "a build graph is owned by its active checked invocation", "return b.plan() from the selected build"))
+        &errors.push(jet_driver_diagnostic_without_span("E3502", "`fn build` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
         return jet_driver_build_query_empty(^request, ^errors, false, None)
     }
     finished :: build_session_finish(&session, value)

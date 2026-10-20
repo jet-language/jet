@@ -75,6 +75,7 @@ fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildCo
             result = sema_build_result("BuildProbe")
         }
         method == "error" && arity == 5 -> parameters = [Type]{Type.Named{name: "SourceSpan"}, Type.String, Type.String, Type.String, Type.String}
+        method == "default" && arity == 1 -> parameters = [Type]{target}
         method == "plan" && (arity == 0 || arity == 1) -> {
             if arity == 1 -> &parameters.push(target)
             result = sema_build_result("BuildPlan")
@@ -95,19 +96,20 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
+    if method == "default" -> return "1"
     if method == "find" || method == "embed" -> return "1"
     if method == "error" -> return "5"
     "2"
 }
 
 fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver_value.ty != (Type.Named{name: "BuildContext"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if receiver_value.ty != (Type.Named{name: "Build"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     contract :: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
             if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
-        &diagnostics.push(sema_error("E0104", span, "`BuildContext.{method}` expects {sema_build_context_arity_description(method)} arguments, got {args.len()}", "build methods have one canonical base shape and typed trailing controls", "pass the arguments accepted by `b.{method}`"))
+        &diagnostics.push(sema_error("E0104", span, "`Build.{method}` expects {sema_build_context_arity_description(method)} arguments, got {args.len()}", "build methods have one canonical base shape and typed trailing controls", "pass the arguments accepted by `b.{method}`"))
         return failed
     }
     template_count := 0
@@ -136,13 +138,13 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
             }
         }
         if argument.label != None || argument.spread {
-            &diagnostics.push(sema_error("E0764", argument.span, "`BuildContext.{method}` takes positional arguments", "the build method contract does not declare labels or variadic slots", "remove the label or spread from this argument"))
+            &diagnostics.push(sema_error("E0764", argument.span, "`Build.{method}` takes positional arguments", "the build method contract does not declare labels or variadic slots", "remove the label or spread from this argument"))
             return failed
         }
         &values.push(value)
         &params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
     }
-    ownership :: sema_ownership_check_method_call(&state, "BuildContext.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+    ownership :: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     if method == "generate" {
         // Rust lower_build_generate also expands/formats the typed body under

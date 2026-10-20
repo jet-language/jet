@@ -1,11 +1,11 @@
 
-fn build(b: BuildContext) -[FS]> BuildPlan {
+fn build(b: Build) -[FS]> {
     files :: b.find("assets/*.txt")
     message :: b.embed(files[0])
     b.generate("asset") {
         fn generated_asset() -> String { "hello" }
         }
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 fn run() { print(generated_asset()) }

@@ -131,10 +131,10 @@ source-facing effect names are registered through
 
 ## Build entries and typed generation
 
-A package may expose an ordinary `fn build` that takes `BuildContext` and
+A package may expose an ordinary `fn build` that takes `Build` and
 returns a `BuildPlan`. It inspects typed build facts, registers typed graph
 nodes, and returns the plan; it does not become a second configuration
-language. `BuildContext` exposes typed graph operations: `b.add_executable`,
+language. `Build` exposes typed graph operations: `b.add_executable`,
 `b.add_library`, `b.add_test`, `b.add_asset_bundle`, `b.add_doc`,
 `b.add_install`, `b.add_package`, and `b.add_publish` register targets;
 `b.action` registers a typed action; `b.generate` registers additive generated
@@ -146,7 +146,7 @@ The checked example in [`distinct_reflect.jet`](../../../Examples/features/compt
 uses the current return-arrow form:
 
 ```jet
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     loop info in b.program.types() {
         if {
             info.name == "CustomerID" -> {
@@ -163,7 +163,7 @@ fn build(b: BuildContext) -> BuildPlan {
         }
     }
     app :: b.add_executable("distinct_reflect", ["distinct_reflect.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 ```
 

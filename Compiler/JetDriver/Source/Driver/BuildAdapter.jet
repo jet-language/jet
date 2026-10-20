@@ -53,7 +53,7 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBui
             graph :: projected.graph ?? return Val(jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph"))
             return Val(jet_driver_build_host_result(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: jet_eval_build_graph_value(graph)}}))
         }
-        if !row.member.starts_with("BuildContext.") -> return None
+        if !row.member.starts_with("Build.") -> return None
         if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
         owner :: jet_eval_build_context_host_id(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method requires its checked context"))
         if !jet_driver_build_context_owned(session, owner) -> return Val(jet_driver_build_host_failure(session, span, "build context expired"))

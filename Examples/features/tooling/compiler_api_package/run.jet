@@ -16,13 +16,13 @@ PROFILE_COUNT :: prep { PROFILES.profiles().len() }
 PACKAGE_NAME :: prep { $package.name }
 PACKAGE_VERSION :: prep { $package.version }
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     if MANIFEST_OUTPUTS != 0 -> panic("manifest view must stay uncomposed")
     if PACKAGE_OUTPUTS != 1 -> panic("package view must include Config output")
     if LOCK_PACKAGES != 1 -> panic("lock view lost its package")
     if PROFILE_COUNT != 2 -> panic("profile view lost its profiles")
     app :: b.add_executable("compiler_api_package", ["run.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 
 fn run() {

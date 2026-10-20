@@ -6309,7 +6309,7 @@ fn sema_comptime_policy_deny_diagnostic(package_identity: String, denied: [Strin
 // that entry never calls (a bootstrap host hook, an unused helper) is not
 // application provenance, so its row is not checked against
 // `authority.holds`. The entry is a selected Output, else the entry module's
-// `run`, else its `build(b: BuildContext)`; with none, nothing is checked.
+// `run`, else its `build(b: Build)`; with none, nothing is checked.
 fn sema_authority_entry_reach(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [String:Bool] {
     edges := [String:[String]]{}
     loop module_result in modules {
@@ -6346,7 +6346,7 @@ fn sema_authority_entry_roots(graph: SemaRegistrationGraph, edges: [String:[Stri
         key :: graph.modules[entry_index].functions[function_index].symbol.id.key
         if edges.get(key) == None -> next
         if graph.modules[entry_index].functions[function_index].declaration.name == "run" -> return [String]{key}
-        if graph.modules[entry_index].functions[function_index].declaration.name == "build" && graph.modules[entry_index].functions[function_index].declaration.params.len() == 1 && graph.modules[entry_index].functions[function_index].declaration.params[0].ty == (Type.Named{name: "BuildContext"}) -> build = [String]{key}
+        if graph.modules[entry_index].functions[function_index].declaration.name == "build" && graph.modules[entry_index].functions[function_index].declaration.params.len() == 1 && graph.modules[entry_index].functions[function_index].declaration.params[0].ty == (Type.Named{name: "Build"}) -> build = [String]{key}
     }
     build
 }

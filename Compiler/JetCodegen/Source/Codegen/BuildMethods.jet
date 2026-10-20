@@ -1,9 +1,9 @@
-// BuildContext calls are sema-checked compiler values. The existing comptime
+// Build calls are sema-checked compiler values. The existing comptime
 // host boundary marshals these calls into Core's session-owned source kernel.
 use jet_foundation.[MIRAccess, MIRCallArg, MIRCallee, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRType, MIRValueID, TExpr, Type]
 
 fn jet_codegen_build_context_host_method(receiver: Type) -> Bool Never! {
-    receiver == (Type.Named{name: "BuildContext"}) || receiver == (Type.Named{name: "BuildPlan"})
+    receiver == (Type.Named{name: "Build"}) || receiver == (Type.Named{name: "BuildPlan"})
 }
 
 fn jet_codegen_lower_build_context_host_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
@@ -14,7 +14,7 @@ fn jet_codegen_lower_build_context_host_method(builder: &JetCodegenBuilder, prog
     }
     borrow_mask := [Bool]{true}
     loop _ in args -> &borrow_mask.push(false)
-    owner :: if receiver.ty == (Type.Named{name: "BuildPlan"}) -> "BuildPlan" else -> "BuildContext"
+    owner :: if receiver.ty == (Type.Named{name: "BuildPlan"}) -> "BuildPlan" else -> "Build"
     route :: jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.host", "{owner}.{method}", "jet_comptime_host_method", lowered.len(), borrow_mask, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: lowered, type_args: [MIRType]{}})
 }

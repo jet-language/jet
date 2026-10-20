@@ -3401,7 +3401,7 @@ order; source order breaks independent ties. A cycle fails before any plan
 exists and prints the complete chain. Tier-1 and Tier-2 reads are rejected
 inside fields: locked external input reaches a field only through a top-level
 `comptime` binding (D-CTIO1) or the `fn build` input surface. No field gains
-`BuildContext`, `#Impure`, filesystem, network, environment, clock, or
+`Build`, `#Impure`, filesystem, network, environment, clock, or
 randomness authority.
 
 **D-METADEPTH1/2 — Metaprogramming ceiling**: read-only reflection + derives.
@@ -5644,7 +5644,7 @@ D-BUILDPROFILE1, D-BUILDNORM1, D-BUILDTARGET1, D-BUILDACTION1,
 D-BUILDTOOLCHAIN1, D-BUILDPROBE1, D-BUILDCACHE1, D-BUILDREMOTE1,
 D-BUILDSCHED1, D-BUILDQUERY1, D-BUILDLEGACY1, D-BUILDPLUGIN1,
 D-FRONTENDAPI1, D-DSLBLOCK1, D-METAMUTATE1)*: compile-time build entry is
-`fn build(b: BuildContext)`, living in the unit's own definition file (beside
+`fn build(b: Build)`, living in the unit's own definition file (beside
 `fn run` / in `package.jet` / in a discovered Config); `jet build` runs it when
 defined, else the batteries pipeline. Build code is tiered: Tier 1
 pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
@@ -7183,7 +7183,7 @@ see each other's settings. Example: `Examples/features/script_job/job_env.jet`.
 
 **D-CMD-OVERRIDE1=C — every live command may be expert-overridden** *(ratified
 2026-08-05, card #1451; amended by D-CLAIM-BENCH1=A)*: `fn test(suite:
-TestSuite)` is an ordinary function that becomes the selected test entry when
+Test)` is an ordinary function that becomes the selected test entry when
 present. The compiler supplies the discovered suite after the command's
 filter; the value exposes `run()`, `iteration`, and `result`. A zero-parameter
 `fn test()` replaces the stock harness without receiving a suite.

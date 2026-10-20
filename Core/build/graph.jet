@@ -167,7 +167,9 @@ fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> 
     state := &permit.value
     if !state.active -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "build context expired")}}
     state.active = false
-    default :: build_session_handle(state, returned, "BuildPlan") ?? return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "build must return a BuildPlan from this build context")}}
+    // `fn build(b: Build)` returns nothing: the session it configured is the plan.
+    if returned != .Unit -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "`fn build` returns nothing")}}
+    default :: state.default_target
     if build_session_validate(state, default) == .Val(error) -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{error}}
     {plan: Val(BuildSessionPlan{storage: session.storage, default: default}), diagnostics: state.diagnostics}
 }

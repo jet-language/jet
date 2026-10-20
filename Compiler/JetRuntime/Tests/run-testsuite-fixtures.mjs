@@ -19,14 +19,14 @@ function command(bin, args, options = {}) {
   return result;
 }
 if (mode === 'assemble') {
-  command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only', '--test', 'TestSuite']);
+  command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only', '--test', 'Test']);
   mkdirSync(join(dir, 'Source'), { recursive: true });
   writeFileSync(join(dir, 'Source/Fixture.jet'), readFileSync(join(dir, 'unit.jet'), 'utf8'));
   const entries = new Map(readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n')
     .filter(x => x && !x.startsWith('#')).map(x => [x.split(/\s+/)[0], x]));
   // Scratch-only export admission for the held witness; never edit the frozen
   // runtime manifest. Once regenerated, the same rows are merely reused.
-  for (const path of ['Source/TestSuite.jet', 'Tests/TestSuiteTests.jet']) {
+  for (const path of ['Source/Test.jet', 'Tests/TestSuiteTests.jet']) {
     const source = readFileSync(join(root, 'Compiler/JetRuntime', path), 'utf8');
     for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
       const name = match[1];

@@ -1,10 +1,9 @@
 
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     #Impure("declare an inspectable action") {
         action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "FS"])
         app :: b.add_executable("app", ["main.jet"], [action])
-        return b.plan(app)
+        b.default(app)
     }
-    return b.plan()
 }
 fn run() {}

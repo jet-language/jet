@@ -4357,7 +4357,7 @@ runtime guarantees.
 ## Programmable builds
 
 `jet build` checks the root program and then evaluates at most one package-local
-`fn build(b: BuildContext) -> BuildPlan` through the comptime interpreter. The
+`fn build(b: Build) -> BuildPlan` through the comptime interpreter. The
 entry may live in any package source file or in `package.jet`; two candidates
 name both sites and fail. An explicit Output `entry:` can select a rare layout.
 For a workspace, member entries run in deterministic dependency order with
@@ -4377,7 +4377,7 @@ canonical graph to scheduling, caching, execution, queries, and LSP.
 `find_program`, `pkg_config`, and `header` probes.
 
 ```jet
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
         shell :: b.probe("shell", "find_program", "sh")
         native :: b.toolchain("native", "x86_64-linux")
@@ -4391,7 +4391,7 @@ fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
             [shell]
         )
         app :: b.add_executable("app", ["main.jet"], [stamp])
-        return b.plan(app)
+        b.default(app)
     }
 }
 

@@ -3295,7 +3295,7 @@ or golden file. The public source is
 | `fake_clock(unix_ms: Int) -> Clock` | clock | Create a deterministic clock at a Unix-millisecond value. |
 | `fake_rng(seed: Int) -> RNG` | RNG | Create deterministic random state. |
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
-| `test_suite() -> TestSuite` | suite | Create the default suite record. |
+| `test_suite() -> Test` | suite | Create the default suite record. |
 | `world(body: fn(DeterministicWorld))` | — | Run a body with deterministic world services. |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
 

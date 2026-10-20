@@ -15,7 +15,7 @@ ITEMS :: prep { PARSED.items().len() }
 
 FUNCTIONS :: prep { CHECKED.functions().len() }
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     b.generate("facts") {
         fn tooling_facts() -> String { "tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}" }
     }
@@ -45,7 +45,7 @@ fn build(b: BuildContext) -> BuildPlan {
         panic("build graph diff was empty")
     }
 
-    return b.plan(after)
+    b.default(after)
 }
 
 fn run() {

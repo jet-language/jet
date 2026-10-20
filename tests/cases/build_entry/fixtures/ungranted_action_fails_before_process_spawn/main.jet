@@ -1,10 +1,9 @@
 
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     #Impure("exercise denied authority") {
     action :: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])
     app :: b.add_executable("app", ["main.jet"], [action])
-    return b.plan(app)
+    b.default(app)
     }
-    return b.plan()
 }
 fn run() {}

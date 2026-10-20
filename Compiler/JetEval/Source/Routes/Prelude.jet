@@ -1493,7 +1493,7 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
         return jet_eval_copy_value(args[0], &machine, span)
     }
     symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
-    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" && (row.member.starts_with("BuildContext.") || row.member == "BuildPlan.graph") -> return jet_eval_host_row(&machine, row, args, result_ty, span)
+    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" && (row.member.starts_with("Build.") || row.member == "BuildPlan.graph") -> return jet_eval_host_row(&machine, row, args, result_ty, span)
     data :: jet_eval_route_args(args, &machine, span) ?? return None
     // MIREval `core.text.fmt` display/debug: the evaluator-owned structural
     // renderers (Formatting/Values.jet), never a source target.

@@ -1,7 +1,7 @@
 
 use "./left" as left
 use "./right" as right
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     answer :: left.answer()
     if answer == 7 { b.error(b.program.functions()[0].span, "CALL", "qualified", "evaluator", "ok") }
     loop ty in b.program.types() {
@@ -15,7 +15,6 @@ fn build(b: BuildContext) -> BuildPlan {
         if f.identity == "left::same" && f.effects.has("Net") && f.reaches_panic() { b.error(f.span, "LEFT", "left", "effect", "ok") }
         if f.identity == "right::same" && (f.effects.has("Net") || f.reaches_panic()) { b.error(f.span, "BAD", "collision", "effect", "fix") }
     }
-    return b.plan()
 }
 fn run() {
     left.same()

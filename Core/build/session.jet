@@ -1,6 +1,6 @@
 // Private compiler service linkage, not a second public Build API. The trusted
 // build/comptime wrapper binds these symbols after ordinary checking. Handles
-// remain the compiler's BuildContext/BuildPlan/BuildAction/... nominal values.
+// remain the compiler's Build/BuildPlan/BuildAction/... nominal values.
 // Source owns session mutation, validation and projection on every tier.
 use core.crypto as build_crypto
 use core.build.[BuildGraph, BuildGraphTarget, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphNode, BuildGraphInputDigest]
@@ -140,6 +140,8 @@ struct BuildSessionState {
     contributions: [BuildSessionContribution]
     diagnostics: [BuildSessionDiagnostic]
     nodes: [BuildGraphNode]
+    // The target `b.default(t)` selected, or -1 for every target.
+    default_target: Int
     start: Int
     end: Int
 }
@@ -153,7 +155,7 @@ fn build_session_new(session_id: Int, package: String, compiler_version: String,
         toolchains: [BuildSessionToolchain]{{name: "host", role: "host", host_triple: "host", target_triple: "host", sdk: None, linker: None, sysroot: None}},
         signing: [BuildSessionSigning]{}, probes: [BuildSessionProbe]{}, plugins: [BuildSessionPlugin]{},
         generated: [BuildSessionGeneratedModule]{}, contributions: [BuildSessionContribution]{},
-        diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, start: 0, end: 0,
+        diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, default_target: -1, start: 0, end: 0,
     }}
 }
 
@@ -169,7 +171,7 @@ fn build_session_diag(state: BuildSessionState, what: String) -> BuildSessionDia
         detail :: what.removeprefix("E3511: ")
         return {code: "E3511", what: "build plan is invalid: {detail}", why: "generated source must reach a bounded deterministic order, not loop until quiescent", fix: "break the dependency between these generators or give each generated module one owner", start: state.start, end: state.end}
     }
-    {code: "E3502", what: "build plan is invalid: {what}", why: "`fn build` must return one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: state.start, end: state.end}
+    {code: "E3502", what: "build plan is invalid: {what}", why: "`fn build` must describe one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: state.start, end: state.end}
 }
 
 fn build_session_fail(state: BuildSessionState, what: String) -> BuildSessionReply {
@@ -338,6 +340,11 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
         source :: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
         path :: ".jet/generated/{state.package}/{build_session_safe_name(name)}.jet"
         return build_session_add_generated(&state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None})
+    }
+    if method == "default" {
+        if args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
+        state.default_target = build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
     if method == "plan" {
         if args.len() > 1 -> return build_session_fail(state, "`b.plan` accepts zero or one default target")

@@ -14,7 +14,7 @@ fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? N
 }
 
 fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
-    TComptimeValue.Struct{type_name: "BuildContext", fields: [TComptimeField]{
+    TComptimeValue.Struct{type_name: "Build", fields: [TComptimeField]{
         {name: "__session", value: TComptimeValue.Int{value: session}},
         {name: "program", value: program},
     }}
@@ -22,7 +22,7 @@ fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TCompt
 
 fn jet_eval_build_context_id(data: TComptimeValue) -> Int? Never! {
     if data == .Struct(name, _) {
-        if name == "BuildContext" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
+        if name == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
     }
     None
 }

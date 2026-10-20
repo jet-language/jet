@@ -108,7 +108,7 @@ fn run() {
     inspect_build_require(jet_cli_build_compile_observation(static_query.nodes[1], -1.0, None, object) == .Err(_), "invalid measured duration cannot become a fake zero")
     inspect_build_require(jet_cli_build_compile_observation(static_query.nodes[1], build_math.from_bits(9221120237041090560), None, object) == .Err(_), "non-finite measured duration cannot become a fake zero")
     planned := inspect_build_request()
-    planned.authorized_sources.roots[0].files[0].source = "fn build(b: BuildContext) -> BuildPlan {{ return b.plan() }}\nfn run() {{}}"
+    planned.authorized_sources.roots[0].files[0].source = "fn build(b: Build) {{}}\nfn run() {{}}"
     planned_response := jet_driver_query_build_nodes(^planned, &scope)
     planned_request := ^planned_response.request
     planned_query := ^planned_response.query
