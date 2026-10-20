@@ -123,7 +123,10 @@ A violation stops the affected work until it is fixed at the root.
   Any new stdlib external dependency needs an owner decision and an approved
   bridge pattern.
 - **I7 — Ratified syntax.** Every keyword or sigil a user can type is registered
-  in `crates/jet-foundation/src/Syntax.rs` and tied to a decision ID.
+  in the syntax registry (`Compiler/JetFoundation/Data/Syntax`) and ratified on
+  Tower. Decision IDs and decision history live in Tower and the specs, never
+  in source: no decision fields in registries, no decision citations in code
+  or comments.
 - **I8 — One mechanism.** Each meaning has one canonical semantic mechanism.
   Spelling or organization may flex only where that helps users. Keep the
   beginner surface small and safe, and expose expert control only by explicit
