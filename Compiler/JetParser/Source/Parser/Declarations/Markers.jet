@@ -413,7 +413,7 @@ fn parser_report_singleton_marker_group(state: &JetParserState, span: Span, mark
         &state.diagnostics.push(diagnostic)
         return
     }
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
+    &state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
 }
 
 // (Rust `parse_attached_marker_sequence`): two or more
@@ -436,5 +436,5 @@ fn parser_report_adjacent_markers(state: &JetParserState, markers: [Marker], chu
         &rendered.push(text)
     }
     joined :: rendered.join(", ")
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#[{joined}]"}))
+    &state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: span, new_text: "#[{joined}]"}))
 }
