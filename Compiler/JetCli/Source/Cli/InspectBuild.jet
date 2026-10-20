@@ -103,13 +103,8 @@ fn jet_cli_build_package(file: String, color: Bool, release: Bool, threads: Int?
     loop executable in selected.executables {
         source_path :: jet_cli_entry_join(root, executable.source)
         source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
-        built :: jet_cli_compile_build(source_path, source, color, release, threads, invocation, trace_sink)
+        built :: jet_cli_compile_target(source_path, executable.name, source, color, release, threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
-        produced :: "{root}/.jet/build/{jet_cli_stem(source_path)}"
-        named :: "{root}/.jet/build/{executable.name}"
-        if produced != named {
-            build_files.rename(produced, named) ?? return jet_cli_build_failed("couldn't name the built target `{named}`: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
-        }
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

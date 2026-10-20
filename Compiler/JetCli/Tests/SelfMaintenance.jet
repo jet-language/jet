@@ -7,7 +7,7 @@ fn run() {
     quoted :: "\"Examples/features/a.jet\" \"Docs/spec/b.md\" \"tests/ui/c.stderr\" \"tests/ui_lint/d.warn\" \"tests/cli/e.txt\" \"tests/release/f.snapshot\""
     paths :: jet_cli_extract_fixture_paths(quoted)
     maintenance_require(paths == [String]{"Examples/features/a.jet", "Docs/spec/b.md", "tests/ui/c.stderr", "tests/ui_lint/d.warn", "tests/cli/e.txt", "tests/release/f.snapshot"}, "all prefixes and extensions")
-    excluded :: "\"Examples/features/{name}.jet\" \"Examples/features/a{b.jet\" \"Examples/features/a.rs\" \"docs/spec/b.md\" render_diagnostics(\"tests/ui/shown.jet\" render_all_colored(\"tests/ui/shown.jet\" render_all_json(\"tests/ui/shown.jet\""
+    excluded :: "\"Examples/features/{{name}}.jet\" \"Examples/features/a{{b.jet\" \"Examples/features/a.rs\" \"docs/spec/b.md\" render_diagnostics(\"tests/ui/shown.jet\" render_all_colored(\"tests/ui/shown.jet\" render_all_json(\"tests/ui/shown.jet\""
     maintenance_require(jet_cli_extract_fixture_paths(excluded).len() == 0, "templates and display-only paths")
     maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet\" \"tests/ui/a.jet\"").len() == 2, "duplicates count twice")
     maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet") == [String]{"tests/ui/a.jet"}, "unterminated quote uses remainder")

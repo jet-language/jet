@@ -1,11 +1,11 @@
 // The canonical pin pre-parser used by the read-only self-toolchain report.
 fn run() Never! {
-    plain :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\njet: 0.4\ndeps: {}\n")
+    plain :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\njet: 0.4\ndeps: {{}}\n")
     if plain.payload_name != "app" || plain.payload_version != "1.0.0" || plain.jet != .Val("0.4") -> panic("canonical pin identity")
-    unpinned :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\ndeps: {}\n")
+    unpinned :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\ndeps: {{}}\n")
     if unpinned.jet != None -> panic("unpinned identity")
-    nested :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\noutputs: { hidden: { jet: 9.9 } }\njet: \"main\" // channel comment\n")
+    nested :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\noutputs: {{ hidden: {{ jet: 9.9 }} }}\njet: \"main\" // channel comment\n")
     if nested.jet != .Val("main") -> panic("nested fields cannot impersonate the pin")
-    migrated :: trust_pin_identity_preparse("payload: { name: \"app\", version: \"1.0.0\", jet: 0.4 }\n")
+    migrated :: trust_pin_identity_preparse("payload: {{ name: \"app\", version: \"1.0.0\", jet: 0.4 }}\n")
     if migrated != plain -> panic("the shared frozen identity pre-parser remains unchanged")
 }

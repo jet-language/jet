@@ -617,14 +617,14 @@ enum JetCLIBuilt {
 
 // Write `.jet/build/<stem>` in the source root for a compile with no errors,
 // through the native backend at the command's level (jet_cli_native_level).
-fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Bool, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
+// `name` is the binary's name in .jet/build: the file stem, or a build target's name.
+fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool, release: Bool, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     if !result.complete -> return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}
     root :: snapshot.roots[0].canonical_path
     build_dir :: "{root}/.jet/build"
     cli_files.create_dir_all(build_dir) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)}
-    stem :: jet_cli_stem(file)
-    binary :: "{build_dir}/{stem}"
+    binary :: "{build_dir}/{name}"
     built :: jet_cli_build_native(file, command, release, &result, snapshot, binary, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return JetCLIBuilt.Failed{output: built}
     JetCLIBuilt.Binary{path: binary}
@@ -658,7 +658,7 @@ fn jet_cli_present_shown(result: JetDriverCompileResult, snapshot: JetDriverAuth
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // the way the Rust host does, check the application authority, then write
 // the executable.
-fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool, invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, release: Bool, invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
@@ -667,7 +667,7 @@ fn jet_cli_build_result(file: String, source: String, color: Bool, release: Bool
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if jet_cli_authority_check(file, source, color, "build", invocation, result) == .Val(refusal) -> return refusal
-    if jet_cli_build_binary(file, "build", color, release, &result, snapshot) == {
+    if jet_cli_build_binary(file, name, "build", color, release, &result, snapshot) == {
         .Failed(failure) -> return failure
         .Binary(_) -> {}
     }
@@ -682,6 +682,16 @@ fn jet_cli_compiled_snapshot(compiled: JetCLICompiled) -> JetDriverAuthorizedSou
     None
 }
 
+// One build target of a package build: compile `file` into .jet/build/`name` and return,
+// so the package build continues with its next target.
+fn jet_cli_compile_target(file: String, name: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
+    authorized :: jet_cli_compiled_snapshot(compiled)
+    if compiled == .Refused(refusal) -> return ^refusal
+    if &compiled == .Compiled(result, _) -> return jet_cli_build_result(file, name, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
+    jet_cli_ice("the compile of `{file}` was neither refused nor compiled")
+}
+
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // The result is matched in place: binding it out of an owned local
@@ -690,7 +700,7 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_build_result(file, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot")))
+    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot")))
     // Unreached (a compile is refused or compiled); a value-returning verb
     // never ends in its Never exit call.
     output
@@ -759,7 +769,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     if jet_cli_authority_check(file, source, color, "run", invocation, result) == .Val(refusal) -> return refusal
     if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    built :: jet_cli_build_binary(file, "run", color, release, &result, snapshot)
+    built :: jet_cli_build_binary(file, jet_cli_stem(file), "run", color, release, &result, snapshot)
     if built == {
         .Failed(failure) -> output = ^failure
         .Binary(binary) -> output = if dev -> JetDriverVerbOutput{stdout: binary, stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_exec(binary, program_args, color)

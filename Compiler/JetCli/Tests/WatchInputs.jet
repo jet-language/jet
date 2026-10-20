@@ -48,7 +48,7 @@ fn run() {
     }
     watch_inputs_require(graph.paths.len() == jet_cli_lock_canonical(graph.paths).len(), "reference cycles deduplicated")
     literals :: jet_cli_watch_runtime_literals("files.read(\"a\"); files.read_bytes_more(\"ignored\"); testing.corpus('dir'); files.read(\"{{name}}\"); files.read(\"https://example.invalid/x\"); files.read(path)")
-    watch_inputs_require(literals.len() == 2 && literals.get("a") == .Val(false) && literals.get("dir") == .Val(true), "literal grammar and directory hints")
+    watch_inputs_require(literals.len() == 2 && literals.get("a") == (Val(false)) && literals.get("dir") == (Val(true)), "literal grammar and directory hints")
     ignored :: jet_cli_watch_local_reference(root, "https://example.invalid/x")
     watch_inputs_require(ignored == None && jet_cli_watch_local_reference(root, "//example.invalid/x") == None, "remote URLs excluded")
     blocked :: jet_cli_watch_discover(&cache, request)
