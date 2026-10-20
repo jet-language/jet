@@ -57,7 +57,7 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverSharedBui
         if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
         owner :: jet_eval_build_context_host_id(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method requires its checked context"))
         if !jet_driver_build_context_owned(session, owner) -> return Val(jet_driver_build_host_failure(session, span, "build context expired"))
-        method :: row.member.slice(13, row.member.len())
+        method :: row.member.slice("Build.".len(), row.member.len())
         values := [BuildSessionValue]{}
         generated := String?{None}
         loop index in 1..<args.len() {
