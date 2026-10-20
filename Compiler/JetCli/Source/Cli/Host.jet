@@ -1860,6 +1860,7 @@ fn jet_cli_dev_config(file: String, source: String, color: Bool, threads: Int?) 
 
 fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -[FS, Env, Exec, Net, Time, Time.Wait, IO]> JetDriverVerbOutput {
     root :: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
+    hot_noted := false
     loop {
         source :: cli_files.read(file) ?? ""
         config := jet_driver_dev_config_stock()
@@ -1873,7 +1874,10 @@ fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, thr
         }
         stamp :: jet_cli_dev_stamp(root, config.watch)
         child := ProcessChild?{None}
-        if config.configured && config.reload == "Hot" -> cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
+        if config.configured && config.reload == "Hot" && !hot_noted {
+            cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
+            hot_noted = true
+        }
         compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
         authorized :: jet_cli_compiled_snapshot(compiled)
         if !configured {

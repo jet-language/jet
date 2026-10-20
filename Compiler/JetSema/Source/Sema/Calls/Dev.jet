@@ -24,7 +24,11 @@ fn sema_call_try_dev_context_method(receiver: Expr, receiver_value: TExpr, metho
     argument :: args[0]
     label_name :: if argument.label == .Val(label) -> label.name.copy() else -> ""
     if argument.spread || (label_name.len() > 0 && !(method == "serve" && label_name == "port")) {
-        &diagnostics.push(sema_error("E0764", argument.span, "`Dev.{method}` takes a positional argument", "only `d.serve` names its argument (`port:`)", "remove the label or spread"))
+        if method == "serve" {
+            &diagnostics.push(sema_error("E0764", argument.span, "`Dev.serve` takes its port positionally or as `port:`", "the dev server argument is the port", "write `d.serve(3000)` or `d.serve(port: 3000)`"))
+        } else {
+            &diagnostics.push(sema_error("E0764", argument.span, "`Dev.{method}` takes a positional argument", "only `d.serve` names its argument (`port:`)", "remove the label or spread"))
+        }
         return failed
     }
     value := TExpr?{None}
