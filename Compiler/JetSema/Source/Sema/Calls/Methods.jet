@@ -192,6 +192,8 @@ fn sema_call_try_int_abs_source(receiver: Expr, receiver_value: TExpr, method: S
 fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     build :: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if build.handled -> return build
+    dev :: sema_call_try_dev_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if dev.handled -> return dev
     if method == "raw" {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         return sema_call_try_distinct_raw_value(receiver_value, args, span, expected, environment, program, &scopes, &diagnostics)

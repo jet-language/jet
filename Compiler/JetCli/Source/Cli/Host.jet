@@ -17,6 +17,9 @@ use jet_backend.[
     x64_relocatable_object_owned,
 ]
 use jet_driver.[
+    JetDriverDevConfig,
+    jet_driver_dev_config_stock,
+    jet_driver_query_dev_config,
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
     JetDriverCompileRequest,
@@ -1834,20 +1837,57 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
 // Stock `jet dev`: build and run the program; when any source of its package
 // changes, stop it, rebuild and run it again. A build with errors prints them and
 // waits for the next change. Ends only when the user stops it.
+enum JetCLIDevConfigured {
+    Config(config: JetDriverDevConfig)
+    Refused(output: JetDriverVerbOutput)
+}
+
+// The package's dev configuration: its `fn dev(d: Dev)`, or the stock loop.
+fn jet_cli_dev_config(file: String, source: String, color: Bool, threads: Int?) -> JetCLIDevConfigured {
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    if ^prepared == {
+        .Refused(output) -> return JetCLIDevConfigured.Refused{output: output}
+        .Prepared(request, _) -> {
+            queried :: jet_driver_query_dev_config(^request)
+            if queried.internal_problem == .Val(problem) -> return JetCLIDevConfigured.Refused{output: jet_cli_ice(problem)}
+            if !queried.complete || jet_cli_errors(queried.diagnostics).len() > 0 {
+                return JetCLIDevConfigured.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_errors(queried.diagnostics), color, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+            }
+            return JetCLIDevConfigured.Config{config: queried.config}
+        }
+    }
+}
+
 fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -[FS, Env, Exec, Net, Time, Time.Wait, IO]> JetDriverVerbOutput {
     root :: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
     loop {
-        stamp :: jet_cli_dev_stamp(root)
-        child := ProcessChild?{None}
         source :: cli_files.read(file) ?? ""
+        config := jet_driver_dev_config_stock()
+        configured := true
+        if jet_cli_dev_config(file, source, color, threads) == {
+            .Config(found) -> config = found
+            .Refused(output) -> {
+                cli_term.eprint(output.stderr)
+                configured = false
+            }
+        }
+        stamp :: jet_cli_dev_stamp(root, config.watch)
+        child := ProcessChild?{None}
+        if config.configured && config.reload == "Hot" -> cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
         compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
         authorized :: jet_cli_compiled_snapshot(compiled)
-        if &compiled == .Compiled(result, _) {
+        if !configured {
+        } else if &compiled == .Compiled(result, _) {
             built :: jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its snapshot"), true)
             if built.exit_code == JET_DRIVER_EXIT_OK && built.stdout != "" {
                 argv := [String]{built.stdout}
                 loop argument in program_args -> &argv.push(argument)
-                if cli_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == {
+                spec := cli_process.cmd(argv)
+                if config.port == .Val(port) {
+                    spec = spec.env("JET_DEV_PORT", "{port}")
+                    cli_term.eprint("jet dev: dev server port {port} (JET_DEV_PORT)")
+                }
+                if spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == {
                     .Ok(spawned) -> child = Val(spawned)
                     .Err(error) -> cli_term.eprint(jet_cli_report("E2105", "couldn't run the built program: {error}", jet_cli_why("E2105"), "correct the named problem; jet dev reruns on the next change", color))
                 }
@@ -1858,7 +1898,7 @@ fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, thr
             cli_term.eprint(refusal.stderr)
         }
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
-        loop jet_cli_dev_stamp(root) == stamp -> cli_time.sleep(200ms)
+        loop jet_cli_dev_stamp(root, config.watch) == stamp -> cli_time.sleep(200ms)
         if child == .Val(running) {
             running.kill().drop("the program may already have exited")
             running.wait().drop("the stopped program's status is not reported")
@@ -1869,16 +1909,38 @@ fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, thr
 
 // The latest modification time of any .jet source under `root`, plus the file count
 // so that an added or removed file also counts as a change.
-fn jet_cli_dev_stamp(root: String) -[FS]> String Never! {
-    entries :: cli_files.walk(root, None) ?? return ""
+// A change stamp over the package's .jet sources plus every file under the `d.watch` paths
+// (relative to the package root).
+fn jet_cli_dev_stamp(root: String, watch: [String]) -[FS]> String Never! {
+    files := [String]{}
+    loop path in jet_cli_dev_files(root) {
+        if path.ends_with(".jet") && !path.starts_with("{root}/.jet/") -> &files.push(path)
+    }
+    loop path in watch {
+        full :: jet_cli_entry_join(root, path)
+        if cli_files.is_dir(full) {
+            loop watched in jet_cli_dev_files(full) -> &files.push(watched)
+        } else {
+            &files.push(full)
+        }
+    }
     latest := ""
     count := 0
-    loop entry in entries {
-        if entry.is_dir || !entry.path.ends_with(".jet") || entry.relative.starts_with(".jet/") -> next
+    loop watched in files {
         count += 1
-        info :: cli_files.stat(entry.path) ?? next
+        info :: cli_files.stat(watched) ?? next
         modified :: "{info.modified}"
         if modified > latest -> latest = modified
     }
     "{count}:{latest}"
+}
+
+// Every file under `directory`.
+fn jet_cli_dev_files(directory: String) -[FS]> [String] Never! {
+    entries :: cli_files.walk(directory, None) ?? return [String]{}
+    files := [String]{}
+    loop entry in entries {
+        if !entry.is_dir -> &files.push(entry.path)
+    }
+    files
 }

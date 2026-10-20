@@ -1487,7 +1487,7 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     if !jet_eval_route_signature_prelude(row, args.len(), &machine, span) -> return None
     // A fn build's Build calls are effectful host methods its build adapter answers.
-    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && (row.member.starts_with("Build.") || row.member == "BuildPlan.graph") {
+    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && (row.member.starts_with("Build.") || row.member.starts_with("Dev.") || row.member == "BuildPlan.graph") {
         build_symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
         if build_symbol == "jet_comptime_host_method" -> return jet_eval_host_row(&machine, row, args, result_ty, span)
     }

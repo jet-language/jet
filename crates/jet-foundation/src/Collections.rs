@@ -38,6 +38,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     // not a user-defined data type that can shadow the validation surface.
     Syntax::TYPE_VALIDATE,
     Syntax::TYPE_BUILD_CONTEXT,
+    "Dev",
     Syntax::TYPE_BUILD_PLAN,
     Syntax::TYPE_BUILD_ACTION,
     Syntax::TYPE_BUILD_TARGET,

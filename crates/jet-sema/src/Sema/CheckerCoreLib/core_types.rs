@@ -502,6 +502,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-BUILD*: selected-root build-program handles and the read-only
         // graph/diff records returned by `core.build`.
         | "Build"
+        | "Dev"
         | "BuildPlan"
         | "BuildAction"
         | "BuildTarget"
