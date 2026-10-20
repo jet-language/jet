@@ -263,15 +263,13 @@ fn pkg_parse_provenance_requirement(value: String) -> ProvenanceRequirement Pack
     }
 }
 
-// `{ … }` after an optional leading dot.
-fn pkg_dotted_record_body(input: String) -> String? Never! {
-    value :: input.trim()
-    rest :: (if value.starts_with(".") -> value.removeprefix(".") else -> value).trim_start()
-    pkg_strip_wrapped(rest, "{{", "}}")
+// The `{ … }` body of a record value.
+fn pkg_braced_record_body(input: String) -> String? Never! {
+    pkg_strip_wrapped(input.trim(), "{{", "}}")
 }
 
 fn pkg_parse_ci_trust_prompt(value: String) -> TrustDecision PackageParseError! {
-    body :: pkg_dotted_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.ci` must be `{{ prompt: allow|prompt|deny }}`"))
+    body :: pkg_braced_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.ci` must be `{{ prompt: allow|prompt|deny }}`"))
     prompt := TrustDecision?{None}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
@@ -285,7 +283,7 @@ fn pkg_parse_ci_trust_prompt(value: String) -> TrustDecision PackageParseError! 
 }
 
 fn pkg_parse_service_trust(value: String) -> [ServiceTrust] PackageParseError! {
-    body :: pkg_dotted_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.services` must be `{{ name: allow|prompt|deny }}`"))
+    body :: pkg_braced_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.services` must be `{{ name: allow|prompt|deny }}`"))
     services := [ServiceTrust]{}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {

@@ -186,14 +186,6 @@ fn pkg_migrated_string_literal(literal: String, value: String, replacement: Stri
     Val("{pkg_binder_slice(literal, 0, width)}{replacement}{pkg_binder_tail(literal, length - width)}")
 }
 
-// Rewrite the retired `.{ … }` record head (D-LIT-DOT1): `.Kind.{` becomes
-// `.Kind{`.
-fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
-    edits := [SourceEdit]{}
-    loop span in pkg_retired_record_head_spans(text) -> &edits.push(SourceEdit{start: span.start, end: span.end, replacement: ""})
-    RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
-}
-
 // Why a Package/Config source cannot be formatted (Rust `String` errors).
 #Error
 struct PackageFormatError {
@@ -204,7 +196,7 @@ struct PackageFormatError {
 // retired spellings and validating it with the same model that loads it.
 // Files with comments fail closed.
 fn pkg_format_source(input: String, origin: String) -> String PackageFormatError! {
-    text :: pkg_rewrite_retired_record_heads(pkg_rewrite_retired_dependency_refs(pkg_rewrite_retired_targets(input).text).text).text
+    text :: pkg_rewrite_retired_dependency_refs(pkg_rewrite_retired_targets(input).text).text
     stripped :: pkg_strip_comments(text)
     trimmed :: stripped.trim()
     if trimmed == "" -> return Err(PackageFormatError{message: "Package or Config source is empty"})

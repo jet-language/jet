@@ -589,7 +589,6 @@ fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
             token.kind == TOKEN_UNIFIED_ARROW && is_effect_arrow -> replacement = Val(">")
             token.kind == TOKEN_LAMBDA_ARROW && is_effect_arrow -> replacement = Val(">")
             token.kind == TOKEN_LAMBDA_ARROW -> replacement = Val("->")
-            token.kind == TOKEN_DOT && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LBRACE -> replacement = Val("")
             else -> {}
         }
         if replacement == .Val(text) -> &edits.push(JetFmtSourceEdit{start: token.span.start, end: token.span.end, replacement: text})

@@ -1211,7 +1211,7 @@ fn jet_cli_fmt_rewrite_retired_package_targets(source: String, origin: String) -
 // run with its registered manifest diagnostic (E1206 and family); a layout
 // the model declines (authored comments) is left exactly as written.
 fn jet_cli_fmt_package_manifest(source: String, origin: String) -> JetCLIFmtSource {
-    materialized :: pkg_rewrite_retired_record_heads(pkg_rewrite_retired_targets(source).text).text
+    materialized :: pkg_rewrite_retired_targets(source).text
     if PackageFacts.parse(materialized, origin) == .Err(error) -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_parse_diagnostic(origin, error)})
     if pkg_format_source(materialized, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
     jet_cli_fmt_formatted(materialized)

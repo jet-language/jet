@@ -1030,8 +1030,13 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         target :: parser_module_dashed_name(&state, "for a host system name")
         overrides := Span?{None}
         end := target.span
+        // D-LIT-DOT1: `system.web.{ … }` is not Jet; report E0320 and still
+        // capture the override so one pass reports every error.
         if parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-            parser_bump(&state)
+            dot :: parser_bump(&state)
+            parser_add_error_code(&state, "E0320", dot.span, "host overrides use `system.{target.name}{{…}}`, not `system.{target.name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `system.{target.name}{{…}}`")
+        }
+        if parser_current_kind(&state) == TOKEN_LBRACE {
             open :: parser_bump(&state)
             depth := 1
             close := open.span

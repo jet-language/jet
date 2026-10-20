@@ -542,18 +542,18 @@ fn parser_task_group_ahead(state: &JetParserState) -> Bool Never! {
 }
 
 // D-LAYOUT-CTOR1 (Rust `retired_layout_keyword`): the retired
-// `layout NAME { … }` teaches `name :: Layout.{ … }` (E2935).
+// `layout NAME { … }` teaches `name :: Layout{ … }` (E2935).
 fn parser_parse_retired_layout_keyword(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
     end := start.span.end
-    fix := "write `name :: Layout.{{ … }}`"
+    fix := "write `name :: Layout{{ … }}`"
     if parser_current_kind(&state) == TOKEN_IDENT {
         hint :: parser_bump(&state)
         end = hint.span.end
-        fix = "write `{parser_value(state, hint)} :: Layout.{{ … }}`"
+        fix = "write `{parser_value(state, hint)} :: Layout{{ … }}`"
     }
     if parser_current_kind(&state) == TOKEN_LBRACE -> end = parser_current(&state).span.end
-    parser_add_error_code(&state, "E2935", Span{start: start.span.start, end: end}, "`layout` is retired", "constraint layouts use typed-literal construction — `name :: Layout.{{ … }}` (D-DOTCTOR3 element body of `Constraint`s)", fix)
+    parser_add_error_code(&state, "E2935", Span{start: start.span.start, end: end}, "`layout` is retired", "constraint layouts use typed-literal construction — `name :: Layout{{ … }}` (D-DOTCTOR3 element body of `Constraint`s)", fix)
     parser_sync_stmt(&state)
     Stmt.Expr{expr: Expr.Unit{span: start.span}}
 }

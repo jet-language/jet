@@ -492,7 +492,6 @@ fn pkg_config_wrapper(text: String) -> ManifestEntry? PackageParseError! {
     value := pkg_binder_tail(text, at + 2).trim()
     if !value.starts_with("Config") -> return Ok(None)
     value = value.removeprefix("Config").trim_start()
-    if value.starts_with(".") -> value = value.removeprefix(".").trim_start()
     if !value.starts_with("{{") -> return Err(PackageParseError.MissingRecord("Config"))
     Ok(Val(ManifestEntry{key: name, value: pkg_record_body(value, "Config")}))
 }
