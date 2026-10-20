@@ -698,17 +698,7 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
                 // parameter; `<prep>` and `<prep: Trait>` stay type parameters.
                 if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "prep" && parser_kind_at(&state, 1) == TOKEN_IDENT {
                     prep_head :: parser_bump(&state)
-                    &params.push(parser_parse_prep_param(&state, prep_head.span, false))
-                    if parser_type_close_here(&state) -> break
-                    if parser_current_kind(&state) != TOKEN_COMMA -> break
-                    parser_bump(&state)
-                    if parser_type_close_here(&state) -> break
-                    next
-                }
-                // The retired spelling `<@N: Int>` teaches E0389 once.
-                if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0).starts_with("@") && parser_kind_at(&state, 1) == TOKEN_COLON {
-                    retired_start :: parser_current(&state).span
-                    &params.push(parser_parse_prep_param(&state, retired_start, true))
+                    &params.push(parser_parse_prep_param(&state, prep_head.span))
                     if parser_type_close_here(&state) -> break
                     if parser_current_kind(&state) != TOKEN_COMMA -> break
                     parser_bump(&state)
@@ -736,16 +726,11 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
     params
 }
 
-// Parse `N: Int` after `prep` (or the retired `@N: Int`, which
-// teaches E0389) into the typed number-parameter slot.
-fn parser_parse_prep_param(state: &JetParserState, prep_span: Span, retired: Bool) -> TypeParam {
+// Parse `N: Int` after `prep` into the typed number-parameter slot.
+fn parser_parse_prep_param(state: &JetParserState, prep_span: Span) -> TypeParam {
     name :: parser_expect_name(&state, "for a number parameter name")
-    written :: parser_value(state, name)
-    param_name :: if retired -> written.slice(1, written.len()) else -> written
-    name_span :: if retired -> Span{start: name.span.start + 1, end: name.span.end} else -> name.span
-    if retired {
-        parser_add_error_code(&state, "E0389", name.span, "`{written}` marks a number parameter with the retired `@` mark", "only the declaration carries `prep`; every use writes the plain name `{param_name}`", "write `prep {param_name}` in the parameter list")
-    }
+    param_name :: parser_value(state, name)
+    name_span :: name.span
     parser_expect(&state, TOKEN_COLON, "`:` after a number parameter name")
     value_type :: parser_expect_name(&state, "for the number parameter type")
     TypeParam{name: param_name, name_span: name_span, bounds: [String]{}, prep: Val(PrepParam{prep_span: prep_span, value_type: parser_value(state, value_type), value_type_span: value_type.span})}
@@ -964,8 +949,7 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
         }
     }
     // An optional `from src (| src)*` follows the type,
-    // then the default `{expr}`; the retired `= expr`
-    // default is read once to teach E0385.
+    // then the default `{expr}`.
     declared_from := [String]?{None}
     if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "from" && (parser_kind_at(&state, 1) == TOKEN_IDENT || parser_kind_at(&state, 1) == TOKEN_SELF) {
         parser_bump(&state)
@@ -998,11 +982,6 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
             parser_bump(&state)
             default = Val(parser_parse_expression(&state, 1, 0).expr)
             parser_expect(&state, TOKEN_RBRACE, "`}}` after the parameter default")
-        }
-        parser_current_kind(&state) == TOKEN_EQ -> {
-            eq :: parser_bump(&state)
-            parser_add_error_code(&state, "E0385", eq.span, "This declaration uses the retired `name: Type = value` default spelling.", "Declaration defaults ride the type as `name: Type{{value}}`; `=` remains for reassignment and extern slot fill.", "Write `name: Type{{value}}` for a declaration default, or keep `=` for reassignment and extern slot fill.")
-            default = Val(parser_parse_expression(&state, 1, 0).expr)
         }
         else -> {}
     }
@@ -1067,13 +1046,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     effect_via := signature.via
     declared_return_view :: parser_parse_opt_declared_view_from(&state, parser_view_owner_names(params))
     post_effect := false
-    if declared_effects == None && effect_via == None && parser_func_effect_starts_here(&state) {
-        // (card #4512): `-> T -[E]>` writes two arrows; the
-        // result follows the one effect arrow instead (E0068).
-        if signature.plain_arrow && parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
-            arrow_span :: parser_current(&state).span
-            parser_add_error_code(&state, "E0068", arrow_span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
-        }
+    if declared_effects == None && effect_via == None && !signature.plain_arrow && parser_func_effect_starts_here(&state) {
         post_effect = true
         effects :: parser_parse_opt_func_effects(&state)
         declared_effects = effects.effects
@@ -1256,16 +1229,9 @@ struct ParsedCallableResult {
     plain_arrow: Bool
 }
 
-// The start of an effect arrow: canonical `-[`, or a retired `:[`, `=[`,
-// `#(` or `--` that is still read so it can be taught (E0066).
+// The start of an effect arrow `-[`.
 fn parser_func_effect_starts_here(state: &JetParserState) -> Bool Never! {
-    first :: parser_current_kind(&state)
-    second :: parser_kind_at(&state, 1)
-    ((first == TOKEN_MINUS || first == TOKEN_COLON || first == TOKEN_EQ) && second == TOKEN_LBRACKET) || (first == TOKEN_HASH && second == TOKEN_LPAREN) || first == TOKEN_MINUS_MINUS
-}
-
-fn parser_report_retired_effect_syntax(state: &JetParserState, span: Span) {
-    parser_add_error_code(&state, "E0066", span, "this function uses the retired effect-arrow spelling", "callable results use `->`, and an explicit effect ceiling uses the same arrow", "write `-[Effects]>`; use `-[]>` for an explicit purity bound")
+    parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET
 }
 
 // The effect arrow after a
@@ -1274,55 +1240,23 @@ fn parser_report_retired_effect_syntax(state: &JetParserState, span: Span) {
 fn parser_parse_opt_func_effects(state: &JetParserState) -> ParsedFuncEffects {
     first :: parser_current_kind(&state)
     second :: parser_kind_at(&state, 1)
-    canonical :: first == TOKEN_MINUS && second == TOKEN_LBRACKET
-    retired_colon :: first == TOKEN_COLON && second == TOKEN_LBRACKET
-    retired_eq :: first == TOKEN_EQ && second == TOKEN_LBRACKET
-    retired_hash :: first == TOKEN_HASH && second == TOKEN_LPAREN
-    if !canonical && !retired_colon && !retired_eq && !retired_hash && first != TOKEN_MINUS_MINUS -> return ParsedFuncEffects{effects: None, via: None}
-    start :: parser_bump(&state)
-    if !canonical -> parser_report_retired_effect_syntax(&state, start.span)
-    close :: if retired_hash -> TOKEN_RPAREN else -> TOKEN_RBRACKET
-    close_arrow :: if {
-        canonical || retired_colon -> TOKEN_GT
-        retired_eq -> TOKEN_LAMBDA_ARROW
-        else -> TOKEN_UNIFIED_ARROW
-    }
-    if retired_hash {
-        parser_expect(&state, TOKEN_LPAREN, "`(` to start an effect row")
-    } else {
-        parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
-    }
-    close_text :: if retired_hash -> "`)` to close the effect row" else -> "`]` to close the effect row"
+    if first != TOKEN_MINUS || second != TOKEN_LBRACKET -> return ParsedFuncEffects{effects: None, via: None}
+    parser_bump(&state)
+    parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
+    close :: TOKEN_RBRACKET
+    close_text :: "`]` to close the effect row"
     via :: parser_current(&state)
     if via.kind == TOKEN_IDENT && parser_value(state, via) == "via" {
         parser_bump(&state)
         param :: parser_expect_name(&state, "for the callback parameter name after `via`")
         parser_expect(&state, close, close_text)
-        parser_finish_effect_arrow(&state, close_arrow, retired_hash, canonical, start.span)
+        parser_expect(&state, TOKEN_GT, "`>` after the effect row")
         return ParsedFuncEffects{effects: None, via: Val(NamedSpan{name: parser_value(state, param), span: param.span})}
     }
     effects :: parser_parse_effect_row_entries(&state, close)
     parser_expect(&state, close, close_text)
-    parser_finish_effect_arrow(&state, close_arrow, retired_hash, canonical, start.span)
+    parser_expect(&state, TOKEN_GT, "`>` after the effect row")
     ParsedFuncEffects{effects: Val(effects), via: None}
-}
-
-fn parser_finish_effect_arrow(state: &JetParserState, close_arrow: Int, retired_hash: Bool, canonical: Bool, start: Span) {
-    if retired_hash {
-        if parser_at_unified_arrow(&state) -> parser_bump(&state)
-        return
-    }
-    if parser_current_kind(&state) == TOKEN_GT {
-        parser_bump(&state)
-        return
-    }
-    if canonical && parser_at_unified_arrow(&state) {
-        parser_bump(&state)
-        parser_report_retired_effect_syntax(&state, start)
-        return
-    }
-    arrow_text :: if close_arrow == TOKEN_LAMBDA_ARROW -> "`=>`" else -> "`->`"
-    _ := parser_expect(&state, close_arrow, "{arrow_text} after the effect row")
 }
 
 // The entries of an effect row up to (not including) `close`: effect paths,
@@ -1391,7 +1325,7 @@ fn parser_expect_effect_path_name(state: &JetParserState) -> NamedSpan {
 
 fn parser_type_starts_here(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
-    kind == TOKEN_BANG || parser_type_starts(kind)
+    parser_type_starts(kind)
 }
 
 fn parser_is_unit_fallible(ty: Type) -> Bool Never! {
@@ -1400,17 +1334,11 @@ fn parser_is_unit_fallible(ty: Type) -> Bool Never! {
 }
 
 // A unit-fallible result written after the parameters
-// (`IOError!`, `(A | B)!`); a retired prefix `!IOError` is read to teach it.
+// (`IOError!`, `(A | B)!`).
 fn parser_parse_unit_fallible_return(state: &JetParserState) -> ParsedType? {
     start :: parser_current(&state).span
-    if parser_current_kind(&state) != TOKEN_BANG && parser_suffix_contract_ahead(&state) < 0 -> return None
-    error_type :: if {
-        parser_current_kind(&state) == TOKEN_BANG -> {
-            bang :: parser_bump(&state)
-            parser_parse_retired_prefix_error(&state, bang.span, 1)
-        }
-        else -> parser_parse_suffix_contract(&state, 1)
-    }
+    if parser_suffix_contract_ahead(&state) < 0 -> return None
+    error_type :: parser_parse_suffix_contract(&state, 1)
     Val(ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: error_type.ty}, span: parser_cover(start, error_type.span)})
 }
 

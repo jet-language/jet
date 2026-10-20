@@ -238,30 +238,6 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 #Test("lambda_interface_lookahead_preserves_grouped_multiplication") {
     _ :: entry02_program("fn run() {{ print((2) * 3) }}\n")
 }
-// Rust: crates/jet-parser/src/Parser/mod.rs:2451 (stale on dev: Rust expect_err panics on the now-canonical fn old() -> Int { return 1 })
-#Test("retired_arrow_control_forms_have_specific_teaching_diagnostics") {
-    accepted :: entry02_program("fn old() -> Int {{ return 1 }}\n")
-    old :: entry02_func(accepted, "old")
-    assert_eq(old.return_type, Val(Type.Int))
-    loop testcase in [
-        (source: "fn old() --[FS]-> Int {{ return 1 }}\n", code: "E0066"),
-        (source: "fn old() :> Int {{ return 1 }}\n", code: "E0068"),
-        (source: "fn old() :> 1\n", code: "E0070"),
-        (source: "fn old() => 1\n", code: "E0070"),
-        (source: "fn old() Int :: 1\n", code: "E0065"),
-        (source: "fn run() {{ if ready send() }}\n", code: "E0372"),
-        (source: "fn run() {{ #Grant(FS) {{ caps -> use_caps(caps) }} }}\n", code: "E0077"),
-        (source: "protocol Old {{ client -> server: Hello(id: Int) }}\n", code: "E0154"),
-        (source: "fn run() {{ f :: take(value) (x: Int) => x + value }}\n", code: "E0057")
-    ] {
-        code :: testcase.code
-        ds :: entry02_errors(testcase.source)
-        diagnostic :: entry02_diag(ds, code)
-        if code == "E0065" -> assert((diagnostic.edit ?? panic("canonical replacement")).new_text == "->")
-        if code == "E0077" { assert(diagnostic.what.contains("#Grant"))
- assert(diagnostic.fix.contains("#FX")) }
-    }
-}
 // Rust: crates/jet-parser/src/Parser/mod.rs:2538
 #Test("adjacent_call_result_has_the_registered_call_value_fix") {
     ds :: entry02_errors("fn run() {{ make()() }}\n")
