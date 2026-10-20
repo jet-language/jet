@@ -25,7 +25,7 @@ function assemble(paths) {
 const blank = text => text.replace(/[^\n]/g, " ");
 const production = assemble(sources);
 const foundation = assemble(sources.filter(path =>
-    path.startsWith("Compiler/JetFoundation/") || path === "Jetpack/Foundation/Source/Authority.jet"));
+    path.startsWith("Compiler/JetFoundation/")));
 const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.jet"],
