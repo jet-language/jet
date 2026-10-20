@@ -1850,6 +1850,7 @@ fn jet_driver_find_module_import_target(
             }
         }
         module_path := ""
+        pascal_path := ""
         loop path_index in 1..<path_parts.len() {
             part :: path_parts[path_index]
             if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") {
@@ -1857,8 +1858,10 @@ fn jet_driver_find_module_import_target(
                 return None
             }
             if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
+            pascal :: jet_driver_pascal_segment(part)
+            if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else -> pascal_path = pascal
         }
-        candidate_paths :: if module_path.len() > 0 -> [String]{"{module_path}.jet", "{module_path}/run.jet"} else -> [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
+        candidate_paths :: if module_path.len() > 0 -> [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"} else -> [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
         target := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, candidate_paths, &diagnostics, span)
         if target != None -> return target
         if module_path.len() == 0 && !jet_driver_has_errors(diagnostics) {
@@ -1878,6 +1881,7 @@ fn jet_driver_find_module_import_target(
         return None
     }
     module_path := ""
+    pascal_path := ""
     loop path_index in 0..<path_parts.len() {
         part :: path_parts[path_index]
         if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") {
@@ -1885,8 +1889,10 @@ fn jet_driver_find_module_import_target(
             return None
         }
         if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
+        pascal :: jet_driver_pascal_segment(part)
+        if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else -> pascal_path = pascal
     }
-    candidate_paths :: [String]{"{module_path}.jet", "{module_path}/run.jet"}
+    candidate_paths :: [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"}
     diagnostics_before :: diagnostics.len()
     target := jet_driver_find_source_path(source_units, source_unit.root_index, candidate_paths, &diagnostics, span)
     if target != None -> return target
@@ -2388,7 +2394,7 @@ fn jet_driver_bind_package_namespaces(
     true
 }
 
-// Root component of every embedded Core module path (`<corelib>/Core/perf/perf.jet`),
+// Root component of every embedded Core module path (`<corelib>/Core/Perf/Perf.jet`),
 // the Rust `Diagnostics::CORE_SOURCE_ROOT`. Core is library source, not the
 // user's program; no authorized disk file ever carries this prefix.
 JET_DRIVER_CORE_SOURCE_ROOT :: prep { "<corelib>" }
@@ -2402,8 +2408,8 @@ fn jet_driver_unit_is_core(unit: JetDriverSourceUnit) -> Bool Never! {
 }
 
 // A Core source module's identity is its canonical owner prefix
-// (`<corelib>/Core/perf::Core/perf/perf.jet`), so its nominals are keyed
-// `<corelib>/Core/perf::Core/perf/perf.jet::PerfError` exactly as in Rust.
+// (`<corelib>/Core/Perf::Core/Perf/Perf.jet`), so its nominals are keyed
+// `<corelib>/Core/Perf::Core/Perf/Perf.jet::PerfError` exactly as in Rust.
 fn jet_driver_unit_module_identity(unit: JetDriverSourceUnit) -> String Never! {
     if !jet_driver_unit_is_core(unit) -> return jet_driver_module_identity(unit.package_identity, unit.path)
     if unit.file_index < 0 -> return unit.path
@@ -3426,7 +3432,7 @@ fn jet_driver_core_source_unit(module_name: String, relative_path: String, file_
 
 // The source unit of the Core module `module_name`, cataloged once. A public
 // source row also schedules the compiler-private parts it owns (`core.text`
-// owns `Core/text/string.jet`), which no import names. A runtime unit row
+// owns `Core/Text/String.jet`), which no import names. A runtime unit row
 // answers only a Core importer (`importer_core`): a Core source or the runtime
 // unit entry, which stands for its own unit (`entry_module`/`entry_index`).
 // A Core module with no source row becomes an empty module; any other
@@ -3498,7 +3504,7 @@ fn jet_driver_core_module_position(modules: [JetDriverLoadedModule], source_unit
 }
 
 // Place the Core module at `position`, then the compiler-private parts its
-// source row owns (`core.text` owns `Core/text/string.jet`).
+// source row owns (`core.text` owns `Core/Text/String.jet`).
 fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], position: Int, placed: &[Bool], order: &[Int]) Never! {
     if placed[position] -> return
     placed[position] = true
@@ -4105,4 +4111,15 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         complete: complete,
         names: Val(names),
     }
+}
+
+// A module path segment names its file in PascalCase: `unicode_assets` is
+// `UnicodeAssets.jet`, so `use core.encoding.base64` finds `Encoding/Base64.jet`.
+fn jet_driver_pascal_segment(part: String) -> String {
+    out := ""
+    loop word in part.split("_").to_list() {
+        if word.len() == 0 -> next
+        out = "{out}{word.slice(0, 1).to_ascii_upper()}{word.slice(1, word.len())}"
+    }
+    out
 }
