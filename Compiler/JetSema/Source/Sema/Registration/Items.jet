@@ -3127,8 +3127,13 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                 // A dependency package is one namespace: a member its import landed on stands for
                 // the package, so a name another member file declares resolves through that file.
                 export_index := target_index
+                // (The namespace table, not the owner's symbol index: imports resolve before that
+                // index exists.)
                 if sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
-                    if sema_registration_namespace_owner(graph, target_index, item.original) == .Val(owner) -> export_index = owner.module_index
+                    slot :: graph.modules[target_index].namespace_slot
+                    if slot >= 0 {
+                        if graph.namespace_tables[slot].get(item.original) == .Val(entry) -> export_index = graph.namespace_entry_modules[entry]
+                    }
                 }
                 resolved :: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package, [String]{})
                 if resolved == {
