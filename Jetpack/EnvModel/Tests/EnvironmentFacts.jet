@@ -332,11 +332,11 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("typed language map preserves options and expands enabled tools") {
     value :: CtValue.Map{entries: [CtMapEntry]{
-        CtMapEntry{key: CtKey.Str{value: "python"}, value: envmodel_test_lang([NamedCtValue]{
+        {key: CtKey.Str{value: "python"}, value: envmodel_test_lang([NamedCtValue]{
             envmodel_test_field("enable", CtValue.Bool{value: false}),
             envmodel_test_field("venv", CtValue.Bool{value: true})
         })},
-        CtMapEntry{key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
+        {key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
             envmodel_test_field("enable", CtValue.Bool{value: true}),
             envmodel_test_field("channel", CtValue.Enum{type_name: "Channel", variant: "Stable", args: [CtEnumArg]{}}),
             envmodel_test_field("version", CtValue.Str{value: "1.78"}),
@@ -393,14 +393,14 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS]> Bool {
 
 #Test("typed language records reject unknown and malformed fields") {
     unknown :: CtValue.Map{entries: [CtMapEntry]{
-        CtMapEntry{key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
+        {key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
             envmodel_test_field("enable", CtValue.Bool{value: true}),
             envmodel_test_field("surprise", CtValue.Bool{value: true})
         })}
     }}
     assert(envmodel_test_languages_error(unknown).contains("unknown language selection field"))
     malformed :: CtValue.Map{entries: [CtMapEntry]{
-        CtMapEntry{key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
+        {key: CtKey.Str{value: "rust"}, value: envmodel_test_lang([NamedCtValue]{
             envmodel_test_field("enable", CtValue.Str{value: "yes"})
         })}
     }}

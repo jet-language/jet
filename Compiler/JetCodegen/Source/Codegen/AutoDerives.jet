@@ -1,6 +1,6 @@
 // Structural Jet trait implementations emitted from explicit checked selection
 // facts. Equatable is not here: its body is the Prelude derive template that
-// JetSema expands into a compiler-generated impl (D-ONCE-DERIVE1=A).
+// JetSema expands into a compiler-generated impl.
 use jet_foundation.[
     name_mangle,
     MIRField,
@@ -171,7 +171,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
     &lines.push("}}")
 }
 
-// D-DISPLAYDBG1: bare `{value}` of a plain enum (every case a unit case) renders
+// Bare `{value}` of a plain enum (every case a unit case) renders
 // its case name on every tier, so `jet_fmt_display<T: JetDisplay>` gets that
 // render here. A selected user `Display` impl keeps its own rendering.
 fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, variants: [MIRVariant], lines: &[String]) Never! {
@@ -196,7 +196,7 @@ fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, 
     &lines.push("}}")
 }
 
-// D-CAPBUNDLE1: `#Printable` on a distinct type admits bare `{value}` and
+// `#Printable` on a distinct type admits bare `{value}` and
 // renders the base value on every tier, so `JetDisplay` forwards to the base;
 // a selected user `Display` impl keeps its own rendering.
 fn jet_codegen_auto_derives_append_distinct_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
@@ -212,7 +212,7 @@ fn jet_codegen_auto_derives_append_distinct_display(ctx: &JetRustEmitContext, de
     &lines.push("}}")
 }
 
-// D-DISPLAYDBG1 / D-FAIL-CONV2=A: an auto-`Printable` record (struct, unit
+// An auto-`Printable` record (struct, unit
 // family, or enum with a payload case) admits bare `{value}` and renders its
 // structural record on every tier (Core error family members convert onto
 // `Err` with `Err("{self}")`), so `JetDisplay` forwards to the structural

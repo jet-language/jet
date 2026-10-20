@@ -198,10 +198,10 @@ struct EvaluatedModule {
     // Environment-scoped facts. Source evaluation selects one name before
     // projecting these into `EnvPlan`.
     environment_contributions: [EnvironmentContribution]
-    // D-ENV-INTEGRATIONS1: typed first-party integrations imported by this
+    // Typed first-party integrations imported by this
     // module and lowered into ordinary environment facts.
     integrations: [EnvironmentIntegration]
-    // D-JPK-PROFILE1=D: source-backed package generation declarations. These
+    // Source-backed package generation declarations. These
     // are not environment presets and never affect shell selection.
     package_profiles: [PackageProfileSpec]
 }
@@ -321,9 +321,9 @@ struct DevServicePlan {
     // contract. Falls back to a TCP connect on `ports[0]` when unset and
     // `ports` is non-empty, else to a bare process-alive check.
     ready: String?{None}
-    // D-JPK-SERVICEDEPTH1: typed readiness without shell-command parsing.
+    // Typed readiness without shell-command parsing.
     ready_probe: ReadyProbe?{None}
-    // D-JPK-SERVICEDEPTH1: bounded restart behavior.
+    // Bounded restart behavior.
     restart: RestartPolicy?{None}
     // Files whose changes may trigger a bounded restart.
     watch: [String]{[String]{}}
@@ -366,14 +366,14 @@ enum ShutdownPolicy {
     Kill
 }
 
-// D-JPK-IMAGE1: the referent selects the realization tier. ISO disk images
+// The referent selects the realization tier. ISO disk images
 // inherit system facts; OCI images project a package or environment.
 enum ImageKind {
     Iso
     OCI
 }
 
-// U14/D-JPK-IMAGE1: one checked image contribution. ISO inherits its
+// U14 one checked image contribution. ISO inherits its
 // system's packages/services/options; OCI supplies container projection facts.
 struct ImagePlan {
     // The contribution path — the `<name>` in `image.<name>`.
@@ -384,7 +384,7 @@ struct ImagePlan {
     from: String
     // ISO disk-image format; empty for an OCI projection.
     format: String{""}
-    // D-ENV-IMAGE1: true when `from:` projects an `env.<name>` into an OCI
+    // True when `from:` projects an `env.<name>` into an OCI
     // shell image. The source kind stays explicit in the plan so realization
     // cannot confuse an environment with an executable package.
     from_environment: Bool
@@ -401,11 +401,11 @@ struct ImagePlan {
     // image alongside the package binary. Sorted before layering so the tar
     // layer is byte-identical regardless of declaration order.
     files: [String]
-    // `base: oci("<ref>")` — a base-image escape hatch (D-JPK-IMAGE1 option A).
+    // `base: oci("<ref>")` — a base-image escape hatch (option A).
     // Local `file://` layouts are admitted by digest; remote refs stay
     // explicit until a verified registry transport is configured.
     base: String?
-    // D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
+    // This rule expert projection fields. Empty/None uses the safe shell
     // default for an environment image. Cache, signing, and provenance stay
     // on Hangar and `.jet/lock`; this record does not duplicate those stores.
     services: [String]
@@ -449,7 +449,7 @@ struct EnvPlan {
     // in source order. `jetpack services <verb>`'s health gate is the only
     // consumer.
     dev_services: [DevServicePlan]
-    // D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: every typed declaration
+    // Every typed declaration
     // in the selected environment's one `secrets:` map, in source order.
     // Activation validates policy and source presence; the runtime Prelude
     // resolves composed declarations on each `get` read.
@@ -477,11 +477,11 @@ struct EnvPlan {
     // Managed environment-file declarations from the selected environment
     // before `jet env sync` applies them.
     files: [ManagedFile]
-    // D-ENV-INTEGRATIONS1: typed integrations from the selected environment
+    // Typed integrations from the selected environment
     // before host realization.
     integrations: [EnvironmentIntegration]
     integration_facts: IntegrationFactProjection
-    // D-JPK-PROFILE1=D: source-backed package-generation declarations. These
+    // Source-backed package-generation declarations. These
     // remain separate from the selected environment preset.
     package_profiles: [PackageProfileSpec]
     environment_names: [String]

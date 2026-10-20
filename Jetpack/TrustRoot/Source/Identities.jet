@@ -1,4 +1,4 @@
-// E4-JP6A / D-JPK-TRUSTROOT1: TUF-shaped registry authority substrate.
+// E4-JP6A TUF-shaped registry authority substrate.
 // Separate trust-domain identities (publisher, registry, cache builder,
 // remote executor) and the hybrid publisher proof. Role metadata is signed
 // with HMAC-SHA256 over canonical bytes; publisher identity stays typed for
@@ -63,7 +63,7 @@ enum TrustRootError {
 
 impl IOError -> TrustRootError { return TrustRootError.IO{detail: "{self}"} }
 
-// Separate trust-domain identities (D-JPK-TRUSTROOT1).
+// Separate trust-domain identities.
 enum IdentityKind {
     Publisher
     Registry
@@ -80,9 +80,9 @@ enum IdentityKind {
     }
 }
 
-// Hybrid public/private publisher proof (D-JPK-TRUSTROOT1): a Sigstore
+// Hybrid public/private publisher proof a Sigstore
 // identity bundle against a pinned transparency checkpoint, or an offline
-// Ed25519/KMS/HSM publisher signature. D-PKGSIGN1 author signatures are a
+// Ed25519/KMS/HSM publisher signature. Author signatures are a
 // different, opt-in surface.
 enum PublisherIdentity {
     Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String)

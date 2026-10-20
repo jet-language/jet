@@ -1,0 +1,1074 @@
+// Canonical owner-controlled syntax registry (I7).
+// The reference comparison is temporary and is not a generator dependency.
+
+/// N1 (ratified): language name.
+LANG_NAME :: "Jet"
+
+/// N1 (ratified): compiler binary name.
+BINARY_NAME :: "jet"
+
+/// CI/admin input naming a manifest-shaped organization
+/// policy file. The loader fails closed when a configured file cannot be read.
+ENV_ORG_UNSAFE_POLICY :: "JET_ORG_UNSAFE_POLICY"
+
+/// Typed compile-time unsafe proof statement and its
+/// parser-only call sentinel (removed by sema before TIR).
+KW_ASSERT :: "assert"
+
+INTERNAL_UNSAFE_ASSERT :: "__jet_unsafe_assert"
+
+UNSAFE_OBLIGATION_VALID_PTR :: "valid_ptr"
+
+UNSAFE_OBLIGATION_ALIGNED :: "aligned"
+
+UNSAFE_OBLIGATION_NO_ALIAS :: "no_alias"
+
+/// N2 (ratified): source file extension (without the dot).
+FILE_EXT :: "jet"
+
+/// Closed product-named artifact family. New kinds require
+/// an owner ballot; consumers compare against these exact suffixes.
+ARTIFACT_EXT_SOURCE_MAP :: ".jetmap"
+
+ARTIFACT_EXT_NOTEBOOK :: ".jetnb"
+
+ARTIFACT_EXT_PROOF :: ".jetproof"
+
+ARTIFACT_EXT_TRACE :: ".jettrace"
+
+ARTIFACT_EXT_GAME_REPLAY :: ".jetreplay"
+
+ARTIFACT_EXT_PROOF_REPLAY :: ".jetproof-replay"
+
+ARTIFACT_KINDS :: [(field_0: ArtifactKind, field_1: String)]{
+    (field_0: ArtifactKind.SourceMap, field_1: ARTIFACT_EXT_SOURCE_MAP),
+    (field_0: ArtifactKind.Notebook, field_1: ARTIFACT_EXT_NOTEBOOK),
+    (field_0: ArtifactKind.Proof, field_1: ARTIFACT_EXT_PROOF),
+    (field_0: ArtifactKind.Trace, field_1: ARTIFACT_EXT_TRACE),
+    (field_0: ArtifactKind.GameReplay, field_1: ARTIFACT_EXT_GAME_REPLAY),
+    (field_0: ArtifactKind.ProofReplay, field_1: ARTIFACT_EXT_PROOF_REPLAY),
+}
+
+/// S1 (ratified): keyword that starts a function definition.
+KW_FN :: "fn"
+
+/// (ratified 2026-08-03): explicit call-site type arguments
+/// use the existing angle tokens and must stay adjacent to the call parens.
+/// These constants name the source surface; Jet does not use Rust's `::<T>`.
+GENERIC_CALL_OPEN :: "<"
+
+GENERIC_CALL_CLOSE :: ">"
+
+/// `pub use` re-export is the only remaining `pub` form (re-export
+/// ballot pending, card #4723). `pub` on a declaration or field is
+/// rejected (E0411) with a fix that deletes it.
+KW_PUB :: "pub"
+
+/// (owner directive 2026-10-07, card #4723): everything is public by
+/// default. `priv` marks a module (`priv module name`, usable only by its
+/// enclosing module) or a struct field (usable only by the type's own module).
+KW_PRIV :: "priv"
+
+/// Retired file marker, recognized only so E0418 can delete it.
+MARKER_PUB_FILE :: "PubFile"
+
+/// (ratified 2026-06-28): file-scope marker that disables the
+/// readable Core prelude. Expert escape hatch only — no library may inject into
+/// the no-prefix surface.
+MARKER_NO_PRELUDE :: "NoPrelude"
+
+/// This rule option B (rejected): foreign spelling of `priv`, recognized
+/// only for E0412 teaching diagnostics.
+FOREIGN_PRIVATE :: "private"
+
+/// External program schema source for
+/// `jet self completions SHELL --for PROGRAM`.
+CLI_COMPLETIONS_FOR :: "--for"
+
+/// Retired file marker spelling, recognized only so E0418 can
+/// delete it.
+MARKER_PUBLIC_FILE :: "PublicFile"
+
+/// `priv(package) module` — the module is usable by every module
+/// of the same package and invisible to other packages.
+PRIV_PACKAGE_QUALIFIER :: "package"
+
+/// S2 immutable binding sigil `name :: expr`.
+/// This rule retires typed bindings (`name: Type :: expr`); types ride the
+/// value (`Type{ … }`) or live on signatures and fields.
+/// And `::` is not a
+/// function-body marker. Named function bodies use braces. `->` introduces
+/// the return type on signatures and still opens control, arm, and lambda
+/// bodies. `::` keeps its binding meaning and `=` remains for slot-filling
+/// declarations such as extern bindings.
+SIGIL_BIND_IMMUT :: "::"
+
+/// S2 (ratified 2026-06-18): mutable binding sigil `name := expr`
+/// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
+/// This rule retires typed bindings (`name: Type := expr`).
+SIGIL_BIND_MUT :: ":="
+
+/// Open/close a lock-step statement-expansion fence.
+/// Binding fences carry plain names; expression fences carry names or
+/// expression entries (expands ascending integer-literal
+/// ranges). Both digraphs are longest-match lexer tokens; `<`, `<=`, `<=>`,
+/// `>`, and generic `<T>` never need the adjacent pairs.
+SIGIL_FENCE_OPEN :: "<:"
+
+SIGIL_FENCE_CLOSE :: ":>"
+
+/// Binding-level tracking marker, written before the binding:
+/// `#Track name :: expr` / `#Track name := expr`.
+MARKER_TRACK :: "Track"
+
+/// The compiler-fact sigil. A fact is a
+/// `$` member of the thing it describes (`T.$layout`, `f.$effects`,
+/// `value.$origin`); subjectless facts use the roots `$build`, `$package`,
+/// `$phase` and `$program` marker and fact declarations
+/// mark compiler metadata the same way (`$sites:`). Inside a
+/// derive or marker template the same mark splices a template binding
+/// (`fn $method`, `self.$field`, `.$left`). The mark
+/// belongs to the name, and programs never declare a `$` name. Config
+/// surfaces read the same token as a `$NAME` environment read
+COMPTIME_MARK :: "$"
+
+/// The four subjectless fact roots.
+FACT_ROOT_BUILD :: "$build"
+
+FACT_ROOT_PACKAGE :: "$package"
+
+FACT_ROOT_PHASE :: "$phase"
+
+FACT_ROOT_PROGRAM :: "$program"
+
+/// (ratified 2026-07-09): statement switch-off attribute.
+/// `#Off <stmt>` parses and type-checks the statement, then emits no code.
+MARKER_OFF :: "Off"
+
+/// (ratified 2026-07-09): debug-only statement attribute.
+/// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
+MARKER_DEBUG_ONLY :: "DebugOnly"
+
+/// (ratified 2026-07-09): tooling metadata attribute for
+/// bindings, top-level consts, and functions.
+MARKER_META :: "Meta"
+
+/// One marker discovers an exported typed devtools panel.
+MARKER_DEV_PANEL :: "DevPanel"
+
+/// #2793: bind a bounded target interrupt handler.
+MARKER_INTERRUPT :: "Interrupt"
+
+/// The shared Core module and member for typed publications.
+CORE_DEVTOOLS_MODULE :: "core.devtools"
+
+CORE_DEVTOOLS_PUBLISH :: "publish"
+
+TYPE_UI_NODE :: "UINode"
+
+/// `#Meta` category field name.
+META_FIELD_CATEGORY :: "category"
+
+/// `#Meta` tunable flag field name.
+META_FIELD_TUNABLE :: "tunable"
+
+/// `#Meta` maturity field name.
+META_FIELD_MATURITY :: "maturity"
+
+/// S3 (ratified): block delimiters.
+BLOCK_OPEN :: "{{"
+
+BLOCK_CLOSE :: "}}"
+
+/// `?` is the contextual journey
+/// marker only when followed by `(text)`; ordinary fallible calls propagate
+/// implicitly. The note is lazy and source-linked.
+OP_TRY_SUFFIX :: "?"
+
+/// S5 (ratified): line comments run from this prefix to end of line.
+COMMENT_PREFIX :: "//"
+
+/// S5 (ratified 2026-06-15): block comments `/* … */`, nesting allowed so a
+/// region containing other comments can always be commented out.
+BLOCK_COMMENT_OPEN :: "/*"
+
+BLOCK_COMMENT_CLOSE :: "*/"
+
+/// S6 / S6-R (ratified 2026-06-18): the statement terminator. Under S6-R it is
+/// **never user-typed** — the lexer inserts a synthetic `;` at each line end
+/// after a statement-ending token (Go-style), so the grammar stays
+/// terminator-based while source has no visible semicolons. `jet fmt` emits
+/// none. The constant remains because the token still exists internally.
+STMT_SEP :: ";"
+
+/// S8 (ratified): string interpolation delimiters inside quoted text.
+INTERP_OPEN :: "{{"
+
+INTERP_CLOSE :: "}}"
+
+/// S9 (ratified): the prelude-declared print function (adds a newline).
+BUILTIN_PRINT :: "print"
+
+/// (owner: named `debug`, not `dbg`): the prelude-declared
+/// development trace. `debug(value)` returns `value` unchanged, adds no
+/// effect, and in development builds writes one stderr line
+/// `[debug] file.jet:LINE expr = <Debug form>`. Shipped artifacts and
+/// release-profile builds reject it (E3405).
+BUILTIN_DEBUG :: "debug"
+
+/// Sema-only name of a checked `debug(value)` call. Sema appends
+/// the site text (`file.jet:LINE expr`) as a second argument so every
+/// evaluator prints the same line without re-reading source. Never a source
+/// spelling.
+INTERNAL_DEBUG_TRACE :: "__jet_debug_trace"
+
+/// The stderr prefix every tier writes before the site text.
+DEBUG_TRACE_PREFIX :: "[debug]"
+
+/// `input` is prelude-declared (no `use core.term` required).
+/// `print` and `input` remain the interactive I/O subset. Other `core.term`
+/// members are opened through the readable prelude's explicit aliases.
+BUILTIN_INPUT :: "input"
+
+/// S11 (ratified): built-in type names (M1).
+TYPE_INT :: "Int"
+
+TYPE_FLOAT :: "Float"
+
+TYPE_BOOL :: "Bool"
+
+TYPE_STRING :: "String"
+
+/// Canonical checked HTML text type.
+TYPE_HTML :: "HTML"
+
+/// S80 (ratified; amended by): default error type and
+/// constructor share `Err`.
+TYPE_ERR :: "Err"
+
+/// `Never` is the existing bottom
+/// error-domain name and is also legal in callable success-return slots.
+/// It remains uninhabited in every ordinary value position.
+TYPE_NEVER :: "Never"
+
+/// (ratified 2026-08-06): ambient failure report inside a
+/// fallible `??` fallback. This is an ordinary contextual identifier, not a
+/// lexer keyword.
+AMBIENT_ERR :: "err"
+
+/// (ratified 2026-08-07, card #1641): the optional-name
+/// `.cases` member uses this ambient binding when the author gives no name;
+/// an explicit member-head name overwrites it inside that member's rows.
+AMBIENT_CASE :: "case"
+
+/// The public no-information result spelling is `()`.
+TYPE_UNIT :: "()"
+
+/// Compiler-only name carried by the existing zero-sized runtime value.
+INTERNAL_UNIT_TYPE :: "Unit"
+
+/// Compiler-private subject name for the one ordinary
+/// pattern table produced from ordered multi-head declarations.
+INTERNAL_MULTI_HEAD_SUBJECT :: "__jet_multi_head_subject"
+
+/// Expert terminal-session
+/// controls stay on the one `ProcessSpec` / `ProcessChild` model.
+TYPE_TERMINAL_POLICY :: "TerminalPolicy"
+
+TYPE_TERMINAL_SIZE :: "TerminalSize"
+
+TYPE_TERMINAL_MODE :: "TerminalMode"
+
+TYPE_TERMINAL_SESSION :: "TerminalSession"
+
+TERMINAL_FACT_NAMESPACE :: "TerminalFact"
+
+TERMINAL_FACT_TERMINAL :: "terminal"
+
+TERMINAL_FACT_RESIZE :: "resize"
+
+TERMINAL_FACT_RAW :: "raw"
+
+TERMINAL_FACTS :: [String]{
+    TERMINAL_FACT_TERMINAL,
+    TERMINAL_FACT_RESIZE,
+    TERMINAL_FACT_RAW,
+}
+
+/// S42 (ratified): explicit fixed-width numeric spellings for expert and
+/// FFI/binary code. `Int`/`Float` stay the beginner defaults; `I64`/`F64` are
+/// explicit fixed-width cells. The other widths are distinct types (no
+/// implicit narrowing/mixing —).
+TYPE_I8 :: "I8"
+
+TYPE_I16 :: "I16"
+
+TYPE_I32 :: "I32"
+
+TYPE_I64 :: "I64"
+
+TYPE_U8 :: "U8"
+
+TYPE_U16 :: "U16"
+
+TYPE_U32 :: "U32"
+
+TYPE_U64 :: "U64"
+
+TYPE_F32 :: "F32"
+
+TYPE_F64 :: "F64"
+
+/// Every fixed-width numeric spelling, for keyword/reserved-name checks.
+SIZED_NUMERIC_TYPES :: [String]{
+    TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_F32,
+    TYPE_F64,
+}
+
+/// (ratified, supersedes): memory model v5 sigils. Two
+/// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
+/// write, `^T` = move (consume). A deliberate copy is the built-in method
+/// `x.copy()`. At call sites `&`/`^` mark the
+/// named place a call writes or takes, receiver or argument alike
+/// (`&buf.append(x)`, `^buf.seal()`, `edit(&buf)`).
+SIGIL_MOVE :: "^"
+
+SIGIL_WRITE :: "&"
+
+WRITE_ACCESS_LABEL :: "the write-access marker `&`"
+
+MOVE_MARKER_LABEL :: "the move marker `^`"
+
+/// The two parameter-zone separators. Written in a parameter
+/// list, not as operators: `/` closes the positional-only zone (a label is
+/// forbidden before it) and `*` opens the label-only zone (a label is
+/// required after it). Parameters between them accept either call form.
+PARAM_ZONE_POSITIONAL_ONLY :: "/"
+
+PARAM_ZONE_LABEL_ONLY :: "*"
+
+/// (amends 's spelling): the one copy spelling
+/// is the compiler-owned method `x.copy()`, producing an owned, independent
+/// value. The parser reads `receiver.copy()` as an ordinary method call; sema
+/// decides by name resolution: on a value receiver (no arguments) it is the
+/// built-in copy, resolved before ordinary method lookup so no type can
+/// redefine it, and on a type receiver (`Recipe.copy()`) it stays an
+/// associated call. A temporary (no named binding survives to be used-after),
+/// so it never needs `^` and never trips E0209. `.clone()` is not
+/// user-typable Jet syntax (I8).
+METHOD_COPY :: "copy"
+
+/// The retired prefix copy sigil (was 's
+/// spelling). Recognized only for the E0941 teaching error whose Safe fix
+/// rewrites `~x` to `x.copy()`.
+SIGIL_COPY_RETIRED :: "~"
+
+/// The retired `copy` word (was S4's one copy
+/// spelling). Recognized only for the E0991 teaching error that points at
+/// `x.copy()`.
+KW_COPY :: "copy"
+
+/// S10 (M2) → the retired write keyword. Recognized only for the E0056
+/// teaching error that points at the `&` sigil.
+KW_MUTATE :: "mut"
+
+/// S10 (M2) → the retired move keyword. Bare `take value` is recognized
+/// only for the paused capability teaching path. `.take(n)` stays a valid method
+/// name, while `take(names) () ->` is recognized only to report E0057.
+KW_MOVE :: "take"
+
+/// M2: struct definition keyword (construction spelling: S29).
+KW_STRUCT :: "struct"
+
+/// S30 (ratified M3): sum-type definition keyword.
+KW_ENUM :: "enum"
+
+/// (ratified 2026-06-28), amended by
+/// (ratified 2026-08-06): transparent type alias — `alias Name<T> :: …`
+/// for generic type shortcuts only (not primitive newtypes).
+KW_ALIAS :: "alias"
+
+/// Optional type mark — `Int?` is “maybe an Int”. It
+/// follows the type it marks and binds tightly: `[Int?]` is a list of
+/// optionals, `[Int]?` an optional list. `T??` is E0309.
+TYPE_OPTION_MARK :: "?"
+
+/// Error-contract mark — `E!` or `(E1 | E2)!` after the
+/// success type in a function contract (`-> Int ParseError!`, unit-fallible
+/// `SaveError!`). Expression `!x` and effect denials `-[!Mem.Alloc]>` keep
+/// their prefix meaning.
+TYPE_FALLIBLE_MARK :: "!"
+
+/// Anonymous closed structural sum — `Int | String`.
+/// Order-insensitive; nested unions flatten; duplicates disappear. Underneath
+/// it is compiler-generated enum sugar; named enums stay the documenting form.
+TYPE_UNION_SEP :: "|"
+
+/// S32 b: Optional variants are `Val` / `None`.
+/// Both also support the expected-type forms `.Val` / `.None`.
+///
+/// For a direct immutable local or parameter of type `?T`,
+/// `x != None` narrows `x` to `T` in the true branch; `x == None` narrows `x`
+/// to `T` in the false branch. The fact reaches the right side of short-circuit
+/// `&&` (not `||`) and ends at the branch boundary. Mutable locals, fields,
+/// indexes, aliases, and calls never narrow. `x == Val(v)` keeps S31 binding
+/// behavior. Sema records the proven unwrap as an S31 Present/`IfLet` fact;
+/// codegen performs no proof.
+///
+/// (ratified 2026-09-28, card #3685) amends S32: a plain `T`
+/// fills a slot whose checked type is `T?` — returns (including `?? return`),
+/// call arguments, struct and enum payload fields, list and map items, typed
+/// bindings, and reassignment of a `T?` place. Callee and generic choices are
+/// fixed first; the lift then adds exactly one `Present`, so every tier lowers
+/// it as `Val(x)`. `x == 5` holds only when `x` holds 5 (`!=` is its
+/// opposite); only `x == Val(v)` binds. Nested optionals stay E0309, and
+/// `Val(x)` stays where nothing expects an optional (`limit := Val(10)`).
+/// `jet fmt --simplify` drops a redundant `Val(x)` in a `-> T?` return.
+LIT_VALUE :: "Val"
+
+LIT_NULL :: "None"
+
+/// S27 (ratified M3): method receiver name.
+KW_SELF :: "self"
+
+/// S27 (ratified M3): external method block — `impl Type { ... }`.
+KW_IMPL :: "impl"
+
+/// (ratified): external inherent methods attach with dot:
+/// `fn Type.method(self)`. S83's earlier `~~` connector is retired and exists
+/// only for E0325 teaching diagnostics.
+EXTERNAL_METHOD_CONNECTOR :: "."
+
+EXTERNAL_METHOD_CONNECTOR_RETIRED :: "~~"
+
+/// (ratified 2026-08-19): user-declared policy settings use
+/// `policy name(...) { wrap(call) { ... } }`, public like every declaration.
+KW_POLICY :: "policy"
+
+/// The checked body that wraps the declared callable.
+KW_WRAP :: "wrap"
+
+/// Retired module binding keyword. Lexer still emits `KwConst`
+/// so the parser can teach `comptime` (S57). Not in `JET_KEYWORD_LIST`.
+KW_CONST :: "const"
+
+/// M1/M2: return from a function. Foundational keyword predating the
+/// S-numbered decision log (card #447 KW_DECISION_ID_EXEMPT).
+KW_RETURN :: "return"
+
+/// (ratified 2026-07-15, card #647): the only deferred
+/// statement is `defer close(^resource)`. `defer` is contextual so ordinary
+/// identifiers keep their existing meaning outside statement-head position.
+KW_DEFER :: "defer"
+
+RESOURCE_CLOSE :: "close"
+
+/// Nominal, consuming, infallible cleanup capability.
+TRAIT_CLOSE :: "Close"
+
+/// (card #2789): a nominal type may opt into contextual
+/// numeric literals through one of these capability traits. The dot-separated
+/// names are semantic capability names, not new lexer words or literal suffixes.
+TRAIT_LITERAL_INT :: "Literal.Int"
+
+TRAIT_LITERAL_FLOAT :: "Literal.Float"
+
+METHOD_LITERAL_FROM_LITERAL :: "from_literal"
+
+/// S19 (ratified): loop statement (for SharedHandle lint checks) — same
+/// governing decision as the loop-header keywords in Syntax/math_layout.rs.
+KW_LOOP :: "loop"
+
+/// (ratified): `yield expr` — hand a value to a `Stream<T>`
+/// consumer and suspend until the next pull. Legal only in a function whose
+/// return type is `Stream<T>`.
+KW_YIELD :: "yield"
+
+/// The generator return-type constructor `Stream<T>`.
+TYPE_STREAM :: "Stream"
+
+/// (ratified 2026-06-22, opt B; prev S58 2026-06-12) and
+/// The audited
+/// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
+/// `#Unsafe("reason") fn`. Bare `#Unsafe { … }` / `#Unsafe fn` are E3112.
+/// The reason is the argument of `#Unsafe` itself; the separate
+/// `#Audit` marker is retired (E0055). The bare lowercase `unsafe` keyword
+/// (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only to emit a
+/// teaching error.
+KW_UNSAFE :: "Unsafe"
+
+/// (ratified 2026-07-11): `#Shield { … }` — the cancellation-shield
+/// block marker, joining the `#Unsafe`/`#Context` sigil family. Any cancellation
+/// (or blown deadline) pending against a task running inside the block is deferred
+/// until the block exits; at exit the deadline lands first, then the cancel. Bare
+/// `#Shield {` only — no argument list (`#Shield(...)` is a parse error). Lowers to
+/// the `jet_scheduler_shield_enter`/`_leave` runtime (SHIELD_DEPTH thread-local);
+/// a no-op outside a task. Expert-tier concurrency marker.
+KW_SHIELD :: "Shield"
+
+/// (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
+/// Tier-2 comptime effect gate. Both this block AND `--gate impure=allow` at build
+/// are required to execute ambient comptime I/O (FS/Env/Exec/IO). PascalCase
+/// per (consistent with `Unsafe`).
+KW_IMPURE :: "Impure"
+
+/// (ratified 2026-06-27, opt D): `#Reactive fn` / `#Reactive { … }` —
+/// an explicit opt-in scope marker. Inside it, signal `.get()` reads register with
+/// the active reactive observer (library machinery in `core.reactive`). Lowers to
+/// `jet_reactive_scope` / `jet_reactive_effect` — no new evaluation semantics.
+KW_REACTIVE :: "Reactive"
+
+/// (ratified 2026-06-28, c123), respelled by
+/// (ratified 2026-07-11, card #498): `#Target(Wasm|JS)` is the one target-
+/// marker family, covering both the module-/file-level partition ceiling
+/// AND the per-function bucket override (the retired bare `#Wasm`/`#JS`
+/// spellings). Sema validates it against inferred `Browser` effects.
+MARKER_TARGET :: "Target"
+
+/// Export this WASM function to the generated JS loader. A
+/// different job (export surface) from the `#Target(Wasm|JS)` partition
+/// family above — leaves it untouched.
+MARKER_WASM_EXPORT :: "WasmExport"
+
+/// `#Target(JS)` argument spelling.
+WEB_BUCKET_JS :: "JS"
+
+/// `#Target(Wasm)` argument spelling.
+WEB_BUCKET_WASM :: "Wasm"
+
+/// (c123): `jet build --target=web` Jet backend target (not a rustc triple).
+BUILD_TARGET_WEB :: "web"
+
+/// (ratified 2026-08-19): first-class WASI Preview 2 server
+/// target. Rust emits its Component Model artifact and std::net carries the
+/// wasi-sockets adapter.
+BUILD_TARGET_WASI_SERVER :: "wasm32-wasip2"
+
+/// (ratified 2026-07-01, c134): `#Target(Web)` argument spelling — a file-level
+/// marker distinct from the `Wasm`/`JS` partition-ceiling values above (same
+/// `#Target(...)` marker, different axis: "build me for the web backend by
+/// default" rather than "cap this file's partition ceiling").
+WEB_TARGET_DEFAULT_WEB :: "Web"
+
+/// `#HTML(Path{"path.html"})` — an explicit, file-level
+/// declaration of this program's companion host page for `--target=web`,
+/// replacing the retired bare-string argument.
+MARKER_HTML :: "HTML"
+
+/// `#SQL<Row> { ... }` — a checked text block whose row is
+/// declared in `Prelude/Markers.jet`; block legality comes from the one
+/// declaration registry, not a compiler whitelist.
+DSL_BLOCK_SQL :: "SQL"
+
+/// `Sh` is 's argv-safe shell-command instance.
+TYPE_SH :: "Sh"
+
+/// `Regex.{"…"}` is a compile-checked pattern value.
+TYPE_REGEX :: "Regex"
+
+/// Checked URL/Path/DateTime literal heads. `URL` is both the
+/// source spelling and the internal nominal (retired `Url`).
+TYPE_URL :: "URL"
+
+TYPE_PATH :: "Path"
+
+TYPE_DATETIME :: "DateTime"
+
+/// The retired declaration word is kept only so the parser
+/// can give a focused migration diagnostic. It is not part of marker grammar.
+TEXT_HEAD_ON :: "on"
+
+/// (ratified 2026-07-01, c134): `#Target(OS. … )` namespace — the
+/// second, mutually-exclusive axis of the `#Target(...)` marker family
+/// (`Wasm`/`JS`/`Web` above are the first, web-bucket axis). Attaches at
+/// `impl` block scope, not file/module scope.
+TARGET_OS_NAMESPACE :: "OS"
+
+/// `#Target(OS.Linux)`.
+TARGET_OS_LINUX :: "Linux"
+
+/// `#Target(OS.MacOS)`.
+TARGET_OS_MACOS :: "MacOS"
+
+/// `#Target(OS.Windows)`.
+TARGET_OS_WINDOWS :: "Windows"
+
+/// (ratified 2026-07-03): the compiler-known comptime value
+/// `$build` and its `.os` field — the subject of an `prep if $build.os == { }`
+/// switch that folds to the arm matching the build's active OS. `build` is not
+/// a reserved keyword: it is recognized only in that syntactic position (an
+/// ordinary local named `build` is still fine); a `$build.os` anywhere else has
+/// no compiler meaning.
+BUILD_INFO :: "build"
+
+/// The `.os` field of the comptime `build` value.
+BUILD_INFO_OS :: "os"
+
+BUILD_INFO_PROFILE :: "profile"
+
+BUILD_INFO_SETTINGS :: "settings"
+
+/// Registered complete
+/// build-fact paths.
+COMPILER_BUILD_FACT_PACKAGE_NAME :: "$package.name"
+
+COMPILER_BUILD_FACT_PACKAGE_VERSION :: "$package.version"
+
+COMPILER_BUILD_FACT_OS :: "$build.os"
+
+COMPILER_BUILD_FACT_PROFILE_PATH :: "$build.profile"
+
+/// Declared settings are dynamic leaves of the same
+/// compiler-owned build-fact namespace.
+COMPILER_BUILD_FACT_SETTINGS_PREFIX :: "$build.settings."
+
+COMPILER_BUILD_FACT_STAMP_GIT :: "$build.stamp.git"
+
+COMPILER_BUILD_FACT_STAMP_DIRTY :: "$build.stamp.dirty"
+
+COMPILER_BUILD_FACT_STAMP_TOOLCHAIN :: "$build.stamp.toolchain"
+
+COMPILER_BUILD_FACT_STAMP_AT :: "$build.stamp.at"
+
+/// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
+/// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
+FOREIGN_UNSAFE :: "unsafe"
+
+/// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
+/// requires `use core.mem`. The complete named-item tier map lives in
+/// `CORE_MEM_GATE_TIERS`; the rule and reasons live beside S58 in
+/// `Docs/spec/syntax-decisions.md`.
+/// The import gate (`use core.mem`) unlocks every name; the audit gate (`#Unsafe("reason")`) is required only for items marked `Audit`.
+CORE_MEM_MODULE :: "core.mem"
+
+/// (ratified 2026-06-21, opt C): the `#Uninit` binding marker.
+/// **Retired by ** (2026-07-02) — the spelling moved to the
+/// `uninit` contextual keyword (see `KW_UNINIT` below); this constant is kept
+/// only so the parser can recognize the old marker and reject it with a
+/// teaching error (E0426) pointing at the new spelling.
+MARKER_UNINIT :: "Uninit"
+
+/// (ratified 2026-07-24; amends):
+/// contextual keyword `uninit`, legal only as the whole body of a typed-literal
+/// head — `name := Type{ uninit }`. Bare `name := uninit` is E0421. Still gated
+/// by `use core.mem` (E0424) and restricted to plain-data types (E0423). Flow
+/// proof E0420 is unchanged. Contextual like `region`/`state`/`migration`: the
+/// word `uninit` stays usable as an ordinary identifier everywhere else; the
+/// lexer emits it as a plain `Ident`, and only a whole `Type{ uninit }` body
+/// is the uninit trigger.
+KW_UNINIT :: "uninit"
+
+/// (ratified 2026-07-06): explicit finite solver library.
+CORE_SOLVE_MODULE :: "core.compute.solve"
+
+/// Deterministic solver state handle.
+SOLVER_TYPE :: "Solver"
+
+/// The opaque persistent-key handle `core.crypto.vault`
+/// hands back. It has no Jet-visible fields; the two carrier names below are
+/// how an in-process engine holds one.
+VAULT_KEY_REF_TYPE :: "KeyRef"
+
+/// Carrier field holding the host-side vault handle identity, so a marshalled
+/// `KeyRef` still names one key rather than a copy of its rendering.
+VAULT_KEY_REF_HANDLE :: "__jet_vault_handle"
+
+/// Carrier field holding the ONE `impl Display for JetVaultKeyRef` rendering
+/// (`Prelude/SecretsCrypto.rs`). The ambient host calls that impl while it
+/// marshals the handle; no engine re-derives `repo:{name}@v{generation}`.
+VAULT_KEY_REF_SHOWN :: "__jet_vault_shown"
+
+/// S58 (ratified): raw-pointer type is `*T`.
+/// `Ptr<T>` is not live syntax; this string remains only as the internal Rust
+/// dispatch key for legacy TIR/codegen paths until they are renamed to `RawPtr`.
+TYPE_PTR :: "Ptr"
+
+/// S58 (ratified 2026-06-12): `mem.Ptr<T>.from_addr(addr)` — typed pointer
+/// from an integer address.
+MEM_FROM_ADDR :: "from_addr"
+
+/// Contextual `from` after a return type declaring view owners.
+VIEW_FROM :: "from"
+
+/// `static.<path>` source in a view `from` clause.
+VIEW_FROM_STATIC :: "static"
+
+/// `prefix.[a, b, c]` member-spread sigil (reuses the `.[` slot
+/// freed by removing S75 call fan-out). Entries are bare member names only.
+OP_MEMBER_SPREAD :: ".["
+
+/// S58 (ratified 2026-06-12): `mem.volatile_read(p)` — volatile/MMIO read.
+MEM_VOLATILE_READ :: "volatile_read"
+
+/// (ratified 2026-07-07): `mem.volatile_write(p, value)` —
+/// volatile/MMIO write.
+MEM_VOLATILE_WRITE :: "volatile_write"
+
+/// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
+/// an Int (taking a pointer is inert; using it needs `#Unsafe`).
+MEM_ADDRESS_OF :: "address_of"
+
+/// (ratified 2026-07-26): `mem.pin(&place)` — start the address-stable
+/// window on `place`. Safe code may still read and edit through the returned
+/// `Pin<T>`; it may not move, replace, or resize the pinned storage while any
+/// pin is live. Gated by `use core.mem` like the rest of the low-level surface.
+MEM_PIN :: "pin"
+
+/// (ratified 2026-07-31): `Pin<T>` — the tracked write view
+/// that carries the no-move promise. It is also the field mark: a struct field
+/// declared `Pin<U>` projects to `Pin<U>` through a pinned value, and every
+/// other field projects as an ordinary view.
+TYPE_PIN :: "Pin"
+
+/// (ratified 2026-06-19): arena allocator type name.
+/// Construct with `mem.Arena.new()`, allocate with `arena.alloc(value)`.
+/// Gated by `use core.mem` (E3102); no `#Unsafe` needed.
+MEM_ARENA :: "Arena"
+
+/// (ratified 2026-06-19): bump allocator (append-only, O(1)).
+/// Grouped under `core.mem` together with Arena/Pool/Fixed.
+MEM_BUMP :: "Bump"
+
+/// (ratified 2026-06-19): pool allocator (fixed-slot slab).
+MEM_POOL :: "Pool"
+
+/// (ratified 2026-06-19): fixed allocator (static backing buffer).
+MEM_FIXED :: "Fixed"
+
+/// (ratified 2026-08-12): the typed report from `try_` allocation.
+TYPE_ALLOC_ERROR :: "AllocError"
+
+/// (ratified 2026-06-19): allocator constructor method name.
+/// This rule a=A (ratified 2026-07-14): also the sole fresh-state constructor
+/// spelling, optionally written `.new(...)` when expected type resolves receiver.
+/// (ratified 2026-07-14): generic receiver arguments may
+/// be omitted only when ordinary constructor inputs/expected type resolve them.
+MEM_ALLOC_NEW :: "new"
+
+/// (ratified 2026-06-19): allocate a value into an arena/bump/pool/fixed.
+MEM_ALLOC_ALLOC :: "alloc"
+
+/// Fallible allocator method.
+MEM_ALLOC_TRY_ALLOC :: "try_alloc"
+
+/// (ratified 2026-06-19): reset the allocator, keeping the backing buffer.
+MEM_ALLOC_RESET :: "reset"
+
+/// Retired allocator-specific terminal verb. Kept only so
+/// diagnostics can teach the sole `close(^allocator)` resource protocol.
+MEM_ALLOC_FREE :: "free"
+
+/// S58: one tier for every current `core.mem` module item. Keep this table
+/// aligned with `core_module_items("core.mem")` in `jet-sema`.
+CORE_MEM_GATE_TIERS :: [(field_0: String, field_1: CoreMemGate)]{
+    (field_0: TYPE_PTR, field_1: CoreMemGate.Import),
+    (field_0: MEM_FROM_ADDR, field_1: CoreMemGate.Audit),
+    (field_0: MEM_VOLATILE_READ, field_1: CoreMemGate.Audit),
+    (field_0: MEM_VOLATILE_WRITE, field_1: CoreMemGate.Audit),
+    (field_0: "__string_data", field_1: CoreMemGate.Audit),
+    (field_0: "__string_byte_len", field_1: CoreMemGate.Audit),
+    (field_0: "__bytes_pack", field_1: CoreMemGate.Audit),
+    (field_0: "__bytes_free", field_1: CoreMemGate.Audit),
+    (field_0: "__bytes_unpack", field_1: CoreMemGate.Audit),
+    (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),
+    (field_0: MEM_PIN, field_1: CoreMemGate.Import),
+    (field_0: TYPE_PIN, field_1: CoreMemGate.Import),
+    (field_0: MEM_ARENA, field_1: CoreMemGate.Import),
+    (field_0: MEM_BUMP, field_1: CoreMemGate.Import),
+    (field_0: MEM_POOL, field_1: CoreMemGate.Import),
+    (field_0: MEM_FIXED, field_1: CoreMemGate.Import),
+    (field_0: TYPE_ALLOC_ERROR, field_1: CoreMemGate.Import),
+    (field_0: "Atomic", field_1: CoreMemGate.Import),
+}
+
+/// (ratified 2026-06-22): declarative CLI argument parsing module.
+CORE_ARGS_MODULE :: "core.args"
+
+/// Load a pinned `.jetlib` at a checked grant site.
+CORE_MOD_MODULE :: "core.mod"
+
+MOD_TYPE :: "Mod"
+
+MOD_GRANT_TYPE :: "ModGrant"
+
+// Bounded
+// message/MIME plus exact SMTP policy values and one verified transport.
+CORE_EMAIL_MODULE :: "core.email"
+
+TYPE_EMAIL_ADDRESS :: "Address"
+
+TYPE_EMAIL_MESSAGE :: "Message"
+
+TYPE_EMAIL_ATTACHMENT :: "Attachment"
+
+TYPE_EMAIL_ENVELOPE :: "Envelope"
+
+TYPE_EMAIL_SMTP_SECURITY :: "SMTPSecurity"
+
+TYPE_EMAIL_RECIPIENT_POLICY :: "RecipientPolicy"
+
+TYPE_EMAIL_RECIPIENT_REPORT :: "RecipientReport"
+
+TYPE_EMAIL_SEND_REPORT :: "SendReport"
+
+TYPE_EMAIL_ERROR :: "EmailError"
+
+TYPE_EMAIL_LIMITS :: "Limits"
+
+TYPE_EMAIL_SMTP_AUTH :: "SMTPAuth"
+
+TYPE_EMAIL_TLS_TRUST :: "TLSTrust"
+
+TYPE_EMAIL_SMTP_CONFIG :: "SMTPConfig"
+
+TYPE_EMAIL_DKIM_CONFIG :: "DKIMConfig"
+
+TYPE_EMAIL_MAILER :: "Mailer"
+
+EMAIL_LIMITS_SAFE_METHOD :: "safe"
+
+CORE_EMAIL_ADDRESS_FN :: "address"
+
+CORE_EMAIL_ATTACHMENT_FN :: "attachment"
+
+CORE_EMAIL_MESSAGE_FN :: "message"
+
+CORE_EMAIL_ENVELOPE_FN :: "envelope"
+
+CORE_EMAIL_SERIALIZE_FN :: "serialize"
+
+CORE_EMAIL_SMTP_FN :: "smtp"
+
+CORE_EMAIL_SMTP_FROM_ENV_FN :: "smtp_from_env"
+
+/// Explicit allocation-region block
+/// `#Region(r) { … }`.
+/// Names a region spanning multiple arenas or narrower than the enclosing
+/// function; arena `view`s allocated inside may not escape the region (E0631).
+/// The beginner default is an implicit scope-inferred region (opt A) and never
+/// writes `region`.
+MARKER_REGION :: "Region"
+
+/// (ratified 2026-06-22, G2): smart-context block marker.
+/// `#context(field: value) { … }` swaps named ambient fields (allocator,
+/// logger) for the lexical+dynamic extent of the block, then restores them.
+/// The marker is PascalCase the field names inside are lower.
+/// Expert-tier only (R1): never emitted in beginner-tier diagnostics or docs.
+CTX_BLOCK :: "Context"
+
+/// (ratified 2026-06-22/2026-06-28): allowed field names
+/// inside `#Context(…)`.
+CTX_FIELD_ALLOCATOR :: "allocator"
+
+/// (ratified 2026-06-22): logger field (v1 bundle).
+CTX_FIELD_LOGGER :: "logger"
+
+/// (ratified 2026-06-28): absolute deadline (epoch millis) carried
+/// through wait/IO points in the current task context.
+CTX_FIELD_DEADLINE :: "deadline"
+
+/// Terminal direct-input block marker.
+/// `#Live { … }` enters un-buffered/no-echo input mode for its body and
+/// guarantees terminal-state restore on every exit path including panic
+/// (implemented with the scope-guard mechanism). "raw mode" jargon
+/// is deliberately avoided; `live` is the user-facing name. A contextual
+/// keyword: recognised only when followed by `{`.
+MARKER_LIVE :: "Live"
+
+/// Expert determinism-escape marker.
+/// `#Nondeterministic("reason") { … }` inside a `#Pure fn` suspends determinism
+/// rejections (E3401/E3403) for its body — the "I know this is deterministic"
+/// hatch. A semantic footgun, v1-legal per the card. A contextual keyword:
+/// recognised only when followed by `{`, so a name `assume_deterministic` still
+/// works elsewhere. Erased in codegen (I3) — the block is a plain Rust block.
+MARKER_NONDETERMINISTIC :: "Nondeterministic"
+
+/// The deterministic injected `Clock` capability
+/// type. A `#Pure fn` taking a `Clock` param may read time **through it**
+/// (`clock.now()` / `clock.tick(ms)`) — reproducible, because the caller seeded
+/// it (`Clock.new(seed)`) — while the ambient `time.now()` stays E3403. An
+/// ordinary value type, not a module alias; methods are pure-from-the-fn's-view.
+CLOCK_TYPE :: "Clock"
+
+/// Fresh state uses `new`; entropy-drawing construction
+/// uses `new_random`. The generic TTL wrapper is the type-owned
+/// `ExpiringValue.new(value, ttl, clock)`.
+EXPIRING_VALUE_TYPE :: "ExpiringValue"
+
+METHOD_FRESH_NEW_RANDOM :: "new_random"
+
+/// (ratified 2026-06-22): the deterministic injected `Rng` capability
+/// type. A `#Pure fn` taking an `Rng` param may draw randomness **through it**
+/// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
+/// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
+/// (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
+/// / `shuffle(&list)`, mirroring the ambient `random.*` set.
+RNG_TYPE :: "RNG"
+
+/// (ratified 2026-09-05): scoped deterministic execution
+/// world carrying the controlled clock, scheduler, external-input providers,
+/// and seeded test randomness.
+DETERMINISTIC_WORLD_TYPE :: "DeterministicWorld"
+
+/// (ratified 2026-07-14) /
+/// (ratified 2026-08-06): runtime numbers become checked
+/// durations through type-owned unit methods; whole-unit reads use one checked
+/// enum-taking method. Time literals resolve through the in-scope canonical
+/// family. Duration is the canonical Time delta quantity.
+DURATION_TYPE :: "Duration"
+
+/// (ratified 2026-08-06): the canonical Time point quantity.
+TYPE_INSTANT :: "Instant"
+
+DURATION_UNIT_TYPE :: "DurationUnit"
+
+DURATION_RANGE_ERROR_TYPE :: "RangeError"
+
+DURATION_CONSTRUCTORS :: [String]{
+    "nanoseconds",
+    "microseconds",
+    "milliseconds",
+    "seconds",
+    "minutes",
+    "hours",
+}
+
+DURATION_UNITS :: [String]{
+    "Nanoseconds",
+    "Microseconds",
+    "Milliseconds",
+    "Seconds",
+    "Minutes",
+    "Hours",
+}
+
+METHOD_DURATION_IN :: "in"
+
+METHOD_DURATION_IS_ZERO :: "is_zero"
+
+METHOD_DURATION_TOTAL_SECONDS :: "total_seconds"
+
+/// (ratified 2026-06-26): exact base-10 decimal. Construct with
+/// `Decimal("12.34")` or `core.math.decimal("12.34")`; no implicit `Float`.
+TYPE_DECIMAL :: "Decimal"
+
+// An exact ratio of two whole numbers, kept reduced.
+TYPE_FRACTION :: "Fraction"
+
+/// The one nameable Authority value at process, plugin,
+/// and session boundaries. It is the rights carrier; there is no alias.
+TYPE_AUTHORITY :: "Authority"
+
+/// Typed build-program values.
+/// These names are compiler-known only while the selected root `fn build`
+/// runs; build entry is removed before runtime codegen.
+TYPE_BUILD_CONTEXT :: "BuildContext"
+
+TYPE_BUILD_PLAN :: "BuildPlan"
+
+TYPE_BUILD_ACTION :: "BuildAction"
+
+TYPE_BUILD_TARGET :: "BuildTarget"
+
+TYPE_BUILD_TOOLCHAIN :: "BuildToolchain"
+
+TYPE_BUILD_PROBE :: "BuildProbe"
+
+TYPE_PROGRAM_INFO :: "ProgramInfo"
+
+/// Typed read-only graph projections returned by
+/// `core.build.graph` and `core.build.receipt_diff`.
+TYPE_BUILD_GRAPH :: "BuildGraph"
+
+TYPE_BUILD_GRAPH_TARGET :: "BuildGraphTarget"
+
+TYPE_BUILD_GRAPH_ACTION :: "BuildGraphAction"
+
+TYPE_BUILD_GRAPH_FILE :: "BuildGraphFile"
+
+TYPE_BUILD_GRAPH_NODE :: "BuildGraphNode"
+
+TYPE_BUILD_GRAPH_INPUT_DIGEST :: "BuildGraphInputDigest"
+
+TYPE_BUILD_GRAPH_ACTION_KEY :: "BuildGraphActionKey"
+
+TYPE_BUILD_GRAPH_FILE_DELTA :: "BuildGraphFileDelta"
+
+TYPE_BUILD_GRAPH_KEY_DELTA :: "BuildGraphKeyDelta"
+
+TYPE_BUILD_GRAPH_CACHE_DELTA :: "BuildGraphCacheDelta"
+
+TYPE_BUILD_GRAPH_DIFF :: "BuildGraphDiff"
+
+/// The read-only statistics record returned by `name.cache()`.
+TYPE_MEMO_STATS :: "MemoStats"
+
+METHOD_MEMO_CACHE :: "cache"
+
+MEMO_STATS_CALL_PREFIX :: String.from_bytes([U8]{0, 106, 101, 116, 46, 109, 101, 109, 111, 46, 115, 116, 97, 116, 115, 46})
+
+TYPE_TYPE_INFO :: "TypeInfo"
+
+TYPE_SOURCE_SPAN :: "SourceSpan"
+
+/// The compiler-owned type facts. The
+/// parser accepts these after `.` only in the contextual `@fact` form; they are
+/// not user-declarable member names.
+COMPILER_FACT_LAYOUT :: "$layout"
+
+COMPILER_FACT_NAME :: "$name"
+
+COMPILER_FACT_FIELDS :: "$fields"
+
+COMPILER_FACT_RANGE :: "$range"
+
+COMPILER_FACT_DIMENSION :: "$dimension"
+
+COMPILER_FACT_MEASURE :: "$measure"
+
+COMPILER_FACT_EXACTNESS :: "$exactness"
+
+COMPILER_FACT_CLASSIFICATION :: "$classification"
+
+COMPILER_FACT_OBLIGATION :: "$obligation"
+
+COMPILER_FACT_STATES :: "$states"
+
+COMPILER_FACT_EFFECTS :: "$effects"
+
+COMPILER_FACT_SENDABILITY :: "$sendability"
+
+COMPILER_FACT_MOVEDNESS :: "$movedness"
+
+COMPILER_FACT_ATTRIBUTION :: "$attribution"
+
+/// The sole public read of the typed, optional `#Track`
+/// origin fact.
+COMPILER_FACT_ORIGIN :: "$origin"
+
+COMPILER_FACT_VIEW_PROVENANCE :: "$view_provenance"
+
+COMPILER_FACT_UNIT_SCALE_PROVENANCE :: "$unit_scale_provenance"
+
+COMPILER_FACT_MATURITY :: "$maturity"
+
+/// The marked member used by the old TypeInfo reader. The complete build
+/// path is `COMPILER_BUILD_FACT_PROFILE_PATH` above.
+COMPILER_BUILD_FACT_PROFILE :: "$profile"
+
+/// Each compiler fact and the `TypeInfo` member it projects.
+COMPILER_FACTS :: [(field_0: String, field_1: String)]{
+    (field_0: COMPILER_FACT_LAYOUT, field_1: "layout"),
+    (field_0: COMPILER_FACT_NAME, field_1: "name"),
+    (field_0: COMPILER_FACT_FIELDS, field_1: "fields"),
+}
+
+TYPE_LAYOUT_INFO :: "LayoutInfo"
+
+TYPE_LAYOUT_FIELD :: "LayoutField"
+
+/// Internal AST spelling for the typed selector in `T.$layout[.field]`.
+/// Keeping the selector in an existing `Expr::Ident` avoids a second AST
+/// variant for a compile-time-only projection. It is never formatted as this
+/// sentinel and never appears in generated Jet source.
+LAYOUT_SELECTOR_PREFIX :: String.from_bytes([U8]{0, 106, 101, 116, 46, 108, 97, 121, 111, 117, 116, 46, 115, 101, 108, 101, 99, 116, 111, 114, 46})

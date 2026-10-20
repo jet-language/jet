@@ -1,4 +1,4 @@
-// U11 (D-JPK-SCRIPTDEP1=A): inline script dependencies. A manifest-less
+// U11 inline script dependencies. A manifest-less
 // `.jet` script may open with `use pkg#version;` instead of shipping a
 // `package.jet`. `jet run` resolves and locks by file-content hash,
 // `jet fetch --lock` writes a `<script>.lock` sidecar, and `jet init` lifts
@@ -301,7 +301,7 @@ fn pkg_inline_deps_framed_count(bytes: &[U8], count: Int) Never! {
     loop shift in FOUNDATION_U64_SHIFTS -> &bytes.push(U8{((count >> shift)).bit_and(255)})
 }
 
-// E1253 (D-JPK-SCRIPTDEP1=A): an inline `use pkg#version;` ref that cannot
+// E1253 an inline `use pkg#version;` ref that cannot
 // be resolved: unknown package, unreachable or unsafe source tree, or no
 // version satisfies the selector.
 fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
@@ -315,7 +315,7 @@ fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnos
     diagnostic_from_registry("E1253", Val(dep.span), "inline dependency `{dep.name}#{dep.selector}` didn't resolve", explanation.why, explanation.fix)
 }
 
-// L0203 (D-JPK-SCRIPTDEP1=A): an inline dependency with a loose selector
+// L0203 an inline dependency with a loose selector
 // (anything but an exact `major.minor.patch`).
 fn pkg_inline_deps_l0203_unpinned(dep: InlineDep) -> Diagnostic Never! {
     pkg_diagnostic_from_row("L0203", [(name: String, value: String)]{(name: "name", value: dep.name), (name: "selector", value: dep.selector)}, Val(dep.span))

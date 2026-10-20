@@ -1,6 +1,6 @@
 // The export boundary shared by the native Library C exports (owner ruling
-// U3) and the `target: sandbox` Component exports (D-PLUGIN-EXPORT1=A,
-// D-PLUGIN-VERSION1=A). Which shapes cross each boundary is the MIR export
+// U3) and the `target: sandbox` Component exports (
+// ). Which shapes cross each boundary is the MIR export
 // law (`mir_c_export_signature`, `mir_component_export_signature`, both over
 // the one `mir_c_export_result` success projection); this module owns the
 // boundary's diagnostics, the sandbox's export selection, and the frozen
@@ -32,7 +32,7 @@ fn sema_export_unsupported_diagnostic(boundary: SemaExportBoundary, name: String
 
 // The functions a sandbox exports: every top-level `pub` (not
 // `pub(package)`) function of its entry module, in declaration order. There
-// is no separate export marker (D-PLUGIN-EXPORT1=A).
+// is no separate export marker.
 fn sema_sandbox_export_functions(graph: SemaRegistrationGraph) -> [Func] Never! {
     functions := [Func]{}
     module_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return functions
@@ -116,7 +116,7 @@ fn sema_sandbox_parse_snapshot(text: String) -> SemaPluginFrozenSnapshotInput? {
     Val(SemaPluginFrozenSnapshotInput{package: package, funcs: funcs})
 }
 
-// D-PLUGIN-VERSION1=A: E1257 for each export the prior frozen interface
+// E1257 for each export the prior frozen interface
 // names that is now removed or has a changed signature. Adding an export is
 // always compatible, and no prior snapshot freezes the current interface.
 fn sema_sandbox_freeze_diagnostics(current: SemaPluginFrozenSnapshotInput, prior: SemaPluginFrozenSnapshotInput?) -> [Diagnostic] Never! {
@@ -135,5 +135,5 @@ fn sema_sandbox_freeze_diagnostics(current: SemaPluginFrozenSnapshotInput, prior
 }
 
 fn sema_sandbox_version_diagnostic(delta: String) -> Diagnostic Never! {
-    sema_error_optional("E1257", None, "this sandbox's exported interface changed incompatibly", "a sandbox's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1) — {delta}", "restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot under `.jet/cache/api/` to re-freeze)")
+    sema_error_optional("E1257", None, "this sandbox's exported interface changed incompatibly", "a sandbox's frozen exported interface is the load-time contract — {delta}", "restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot under `.jet/cache/api/` to re-freeze)")
 }

@@ -309,7 +309,7 @@ fn record_canvas_rename(path: &OSPath, before: String, after: String, from: Stri
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:475
 fn apply_create_function(path: OSPath, src: String, name: String, params: String, ret_type: String) -> String Err! {
     body :: if ret_type == "Void" -> "" else -> "    return {default_arg_for_type(ret_type)}\n"
-    // D-SIG-AFTER1=A: one mandatory arrow even when the return type is absent.
+    // One mandatory arrow even when the return type is absent.
     ret :: if ret_type == "Void" -> " ->" else -> " -> {ret_type}"
     function :: "fn {name}({params}){ret} {{\n{body}}}\n\n"
     changed :: FixEngine.apply_edits(src, [edit(SourceSpan { start: 0, end: 0 }, function)]) ?? return .Err(edit_error("overlap", "Canvas create function edit overlapped"))

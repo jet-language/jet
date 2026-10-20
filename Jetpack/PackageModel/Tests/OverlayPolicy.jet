@@ -32,8 +32,8 @@ module workspace {
 `)
     assert_eq(policy.build_deny, [String]{"Time"})
     assert_eq(policy.build_grants, [BuildGrant]{
-        BuildGrant{subject: "native:tools", effects: [String]{"Net", "Exec"}},
-        BuildGrant{subject: "app", effects: [String]{"FS"}}
+        {subject: "native:tools", effects: [String]{"Net", "Exec"}},
+        {subject: "app", effects: [String]{"FS"}}
     })
 }
 
@@ -150,9 +150,9 @@ module workspace {
     app :: policy.package_override("dev", "app") ?? panic("app override")
     assert_eq(app.version, Val("2"))
     assert_eq(app.env, [OverrideEnv]{
-        OverrideEnv{key: "CC", value: "clang"},
-        OverrideEnv{key: "CFLAGS", value: "-O2"},
-        OverrideEnv{key: "RUST_LOG", value: "debug"}
+        {key: "CC", value: "clang"},
+        {key: "CFLAGS", value: "-O2"},
+        {key: "RUST_LOG", value: "debug"}
     })
     assert_eq(app.flags, [String]{"lto"})
     assert_eq(app.priority, 10)
@@ -207,8 +207,8 @@ module workspace {
     app :: policy.resolve_package_override("app") ?? panic("app resolves")
     assert_eq(app.version, Val("1"))
     assert_eq(app.env, [OverrideEnv]{
-        OverrideEnv{key: "CC", value: "gcc"},
-        OverrideEnv{key: "RUST_LOG", value: "debug"}
+        {key: "CC", value: "gcc"},
+        {key: "RUST_LOG", value: "debug"}
     })
     assert_eq(app.patches, [String]{"base.patch", "local.patch"})
     assert_eq(app.provenance.len(), 7)

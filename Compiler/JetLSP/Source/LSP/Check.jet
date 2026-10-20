@@ -8,7 +8,6 @@ use core.files.runtime.kernel_path_components.[OSPath]
 use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverCheckedQuery, JetDriverCompilerCheckResult, jet_driver_present_checked_diagnostics, query_build_plan_with_overlay, build_plan_json, apply_edits]
 use jet_foundation.[Diagnostic, TextEdit, FixApplicability, FixSafety, ApplicationAuthority, names_normalize_path]
 use jet_pkg_model.[pkg_extract_inline_package, pkg_project_program_effects, pkg_application_policy_diagnostic, ScriptEntry]
-use jet_parser.[jet_format_retired_interpolation_selector_edits, jet_format_retired_print_family_edits, jet_format_retired_type_edits]
 // apply_edits uses Wave-0611b's canonical View<TextEdit> / ApplyError ABI.
 
 // Caller-held native cwd is the sole Server/Driver snapshot's actual cwd. The
@@ -100,9 +99,6 @@ fn lsp_fixes_from_diagnostics(diagnostics: ^[Diagnostic]) -> [Fix] Never! {
 
 fn lsp_collect_fixes_from_diagnostics(diagnostics: ^[Diagnostic], text: String) -> [Fix] Never! {
     fixes := lsp_fixes_from_diagnostics(^diagnostics)
-    loop edit in jet_format_retired_interpolation_selector_edits(text) -> &fixes.push(Fix{title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)", edit: edit, applicability: FixApplicability.Safe, safety: FixSafety.Formatting})
-    loop edit in jet_format_retired_print_family_edits(text) -> &fixes.push(Fix{title: "rewrite retired print-family spelling (D-ONCE-PRINT1)", edit: edit, applicability: FixApplicability.Safe, safety: FixSafety.Formatting})
-    loop edit in jet_format_retired_type_edits(text) -> &fixes.push(Fix{title: "rewrite retired Core container name (D-COLLNAME1=A)", edit: edit, applicability: FixApplicability.Safe, safety: FixSafety.Formatting})
     fixes
 }
 

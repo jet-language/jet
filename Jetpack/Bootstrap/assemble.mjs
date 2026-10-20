@@ -9,7 +9,7 @@
 //   aot    the same unit, for `jet test`
 //   run    implementation + the same test bodies as functions, driven by one
 //          generated `fn run()` for the default `jet run` tier (I9)
-//   hosted implementation only + Jetpack/main.jet, for the standalone native
+//   hosted implementation only + Jetpack/run.jet, for the standalone native
 //          `jetpack` engine binary (`jet build`)
 //   publication  INTERNAL Store implementation closure + the one registered
 //                native runtime-pack publisher entry; no test driver
@@ -300,7 +300,7 @@ function renderTests(text, sourcePath) {
 const unitTests = mode === "publication" || mode === "hosted" ? [] : ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
 const units = [...sources, ...unitTests];
 if (mode === "hosted") {
-  const sourcePath = "Jetpack/main.jet";
+  const sourcePath = "Jetpack/run.jet";
   const bytes = await readFile(resolve(sourceRootDir, sourcePath));
   units.push({ sourcePath, bytes, text: bytes.toString("utf8") });
 }

@@ -221,11 +221,11 @@ fn sema_taint_add_builtin_tags(catalog: &SemaTaintCatalog) Never! {
         }
     }
     origin_rows := [SemaTaintTagFact]{
-        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_NET, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Net"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_FS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FS"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_ENV, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Env"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_PROCESS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Exec"}, span: Span{start: 0, end: 0}, visibility: 2},
-        SemaTaintTagFact{name: SEMA_TAINT_ORIGIN_FFI, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FFI"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_NET, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Net"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_FS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FS"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_ENV, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Env"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_PROCESS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Exec"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_FFI, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FFI"}, span: Span{start: 0, end: 0}, visibility: 2},
     }
     loop row in origin_rows -> &catalog.tags.push(row)
 }
@@ -426,7 +426,7 @@ fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationG
 fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
     module_row :: graph.modules[module_index]
-    // D-MOD-CYCLE1=A: the package names bind after the imports before
+    // The package names bind after the imports before
     // `namespace_import_split`, unless the module declares the name itself.
     namespace_from :: if module_row.namespace_import_split < 0 -> module_row.imports.len() else -> module_row.namespace_import_split
     loop (import_index, import) in module_row.imports {

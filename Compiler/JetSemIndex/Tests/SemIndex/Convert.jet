@@ -36,10 +36,10 @@ fn semindex_convert_test_member(identity: String, owner: String, origin: MemberO
 }
 #Test("semindex_convert_views_preserve_ordered_alternatives_slots_and_paths") {
     provenance :: ViewProvenance{sources: [ViewSourcePath]{
-        ViewSourcePath{source: .Parameter{index: 1}, projections: [ViewSourceProjection]{.Range}},
-        ViewSourcePath{source: .Receiver, projections: [ViewSourceProjection]{.Field{name: "data"}, .Index, .Range}},
-        ViewSourcePath{source: .Static{module_path: "mód", name: "data"}, projections: [ViewSourceProjection]{}},
-        ViewSourcePath{source: .Parameter{index: 1}, projections: [ViewSourceProjection]{.Range}},
+        {source: .Parameter{index: 1}, projections: [ViewSourceProjection]{.Range}},
+        {source: .Receiver, projections: [ViewSourceProjection]{.Field{name: "data"}, .Index, .Range}},
+        {source: .Static{module_path: "mód", name: "data"}, projections: [ViewSourceProjection]{}},
+        {source: .Parameter{index: 1}, projections: [ViewSourceProjection]{.Range}},
     }, mutable: true}
     converted :: semindex_convert_view_provenance([String]{"outer", "left"}, provenance)
     assert_eq(converted.output_path, [String]{"outer", "left"})
@@ -125,8 +125,8 @@ fn semindex_convert_test_callable() -> SymKind Never! {
 #Test("semindex_convert_refs_preserves_unresolved_anchor_and_registry_fact") {
     target :: DefinitionAnchor{module_path: "definition.jet", kind: "function", def_span: SourceSpan{start: 1, end: 6}, semantic_identity: Val("fn:real")}
     rows :: [SymRef]{
-        SymRef{name: "same", span: Span{start: 5, end: 3}, module_path: "use.jet", scope_identity: Val("block:1"), target: Val(target), fact: Val(CompilerFact{name: "type_of", kind: "type", type_name: "Type"})},
-        SymRef{name: "same", span: Span{start: 4, end: 4}, module_path: "other.jet", scope_identity: None, target: None, fact: None},
+        {name: "same", span: Span{start: 5, end: 3}, module_path: "use.jet", scope_identity: Val("block:1"), target: Val(target), fact: Val(CompilerFact{name: "type_of", kind: "type", type_name: "Type"})},
+        {name: "same", span: Span{start: 4, end: 4}, module_path: "other.jet", scope_identity: None, target: None, fact: None},
     }
     converted :: semindex_convert_refs(rows)
     assert_eq(converted.len(), 2)

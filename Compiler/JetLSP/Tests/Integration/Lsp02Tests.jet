@@ -67,7 +67,7 @@ use std.process.[Command, Stdio]
     fs.create_dir_all(root.join("src")).unwrap()
     fs.write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
     source :: "module perf.package {{\n    budgets: [Budget{{ name: \"api\", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }}]\n}}\npub fn api() {{}}\nfn run() {{}}\n"
-    // D-VERDICT-678-1: budget discovery uses canonical run.jet, never main.jet.
+    // Budget discovery uses canonical run.jet, never main.jet.
     path :: root.join("src/run.jet")
     fs.write(path, source).unwrap()
     measured :: Command.new(jet).args(["budget", "check", "--json"]).current_dir(root).output().unwrap()
@@ -100,23 +100,6 @@ use std.process.[Command, Stdio]
     }).collect<[(OSPath, std.time.SystemTime)]>()
     assert_eq(before, after, "LSP projection must not rewrite reports")
     _ :: fs.remove_dir_all(root)
-}
-
-// Rust: tests/lsp.rs:2046
-#Test("lsp_c_style_snippet_autocorrects") {
-    src :: "fn greet() {{\n    println(\"ok\");\n}}\n\nfn run() {{\n    count :: 1\n    println(\"hi\");\n}}\n"
-    diags :: check_document("snippet.jet", src)
-    assert(diags.iter().any(d -> d.code == "E0037"), "println -> print")
-    assert(diags.iter().all(d -> d.code != "E0008"), "def/func teaching is paused under D-S14-PAUSE")
-    edits := diags.iter().filter_map(d -> d.edit.clone()).collect()
-    edits.sort_by_key(e -> std.cmp.Reverse(e.span.start))
-    fixed := src
-    loop edit in edits { fixed = LSP.apply_edit(fixed, edit) }
-    assert(!fixed.contains("val count"))
-    // E0037 is still a live single-token fix.
-    assert(fixed.contains("print("))
-    assert(!fixed.contains("println("))
-    assert(fixed.contains("fn greet"))
 }
 
 // Rust: tests/lsp.rs:2158

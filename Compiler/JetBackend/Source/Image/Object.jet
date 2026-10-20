@@ -222,12 +222,12 @@ fn x64_object_functions_threads(program: LIRModule, functions: [X64CompiledFunct
     // Symbols: null, section symbols, private functions, exported functions,
     // then undefined runtime symbols. ELF requires all locals before globals.
     symbols := [X64ObjectSymbol]{
-        X64ObjectSymbol{name: "", info: 0, section: 0, value: 0, size: 0},
-        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_TEXT, value: 0, size: 0},
-        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
-        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_ABBREV, value: 0, size: 0},
-        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_LINE, value: 0, size: 0},
-        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_LOCLISTS, value: 0, size: 0},
+        {name: "", info: 0, section: 0, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_TEXT, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_DEBUG_ABBREV, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_DEBUG_LINE, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_DEBUG_LOCLISTS, value: 0, size: 0},
     }
     loop (index, function) in functions {
         if exported.get(function.id.value) == None -> &symbols.push(X64ObjectSymbol{name: function.name, info: 2, section: ELF64_OBJECT_TEXT, value: offsets[index], size: function.code.len()})
@@ -292,20 +292,20 @@ fn x64_object_functions_threads(program: LIRModule, functions: [X64CompiledFunct
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
-        X64ObjectSection{name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: X64_FUNCTION_ALIGN, entry_size: 0},
+        {name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: X64_FUNCTION_ALIGN, entry_size: 0},
         // .data: PROGBITS, WRITE + ALLOC
-        X64ObjectSection{name: ".data", kind: 1, flags: 3, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
+        {name: ".data", kind: 1, flags: 3, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
         x64_object_rela_section(".rela.text", relas, ELF64_OBJECT_TEXT),
         // .symtab: names in .strtab, locals before `first_global`
-        X64ObjectSection{name: ".symtab", kind: 2, flags: 0, bytes: symtab, link: ELF64_OBJECT_STRTAB, info: first_global, align: 8, entry_size: ELF64_SYMBOL_SIZE},
-        X64ObjectSection{name: ".strtab", kind: 3, flags: 0, bytes: strtab, link: 0, info: 0, align: 1, entry_size: 0},
-        X64ObjectSection{name: ".shstrtab", kind: 3, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
+        {name: ".symtab", kind: 2, flags: 0, bytes: symtab, link: ELF64_OBJECT_STRTAB, info: first_global, align: 8, entry_size: ELF64_SYMBOL_SIZE},
+        {name: ".strtab", kind: 3, flags: 0, bytes: strtab, link: 0, info: 0, align: 1, entry_size: 0},
+        {name: ".shstrtab", kind: 3, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
         // .note.GNU-stack: empty, no flags: the stack is not executable.
-        X64ObjectSection{name: ".note.GNU-stack", kind: 1, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
+        {name: ".note.GNU-stack", kind: 1, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
         // .rela.data: absolute pointer words against the .data section symbol.
         x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_RODATA),
         // .eh_frame: PROGBITS, ALLOC
-        X64ObjectSection{name: ".eh_frame", kind: 1, flags: 2, bytes: dwarf.eh_frame, link: 0, info: 0, align: 8, entry_size: 0},
+        {name: ".eh_frame", kind: 1, flags: 2, bytes: dwarf.eh_frame, link: 0, info: 0, align: 8, entry_size: 0},
         x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME),
         x64_object_debug_section(".debug_abbrev", dwarf.abbrev),
         x64_object_debug_section(".debug_info", dwarf.info),

@@ -416,12 +416,12 @@ fn bundle_test_wire_report(materialized: Bool, explain: Bool) -> String Never! {
     // Direct ordered Object, deliberately not canonical_json_object (which
     // sorts). Rust status_value walks the supplied variant without sorting.
     tree :: CanonicalJSON.Object([CanonicalJSONField]{
-        CanonicalJSONField{key: "z", value: CanonicalJSON.Array([CanonicalJSON]{
+        {key: "z", value: CanonicalJSON.Array([CanonicalJSON]{
             CanonicalJSON.Null, CanonicalJSON.Bool(false), CanonicalJSON.Integer("-7"),
             CanonicalJSON.String("é\n\"\\\t"),
             CanonicalJSON.Object([CanonicalJSONField]{
-                CanonicalJSONField{key: "z", value: CanonicalJSON.Bool(true)},
-                CanonicalJSONField{key: "a", value: CanonicalJSON.Array([CanonicalJSON]{})}})})},
+                {key: "z", value: CanonicalJSON.Bool(true)},
+                {key: "a", value: CanonicalJSON.Array([CanonicalJSON]{})}})})},
         CanonicalJSONField{key: "a", value: CanonicalJSON.Integer("9007199254740993")}})
     expected :: "{{\"z\":[null,false,-7,\"é\\n\\\"\\\\\\t\",{{\"z\":true,\"a\":[]}}],\"a\":9007199254740993}}"
     assert_eq(jet_cli_status_json(jet_cli_bundle_status(tree)).bytes(), expected.bytes())

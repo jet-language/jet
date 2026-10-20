@@ -429,7 +429,7 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
         return
     }
 
-    // D-FENCE-RANGE1=A: integer-range fences expand to N entries that all
+    // Integer-range fences expand to N entries that all
     // point at the same `start..end` source span. Re-emit that range once.
     if fence.names.len() > 1 {
         first_span :: fence.names[0].span
@@ -447,7 +447,7 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
         }
     }
 
-    // D-FMT-SIMPLIFY1=A / R4: a listed ascending integer run becomes a range.
+    // R4: a listed ascending integer run becomes a range.
     if f.simplify {
         if jfmt_consecutive_expr_int_range(f, fence) == .Val(range) {
             jfmt_write(&f, "<: {range.start}..{range.end} :>")
@@ -455,7 +455,7 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
         }
     }
 
-    // Expression entries (D-FENCE-GLYPH1=A) store an empty display name;
+    // Expression entries store an empty display name;
     // emit their authored source slice instead.
     names := [String]{}
     loop entry in fence.names {
@@ -582,7 +582,7 @@ fn jfmt_source_has_blank_line(bytes: [U8], start: Int, end: Int) -> Bool Never! 
     false
 }
 
-// D-FMT1: render a single simple statement (no leading indent/newline) for
+// Render a single simple statement (no leading indent/newline) for
 // the inline brace-body path. The caller guarantees `is_simple_stmt`.
 fn jfmt_fmt_stmt_inline(f: &JetFmt, stmt: Stmt) {
     jfmt_fmt_stmt(&f, stmt)
@@ -652,7 +652,7 @@ fn jfmt_fmt_block_marker(f: &JetFmt, marker: JetFmtBlockMarker, source_start: In
 }
 
 fn jfmt_fmt_loop_label(f: &JetFmt, label: NamedSpan?) {
-    // D-LOOPLABEL3=A: loop labels use declaration spelling.
+    // Loop labels use declaration spelling.
     if label == .Val(named) -> jfmt_write(&f, "{named.name} :: ")
 }
 
@@ -716,7 +716,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_effect_loop_body(&f, body, expr_span(cond).end, arrow_body)
         }
         .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> jfmt_fmt_for_stmt(&f, var, var_span, var2, kind, body, span, arrow_body, label)
-        // D-IF3 / D-IFDIST1: multi-arm dispatch renders as
+        // Multi-arm dispatch renders as
         // `if subject OP { head -> body }` (the `Stmt::Switch` IR is shared
         // with the retired `when`). The comparison marker enters dispatch;
         // arm heads carry no repeated `subject OP`.
@@ -767,7 +767,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_write(&f, "next({name})")
             }
         }
-        // D-LOOP-HEADER2=A: `loop name := value, condition [, afterthought]`.
+        // `loop name := value, condition [, afterthought]`.
         .CountedLoop(init, cond, step, body, _, arrow_body, label) -> {
             jfmt_fmt_loop_label(&f, label)
             jfmt_write(&f, "loop ")
@@ -791,17 +791,17 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_effect_loop_body(&f, inner, 0, arrow_body)
         }
         .Unsafe(_, _, body, _) -> jfmt_fmt_body(&f, body)
-        // D-CTEFFECT1: `#Impure("reason") { … }` round-trips verbatim.
+        // `#Impure("reason") { … }` round-trips verbatim.
         .Impure(_, _, body, _) -> jfmt_fmt_body(&f, body)
         .Switched(marker, body, _) -> jfmt_fmt_statement_switch_attr(&f, marker, body)
-        // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
+        // `#Reactive { … }` round-trips verbatim.
         .Reactive(body, _) -> jfmt_fmt_body(&f, body)
-        // D-SHIELDNAME1=A: `#Shield { … }` round-trips verbatim.
+        // `#Shield { … }` round-trips verbatim.
         .Shield(body, _) -> jfmt_fmt_body(&f, body)
-        // D-BLOCKPLANE1=A: `#Region(r) { … }`.
+        // `#Region(r) { … }`.
         .Region(_, _, body, _) -> jfmt_fmt_body(&f, body)
         .Policy(_, body, _) -> jfmt_fmt_body(&f, body)
-        // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }`.
+        // `task.group g(limit: n) { … }`.
         .TaskGroup(name, _, limit, body, _) -> {
             jfmt_write(&f, "task.group {name}")
             if limit == .Val(value) {
@@ -816,7 +816,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             f.indent -= 1
             jfmt_end_block(&f)
         }
-        // D-LAYOUT-CTOR1: `name :: Layout{ … }` — typed-literal element
+        // `name :: Layout{ … }` — typed-literal element
         // body (comma-separated Constraints). Re-sugar `h`/`v` calls back
         // to `box.anchor` / `self.anchor`.
         .Layout(name, _, body, span) -> {
@@ -840,11 +840,11 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // D-EFF1 / D-QUAL1: `#FX(Net, DB) { … }` effect-restriction region.
+        // `#FX(Net, DB) { … }` effect-restriction region.
         .AuthorityScope(_, _, _, body, _) -> jfmt_fmt_body(&f, body)
-        // D-PREP-SURFACE2=A: `prep { … }` shared-preparation block.
+        // `prep { … }` shared-preparation block.
         .ComptimeBlock(body, is_template_loop, _) -> {
-            // D-PREP-BRANCH1=A: a template loop prints as `prep loop …`.
+            // A template loop prints as `prep loop …`.
             if is_template_loop && body.len() == 1 {
                 jfmt_write(&f, "prep ")
                 jfmt_fmt_stmt(&f, body[0])
@@ -857,7 +857,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // D-PREP-BRANCH1=A: format like `if` with a `prep` lead.
+        // Format like `if` with a `prep` lead.
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
             jfmt_write(&f, "prep if ")
             jfmt_fmt_cond(&f, cond)
@@ -876,22 +876,22 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // D-OSTARGET2=B: `prep if $build.os == { … }` — the OS-dispatch
-        // switch. Formats exactly like a `Stmt::Switch` (D-IF3 arm grammar)
-        // with a `prep if` lead (D-PREP-BRANCH1=A).
+        // `prep if $build.os == { … }` — the OS-dispatch
+        // switch. Formats exactly like a `Stmt::Switch` (arm grammar)
+        // with a `prep if` lead.
         .ComptimeSwitch(subject, arms, else_body, _) -> {
             jfmt_write(&f, "prep if ")
             jfmt_fmt_dispatch(&f, subject, arms, else_body, true)
         }
-        // D-CTX1: `#Context(field: value, …) { … }`.
+        // `#Context(field: value, …) { … }`.
         .ContextBlock(_, body, _) -> jfmt_fmt_body(&f, body)
-        // D-BLOCKPLANE1=A: `#Live { … }`.
+        // `#Live { … }`.
         .Live(body, _) -> jfmt_fmt_body(&f, body)
-        // D-BLOCKPLANE1=A: `#Nondeterministic("reason") { … }`.
+        // `#Nondeterministic("reason") { … }`.
         .AssumeDet(_, _, body, _) -> jfmt_fmt_body(&f, body)
-        // D-TXN1–D-TXN4: `#Transact(name) { … }` (the handle is optional).
+        // – `#Transact(name) { … }` (the handle is optional).
         .Transact(_, _, body, _, _) -> jfmt_fmt_body(&f, body)
-        // D-DOTSCOPE1 / D-META-DSL1: a scope-member statement `.name { … }` /
+        // A scope-member statement `.name { … }` /
         // `.name(args) { … }`, or a declared `#Name { … }` block.
         .ScopeMember(name, _, args, args_span, body, dsl, _, _) -> {
             if dsl || name == "Arithmetic" {
@@ -935,7 +935,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
 fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
     jfmt_fmt_loop_label(&f, label)
     jfmt_write(&f, "loop ")
-    // D-LOOP-SUBJECT1: the bindingless form writes its subject bare. The
+    // The bindingless form writes its subject bare. The
     // parser records the implicit binding as `it`, so printing the name back
     // produces `loop it in words`, which is not a spelling the parser
     // accepts — `it` is a keyword, not a name.
@@ -1004,7 +1004,7 @@ fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, 
     jfmt_fmt_effect_loop_body(&f, body, header_end, arrow_body)
 }
 
-// S68 (D-SG2): render an `if`/`while` condition without wrapping the
+// S68 render an `if`/`while` condition without wrapping the
 // outermost expression in redundant parens. A condition is its own statement
 // slot, so it renders at the lowest precedence; precedence-required parens on
 // nested sub-expressions are still added by `fmt_expr`.
@@ -1012,8 +1012,8 @@ fn jfmt_fmt_cond(f: &JetFmt, cond: Expr) {
     jfmt_fmt_expr(&f, cond, JFMT_PREC_OR_FALLBACK)
 }
 
-// S68 (D-SG2): render an `if`-expression branch `{ stmts… value }`.
-// D-FMT1: when `inline` is set and the branch holds only its value
+// S68 render an `if`-expression branch `{ stmts… value }`.
+// When `inline` is set and the branch holds only its value
 // expression (no leading statements, no inner comment, author wrote it on
 // one line, fits width 100), keep it as `{ value }`. Otherwise expand.
 fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
@@ -1028,7 +1028,7 @@ fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
     jfmt_end_block(&f)
 }
 
-// D-FMT1: is this if-expression branch (no statements, just `value`)
+// Is this if-expression branch (no statements, just `value`)
 // eligible to stay on one line? Mirrors `body_inline_eligible`.
 fn jfmt_value_block_inlineable(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if stmts.len() > 0 -> return false
@@ -1065,7 +1065,7 @@ fn jfmt_fmt_effect_loop_body(f: &JetFmt, body: [Stmt], header_end: Int, arrow_bo
     jfmt_fmt_control_body_after_header(&f, body, force_braces)
 }
 
-// D-IF3 / D-OSTARGET2=B / D-IFDIST1: render a dispatch body
+// Render a dispatch body
 // `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
 // `prep if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
 fn jfmt_fmt_dispatch(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool) {
@@ -1139,7 +1139,7 @@ fn jfmt_fmt_guard_dispatch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
     jfmt_end_block(&f)
 }
 
-// D-CONC-CHAN2=D: the parser stores a readiness head in a private one-field
+// The parser stores a readiness head in a private one-field
 // tuple so the existing arm IR can carry it through sema/TIR. That carrier is
 // not user syntax; always print its canonical arm-table spelling instead of
 // leaking the tuple or its sentinel field.
@@ -1302,7 +1302,7 @@ fn jfmt_fmt_arm_body(f: &JetFmt, body: [Stmt], force_braces: Bool) {
     jfmt_fmt_body(&f, body)
 }
 
-// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C: one simple effect-control
+// One simple effect-control
 // statement uses `->` when it fits. Braces remain the canonical shape for
 // multiple statements, scoped blocks, comments, and marked controls.
 fn jfmt_fmt_control_body_after_header(f: &JetFmt, body: [Stmt], force_braces: Bool) {
@@ -1366,7 +1366,7 @@ fn jfmt_arm_body_was_braceless(f: JetFmt, body: [Stmt]) -> Bool {
 }
 
 fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, prec: Int) {
-    // D-MATCHARM1 / D-IFDIST1: if the whole expression is an Or of
+    // If the whole expression is an Or of
     // subject-table_op atoms, emit it with `|` alternation syntax instead of `||`.
     if jfmt_is_all_subject_alts(f, subject, table_op, cond) {
         // Parens required when inside && or || context.
@@ -1382,7 +1382,7 @@ fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, 
                 my_prec :: jfmt_prec_of_bin(op)
                 needs_paren :: prec > my_prec
                 if needs_paren -> jfmt_write(&f, "(")
-                // E0082 (D-ARMHEAD-PAREN1 amendment): an `&&` operand of `||`
+                // E0082 (amendment): an `&&` operand of `||`
                 // always prints with its grouping parentheses.
                 lhs_slot :: jfmt_switch_cond_slot(op, lhs, my_prec)
                 rhs_slot :: jfmt_switch_cond_slot(op, rhs, jfmt_prec_add_rhs(my_prec))
@@ -1400,7 +1400,7 @@ fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, 
                 jfmt_fmt_expr(&f, cond, prec)
             }
         }
-        // D-IF3: a pattern arm head is bare — the comparison marker on the
+        // A pattern arm head is bare — the comparison marker on the
         // `if` already binds it to the subject.
         .PatternTest(_, pattern, _) -> jfmt_fmt_pattern(&f, pattern)
         else -> jfmt_fmt_expr(&f, cond, prec)
@@ -1532,7 +1532,7 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
         jfmt_write(&f, " ")
     }
     loop marker in b.markers -> jfmt_write(&f, "#{marker.name} ")
-    // D-PREP-SURFACE2=A: compile time is always the explicit
+    // Compile time is always the explicit
     // `name :: prep { value }`.
     if b.is_comptime {
         jfmt_write(&f, b.name)
@@ -1542,7 +1542,7 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
     }
     if b.pattern == .Val(pattern_value) {
         if pattern_value == .Refutable(pattern, fallback, _, _) {
-            // D-CHOOSE-TEST1=A: this statement has no binding sigil in its
+            // This statement has no binding sigil in its
             // surface form; the successful pattern captures are the locals.
             jfmt_fmt_refutable_subject(&f, b.init)
             jfmt_write(&f, " == ")
@@ -1556,14 +1556,14 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
         // S74: a destructuring target stands in for the name.
         jfmt_fmt_bind_pattern(&f, pattern_value)
     } else {
-        // D-BIND-BARE1: bindings are always bare (`name :: …` / `name := …`).
+        // Bindings are always bare (`name :: …` / `name := …`).
         // Types ride the value (`Type{ … }`), never the binding name.
         jfmt_write(&f, b.name)
     }
     jfmt_write(&f, " ")
     jfmt_write(&f, if b.mutable -> ":=" else -> "::")
     jfmt_write(&f, " ")
-    // D-UNINIT-SENTINEL2: print `Type{ uninit }` from the binding's type.
+    // Print `Type{ uninit }` from the binding's type.
     if b.uninit {
         if b.ty == .Val(ty) {
             jfmt_fmt_type(&f, ty)
@@ -1578,7 +1578,7 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
     }
 }
 
-// D-PREP-SURFACE2=A: the prepared value of a compile-time binding,
+// The prepared value of a compile-time binding,
 // `prep { value }`.
 fn jfmt_fmt_prepared_value(f: &JetFmt, value: Expr) {
     jfmt_write(&f, "prep {{ ")
@@ -1596,8 +1596,8 @@ fn jfmt_fmt_bind_names(f: &JetFmt, elems: [BindName]) {
 fn jfmt_fmt_bind_pattern(f: &JetFmt, pat: BindPattern) {
     if pat == {
         .Struct(type_name, _, fields, rest, _) -> {
-            // D-LIT-DOT1: emit `Type{x, y}` (auto-fixes retired dotted form).
-            // D-DESTRUCT1: preserve a `field: rename` and a trailing `..`.
+            // Emit `Type{x, y}` (auto-fixes retired dotted form).
+            // Preserve a `field: rename` and a trailing `..`.
             jfmt_write(&f, type_name)
             jfmt_write(&f, "{{")
             loop index in 0..<fields.len() {
@@ -1637,7 +1637,7 @@ fn jfmt_fmt_lvalue(f: &JetFmt, lv: LValue) {
             jfmt_fmt_expr(&f, index, JFMT_PREC_OR_FALLBACK)
             jfmt_write(&f, "]")
         }
-        // D-MUTSELF1: `place.field` field-assignment target.
+        // `place.field` field-assignment target.
         .Field(base, field, _) -> {
             jfmt_fmt_expr(&f, base, JFMT_PREC_POSTFIX)
             jfmt_write(&f, ".")
@@ -1646,7 +1646,7 @@ fn jfmt_fmt_lvalue(f: &JetFmt, lv: LValue) {
     }
 }
 
-// D-LAYOUT1 / D-LAYOUT-CTOR1: the inverse of `Parser::desugar_layout_anchors`
+// The inverse of `Parser::desugar_layout_anchors`
 // — turns a `name.h(box, anchor)` / `name.v(box, anchor)` call back into the
 // `box.anchor` / `self.anchor` source spelling before formatting. Only fires
 // on the EXACT shape the parser's desugar produces (receiver is a bare

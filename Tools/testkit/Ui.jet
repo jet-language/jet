@@ -6,24 +6,24 @@ use core.files as files
 // rows never change the plain check; unavailable facts are never substituted.
 fn kit_ui_directives() -> [KitUIDirective] {
     rows := [KitUIDirective]{
-        KitUIDirective{name: "check_cli", argv: ["check", "$base"], parent: true, exit: "any", streams: "check", capability: ""},
-        KitUIDirective{name: "all_diags", argv: ["check", "$file"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
-        KitUIDirective{name: "typed_settings_cli", argv: ["check", "$file", "--set", "cli_only=true"], parent: false, exit: "any", streams: "check", capability: ""},
-        KitUIDirective{name: "cli_e0043", argv: ["install"], parent: false, exit: "nonzero", streams: "both", capability: ""},
-        KitUIDirective{name: "cli_e2101", argv: ["bench"], parent: false, exit: "nonzero", streams: "both", capability: ""},
-        KitUIDirective{name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
-        KitUIDirective{name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
-        KitUIDirective{name: "cli_build", argv: ["build", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
-        KitUIDirective{name: "jetpack_e1250", argv: ["build", "main.jet", "--offline"], parent: true, exit: "nonzero", streams: "both", capability: ""},
-        KitUIDirective{name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
-        KitUIDirective{name: "sandbox_effect", argv: ["build", "$file", "--target=sandbox"], parent: false, exit: "any", streams: "both", capability: ""},
-        KitUIDirective{name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
-        KitUIDirective{name: "run_cli", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
-        KitUIDirective{name: "dev_interpreter", argv: ["run", "--interpret", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
-        KitUIDirective{name: "complexity_cli", argv: ["lint", "--complexity", "$file", "--max=$max"], parent: false, exit: "any", streams: "both", capability: ""},
-        KitUIDirective{name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
-        KitUIDirective{name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
-        KitUIDirective{name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
+        {name: "check_cli", argv: ["check", "$base"], parent: true, exit: "any", streams: "check", capability: ""},
+        {name: "all_diags", argv: ["check", "$file"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
+        {name: "typed_settings_cli", argv: ["check", "$file", "--set", "cli_only=true"], parent: false, exit: "any", streams: "check", capability: ""},
+        {name: "cli_e0043", argv: ["install"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        {name: "cli_e2101", argv: ["bench"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        {name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        {name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        {name: "cli_build", argv: ["build", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        {name: "jetpack_e1250", argv: ["build", "main.jet", "--offline"], parent: true, exit: "nonzero", streams: "both", capability: ""},
+        {name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
+        {name: "sandbox_effect", argv: ["build", "$file", "--target=sandbox"], parent: false, exit: "any", streams: "both", capability: ""},
+        {name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        {name: "run_cli", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        {name: "dev_interpreter", argv: ["run", "--interpret", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        {name: "complexity_cli", argv: ["lint", "--complexity", "$file", "--max=$max"], parent: false, exit: "any", streams: "both", capability: ""},
+        {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
+        {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
+        {name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
     loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "command_override_conflict", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "gate", "build_grants", "build_locked", "sandbox_missing_wasm_tools", "jetpack_hangar_digest_mismatch", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "plugin_target", "target", "cost_cli"] {
         &rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})

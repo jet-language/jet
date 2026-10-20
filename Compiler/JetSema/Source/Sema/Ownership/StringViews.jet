@@ -1,4 +1,4 @@
-// D-MEM1 stage S5 / D-MEM-COPYSEM1: string views. `x :: s.trim()`,
+// This rule stage S5 string views. `x :: s.trim()`,
 // `x :: s.after(sep)` and `x :: s.before(sep)` on a local or parameter
 // `String` bind a zero-copy `&str` window into `s`. `String` stays one type,
 // so the view-ness lives on the binding (SemaScopeBinding.string_view) and on
@@ -165,7 +165,7 @@ fn sema_string_view_check_read(name: String, span: Span, scopes: SemaScopeTable,
     sema_string_view_unsupported_use(name, "be used directly here", span, scopes, state, &diagnostics)
 }
 
-// D-MEM-COPYSEM1=A: a string view, or a read view local, read at an owning
+// A string view, or a read view local, read at an owning
 // destination is materialized into an owned copy (Rust `insert_implicit_copy`).
 fn sema_string_view_materialize(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx

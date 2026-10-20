@@ -39,8 +39,8 @@ fn pkg_test_provider_ref(raw: String) -> ProviderRef {
 
 fn pkg_test_ws_index() -> WorkspaceIndex {
     WorkspaceIndex.from_members([WorkspaceMember]{
-        WorkspaceMember{name: "logging", path: "./infra/logging"},
-        WorkspaceMember{name: "ranker", path: "packages/ranker"}
+        {name: "logging", path: "./infra/logging"},
+        {name: "ranker", path: "packages/ranker"}
     })
 }
 
@@ -189,8 +189,8 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 
 #Test("named source unknown lists declared") {
     table :: SourceTable.from_decls([NamedSourceDecl]{
-        NamedSourceDecl{name: "stable", upstream: "u1", via: ProviderKind.Nix},
-        NamedSourceDecl{name: "unstable", upstream: "u2", via: ProviderKind.Core}
+        {name: "stable", upstream: "u1", via: ProviderKind.Nix},
+        {name: "unstable", upstream: "u2", via: ProviderKind.Core}
     })
     if RefSpec.classify_in("neovim@beta", table) == {
         .Ok(_) -> panic("expected UnknownSource")
@@ -245,8 +245,8 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 
 #Test("ambiguous bare member is E1230 and lists candidates") {
     index :: WorkspaceIndex.from_members([WorkspaceMember]{
-        WorkspaceMember{name: "logging", path: "infra/logging"},
-        WorkspaceMember{name: "logging", path: "apps/logging"}
+        {name: "logging", path: "infra/logging"},
+        {name: "logging", path: "apps/logging"}
     })
     error :: pkg_test_workspace_error("logging", index)
     assert_eq(error.code(), Val("E1230"))

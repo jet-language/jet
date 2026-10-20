@@ -64,8 +64,8 @@ fn callable_statics() {
     zeros := [U8]{}
     loop _ in 0..<16 -> &zeros.push(U8{0})
     &lir.data.push(LIRData{id: LIRDataID{value: lir.data.len()}, bytes: zeros, align: 8, relocs: [LIRDataReloc]{
-        LIRDataReloc{offset: 0, target: flag, addend: 0},
-        LIRDataReloc{offset: 8, target: owner, addend: 0},
+        {offset: 0, target: flag, addend: 0},
+        {offset: 8, target: owner, addend: 0},
     }})
     call :: x64_call_image(lir, entry, Val(finalizer))
     loop error in call.image.errors -> print(error)

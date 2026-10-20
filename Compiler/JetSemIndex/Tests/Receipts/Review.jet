@@ -180,8 +180,8 @@ fn review_test_effect(function: String, direct: [String], inferred: [String], ca
     receipt := review_test_receipt("rename", Val("wrong"), Val("wrong"))
     receipt.rule_id = Val("jet-fix")
     receipt.targets = [SemanticOpTarget]{
-        SemanticOpTarget{stable_id: "old", before: "report", after: "summarize", kind: "function", module_path: "ignored-nonempty-identities"},
-        SemanticOpTarget{stable_id: "bad", before: "wrong", after: "wrong", kind: "wrong", module_path: "wrong"},
+        {stable_id: "old", before: "report", after: "summarize", kind: "function", module_path: "ignored-nonempty-identities"},
+        {stable_id: "bad", before: "wrong", after: "wrong", kind: "wrong", module_path: "wrong"},
     }
     ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{receipt})
     assert_eq(ops.len(), 1)

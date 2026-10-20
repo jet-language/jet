@@ -70,20 +70,17 @@ use jet_lexer.[
     TOKEN_KW_LOOP,
     TOKEN_KW_MOVE,
     TOKEN_KW_YIELD,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
     TOKEN_MINUS,
     TOKEN_MINUS_EQ,
-    TOKEN_MINUS_MINUS,
     TOKEN_NULL,
     TOKEN_OR_OR,
     TOKEN_PERCENT_EQ,
     TOKEN_PERCENT_PERCENT_EQ,
     TOKEN_PIPE_EQ,
     TOKEN_PLUS_EQ,
-    TOKEN_PLUS_PLUS,
     TOKEN_RAW_STRING,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
@@ -99,7 +96,6 @@ use jet_lexer.[
     TOKEN_STAR,
     TOKEN_STAR_EQ,
     TOKEN_STRING,
-    TOKEN_TILDE,
     TOKEN_TILDE_PIPE_EQ,
     TOKEN_TRUE,
     TOKEN_UNIFIED_ARROW,
@@ -160,8 +156,8 @@ fn parser_value_tail_ahead(state: JetParserState) -> Bool Never! {
 // parsing; the speculation's rewound result would be thrown away. The one
 // exception is a line whose speculative parse leaves state behind that the
 // rewind does not restore and the statement reparse then sees: the once-per-file
-// E0373 flag (an authored `;`), block policy declarations (`#`), the retired
-// step span (`++`, `--`), and a split `>>` type close. Such a line keeps the
+// E0373 flag (an authored `;`), block policy declarations (`#`), and a split
+// `>>` type close. Such a line keeps the
 // speculation, so the result is the same as speculating every line.
 fn parser_tail_speculation_needed(state: JetParserState) -> Bool Never! {
     if parser_value_tail_ahead(state) -> return true
@@ -170,7 +166,7 @@ fn parser_tail_speculation_needed(state: JetParserState) -> Bool Never! {
     loop index < state.tokens.len() {
         kind :: state.tokens[index].kind
         if kind == TOKEN_SEMI && state.tokens[index].span.start < state.tokens[index].span.end -> return true
-        if kind == TOKEN_HASH || kind == TOKEN_PLUS_PLUS || kind == TOKEN_MINUS_MINUS || kind == TOKEN_SHR -> return true
+        if kind == TOKEN_HASH || kind == TOKEN_SHR -> return true
         if kind == TOKEN_EOF -> return true
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
         if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
@@ -303,9 +299,8 @@ fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
 
 // Rust `callable_tail_block_depth` (#18): the last line of a callable body
 // may be a bare value. `value_tail` marks the body of a callable with a
-// declared result (D-TAIL-RETURN1=A): its final line is in value position,
+// declared result its final line is in value position,
 // where a finite source loop with `->` keeps its collecting meaning
-// (D-LOOP-STMT-ARROW1=C).
 fn parser_parse_callable_body(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
     saved_tail_depth :: state.callable_tail_depth
     state.callable_tail_depth = state.block_depth + 1
@@ -375,7 +370,7 @@ fn parser_parse_tail_loop(state: &JetParserState) -> Stmt {
     parser_parse_statement(&state)
 }
 
-// D-BODY-LAST1=B: in the body of a callable with a declared result, a final
+// In the body of a callable with a declared result, a final
 // `if` in a value form (`->` branches, a guard table or a dispatch) is the
 // body's value. Any other `if` there is parsed again as a statement.
 fn parser_parse_tail_if(state: &JetParserState) -> Stmt {
@@ -492,32 +487,22 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             Stmt.Yield{value: value.expr, span: parser_cover(start.span, value.span)}
         }
         TOKEN_HASH -> parser_parse_marked_statement(&state)
-        TOKEN_KW_COMPTIME -> parser_parse_retired_comptime_statement(&state)
         TOKEN_IDENT -> {
             if parser_next_statement_ahead(&state) -> return parser_parse_next_statement(&state)
             word :: parser_value(state, token)
             if word == "defer" -> return parser_parse_defer_statement(&state)
             if parser_task_group_ahead(&state) -> return parser_parse_task_group(&state)
-            if word == "layout" && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LBRACE -> return parser_parse_retired_layout_keyword(&state)
             if word == "assert" && parser_kind_at(&state, 1) == TOKEN_IDENT -> return parser_parse_assert_names(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) -> return parser_parse_prep_block(&state)
             if parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP && !parser_named_loop_is_value(&state) -> return parser_parse_labeled_loop(&state)
-            if parser_kind_at(&state, 2) == TOKEN_KW_LOOP && (parser_kind_at(&state, 1) == TOKEN_COLON_EQ || parser_kind_at(&state, 1) == TOKEN_AT) -> return parser_parse_retired_labeled_loop(&state)
             binding_kind :: parser_kind_at(&state, 1)
             if {
                 binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
                 (binding_kind == TOKEN_LBRACE || binding_kind == TOKEN_DOT) && parser_pattern_binding_ahead(&state) -> parser_parse_pattern_binding_statement(&state)
                 else -> parser_parse_assignment_or_expression(&state)
             }
-        }
-        TOKEN_AT -> {
-            if parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_KW_LOOP -> return parser_parse_retired_labeled_loop(&state)
-            if parser_kind_at(&state, 1) == TOKEN_KW_IF -> return parser_parse_prep_if(&state)
-            if parser_kind_at(&state, 1) == TOKEN_KW_LOOP -> return parser_parse_prep_loop(&state)
-            if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
-            parser_parse_comptime_binding(&state)
         }
         else -> {
             if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
@@ -531,7 +516,7 @@ fn parser_scope_member_ahead(state: &JetParserState) -> Bool Never! {
         && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_LBRACE)
 }
 
-// Rust `stmt` (D-CONC-SPAWN1=D): `task.group g { … }` or
+// Rust `stmt` `task.group g { … }` or
 // `task.group g(limit: n) { … }` opens a structured task scope.
 fn parser_task_group_ahead(state: &JetParserState) -> Bool Never! {
     if parser_value_at(&state, 0) != "task" || parser_kind_at(&state, 1) != TOKEN_DOT -> return false
@@ -539,23 +524,6 @@ fn parser_task_group_ahead(state: &JetParserState) -> Bool Never! {
     if selector.kind != TOKEN_IDENT || parser_value(state, selector) != "group" || parser_kind_at(&state, 3) != TOKEN_IDENT -> return false
     opener :: parser_kind_at(&state, 4)
     opener == TOKEN_LBRACE || opener == TOKEN_LPAREN
-}
-
-// D-LAYOUT-CTOR1 (Rust `retired_layout_keyword`): the retired
-// `layout NAME { … }` teaches `name :: Layout.{ … }` (E2935).
-fn parser_parse_retired_layout_keyword(state: &JetParserState) -> Stmt {
-    start :: parser_bump(&state)
-    end := start.span.end
-    fix := "write `name :: Layout.{{ … }}`"
-    if parser_current_kind(&state) == TOKEN_IDENT {
-        hint :: parser_bump(&state)
-        end = hint.span.end
-        fix = "write `{parser_value(state, hint)} :: Layout.{{ … }}`"
-    }
-    if parser_current_kind(&state) == TOKEN_LBRACE -> end = parser_current(&state).span.end
-    parser_add_error_code(&state, "E2935", Span{start: start.span.start, end: end}, "`layout` is retired", "constraint layouts use typed-literal construction — `name :: Layout.{{ … }}` (D-DOTCTOR3 element body of `Constraint`s)", fix)
-    parser_sync_stmt(&state)
-    Stmt.Expr{expr: Expr.Unit{span: start.span}}
 }
 
 fn parser_parse_task_group(state: &JetParserState) -> Stmt {
@@ -613,16 +581,12 @@ fn parser_next_statement_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind != TOKEN_IDENT || parser_value(state, token) != "next" -> return false
     following :: parser_kind_at(&state, 1)
-    following == TOKEN_SEMI || following == TOKEN_RBRACE || following == TOKEN_AT || (following == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_AT) || (following == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)
+    following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)
 }
 
 // `next` or `next(name)`: continue the innermost or the named loop.
 fn parser_parse_next_statement(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
-    if parser_take_retired_loop_target(&state, "next") == .Val(name) {
-        parser_finish_statement(&state)
-        return Stmt.ContinueLabel{name: name, span: start.span}
-    }
     if parser_current_kind(&state) == TOKEN_LPAREN {
         parser_bump(&state)
         name :: parser_expect_name(&state, "as the loop name in `next(name)`")
@@ -634,7 +598,7 @@ fn parser_parse_next_statement(state: &JetParserState) -> Stmt {
     Stmt.Continue{span: start.span}
 }
 
-// D-IF3 / D-IFDIST1 / D-IFGUARD1=A / D-ONELINE-BODY1=B: the statement `if`.
+// The statement `if`.
 // `if {` opens an ordered Boolean guard table, `if subject OP {` opens value
 // or pattern dispatch, and a plain `if cond` gates one `->` statement or a
 // braced body, with an optional `else` chain. Every form builds the one flat
@@ -664,7 +628,7 @@ fn parser_parse_if_statement(state: &JetParserState) -> Stmt {
     cond_start :: parser_current(&state).span.start
     condition :: parser_parse_expression_no_struct_lit(&state, 1)
     cond_span :: Span{start: cond_start, end: parser_prev_token_end(state)}
-    // D-ASSIGNCOND1: a bare `=` in a condition is an assignment, not `==`.
+    // A bare `=` in a condition is an assignment, not `==`.
     if parser_current_kind(&state) == TOKEN_EQ {
         eq_span :: parser_current(&state).span
         parser_add_error_code(&state, "E0322", eq_span, "assignment `=` cannot appear in an `if` condition", "`=` binds a name; use `==` to compare two values", "replace `=` with `==` to compare, or move the assignment before the `if`")
@@ -721,7 +685,7 @@ fn parser_parse_if_else_chain(state: &JetParserState, arms: &[SwitchArm], parts:
     None
 }
 
-// D-ONELINE-BODY1=B: an `if` body is one `->` statement or a braced block.
+// An `if` body is one `->` statement or a braced block.
 // Anything else teaches braces (E0372) and parses as the one statement. The
 // condition and body are recorded in `parts` for the L0507 fix.
 fn parser_parse_if_body(state: &JetParserState, parts: &[ParserBranchPart], cond: Span) -> [Stmt] {
@@ -779,7 +743,7 @@ fn parser_teach_control_braces(state: &JetParserState, body: String, span: Span)
     parser_add_error_code(&state, "E0372", span, "This `{body}` body needs braces.", "Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler.", "Write `-> statement` for one statement, or wrap the body in `{{ ... }}`; `jet fmt` applies this fix.")
 }
 
-// D-IFGUARD1=A: `if { Bool -> body … [else -> body] }` statement guards.
+// `if { Bool -> body … [else -> body] }` statement guards.
 fn parser_parse_if_guard_arms(state: &JetParserState, start: Span) -> Stmt {
     arms := [SwitchArm]{}
     else_body := [Stmt]?{None}
@@ -817,7 +781,7 @@ fn parser_parse_if_guard_arms(state: &JetParserState, start: Span) -> Stmt {
     Stmt.Switch{subject: Expr.Bool{value: true, span: start}, arms: arms, else_body: else_body, span: start}
 }
 
-// D-CONC-CHAN2=D: a subjectless readiness arm is a `value, receiver` pair or
+// A subjectless readiness arm is a `value, receiver` pair or
 // an `after duration` head, carried in the one-field tuple node sema
 // recognizes; any other head is a Boolean condition.
 fn parser_parse_subjectless_arm_head(state: &JetParserState) -> Expr {
@@ -853,20 +817,20 @@ fn parser_parse_guard_arm_body(state: &JetParserState) -> [Stmt] {
     [Stmt]{parser_parse_statement(&state)}
 }
 
-// D-IF2 Q2: a dispatch arm body is a braced block or one braceless statement.
+// Q2: a dispatch arm body is a braced block or one braceless statement.
 fn parser_parse_arm_body(state: &JetParserState) -> [Stmt] {
     if parser_current_kind(&state) == TOKEN_LBRACE -> return parser_parse_block(&state).statements
     [Stmt]{parser_parse_statement(&state)}
 }
 
-// D-IF1: with the cursor just past `{`, does the body open with an arm (an
+// With the cursor just past `{`, does the body open with an arm (an
 // `else ->` catch-all, a range head, or an expression followed by `->`)?
 // Pure lookahead.
 fn parser_if_body_is_arms(state: &JetParserState) -> Bool {
     first :: parser_current_kind(&state)
     if first == TOKEN_KW_ELSE && parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW -> return true
     if first == TOKEN_RBRACE -> return false
-    // D-PATR: `lo .. hi ->`, plus the `lo .. hi step n ->` (E0319) and
+    // `lo .. hi ->`, plus the `lo .. hi step n ->` (E0319) and
     // `lo ..= hi ->` (E0318) porting hazards, without a full expression parse.
     if first == TOKEN_INT && parser_kind_at(&state, 1) == TOKEN_DOT_DOT {
         if parser_kind_at(&state, 3) == TOKEN_UNIFIED_ARROW -> return true
@@ -896,7 +860,7 @@ fn parser_line_arrow_ahead(state: JetParserState) -> Bool Never! {
     loop index < state.tokens.len() {
         kind :: state.tokens[index].kind
         if kind == TOKEN_EOF -> return false
-        if depth == 0 && (kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW) -> return true
+        if depth == 0 && (kind == TOKEN_UNIFIED_ARROW) -> return true
         if depth == 0 && kind == TOKEN_SEMI -> return false
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
         if parser_is_closer(kind) {
@@ -908,7 +872,7 @@ fn parser_line_arrow_ahead(state: JetParserState) -> Bool Never! {
     false
 }
 
-// D-IF3 / D-IFDIST1: the arms of `if subject OP { … }` (cursor just past
+// The arms of `if subject OP { … }` (cursor just past
 // `{`). Each arm is `head -> body`; `else -> body` is the catch-all. A
 // pattern head binds against the subject itself when it is a plain name and
 // against the synthesised `it` otherwise.
@@ -947,7 +911,7 @@ fn parser_parse_if_arms(state: &JetParserState, subject: Expr, start: Span, op: 
     Stmt.Switch{subject: subject, arms: ^arms, else_body: ^else_body, span: start}
 }
 
-// D-IF3 / D-MATCHARM1 / D-IFDIST1: one bare arm head bound to the subject.
+// One bare arm head bound to the subject.
 // A range or pattern head tests `pattern_subject`; a pattern may carry a
 // Boolean guard (`.Key(key) && key == "b" ->`). Value heads use the
 // distributed arm grammar; a redundant `subject OP` prefix reports E0994.
@@ -1002,7 +966,7 @@ fn parser_parse_arm_bool_operand(state: &JetParserState, subject: Expr, op: BinO
     parser_expression_form_arm_alternates(&state, subject, op, true, 1)
 }
 
-// D-PATR / C25: a `lo..hi` range arm head. Rust's inclusive `..=` (E0318) and
+// C25: a `lo..hi` range arm head. Rust's inclusive `..=` (E0318) and
 // a trailing loop `step n` (E0319) are porting hazards that teach and
 // recover; None when the cursor is not a range head.
 fn parser_parse_range_arm_head(state: &JetParserState, subject: Expr) -> Expr? {
@@ -1030,7 +994,7 @@ fn parser_parse_range_arm_head(state: &JetParserState, subject: Expr) -> Expr? {
     } else {
         step :: parser_current(&state)
         if step.kind == TOKEN_IDENT && parser_value(state, step) == "step" {
-            parser_add_error_code(&state, "E0319", span, "`step` is not allowed in a range arm — range arms test a band, not a sequence", "`step` is a retired loop spelling; a range arm just checks if the subject falls between the two ends", "remove `step …`, or use a full condition: `subject >= {low} && subject <= {high} && subject % n == 0 ->`")
+            parser_add_error_code(&state, "E0319", span, "`step` is not allowed in a range arm — range arms test a band, not a sequence", "a range arm just checks if the subject falls between the two ends", "remove `step …`, or use a full condition: `subject >= {low} && subject <= {high} && subject % n == 0 ->`")
             parser_bump(&state)
             if parser_current_kind(&state) == TOKEN_INT -> parser_bump(&state)
         }
@@ -1038,7 +1002,7 @@ fn parser_parse_range_arm_head(state: &JetParserState, subject: Expr) -> Expr? {
     Val(Expr.PatternTest{subject: subject, pattern: Pattern.Range{lo: ^low, hi: ^high, span: span}, span: span})
 }
 
-// D-ONELINE-BODY1=B: a statement loop body is a braced block or one `->`
+// A statement loop body is a braced block or one `->`
 // statement; a nested `if`/`loop` there needs braces (E0329).
 fn parser_parse_loop_effect_body(state: &JetParserState) -> ParsedBlock {
     token :: parser_current(&state)
@@ -1080,7 +1044,7 @@ fn parser_loop_stride(state: &JetParserState) -> Expr? {
     Val(parser_parse_expression_no_struct_lit(&state, 1).expr)
 }
 
-// D-LOOP-IN1=A: `x`, `(key, value)`, or the retired bare `x, y;` binding.
+// `x`, `(key, value)`, or the retired bare `x, y;` binding.
 fn parser_loop_source_binding(state: &JetParserState) -> ParserExpressionFormLoopClause {
     if parser_current_kind(&state) == TOKEN_LPAREN -> return parser_expression_form_loop_binding(&state)
     first :: parser_expect_name(&state, "as the loop variable")
@@ -1098,11 +1062,6 @@ fn parser_loop_source_separator(state: &JetParserState) {
         parser_bump(&state)
         return
     }
-    if token.kind == TOKEN_COMMA {
-        parser_bump(&state)
-        parser_expression_form_error(&state, "E0383", token.span, "a loop source needs `in`", "the source separator names the collection or range after the loop variable", "write `in` between the variable and source")
-        return
-    }
     parser_expect(&state, TOKEN_KW_IN, "between the loop binding and source").drop("parser_expect records the missing-token diagnostic")
 }
 
@@ -1118,7 +1077,7 @@ fn parser_parse_loop_after_keyword(state: &JetParserState, start: Span, label: N
     }
     second_kind :: parser_kind_at(&state, 1)
     if first_kind == TOKEN_IDENT && second_kind == TOKEN_COLON_EQ {
-        // D-LOOP-HEADER2=A: a state loop starts with one mutable name binding.
+        // A state loop starts with one mutable name binding.
         name :: parser_bump(&state)
         sigil :: parser_bump(&state)
         initial :: parser_parse_expression(&state, 1, 0)
@@ -1129,20 +1088,6 @@ fn parser_parse_loop_after_keyword(state: &JetParserState, start: Span, label: N
             parser_expect(&state, TOKEN_COMMA, "after the state initializer").drop("parser_expect records the missing-token diagnostic")
         }
         condition :: parser_parse_expression_no_struct_lit(&state, 1)
-        // D-LOOP-HEADER3=D: the three-slot C-style counter header is retired.
-        if parser_current_kind(&state) == TOKEN_COMMA {
-            parser_bump(&state)
-            if !parser_loop_body_start(&state) {
-                step_span :: parser_current(&state).span
-                parser_parse_expression(&state, 1, 0)
-                if parser_is_assignment_operator(parser_current_kind(&state)) {
-                    parser_bump(&state)
-                    parser_parse_expression(&state, 1, 0)
-                }
-                parser_add_fatal_code(&state, "E0376", step_span, "C-style counter loop headers are retired", "a three-slot loop header is binding, source, and step rule — not init, condition, and assignment", "write `loop i in 0..<n {{ … }}` or `loop i in 0..n, 2 {{ … }}`; keep `loop name := value, condition {{ … }}` for mutable state")
-                return Stmt.Expr{expr: Expr.Unit{span: start}}
-            }
-        }
         arrow_body :: parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
         body :: parser_parse_loop_effect_body(&state)
         return Stmt.CountedLoop{init: ^init, cond: condition.expr, step: None, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label}
@@ -1156,7 +1101,7 @@ fn parser_parse_loop_after_keyword(state: &JetParserState, start: Span, label: N
             .Range(range_start, range_end, exclusive, _) -> kind = ForKind.Range{start: range_start, end: range_end, step: parser_loop_stride(&state), exclusive: exclusive}
             else -> {
                 if parser_current_kind(&state) == TOKEN_DOT_DOT || parser_current_kind(&state) == TOKEN_DOT_DOT_LT {
-                    // D-RANGE-EXCL1=C: `..` is inclusive; `..<` is half-open.
+                    // `..` is inclusive; `..<` is half-open.
                     exclusive :: parser_current_kind(&state) == TOKEN_DOT_DOT_LT
                     parser_bump(&state)
                     finish :: parser_parse_expression_no_struct_lit(&state, 1)
@@ -1187,38 +1132,6 @@ fn parser_parse_labeled_loop(state: &JetParserState) -> Stmt {
     parser_bump(&state)
     label :: NamedSpan{name: parser_value(state, name), span: name.span}
     parser_parse_loop_after_keyword(&state, name.span, Val(label))
-}
-
-// Rust stmt recovery for the retired prefix/suffix label forms. A mutable
-// label is fatal; the retired @ forms retain the canonical labelled loop AST.
-fn parser_parse_retired_labeled_loop(state: &JetParserState) -> Stmt {
-    first :: parser_bump(&state)
-    prefix :: first.kind == TOKEN_AT
-    name :: if prefix -> parser_expect_name(&state, "for the loop label after `@`") else -> first
-    mark :: if prefix -> first else -> parser_bump(&state)
-    keyword :: parser_expect(&state, TOKEN_KW_LOOP, "`loop` after the loop label")
-    label :: parser_value(state, name)
-    if mark.kind == TOKEN_COLON_EQ {
-        parser_add_fatal_code(&state, "E0988", parser_cover(name.span, keyword.span), "a loop name is compile-time, not mutable state", "`:=` creates a runtime binding; a loop name only targets control flow", "write `{label} :: loop {{ … }}`")
-        return Stmt.Loop{body: [Stmt]{}, span: keyword.span, arrow_body: false, label: None}
-    }
-    span :: if prefix -> parser_cover(mark.span, name.span) else -> parser_cover(name.span, mark.span)
-    parser_add_error_code(&state, "E0988", span, "named loops use `::`, not `@`", "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)", "write `{label} :: loop {{ … }}`")
-    parser_parse_loop_after_keyword(&state, name.span, Val(NamedSpan{name: label, span: name.span}))
-}
-
-// Rust break/next preserve named control flow while teaching target arguments.
-fn parser_take_retired_loop_target(state: &JetParserState, verb: String) -> String? {
-    prefix :: parser_current_kind(&state) == TOKEN_AT
-    suffix :: parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_AT
-    if !prefix && !suffix -> return None
-    first :: parser_bump(&state)
-    name :: if prefix -> parser_expect_name(&state, "after `@` for the loop label") else -> first
-    mark :: if prefix -> first else -> parser_bump(&state)
-    span :: if prefix -> parser_cover(mark.span, name.span) else -> parser_cover(name.span, mark.span)
-    label :: parser_value(state, name)
-    parser_add_error_code(&state, "E0988", span, "named loop exits use target arguments", "prefix `@` is for compile-time names and fact reads, not loop labels (D-LOOPLABEL3, D-ONCE-AT1=D)", "write `{verb}({label})`")
-    Val(label)
 }
 
 // Rust `named_loop_is_value`: `name :: loop …` binds a loop value when an
@@ -1266,7 +1179,7 @@ fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
             TOKEN_RBRACKET -> {
                 if brackets > 0 -> brackets -= 1
             }
-            TOKEN_UNIFIED_ARROW | TOKEN_LAMBDA_ARROW -> {
+            TOKEN_UNIFIED_ARROW -> {
                 if braces == 0 && parens == 0 && brackets == 0 -> return true
             }
             TOKEN_KW_LOOP -> {
@@ -1278,7 +1191,7 @@ fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
                     name_index :: if next_index >= 0 -> parser_next_code_index(state, next_index + 1) else -> -1
                     comma_index :: if name_index >= 0 -> parser_next_code_index(state, name_index + 1) else -> -1
                     targets_label :: next_kind == TOKEN_LPAREN && name_index >= 0 && state.tokens[name_index].kind == TOKEN_IDENT && state.tokens[name_index].decoded == label && comma_index >= 0 && state.tokens[comma_index].kind == TOKEN_COMMA
-                    // D-CHOOSE-FIND1=A: a search payload may sit under an
+                    // A search payload may sit under an
                     // `if`, but not under an explicitly nested loop.
                     bare_payload :: braces >= 1 && nested_loop_braces.len() == 0 && next_kind != TOKEN_SEMI && next_kind != TOKEN_RBRACE && next_kind != TOKEN_LPAREN
                     if targets_label || bare_payload -> return true
@@ -1309,10 +1222,6 @@ fn parser_parse_return_statement(state: &JetParserState) -> Stmt {
 
 fn parser_parse_break_statement(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
-    if parser_take_retired_loop_target(&state, "break") == .Val(name) {
-        parser_finish_statement(&state)
-        return Stmt.BreakLabel{name: name, span: start.span}
-    }
     if parser_current_kind(&state) == TOKEN_LPAREN {
         parser_bump(&state)
         name :: parser_expect_name(&state, "as a loop label")
@@ -1336,41 +1245,7 @@ fn parser_parse_break_statement(state: &JetParserState) -> Stmt {
     Stmt.Break{span: start.span}
 }
 
-// D-PREP-SURFACE2=A: `@ name :: value` is a retired constant. The mark always
-// meant compile time, so E0388 teaches `name :: prep { value }` and the parse
-// continues as that prepared binding.
-fn parser_parse_comptime_binding(state: &JetParserState) -> Stmt {
-    at :: parser_bump(&state)
-    name :: parser_expect_name(&state, "after `@` in a constant")
-    old :: "@{parser_value(state, name)}"
-    plain :: parser_retire_const_decl(&state, parser_cover(at.span, name.span), old)
-    sigil :: parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
-    value :: parser_parse_expression(&state, 1, 0)
-    binding := ast_binding(plain, name.span, false, value.expr, Val(sigil.span))
-    binding.is_comptime = true
-    parser_finish_statement(&state)
-    Stmt.Val{binding: binding}
-}
-
-// Rust `KwComptime` statements: the retired keyword teaches E0374 and the
-// statement recovers as `prep if`, `prep { … }`, or the retired compile-time
-// binding `comptime name = value`.
-fn parser_parse_retired_comptime_statement(state: &JetParserState) -> Stmt {
-    keyword :: parser_current(&state)
-    parser_add_error_code(&state, "E0374", keyword.span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword; a build-time value is written `name :: prep {{ … }}`, and `prep {{ … }}` runs other work while building")
-    if parser_kind_at(&state, 1) == TOKEN_KW_IF -> return parser_parse_prep_if(&state)
-    if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
-    parser_bump(&state)
-    name :: parser_expect_name(&state, "for the compile-time binding")
-    parser_expect(&state, TOKEN_EQ, "`=` in the retired comptime binding")
-    value :: parser_parse_expression(&state, 1, 0)
-    binding := ast_binding(parser_value(state, name), name.span, false, value.expr, None)
-    binding.is_comptime = true
-    parser_finish_statement(&state)
-    Stmt.Val{binding: binding}
-}
-
-// D-PREP-BRANCH1=A / D-PREP-FN1=A: `prep` leads a build-time verb only when
+// `prep` leads a build-time verb only when
 // the verb keyword follows it on the same line; everywhere else `prep` is an
 // ordinary name, so the lexer never reserves it.
 fn parser_prep_verb_ahead(state: &JetParserState, offset: Int, verb: Int) -> Bool Never! {
@@ -1378,84 +1253,31 @@ fn parser_prep_verb_ahead(state: &JetParserState, offset: Int, verb: Int) -> Boo
     token.kind == TOKEN_IDENT && parser_value(state, token) == "prep" && parser_kind_at(&state, offset + 1) == verb
 }
 
-// Rust `retired_known_error` / `take_mark`: recover every former demand
-// form, retaining its compile-time meaning after the one teaching diagnostic.
-fn parser_take_retired_known(state: &JetParserState, case: SemaNameCase) -> Token {
-    head := parser_expect(&state, TOKEN_HASH, "`#` before `Known`")
-    name :: parser_expect_name(&state, "for the retired `Known` marker")
-    head.span = parser_cover(head.span, name.span)
-    next_token :: parser_current(&state)
-    fix :: if {
-        next_token.kind == TOKEN_KW_IF -> "write `prep if <condition> {{ … }}`"
-        next_token.kind == TOKEN_LBRACE -> "write `prep {{ … }}`"
-        next_token.kind == TOKEN_IDENT -> "write `{sema_casing_canonical(parser_value(state, next_token), case)} :: prep {{ … }}`"
-        case == SemaNameCase.Screaming -> "write a prepared constant: `NAME :: prep {{ … }}`"
-        else -> "write a prepared value: `name :: prep {{ … }}`"
-    }
-    parser_add_error_code(&state, "E0377", head.span, "`#Known` is retired", "compile-time work carries the word `prep`, and a compile-time constant is `NAME :: prep {{ value }}`", fix)
-    head
-}
-
-fn parser_parse_retired_known_statement(state: &JetParserState) -> Stmt {
-    if parser_kind_at(&state, 2) == TOKEN_KW_IF -> return parser_parse_prep_if(&state)
-    if parser_kind_at(&state, 2) == TOKEN_LBRACE -> return parser_parse_prep_block(&state)
-    parser_take_retired_known(&state, SemaNameCase.Snake)
-    name :: parser_expect_name(&state, "for the compile-time binding")
-    parser_expect(&state, TOKEN_COLON_COLON, "`::` after the compile-time binding name")
-    value :: parser_parse_expression(&state, 1, 0)
-    binding := ast_binding(parser_value(state, name), name.span, false, value.expr, None)
-    binding.is_comptime = true
-    parser_finish_statement(&state)
-    Stmt.Val{binding: binding}
-}
-
-// Consume `prep` ahead of a build-time verb. The retired `@if`, `@loop` and
-// `@fn` heads teach E0388 once and recover as the `prep` form.
-fn parser_take_prep_head(state: &JetParserState, verb: String) -> Token {
-    if parser_known_ahead_at(&state, 0) -> return parser_take_retired_known(&state, SemaNameCase.Snake)
-    head :: parser_current(&state)
-    if head.kind == TOKEN_AT {
-        verb_token :: parser_lookahead(&state, 1)
-        parser_add_error_code(&state, "E0388", parser_cover(head.span, verb_token.span), "`@{verb}` is retired; write `prep {verb}`", "build-time blocks, branches, loops and functions carry the word `prep`, the same word Jet uses for every build-time step; the meaning and the checks are unchanged", "replace `@{verb}` with `prep {verb}`")
-    }
-    parser_bump(&state)
-}
-
-// D-PREP-SURFACE2=A: `prep { … }` is the explicit shared-preparation block. It
-// runs while building and emits no runtime code. The retired `@ { … }` head
-// teaches E0388 once and recovers as the `prep` block.
+// `prep { … }` is the explicit shared-preparation block. It
+// runs while building and emits no runtime code.
 fn parser_parse_prep_block(state: &JetParserState) -> Stmt {
-    start := parser_current(&state)
-    if parser_known_ahead_at(&state, 0) {
-        start = parser_take_retired_known(&state, SemaNameCase.Snake)
-    } else {
-        if start.kind == TOKEN_AT {
-            brace :: parser_lookahead(&state, 1)
-            parser_add_error_code(&state, "E0388", parser_cover(start.span, brace.span), "`@ {{ … }}` is retired; write `prep {{ … }}`", "build-time blocks, branches, loops and functions carry the word `prep`, the same word Jet uses for every build-time step; the meaning and the checks are unchanged", "replace `@ {{ … }}` with `prep {{ … }}`")
-        }
-        parser_bump(&state)
-    }
+    start :: parser_bump(&state)
     block :: parser_parse_block(&state)
     Stmt.ComptimeBlock{body: block.statements, is_template_loop: false, span: parser_cover(start.span, block.span)}
 }
 
-// D-PREP-FN1=A: a build-time method writes `prep fn` directly before `fn`.
+// A build-time method writes `prep fn` directly before `fn`.
 fn parser_prep_fn_ahead(state: &JetParserState) -> Bool Never! {
-    parser_prep_verb_ahead(&state, 0, TOKEN_KW_FN) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_FN)
+    parser_prep_verb_ahead(&state, 0, TOKEN_KW_FN)
 }
 
 fn parser_take_prep_fn(state: &JetParserState) -> Bool {
     if !parser_prep_fn_ahead(&state) -> return false
-    parser_take_prep_head(&state, "fn")
+    parser_bump(&state)
     true
 }
 
-// D-PREP-BRANCH1=A: `prep if <cond> { … } else prep if … else { … }` and the
-// D-OSTARGET2=B dispatch `prep if <subject> == { .Arm -> … else -> … }`, which
+// `prep if <cond> { … } else prep if … else { … }` and the
+// This rule dispatch `prep if <subject> == { .Arm -> … else -> … }`, which
 // shares the `if` arm grammar. Sema selects the arm; unselected arms are
-// name-checked only (D-WHEN2).
+// name-checked only.
 fn parser_parse_prep_if(state: &JetParserState) -> Stmt {
-    start :: parser_take_prep_head(&state, "if")
+    start :: parser_bump(&state)
     parser_expect(&state, TOKEN_KW_IF, "`if` after `prep`")
     saved_position :: state.position
     saved_diagnostics :: state.diagnostics.len()
@@ -1477,7 +1299,7 @@ fn parser_parse_prep_if(state: &JetParserState) -> Stmt {
     end := then_block.span
     if parser_current_kind(&state) == TOKEN_KW_ELSE {
         parser_bump(&state)
-        if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_IF) || (parser_known_ahead_at(&state, 0) && parser_kind_at(&state, 2) == TOKEN_KW_IF) {
+        if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) {
             chained :: parser_parse_prep_if(&state)
             else_body = Val([Stmt]{chained})
             end = parser_lookahead(&state, -1).span
@@ -1490,17 +1312,17 @@ fn parser_parse_prep_if(state: &JetParserState) -> Stmt {
     Stmt.ComptimeIf{cond: condition.expr, cond_span: condition.span, then_body: then_block.statements, else_body: ^else_body, span: parser_cover(start.span, end), selected_then: None}
 }
 
-// D-PREP-BRANCH1=A: `prep loop …` is the ordinary loop run while building. It
+// `prep loop …` is the ordinary loop run while building. It
 // is one compile-time block holding that loop, so it emits no runtime code.
 fn parser_parse_prep_loop(state: &JetParserState) -> Stmt {
-    start :: parser_take_prep_head(&state, "loop")
+    start :: parser_bump(&state)
     keyword :: parser_expect(&state, TOKEN_KW_LOOP, "`loop` after `prep`")
     body :: parser_parse_loop_after_keyword(&state, keyword.span, None)
     end :: parser_lookahead(&state, -1).span
     Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
 }
 
-// D-BIND-BARE1 / S74 (Rust `looks_like_sigil_binding` destructuring arms): a
+// S74 (Rust `looks_like_sigil_binding` destructuring arms): a
 // `[ … ]`, `( … )`, `Type{ … }` or retired `Type.{ … }` target whose matching
 // close is followed by `::` or `:=`. Bounded by the bracket depth.
 fn parser_pattern_binding_ahead(state: &JetParserState) -> Bool Never! {
@@ -1557,7 +1379,7 @@ fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
             if parser_current_kind(&state) == TOKEN_DOT {
                 dot :: parser_bump(&state)
                 name :: parser_value(state, type_name)
-                parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{name}{{…}}`")
+                parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace", "write `{name}{{…}}`")
             }
             parser_expect(&state, TOKEN_LBRACE, "`{{` to open the struct pattern")
             fields := [BindName]{}
@@ -1615,10 +1437,6 @@ fn parser_bind_pattern_span(pattern: BindPattern) -> Span Never! {
 
 fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     name :: parser_expect_name(&state, "in a binding")
-    if parser_current_kind(&state) == TOKEN_COLON {
-        retired :: parser_parse_retired_typed_binding(&state, name)
-        if retired == .Val(statement) -> return statement
-    }
     sigil :: parser_current(&state)
     mutable :: if {
         sigil.kind == TOKEN_COLON_EQ || sigil.kind == TOKEN_COLON_COLON -> {
@@ -1630,7 +1448,7 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
             false
         }
     }
-    // D-PREP-SURFACE2=A: `name :: prep { value }` is the prepared-value
+    // `name :: prep { value }` is the prepared-value
     // binding. A block holding only its final expression lowers to the one
     // compile-time binding path; any other block keeps E0391.
     if !mutable && parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
@@ -1638,12 +1456,12 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
         block :: parser_parse_value_block(&state, 0, true)
         span :: parser_cover(head.span, block.span)
         if block.statements.len() == 0 && block.tail == .Val(tail) {
-            prepared := ast_binding(parser_retire_const_mark(&state, name), name.span, false, tail, Val(sigil.span))
+            prepared := ast_binding(parser_value(state, name), name.span, false, tail, Val(sigil.span))
             prepared.is_comptime = true
             parser_finish_statement(&state)
             return Stmt.Val{binding: prepared}
         }
-        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
         parser_finish_statement(&state)
         return Stmt.Val{binding: ast_binding(parser_value(state, name), name.span, false, Expr.Unit{span: span}, Val(sigil.span))}
     }
@@ -1659,13 +1477,8 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
         }
     }
     value :: parser_parse_expression(&state, 1, 0)
-    // A retired `@name :: value` recovers as `name :: prep { value }`.
-    written_name :: parser_value(state, name)
-    retired :: !mutable && written_name.starts_with("@")
-    binding_name :: if retired -> parser_retire_const_decl(&state, name.span, written_name) else -> parser_retire_const_mark(&state, name)
-    binding := ast_binding(binding_name, name.span, mutable, value.expr, Val(sigil.span))
-    binding.is_comptime = retired
-    // D-UNINIT-SENTINEL2: `name := Type{ uninit }` — `uninit` only as the
+    binding := ast_binding(parser_value(state, name), name.span, mutable, value.expr, Val(sigil.span))
+    // `name := Type{ uninit }` — `uninit` only as the
     // whole typed-literal body, and only on a mutable binding. Sema proves
     // write-before-read; the type rides on the binding.
     if mutable && value.expr == .TypedLit(head, body, literal_span) {
@@ -1680,7 +1493,7 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     Stmt.Val{binding: binding}
 }
 
-// D-UNINIT-SENTINEL2: the `uninit` span when a headed typed literal's whole
+// The `uninit` span when a headed typed literal's whole
 // body is the bare word `uninit`. Named heads parse it as a one-field
 // shorthand, list heads as one element.
 fn parser_typed_literal_uninit_marker(head: Type?, body: TypedLitBody) -> Span? {
@@ -1702,46 +1515,6 @@ fn parser_typed_literal_uninit_marker(head: Type?, body: TypedLitBody) -> Span? 
         else -> {}
     }
     None
-}
-
-// D-BIND-TYPE2=A: the retired `name: Type :: value` (or `:=`) teaches E0393
-// with a behavior-preserving edit to `name :: Type{value}`, then parses on as
-// the untyped binding so one mistake reports once. Returns None with the
-// cursor restored when the tokens after `:` are not a type and a sigil.
-fn parser_parse_retired_typed_binding(state: &JetParserState, name: Token) -> Stmt? {
-    saved_position := state.position
-    saved_diagnostics := state.diagnostics.len()
-    saved_gt := state.pending_type_gt
-    saved_gt_span := state.pending_type_gt_span
-    colon :: parser_bump(&state)
-    type_start :: state.position
-    parsed :: parser_parse_type(&state, 0)
-    type_end :: state.position
-    sigil :: parser_current(&state)
-    if state.diagnostics.len() != saved_diagnostics || (sigil.kind != TOKEN_COLON_COLON && sigil.kind != TOKEN_COLON_EQ) {
-        state.position = saved_position
-        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
-        state.pending_type_gt = saved_gt
-        state.pending_type_gt_span = saved_gt_span
-        return None
-    }
-    parser_bump(&state)
-    mutable :: sigil.kind == TOKEN_COLON_EQ
-    value_start :: state.position
-    value :: parser_parse_expression(&state, 1, 0)
-    value_end :: state.position
-    binding_name :: parser_value(state, name)
-    type_text :: parser_tokens_text(state, type_start, type_end)
-    value_text :: parser_tokens_text(state, value_start, value_end)
-    sigil_text :: if mutable -> ":=" else -> "::"
-    replacement :: "{binding_name} {sigil_text} {type_text}{{{value_text}}}"
-    diagnostic :: diagnostic_from_registry("E0393", Val(parser_cover(colon.span, parsed.span)), "`{binding_name}: {type_text}` puts a type after the binding name, which Jet does not accept.", "A binding carries no type of its own (D-BIND-BARE1); `Type{{ … }}` on the value states the type, checking the value or converting it the way a parameter of that type would.", "Write `{replacement}`.")
-    // The edit ends at the value's last token; `value.span` is only the head
-    // of some forms (a method call's span is its method name).
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: name.span.start, end: parser_previous_end(state)}, new_text: replacement}))
-    binding :: ast_binding(binding_name, name.span, mutable, value.expr, Val(sigil.span))
-    parser_finish_statement(&state)
-    Val(Stmt.Val{binding: binding})
 }
 
 // Rust `KW_DEFER`: `defer close(^resource)` keeps the whole close call; any
@@ -1834,7 +1607,7 @@ fn parser_starts_expression(kind: Int) -> Bool Never! {
     if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR -> return true
     if kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_NULL || kind == TOKEN_KW_IT || kind == TOKEN_SELF || kind == TOKEN_KW_LOOP || kind == TOKEN_KW_IF || kind == TOKEN_KW_MOVE || kind == TOKEN_KW_COPY -> return true
     if kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_HASH || kind == TOKEN_DOLLAR || kind == TOKEN_DOT -> return true
-    kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_TILDE || kind == TOKEN_STAR || kind == TOKEN_AMP || kind == TOKEN_CARET || kind == TOKEN_PLUS_PLUS || kind == TOKEN_MINUS_MINUS
+    kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_STAR || kind == TOKEN_AMP || kind == TOKEN_CARET
 }
 
 // A line that starts with a name or `self` works when it calls, names a
@@ -1848,10 +1621,10 @@ fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never
         .If(_, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
         else -> false
     }
-    works || parser_at_callable_tail(&state) || parser_recovered_retired_step(&state, expr)
+    works || parser_at_callable_tail(&state)
 }
 
-// D-CAP-RECEIVER1=D: any other line works when it starts with the `&`/`^`
+// Any other line works when it starts with the `&`/`^`
 // mark of the call that writes or takes that place (`&buf.push(x)`).
 fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: Int) -> Bool Never! {
     if start_kind == TOKEN_AMP || start_kind == TOKEN_CARET {
@@ -1861,7 +1634,7 @@ fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: 
         }
         if call -> return true
     }
-    parser_recovered_retired_step(&state, expr) || parser_at_callable_tail(&state)
+    parser_at_callable_tail(&state)
 }
 
 // The line ends the innermost callable body (before its `}`).
@@ -1869,15 +1642,6 @@ fn parser_at_callable_tail(state: &JetParserState) -> Bool Never! {
     if state.callable_tail_depth != state.block_depth -> return false
     kind :: parser_current_kind(&state)
     kind == TOKEN_RBRACE || (kind == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
-}
-
-// Rust `recovered_retired_step`: the operand of a retired `++`/`--` step
-// that ends right here; E0160 already covers the line.
-fn parser_recovered_retired_step(state: &JetParserState, expr: Expr) -> Bool Never! {
-    previous_end :: parser_lookahead(&state, -1).span.end
-    whole :: state.retired_step ?? return false
-    span :: expr_span(expr)
-    whole.end == previous_end && whole.start <= span.start && span.end <= whole.end
 }
 
 // Rust `is_result_handler_expr`: `value ? ok -> … ! err -> …` is the one
@@ -1893,7 +1657,7 @@ fn parser_is_result_handler_expr(expr: Expr) -> Bool Never! {
     false
 }
 
-// Rust `try_refutable_test_binding` (D-CHOOSE-TEST1=A): a pattern test with
+// Rust `try_refutable_test_binding` a pattern test with
 // a diverging fallback that captures names is a statement binding; the
 // tested subject is the binding's value.
 fn parser_refutable_test_binding(expr: Expr) -> Binding? {
@@ -1910,7 +1674,7 @@ fn parser_refutable_test_binding(expr: Expr) -> Binding? {
 }
 
 fn parser_is_assignment_operator(kind: Int) -> Bool Never! {
-    kind == TOKEN_EQ || kind == TOKEN_PLUS_EQ || kind == TOKEN_MINUS_EQ || kind == TOKEN_STAR_EQ || kind == TOKEN_SLASH_EQ || kind == TOKEN_SLASH_PERCENT_EQ || kind == TOKEN_PERCENT_EQ || kind == TOKEN_PERCENT_PERCENT_EQ || kind == TOKEN_AMP_EQ || kind == TOKEN_PIPE_EQ || kind == TOKEN_CARET_EQ || kind == TOKEN_TILDE_PIPE_EQ || kind == TOKEN_SHL_EQ || kind == TOKEN_SHR_EQ
+    kind == TOKEN_EQ || kind == TOKEN_PLUS_EQ || kind == TOKEN_MINUS_EQ || kind == TOKEN_STAR_EQ || kind == TOKEN_SLASH_EQ || kind == TOKEN_SLASH_PERCENT_EQ || kind == TOKEN_PERCENT_EQ || kind == TOKEN_PERCENT_PERCENT_EQ || kind == TOKEN_SHL_EQ || kind == TOKEN_SHR_EQ
 }
 
 fn parser_assignment_binop(kind: Int) -> BinOp? {
@@ -1923,10 +1687,6 @@ fn parser_assignment_binop(kind: Int) -> BinOp? {
         TOKEN_SLASH_PERCENT_EQ -> Val(BinOp.FloorDiv)
         TOKEN_PERCENT_EQ -> Val(BinOp.Mod)
         TOKEN_PERCENT_PERCENT_EQ -> Val(BinOp.Rem)
-        TOKEN_AMP_EQ -> Val(BinOp.BitAnd)
-        TOKEN_PIPE_EQ -> Val(BinOp.BitOr)
-        TOKEN_CARET_EQ -> Val(BinOp.Pow)
-        TOKEN_TILDE_PIPE_EQ -> Val(BinOp.BitXor)
         TOKEN_SHL_EQ -> Val(BinOp.Shl)
         TOKEN_SHR_EQ -> Val(BinOp.Shr)
         else -> None
@@ -1936,19 +1696,6 @@ fn parser_assignment_binop(kind: Int) -> BinOp? {
 // S17: an assignment target is a name, an indexed slot or a field place,
 // after any parentheses; a compound update of anything else is E0165.
 fn parser_expression_lvalue(state: &JetParserState, expr: Expr, fallback_span: Span, operator: Token) -> LValue {
-    retired_method := if operator.kind == {
-        TOKEN_AMP_EQ -> "bit_and"
-        TOKEN_PIPE_EQ -> "bit_or"
-        TOKEN_TILDE_PIPE_EQ -> "bit_xor"
-        TOKEN_CARET_EQ -> "pow"
-        else -> ""
-    }
-    if retired_method != "" {
-        rhs_start := operator.span.end
-        end := if state.position > 0 -> state.tokens[state.position - 1].span.end else -> rhs_start
-        if state.position > 1 && state.tokens[state.position - 1].kind == TOKEN_SEMI -> end = state.tokens[state.position - 2].span.end
-        parser_teach_arithmetic_method(&state, retired_method, expr_span(expr), Span{start: rhs_start, end: end}, operator.span, true)
-    }
     if expr == {
         .Paren(inner, _) -> return parser_expression_lvalue(&state, inner, fallback_span, operator)
         .Ident(name, span) -> return LValue.Local{name: name, name_span: span}
@@ -1982,7 +1729,6 @@ fn parser_finish_statement(state: &JetParserState) {
 }
 
 fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
-    if parser_known_ahead_at(&state, 0) -> return parser_parse_retired_known_statement(&state)
     hash :: parser_bump(&state)
     negated := false
     if parser_current_kind(&state) == TOKEN_BANG {
@@ -1991,35 +1737,21 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     name :: parser_expect_name(&state, "after `#` in a statement marker")
     word :: parser_value(state, name)
-    // D-PERSIST1: persistence is keyed by module + name, so a local binding
+    // Persistence is keyed by module + name, so a local binding
     // has no stable identity across a reload.
     if word == "Persist" {
         parser_add_error_code(&state, "E0145", parser_cover(hash.span, name.span), "only module-level state can persist across reloads", "persistence is keyed by module + name; a local has no stable identity across a reload", "move it to module level, or drop `#Persist`")
         parser_sync_stmt(&state)
         return Stmt.Expr{expr: Expr.Unit{span: hash.span}}
     }
-    // D-UNINIT-SENTINEL1/2: the retired `#Uninit name: Type` marker teaches
-    // `name := Type{ uninit }`.
-    if word == "Uninit" && !negated {
-        end := name.span.end
-        fix := "write `name := Type{{ uninit }}`"
-        if parser_current_kind(&state) == TOKEN_IDENT {
-            hint :: parser_current(&state)
-            end = hint.span.end
-            fix = "write `{parser_value(state, hint)} := <Type>.{{ uninit }}`"
-        }
-        parser_add_error_code(&state, "E0426", Span{start: hash.span.start, end: end}, "`#Uninit` is retired", "uninitialized storage is a fact about the value — it now reads `name := Type{{ uninit }}`", fix)
-        parser_sync_stmt(&state)
-        return Stmt.Expr{expr: Expr.Unit{span: hash.span}}
-    }
-    // D-SHIELDNAME1=A: `#Shield { … }` is a bare block.
+    // `#Shield { … }` is a bare block.
     if word == "Shield" && parser_current_kind(&state) == TOKEN_LPAREN {
         lparen :: parser_current(&state)
         parser_add_error_code(&state, "E0430", parser_cover(name.span, lparen.span), "`#Shield` takes no arguments", "a shield region protects whatever runs inside it; there is nothing to configure", "write `#Shield {{ … }}`")
         parser_sync_stmt(&state)
         return Stmt.Expr{expr: Expr.Unit{span: hash.span}}
     }
-    // D-CTX1: a context field is set with `name: value`.
+    // A context field is set with `name: value`.
     if word == "Context" && parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_EQ {
         field :: parser_lookahead(&state, 1)
         eq :: parser_lookahead(&state, 2)
@@ -2042,7 +1774,7 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     marker_span :: parser_cover(hash.span, end)
     marker :: Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: marker_span, ct: None}
-    // D-LINTPOLICY1 / S82: an allowance attaches to one ordinary statement,
+    // S82: an allowance attaches to one ordinary statement,
     // not an invented block node. Its target stays for sema and gate audit.
     if word == "allow" {
         parser_skip_semicolons(&state)
@@ -2051,7 +1783,7 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
         &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: target_start, end: parser_previous_end(state)}), site: Val(RuleSite.Statement)})
         return statement
     }
-    // D-UNSAFE-REASON1=A: every unsafe gate records its reason.
+    // Every unsafe gate records its reason.
     if word == "Unsafe" && args.len() == 0 {
         parser_add_error_code(&state, "E3112", marker_span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
         parser_sync_stmt(&state)
@@ -2068,7 +1800,7 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
             }
         }
     }
-    // D-CANVASSTATE1=D: a switch-off attribute governs a block or the one
+    // A switch-off attribute governs a block or the one
     // statement after it; two on one statement is E0344.
     if word == "Off" || word == "DebugOnly" {
         if parser_current_kind(&state) == TOKEN_HASH {

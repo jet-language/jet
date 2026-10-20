@@ -521,9 +521,9 @@ struct JetEvalTaskCallbackInvokeResult {
 
 
 // The evaluator's host boundary. Compile-time evaluation holds the canonical
-// comptime rights row (D-META-EFFECT1 c3): memory-only work plus the embed
+// comptime rights row (c3): memory-only work plus the embed
 // reads, so every call declares `FS.Read`. An undeclared dynamic dispatch
-// would be the maximal row (D-EFF2) and would make every checker path that
+// would be the maximal row and would make every checker path that
 // evaluates a constant reach every effect.
 trait JetEvalHostAdapter {
     fn new_session(self) -[]> JetEvalHostAdapter
@@ -560,7 +560,7 @@ trait JetEvalBuildHostAdapter {
 
 struct JetEvalConfig {
     // Step budget for compile-time evaluation. Runtime execution (a program
-    // run) has no step limit, like a built binary (D-INTERP-BUDGET1).
+    // run) has no step limit, like a built binary.
     fuel: Int
     max_call_depth: Int
     max_collection_len: Int

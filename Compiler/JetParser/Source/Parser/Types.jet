@@ -27,13 +27,11 @@ use jet_lexer.[
     TOKEN_IDENT,
     TOKEN_INT,
     TOKEN_KW_FN,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
     TOKEN_LT,
     TOKEN_MINUS,
-    TOKEN_MINUS_MINUS,
     TOKEN_PIPE,
     TOKEN_PLUS,
     TOKEN_QUESTION,
@@ -62,23 +60,17 @@ fn parser_parse_type(state: &JetParserState, depth: Int) -> ParsedType {
     }
 
     start :: parser_current(&state)
-    // D-TYPE-SUFFIX1=A: a whole type position may hold only a contract,
+    // A whole type position may hold only a contract,
     // `E!` or `(A | B)!`, the unit-success carrier.
     if parser_suffix_contract_ahead(&state) >= 0 {
         error_type :: parser_parse_suffix_contract(&state, depth + 1)
         return ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: error_type.ty}, span: parser_cover(start.span, error_type.span)}
     }
     ty :: parser_parse_type_atom(&state, depth + 1)
-    // D-TYPE-SUFFIX1=A: the error contract follows the success type:
+    // The error contract follows the success type:
     // `Int ParseError!`, `Entry? (DBError | TimeoutError)!`.
     if parser_suffix_contract_ahead(&state) >= 0 {
         error_type :: parser_parse_suffix_contract(&state, depth + 1)
-        result :: Type.Result{ok: ty.ty, err: error_type.ty}
-        return ParsedType{ty: result, span: parser_cover(start.span, error_type.span)}
-    }
-    if parser_current_kind(&state) == TOKEN_BANG {
-        bang :: parser_bump(&state)
-        error_type :: parser_parse_retired_prefix_error(&state, bang.span, depth + 1)
         result :: Type.Result{ok: ty.ty, err: error_type.ty}
         return ParsedType{ty: result, span: parser_cover(start.span, error_type.span)}
     }
@@ -95,7 +87,7 @@ fn parser_next_code_index(state: JetParserState, start: Int) -> Int Never! {
     -1
 }
 
-// D-TYPE-SUFFIX1=A: the index just past one error-contract member (a dotted
+// The index just past one error-contract member (a dotted
 // type path with optional `<...>` arguments, a `( ... )` group, or a
 // `[ ... ]` list of errors), or -1.
 fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int Never! {
@@ -145,7 +137,7 @@ fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int Never! 
     index
 }
 
-// D-TYPE-SUFFIX1=A: does an error contract start here? -1 when none, 0 for
+// Does an error contract start here? -1 when none, 0 for
 // `E!` or `(A | B)!`, and 1 for the rejected unparenthesized `A | B!`.
 fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
     if state.pending_type_gt -> return -1
@@ -160,10 +152,6 @@ fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
         if next_index < 0 -> return -1
         kind :: state.tokens[next_index].kind
         if kind == TOKEN_BANG {
-            // The retired infix contract `T ! E` (the `!` followed by one type
-            // name and then `{`, `,`, `)` or `=`) is not a suffix `T!`; its
-            // `!` is left for parser_parse_retired_prefix_error.
-            if parser_retired_infix_contract_at(state, next_index) -> return -1
             if members > 1 -> return 1
             return 0
         }
@@ -173,19 +161,7 @@ fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
     -1
 }
 
-// Does the `!` at `bang` open the retired infix `T ! E` error type?
-fn parser_retired_infix_contract_at(state: JetParserState, bang: Int) -> Bool Never! {
-    name :: parser_next_code_index(state, bang + 1)
-    if name < 0 || state.tokens[name].kind != TOKEN_IDENT -> return false
-    end :: parser_scan_contract_member(state, name)
-    if end < 0 -> return false
-    after :: parser_next_code_index(state, end)
-    if after < 0 -> return false
-    kind :: state.tokens[after].kind
-    kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || kind == TOKEN_EQ
-}
-
-// D-TYPE-SUFFIX1=A: the error half of a contract and its `!`. A union needs
+// The error half of a contract and its `!`. A union needs
 // its parentheses: `A | B!` is taught as `(A | B)!`.
 fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedType {
     bare_union :: parser_suffix_contract_ahead(&state) == 1
@@ -202,27 +178,7 @@ fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedTyp
 }
 
 fn parser_type_starts(kind: Int) -> Bool Never! {
-    kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_STAR || kind == TOKEN_KW_FN
-}
-
-// D-TYPE-SUFFIX1=A: a retired prefix error contract (`!E`, `!(A | B)`, or
-// infix `T ! E`) after its `!`: parse the error type and teach `E!`.
-fn parser_parse_retired_prefix_error(state: &JetParserState, bang: Span, depth: Int) -> ParsedType {
-    first :: parser_current(&state)
-    if !parser_type_starts(first.kind) {
-        parser_add_error_code(&state, "E-ERR-DEFAULT", bang, "`!` is a retired bare default failure contract", "ordinary fallible functions use the implicit default `Err` contract; the `!` mark only follows a named error domain", "remove `!`; failure is implicit, or name an explicit domain such as `IOError!`")
-        return ParsedType{ty: Type.Named{name: "Err"}, span: bang}
-    }
-    first_index :: state.position
-    error_type :: parser_parse_type_union(&state, depth + 1)
-    text :: parser_marked_type_text(state, error_type.ty, first_index, state.position)
-    span :: parser_cover(bang, error_type.span)
-    if first.span.start == bang.end {
-        parser_add_type_mark_error(&state, "E-TYPE-PREFIX", span, "`!{text}` is a retired prefix type mark", "a type mark follows the type it marks; `SaveError!` in a function contract names how the call fails", "write `{text}!`", "{text}!")
-    } else {
-        parser_add_type_mark_error(&state, "E-ERR-SIGIL", span, "`T ! E` is a retired infix fallible type spelling", "the `!` mark follows the error type it names, so the success role and the error role stay distinct", "write `{text}!`", "{text}!")
-    }
-    ParsedType{ty: error_type.ty, span: error_type.span}
+    kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_STAR || kind == TOKEN_KW_FN
 }
 
 fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String Never! {
@@ -239,7 +195,7 @@ fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String Nev
     out
 }
 
-// D-TYPE-SUFFIX1=A: source text of a type written before a suffix mark,
+// Source text of a type written before a suffix mark,
 // grouped when the mark would otherwise bind to its last member.
 fn parser_marked_type_text(state: JetParserState, ty: Type, first: Int, end: Int) -> String Never! {
     text :: parser_tokens_text(state, first, end)
@@ -275,7 +231,7 @@ fn parser_parse_type_union_tail(state: &JetParserState, first: ParsedType, depth
     result
 }
 
-// D-TYPE-SUFFIX1=A: `?` follows the type it marks and binds tightly, so
+// `?` follows the type it marks and binds tightly, so
 // `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
 fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
     base :: parser_parse_type_base(&state, depth + 1)
@@ -299,23 +255,6 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
     kind :: start.kind
 
     if kind == {
-        // D-TYPE-SUFFIX1=A: the retired prefix optional `?T` teaches `T?`.
-        TOKEN_QUESTION -> {
-            parser_bump(&state)
-            parser_skip_trivia(&state)
-            first_index :: state.position
-            inner :: parser_parse_type_base(&state, depth + 1)
-            span :: parser_cover(start.span, inner.span)
-            text :: parser_marked_type_text(state, inner.ty, first_index, state.position)
-            parser_add_type_mark_error(&state, "E-TYPE-PREFIX", span, "`?{text}` is a retired prefix type mark", "a type mark follows the type it marks; `{text}?` may be absent", "write `{text}?`", "{text}?")
-            ParsedType{ty: Type.Option{inner: inner.ty}, span: ^span}
-        }
-        // D-TYPE-SUFFIX1=A: the retired prefix contract `!E` teaches `E!`.
-        TOKEN_BANG -> {
-            bang :: parser_bump(&state)
-            err :: parser_parse_retired_prefix_error(&state, bang.span, depth + 1)
-            ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: err.ty}, span: parser_cover(start.span, err.span)}
-        }
         TOKEN_STAR -> {
             parser_bump(&state)
             elem :: parser_parse_type_atom(&state, depth + 1)
@@ -331,7 +270,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
-            // D-SOA2C (Rust `Types.rs` E1107): the per-container prefix
+            // (Rust `Types.rs` E1107): the per-container prefix
             // spelling `columnar [T]` is reserved; nothing ships, so it is a
             // fatal teaching error at the prefix word.
             if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
@@ -341,17 +280,6 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
             parser_bump(&state)
             name := parser_value(state, start)
             end := start.span
-            if name == {
-                "Error" -> {
-                    parser_add_error_code(&state, "E0432", start.span, "`Error` is retired", "the default error type and its constructor now use the same name", "replace `Error` with `Err`")
-                    return ParsedType{ty: Type.Named{name: "Err"}, span: start.span}
-                }
-                "Void" -> {
-                    parser_add_error_code(&state, "E0431", start.span, "`Void` is retired", "Jet uses `()` for a result with no information; non-returning paths are compiler facts under D-NEVER1", "replace `Void` with `()`")
-                    return ParsedType{ty: Type.Named{name: "Unit"}, span: start.span}
-                }
-                else -> {}
-            }
             loop parser_current_kind(&state) == TOKEN_DOT {
                 parser_bump(&state)
                 member :: parser_expect_name(&state, "after `.` in a type path")
@@ -367,8 +295,6 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: parser_cover(start.span, end)}
             }
             if parser_current_kind(&state) == TOKEN_LT {
-                // D-TYPE-SUFFIX1=A: `Result<T, E>` is the retired fallible spelling.
-                if name == "Result" -> parser_add_error_code(&state, "E0406", start.span, "`Result<T, E>` is old Jet error syntax", "fallible Jet types write the error contract after the success type", "write `T? E!`, `T (E1 | E2)!`, or omit the contract for implicit `Err`")
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
             }
             ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
@@ -432,7 +358,7 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
 }
 
 // A function type `fn(T1, …) -> R`, `fn(T1, …) -[E]> R` or `fn(…) E!`. It
-// reuses the parameter grammar's zone separators (D-APILABEL1=A): public
+// reuses the parameter grammar's zone separators public
 // labels and zones are part of callable identity, local names are not.
 fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType {
     start :: parser_bump(&state)
@@ -510,38 +436,25 @@ fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType 
     first :: parser_current_kind(&state)
     second :: parser_kind_at(&state, 1)
     canonical :: first == TOKEN_MINUS && second == TOKEN_LBRACKET
-    retired_colon :: first == TOKEN_COLON && second == TOKEN_LBRACKET
-    retired_eq :: first == TOKEN_EQ && second == TOKEN_LBRACKET
-    retired_double :: first == TOKEN_MINUS_MINUS
     effect_bound := [EffectRowEntry]?{None}
-    if canonical || retired_colon || retired_eq || retired_double {
-        if !canonical -> parser_report_retired_effect_syntax(&state, after_params)
-        effect_bound = Val(parser_parse_effect_arrow_row(&state, canonical, retired_colon, retired_eq))
-    }
+    if canonical -> effect_bound = Val(parser_parse_effect_arrow_row(&state))
     arrow_return := false
     result := ParsedType?{None}
     if {
-        canonical || retired_colon -> {
+        canonical -> {
             result = parser_parse_unit_fallible_return(&state)
             if !parser_has_type(result) && parser_type_starts_here(&state) {
                 arrow_return = true
                 result = Val(parser_parse_type(&state, depth + 1))
             }
         }
-        retired_eq || retired_double || parser_at_unified_arrow(&state) -> {
-            if parser_at_unified_arrow(&state) -> parser_bump(&state)
+        parser_at_unified_arrow(&state) -> {
+            parser_bump(&state)
             arrow_return = true
             result = parser_parse_unit_fallible_return(&state)
             if !parser_has_type(result) && parser_type_starts_here(&state) -> result = Val(parser_parse_type(&state, depth + 1))
         }
-        else -> {
-            result = parser_parse_unit_fallible_return(&state)
-            if !parser_has_type(result) && parser_type_starts_here(&state) {
-                parsed :: parser_parse_type(&state, depth + 1)
-                parser_add_error_code(&state, "E0068", parsed.span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
-                result = Val(parsed)
-            }
-        }
+        else -> result = parser_parse_unit_fallible_return(&state)
     }
     returned := Type?{None}
     end := close.span
@@ -549,7 +462,7 @@ fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType 
         returned = Val(parsed.ty)
         end = parsed.span
         if arrow_return && parser_is_unit_fallible(parsed.ty) {
-            parser_add_error_code(&state, "E0003", parsed.span, "this unit-fallible signature uses the retired arrow-and-unit form", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
+            parser_add_error_code(&state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
     owners := [String]{}
@@ -559,12 +472,7 @@ fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType 
     return_view :: parser_parse_opt_declared_view_from(&state, owners)
     if effect_bound == None && parser_func_effect_starts_here(&state) {
         late_first :: parser_current_kind(&state)
-        late_canonical :: late_first == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET
-        late_colon :: late_first == TOKEN_COLON && parser_kind_at(&state, 1) == TOKEN_LBRACKET
-        late_eq :: late_first == TOKEN_EQ && parser_kind_at(&state, 1) == TOKEN_LBRACKET
-        late_span :: parser_current(&state).span
-        if !late_canonical -> parser_report_retired_effect_syntax(&state, late_span)
-        effect_bound = Val(parser_parse_effect_arrow_row(&state, late_canonical, late_colon, late_eq))
+        if late_first == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET -> effect_bound = Val(parser_parse_effect_arrow_row(&state))
     }
     end = parser_lookahead(&state, -1).span
     ty :: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: None, return_view_provenance: return_view}
@@ -576,23 +484,13 @@ fn parser_has_type(value: ParsedType?) -> Bool Never! {
     false
 }
 
-// D-EFF1: the effect row of a function type, `-[E]>`; the retired `:[E]>`,
-// `=[E]=>` and `--[E]->` spellings are read after their E0066 teaching.
-fn parser_parse_effect_arrow_row(state: &JetParserState, canonical: Bool, retired_colon: Bool, retired_eq: Bool) -> [EffectRowEntry] {
-    if {
-        canonical -> parser_expect(&state, TOKEN_MINUS, "`-` to start an effect arrow")
-        retired_colon -> parser_expect(&state, TOKEN_COLON, "`:` to start an effect arrow")
-        retired_eq -> parser_expect(&state, TOKEN_EQ, "`=` to start an effect arrow")
-        else -> parser_expect(&state, TOKEN_MINUS_MINUS, "`--` to start an effect arrow")
-    }
+// The effect row of a function type, `-[E]>`.
+fn parser_parse_effect_arrow_row(state: &JetParserState) -> [EffectRowEntry] {
+    parser_expect(&state, TOKEN_MINUS, "`-` to start an effect arrow")
     parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
     effects :: parser_parse_effect_row_entries(&state, TOKEN_RBRACKET)
     parser_expect(&state, TOKEN_RBRACKET, "`]` to close the effect row")
-    if {
-        canonical || retired_colon -> parser_expect(&state, TOKEN_GT, "`>` after the effect row")
-        retired_eq -> parser_expect(&state, TOKEN_LAMBDA_ARROW, "`=>` after the effect row")
-        else -> parser_expect(&state, TOKEN_UNIFIED_ARROW, "`->` after the effect row")
-    }
+    parser_expect(&state, TOKEN_GT, "`>` after the effect row")
     effects
 }
 

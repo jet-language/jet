@@ -20,32 +20,6 @@ struct JetCLIActionRef {
     action: Int
 }
 
-// One retired command route (D-ONCE-RETIRE1=C). Every row is a semantic
-// retirement that teaches E2101 with its current home.
-struct JetCLIRetiredSpec {
-    spelling: String
-    why: String
-    fix: String
-}
-
-JET_CLI_RETIRED :: prep { [JetCLIRetiredSpec]{
-    JetCLIRetiredSpec{spelling: "facts", why: "the typed facts ledger is now the `inspect types` plane (D-CLI-ONE1=A)", fix: "jet inspect types"},
-    JetCLIRetiredSpec{spelling: "authority", why: "authority inspection is the `inspect rights` plane (D-CLI-ONE1=A)", fix: "jet inspect rights"},
-    JetCLIRetiredSpec{spelling: "unsafe", why: "unsafe inspection is the `inspect gates` plane (D-CLI-ONE1=A)", fix: "jet inspect gates"},
-    JetCLIRetiredSpec{spelling: "guarantees", why: "guarantees inspection is the `inspect rights` plane (D-CLI-ONE1=A)", fix: "jet inspect rights"},
-    JetCLIRetiredSpec{spelling: "report", why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)", fix: "jet inspect build"},
-    JetCLIRetiredSpec{spelling: "dossier", why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)", fix: "jet inspect build"},
-    JetCLIRetiredSpec{spelling: "bench", why: "measurement is a mode of the test harness now (D-CLAIM-BENCH1=A)", fix: "jet test --measure"},
-    JetCLIRetiredSpec{spelling: "serve", why: "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)", fix: "jet dev <file.jet> --swap"},
-    JetCLIRetiredSpec{spelling: "store", why: "the store group is owned by Jetpack; project commands stay with Jet (D-VERDICT-2188-1)", fix: "jetpack hangar / jet clean / jet fetch"},
-    JetCLIRetiredSpec{spelling: "store fetch", why: "dependency fetching is the flat `jet fetch` command (D-CLI-STORE2=A)", fix: "jet fetch"},
-    JetCLIRetiredSpec{spelling: "store verify", why: "package-store integrity checks belong to Jetpack's Hangar (D-VERDICT-2188-1)", fix: "jetpack hangar verify"},
-    JetCLIRetiredSpec{spelling: "store generations", why: "package-store generations belong to Jetpack's Hangar (D-VERDICT-2188-1)", fix: "jetpack hangar"},
-    JetCLIRetiredSpec{spelling: "store rollback", why: "package-store rollback belongs to Jetpack's Hangar (D-VERDICT-2188-1)", fix: "jetpack hangar"},
-    JetCLIRetiredSpec{spelling: "store gc", why: "package-store cleanup is the sole `jet clean` intent (D-CLI-STORE2=A)", fix: "jet clean"},
-    JetCLIRetiredSpec{spelling: "store lock", why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)", fix: "jet fetch --lock <script.jet>"},
-    JetCLIRetiredSpec{spelling: "lock", why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)", fix: "jet fetch --lock <script.jet>"},
-} }
 
 // `text` left-aligned in `width` characters (Rust `{:<width}`).
 fn jet_cli_pad(text: String, width: Int) -> String Never! {
@@ -87,11 +61,9 @@ fn jet_cli_nested_command(group: String, action: String) -> JetCLIActionRef? Nev
 
 // A bare nested-action word typed as a top-level command (`jet publish`).
 // Group names, top-level commands, and actions that are also canonical at the
-// top level win the bare word; a retired bare word keeps its hard error
-// (D-ONCE-RETIRE1=C); E0043 keeps bare `install` for its own teaching.
+// top level win the bare word; E0043 keeps bare `install` for its own teaching.
 fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     if jet_cli_command_index(name) != None -> return None
-    if jet_cli_is_retired_root(name) -> return None
     loop command in JET_CLI_COMMANDS {
         loop action in command.actions {
             if action.name == name && action.also_canonical_top_level -> return None
@@ -108,72 +80,14 @@ fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     None
 }
 
-fn jet_cli_retired_matches(spelling: String, argv: [String]) -> Bool Never! {
-    words :: spelling.split(" ").to_list()
-    if words.len() > argv.len() -> return false
-    loop (index, word) in words {
-        if argv[index] != word -> return false
-    }
-    true
-}
-
-// The longest retired spelling that prefixes `argv`.
-fn jet_cli_retired_command(argv: [String]) -> Int? Never! {
-    best := -1
-    best_words := 0
-    loop (index, retired) in JET_CLI_RETIRED {
-        if !jet_cli_retired_matches(retired.spelling, argv) -> next
-        words :: retired.spelling.split(" ").to_list().len()
-        if words >= best_words {
-            best = index
-            best_words = words
-        }
-    }
-    if best < 0 -> return None
-    Val(best)
-}
-
-// The fix line names the file or script the retired spelling was given.
-fn jet_cli_retired_fix(retired: JetCLIRetiredSpec, argv: [String]) -> String Never! {
-    if {
-        retired.spelling == "serve" && argv.len() > 1 -> return "jet dev {argv[1]} --swap"
-        retired.spelling == "lock" && argv.len() > 1 -> return "jet fetch --lock {argv[1]}"
-        retired.spelling == "store lock" && argv.len() > 2 -> return "jet fetch --lock {argv[2]}"
-        else -> {}
-    }
-    // copy: `retired.fix` stays with the caller (`retired` is a read parameter: no move out of it,
-    // E0201) and the returned value owns its own.
-    retired.fix.copy()
-}
-
-// E2101 for a retired route, or None when `argv` names no retired spelling.
-fn jet_cli_retired_report(argv: [String], color: Bool) -> String? Never! {
-    index :: jet_cli_retired_command(argv) ?? return None
-    retired :: JET_CLI_RETIRED[index]
-    Val(jet_cli_report(
-        "E2101",
-        "`{retired.spelling}` isn't a jet command",
-        retired.why,
-        "run `{jet_cli_retired_fix(retired, argv)}`",
-        color,
-    ))
-}
-
-fn jet_cli_is_retired_root(name: String) -> Bool Never! {
-    loop retired in JET_CLI_RETIRED {
-        if retired.spelling == name -> return true
-    }
-    false
-}
-
-// Canonical top-level spellings: never a moved action, a retired root, or
-// the E0043 teaching-only `install`.
+// Canonical top-level spellings: never a moved action or the E0043
+// teaching-only `install`.
 fn jet_cli_is_canonical_top_level(name: String) -> Bool Never! {
-    jet_cli_moved_command(name) == None && !jet_cli_is_retired_root(name) && name != "install"
+    jet_cli_moved_command(name) == None && name != "install"
 }
 
 // Is `name` a word the host dispatches: a command, a normalized handler
-// word, the E0043 `install` teaching path, or a retired root?
+// word, or the E0043 `install` teaching path?
 fn jet_cli_is_builtin(name: String) -> Bool Never! {
     if jet_cli_command_index(name) != None -> return true
     loop command in JET_CLI_COMMANDS {
@@ -182,7 +96,7 @@ fn jet_cli_is_builtin(name: String) -> Bool Never! {
             if JET_CLI_HANDLERS[handler].dispatch_word == name -> return true
         }
     }
-    name == "install" || jet_cli_is_retired_root(name)
+    name == "install"
 }
 
 fn jet_cli_is_known_flag(flag: String) -> Bool Never! {
@@ -351,7 +265,7 @@ fn jet_cli_command_before(left: Int, right: Int, order: String) -> Bool Never! {
     JET_CLI_COMMANDS[left].frequency_rank < JET_CLI_COMMANDS[right].frequency_rank
 }
 
-// The accepted `jet help --sort` values (D-HELP-SORT1=A).
+// The accepted `jet help --sort` values.
 JET_CLI_HELP_ORDERS :: "frequency, az, za"
 
 fn jet_cli_is_help_order(value: String) -> Bool Never! {

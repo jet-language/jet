@@ -3,7 +3,7 @@
 use core.files as cli_files
 use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[Diagnostic, Span, TextEdit, DiagnosticFixApplicability, DiagnosticFixSafety, diagnostic_with_edit_grade]
-use jet_parser.[jet_format_unified_diff, jfmt_retired_interpolation_selector_edits, jfmt_retired_print_family_edits, jfmt_retired_type_edits]
+use jet_parser.jet_format_unified_diff
 
 enum JetCLIFixQuery {
     Fixes(fixes: [JetCLIFix])
@@ -37,140 +37,6 @@ fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuer
     JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes)}
 }
 
-// Parentheses are balanced in bytes, with Rust's string/escape fidelity.
-fn jet_cli_fix_matching_paren(source: String, from: Int) -> Int? Never! {
-    bytes :: source.bytes()
-    depth := 1
-    in_string := false
-    escaped := false
-    loop index in from..<bytes.len() {
-        byte :: Int.from_u8(bytes[index])
-        if in_string {
-            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 -> in_string = false
-            next
-        }
-        if byte == 34 -> in_string = true
-        if byte == 40 -> depth += 1
-        if byte == 41 {
-            depth -= 1
-            if depth == 0 -> return Val(index)
-        }
-    }
-    None
-}
-
-fn jet_cli_fix_open_brace(source: String, before: Int) -> Int? Never! {
-    bytes :: source.bytes()
-    depth := 0
-    index := before
-    loop index > 0 {
-        index -= 1
-        byte :: Int.from_u8(bytes[index])
-        if byte == 125 -> depth += 1
-        if byte == 123 {
-            if depth == 0 -> return Val(index)
-            depth -= 1
-        }
-    }
-    None
-}
-
-fn jet_cli_fix_fn_header(source: String, open: Int) -> Int? Never! {
-    end := open
-    bytes :: source.bytes()
-    loop end >= 3 {
-        found := -1
-        loop index in 0..<(end - 2) {
-            if (bytes[index] == U8{102} && bytes[index + 1] == U8{110} && bytes[index + 2] == U8{32}) -> found = index
-        }
-        if found < 0 -> return None
-        boundary := true
-        if found > 0 {
-            previous :: Int.from_u8(bytes[found - 1])
-            boundary = !((previous >= 48 && previous <= 57) || (previous >= 65 && previous <= 90) || (previous >= 97 && previous <= 122) || previous == 95)
-        }
-        if boundary {
-            paren := -1
-            loop index in (found + 3)..<open {
-                if (bytes[index] == U8{40}) {
-                    paren = index
-                    break
-                }
-            }
-            if paren >= 0 {
-                if jet_cli_fix_matching_paren(source, paren + 1) == .Val(close) && close < open {
-                    tail :: source.slice((close + 1)..<open).trim()
-                    if !tail.contains("{{") && !tail.contains("}}") && !tail.contains(";") -> return Val(found)
-                }
-            }
-        }
-        end = found
-    }
-    None
-}
-
-fn jet_cli_fix_enclosing_fallible(source: String, at: Int) -> Bool Never! {
-    before := at
-    loop {
-        open :: jet_cli_fix_open_brace(source, before) ?? return false
-        if jet_cli_fix_fn_header(source, open) == .Val(start) -> return !source.slice(start..<open).contains("Never!")
-        before = open
-    }
-}
-
-fn jet_cli_fix_replace_untyped(source: String, from: String, to: String) -> String Never! {
-    out := ""
-    offset := 0
-    loop {
-        found :: jet_cli_inspect_find(source, from, offset) ?? break
-        out = "{out}{source.slice(offset..<found)}"
-        after :: found + from.len()
-        out = "{out}{if (after < source.len() && source.bytes()[after] == U8{60}) -> from else -> to}"
-        offset = after
-    }
-    "{out}{source.slice(offset..<source.len())}"
-}
-
-fn jet_cli_fix_edition_2027(source: String) -> String Never! {
-    replaced :: jet_cli_fix_replace_untyped(jet_cli_fix_replace_untyped(source, "cbor.encode(", "cbor.to_bytes("), "cbor.decode(", "cbor.parse(")
-    needle :: "json.canonical("
-    out := ""
-    offset := 0
-    loop {
-        found :: jet_cli_inspect_find(replaced, needle, offset) ?? break
-        out = "{out}{replaced.slice(offset..<found)}"
-        after :: found + needle.len()
-        close :: jet_cli_fix_matching_paren(replaced, after) ?? {
-            out = "{out}{needle}"
-            offset = after
-            next
-        }
-        call :: replaced.slice(found..<(close + 1))
-        trailing :: replaced.slice((close + 1)..<replaced.len())
-        if trailing.trim_start().starts_with("?") || jet_cli_fix_enclosing_fallible(replaced, found) {
-            out = "{out}{call}"
-        } else {
-            out = "{out}{call} ?? panic(\"value is not canonical JSON\")"
-        }
-        offset = close + 1
-    }
-    "{out}{replaced.slice(offset..<replaced.len())}"
-}
-
-fn jet_cli_fix_edition_audit(before: String, after: String) -> [String] Never! {
-    notes := [String]{}
-    if before.contains("json.canonical(") {
-        if after.contains("?? panic(\"value is not canonical JSON\")") || (after.contains("json.canonical(") && after != before) {
-            &notes.push("rewrote `json.canonical(...)` to fallible form; review hashing/signing fixtures")
-        } else {
-            &notes.push("review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)")
-        }
-    }
-    if before != after && (before.contains("cbor.encode(") || before.contains("cbor.decode(")) -> &notes.push("rewrote deprecated CBOR forwarding calls (`encode`/`decode`)")
-    if notes.len() == 0 -> &notes.push("no encoding forwarding calls found")
-    notes
-}
-
 fn jet_cli_fix_inline_authority(file: String, allow: [String]) -> String Never! {
     stem :: jet_cli_stem(jet_cli_file_name(file))
     valid := stem != ""
@@ -201,28 +67,15 @@ fn jet_cli_fix_inline_insertion(source: String) -> Int Never! {
     at
 }
 
-fn jet_cli_fix_rewrite_status(file: String, target: Int, selector: Int, prints: Int, types: Int) -> String Never! {
-    targets :: if target > 0 -> "{file}: rewrote {target} retired target spelling{if target == 1 -> "" else -> "s"} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)\n" else -> ""
-    selectors :: if selector > 0 -> "{file}: rewrote {selector} retired interpolation selector{if selector == 1 -> "" else -> "s"} from `#` to `:` (D-ONCE-HASH1)\n" else -> ""
-    printing :: if prints > 0 -> "{file}: rewrote {prints} retired print-family spelling{if prints == 1 -> "" else -> "s"} (D-ONCE-PRINT1=A)\n" else -> ""
-    containers :: if types > 0 -> "{file}: rewrote {types} retired Core container name{if types == 1 -> "" else -> "s"} (D-COLLNAME1=A)\n" else -> ""
-    "{targets}{selectors}{printing}{containers}"
-}
-
-fn jet_cli_fix_run(file: String, dry_run: Bool, edition: String?, all: Bool, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
     before :: cli_files.read(file) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    edition_source :: if edition == (Val("2027")) -> jet_cli_fix_edition_2027(before) else -> before
-    retired :: jet_cli_fmt_rewrite_retired_package_targets(edition_source, file)
-    selectors :: jfmt_retired_interpolation_selector_edits(retired.text).len()
-    prints :: jfmt_retired_print_family_edits(retired.text).len()
-    types :: jfmt_retired_type_edits(retired.text).len()
-    all_fixes :: if jet_cli_fix_collect(file, retired.text, true) == {
+    all_fixes :: if jet_cli_fix_collect(file, before, true) == {
         .Fixes(found) -> found
         .Refused(output) -> { return output }
     }
     fixes :: if all -> all_fixes else -> jet_cli_safe_fixes(all_fixes)
     skipped :: all_fixes.len() - fixes.len()
-    applied := jet_cli_fix_apply_non_overlapping(retired.text, fixes)
+    applied := jet_cli_fix_apply_non_overlapping(before, fixes)
     count := applied.applied
     round := 1
     loop applied.deferred > 0 && round < 16 {
@@ -237,27 +90,21 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, edition: String?, all: Bool, col
         round += 1
     }
     status := ""
-    if edition == (Val("2027")) {
-        loop note in jet_cli_fix_edition_audit(before, edition_source) -> status = "{status}{file}: edition 2027 migration: {note}\n"
-    }
     if applied.source == before {
         detail :: if skipped == 0 -> "" else -> " ({skipped} suggestion{if skipped == 1 -> "" else -> "s"} need review)"
-        status = "{status}{file}: no changes made{detail}\n"
+        status = "{file}: no changes made{detail}\n"
         return JetDriverVerbOutput{stdout: "", stderr: if quiet || json -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
     }
     diff := ""
     if dry_run {
         if !json -> diff = jet_format_unified_diff(file, before, applied.source)
-        if count == 0 && retired.count == 0 && selectors == 0 && prints == 0 && types == 0 -> status = "{status}{file}: would apply edition migration (dry run; nothing written)\n"
-        if count > 0 -> status = "{status}{file}: would apply {count} fix{if count == 1 -> "" else -> "es"} (dry run; nothing written)\n"
-        status = "{status}{jet_cli_fix_rewrite_status(file, retired.count, selectors, prints, types)}"
+        status = "{file}: would apply {count} fix{if count == 1 -> "" else -> "es"} (dry run; nothing written)\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review (dry run)\n"
     } else {
         log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-        if count == 0 && retired.count == 0 && selectors == 0 && prints == 0 && types == 0 -> status = "{status}{file}: applied edition migration\n"
-        if count > 0 -> status = "{status}{file}: applied {count} fix{if count == 1 -> "" else -> "es"}\n"
+        status = "{file}: applied {count} fix{if count == 1 -> "" else -> "es"}\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review\n"
-        status = "{status}  log: {log}\n{jet_cli_fix_rewrite_status(file, retired.count, selectors, prints, types)}"
+        status = "{status}  log: {log}\n"
     }
     JetDriverVerbOutput{stdout: diff, stderr: if quiet || json -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
 }

@@ -885,7 +885,7 @@ fn mir_result_display_name(ok: MIRType, err: MIRType) -> String Never! {
         .Apply(name, args) -> args.len() == 0 && name.name == "Err"
         else -> false
     }
-    // D-TYPE-SUFFIX1=A: the error contract follows its type: `E!`.
+    // The error contract follows its type: `E!`.
     if mir_type_is_unit(ok) -> return "{mir_marked_display_name(err)}!"
     if !is_default_error -> return "{mir_marked_display_name(ok)} {mir_marked_display_name(err)}!"
     mir_type_display_name(ok)
@@ -1082,7 +1082,7 @@ enum MIRProjection {
     Field(field: MIRFieldID, span: Span)
     Index(kind: MIRIndexKind, index: MIRValueID, call: MIRPreludeCallID, write_call: MIRPreludeCallID?, location: MIRPanicLoc, context: MIRPanicContext?, span: Span)
     Deref(span: Span)
-    // D-OPT-WRITE1 (#3974): the payload of a checked variant inside an enum,
+    // (#3974): the payload of a checked variant inside an enum,
     // Optional, or Result place. A match on a `&place` subject binds each
     // payload name as a write window through this projection, so edits land
     // in the owner's storage. Only read or written after the variant test.
@@ -1093,7 +1093,7 @@ enum MIRProjection {
     // projected place keeps the list type, so a length-preserving callee
     // edits the window in place without a copy.
     Range(range: MIRValueID, location: MIRPanicLoc, span: Span)
-    // D-PAT-MAP1: a read window selected by one Ptr<V>? lookup.
+    // A read window selected by one Ptr<V>? lookup.
     MapLookup(lookup: MIRValueID, optional: Bool, span: Span)
 }
 
@@ -3696,7 +3696,7 @@ struct MIRForeign {
     close_function: MIRFunctionID?
     close_foreign: MIRForeignID?
     undo_function: MIRFunctionID?
-    // D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
+    // The declaration's own `#Unsafe("reason")` gate for an
     // audited inline foreign function. Every call runs inside its sentry scope.
     unsafe_gate: MIRUnsafeGate?
 }
@@ -3921,7 +3921,7 @@ fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
     mir_c_void(result) || mir_c_primitive(result) != None
 }
 
-// The sandbox Component export law (D-PLUGIN-EXPORT1=A): every parameter and
+// The sandbox Component export law every parameter and
 // the published result of a sandbox `pub fn` is one recursively closed
 // Component Model shape, independently per position: `Int`, `Float`, `Bool`,
 // `String`, or a `List`, `Option`, `Result` or `#Codable` record of them. The

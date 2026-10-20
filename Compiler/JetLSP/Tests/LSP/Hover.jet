@@ -41,8 +41,8 @@ fn lsp_hover_test_symbol() -> SemanticSymbol Never! {
     db := SymbolDB.new()
     db.symbols = SemanticSymbolIndex.new([SemanticSymbol]{lsp_hover_test_symbol()})
     db.hover = [HoverEntry]{
-        HoverEntry{span: Span{start: 3, end: 6}, module_path: "elsewhere.jet", text: "state `Wrong.State.S`"},
-        HoverEntry{span: Span{start: 3, end: 6}, module_path: "other.jet", text: "state `Mode.State.Ready`"},
+        {span: Span{start: 3, end: 6}, module_path: "elsewhere.jet", text: "state `Wrong.State.S`"},
+        {span: Span{start: 3, end: 6}, module_path: "other.jet", text: "state `Mode.State.Ready`"},
     }
     tokens :: lex("   run".bytes()).tokens
     assert_eq(lsp_compute_hover(db, tokens, "   run", "other.jet", 6), Val("state `Mode.State.Ready`"))

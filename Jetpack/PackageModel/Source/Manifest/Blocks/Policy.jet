@@ -1,6 +1,5 @@
-// `policy: { … }` (D-POLICY-WORD1, D-TEAMPOLICY1, D-LINTPOLICY1,
-// D-PACKAGE-POLICY-SCOPE1, D-ONCE-AUTODERIVE1, D-MEM-GUARANTEE1,
-// D-JPK-POLICYSURFACE1, D-JPK-FRESHNESS1, D-GRADE-POLICY1) and the standalone
+// `policy: { … }` (
+// ) and the standalone
 // organization policy document (Package/Blocks.rs).
 use core.math as policy_core_math
 
@@ -16,7 +15,7 @@ fn pkg_bad_policy(detail: String) -> PackageParseError Never! {
     PackageParseError.BadPackagePolicy{detail: detail}
 }
 
-// `policy.lints.deny` (D-LINTPOLICY1). `None` means no `lints:` block.
+// `policy.lints.deny`. `None` means no `lints:` block.
 fn pkg_parse_lints_policy(body: String) -> [String]? PackageParseError! {
     if lint_parse_policy_lints(body) == {
         .Ok(lints) -> Ok(lints)
@@ -70,7 +69,7 @@ fn pkg_policy_unknown_key(name: String, raw: String, package_only_fields: Bool) 
         }
         else -> None
     }
-    if replacement == .Val(text) -> return Err(pkg_bad_mem("`{name}` is a retired memory floor; write the denial {text}"))
+    if replacement == .Val(text) -> return Err(pkg_bad_mem("`{name}` is not a memory floor; write the denial {text}"))
     if name == POLICY_FIELD_LINTS -> return
     if package_only_fields && (name == POLICY_FIELD_CONTAIN || name == POLICY_FIELD_HARDEN || name == POLICY_FIELD_LICENSES || name == POLICY_FIELD_SOURCES || name == POLICY_FIELD_EXCEPTIONS || name == POLICY_FIELD_CLAIMS) -> return
     auto_derive :: lint_auto_derive_name()
@@ -210,13 +209,13 @@ fn pkg_policy_has_repeat(values: [String]) -> Bool Never! {
     false
 }
 
-// The body of a `{ … }` or `.{ … }` record value with nothing after it.
+// The body of a `{ … }` record value with nothing after it.
 fn pkg_record_value_body(raw: String, field: String) -> String PackageParseError! {
     value :: raw.trim()
     open :: pkg_text_find_byte(value, 123) ?? return Err(pkg_bad_policy("`{field}` must be a record"))
     close :: pkg_text_rfind_byte(value, 125) ?? return Err(pkg_bad_policy("`{field}` is missing `}}`"))
     head :: pkg_binder_slice(value, 0, open).trim()
-    if head != "" && head != "." -> return Err(pkg_bad_policy("`{field}` must be a record"))
+    if head != "" -> return Err(pkg_bad_policy("`{field}` must be a record"))
     if pkg_binder_tail(value, close + 1).trim() != "" -> return Err(pkg_bad_policy("`{field}` has trailing content"))
     Ok(pkg_binder_slice(value, open + 1, close))
 }
@@ -400,7 +399,7 @@ fn pkg_days_from_civil(input_year: Int, input_month: Int, day: Int) -> Int Never
     era * 146097 + day_of_era - 719468
 }
 
-// The package-only dependency guarantee dial (D-MEM-GUARANTEE1=A).
+// The package-only dependency guarantee dial.
 struct GuaranteePolicy {
     contain: [String]
     harden: Bool
@@ -442,8 +441,7 @@ fn pkg_parse_policy_document(text: String) -> [PolicyDeclaration] PackageParseEr
     rest := stripped.removeprefix(MANIFEST_BLOCK_POLICY).trim_start()
     if !rest.starts_with(":") -> return Err(pkg_bad_mem("expected `:` after `policy`"))
     rest = rest.removeprefix(":").trim_start()
-    if rest.starts_with(".") -> rest = rest.removeprefix(".").trim_start()
-    if !rest.starts_with("{{") -> return Err(pkg_bad_mem("expected `.{{` after `policy:`"))
+    if !rest.starts_with("{{") -> return Err(pkg_bad_mem("expected `{{` after `policy:`"))
     rest = rest.removeprefix("{{")
     close :: pkg_text_find_byte(rest, 125) ?? return Err(pkg_bad_mem("missing `}}` after organization policy"))
     if pkg_binder_tail(rest, close + 1).trim() != "" -> return Err(pkg_bad_mem("organization policy file may contain only the `policy` block"))

@@ -100,21 +100,3 @@ fn pkg_test_insert_inline_package(source: String) -> String Never! {
     assert(!facts.is_config_file("profiles/edge..jet"))
     assert(facts.is_config_file("profiles/edge."))
 }
-
-// Package/mod.rs:1581-1634: root/src retired entries are metadata, but a
-// deeper same-named module is an ordinary checked source.
-#Test("checked package sources exclude only root and src retired entries") {
-    root :: files.tmpdir("jet-inline-security-retired-entries") ?? panic("scratch")
-    files.create_dir_all(files.join(root, "src/cli")) ?? panic("source directory")
-    relatives :: [String]{LEGACY_ENTRY_FILE, "src/{LEGACY_ENTRY_FILE}", "src/cli/{LEGACY_ENTRY_FILE}", "ordinary.jet"}
-    loop relative in relatives {
-        files.write(files.join(root, relative), "fn run() {{}}\n") ?? panic("source fixture")
-    }
-    facts :: PackageFacts.default()
-    resolver :: AuthorityResolver.open(root) ?? panic("checked root")
-    selected :: facts.source_files_checked(resolver) ?? panic("checked sources")
-    names := [String]{}
-    loop file in selected -> &names.push(file.relative)
-    assert_eq(names, [String]{"ordinary.jet", "src/cli/{LEGACY_ENTRY_FILE}"})
-    files.remove_all(root) ?? panic("remove source fixtures")
-}

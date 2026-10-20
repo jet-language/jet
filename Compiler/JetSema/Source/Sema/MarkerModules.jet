@@ -1,4 +1,4 @@
-// D-MARKER-MODULE1=A: canonical identity is (declaring module, name span).
+// Canonical identity is (declaring module, name span).
 use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
 use jet_parser.[parse_generated_source]
 
@@ -360,8 +360,7 @@ fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity
             loop member in members {
                 forbidden := member.negated || member.name == "Unsafe" || member.name == "Impure" || member.name == "Nondeterministic" || member.name == "allow" || member.name == "Scrub" || member.name == "FX"
                 builtin :: sema_marker_rules_catalog_rule_index(catalog.applied_rules, member.name)
-                if builtin == .Val(index) -> forbidden = forbidden || catalog.applied_rules[index].status != .Active
-                else {
+                if builtin == None {
                     resolved :: sema_marker_module_resolve_scoped(graph, module_identity, member.name, scope)
                     if exported && declaration.is_pub && (resolved.status == "private" || (resolved.status == "found" && !resolved.exported)) {
                         &diagnostics.push(sema_error("E0605", member.span, "public marker group `{declaration.name}` contains private marker `#{member.name}`", "a public group cannot publish a module-private marker through expansion", "make the member public by removing `priv`, or make the group private"))
@@ -411,7 +410,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
                 if {
                     resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a library marker is public unless it is marked `priv`", "remove `priv` from the marker, or remove this use"))
                     resolved.status == "ambiguous" -> &diagnostics.push(sema_error("E0086", marker.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
-                    resolved.status == "unknown" -> &diagnostics.push(sema_marker_rules_unknown_error(catalog, marker, None))
+                    resolved.status == "unknown" -> &diagnostics.push(sema_marker_rules_unknown_error(catalog, marker))
                     else -> {}
                 }
             } else if resolved.status == "unknown" {

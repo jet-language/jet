@@ -13,31 +13,31 @@ enum PackageParseError {
     RetiredRecordHead
     ConfigMembers
     Composition(String)
-    // D-ECO-MEMBERS1: a member Package may not introduce another member list.
+    // A member Package may not introduce another member list.
     NestedMembers(root: String, member: String)
-    // D-LINTPOLICY1: a registered diagnostic code used as a lint selector.
+    // A registered diagnostic code used as a lint selector.
     LintPolicyCode(code: String, name: String)
-    // D-TGT1/D-TGT2/D-TGT3: an unknown or not-yet-shipped target.
+    // An unknown or not-yet-shipped target.
     BadTarget(name: String, value: String, reserved: Bool)
-    // D-TGT1: a `packages:` entry uses the removed `kind:` field.
+    // A `packages:` entry uses the removed `kind:` field.
     KindFieldRemoved(name: String)
-    // D-TGT3/D-TGT4: a target block carries an unknown field.
+    // A target block carries an unknown field.
     BadTargetField(name: String, detail: String)
     // U1/S52/E1209: a reserved top-level key was used non-empty.
     ReservedSection(String)
-    // D-EFFBUDGET1: a malformed `authority:`/`build.allow:` block.
+    // A malformed `authority:`/`build.allow:` block.
     BadEffectsBlock(String)
-    // D-AUTHORITY-MANIFEST1: a retired authority field moved into `authority:`.
+    // A retired authority field moved into `authority:`.
     RetiredAuthorityField(field: String, replacement: String)
-    // D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
+    // Malformed or widening package memory policy.
     BadMemoryPolicy(detail: String)
-    // D-ONCE-RETIRE1=C: a retired package policy field needs migration.
+    // A retired package policy field needs migration.
     RetiredPolicyField(field: String, replacement: String)
-    // D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
+    // Malformed or widening package guarantee policy.
     BadGuaranteePolicy(detail: String)
-    // D-JPK-POLICYSURFACE1=D: malformed SPDX/source package policy.
+    // Malformed SPDX/source package policy.
     BadPackagePolicy(detail: String)
-    // D-ALLOC-PROGRAM1=A: malformed hosted whole-program allocator fact.
+    // Malformed hosted whole-program allocator fact.
     BadAllocatorPolicy(detail: String)
 
     fn message(self) -> String Never! {
@@ -48,7 +48,7 @@ enum PackageParseError {
             .UnknownField(name) -> "unknown Package field `{name}`"
             .UnknownOutputKind(kind) -> "unknown Output kind `{kind}`"
             .InvalidValue(field, value) -> "invalid value for `{field}`: `{value}`"
-            .RetiredRecordHead -> "record literals use `{{ … }}`; remove the retired dot before `{{` (D-LIT-DOT1)"
+            .RetiredRecordHead -> "record literals use `{{ … }}`; remove the dot before `{{`"
             .ConfigMembers -> "Config cannot declare `members`"
             .Composition(value) -> value
             .NestedMembers(root, member) -> "member Package `{member}` declares `members`; Package root `{root}` owns membership"
@@ -58,9 +58,9 @@ enum PackageParseError {
             .BadTargetField(name, detail) -> "package `{name}`: {detail}"
             .ReservedSection(section) -> "`{section}` is reserved"
             .BadEffectsBlock(detail) -> detail
-            .RetiredAuthorityField(field, replacement) -> "`{field}` is retired; use `{replacement}`"
+            .RetiredAuthorityField(field, replacement) -> "`{field}` is not a field; use `{replacement}`"
             .BadMemoryPolicy(detail) -> detail
-            .RetiredPolicyField(field, replacement) -> "`{field}` is retired; use `{replacement}`"
+            .RetiredPolicyField(field, replacement) -> "`{field}` is not a field; use `{replacement}`"
             .BadGuaranteePolicy(detail) -> detail
             .BadPackagePolicy(detail) -> detail
             .BadAllocatorPolicy(detail) -> detail
@@ -86,7 +86,7 @@ enum ComposeError {
     }
 }
 
-// D-ECO-INLINEPACKAGE1=A: structural carrier failures and canonical Package
+// Structural carrier failures and canonical Package
 // field failures share one parse result.
 #Error
 enum InlinePackageParseError {

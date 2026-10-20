@@ -37,7 +37,6 @@ use jet_lexer.[
     TOKEN_GT,
     TOKEN_HASH,
     TOKEN_IDENT,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LINE_COMMENT,
@@ -61,7 +60,7 @@ use jet_lexer.[
 ]
 
 JFMT_INDENT :: 4
-// D-FMT1: the width floor (gate d) for keeping a body on one line.
+// The width floor (gate d) for keeping a body on one line.
 JFMT_MAX_WIDTH :: 100
 // Rust `usize::MAX`: no trailing-comment limit.
 JFMT_NO_LIMIT :: 9223372036854775807
@@ -79,7 +78,7 @@ JFMT_PREC_SHIFT :: 8
 JFMT_PREC_ADD :: 9
 JFMT_PREC_MUL :: 10
 JFMT_PREC_UNARY :: 11
-// D-EXPSEM1=A: `^` binds tighter than unary minus and looser than postfix.
+// `^` binds tighter than unary minus and looser than postfix.
 JFMT_PREC_POW :: 12
 JFMT_PREC_POSTFIX :: 13
 JFMT_PREC_PRIMARY :: 14
@@ -114,7 +113,7 @@ struct JetFmt {
     trailing_comment_limit: Int
     items: [Item]
     policy_declarations: [PolicyDeclaration]
-    // D-EACH1=C authored forms corresponding to expanded AST statements.
+    // This rule authored forms corresponding to expanded AST statements.
     fenced_statements: [FencedStatement]
     simplify: Bool
     // The return type supplies the expected type for a direct returned
@@ -354,7 +353,7 @@ fn jfmt_is_generated_label(name: String) -> Bool Never! {
     name.starts_with("__jet_")
 }
 
-// ---- D-FMT1 inline eligibility ----
+// ---- inline eligibility ----
 
 // May this statement render inline inside a one-line brace body? Only
 // non-block statements qualify.
@@ -512,7 +511,7 @@ fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
         .Const(constant) -> {
             if constant.is_persist -> return jfmt_rfind_or(f, constant.name_span.start, "#Persist", constant.name_span.start)
             if constant.attrs.len() > 0 {
-                // D-CONSTMARK1: only a storage marker can sit in front of a
+                // Only a storage marker can sit in front of a
                 // constant's name.
                 found :: jfmt_bytes_rfind(f.src_bytes, constant.name_span.start, "#Static")
                 if found >= 0 -> return found
@@ -580,7 +579,7 @@ fn jfmt_item_span_end(item: Item) -> Int Never! {
         .Distinct(definition) -> definition.span.end
         .TypeAlias(definition) -> definition.span.end
         .UnitFamily(definition) -> definition.span.end
-        // D-ERR-CONV: body_span.end is after the closing `}`.
+        // Body_span.end is after the closing `}`.
         .ErrorConv(definition) -> definition.body_span.end
         .Migration(declaration) -> declaration.span.end
         .ProtocolDecl(declaration) -> declaration.span.end
@@ -974,7 +973,7 @@ fn jfmt_statement_source_end(f: JetFmt, stmt: Stmt) -> Int Never! {
     last_end
 }
 
-// S69 (D-SG3): did the author break the line before this chain step's `.`?
+// S69 did the author break the line before this chain step's `.`?
 fn jfmt_chain_break_between(f: JetFmt, from: Int, to: Int) -> Bool Never! {
     from <= to && jfmt_src_valid(f, from, to) && jfmt_bytes_have_newline(f.src_bytes, from, to)
 }
@@ -994,7 +993,7 @@ fn jfmt_source_type_spelling(f: JetFmt, start: Int) -> String? Never! {
         token :: f.source_toks[index]
         kind :: token.kind
         top_level :: parens == 0 && brackets == 0 && angles == 0
-        if top_level && (kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW || kind == TOKEN_RPAREN || kind == TOKEN_RBRACE || kind == TOKEN_EOF) -> break
+        if top_level && (kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_RPAREN || kind == TOKEN_RBRACE || kind == TOKEN_EOF) -> break
         if {
             kind == TOKEN_LPAREN -> parens += 1
             kind == TOKEN_RPAREN -> parens = jfmt_saturating_sub(parens, 1)
@@ -1175,7 +1174,7 @@ fn jfmt_list_item_spans(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never! 
     None
 }
 
-// ---- brace bodies (D-FMT1 / D-FMTCOLLAPSE1=B) ----
+// ---- brace bodies ----
 
 fn jfmt_fmt_body(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_control_body(&f, body)
@@ -1235,7 +1234,7 @@ fn jfmt_value_block_braces(f: JetFmt, value: Expr) -> JetFmtBraces? Never! {
     if open <= close -> Val(JetFmtBraces{open: open, close: close}) else -> None
 }
 
-// D-FMT1: attempt the inline branch `{ value }`; rolls back on overflow. The
+// Attempt the inline branch `{ value }`; rolls back on overflow. The
 // caller has already emitted the opening `{`.
 fn jfmt_try_inline_value_block(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if !jfmt_value_block_inlineable(f, stmts, value) -> return false
@@ -1271,7 +1270,7 @@ fn jfmt_fmt_control_body(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_body_expanded(&f, body)
 }
 
-// ---- D-OPT-LIFT1=A / D-FMT-SIMPLIFY1=A: redundant `Val(x)` returns ----
+// ---- redundant `Val(x)` returns ----
 
 // `Val(x)` returned from a function declared `-> T?` drops its `Val` when the
 // payload's type never comes from the optional context: a name, a field
@@ -1411,23 +1410,7 @@ fn jfmt_strip_redundant_optional_returns(items: [Item]) -> [Item] Never! {
     out
 }
 
-// ---- retired-spelling migrations (D-ONCE-RETIRE1=C) ----
-
-// Rust `Syntax::rename_target` for identifier-shaped retired names.
-fn jfmt_retired_type_target(name: String) -> String? Never! {
-    if name == {
-        "Deque" -> Val("Queue")
-        "SortedSet" -> Val("Rank")
-        "Bag" -> Val("Tally")
-        "BitSet" -> Val("Bits")
-        "ByteBuffer" -> Val("Bytes")
-        else -> None
-    }
-}
-
-fn jfmt_token_ident(tables: TokenTables, token: Token) -> String Never! {
-    if token.kind == TOKEN_IDENT -> token_decoded(tables, token) else -> ""
-}
+// ---- source edits ----
 
 fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     source :: src.bytes()
@@ -1470,286 +1453,12 @@ fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
     sorted
 }
 
-// D-ONCE-RETIRE1=C: edits for the retired `#` interpolation selector rail.
-fn jfmt_retired_interpolation_selector_edits(src: String) -> [TextEdit] Never! {
-    lexed :: lex(src.bytes())
-    if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
-    edits := [TextEdit]{}
-    jfmt_collect_retired_selector_edits(lexed.tokens, lexed.tables, &edits)
-    edits
-}
-
-fn jfmt_is_interpolation_selector(name: String) -> Bool Never! {
-    if name == {
-        "Debug" | "Pretty" | "Fixed" | "Grouped" | "Hex" | "Pad" | "PadLeft" | "Sci" | "Percent" | "Bin" | "Oct" | "Unit" -> true
-        else -> false
-    }
-}
-
-fn jfmt_collect_retired_selector_edits(tokens: [Token], tables: TokenTables, edits: &[TextEdit]) Never! {
-    loop token in tokens {
-        if token.kind != TOKEN_STRING -> next
-        loop part in token_string_parts(tables, token) {
-            if part.kind != STRING_PART_INTERPOLATION -> next
-            inner :: part.tokens
-            loop index in 1..<inner.len() {
-                if inner[index - 1].kind != TOKEN_HASH -> next
-                if inner[index].kind != TOKEN_IDENT -> next
-                if !jfmt_is_interpolation_selector(token_decoded(tables, inner[index])) -> next
-                &edits.push(TextEdit{span: inner[index - 1].span, new_text: ":"})
-            }
-            jfmt_collect_retired_selector_edits(inner, tables, &edits)
-        }
-    }
-}
-
-// D-ONCE-RETIRE1=C / D-COLLNAME1=A: identifier edits for retired Core type
-// names; interpolation expressions are scanned recursively.
-fn jfmt_retired_type_edits(src: String) -> [TextEdit] Never! {
-    lexed :: lex(src.bytes())
-    if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
-    edits := [TextEdit]{}
-    jfmt_collect_retired_type_edits(lexed.tokens, lexed.tables, &edits)
-    edits
-}
-
-fn jfmt_collect_retired_type_edits(tokens: [Token], tables: TokenTables, edits: &[TextEdit]) Never! {
-    loop token in tokens {
-        if token.kind == TOKEN_IDENT {
-            if jfmt_retired_type_target(token_decoded(tables, token)) == .Val(canonical) -> &edits.push(TextEdit{span: token.span, new_text: canonical})
-            next
-        }
-        if token.kind == TOKEN_STRING {
-            loop part in token_string_parts(tables, token) {
-                if part.kind == STRING_PART_INTERPOLATION -> jfmt_collect_retired_type_edits(part.tokens, tables, &edits)
-            }
-        }
-    }
-}
-
-fn jfmt_apply_retired_type_edits(src: String) -> String Never! {
-    jfmt_apply_source_edits(src, jfmt_retired_type_edits(src)) ?? src
-}
-
-fn jfmt_semicolon_has_same_line_code(source: [U8], tokens: [Token], index: Int) -> Bool Never! {
-    loop following in index + 1..<tokens.len() {
-        kind :: tokens[following].kind
-        if jfmt_is_comment_kind(kind) || kind == TOKEN_SEMI || kind == TOKEN_EOF -> next
-        start :: tokens[index].span.end
-        end :: tokens[following].span.start
-        if start < 0 || end > source.len() || start > end -> return false
-        loop at in start..<end {
-            if source[at] == 10 || source[at] == 13 -> return false
-        }
-        return true
-    }
-    false
-}
-
-// D-SEMI1=A: an authored `;` becomes a line break before same-line code and
-// is deleted otherwise.
-fn jfmt_retired_semicolon_edits(src: String) -> [TextEdit] Never! {
-    source :: src.bytes()
-    lexed :: lex(source)
-    if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
-    edits := [TextEdit]{}
-    loop (index, token) in lexed.tokens {
-        if token.kind != TOKEN_SEMI || token.span.start >= token.span.end -> next
-        &edits.push(TextEdit{span: token.span, new_text: if jfmt_semicolon_has_same_line_code(source, lexed.tokens, index) -> "\n" else -> ""})
-    }
-    edits
-}
-
-fn jfmt_marker_group_contains(tokens: [Token], name_index: Int) -> Bool Never! {
-    nested := 0
-    index := name_index - 1
-    loop index >= 0 {
-        kind :: tokens[index].kind
-        if {
-            kind == TOKEN_RBRACKET -> nested += 1
-            kind == TOKEN_LBRACKET && nested > 0 -> nested -= 1
-            kind == TOKEN_LBRACKET -> return index > 0 && tokens[index - 1].kind == TOKEN_HASH
-            else -> {}
-        }
-        index -= 1
-    }
-    false
-}
-
-fn jfmt_is_string_token(kind: Int) -> Bool Never! {
-    kind == TOKEN_STRING || kind == TOKEN_RAW_STRING
-}
-
-// D-HTMLPAIR1: the retired bare-string `#HTML("page.html")` argument becomes
-// `#HTML(Path{"page.html"})`.
-fn jfmt_retired_html_marker_edits(src: String) -> [TextEdit] Never! {
-    source :: src.bytes()
-    lexed :: lex(source)
-    if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
-    tokens :: lexed.tokens
-    edits := [TextEdit]{}
-    if tokens.len() >= 5 {
-        loop index in 0..<tokens.len() - 4 {
-            hash :: tokens[index]
-            name :: tokens[index + 1]
-            open :: tokens[index + 2]
-            argument :: tokens[index + 3]
-            close :: tokens[index + 4]
-            if hash.kind != TOKEN_HASH || jfmt_token_ident(lexed.tables, name) != "HTML" || open.kind != TOKEN_LPAREN || !jfmt_is_string_token(argument.kind) || close.kind != TOKEN_RPAREN -> next
-            if !(argument.span.start >= 0 && argument.span.end <= source.len()) -> next
-            literal :: jfmt_bytes_text(source, argument.span.start, argument.span.end)
-            &edits.push(TextEdit{span: Span{start: hash.span.start, end: close.span.end}, new_text: "#HTML(Path{{{literal}}})"})
-        }
-        // Grouped marker stacks (`#[Target(Web), HTML("index.html")]`).
-        loop index in 0..<tokens.len() - 4 {
-            previous :: tokens[index]
-            name :: tokens[index + 1]
-            open :: tokens[index + 2]
-            argument :: tokens[index + 3]
-            close :: tokens[index + 4]
-            if !(previous.kind == TOKEN_COMMA || previous.kind == TOKEN_LBRACKET) || jfmt_token_ident(lexed.tables, name) != "HTML" || open.kind != TOKEN_LPAREN || !jfmt_is_string_token(argument.kind) || close.kind != TOKEN_RPAREN || !jfmt_marker_group_contains(tokens, index + 1) -> next
-            if !(argument.span.start >= 0 && argument.span.end <= source.len()) -> next
-            literal :: jfmt_bytes_text(source, argument.span.start, argument.span.end)
-            &edits.push(TextEdit{span: Span{start: name.span.start, end: close.span.end}, new_text: "HTML(Path{{{literal}}})"})
-        }
-    }
-    edits
-}
-
-// D-ONCE-RETIRE1=C / D-ONCE-PRINT1=A: `println` renames to `print`; `sprint`
-// and `repr` become interpolation forms. Only calls through a `core.term`
-// import binding are rewritten.
-JFMT_PRINT_PRINTLN :: 1
-JFMT_PRINT_SPRINT :: 2
-JFMT_PRINT_REPR :: 3
-
-struct JetFmtRetiredPrintCall {
-    receiver_start: Int
-    method_span: Span
-    open_span: Span
-    close_span: Span
-    kind: Int
-}
-
-fn jfmt_retired_print_kind(method: String) -> Int Never! {
-    if method == {
-        "println" -> JFMT_PRINT_PRINTLN
-        "sprint" -> JFMT_PRINT_SPRINT
-        "repr" -> JFMT_PRINT_REPR
-        else -> 0
-    }
-}
-
-// The local names bound to the `core.term` module by the file's imports.
-fn jfmt_core_term_aliases(imports: [ImportDecl]) -> [String] Never! {
-    aliases := [String]{}
-    loop import in imports {
-        if import.kind == {
-            .Module(name, _) -> {
-                if name == "core.term" && !aliases.contains(import.alias) -> &aliases.push(import.alias)
-            }
-            .Unqualified(module_alias, _, items, _, _) -> {
-                loop item in items {
-                    local :: item.alias ?? item.original
-                    if "{module_alias}.{item.original}" == "core.term" && !aliases.contains(local) -> &aliases.push(local)
-                }
-            }
-            else -> {}
-        }
-    }
-    aliases
-}
-
-fn jfmt_matching_call_close(code: [Token], open_index: Int) -> Int Never! {
-    depth := 0
-    loop index in open_index..<code.len() {
-        kind :: code[index].kind
-        if kind == TOKEN_LPAREN {
-            depth += 1
-        } else if kind == TOKEN_RPAREN {
-            if depth == 0 -> return -1
-            depth -= 1
-            if depth == 0 -> return index
-        }
-    }
-    -1
-}
-
-fn jfmt_collect_retired_print_calls(tokens: [Token], tables: TokenTables, aliases: [String], calls: &[JetFmtRetiredPrintCall]) Never! {
-    code := [Token]{}
-    loop token in tokens {
-        if !jfmt_is_comment_kind(token.kind) -> &code.push(token)
-    }
-    limit :: jfmt_saturating_sub(code.len(), 3)
-    loop index in 0..<limit {
-        if code[index].kind != TOKEN_IDENT -> next
-        alias :: token_decoded(tables, code[index])
-        if !aliases.contains(alias) -> next
-        if index > 0 && (code[index - 1].kind == TOKEN_DOT || code[index - 1].kind == TOKEN_QUESTION_DOT) -> next
-        if code[index + 1].kind != TOKEN_DOT || code[index + 2].kind != TOKEN_IDENT -> next
-        kind :: jfmt_retired_print_kind(token_decoded(tables, code[index + 2]))
-        if kind == 0 || code[index + 3].kind != TOKEN_LPAREN -> next
-        close_index :: jfmt_matching_call_close(code, index + 3)
-        if close_index < 0 -> next
-        &calls.push(JetFmtRetiredPrintCall{receiver_start: code[index].span.start, method_span: code[index + 2].span, open_span: code[index + 3].span, close_span: code[close_index].span, kind: kind})
-    }
-    loop token in tokens {
-        if token.kind != TOKEN_STRING -> next
-        loop part in token_string_parts(tables, token) {
-            if part.kind == STRING_PART_INTERPOLATION -> jfmt_collect_retired_print_calls(part.tokens, tables, aliases, &calls)
-        }
-    }
-}
-
-fn jfmt_print_family_edits(src: String, aliases: [String], calls: [JetFmtRetiredPrintCall]) -> [TextEdit] {
-    source :: src.bytes()
-    edits := [TextEdit]{}
-    loop call in calls {
-        inside_replacement := false
-        loop outer in calls {
-            if (outer.kind == JFMT_PRINT_SPRINT || outer.kind == JFMT_PRINT_REPR) && outer.receiver_start < call.receiver_start && outer.close_span.end >= call.close_span.end -> inside_replacement = true
-        }
-        if inside_replacement -> next
-        if call.kind == JFMT_PRINT_PRINTLN {
-            &edits.push(TextEdit{span: call.method_span, new_text: "print"})
-            next
-        }
-        argument := jfmt_bytes_text(source, call.open_span.end, call.close_span.start).trim()
-        if argument.len() == 0 -> next
-        argument = jfmt_rewrite_print_family_fragment(argument, aliases)
-        format :: if call.kind == JFMT_PRINT_REPR -> ":Debug" else -> ""
-        &edits.push(TextEdit{span: Span{start: call.receiver_start, end: call.close_span.end}, new_text: "print(\"{{{argument}{format}}}\")"})
-    }
-    jfmt_sort_edits_by_start(edits)
-}
-
-fn jfmt_rewrite_print_family_fragment(src: String, aliases: [String]) -> String {
-    lexed :: lex(src.bytes())
-    if lexed.diagnostics.len() > 0 -> return src.copy()
-    calls := [JetFmtRetiredPrintCall]{}
-    jfmt_collect_retired_print_calls(lexed.tokens, lexed.tables, aliases, &calls)
-    jfmt_apply_source_edits(src, jfmt_print_family_edits(src, aliases, calls)) ?? src
-}
-
-fn jfmt_retired_print_family_edits(src: String) -> [TextEdit] {
-    source :: src.bytes()
-    lexed :: lex(source)
-    if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
-    parsed :: parse_source(source)
-    if !jfmt_fmt_parse_accepts(parsed.diagnostics) -> return [TextEdit]{}
-    aliases :: jfmt_core_term_aliases(parsed.program.imports)
-    if aliases.len() == 0 -> return [TextEdit]{}
-    calls := [JetFmtRetiredPrintCall]{}
-    jfmt_collect_retired_print_calls(lexed.tokens, lexed.tables, aliases, &calls)
-    jfmt_print_family_edits(src, aliases, calls)
-}
-
 // ---- parse acceptance (Rust parse_for_check_with_source / parse_for_fmt) ----
 
 // Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
 fn jfmt_is_teaching_parse_diag(code: String) -> Bool Never! {
     if code == {
-        "E0031" | "E0034" | "E0048" | "E0049" | "E0055" | "E0057" | "E0065" | "E0066" | "E0068" | "E0070" | "E0080" | "E0082" | "E0077" | "E0146" | "E0154" | "E0210" | "E0986" | "E0320" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0374" | "E0378" | "E0379" | "E0383" | "E0384" | "E0385" | "E0386" | "E0999" | "E0412" | "E0413" | "E0414" | "E0415" | "E0417" | "E0418" | "E0998" | "E0927" | "E1115" -> true
+        "E0031" | "E0034" | "E0048" | "E0049" | "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0999" | "E0412" | "E0413" | "E0414" | "E0415" | "E0417" | "E0418" -> true
         else -> false
     }
 }
@@ -1765,11 +1474,11 @@ fn jfmt_check_parse_accepts(diagnostics: [Diagnostic]) -> Bool Never! {
 }
 
 // Rust `parse_for_fmt` succeeds: no errors, or every error is a teaching
-// diagnostic (E0927 only for a retired spelling).
+// diagnostic.
 fn jfmt_fmt_parse_accepts(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
-        if jfmt_is_teaching_parse_diag(diagnostic.code) || (diagnostic.code == "E0927" && diagnostic.what.contains("retired")) -> next
+        if jfmt_is_teaching_parse_diag(diagnostic.code) -> next
         return false
     }
     true
@@ -1860,7 +1569,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_newline(&f)
         first = false
     }
-    // D-PRELUDEX1=A: `#NoPrelude` is emitted before imports.
+    // `#NoPrelude` is emitted before imports.
     if prog.no_prelude && !grouped_file_rules && !has_ordered_file_rules {
         if !first -> jfmt_newline(&f)
         first = false
@@ -1879,7 +1588,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         first = false
         jfmt_fmt_marker_group(&f, ordered_file_rules, "#", true)
     }
-    // D-WEBDEFAULT1 / D-WASM1: fixed post-import position.
+    // Fixed post-import position.
     if web_default && !grouped_file_rules && !has_ordered_file_rules {
         if !first -> jfmt_blank_line_between_items(&f)
         first = false
@@ -1894,7 +1603,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             jfmt_newline(&f)
         }
     }
-    // D-HTMLPAIR1: `#HTML(Path{"path.html"})`.
+    // `#HTML(Path{"path.html"})`.
     if prog.html_path == .Val(html_path) {
         if !grouped_file_rules && !has_ordered_file_rules {
             if !first -> jfmt_blank_line_between_items(&f)
@@ -1904,7 +1613,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             jfmt_newline(&f)
         }
     }
-    // D-POLICY-WORD1=A: module-scoped `#Policy(...)` at a fixed position.
+    // Module-scoped `#Policy(...)` at a fixed position.
     module_policies := [PolicyDeclaration]{}
     loop declaration in prog.policy_declarations {
         if jfmt_is_module_policy(declaration) -> &module_policies.push(declaration)
@@ -1918,7 +1627,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_newline(&f)
         jfmt_emit_trailing(&f, policy_span.end)
     }
-    // D-STRUCT-POLICY1=A: user settings stay on the declaration plane.
+    // User settings stay on the declaration plane.
     loop declaration in prog.user_policy_declarations {
         if !first -> jfmt_blank_line_between_items(&f)
         first = false
@@ -1926,7 +1635,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_fmt_user_policy_decl(&f, declaration)
         jfmt_emit_trailing(&f, declaration.span.end)
     }
-    // D-ENTRY-SCRIPT1=C: loose statements interleave with items by position.
+    // Loose statements interleave with items by position.
     item_i := 0
     stmt_i := 0
     previous_was_script := false
@@ -1968,18 +1677,9 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
     jfmt_out_text(f)
 }
 
-fn jfmt_apply_or_keep(src: String, edits: [TextEdit]) -> String Never! {
-    jfmt_apply_source_edits(src, edits) ?? src
-}
-
-// Rust `format_source_with_options`: migrate retired spellings, lex, parse,
-// then format. Parse errors propagate; sema is not required.
+// Lex, parse, then format. Parse errors propagate; sema is not required.
 fn jet_format_source(src: String, simplify_requested: Bool) -> JetFormatResult {
-    print_migrated :: jfmt_apply_or_keep(src, jfmt_retired_print_family_edits(src))
-    html_migrated :: jfmt_apply_or_keep(print_migrated, jfmt_retired_html_marker_edits(print_migrated))
-    semi_migrated :: jfmt_apply_or_keep(html_migrated, jfmt_retired_semicolon_edits(html_migrated))
-    migrated :: jfmt_apply_retired_type_edits(semi_migrated)
-    source :: migrated.bytes()
+    source :: src.bytes()
     lexed :: lex(source)
     if lexed.diagnostics.len() > 0 -> return JetFormatResult{ok: false, text: "", diagnostics: lexed.diagnostics}
     simplify := simplify_requested
@@ -1988,16 +1688,16 @@ fn jet_format_source(src: String, simplify_requested: Bool) -> JetFormatResult {
         // A recovered control-body diagnostic leaves only a recovery
         // scaffold; simplify must remain a no-op there.
         loop diagnostic in parsed.diagnostics {
-            if diagnostic.severity != DIAGNOSTIC_LINT && diagnostic.code != "E0068" && diagnostic.code != "E0070" && diagnostic.code != "E0080" -> simplify = false
+            if diagnostic.severity != DIAGNOSTIC_LINT && diagnostic.code != "E0080" -> simplify = false
         }
     } else {
         simplify = false
         if !jfmt_fmt_parse_accepts(parsed.diagnostics) -> return JetFormatResult{ok: false, text: "", diagnostics: parsed.diagnostics}
     }
     prog := parsed.program
-    // D-OPT-LIFT1=A: dropping a redundant `Val(x)` rewrites the program itself.
+    // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
-    JetFormatResult{ok: true, text: jfmt_format_program_with_tokens(prog, migrated, lexed.tokens, simplify), diagnostics: [Diagnostic]{}}
+    JetFormatResult{ok: true, text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify), diagnostics: [Diagnostic]{}}
 }
 
 fn jfmt_lines(text: String) -> [String] Never! {

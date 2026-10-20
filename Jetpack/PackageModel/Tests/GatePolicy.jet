@@ -17,9 +17,9 @@ fn pkg_gate_test_refusal(error: PackageGateError, key: String, site: String, pol
 
 #Test("gate refusal preserves the outer floor and exact registered text") {
     declarations :: [PolicyDeclaration]{
-        PolicyDeclaration{key: PolicyKey.ForcePin, value: PolicyValue.GateOnly, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"},
-        PolicyDeclaration{key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 0}, target: None, source: "org-policy.jet"},
-        PolicyDeclaration{key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"}
+        {key: PolicyKey.ForcePin, value: PolicyValue.GateOnly, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"},
+        {key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 0}, target: None, source: "org-policy.jet"},
+        {key: PolicyKey.ForcePin, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"}
     }
     refusal :: pkg_gate_refusal(PolicyKey.ForcePin, "main.jet:4..9", None, declarations) ?? panic("outer refusal")
     pkg_gate_test_refusal(PackageGateError{diagnostics: [Diagnostic]{refusal}}, "force_pin", "main.jet:4..9", "org-policy.jet")

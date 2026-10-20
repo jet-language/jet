@@ -200,7 +200,7 @@ fn sema_state_unknown(state: String, type_name: String, candidates: [String], sp
         .Val(candidate) -> "did you mean `{candidate}`? Check the `struct {type_name} {{ state {{ … }} }}` declaration for valid names"
         .None -> "add `{state}` inside `struct {type_name} {{ state {{ … }} }}`, or correct the spelling"
     }
-    diagnostic :: sema_error("E0151", span, "`{state}` is not a declared state of `{type_name}`", "typestate (D-STATE-HOME1=A): `struct {type_name} {{ state {{ … }} }}` defines the valid state labels; `{state}` is not among them — a typo here would silently create a phantom state that no transition reaches", fix)
+    diagnostic :: sema_error("E0151", span, "`{state}` is not a declared state of `{type_name}`", "typestate: `struct {type_name} {{ state {{ … }} }}` defines the valid state labels; `{state}` is not among them — a typo here would silently create a phantom state that no transition reaches", fix)
     if suggestion == .Val(candidate) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
     diagnostic
 }
@@ -261,7 +261,7 @@ fn sema_state_validate_owner(definition: StructDef, state: StateDecl, all_items:
     }
 }
 
-// Rust `StateTable::validate_declarations` (D-STATE-HOME1=A). Declarations are
+// Rust `StateTable::validate_declarations`. Declarations are
 // bundle-wide (an owner and its impls may sit in different modules), so
 // `all_items` is every user module's items; reports cover `items`' owners.
 fn sema_state_validate_declarations(items: [Item], all_items: [Item]) -> [Diagnostic] {

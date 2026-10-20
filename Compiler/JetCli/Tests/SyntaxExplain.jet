@@ -22,7 +22,7 @@ fn run() Never! {
     if jet_cli_explain_build_fact_name("Build.Settings.Mode") != .Val("Build.Settings.mode") -> panic("dynamic setting normalization")
     if jet_cli_explain_build_fact_name("$build.settings.") != .None || jet_cli_explain_build_fact_name("$build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
     loop row in JET_CLI_SYNTAX_ROWS {
-        if row.meanings.len() == 0 || row.registry_name == "" || row.decision == "" -> panic("every syntax row explains itself")
+        if row.meanings.len() == 0 || row.registry_name == "" -> panic("every syntax row explains itself")
         found :: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
         if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
     }

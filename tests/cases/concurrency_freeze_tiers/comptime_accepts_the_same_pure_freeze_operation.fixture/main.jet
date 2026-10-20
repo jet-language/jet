@@ -2,7 +2,7 @@
 struct Snapshot { value: Int }
 
 fn run() {
-    source := Snapshot.{ value: 41 }
+    source := Snapshot{ value: 41 }
     frozen :: freeze(source)
     twice :: freeze(freeze(source))
     task.group snapshots {
@@ -12,7 +12,7 @@ fn run() {
         print(second.join() ?? 0)
     }
 
-    owned := Snapshot.{ value: 7 }
+    owned := Snapshot{ value: 7 }
     task.group moved {
         child :: task ^owned { owned.value }
         print(child.join() ?? 0)

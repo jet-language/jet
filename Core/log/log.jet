@@ -138,7 +138,7 @@ fn set_trace_id(id: String) Never! -[Log]> {
 /// Apply comma-separated settings without handing the whole grammar to the
 /// host. Each setting is `key=value` (`level`, `format`, `sink`, `file` or
 /// `path`, `sample` or `sample_every`, `trace_id`); a bare `auto`, `json` or
-/// `text` selects the record format (D-LOGFMT1). An unknown setting or value
+/// `text` selects the record format. An unknown setting or value
 /// is reported as an error record and otherwise ignored. The host owns the
 /// sink and process-global cells; Jet owns normalization and dispatch.
 fn setup(spec: String) Never! -[Log]> {
@@ -552,9 +552,9 @@ fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.messa
 
 #Test("typed log fields retain order and normalize only redacted or unknown kinds") {
     fields :: normalize_fields([LogField]{
-        LogField{key: "same", value: "secret", kind: "int", redacted: true},
-        LogField{key: "same", value: "7", kind: "counter", redacted: false},
-        LogField{key: "\"", value: "\n", kind: "unknown", redacted: false}
+        {key: "same", value: "secret", kind: "int", redacted: true},
+        {key: "same", value: "7", kind: "counter", redacted: false},
+        {key: "\"", value: "\n", kind: "unknown", redacted: false}
     })
     assert_eq(fields.len(), 3)
     assert_eq(fields[0].key, "same")

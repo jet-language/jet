@@ -59,33 +59,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     (project, diagnostics, bundle, facts)
 }
 
-// Rust: Source/LSP/mod.rs:104
-#Test("old_binding_keyword_has_no_teaching_edit") {
-    src :: "fn run() {{\n    let x = 1\n}}\n"
-    (_project, diags, _, _) :: check_test_document(src)
-    assert(!diags.iter().any((d) -> { d.code == "E0009" || d.code == "E0985" }), "old binding words should not produce migration diagnostics: {diags:Debug}")
-    assert(!diags.is_empty(), "old binding words should still fail")
-}
-
-// Rust: Source/LSP/mod.rs:115
-#Test("retired_interpolation_selector_has_one_shared_quick_fix") {
-    project :: TestProject.new()
-    source :: "fn run() {{\n    value :: 1\n    print(\"{{value{Syntax.RETIRED_INTERPOLATION_SELECTOR_RAIL}Debug}}\")\n}}\n"
-    fixes :: collect_fixes(project.entry(), source)
-    assert_eq(fixes.iter().filter((fix) -> { fix.title.contains("D-ONCE-HASH1") }).count(), 1)
-    assert_eq(lsp_apply_all(source, fixes), "fn run() {{\n    value :: 1\n    print(\"{{value{Syntax.INTERPOLATION_SELECTOR_RAIL}Debug}}\")\n}}\n")
-}
-
-// Rust: Source/LSP/mod.rs:139
-#Test("retired_print_family_has_one_shared_quick_fix_per_spelling") {
-    project :: TestProject.new()
-    source :: "use core.term as io\n\nfn run() {{\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}}\n"
-    fixes :: collect_fixes(project.entry(), source)
-    print_fixes :: fixes.iter().filter((fix) -> { fix.title.contains("D-ONCE-PRINT1") }).cloned().collect()
-    assert_eq(print_fixes.len(), 3)
-    assert_eq(lsp_apply_all(source, print_fixes), "use core.term as io\n\nfn run() {{\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{{value}}\")\n    print(\"{{value:Debug}}\")\n}}\n")
-}
-
 // Rust: Source/LSP/mod.rs:155
 #Test("overlapping_fixes_apply_the_wider_edit_and_defer_the_rest") {
     fix :: (start: Int, end: Int, text: String) -> {

@@ -36,7 +36,7 @@ const TABLES = [
     path: join(ROOT, "Compiler/JetFoundation/Source/Registry/CLICommands.jet"),
     open: "JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{\n",
     close: "\n} }\n",
-    rowPattern: /^ {4}JetCLICommandSpec\{\n[\s\S]*?^ {4}\},?$/gm,
+    rowPattern: /^ {4}(?:JetCLICommandSpec)?\{\n[\s\S]*?^ {4}\},?$/gm,
   },
   {
     path: join(ROOT, "crates/jet-foundation/src/CLICommands.rs"),

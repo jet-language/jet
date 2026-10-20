@@ -1,8 +1,8 @@
-// `jet:` self-toolchain pin (D-JPK-TOOLCHAIN1=A, card #179, U30): which
+// `jet:` self-toolchain pin (card #179, U30): which
 // `jet` compiler a project runs. Distinct from the Rust/native build
-// toolchain (D-JPK-BUILDTOOL1). A running `jet` whose version differs from
+// toolchain. A running `jet` whose version differs from
 // the locked pin realizes the pinned compiler as a prebuilt hangar object
-// (D-JPK-CACHE1) and re-execs into it (D-JPK-DISPATCH1). It never
+// and re-execs into it. It never
 // source-builds the compiler: a platform cache miss is an honest E1251.
 //
 //   T1  frozen-forward identity pre-parse + E1249
@@ -12,7 +12,7 @@
 
 // ── T1: channel classification (E1249) ──
 
-// A `jet:` pin is a channel ref (D-JPK-CHANNEL1): `MAJOR.MINOR`,
+// A `jet:` pin is a channel ref `MAJOR.MINOR`,
 // `MAJOR.MINOR.PATCH`, or a lowercase named channel. Ranges, empty values,
 // and a bare major are E1249.
 fn trust_pin_classify_channel(raw: String) -> String TrustError! {
@@ -83,7 +83,7 @@ fn trust_pin_version_of_channel(channel: String) -> String Never! {
     channel.copy()
 }
 
-// `jet-<version>-<fp>` with a short platform-qualified fingerprint (D-PM1).
+// `jet-<version>-<fp>` with a short platform-qualified fingerprint.
 fn trust_pin_object_id(version: String) -[Env]> String {
     fingerprint :: pkg_sha256_hex("{version}:{trust_pin_current_platform()}".bytes())
     "jet-{version}-{pkg_bytes_text(fingerprint.bytes(), 0, 8)}"
@@ -159,7 +159,7 @@ fn trust_pin_handoff_line(channel: String, pinned_version: String, installed_ver
 }
 
 // Realize the pinned toolchain object and return its `jet` binary
-// (D-JPK-CACHE1 substitution boundary; `JET_TOOLCHAIN_FIXTURE` stands in
+// (substitution boundary; `JET_TOOLCHAIN_FIXTURE` stands in
 // for the fetched prebuilt). Never a source build; a miss is E1251.
 fn trust_pin_realize_jet_binary(channel: String, version: String) -[FS, Env]> String TrustError! {
     binary :: trust_pin_realized_binary() ?? return Err(TrustError.Pin(trust_pin_e1251(channel, version, trust_pin_current_platform())))
@@ -187,11 +187,8 @@ fn trust_pin_move(root: String, channel_arg: String?, running_version: String) -
 }
 
 // `jet init`: write a `package.jet` pinned to the running toolchain's
-// channel. Never clobbers a manifest or writes beside a migration-era one.
+// channel. Never clobbers a manifest.
 fn trust_pin_write_init(dir: String, name: String, running_version: String) -[FS]> String TrustError! {
-    if files.is_file(files.join(dir, PAYLOAD_FILE)) {
-        return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{PAYLOAD_FILE}` already exists here", "`jet init` will not create a second manifest root beside migration-era input.", "migrate or remove `{PAYLOAD_FILE}` before running `jet init`")))
-    }
     path :: files.join(dir, PACKAGE_FILE)
     if files.exists(path) {
         return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{PACKAGE_FILE}` already exists here", "`jet init` writes a fresh package manifest; overwriting one would discard its dependencies, pins, and identity.", "edit the existing manifest, or run `jet init` in an empty directory.")))

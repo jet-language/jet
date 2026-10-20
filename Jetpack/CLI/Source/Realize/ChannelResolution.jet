@@ -1,5 +1,5 @@
 // Source channel discovery, resolution, and locking, ported from
-// jetpack::CLI::realize (D-CHANNEL-AUTO1=A, D-JPK-CHANNEL1=A). A declared
+// jetpack::CLI::realize. A declared
 // source that tracks a channel resolves to one exact upstream, which is
 // written to `.jet/lock`; build, run, and env read only that exact source.
 
@@ -22,7 +22,7 @@ struct ChannelSource {
     }
 }
 
-// D-CHANNEL-AUTO1=A refreshes automatic channels once per command. Package
+// This rule refreshes automatic channels once per command. Package
 // realization re-applies the source table per ref, so without this memo one
 // warm 28-package env ran `git ls-remote` 56 times. Keyed `base\nchannel`.
 cli_resolved_channels := [String: String]{}
@@ -92,7 +92,7 @@ fn cli_is_lower_hex(text: String) -> Bool Never! {
     true
 }
 
-// D-CHANNEL-AUTO1=A: refresh automatic channels before applying the exact
+// Refresh automatic channels before applying the exact
 // lock. Manual channels still move only in `jetpack update`; ordinary pinned
 // sources never enter this loop. NixOS/nixpkgs channel declarations are the
 // one implicit moving-source form because the provider requires their exact

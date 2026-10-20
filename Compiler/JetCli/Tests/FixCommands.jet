@@ -26,17 +26,6 @@ fn run() Never! {
     if inserted.source != "ABπ" || inserted.applied != 2 -> panic("same-point insertions are stable and UTF-8 exact")
     if jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{insert_a, insert_b}).source != "aABbc" -> panic("insertion order")
 
-    infallible :: "fn run() Never! {{ json.canonical(data) }}\n"
-    migrated :: jet_cli_fix_edition_2027(infallible)
-    if migrated != "fn run() Never! {{ json.canonical(data) ?? panic(\"value is not canonical JSON\") }}\n" -> panic("infallible JSON migration")
-    if jet_cli_fix_edition_2027(migrated) != migrated -> panic("fallback migration is idempotent after whitespace")
-    fallible :: "fn run() {{ if true {{ json.canonical(data) }} }}\n"
-    if jet_cli_fix_edition_2027(fallible) != fallible -> panic("implicit Err propagates in enclosing function")
-    if jet_cli_fix_edition_2027("value :: json.canonical(data)?\n") != "value :: json.canonical(data)?\n" -> panic("written propagation is retained")
-    if jet_cli_fix_edition_2027("value :: cbor.encode(data)\nother :: cbor.decode(data)\n") != "value :: cbor.to_bytes(data)\nother :: cbor.parse(data)\n" -> panic("CBOR forwarding migration")
-    if jet_cli_fix_edition_2027("value :: cbor.encode(<T>data)\n") != "value :: cbor.encode(<T>data)\n" -> panic("typed call forwarding stays written")
-    paren_prefix :: "data, \"escaped \\\" )\", nested(1)"
-    if jet_cli_fix_matching_paren("{paren_prefix}) tail", 0) != Val(paren_prefix.len()) -> panic("quoted parens and escaped quotes do not alter nesting")
     if jet_cli_fix_inline_insertion("// header\n/// run docs\nfn run() {{}}\n") != "// header\n".len() -> panic("docs stay on first declaration")
     if jet_cli_fix_inline_insertion("/* header */fn run() {{}}") != "/* header */".len() -> panic("same-line leading block comment")
     if jet_cli_fix_inline_insertion("#!/usr/bin/env jet\n// tool\n\nfn run() {{}}") != "#!/usr/bin/env jet\n// tool\n\n".len() -> panic("launch header and leading trivia")

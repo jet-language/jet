@@ -15,7 +15,7 @@ struct RustBridgeProgram {
     // Core surfaces the program reaches (`module::item` or bare module rows).
     used_core: [String]
     project_root: String
-    // The checked package declaration's authority needs (D-PLUGIN-AUTHORITY1).
+    // The checked package declaration's authority needs.
     authority_needs: [String]
     // Gathered C-FFI artifacts.
     cffi: CFFI
@@ -66,7 +66,7 @@ struct ExternEntry {
     generated: Bool
     // The entry originates in a C module rather than an `extern rust` block.
     c_module: Bool
-    // D-FFI-CAP1: the sibling foreign function that consumes a returned
+    // The sibling foreign function that consumes a returned
     // handle, when the declaration carries `#Close(close)`.
     close: String?
 
@@ -115,7 +115,7 @@ struct FFILink {
     host_deps_dir: String
     // The `jet-crypto-helper` binary, present only for crypto bridges.
     helper_bin_path: String?
-    // U13 (D-JPK-SECRETCRYPTO1): the `jet-secrets-helper` binary, present
+    // U13 the `jet-secrets-helper` binary, present
     // only for secrets bridges.
     secrets_helper_bin_path: String?
     // Opaque C handle facts captured by the bridge input.
@@ -704,7 +704,7 @@ fn pkg_ffi_type_key(ty: Type) -> String Never! {
     }
 }
 
-// D-SG9: `U8`, `I32`, ...
+// `U8`, `I32`, ...
 fn pkg_ffi_int_spelling(signed: Bool, bits: Int) -> String Never! {
     prefix :: if signed -> "I" else -> "U"
     "{prefix}{bits}"

@@ -48,7 +48,7 @@ fn sema_comparability_definition_key(definition: TTypeDef) -> String Never! {
     "{definition.module_identity}::{definition.name}"
 }
 
-// D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
+// Shared encoding value types compare by value.
 fn sema_comparability_encoding_value(leaf: String) -> Bool Never! {
     leaf == "EncodingFormat" || leaf == "EncodingErrorKind" || leaf == "EncodingCause" || leaf == "EncodingError" || leaf == "EncodingLimits" || leaf == "DataError" || leaf == "DataErrorKind" || leaf == "DataLimits"
 }
@@ -79,7 +79,7 @@ fn sema_comparability_definition(environment: SemaScopeEnvironment, program: Sem
 // declaration-marker rule codegen uses for the generated body.
 fn sema_comparability_implements(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, trait_name: String) -> Bool Never! {
     // Rust `register_synthetic_display_debug` registers the Prelude carriers'
-    // value equality and order (D-TIME-ORDER1=A: LocalDate, DateTime, ...) in
+    // value equality and order (LocalDate, DateTime, ...) in
     // the trait registry, so `implements_trait` answers by name.
     if ty == .Named(carrier) {
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
@@ -183,7 +183,7 @@ fn sema_comparability_named_fields(environment: SemaScopeEnvironment, program: S
     sema_comparability_definition_incomparable_field(environment, program, definition, &query) == None
 }
 
-// Distinct and alias declarations wrap a comparable base (D-DIST1); only
+// Distinct and alias declarations wrap a comparable base only
 // struct fields and enum payloads can block comparison.
 fn sema_comparability_definition_incomparable_field(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, query: &SemaComparabilityQuery) -> String? {
     owner := definition.module_identity
@@ -315,7 +315,7 @@ fn sema_type_equatable(environment: SemaScopeEnvironment, program: SemaProgramTa
         .Named(name) -> {
             leaf := sema_serde_named_leaf(name)
             if leaf == "U8" || leaf == "Ordering" || sema_comparability_encoding_value(leaf) || sema_comparability_data_equatable_value(leaf) -> return true
-            // D-FACT-ENUM-TIR: compiler fact enums compare by variant; codegen folds the test.
+            // Compiler fact enums compare by variant; codegen folds the test.
             if sema_fact_enum_menu(ty, environment, program) != None -> return true
             sema_comparability_implements(environment, program, ty, "Equatable")
         }
@@ -400,7 +400,7 @@ fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
     Val(sema_error("E0905", span, "`{member}` needs comparable values", why, "use Int, Float, String, Char, Bool, or a comparable type"))
 }
 
-// Rust `map_key_type_eligible` (D-MAP-KEY1, E0502): map keys are ordered
+// Rust `map_key_type_eligible` (E0502): map keys are ordered
 // values. Scalars and tuples of keys qualify, and a nominal qualifies when it
 // is a struct whose fields all qualify or an enum without payloads. A nominal
 // reached again while it is still being decided lies on a cycle and answers
@@ -410,7 +410,7 @@ fn sema_type_map_key_eligible(environment: SemaScopeEnvironment, program: SemaPr
     sema_comparability_map_key(environment, program, environment.module_identity, ty, &query)
 }
 
-// Rust `check_declared_type_rules` (D-MAP-KEY1, E0502): every map written in
+// Rust `check_declared_type_rules` (E0502): every map written in
 // a declared type needs a key-eligible key. False when one was reported.
 fn sema_type_check_declared_map_keys(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
     if ty == {
@@ -418,7 +418,7 @@ fn sema_type_check_declared_map_keys(environment: SemaScopeEnvironment, program:
             valid := sema_type_check_declared_map_keys(environment, program, key, span, &diagnostics)
             if !sema_type_check_declared_map_keys(environment, program, value, span, &diagnostics) -> valid = false
             if !sema_type_map_key_eligible(environment, program, key) {
-                &diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type (D-MAP-KEY1)", key_span ?? span))
+                &diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type", key_span ?? span))
                 valid = false
             }
             valid
@@ -500,7 +500,7 @@ fn sema_comparability_definition_map_key(environment: SemaScopeEnvironment, prog
     }
 }
 
-// Rust `hashable_type_eligible` (D-SET-HASH1, E0506): the `Hash + Eq`
+// Rust `hashable_type_eligible` (E0506): the `Hash + Eq`
 // capability a `Set` or `Tally` element needs. Structural carriers follow
 // their parts; a nominal needs value equality and hashable fields. A nominal
 // still being decided answers false, and a finished one reuses its answer.

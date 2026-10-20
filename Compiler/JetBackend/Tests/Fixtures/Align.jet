@@ -42,18 +42,18 @@ fn fx_align_module(align: Int) -> LIRModule Never! {
     lir_builder_seal(&c, LIRBlockID{value: 0}, [LIRValueID]{pointer, divisor}, LIRTerminator.Return{value: Val(result)})
 
     signatures :: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None},
-        LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 2}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word()}, result: Val(lir_layout_pointer())},
-        LIRSignature{id: LIRSignatureID{value: 3}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_word()}, result: None},
-        LIRSignature{id: LIRSignatureID{value: 4}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_pointer())},
-        LIRSignature{id: LIRSignatureID{value: 5}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_bool()}, result: None},
+        {id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None},
+        {id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 2}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word()}, result: Val(lir_layout_pointer())},
+        {id: LIRSignatureID{value: 3}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_word()}, result: None},
+        {id: LIRSignatureID{value: 4}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_pointer())},
+        {id: LIRSignatureID{value: 5}, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_bool()}, result: None},
     }
     // The leading unaligned byte forces padding between data objects too,
     // rather than proving only the first object's trivially zero offset.
     data :: [LIRData]{
-        LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{17}}, align: 1, relocs: [LIRDataReloc]{}},
-        LIRData{id: LIRDataID{value: 1}, bytes: [U8]{U8{42}}, align: align, relocs: [LIRDataReloc]{}},
+        {id: LIRDataID{value: 0}, bytes: [U8]{U8{17}}, align: 1, relocs: [LIRDataReloc]{}},
+        {id: LIRDataID{value: 1}, bytes: [U8]{U8{42}}, align: align, relocs: [LIRDataReloc]{}},
     }
     LIRModule{signatures: signatures, functions: [LIRFunction]{lir_builder_finish(r), lir_builder_finish(c)}, data: data, debug: lir_module_debug_none()}
 }

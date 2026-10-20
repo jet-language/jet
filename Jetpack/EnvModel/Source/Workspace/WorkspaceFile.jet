@@ -1,4 +1,4 @@
-// Declaration-resolved workspace evaluator (D-WORKSPACE1=B, D-WORKSPACE2=A).
+// Declaration-resolved workspace evaluator.
 //
 // Loads Package membership from the canonical `package.jet` root. During the
 // reversible split/fold migration, roots that have not yet folded membership
@@ -35,7 +35,7 @@ impl AuthorityError -> EnvModelEvalError {
 // file declares an index (an authority-only source is not an index); an error
 // when a declaring file exists but is malformed.
 //
-// D-JPK-FILENAME2=B (A2): `module workspace { … }` is discovered by
+// (A2): `module workspace { … }` is discovered by
 // declaration and may live in any top-level `.jet` file. The shared resolver
 // owns candidate scanning, ambiguity, and source I/O diagnostics.
 // The caller owns the session cache and shares it with discovery and lock I/O.
@@ -139,7 +139,7 @@ fn envmodel_workspace_evaluate(src: String, base_dir: String) -[FS, Env, Exec, T
 
 // Evaluate a resolved source according to its classified role. Arbitrary
 // authority modules contribute policy and a boundary only; they never become
-// the D-WORKSPACE2 member index.
+// the member index.
 fn envmodel_workspace_evaluate_source(src: String, base_dir: String, role: WorkspaceSourceRole) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
     resolver :: AuthorityResolver.open(base_dir)
     envmodel_workspace_evaluate_with_resolver(src, base_dir, role, resolver)
@@ -291,7 +291,7 @@ struct WorkspaceMemberIdentity {
     canonical_path: String
 }
 
-// D-ECO membership law: member paths are physical identities inside the root,
+// Membership law: member paths are physical identities inside the root,
 // names are unique, and a member cannot introduce another member list.
 fn envmodel_workspace_validate_member_path(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS]> WorkspaceMemberIdentity EnvModelEvalError! {
     if envmodel_workspace_escapes_root(rel_path) {
@@ -415,7 +415,7 @@ fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: Strin
 
     // General case: evaluate through comptime and expect a list of strings.
     // The workspace lock records every Tier-1 input (`embed_file`,
-    // `embed_bytes`, `find`, `fetch`) the expression reads (D-CTEFFECT1), and
+    // `embed_bytes`, `find`, `fetch`) the expression reads and
     // the comptime bridge does not report its reads yet, so an expression
     // that reaches one is refused rather than locked without its inputs.
     span :: expr_span(expr)

@@ -15,7 +15,7 @@
 # area, and another writer's unfinished area cannot break an unrelated proof.
 # JETPACK_WORKER gives each concurrent writer its own scratch directory.
 #
-# `--hosted` assembles every implementation file plus Jetpack/main.jet
+# `--hosted` assembles every implementation file plus Jetpack/run.jet
 # (`node Jetpack/Bootstrap/assemble.mjs hosted`) and builds the standalone
 # engine with `jet build`; the receipt records the binary's path and sha256.
 #
@@ -200,7 +200,7 @@ unit_record() {
 overall=0
 if (( hosted == 1 )); then
   # The standalone engine: one native `jet build` of every implementation file
-  # plus Jetpack/main.jet. The binary is the project's build output.
+  # plus Jetpack/run.jet. The binary is the project's build output.
   node "$bootstrap/assemble.mjs" hosted
   unit_record hosted
   bounded hosted "${JETPACK_HOSTED_MEM:-20G}" "${JETPACK_HOSTED_SECS:-5400}" "$scratch/hosted/project" "$jet" build src/jetpack.jet || overall=1

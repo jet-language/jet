@@ -86,7 +86,7 @@ fn provider_source_cache_dir(store_dir: String, remote: RemoteSource) -> String 
     files.join(root, provider_prefix(key, 16))
 }
 
-// D-ILE1: infer a package's kind from its source. A staged, non-empty `bin/`
+// Infer a package's kind from its source. A staged, non-empty `bin/`
 // or a top-level `fn run` in any `.jet` file means executable; otherwise
 // library. Sources are lexed, so `fn run` in a comment or string never counts.
 fn provider_infer_package_kind(dir: String) -[FS]> PackageKind Never! {
@@ -142,8 +142,6 @@ fn provider_member_dirs_from_listing(listing: String) -> [String] Never! {
         dir := ""
         if path.ends_with("/{PACKAGE_FILE}") {
             dir = path.removesuffix("/{PACKAGE_FILE}")
-        } else if path.ends_with("/{PAYLOAD_FILE}") {
-            dir = path.removesuffix("/{PAYLOAD_FILE}")
         }
         if dir != "" && !out.contains(dir) -> &out.push(dir)
     }

@@ -104,13 +104,11 @@ use jet_lexer.[
     TOKEN_KW_TAG,
     TOKEN_KW_TRAIT,
     TOKEN_KW_USE,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
     TOKEN_LT,
     TOKEN_MINUS,
-    TOKEN_MINUS_MINUS,
     TOKEN_PIPE,
     TOKEN_RAW_STRING,
     TOKEN_RBRACE,
@@ -121,7 +119,6 @@ use jet_lexer.[
     TOKEN_SLASH,
     TOKEN_STAR,
     TOKEN_STRING,
-    TOKEN_TILDE_TILDE,
     TOKEN_UNIFIED_ARROW,
     Token,
 ]
@@ -138,9 +135,9 @@ struct ParsedItemModifiers {
     is_comptime: Bool
     markers: [Marker]
     start_span: Span
-    // D-TAINT-SAN: the retired bare `sanitizer` word before `fn` (E0059).
+    // The retired bare `sanitizer` word before `fn` (E0059).
     is_sanitizer: Bool{false}
-    // D-MOD4: `pub use` re-exports (the only remaining `pub`, ballot pending).
+    // `pub use` re-exports (the only remaining `pub`, ballot pending).
     reexport: Bool{false}
     // The markers came from at least one `#[…]` list (Rust's grouped marker path).
     grouped_markers: Bool{false}
@@ -163,8 +160,8 @@ fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
     token.kind == TOKEN_IDENT && parser_value(state, token) == "policy"
 }
 
-// D-STRUCT-POLICY1=A: `policy name(params…) { wrap(call) { … } }`, public
-// like every declaration (D-VIS-MODULE1); a retired `pub` is E0411.
+// `policy name(params…) { wrap(call) { … } }`, public
+// like every declaration a retired `pub` is E0411.
 fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     if parser_current_kind(&state) == TOKEN_KW_PUB {
         word :: parser_bump(&state)
@@ -277,11 +274,9 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             value :: parser_parse_template_loop(&state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
-        // D-PREP-SURFACE2=A: an ALL_CAPS `NAME :: value` (or a retired
-        // `@name ::`) in an inline module body is a module constant (Rust
-        // `top_level_item_in_code_module`); file scope routes it as a module
-        // binding before reaching here.
-        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) || parser_known_ahead_at(&state, 0) -> {
+        // An ALL_CAPS `NAME :: value` in an inline module body is a module
+        // constant; file scope routes it as a module binding before reaching here.
+        parser_marked_const_ahead(&state, 0) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -296,10 +291,6 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         token.kind == TOKEN_KW_ENUM -> {
             value :: parser_parse_enum(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Enum{value: value}), import: None, handled: true}
-        }
-        token.kind == TOKEN_KW_CONST || token.kind == TOKEN_KW_COMPTIME || (modifiers.is_comptime && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ) -> {
-            value :: parser_parse_const(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
         token.kind == TOKEN_KW_TRAIT -> {
             value :: parser_parse_trait(&state, modifiers)
@@ -347,7 +338,7 @@ fn parser_report_repeated_state_section(state: &JetParserState, section: StateDe
     parser_add_error_code(&state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "The state set is one erased fact row owned by the struct", "Merge the state names into one `state {{ … }}` section")
 }
 
-// D-VIS-MODULE1 (card #4723): declarations are public by default. `priv` and
+// (card #4723): declarations are public by default. `priv` and
 // `priv(package)` mark a module (`item_visibility`) or a field (members);
 // `pub`, `pub(…)`, `private`, and `priv` on any other declaration are reported
 // with a fix that deletes them, and the declaration parses as if they were absent.
@@ -365,7 +356,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     loop {
         kind := parser_current_kind(&state)
         if kind == TOKEN_KW_PUB && item_visibility && (parser_kind_at(&state, 1) == TOKEN_KW_USE || (parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 4) == TOKEN_KW_USE)) {
-            // D-MOD4: `pub use` stays the re-export spelling; a `pub(…)`
+            // `pub use` stays the re-export spelling; a `pub(…)`
             // qualifier on it was removed (E0411) and is deleted.
             parser_bump(&state)
             if parser_current_kind(&state) == TOKEN_LPAREN {
@@ -436,16 +427,8 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             is_package_pub = package
             next
         }
-        // D-TAINT-SAN: a bare `sanitizer fn` is the retired spelling of the
-        // taint-strip modifier (E0059); the function still strips taint.
-        if item_visibility && kind == TOKEN_IDENT && parser_value_at(&state, 0) == "sanitizer" && (parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_kind_at(&state, 1) == TOKEN_KW_PUB) {
-            word :: parser_bump(&state)
-            parser_add_error_code(&state, "E0059", word.span, "the taint-strip modifier is written `#Scrub(Tag)`, not bare `sanitizer`", "`#Scrub(Tag)` names the exact fact removed by the function", "write: #Scrub(Tag) fn name() {{ ... }}")
-            is_sanitizer = true
-            next
-        }
         if kind == TOKEN_HASH {
-            if parser_item_declaration_ahead_at(&state, 0) || parser_known_ahead_at(&state, 0) -> break
+            if parser_item_declaration_ahead_at(&state, 0) -> break
             if parser_kind_at(&state, 1) == TOKEN_LBRACKET {
                 group :: parser_parse_marker_group_list(&state)
                 if marker_chunks == 0 -> sequence.start = group.span.start
@@ -454,7 +437,6 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
                 bracket_chunks += 1
                 loop marker in group.markers {
                     &markers.push(marker)
-                    if marker.name == "Comptime" -> is_comptime = true
                 }
                 next
             }
@@ -463,7 +445,6 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             sequence.end = marker.span.end
             marker_chunks += 1
             &markers.push(marker)
-            if marker.name == "Comptime" -> is_comptime = true
             // Rust `parse_attached_marker_sequence`: a marker on its own line
             // still attaches to the declaration below.
             parser_skip_semicolons(&state)
@@ -587,7 +568,7 @@ fn parser_parse_import(state: &JetParserState) -> ImportDecl {
                 if kind == TOKEN_RBRACE -> brace_depth -= 1
                 parser_bump(&state)
             }
-            parser_add_error(&state, open.span, "brace import groups are not supported", "the braced grouped-import suffix is retired", "write a bracketed member list instead")
+            parser_add_error(&state, open.span, "brace import groups are not supported", "imports group members in brackets", "write a bracketed member list instead")
             parser_finish_statement(&state)
             end := parser_lookahead(&state, -1).span
             return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start.span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
@@ -694,21 +675,11 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
         parser_type_close_here(&state) -> parser_add_error_here(&state, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
         else -> {
             loop {
-                // D-CONSTGEN2=A: `prep N: Int` declares a compile-time number
+                // `prep N: Int` declares a compile-time number
                 // parameter; `<prep>` and `<prep: Trait>` stay type parameters.
                 if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "prep" && parser_kind_at(&state, 1) == TOKEN_IDENT {
                     prep_head :: parser_bump(&state)
-                    &params.push(parser_parse_prep_param(&state, prep_head.span, false))
-                    if parser_type_close_here(&state) -> break
-                    if parser_current_kind(&state) != TOKEN_COMMA -> break
-                    parser_bump(&state)
-                    if parser_type_close_here(&state) -> break
-                    next
-                }
-                // The retired D-CONSTGEN1 spelling `<@N: Int>` teaches E0389 once.
-                if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0).starts_with("@") && parser_kind_at(&state, 1) == TOKEN_COLON {
-                    retired_start :: parser_current(&state).span
-                    &params.push(parser_parse_prep_param(&state, retired_start, true))
+                    &params.push(parser_parse_prep_param(&state, prep_head.span))
                     if parser_type_close_here(&state) -> break
                     if parser_current_kind(&state) != TOKEN_COMMA -> break
                     parser_bump(&state)
@@ -736,22 +707,17 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
     params
 }
 
-// D-CONSTGEN2=A: parse `N: Int` after `prep` (or the retired `@N: Int`, which
-// teaches E0389) into the typed number-parameter slot.
-fn parser_parse_prep_param(state: &JetParserState, prep_span: Span, retired: Bool) -> TypeParam {
+// Parse `N: Int` after `prep` into the typed number-parameter slot.
+fn parser_parse_prep_param(state: &JetParserState, prep_span: Span) -> TypeParam {
     name :: parser_expect_name(&state, "for a number parameter name")
-    written :: parser_value(state, name)
-    param_name :: if retired -> written.slice(1, written.len()) else -> written
-    name_span :: if retired -> Span{start: name.span.start + 1, end: name.span.end} else -> name.span
-    if retired {
-        parser_add_error_code(&state, "E0389", name.span, "`{written}` marks a number parameter with the retired `@` mark", "only the declaration carries `prep`; every use writes the plain name `{param_name}`", "write `prep {param_name}` in the parameter list")
-    }
+    param_name :: parser_value(state, name)
+    name_span :: name.span
     parser_expect(&state, TOKEN_COLON, "`:` after a number parameter name")
     value_type :: parser_expect_name(&state, "for the number parameter type")
     TypeParam{name: param_name, name_span: name_span, bounds: [String]{}, prep: Val(PrepParam{prep_span: prep_span, value_type: parser_value(state, value_type), value_type_span: value_type.span})}
 }
 
-// D-APILABEL1=A: `/` closes the positional-only zone and `*` opens the
+// `/` closes the positional-only zone and `*` opens the
 // label-only zone; each appears at most once, `/` before `*`, and neither
 // may mark an empty zone (E0763).
 fn parser_parse_param_list(state: &JetParserState) -> [Param] {
@@ -812,7 +778,7 @@ fn parser_parse_param_list(state: &JetParserState) -> [Param] {
     params
 }
 
-// D-APILABEL1=A: a parameter's call label is its public label when written,
+// A parameter's call label is its public label when written,
 // else its name; two parameters may not publish the same one (E0770).
 fn parser_validate_param_labels(state: &JetParserState, params: [Param]) {
     loop index in 0..<params.len() {
@@ -832,7 +798,7 @@ fn parser_validate_param_labels(state: &JetParserState, params: [Param]) {
     }
 }
 
-// D-VARIADIC1: a `name: ...T` rest parameter collects every trailing
+// A `name: ...T` rest parameter collects every trailing
 // argument, so it is last and has no default (E1310).
 fn parser_validate_variadic_params(state: &JetParserState, params: [Param]) {
     loop index in 0..<params.len() {
@@ -868,7 +834,7 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
         else -> {}
     }
     name := if parser_current_kind(&state) == TOKEN_SELF -> parser_bump(&state) else -> parser_expect_name(&state, "for a parameter name")
-    // D-METHOD-FOOTPRINT1=A: an expert receiver may state its field footprint
+    // An expert receiver may state its field footprint
     // with a field or the ratified member spread: `&self.log`,
     // `&self.[log, hits]`. A consuming `^self` takes the whole value.
     declared_footprint := [NamedSpan]?{None}
@@ -963,9 +929,8 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
             }
         }
     }
-    // D-MEMPROVENANCE3=A: an optional `from src (| src)*` follows the type,
-    // then the D-DEFAULT-SHAPE1=B default `{expr}`; the retired `= expr`
-    // default is read once to teach E0385.
+    // An optional `from src (| src)*` follows the type,
+    // then the default `{expr}`.
     declared_from := [String]?{None}
     if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "from" && (parser_kind_at(&state, 1) == TOKEN_IDENT || parser_kind_at(&state, 1) == TOKEN_SELF) {
         parser_bump(&state)
@@ -999,11 +964,6 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
             default = Val(parser_parse_expression(&state, 1, 0).expr)
             parser_expect(&state, TOKEN_RBRACE, "`}}` after the parameter default")
         }
-        parser_current_kind(&state) == TOKEN_EQ -> {
-            eq :: parser_bump(&state)
-            parser_add_error_code(&state, "E0385", eq.span, "This declaration uses the retired `name: Type = value` default spelling.", "Declaration defaults ride the type as `name: Type{{value}}`; `=` remains for reassignment and extern slot fill.", "Write `name: Type{{value}}` for a declaration default, or keep `=` for reassignment and extern slot fill.")
-            default = Val(parser_parse_expression(&state, 1, 0).expr)
-        }
         else -> {}
     }
     if variadic && default != None {
@@ -1021,12 +981,9 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     func_name := if name.kind == TOKEN_KW_COPY -> parser_text(state, name) else -> parser_value(state, name)
     func_name_span := name.span
     external_type := NamedSpan?{None}
-    // Rust `func_after_fn`: `fn Type.method(` attaches an external method;
-    // the retired `~~` connector teaches E0325 and recovers the same way.
-    connector :: parser_current_kind(&state)
-    if connector == TOKEN_DOT || (connector == TOKEN_TILDE_TILDE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN) {
-        separator :: parser_bump(&state)
-        if separator.kind == TOKEN_TILDE_TILDE -> parser_add_error_code(&state, "E0325", separator.span, "external methods attach with `.`, not `~~`", "the dot connector matches trait impls and ordinary member access", "write `fn {func_name}.method(...)`")
+    // `fn Type.method(` attaches an external method.
+    if parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
         method :: parser_expect_name(&state, "after `.` in an external method name")
         external_type = Val(NamedSpan{name: func_name, span: name.span})
         func_name = parser_value(state, method)
@@ -1067,20 +1024,14 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     effect_via := signature.via
     declared_return_view :: parser_parse_opt_declared_view_from(&state, parser_view_owner_names(params))
     post_effect := false
-    if declared_effects == None && effect_via == None && parser_func_effect_starts_here(&state) {
-        // D-SIG-AFTER1=A (card #4512): `-> T -[E]>` writes two arrows; the
-        // result follows the one effect arrow instead (E0068).
-        if signature.plain_arrow && parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
-            arrow_span :: parser_current(&state).span
-            parser_add_error_code(&state, "E0068", arrow_span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
-        }
+    if declared_effects == None && effect_via == None && !signature.plain_arrow && parser_func_effect_starts_here(&state) {
         post_effect = true
         effects :: parser_parse_opt_func_effects(&state)
         declared_effects = effects.effects
         effect_via = effects.via
     }
     effect_body_marker :: post_effect || (return_type == None && (declared_effects != None || effect_via != None) && signature.prefix_effect)
-    // D-SIG-SHAPE1=B: the colon before a bare result is not a signature form.
+    // The colon before a bare result is not a signature form.
     if parser_current_kind(&state) == TOKEN_COLON {
         colon :: parser_bump(&state)
         if !parser_aborting(&state) {
@@ -1099,17 +1050,17 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     is_ffi :: loop applied in modifiers.markers {
         if applied.name == "FFI" -> break true
     } ?? false
-    // D-SIG-AFTER1=A (card #4512): a named function has one arrow, before its
+    // (card #4512): a named function has one arrow, before its
     // result, and a braced body. A body `->` after the result, or an
     // expression right after the arrow, is E0080 and recovers to the same
-    // body; the retired `=>` / `::` / `=` markers keep their own codes. An
+    // body. An
     // `#FFI` function's body is its foreign source instead. A trait slot
     // (`body_required` false) has no effect-arrow body, as Rust
     // `trait_method_sig`: `fn f() Never! -[FS]>` ends a bodiless requirement.
     marker_kind :: parser_current_kind(&state)
     marker_span :: parser_current(&state).span
-    effect_body :: body_required && !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
-    teach_arrow_body :: !guest_import && !signature.retired_shape
+    effect_body :: body_required && !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
+    teach_arrow_body :: !guest_import
     arrow_marker :: !is_ffi && !effect_body && teach_arrow_body && marker_kind == TOKEN_UNIFIED_ARROW
     body_marker :: if {
         is_ffi -> false
@@ -1195,7 +1146,7 @@ fn parser_marker_is_c_guest_import(marker: Marker) -> Bool Never! {
     false
 }
 
-// D-ADOPT-GUEST1=A (Rust `guest_import_fn_from_markers`): the one string body
+// (Rust `guest_import_fn_from_markers`): the one string body
 // of an `#Import(c)` function names its C symbol. The symbol moves into the
 // marker's compile-time fact and the Jet body is cleared, so it never reaches
 // expression checking or codegen.
@@ -1249,84 +1200,42 @@ struct ParsedCallableResult {
     effects: [EffectRowEntry]?
     via: NamedSpan?
     prefix_effect: Bool
-    // A retired bare result before the arrow (E0068) already teaches the
-    // whole `-> Type { … }` shape; the arrow-body codes stay quiet then.
-    retired_shape: Bool
     // The result follows a plain `->` (not an effect arrow or a bare `E!`).
     plain_arrow: Bool
 }
 
-// The start of an effect arrow: canonical `-[`, or a retired `:[`, `=[`,
-// `#(` or `--` that is still read so it can be taught (E0066).
+// The start of an effect arrow `-[`.
 fn parser_func_effect_starts_here(state: &JetParserState) -> Bool Never! {
-    first :: parser_current_kind(&state)
-    second :: parser_kind_at(&state, 1)
-    ((first == TOKEN_MINUS || first == TOKEN_COLON || first == TOKEN_EQ) && second == TOKEN_LBRACKET) || (first == TOKEN_HASH && second == TOKEN_LPAREN) || first == TOKEN_MINUS_MINUS
+    parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET
 }
 
-fn parser_report_retired_effect_syntax(state: &JetParserState, span: Span) {
-    parser_add_error_code(&state, "E0066", span, "this function uses the retired effect-arrow spelling", "callable results use `->`, and an explicit effect ceiling uses the same arrow", "write `-[Effects]>`; use `-[]>` for an explicit purity bound")
-}
-
-// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-RESPELL1: the effect arrow after a
+// The effect arrow after a
 // callable's parameters, a declared bound `-[Net, DB]>` or the `-[via f]>`
 // pass-through. Both halves are None when no effect arrow starts here.
 fn parser_parse_opt_func_effects(state: &JetParserState) -> ParsedFuncEffects {
     first :: parser_current_kind(&state)
     second :: parser_kind_at(&state, 1)
-    canonical :: first == TOKEN_MINUS && second == TOKEN_LBRACKET
-    retired_colon :: first == TOKEN_COLON && second == TOKEN_LBRACKET
-    retired_eq :: first == TOKEN_EQ && second == TOKEN_LBRACKET
-    retired_hash :: first == TOKEN_HASH && second == TOKEN_LPAREN
-    if !canonical && !retired_colon && !retired_eq && !retired_hash && first != TOKEN_MINUS_MINUS -> return ParsedFuncEffects{effects: None, via: None}
-    start :: parser_bump(&state)
-    if !canonical -> parser_report_retired_effect_syntax(&state, start.span)
-    close :: if retired_hash -> TOKEN_RPAREN else -> TOKEN_RBRACKET
-    close_arrow :: if {
-        canonical || retired_colon -> TOKEN_GT
-        retired_eq -> TOKEN_LAMBDA_ARROW
-        else -> TOKEN_UNIFIED_ARROW
-    }
-    if retired_hash {
-        parser_expect(&state, TOKEN_LPAREN, "`(` to start an effect row")
-    } else {
-        parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
-    }
-    close_text :: if retired_hash -> "`)` to close the effect row" else -> "`]` to close the effect row"
+    if first != TOKEN_MINUS || second != TOKEN_LBRACKET -> return ParsedFuncEffects{effects: None, via: None}
+    parser_bump(&state)
+    parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
+    close :: TOKEN_RBRACKET
+    close_text :: "`]` to close the effect row"
     via :: parser_current(&state)
     if via.kind == TOKEN_IDENT && parser_value(state, via) == "via" {
         parser_bump(&state)
         param :: parser_expect_name(&state, "for the callback parameter name after `via`")
         parser_expect(&state, close, close_text)
-        parser_finish_effect_arrow(&state, close_arrow, retired_hash, canonical, start.span)
+        parser_expect(&state, TOKEN_GT, "`>` after the effect row")
         return ParsedFuncEffects{effects: None, via: Val(NamedSpan{name: parser_value(state, param), span: param.span})}
     }
     effects :: parser_parse_effect_row_entries(&state, close)
     parser_expect(&state, close, close_text)
-    parser_finish_effect_arrow(&state, close_arrow, retired_hash, canonical, start.span)
+    parser_expect(&state, TOKEN_GT, "`>` after the effect row")
     ParsedFuncEffects{effects: Val(effects), via: None}
 }
 
-fn parser_finish_effect_arrow(state: &JetParserState, close_arrow: Int, retired_hash: Bool, canonical: Bool, start: Span) {
-    if retired_hash {
-        if parser_at_unified_arrow(&state) -> parser_bump(&state)
-        return
-    }
-    if parser_current_kind(&state) == TOKEN_GT {
-        parser_bump(&state)
-        return
-    }
-    if canonical && parser_at_unified_arrow(&state) {
-        parser_bump(&state)
-        parser_report_retired_effect_syntax(&state, start)
-        return
-    }
-    arrow_text :: if close_arrow == TOKEN_LAMBDA_ARROW -> "`=>`" else -> "`->`"
-    _ := parser_expect(&state, close_arrow, "{arrow_text} after the effect row")
-}
-
 // The entries of an effect row up to (not including) `close`: effect paths,
-// `!Effect` prohibitions (D-PROP2=A) and `..Name` open rows.
+// `!Effect` prohibitions and `..Name` open rows.
 fn parser_parse_effect_row_entries(state: &JetParserState, close: Int) -> [EffectRowEntry] {
     effects := [EffectRowEntry]{}
     loop parser_current_kind(&state) != close && !parser_aborting(&state) {
@@ -1351,7 +1260,7 @@ fn parser_parse_effect_row_entries(state: &JetParserState, close: Int) -> [Effec
     effects
 }
 
-// D-EFFTREE1 / D-AUTHORITY-MEM2: an effect path `ident (.ident)*`; the one
+// An effect path `ident (.ident)*`; the one
 // parameterized entry is the bounded memory denial `Mem.Alloc(above: N)`.
 fn parser_expect_effect_path_name(state: &JetParserState) -> NamedSpan {
     first :: parser_expect_name(&state, "for an effect name")
@@ -1391,7 +1300,7 @@ fn parser_expect_effect_path_name(state: &JetParserState) -> NamedSpan {
 
 fn parser_type_starts_here(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
-    kind == TOKEN_BANG || parser_type_starts(kind)
+    parser_type_starts(kind)
 }
 
 fn parser_is_unit_fallible(ty: Type) -> Bool Never! {
@@ -1399,22 +1308,16 @@ fn parser_is_unit_fallible(ty: Type) -> Bool Never! {
     false
 }
 
-// D-TYPE-SUFFIX1=A: a unit-fallible result written after the parameters
-// (`IOError!`, `(A | B)!`); a retired prefix `!IOError` is read to teach it.
+// A unit-fallible result written after the parameters
+// (`IOError!`, `(A | B)!`).
 fn parser_parse_unit_fallible_return(state: &JetParserState) -> ParsedType? {
     start :: parser_current(&state).span
-    if parser_current_kind(&state) != TOKEN_BANG && parser_suffix_contract_ahead(&state) < 0 -> return None
-    error_type :: if {
-        parser_current_kind(&state) == TOKEN_BANG -> {
-            bang :: parser_bump(&state)
-            parser_parse_retired_prefix_error(&state, bang.span, 1)
-        }
-        else -> parser_parse_suffix_contract(&state, 1)
-    }
+    if parser_suffix_contract_ahead(&state) < 0 -> return None
+    error_type :: parser_parse_suffix_contract(&state, 1)
     Val(ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: error_type.ty}, span: parser_cover(start, error_type.span)})
 }
 
-// D-SIG-AFTER1=A: a result after `->` or `-[E]>` is a type only when a
+// A result after `->` or `-[E]>` is a type only when a
 // declaration-body boundary follows it, so `-> n * 2` stays an expression.
 fn parser_result_type_follows_arrow(state: &JetParserState) -> Bool {
     saved_position :: state.position
@@ -1428,9 +1331,9 @@ fn parser_result_type_follows_arrow(state: &JetParserState) -> Bool {
     failed :: parser_aborting(&state) && state.abort_mark > saved_diagnostics
     next :: parser_current(&state)
     kind :: next.kind
-    // `-> T -[E]>` also ends the result: a second (effect) arrow, E0068 at the
-    // caller. A one-line trait slot ends at the enclosing `}`.
-    boundary :: kind == TOKEN_COLON_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW || kind == TOKEN_SEMI || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || (kind == TOKEN_LBRACE && parsed.span.end < next.span.start) || (kind == TOKEN_IDENT && parser_value(state, next) == "from") || (kind == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET) || kind == TOKEN_RBRACE
+    // `-> T -[E]>` also ends the result: a second (effect) arrow. A one-line
+    // trait slot ends at the enclosing `}`.
+    boundary :: kind == TOKEN_COLON_COLON || kind == TOKEN_EQ || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_SEMI || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || (kind == TOKEN_LBRACE && parsed.span.end < next.span.start) || (kind == TOKEN_IDENT && parser_value(state, next) == "from") || (kind == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET) || kind == TOKEN_RBRACE
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     state.pending_type_gt = saved_type_gt
     state.pending_type_gt_span = saved_type_gt_span
@@ -1438,15 +1341,13 @@ fn parser_result_type_follows_arrow(state: &JetParserState) -> Bool {
     !failed && boundary
 }
 
-// D-SIG-AFTER1=A: the result after the one arrow. Current forms are `-> T`,
-// `-[E]> T`, unit `-[E]>` and unit-fallible `E!`; a bare type after `)` is
-// the retired shape (E0068). A `->` with no type after it is left for the
+// The result after the one arrow. Current forms are `-> T`,
+// `-[E]> T`, unit `-[E]>` and unit-fallible `E!`. A `->` with no type after it is left for the
 // body parser, so `fn f() -> expr` still reads as a one-line body.
 fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult {
     prefix_effect :: parser_func_effect_starts_here(&state)
     effects :: parser_parse_opt_func_effects(&state)
     arrow_return := false
-    retired_shape := false
     plain_arrow := false
     result := ParsedType?{None}
     if {
@@ -1473,12 +1374,6 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
         }
         else -> {
             result = parser_parse_unit_fallible_return(&state)
-            if !parser_has_type(result) && parser_type_starts_here(&state) {
-                parsed :: parser_parse_type(&state, 0)
-                parser_add_error_code(&state, "E0068", parsed.span, "this callable puts the return type before the arrow", "a return type follows the one arrow, and a named function body uses braces", "write `fn name(...) -> Type {{ … }}`")
-                retired_shape = true
-                result = Val(parsed)
-            }
         }
     }
     return_type := Type?{None}
@@ -1487,16 +1382,15 @@ fn parser_parse_callable_result(state: &JetParserState) -> ParsedCallableResult 
         return_type = Val(parsed.ty)
         return_type_span = Val(parsed.span)
         if arrow_return && parser_is_unit_fallible(parsed.ty) {
-            parser_add_error_code(&state, "E0003", parsed.span, "this unit-fallible signature uses the retired arrow-and-unit form", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
+            parser_add_error_code(&state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `fn save(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
-    ParsedCallableResult{return_type: ^return_type, return_type_span: ^return_type_span, effects: effects.effects, via: effects.via, prefix_effect: ^prefix_effect, retired_shape: retired_shape, plain_arrow: plain_arrow}
+    ParsedCallableResult{return_type: ^return_type, return_type_span: ^return_type_span, effects: effects.effects, via: effects.via, prefix_effect: ^prefix_effect, plain_arrow: plain_arrow}
 }
 
 // The marker that opens a recovered one-line function body. A `->` here is
-// E0080 at the caller (card #4512); `=>` teaches `->` (E0070) and `::` / `=`
-// teach braces (E0065), except that an `#Import(c)` function binds its C
-// symbol with `=`, where a `->` is the wrong marker (E3261).
+// E0080 at the caller; an `#Import(c)` function binds its C symbol with `=`,
+// where a `->` is the wrong marker (E3261).
 fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool) -> Bool {
     token :: parser_current(&state)
     if token.kind == TOKEN_UNIFIED_ARROW {
@@ -1506,26 +1400,17 @@ fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool)
         }
         return true
     }
-    if token.kind == TOKEN_LAMBDA_ARROW {
-        parser_bump(&state)
-        parser_report_retired_arrow(&state, token.span)
-        return true
-    }
-    if token.kind != TOKEN_COLON_COLON && token.kind != TOKEN_EQ -> return false
+    if token.kind != TOKEN_EQ || !guest_import -> return false
     parser_bump(&state)
-    if token.kind == TOKEN_COLON_COLON || !guest_import {
-        marker_text :: parser_text(state, token)
-        parser_add_error_code(&state, "E0065", token.span, "This function uses the retired `{marker_text}` body marker.", "Named function bodies use braces. `::` binds a name, and `=` fills a slot inside a definition.", "Replace `{marker_text}` with `{{ … }}`; `jet fmt` applies this fix.")
-    }
     true
 }
 
-// D-SIG-AFTER1=A (card #4512): E0080 for a named function body after an arrow.
+// (card #4512): E0080 for a named function body after an arrow.
 fn parser_report_arrow_function_body(state: &JetParserState, span: Span) {
     parser_add_error_code(&state, "E0080", span, "This named function body follows an arrow instead of braces.", "A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `fn name(...) -> Type {{ … }}`.", "Replace `-> expr` with `{{ expr }}`; `jet fmt` applies this fix.")
 }
 
-// D-FFI-INLINE1=A (card #501): a `#FFI(<lang>) fn` body is exactly one
+// (card #501): a `#FFI(<lang>) fn` body is exactly one
 // non-interpolated string of foreign source; anything else is E0064. The
 // braced body follows the one arrow and its result; a second `->` is E0080.
 fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -> InlineForeign? {
@@ -1556,7 +1441,7 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -
     if source.kind == TOKEN_STRING || source.kind == TOKEN_RAW_STRING -> parser_bump(&state)
     if !plain {
         error_span :: if source.kind == TOKEN_STRING -> source.span else -> ffi.span
-        parser_add_fatal_code(&state, "E0064", error_span, "a `#FFI({lang})` function body must be one string of {lang} source", "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract (D-FFI-INLINE1)", "write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation")
+        parser_add_fatal_code(&state, "E0064", error_span, "a `#FFI({lang})` function body must be one string of {lang} source", "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract", "write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation")
         return None
     }
     parser_skip_semicolons(&state)
@@ -1564,7 +1449,7 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -
     Val(InlineForeign{lang: lang, lang_span: lang_span, marker_span: ffi.span, source: parser_value(state, source), source_span: source.span})
 }
 
-// D-MEMPROVENANCE3=A: an optional `from src (| src)*` or `from (slot: srcs, …)`
+// An optional `from src (| src)*` or `from (slot: srcs, …)`
 // after a return type. A source names one of `owners` (the non-`self`
 // parameters, by position), the receiver `self`, or `static.path.Name`,
 // optionally projected through fields.
@@ -1716,13 +1601,13 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
                     func.must_use_span = Val(marker.span)
                 }
             }
-            // D-TAG-SURFACE1=A: `#Scrub(Tag)` names the one fact tag removed.
+            // `#Scrub(Tag)` names the one fact tag removed.
             "Scrub" -> {
                 if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) {
                     if values[0] == .Val(written) && written == .Ident(name, _) -> func.scrub_tag = Val(name)
                 }
             }
-            // D-METHODMACRO1=A: bare `#Inline` is a hint; `#Inline(Always)`
+            // Bare `#Inline` is a hint; `#Inline(Always)`
             // is the checked promise. A written `Hint` or `Never` mode is
             // E0930 here (Rust `apply_callable_markers`); sema's menu check
             // reports any other value.
@@ -1742,7 +1627,7 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
                     else -> func.is_inline = true
                 }
             }
-            // D-PREPOST1 (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
+            // (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
             // `#Post(cond, msg)` become the function's contract clauses; both
             // arguments are required.
             "Pre" -> parser_project_contract_marker(&state, &func, marker, true)
@@ -1750,7 +1635,7 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             else -> {}
         }
     }
-    // D-TASKS-LIST1=A: `#Job` metadata and its `#Every` schedule (E0925).
+    // `#Job` metadata and its `#Every` schedule (E0925).
     _ := parser_project_function_job_markers(&state, &func, markers)
 }
 
@@ -1776,7 +1661,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
     // Rust `attach_type_markers`: the markers, the derives and serde markers
-    // they request, the package auto-derive default (D-AUTODERIVE1=E) and the
+    // they request, the package auto-derive default and the
     // SingleUse/MustUse/PublishedSchema facts.
     parser_apply_struct_type_markers(&value, modifiers.markers)
     value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
@@ -1802,7 +1687,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
             next
         }
         if parser_take_prep_fn(&state) -> member_modifiers.is_comptime = true
-        // D-CLI-GLOBAL1=E (Rust `cli_binding_starts_here` / `cli_binding`):
+        // (Rust `cli_binding_starts_here` / `cli_binding`):
         // `name = callable` binds a program-struct command to a function; it
         // is a command member, never a stored field.
         if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ {
@@ -1813,7 +1698,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
             if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
             next
         }
-        // D-VALIDATE1 (Rust `at_validate_block` / `validate_block`):
+        // (Rust `at_validate_block` / `validate_block`):
         // `validate { … }` holds the struct's rule statements as an ordinary
         // block; sema restricts and synthesizes them (sema_validate_blocks).
         if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_value(state, parser_current(&state)) == "validate" {
@@ -1829,7 +1714,6 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 &value.methods.push(method.value)
             }
             TOKEN_KW_IMPL -> &value.trait_impls.push(parser_parse_trait_impl_block(&state))
-            TOKEN_KW_DERIVE -> parser_report_retired_derive_line(&state)
             else -> {
                 field_markers := member_modifiers.markers
                 field_pub := member_modifiers.is_pub
@@ -1841,7 +1725,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 default := Expr?{None}
                 default_kind := parser_current_kind(&state)
                 if {
-                    // D-FIELDPOL1: `name: T -> expr` is a computed field;
+                    // `name: T -> expr` is a computed field;
                     // sema rewrites sibling field names to `self.<field>`.
                     parser_at_unified_arrow(&state) -> {
                         parser_bump(&state)
@@ -1919,7 +1803,6 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
         kind :: parser_current_kind(&state)
         markers :: if kind == TOKEN_HASH -> parser_parse_variant_markers(&state) else -> [Marker]{}
         if {
-            kind == TOKEN_KW_DERIVE -> parser_report_retired_derive_line(&state)
             kind == TOKEN_KW_IMPL -> &value.trait_impls.push(parser_parse_trait_impl_block(&state))
             else -> parser_parse_variant_entry(&state, "", &value, markers)
         }
@@ -1941,7 +1824,7 @@ fn parser_parse_type_method(state: &JetParserState) -> Func {
     parser_parse_function(&state, modifiers, true).value
 }
 
-// D-SERDE5/7 + D-SHAPE2: the markers on one variant, bare `#Name` markers or
+// 7 + the markers on one variant, bare `#Name` markers or
 // `#[…]` lists; two distinct rules belong in one list (E0999).
 fn parser_parse_variant_markers(state: &JetParserState) -> [Marker] {
     markers := [Marker]{}
@@ -1966,7 +1849,7 @@ fn parser_parse_variant_markers(state: &JetParserState) -> [Marker] {
     markers
 }
 
-// D-TAG1: one enum-body entry, a leaf variant or a variant group
+// One enum-body entry, a leaf variant or a variant group
 // `Name { … }`. Leaves are recorded flat with their full dotted path and each
 // group path in `groups`; groups nest to any depth. Payloads live on leaves
 // only (E0331).
@@ -1980,7 +1863,7 @@ fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &En
         parsed :: parser_parse_variant_payload(&state)
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a variant's payload")
         if parser_current_kind(&state) == TOKEN_LBRACE {
-            parser_add_error_code(&state, "E0331", parser_cover(open.span, close.span), "group `{path}` can't carry a payload", "a variant group only names its subtree — data lives on the leaf variants (D-TAG1)", "move the payload onto the leaf variants inside the `{{ }}`, or remove the `(...)`")
+            parser_add_error_code(&state, "E0331", parser_cover(open.span, close.span), "group `{path}` can't carry a payload", "a variant group only names its subtree — data lives on the leaf variants", "move the payload onto the leaf variants inside the `{{ }}`, or remove the `(...)`")
         } else {
             payload = parsed
         }
@@ -1999,7 +1882,7 @@ fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &En
     }
     parser_bump(&state)
     if markers.len() > 0 {
-        parser_add_error_code(&state, "E0003", name.span, "a `#[…]` marker can't sit on group `{path}`", "serde markers rename wire names, and only leaf variants reach the wire (D-TAG1)", "move the marker onto a leaf variant inside the `{{ }}`")
+        parser_add_error_code(&state, "E0003", name.span, "a `#[…]` marker can't sit on group `{path}`", "serde markers rename wire names, and only leaf variants reach the wire", "move the marker onto a leaf variant inside the `{{ }}`")
     }
     leaves_before :: value.variants.len()
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
@@ -2015,7 +1898,7 @@ fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &En
     parser_expect(&state, TOKEN_RBRACE, "`}}` to close the variant group")
     if parser_aborting(&state) -> return
     if value.variants.len() == leaves_before {
-        parser_add_error_code(&state, "E0003", name.span, "group `{path}` has no variants", "an empty group can never match anything — every group needs at least one leaf variant (D-TAG1)", "add a variant inside the `{{ }}`, or remove the group")
+        parser_add_error_code(&state, "E0003", name.span, "group `{path}` has no variants", "an empty group can never match anything — every group needs at least one leaf variant", "add a variant inside the `{{ }}`, or remove the group")
     }
     &value.groups.push(EnumGroup{path: path, name_span: name.span})
 }
@@ -2043,22 +1926,8 @@ fn parser_parse_variant_payload(state: &JetParserState) -> VariantPayload {
     VariantPayload.Single{ty: ty.ty, span: ty.span}
 }
 
-// D-ONCE-DERIVE1=A: a body-line `derive Trait` request is retired (E0922 for
-// `Debug`, E0929 otherwise); `derive` defines providers at item scope.
-fn parser_report_retired_derive_line(state: &JetParserState) {
-    keyword :: parser_bump(&state)
-    trait_name :: parser_expect_name(&state, "after `derive`")
-    parser_finish_statement(&state)
-    derived :: parser_value(state, trait_name)
-    if derived == "Debug" {
-        parser_add_fatal_code(&state, "E0922", keyword.span, "`derive Debug` inside a type body is retired", "signed type markers are the one control for compiler-generated Debug implementations", "write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand")
-        return
-    }
-    parser_add_fatal_code(&state, "E0929", keyword.span, "`derive {derived}` inside a type body is retired", "a derive request has one spelling: the marker before the type; `derive` defines providers", "write `#{derived}` before the type")
-}
-
-// S28: `impl Trait { … }` inside a struct or enum body, with D-LIB2
-// associated types `type Name = Type` and D-FOUND-OPMIX1=A's one
+// S28: `impl Trait { … }` inside a struct or enum body, with
+// associated types `type Name = Type` and 's one
 // parenthesized right-hand type on an operator trait.
 fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
     parser_bump(&state)
@@ -2104,78 +1973,11 @@ fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
     TraitImplBlock{trait_name: trait_text, trait_span: trait_name.span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types}
 }
 
-fn parser_report_retired_const(state: &JetParserState, kind: Int, span: Span) {
-    if kind == {
-        TOKEN_KW_CONST -> parser_add_error_code(&state, "E0146", span, "`const` is retired — write `NAME :: prep {{ … }}`", "a compile-time constant is an immutable binding whose value is prepared while building", "write `NAME :: prep {{ … }}` (or `#Persist name := …` for hot-reload state)")
-        else -> parser_add_error_code(&state, "E0374", span, "`comptime` is retired", "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane", "remove the keyword; a build-time value is written `NAME :: prep {{ … }}`, and `prep {{ … }}` runs other work while building")
-    }
-}
 fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
-    start := parser_current(&state)
-    if modifiers.is_comptime {
-        error_span := modifiers.start_span
-        marker_index := 0
-        loop marker_index < modifiers.markers.len() {
-            marker :: modifiers.markers[marker_index]
-            if marker.name == "Comptime" -> error_span = marker.span
-            marker_index += 1
-        }
-        parser_report_retired_const(&state, TOKEN_KW_COMPTIME, error_span)
-    }
-    // D-PREP-SURFACE2=A + owner ruling (2026-09-30): compile time is always
-    // explicit. Only `NAME :: prep { value }` is evaluated while building; a
-    // retired `@NAME :: value` or `comptime` form recovers with its old
-    // compile-time meaning after its teaching error.
-    binding_name := ""
-    retired_at := ""
-    recovered_comptime := false
-    if parser_known_ahead_at(&state, 0) {
-        start = parser_take_retired_known(&state, SemaNameCase.Screaming)
-        recovered_comptime = true
-    }
-    name_token := if {
-        recovered_comptime -> {
-            known_name :: parser_expect_name(&state, "for the compile-time binding")
-            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
-            binding_name = parser_value(state, known_name)
-            known_name
-        }
-        start.kind == TOKEN_AT -> {
-            parser_bump(&state)
-            at_name :: parser_expect_name(&state, "after `@` in a constant")
-            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
-            binding_name = parser_value(state, at_name).to_ascii_upper()
-            retired_at = "@{parser_value(state, at_name)}"
-            at_name
-        }
-        start.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON -> {
-            parser_bump(&state)
-            parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
-            if parser_value(state, start).starts_with("@") {
-                retired_at = parser_value(state, start)
-            } else {
-                binding_name = parser_value(state, start)
-            }
-            start
-        }
-        else -> {
-            if {
-                start.kind == TOKEN_KW_CONST || start.kind == TOKEN_KW_COMPTIME -> {
-                    parser_bump(&state)
-                    parser_report_retired_const(&state, start.kind, start.span)
-                }
-                !modifiers.is_comptime -> {
-                    parser_add_error(&state, start.span, "expected a constant binding", "a module constant is an ALL_CAPS name", "write `NAME :: value`, or `NAME :: prep {{ value }}` to evaluate it while building")
-                    if start.kind != TOKEN_EOF -> parser_bump(&state)
-                }
-            }
-            retired_name :: parser_expect_name(&state, "after a retired constant keyword")
-            parser_expect(&state, TOKEN_EQ, "`=` after a retired constant name")
-            binding_name = parser_value(state, retired_name)
-            recovered_comptime = true
-            retired_name
-        }
-    }
+    start :: parser_current(&state)
+    name_token :: parser_expect_name(&state, "for a constant")
+    parser_expect(&state, TOKEN_COLON_COLON, "`::` after a constant name")
+    binding_name :: parser_value(state, name_token)
     prepared := false
     parsed_value := ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
     if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
@@ -2187,19 +1989,10 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             prepared = true
             parsed_value = ParsedExpr{expr: tail, span: span}
         } else {
-            parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
+            parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME :: prep {{ value }}` with one final expression, or a `prep {{ … }}` statement")
         }
     } else {
         parsed_value = parser_parse_expression(&state, 1, 0)
-    }
-    if retired_at != "" {
-        recovered_comptime = true
-        if prepared && start.kind != TOKEN_AT {
-            binding_name = parser_retire_const_mark(&state, name_token)
-        } else {
-            binding_name = parser_retire_const_decl(&state, parser_cover(start.span, name_token.span), retired_at)
-        }
-        if start.kind == TOKEN_AT -> binding_name = binding_name.to_ascii_upper()
     }
     terminator := parser_current(&state)
     terminator_span := terminator.span
@@ -2225,13 +2018,13 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     result.attrs = attrs
     result.is_pub = modifiers.is_pub
     result.is_package_pub = modifiers.is_package_pub
-    result.is_comptime = prepared || recovered_comptime
+    result.is_comptime = prepared
     result.rust_kind = rust_kind
     result.ty = None
     result
 }
 
-// D-MODULE-BIND1: `name :: value` / `name := value` at file scope declares a
+// `name :: value` / `name := value` at file scope declares a
 // module binding, not an executable script statement (Rust
 // `module_binding_def`). The retired typed form `name : Type …` takes the same
 // route so the binding parser teaches it.
@@ -2318,7 +2111,7 @@ fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
 fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) -> TraitDef {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `trait`")
-    // D-TRAIT-OVERLOAD1=A: `trait Name: [A, B] {{ … }}` lists the traits it
+    // `trait Name: [A, B] {{ … }}` lists the traits it
     // builds on with the ordinary bound spelling.
     supertraits := [String]{}
     if parser_current_kind(&state) == TOKEN_COLON {
@@ -2390,7 +2183,7 @@ fn parser_parse_trait_bounds(state: &JetParserState, list_context: String, close
     bounds
 }
 
-// D-FOUND-OPMIX1=A: the one parenthesized right-hand type allowed on an
+// The one parenthesized right-hand type allowed on an
 // operator trait impl. A bare operator impl keeps `None`, which means `Self`.
 fn parser_parse_operator_rhs(state: &JetParserState, trait_name: String?) -> Type? {
     if parser_current_kind(&state) != TOKEN_LPAREN -> return None
@@ -2413,10 +2206,10 @@ fn parser_parse_operator_rhs(state: &JetParserState, trait_name: String?) -> Typ
     Val(rhs.ty)
 }
 
-// D-IMPLDOT1=A: `impl Type.Trait { … }` implements a trait; `impl Type { … }`
+// `impl Type.Trait { … }` implements a trait; `impl Type { … }`
 // is inherent, as is a protocol handle `impl Payment.Client { … }`. A
 // `Type.Literal.Int` / `Type.Literal.Float` tail names one literal capability.
-// D-ERR-CONV (as respelled by D-ARROW-CONTROL1): `impl Source -> Target { body }`
+// (as respelled by): `impl Source -> Target { body }`
 // declares the conversion of a `Source` error into a `Target` error.
 fn parser_parse_impl(state: &JetParserState) -> Item {
     start :: parser_bump(&state)
@@ -2574,18 +2367,10 @@ fn parser_parse_tag_decl(state: &JetParserState, modifiers: ParsedItemModifiers)
     TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
 }
 
-// D-METADERIVE1=A: `derive T.Trait { … }`. The retired `derive Trait for T`
-// spelling teaches the dot form (E2714) and yields no item.
+// `derive T.Trait { … }`.
 fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef? {
     start :: parser_bump(&state)
     type_name :: parser_expect_name(&state, "after `derive`")
-    old_for :: parser_current(&state)
-    if old_for.kind == TOKEN_IDENT && parser_value(state, old_for) == "for" {
-        // Old spelling `derive Trait for T`: the first name was the trait.
-        written :: parser_value(state, type_name)
-        parser_add_fatal_code(&state, "E2714", type_name.span, "a user derive is written `derive T.{written}`", "the type parameter comes first, joined to the trait name with a dot; `derive Trait for T` was retired", "write `derive T.{written} {{ … }}`")
-        return None
-    }
     parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
     trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
     // Rust `derive_body_items`: a derive body is the shared template body —

@@ -1,9 +1,9 @@
-// D-META-ONE1=A: the marker vocabulary is written here, not in Rust.
+// The marker vocabulary is written here, not in Rust.
 //
 // This is ordinary Jet source in the ratified `marker Name(params…)` form
-// (D-META-NAME1=A / D-META-FORM1=A / D-MARKER-SITES1=B). One row per marker. The compiler reads
+// . One row per marker. The compiler reads
 // this file to build its registry, so a marker exists exactly when it is
-// written here (D-VERDICT-1455-1, law zero).
+// written here (law zero).
 //
 // A plain parameter is an argument the use site writes: `name: Type` with an
 // optional `{default}`. A `$`-marked parameter is a fact about the rule
@@ -16,7 +16,6 @@
 //   $resolution   how nested writings combine: .Override, .Merge, .Tighten
 //   $scopes       the policy scopes the rule may be written at
 //   $companion    `[Rule, .Site]` — one extra site a companion rule opens
-//   $retired      the replacement text for a name that no longer works
 //
 // `$sites` is the only public legal-site declaration form. Ordinary names
 // are typed use-site arguments; every `$` name is fixed declaration metadata.
@@ -29,25 +28,23 @@ marker Unsafe(reason: String, obligations: ObligationMode{.None}, $sites: [.Func
 
 marker Scrub(tag: Ident, $sites: [.Function, .Method])
 
-marker Pure($sites: [.Function, .Method], $retired: "-[]>")
-
 marker Memo(bound: MemoBound{.Default}, $sites: [.Function, .Field])
 
 marker Pre(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
 
 marker Post(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
 
-// D-CODEGEN-HINTS1=A: these rows stay separate. Kernel requests a checked
+// These rows stay separate. Kernel requests a checked
 // worker-boundary proof; Inline(Always) is a checked promise, not a hint.
 marker Kernel(mode: KernelMode, $sites: [.Function])
 
 marker Inline(mode: InlineMode{.Hint}, $sites: [.Function, .Method, .Constant])
 
-// D-SIMD3=B: native auto-vectorization is the safe default; this explicit
+// Native auto-vectorization is the safe default; this explicit
 // function/method marker keeps scalar codegen available for reproducibility or
 // a workload whose measured result favors scalar execution.
 marker Scalar($sites: [.Function, .Method])
-// D-FOUND-OPMIX1=A: a typed Add/Mul impl may derive its reverse lookup.
+// A typed Add/Mul impl may derive its reverse lookup.
 marker Commutative($sites: [.Impl])
 
 marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, after: Value{[]}, parallel: Value{none}, $sites: [.Function])
@@ -74,13 +71,13 @@ marker MustUse($sites: [.Function, .Method, .Type])
 
 marker Error($sites: [.Type])
 
-// D-STRUCT-LIFE1=A: the one retiring lifecycle rung. `removed_in` is
+// The one retiring lifecycle rung. `removed_in` is
 // optional until package editions own removal; before then it remains warn-only.
 marker Deprecated(since: String, use: String, removed_in: String{none}, $sites: [.Function, .Method, .Type])
 
 marker Codable($sites: [.Type])
 
-// D-FOUND-RECEIPT1: named typed receipt section declaration.
+// Named typed receipt section declaration.
 marker Receipt(name: String, $sites: [.Type])
 
 marker Encode($sites: [.Type])
@@ -109,9 +106,7 @@ marker UnitFamily(family: Ident, dimension: Value{nominal}, base: Ident{"first m
 
 marker SingleUse($sites: [.Type])
 
-marker Invariant(condition: String, $sites: [.Type], $retired: "distinct Int(lo..hi)")
-
-// D-PLACE1=A: structs use the second argument for `align(N)`; enums retain
+// Structs use the second argument for `align(N)`; enums retain
 // the legacy bare tag-width argument in this same registry slot.
 marker Layout(kind: Layout, tag: Value{none}, $sites: [.Type])
 
@@ -129,8 +124,6 @@ marker Rename(name: String, json: String{none}, cbor: String{none}, csv: String{
 
 marker Skip($sites: [.Field])
 
-marker Default(value: Value{T.default}, $sites: [.Field], $retired: "field: ...{{...}}")
-
 marker Flatten($sites: [.Field])
 
 marker Doc(text: String, $sites: [.Field, .Type, .Variant, .Method], $companion: [Job, .Function])
@@ -145,14 +138,12 @@ marker Persist($sites: [.Declaration])
 
 marker Track($sites: [.Declaration])
 
-marker Known($sites: [], $retired: "@name :: ...")
-
 marker Local($sites: [.Declaration])
 
 marker Shared($sites: [.Declaration])
 
 marker Meta(category: String{""}, tunable: Bool{false}, maturity: Maturity{.Tested}, $sites: [.Function, .Method, .Declaration, .Constant])
-// D-DX-PLUGIN1=D: exported devtools panels are discovered from one typed
+// Exported devtools panels are discovered from one typed
 // function marker; no startup registration call or second metadata surface.
 marker DevPanel($sites: [.Function])
 
@@ -163,10 +154,6 @@ marker Shield($sites: [.Block])
 marker Impure(reason: String{none}, $sites: [.Block])
 
 marker FX(grant: ...Effect, $sites: [.Block])
-
-marker Abilities(grant: ...Effect, $sites: [.Block], $retired: "#FX")
-
-marker Caps(grant: ...Effect, $sites: [.Block], $retired: "#FX")
 
 marker Transact(name: Ident, $sites: [.Block])
 
@@ -184,14 +171,14 @@ marker Off($sites: [.Statement, .Block])
 
 marker DebugOnly($sites: [.Statement, .Block])
 
-// D-TESTFAULT1=A: test-only effect substitution is configured by one typed
+// Test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
-// D-TEST-STOPMSG1=A: `.expect_fail([E30xx,] message: "text")` checks a
+// `.expect_fail([E30xx,] message: "text")` checks a
 // region's raw stop message. Whole-test expected_fail remains the known-bug mark.
 marker Test(name: String{"function name"}, faults: [Effect]{[]}, expected_fail: Bool{false}, $sites: [.Test])
 
 marker Target(target: Target, $sites: [.File, .Module, .Function])
-// D-FOUND-EMBEDDED1 / #2793: target interrupt vector plus bounded effect row.
+// #2793: target interrupt vector plus bounded effect row.
 marker Interrupt(vector: Ident, effects: [Effect], $sites: [.Function])
 
 marker Root($sites: [.Parameter])
@@ -202,55 +189,12 @@ marker NoPrelude($sites: [.File])
 
 marker SQL(row: Type{none}, $sites: [.Block])
 
-marker Extern($sites: [.Module], $retired: "#Import")
-
 marker Bindgen($sites: [.Module])
 
 marker allow(lint: Ident, reason: String{none}, $sites: [.Declaration, .Field, .Statement], $repeatable: true)
 
-// D-CODEGEN-HINTS1=A: stable-address storage is not a code-generation hint.
+// Stable-address storage is not a code-generation hint.
 marker Static($sites: [.Constant])
 
 marker wire($sites: [.Field])
 
-marker InlineAlways($sites: [.Function], $retired: "#Inline(Always)")
-
-marker static($sites: [.Constant], $retired: "#Static")
-
-marker inline($sites: [.Constant], $retired: "#Inline")
-
-marker Add($sites: [.Expression], $retired: ".Add")
-
-marker Mul($sites: [.Expression], $retired: ".Mul")
-
-marker Min($sites: [.Expression], $retired: ".Min")
-
-marker Max($sites: [.Expression], $retired: ".Max")
-
-marker Audit(reason: String, $sites: [.Function, .Method, .Block], $retired: "#Unsafe(reason)")
-
-marker Wasm($sites: [.Function], $retired: "#Target(Wasm)")
-
-marker JS($sites: [.Function], $retired: "#Target(JS)")
-
-marker Suppress(reason: String, $sites: [.Block], $retired: ".drop(\"reason\")")
-
-marker Uninit($sites: [.Field], $retired: "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)")
-
-marker Cli($sites: [.Type], $retired: "#CLI")
-
-marker Abi(name: ABI, $sites: [.Function], $retired: "#ABI")
-
-marker Html(path: String, $sites: [.File], $retired: "#HTML")
-
-marker Sql($sites: [.Block], $retired: "#SQL")
-
-marker Ref($sites: [.Field], $retired: "use an owned value")
-
-marker Tainted(kind: TaintKind{.Input}, $sites: [.Expression, .Operation], $retired: "#Input")
-
-marker Sanitizer($sites: [.Function, .Method], $retired: "#Scrub(Tag)")
-
-marker Task($sites: [.Function], $retired: "#Job")
-
-marker Tag(field: String, $sites: [.Type], $retired: "#Discriminant")

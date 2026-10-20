@@ -3,8 +3,8 @@
 // AuthorityResolver (Resolver.jet); the records here keep the opened object,
 // its identity, and the bytes read from that same handle.
 //
-// Handles are the ratified Core directory/file handles (D-CORE-FILEDIR1,
-// D-CORE-FILEOPEN1); identity is the ratified Stat identity (D-CORE-FILESTAT1).
+// Handles are the ratified Core directory/file handles (
+// ); identity is the ratified Stat identity.
 
 AUTHORITY_KIND_FILE :: prep { "regular file" }
 AUTHORITY_KIND_DIRECTORY :: prep { "directory" }
@@ -101,8 +101,6 @@ enum AuthorityError {
     Symlink(String)
     WrongKind(path: String, expected: String, actual: String)
     Escapes(String)
-    AmbiguousManifest(String)
-    RetiredManifest(String)
     WorkspaceAmbiguous([String])
     WorkspaceNoModule
     NestedMembers(root: String, member: String)
@@ -125,8 +123,6 @@ enum AuthorityError {
             .Symlink(path) -> "authority path `{path}` is a symlink"
             .WrongKind(path, expected, actual) -> "authority path `{path}` is a {actual}, expected a {expected}"
             .Escapes(path) -> "authority path `{path}` escapes its root"
-            .AmbiguousManifest(path) -> "both `{PACKAGE_FILE}` and `{PAYLOAD_FILE}` exist in `{path}`"
-            .RetiredManifest(path) -> "retired manifest `{path}` is not accepted"
             .WorkspaceAmbiguous(paths) -> "workspace authority is declared in {paths.len()} files"
             .WorkspaceNoModule -> "canonical workspace source has no workspace module"
             .NestedMembers(root, member) -> "Package root `{root}` cannot contain member Package `{member}` with its own members"
@@ -139,14 +135,6 @@ enum AuthorityError {
 
     fn diagnostic(self) -> Diagnostic Never! {
         if self == {
-            .AmbiguousManifest(_) -> pkg_authority_error_diagnostic("E1206",
-                "the package has two manifest roots",
-                "`{PACKAGE_FILE}` and `{PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous",
-                "remove `{PAYLOAD_FILE}` or migrate it into `{PACKAGE_FILE}`")
-            .RetiredManifest(path) -> pkg_authority_error_diagnostic("E1226",
-                "retired manifest `{path}` is not a Package root",
-                "`{PAYLOAD_FILE}` is retired; Package identity is read only from `{PACKAGE_FILE}`",
-                "rename `{PAYLOAD_FILE}` to `{PACKAGE_FILE}`")
             .WorkspaceAmbiguous(paths) -> pkg_e1239_ambiguous_workspace(paths)
             .WorkspaceNoModule -> pkg_e0995_no_workspace_module()
             .NestedMembers(root, member) -> pkg_authority_error_diagnostic("E1323",

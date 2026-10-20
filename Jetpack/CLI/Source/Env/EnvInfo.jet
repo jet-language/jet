@@ -183,7 +183,7 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
     }
     packages := [String]{}
     loop reference in plan.refs -> &packages.push(reference.raw)
-    // D-JOB-NAME2=B (card #1448): `jobs` is the project's own work (`#Job fn`
+    // (card #1448): `jobs` is the project's own work (`#Job fn`
     // entries plus the jobs lifecycle hooks name); `checks` is what the
     // environment model supplies (`checks:` command hooks). Two headings keep
     // a reader from confusing the two.
@@ -258,7 +258,7 @@ fn cli_cmd_env_info(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
     services := [String]{}
     loop service in plan.dev_services -> &services.push(cli_env_info_service_summary(service))
     theme.detail("services: {cli_none_or_join(services, ", ")}")
-    // D-JOB-NAME2=B: two headings, each reading the same `Syntax` constant
+    // Two headings, each reading the same `Syntax` constant
     // the machine key reads.
     theme.detail("{ENV_REPORT_CHECKS_KEY}: {cli_none_or_join(checks, ", ")}")
     theme.detail("{ENV_REPORT_JOBS_KEY}: {cli_none_or_join(jobs, ", ")}")
@@ -399,7 +399,7 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
     report["packages"] = cli_json_texts(packages)
     report["formatter"] = formatter
     report["services"] = Dyn.Array(services)
-    // D-JOB-NAME2=B: both keys always appear; the key text is the same
+    // Both keys always appear; the key text is the same
     // `Syntax` constant the human heading uses.
     report[ENV_REPORT_CHECKS_KEY] = cli_json_texts(checks)
     report[ENV_REPORT_JOBS_KEY] = cli_json_texts(jobs)

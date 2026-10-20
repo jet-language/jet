@@ -300,11 +300,11 @@ fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
 // indirect (registry) reference.
 fn trust_flake_direct_source(base: String) -> TrustTextSplit? Never! {
     prefixes :: [TrustTextSplit]{
-        TrustTextSplit{before: "github", after: "github:"},
-        TrustTextSplit{before: "gitlab", after: "gitlab:"},
-        TrustTextSplit{before: "sourcehut", after: "sourcehut:"},
-        TrustTextSplit{before: "github", after: "https://github.com/"},
-        TrustTextSplit{before: "gitlab", after: "https://gitlab.com/"}
+        {before: "github", after: "github:"},
+        {before: "gitlab", after: "gitlab:"},
+        {before: "sourcehut", after: "sourcehut:"},
+        {before: "github", after: "https://github.com/"},
+        {before: "gitlab", after: "https://gitlab.com/"}
     }
     loop prefix in prefixes {
         if base.starts_with(prefix.after) -> return Val(TrustTextSplit{before: prefix.before, after: base.removeprefix(prefix.after)})

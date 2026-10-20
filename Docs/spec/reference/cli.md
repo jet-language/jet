@@ -751,10 +751,8 @@ package-export liveness verdicts in source/span/code/name order, with the same
 Core lifecycle markers publish the consumer's site, package-edition status,
 and replacement detail. Once checked modules exist, failed Doc compilations
 retain these facts as well as the earlier resolved import edges.
-The hosted Core/Structure catalog is regenerated from `Prelude/Core.jet`
-and `Prelude/Facts.jet` with
-`node Compiler/Bootstrap/generate-structure-registry.mjs`; `--check` detects
-a stale generated projection.
+The hosted Core/Structure catalog is `Compiler/JetCli/Source/Cli/StructureRegistry.jet`,
+edited directly.
 
 Offline syntax explanations read `SyntaxDictionaryData.jet`, a Jet-owned
 dictionary of keywords, markers, types, built-ins, operators, and sigils.

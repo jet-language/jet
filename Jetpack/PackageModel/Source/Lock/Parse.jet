@@ -602,7 +602,7 @@ struct PartialPackage {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "version" -> self.version = Val(pkg_lock_unescape(value))
             "fingerprint" -> self.fingerprint = Val(pkg_lock_unescape(value))
-            // D-CASTORE1=A: optional; old lockfiles omit it.
+            // Optional; old lockfiles omit it.
             "content-hash" -> self.content_hash = Val(pkg_lock_unescape(value))
             "source" -> self.source_raw = Val(value)
             "locked" -> self.locked_raw = Val(value)
@@ -630,7 +630,7 @@ struct PartialPackage {
                 self.provenance = Val(provenance)
             }
             else -> {
-                // D-JPK-CACHE1=A (A4): any envelope key marks the package as
+                // (A4): any envelope key marks the package as
                 // realized (the envelope becomes present).
                 if pkg_lock_is_envelope_key(key) {
                     envelope := self.envelope ?? LockEnvelope.empty()

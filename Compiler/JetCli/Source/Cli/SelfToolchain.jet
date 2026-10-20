@@ -13,6 +13,5 @@ fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
         .Err(error) -> return jet_cli_done("", diagnostic_render_all(JET_CLI_PACKAGE_FILE, "", [error.diagnostic], false), JET_DRIVER_EXIT_USER_ERROR)
     }
     if root == .Val(path) -> return jet_cli_renderable(trust_pin_report(path), json)
-    if jet_cli_find_stale_manifest(&cache, cwd) == .Val(report) -> return jet_cli_done("", diagnostic_render_all("", "", [report], false), JET_DRIVER_EXIT_USER_ERROR)
     jet_cli_done("", "error: `jet self toolchain` needs a project — no `package.jet` found here or above\n", JET_DRIVER_EXIT_USER_ERROR)
 }

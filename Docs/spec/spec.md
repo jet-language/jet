@@ -554,7 +554,7 @@ dynamic dispatch with invisible boxing. Generic bounds use `fn f<T: Bound>(…)`
 and `struct Pair<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
 `Comparable`, `Encode`, and `Decode` derive when every field qualifies. The
 package default can deny `auto_derive` through
-`policy: .{ lints: .{ deny: [auto_derive] } }`. A signed type marker opts one
+`policy: { lints: { deny: [auto_derive] } }`. A signed type marker opts one
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 `#Codable` requests both codec directions; `#Encode` and `#Decode` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
@@ -1826,7 +1826,7 @@ floor may reject `.Skip`.
 
 CI or an administrator supplies the floor through
 `JET_ORG_UNSAFE_POLICY=<path>`. Its package-policy shape is
-`policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }`.
+`policy: { unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }`.
 The path is retained as provenance, and an unreadable or malformed configured
 file fails closed. `jet inspect gates --kind unsafe FILE` reports each gate,
 operation, discharge state, and effective policy. Assertions erase in sema

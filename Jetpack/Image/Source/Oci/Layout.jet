@@ -1,4 +1,4 @@
-// D-JPK-IMAGE1 (=A): the native `.Oci` image-layout builder, ported from
+// (=A): the native `.Oci` image-layout builder, ported from
 // jetpack::Image. It builds one deterministic uncompressed layer, optionally
 // appended to a validated local OCI base, straight from realized package or
 // environment output plus optional `expose`/`env_vars`/`files` metadata.
@@ -42,9 +42,9 @@ struct OCIBuildSpec {
     env: [ImageEnvVar]
     // `expose:` TCP ports, rendered as `"<port>/tcp"` keys.
     expose: [Int]
-    // D-ENV-IMAGE1: the non-root container user.
+    // The non-root container user.
     user: Int
-    // D-ENV-IMAGE1: optional `CMD-SHELL` health command.
+    // Optional `CM ` health command.
     healthcheck: String?
 
     // Rust `BuildSpec::default()`.
@@ -526,7 +526,7 @@ fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
 
 fn image_object(value: Dyn, label: String) -> [String: Dyn] ImageError! {
     if value == {
-        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
             members := [String: Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value

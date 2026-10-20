@@ -15,7 +15,7 @@ use core.crypto.vault.[KeyUnlock, WrappedVaultKey]
 use core.files.[basename, dirname, join]
 use __core_crypto_ct as fixedcrypto
 
-// core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
+// core.crypto - safe envelopes and expert primitives.
 //
 // This package is the typed rung. Beginner APIs hide nonce handling and
 // algorithm choice. Raw algorithm control lives in `core.crypto.expert` and
@@ -175,7 +175,7 @@ struct Secret {
     fn from_bytes(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
 }
 
-// D-CONFIG-ENV1: configuration codecs construct the nominal secret from text.
+// Configuration codecs construct the nominal secret from text.
 // There is deliberately no Encode implementation that could reveal its bytes.
 impl Secret.Decode {
     fn decode(tree: Dyn) -> Secret [FieldError]! {
@@ -184,7 +184,7 @@ impl Secret.Decode {
     }
 }
 
-// Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).
+// Secret-bearing values wipe their bytes when they close.
 // Close takes the resident buffer out of the consumed receiver and zeroes that
 // same allocation before it is released. Rebinding `^self` instead would make a
 // second owner whose scope-end Close re-enters this one.

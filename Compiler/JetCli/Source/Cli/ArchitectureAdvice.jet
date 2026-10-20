@@ -1,4 +1,4 @@
-// Source/CmdDevTools.rs D-ARCH-ADVICE1: conservative checked call-graph advice.
+// Source/CmdDevTools.rs conservative checked call-graph advice.
 // This is inspection evidence, not an invariant or an automatic refactor.
 use jet_foundation.[Span, type_name]
 
@@ -97,9 +97,9 @@ fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String
         &boundaries.push("{call.caller_module} -> {call.callee_module}")
         if call.caller_module != call.callee_module -> cross_module = true
         entries :: [JetCLIArchitectureEvidence]{
-            JetCLIArchitectureEvidence{role: "caller-definition", module_path: call.caller_module, span: call.caller_span},
-            JetCLIArchitectureEvidence{role: "callee-definition", module_path: call.callee_module, span: call.callee_span},
-            JetCLIArchitectureEvidence{role: "checked-call-site", module_path: call.caller_module, span: call.call_span},
+            {role: "caller-definition", module_path: call.caller_module, span: call.caller_span},
+            {role: "callee-definition", module_path: call.callee_module, span: call.callee_span},
+            {role: "checked-call-site", module_path: call.caller_module, span: call.call_span},
         }
         loop entry in entries {
             key :: "{entry.role}:{entry.module_path}:{entry.span.start}:{entry.span.end}"
@@ -199,7 +199,7 @@ fn jet_cli_architecture_value(inspection: JetCLIArchitectureInspection) -> JetCL
 }
 
 fn jet_cli_architecture_text(inspection: JetCLIArchitectureInspection) -> String Never! {
-    output := "architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):\n"
+    output := "architecture advice (advisory, operator may reject):\n"
     if inspection.reason == .Val(reason) {
         output = "{output}  status: unavailable — {reason}\n"
     } else if inspection.rows.len() == 0 {

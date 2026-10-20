@@ -46,8 +46,8 @@ fn semindex_dossier_edge_empty() -> TypeDossier Never! {
     }, transitions: [StateTransitionFact]{StateTransitionFact{operation: "new", from: None, to: "Closed"}, StateTransitionFact{operation: "close", from: Val(""), to: "Closed"}}}}
     dossier.references = [SymbolRef]{SymbolRef{name: "Token", module_path: "z.jet", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 10, end: 15}}}
     dossier.bypass_facts = [BypassFact]{
-        BypassFact{kind: BypassKind.UnsafeFn, site: "unrelated", detail: "", module_path: "other.jet", span: SourceSpan{start: 7, end: 11}},
-        BypassFact{kind: BypassKind.LintAllow, site: "price", detail: "float_money", module_path: "other.jet", span: SourceSpan{start: 12, end: 19}},
+        {kind: BypassKind.UnsafeFn, site: "unrelated", detail: "", module_path: "other.jet", span: SourceSpan{start: 7, end: 11}},
+        {kind: BypassKind.LintAllow, site: "price", detail: "float_money", module_path: "other.jet", span: SourceSpan{start: 12, end: 19}},
     }
     expected :: "dossier `Token` (schema v20)\nsummary\n  defined: main.jet:2..9\nnominal type\n  distinct Int\ntrait contracts\n  implements Iter\n    type Item\n    type Item = Int\n    fn next() -> Int?\n    fn next() -> Int?\neffect roles\n  required effects: Net, Net, IO; granted effects: none; denied effects: Net; authority: package\nmembers\n  method fn next() -> Int? (impl Iter) @ z.jet:30..40\nstate graphs\n  Token @ states.jet\n    state Closed (nonterminal; reachability unknown) @ states.jet:1..2\n    state Open (terminal; reachable) @ states.jet:3..4\n    state Lost (nonterminal; unreachable) @ states.jet:5..6\n    transition new: _ -> Closed\n    transition close:  -> Closed\nreferences\n  count: 1\n  z.jet:10..15\nbypass facts\n  count: 2\n  #Unsafe fn at `unrelated` ((no reason given)) @ other.jet:7..11\n  #[allow(lint)] at `price` (float_money) @ other.jet:12..19\n"
     assert_eq(dossier.render_text(), expected)

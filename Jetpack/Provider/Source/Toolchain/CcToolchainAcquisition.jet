@@ -143,8 +143,8 @@ fn provider_cc_realize_nix(verification: &StoreVerification, spec: RefSpec, ctx:
         return Err(ProviderError.BadOutput(err.message()))
     }
     requests :: [NixOutputRequest]{
-        NixOutputRequest{name: "compiler", store_path: compiler_path},
-        NixOutputRequest{name: "linker", store_path: linker_path}
+        {name: "compiler", store_path: compiler_path},
+        {name: "linker", store_path: linker_path}
     }
     admitted :: store_admit_nix_closure_with_progress(&verification, roots, requests, ctx.offline, None, ctx.progress) ?? {
         return Err(ProviderError.NixCache(err.message()))

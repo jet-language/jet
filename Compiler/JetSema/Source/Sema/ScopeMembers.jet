@@ -178,16 +178,11 @@ fn sema_scope_members_registry_add_program(registry: &SemaScopeMembersMarkerRegi
 }
 
 
-fn sema_scope_members_rule_is_active(rule: TAppliedRule) -> Bool Never! {
-    if rule.status == {.Active -> true else -> false}
-}
-
 fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
     seen := [String]{}
     loop rule in catalog.rows {
         if seen.contains(rule.name) -> return false
         &seen.push(rule.name)
-        if !sema_scope_members_rule_is_active(rule) -> next
         sema_scope_members_append_name(&registry.known_marker_names, rule.name)
         loop site in rule.sites {
             if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, rule.name)
@@ -352,7 +347,7 @@ fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry,
     result
 }
 
-// Rust ScopeMembers.rs `scope_members` (D-DOTSCOPE1): the member vocabulary
+// Rust ScopeMembers.rs `scope_members` the member vocabulary
 // an applied-rule block declares; `#Test` is the only marker with members.
 fn sema_scope_members_vocabulary(marker: String) -> [String]? Never! {
     if marker == "Test" -> return Val([String]{"setup", "expect_fail", "timeout", "skip", "measure", "cases"})
@@ -392,7 +387,7 @@ fn sema_scope_members_check(items: [Item]) -> [Diagnostic] {
 fn sema_scope_members_check_marker_body(marker: String, body: [Stmt], diagnostics: &[Diagnostic]) {
     loop (index, statement) in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
-            // D-WRAP-SCOPE1=A: `#Arithmetic(...) { … }` is a lexical policy
+            // `#Arithmetic(...) { … }` is a lexical policy
             // region, not a member of the enclosing test.
             if dsl || name == "Arithmetic" -> next
             sema_scope_members_validate_member(marker, name, index == 0, dot_span, &diagnostics)

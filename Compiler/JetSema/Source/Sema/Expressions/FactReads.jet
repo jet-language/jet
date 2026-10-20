@@ -1,4 +1,4 @@
-// D-FACT-READ1=A / D-META-ROOT3=A: a compiler fact is a `$` member of the
+// A compiler fact is a `$` member of the
 // thing it describes (`Severity.$range`, `send_report.$effects`,
 // `Meter.$unit_scale_provenance`). Sema resolves one registered plane on the
 // subject and replaces the read with its typed compile-time value, so a fact
@@ -133,7 +133,7 @@ fn sema_fact_optional(name: String) -> Type Never! {
     Type.Option{inner: Type.Named{name: name}}
 }
 
-// D-FACT-READ1=A: reflection fact kinds and their detail enums are closed,
+// Reflection fact kinds and their detail enums are closed,
 // compiler-owned menus (Rust `core_fact_kind_variants`). `FactKind` is the
 // registered plane projection: `Effect`, `State`, `Tag`, then each value
 // plane's reflection kind in Prelude `Facts.jet` row order.
@@ -225,7 +225,7 @@ fn sema_enum_unit_payload(display_type_name: String, variant: String, span: Span
     sema_error("E0303", span, "variant `{variant}` takes no payload", "unit variants are written without parentheses", "write `{display_type_name}.{variant}` with no `(...)`")
 }
 
-// D-FACT-ENUM-TIR: `EXACTNESS.kind == .Approximate` tests a compiler fact enum
+// `EXACTNESS.kind == .Approximate` tests a compiler fact enum
 // against one binding-free variant. Codegen folds the test once the subject's
 // prepared value is known (Rust `fold_typed_fact_enum_pattern`).
 fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot], leading_dot: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaPatternValidation? {
@@ -700,7 +700,7 @@ fn sema_fact_build_setting_undeclared(key: String, span: Span) -> Diagnostic {
     sema_error("E0302", span, "`$build.settings.{key}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{key}: Type = default` to the package `settings: {{ … }}` block")
 }
 
-// D-BUILD-FACT3=A: a complete `$package.*` / `$build.*` path folds to its
+// A complete `$package.*` / `$build.*` path folds to its
 // typed snapshot value (Rust `fold_fact_read`, which reads build paths before
 // the compile-time-only gate). The Jet loader declares no manifest settings
 // yet, so every `$build.settings.*` read is undeclared.

@@ -5,7 +5,7 @@
 // --write skips every porcelain-dirty path, records owner handoffs, and never edits Rust.
 // --check --clean checks committed clean files only. --owner-write PATH... is for
 // owners applying the migration to their own dirty files after reviewing the handoff.
-// Canonical evidence: Syntax/math_layout.jet TYPE_DATA; Foundation/Dyn.rs;
+// Canonical evidence: Syntax/MathLayout.jet TYPE_DATA; Foundation/Dyn.rs;
 // TIR/TIR.jet Dyn* operations; Sema/Calls/Data.jet sema_dyn_type; JetStd/Dyn*.rs.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

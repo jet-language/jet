@@ -274,8 +274,8 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
 
 #Test("nix index coverage report partitions indexed and not indexed attrs") {
     oracle :: [NixIndexOracleCandidate]{
-        NixIndexOracleCandidate{record: nix_test_ripgrep_record(), cache_admitted: true},
-        NixIndexOracleCandidate{record: nix_test_auxiliary_record(), cache_admitted: false},
+        {record: nix_test_ripgrep_record(), cache_admitted: true},
+        {record: nix_test_auxiliary_record(), cache_admitted: false},
     }
     generated :: nix_index_producer_generate("nixpkgs-unstable", "x86_64-linux", NIX_TEST_INDEX_REVISION, 1, oracle, [String]{NIX_TEST_RIPGREP_OUT, NIX_TEST_AUX_OUT}) ?? panic("generate")
     report :: nix_index_producer_coverage_report(generated.decoded) ?? panic("coverage report")

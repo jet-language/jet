@@ -109,7 +109,6 @@ K_BANG :: 50
 
 K_UNIFIED_ARROW :: 51
 
-K_LAMBDA_ARROW :: 53
 
 K_EQ :: 54
 
@@ -196,8 +195,6 @@ fn ends_statement(kind: Int) -> Bool Never! {
         K_RBRACE -> true
         K_QUESTION -> true
         K_BANG -> true
-        K_PLUS_PLUS -> true
-        K_MINUS_MINUS -> true
         K_GT -> true
         K_SHR -> true
         K_FENCE_CLOSE -> true
@@ -240,7 +237,6 @@ fn suppresses_terminator(kind: Int) -> Bool Never! {
 fn arrow(kind: Int) -> Bool Never! {
     if kind == {
         K_UNIFIED_ARROW -> true
-        K_LAMBDA_ARROW -> true
         else -> false
     }
 }
@@ -315,7 +311,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     }
     if !leading_dot_variant(facts, cursor) -> return false
     cursor += 1
-    // D-PATO: each structural or-pattern alternative has the same
+    // Each structural or-pattern alternative has the same
     // leading-dot variant/path/payload shape. Keep consuming alternatives
     // before looking for a guard or arrow; otherwise a following arm's
     // leading `.` is mistaken for a fluent chain continuation.
@@ -355,7 +351,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
         cursor += 1
     }
     cursor = skip_comment_tokens(facts, cursor)
-    // D-IFDIST1: a braceless arm may add a Boolean guard after its complete
+    // A braceless arm may add a Boolean guard after its complete
     // structural head (`.Key(key) | .Other(key) && key == "b" -> ...`).
     // Scan that guard only on its source line; an unrelated arrow on a later
     // line must not turn a fluent chain into a new arm.
@@ -404,7 +400,7 @@ fn result_handler_failure_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
 }
 
-// D-CAP-RECEIVER1=D: `&name` / `^name` written together at line start marks
+// `&name` / `^name` written together at line start marks
 // the place a call writes or takes, so it begins a statement. A continued
 // bitwise-and or power line keeps a space after its operator.
 fn place_mark_starts_at(facts: [Int], index: Int) -> Bool Never! {
@@ -447,9 +443,6 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
                         if newline_between(source, end, start) && ends_statement(previous) {
                             split :: if kind == {
                                 K_UNIFIED_ARROW -> true
-                                K_LAMBDA_ARROW -> true
-                                K_EQ -> true
-                                K_MINUS_MINUS -> true
                                 K_LBRACE -> true
                                 else -> false
                             }
@@ -481,15 +474,6 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
 fn split_spelling(kind: Int) -> String Never! {
     if kind == {
         K_UNIFIED_ARROW -> "->"
-        K_LAMBDA_ARROW -> "=>"
-        K_EQ -> {
-            spelling :: "-[…]"
-            "{spelling}>"
-        }
-        K_MINUS_MINUS -> {
-            spelling :: "-[…]"
-            "{spelling}>"
-        }
         K_LBRACE -> "{{"
         else -> ""
     }

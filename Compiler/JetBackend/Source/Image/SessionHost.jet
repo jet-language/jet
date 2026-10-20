@@ -375,7 +375,7 @@ fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionReq
             return X64ExecutionResponse{body: "", stopped: false, invalidated: true, generation: generation, stdout: stdout, stderr: stderr, errors: errors}
         }
         kind :: if native_value == None -> x64_execution_stop_kind(text) else -> None
-        // D-REPL-FAIL1: a turn's #MaxDepth/resource exhaustion invalidates its
+        // A turn's #MaxDepth/resource exhaustion invalidates its
         // native stack and bindings. Bounded comptime depth is recoverable and
         // does not discard independent, previously published REPL slots.
         fatal :: kind == (Val("Panic")) || kind == (Val("HostFault")) || kind == (Val("Trap")) || (request.mode == X64ExecutionMode.Turn && kind == (Val("BudgetDepth")))

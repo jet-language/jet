@@ -152,12 +152,12 @@ fn x64_fx_parallel() Never! {
     // The final ABI xmm1 move precedes two disjoint cycles in the input.
     // Mixed precision must not hide the physical xmm2/xmm3 dependency.
     x64_emit_parallel_moves(&e, [X64Move]{
-        X64Move{src: .Xmm{reg: 7, single: false}, dst: .Xmm{reg: 1, single: false}},
-        X64Move{src: .Xmm{reg: 2, single: true}, dst: .Xmm{reg: 3, single: true}},
-        X64Move{src: .Xmm{reg: 3, single: false}, dst: .Xmm{reg: 2, single: false}},
-        X64Move{src: .Xmm{reg: 4, single: false}, dst: .Xmm{reg: 5, single: false}},
-        X64Move{src: .Xmm{reg: 5, single: false}, dst: .Xmm{reg: 4, single: false}},
-        X64Move{src: .Imm{value: 109}, dst: .Xmm{reg: 0, single: false}}
+        {src: .Xmm{reg: 7, single: false}, dst: .Xmm{reg: 1, single: false}},
+        {src: .Xmm{reg: 2, single: true}, dst: .Xmm{reg: 3, single: true}},
+        {src: .Xmm{reg: 3, single: false}, dst: .Xmm{reg: 2, single: false}},
+        {src: .Xmm{reg: 4, single: false}, dst: .Xmm{reg: 5, single: false}},
+        {src: .Xmm{reg: 5, single: false}, dst: .Xmm{reg: 4, single: false}},
+        {src: .Imm{value: 109}, dst: .Xmm{reg: 0, single: false}}
     })
     expected_regs :: [Int:Int]{0:109, 1:107, 2:103, 3:102, 4:105, 5:104}
     loop (reg, expected) in expected_regs -> x64_fx_expect(&e, reg, expected)
@@ -230,8 +230,8 @@ fn x64_fx_spill() Never! {
     x64_fx_expect_word(&e, X64_RAX, 0x40400000)
     x64_emit_move(&e, .Imm{value: 0x4000000000000000}, .FloatStack{slot: 2, single: false})
     x64_emit_parallel_moves(&e, [X64Move]{
-        X64Move{src: .FloatStack{slot: 1, single: false}, dst: .FloatStack{slot: 2, single: false}},
-        X64Move{src: .FloatStack{slot: 2, single: false}, dst: .FloatStack{slot: 1, single: false}}
+        {src: .FloatStack{slot: 1, single: false}, dst: .FloatStack{slot: 2, single: false}},
+        {src: .FloatStack{slot: 2, single: false}, dst: .FloatStack{slot: 1, single: false}}
     })
     x64_emit_move(&e, .FloatStack{slot: 1, single: false}, .Xmm{reg: 14, single: false})
     x64_fx_expect(&e, 14, 0x4000000000000000)
@@ -276,8 +276,8 @@ fn x64_fx_abi(single: Bool) -> Bool Never! {
     lir_builder_push(&caller, .Convert{dst: result, src: total})
     lir_builder_seal(&caller, LIRBlockID{value: 0}, [LIRValueID]{}, .Return{value: Val(result)})
     program :: LIRModule{signatures: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: layouts, result: Val(layout)}
+        {id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 1}, convention: .SystemV, params: layouts, result: Val(layout)}
     }, functions: [LIRFunction]{lir_builder_finish(caller), lir_builder_finish(callee)}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable(if single -> "abi-f32" else -> "abi-f64", program, None, 46)
 }
@@ -292,11 +292,11 @@ fn x64_fx_entry() -> Bool Never! {
     // Reviewer case: xmm1 is unread only after import, not an unconditional
     // scratch. Duplicate dst2 has last-write meaning here, not an ABI plan.
     moves :: [X64Move]{
-        X64Move{src: .Xmm{reg: 1, single: false}, dst: .Xmm{reg: 2, single: false}},
-        X64Move{src: .Xmm{reg: 2, single: false}, dst: .Xmm{reg: 3, single: false}},
-        X64Move{src: .Xmm{reg: 3, single: false}, dst: .Xmm{reg: 2, single: false}},
-        X64Move{src: .Xmm{reg: 1, single: false}, dst: .Xmm{reg: 4, single: false}},
-        X64Move{src: .Imm{value: 88}, dst: .Xmm{reg: 0, single: false}}
+        {src: .Xmm{reg: 1, single: false}, dst: .Xmm{reg: 2, single: false}},
+        {src: .Xmm{reg: 2, single: false}, dst: .Xmm{reg: 3, single: false}},
+        {src: .Xmm{reg: 3, single: false}, dst: .Xmm{reg: 2, single: false}},
+        {src: .Xmm{reg: 1, single: false}, dst: .Xmm{reg: 4, single: false}},
+        {src: .Imm{value: 88}, dst: .Xmm{reg: 0, single: false}}
     }
     // xmm0 is unread but is a pending destination. Its completed value must
     // subsequently be excluded when the actual cycle is broken.
@@ -438,8 +438,8 @@ fn x64_fx_sib() -> Bool Never! {
 fn x64_fx_address_lint(function: LIRFunction) -> Bool Never! {
     program :: LIRModule{
         signatures: [LIRSignature]{
-            LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: x64_value_layouts(function, function.blocks[0].params), result: Val(lir_layout_word())},
-            LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: None}
+            {id: LIRSignatureID{value: 0}, convention: .SystemV, params: x64_value_layouts(function, function.blocks[0].params), result: Val(lir_layout_word())},
+            {id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: None}
         },
         functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()
     }
@@ -713,8 +713,8 @@ fn x64_fx_frame_branch() -> Bool Never! {
         return false
     }
     program :: LIRModule{signatures: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: Val(lir_layout_word())}
+        {id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: Val(lir_layout_word())}
     }, functions: [LIRFunction]{function, lir_builder_finish(reader)}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("frame-branch", program, None, 42)
 }
@@ -810,8 +810,8 @@ fn x64_fx_split_loop() -> Bool Never! {
         return false
     }
     program :: LIRModule{signatures: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
+        {id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
     }, functions: [LIRFunction]{function, lir_builder_finish(clobber)}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("split-loop", program, Val(1), 210)
 }
@@ -862,7 +862,7 @@ fn x64_fx_fused_overflow() -> Bool Never! {
         return false
     }
     program :: LIRModule{signatures: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
+        {id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
     }, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable("fused-overflow", program, Val(3), 25) && x64_fx_executable("fused-overflow-cold", program, Val(9223372036854775807), 7)
 }
@@ -909,8 +909,8 @@ fn x64_fx_call_clobber(b: &LIRFunctionBuilder) Never! {
 
 fn x64_fx_split_program(function: LIRFunction) -> LIRModule Never! {
     LIRModule{signatures: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
+        {id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}
     }, functions: [LIRFunction]{function, x64_fx_clobber()}, data: [LIRData]{}, debug: lir_module_debug_none()}
 }
 
@@ -1142,9 +1142,9 @@ fn x64_fx_int_route() -> Bool Never! {
         return false
     }
     program :: LIRModule{signatures: [LIRSignature]{
-        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
-        LIRSignature{id: LIRSignatureID{value: 2}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
+        {id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        {id: LIRSignatureID{value: 2}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}
     }, functions: [LIRFunction]{function}, data: [LIRData]{}, debug: lir_module_debug_none()}
     x64_fx_executable_stubbed("int-route", program, Val(1), 22, x64_fx_clobbering_runtime())
 }

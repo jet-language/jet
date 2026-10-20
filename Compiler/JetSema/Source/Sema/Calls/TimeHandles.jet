@@ -244,7 +244,7 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
         &values.push(count)
     }
     ownership_params := [SemaCallParam]{
-        SemaCallParam{label: "items", name: "items", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: if method == "shuffle" -> AccessConvention.Write else -> AccessConvention.Read, ty: Val(Type.List{element: element}), variadic: false},
+        {label: "items", name: "items", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: if method == "shuffle" -> AccessConvention.Write else -> AccessConvention.Read, ty: Val(Type.List{element: element}), variadic: false},
     }
     if method == "weighted_pick" -> &ownership_params.push(SemaCallParam{label: "weights", name: "weights", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.List{element: Type.Float}), variadic: false})
     if method == "sample" -> &ownership_params.push(SemaCallParam{label: "count", name: "count", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
@@ -391,8 +391,8 @@ fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, metho
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-// Rust `duration_method_return` / `builtin_method_arg_types` (D-SHAPE-DURATIONCONVERT1=A,
-// D-TIMERES1=A): the built-in Duration readers. Another name or arity is no
+// Rust `duration_method_return` / `builtin_method_arg_types` (
+// ): the built-in Duration readers. Another name or arity is no
 // Duration method.
 fn sema_time_duration_result(method: String, argc: Int) -> Type? {
     return if {

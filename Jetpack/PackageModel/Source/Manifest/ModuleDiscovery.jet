@@ -1,4 +1,4 @@
-// Package discovery (U10, D-ECO-FILEROOT1=A) (Package/Discovery.rs):
+// Package discovery (U10) (Package/Discovery.rs):
 // resolve a package name to the directory of the unique `.jet` file that
 // declares `module <name>` at the top level, and project `#Job` declarations
 // into the shared job registry.
@@ -13,14 +13,14 @@ enum DiscoveryError {
 }
 
 // The directory holding the one file declaring `module <name>`. An explicit
-// named lookup, so D-SHAPE-MODULEINTERNAL1 does not filter `_name`.
+// named lookup, so does not filter `_name`.
 fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String DiscoveryError! {
     resolver :: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound{name: name})
     listed :: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound{name: name})
     matches := [String]{}
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
-        if file_name == PACKAGE_FILE || file_name == PAYLOAD_FILE -> next
+        if file_name == PACKAGE_FILE -> next
         text :: file.text() ?? next
         if pkg_file_declares_module(text, name) {
             if resolver.revalidate_file(file) == .Err(_) -> return Err(DiscoveryError.NotFound{name: name})
@@ -67,7 +67,7 @@ fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError!
     registry := JobRegistry.default()
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
-        if file_name == PACKAGE_FILE || file_name == PAYLOAD_FILE -> next
+        if file_name == PACKAGE_FILE -> next
         text :: if file.text() == {
             .Ok(read) -> read
             .Err(error) -> {

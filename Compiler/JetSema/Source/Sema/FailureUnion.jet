@@ -1,4 +1,4 @@
-// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: the failure union of functions that
+// The failure union of functions that
 // write no failure contract, and the #3708 plain-return projection. The Rust
 // reference is crates/jet-sema/src/Sema/Bundle/Pipeline/FailureUnion.rs and
 // `solve_inferred_failure` (Sema/mod.rs).
@@ -42,7 +42,7 @@ use jet_foundation.[
 ]
 
 // Rounds of the call-graph join before a still-growing row widens to the
-// general `Err` (D-FAIL-INFER-UNION1 rule 5).
+// general `Err` (rule 5).
 JET_FAILURE_UNION_JOIN_ROUND_CAP :: 64
 
 struct SemaFailureCaseField {
@@ -50,7 +50,7 @@ struct SemaFailureCaseField {
     ty: Type
 }
 
-// D-ERR-CASES1=A: one `Err(.Case(payload))` written where the default `Err`
+// One `Err(.Case(payload))` written where the default `Err`
 // route is expected. The payload types come from the checked arguments.
 struct SemaFailureCase {
     name: String
@@ -129,7 +129,7 @@ fn sema_failure_union_probe_type(value: Expr, environment: SemaScopeEnvironment,
     Val(checked.ty)
 }
 
-// D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: record the value an `Err(...)`
+// Record the value an `Err(...)`
 // sends down the default route. A leading-dot case with no type
 // (`Err(.NotFound(n))`) becomes a case of the function's own error type with
 // the payload types of its arguments; any other value is a member, and a
@@ -224,7 +224,7 @@ fn sema_failure_union_enum(type_name_text: String, function: Func, variants: [Va
     }
 }
 
-// D-ERR-CASES1=A: mint the function's own closed `#Error enum` from the cases
+// Mint the function's own closed `#Error enum` from the cases
 // its body creates, register it in the owning module and add it to the
 // module's items so every tier emits it. Returns the minted type. The
 // replaced module row and (before the first mint) the nominal indexes are
@@ -302,7 +302,7 @@ fn sema_failure_union_flatten(ty: Type, flat: &[Type]) Never! {
     &flat.push(ty)
 }
 
-// D-UNIONTYPE1=A: flatten nested unions, drop exact duplicates, sort by the
+// Flatten nested unions, drop exact duplicates, sort by the
 // canonical spelling read without module qualifiers (Rust
 // `union_member_order_key`); one surviving member is that member.
 fn sema_failure_union_canonical(members: [Type]) -> Type Never! {
@@ -472,7 +472,7 @@ struct SemaFailureUnionProjected {
     minted: Bool
 }
 
-// D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated
+// Join the default-route rows of the unannotated
 // top-level functions, mint their own cases and project every set that holds
 // a typed member.
 fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {

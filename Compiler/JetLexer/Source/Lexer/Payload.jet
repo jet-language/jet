@@ -179,7 +179,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return (byte_head: false, raw_head: false)
     before_open :: previous_code_index(facts, open)
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
-    // D-BOUND-RAW1=A: a typed head is a name whose first character is an
+    // A typed head is a name whose first character is an
     // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
     if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
         first :: byte_at(source, facts[before_open * 4 + 1])
@@ -709,7 +709,7 @@ fn decode_raw_string(text: String, source_start: Int, tables: &TokenTables) -> (
     (decoded: decoded, parts: parts)
 }
 
-// D-TRIPLE-DELIM1=A: use the same first offending run and byte span as Native.
+// Use the same first offending run and byte span as Native.
 fn check_triple_delimiter_text(source: [U8], begin: Int, end: Int, position: String, diagnostics: &[Diagnostic]) {
     finish := end
     if byte_at(source, end) == 10 && finish > begin && byte_at(source, finish - 1) == 13 -> finish -= 1
@@ -834,8 +834,8 @@ fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, tables: &Token
     (decoded: decoded, literal: literal_row(&tables, number_literal(Val(parse_integer_literal(number_text) ?? 0), None, suffix)))
 }
 
-// The identifier's decoded spelling, when it differs from its source text
-// (a retired `@` spelling read as its `$` respelling).
+// Identifier checks: reserved double-underscore names and the `r"…"` prefix.
+// No identifier is respelled.
 fn identifier_respelling(source: [U8], start: Int, end: Int, allow_reserved_identifiers: Bool, diagnostics: &[Diagnostic]) -> String? {
     width :: end - start
     if !allow_reserved_identifiers && width >= 2 && byte_at(source, start) == 95 && byte_at(source, start + 1) == 95 {
@@ -847,7 +847,7 @@ fn identifier_respelling(source: [U8], start: Int, end: Int, allow_reserved_iden
         text :: slice_text(source, start, end)
         add_diagnostic(&diagnostics, "E0003", start, end, "`{text}\"…\"` is not a Jet raw-string prefix", "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names", "write the text as ``…`` instead")
     }
-    retired_fact_respelling(source, start, end, &diagnostics)
+    None
 }
 
 fn source_has_text(source: [U8], at: Int, expected: String) -> Bool Never! {
@@ -863,92 +863,6 @@ fn text_in(name: String, values: [String]) -> Bool Never! {
         if value == name -> return true
     }
     false
-}
-
-fn retired_fact_member(name: String) -> Bool Never! {
-    text_in(name, [String]{"layout", "fields", "range", "effects", "origin", "name", "index", "sendability", "view_provenance", "movedness", "maturity", "kind", "unit_scale_provenance", "dimension", "attribution", "states", "measure", "exactness", "ty", "base", "unknown", "track_origin", "obligation", "classification", "profile", "flow", "taint", "duty", "rights", "package_policy", "nominal", "interval"})
-}
-
-fn retired_declaration_metadata(name: String) -> Bool Never! {
-    text_in(name, [String]{"sites", "repeatable", "holds", "safe", "gates", "decision", "retired", "proved_by", "inherits", "companion", "scopes", "resolution", "owns_menu", "identity", "name"})
-}
-
-// D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
-// compiler facts and declaration metadata moved from `@` to `$`. A retired
-// spelling teaches E0003 with a machine-applicable edit, and the word then
-// reads as its `$` respelling so parsing recovers. D-NAME-SPLICE1=B: any
-// other `@name` after `.` (`self.@field`, `.@left`) or naming a declaration
-// (`fn @method`, `impl @type_name`) is a retired template name splice; it
-// teaches E0388 and reads as `$name`.
-//
-// Precedence follows Rust's lexer: a fact member after `.`, declaration
-// metadata before `:` and `@irreversible` respell in place; otherwise a name
-// splice wins over the retired roots and subject queries.
-fn retired_fact_in_place(source: [U8], start: Int, name_end: Int, name: String) -> Bool Never! {
-    if name == "irreversible" -> return true
-    if byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 && retired_fact_member(name) -> return true
-    colon := name_end
-    loop byte_at(source, colon) == 32 -> colon += 1
-    retired_declaration_metadata(name) && byte_at(source, colon) == 58 && byte_at(source, colon + 1) != 58
-}
-
-// The end of the identifier token for the prefix `@name` at `start`. A
-// respelled retired root consumes its legacy suffix, so `@build.package`
-// reads as one `$package` word and `@PHASE()` as one `$phase` word.
-fn retired_fact_end(source: [U8], start: Int, name_end: Int) -> Int {
-    name :: slice_text(source, start + 1, name_end)
-    suffix_end := name_end
-    if name == "build" && source_has_text(source, name_end, ".package") && !is_identifier_continue(source, name_end + 8) -> suffix_end = name_end + 8
-    if (name == "PHASE" || name == "PROGRAM" || name == "PACKAGE") && byte_at(source, name_end) == 40 && byte_at(source, name_end + 1) == 41 -> suffix_end = name_end + 2
-    if suffix_end == name_end || retired_fact_in_place(source, start, name_end, name) || retired_name_splice(source, start) -> return name_end
-    suffix_end
-}
-
-// `end` is the token end from `retired_fact_end`, past any legacy suffix.
-fn retired_fact_respelling(source: [U8], start: Int, end: Int, diagnostics: &[Diagnostic]) -> String? {
-    if byte_at(source, start) != 64 -> return None
-    name_end :: scan_identifier_end(source, start + 1)
-    name :: slice_text(source, start + 1, name_end)
-    word :: "@{name}"
-    respelled := ""
-    if {
-        retired_fact_in_place(source, start, name_end, name) -> {
-            respelled = "${name}"
-        }
-        retired_name_splice(source, start) -> {
-            splice :: "${name}"
-            span :: Span{start: start, end: name_end}
-            retired :: diagnostic_from_registry("E0388", Val(span), "`{word}` is retired; write `{splice}`", "a template splices a binding's name with the fact sigil `$`; prefix `@` now marks a live link (D-NAME-SPLICE1=B)", "replace `{word}` with `{splice}`")
-            &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: splice}))
-            return Val(splice)
-        }
-        name == "build" -> {
-            respelled = if end > name_end -> "$package" else -> "$build"
-        }
-        name == "PHASE" || name == "PROGRAM" || name == "PACKAGE" -> {
-            respelled = if name == "PHASE" -> "$phase" else -> if name == "PROGRAM" -> "$program" else -> "$package"
-        }
-        name == "TYPE" || name == "FUNCTION" || name == "METHOD" || name == "CLOSURE" || name == "VALUE" -> {
-            add_diagnostic(&diagnostics, "E0003", start, name_end, "`{word}(…)` is retired", "compiler facts carry `$`; a fact is a `$` member of the thing it describes (D-META-ROOT3=A)", "read the fact on its subject, such as `T.$fields`, `f.$effects` or `value.$origin`")
-            return None
-        }
-        else -> return None
-    }
-    old :: slice_text(source, start, end)
-    span :: Span{start: start, end: end}
-    retired :: diagnostic_from_registry("E0003", Val(span), "`{old}` is retired; write `{respelled}`", "compiler facts and declaration metadata carry `$`; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)", "replace `{old}` with `{respelled}`")
-    &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: respelled}))
-    Val(respelled)
-}
-
-fn retired_name_splice(source: [U8], start: Int) -> Bool {
-    if byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 -> return true
-    head_end := start
-    loop byte_at(source, head_end - 1) == 32 -> head_end -= 1
-    head_start := head_end
-    loop head_start > 0 && is_identifier_continue(source, head_start - 1) -> head_start -= 1
-    head :: String.from_bytes(source.slice(head_start, head_end)) ?? ""
-    head_end < start && text_in(head, [String]{"fn", "impl", "struct", "enum", "trait", "type"})
 }
 
 fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int Never! {
@@ -1097,17 +1011,6 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, co
         return (decoded: name_intern(&tables.names, raw.decoded), keep: true, literal: literal_row(&tables, text_literal(0, raw.parts)))
     }
     if kind == K_CHAR -> return (decoded: name_intern(&tables.names, decode_char(slice_text(source, start, end), start, &diagnostics)), keep: true, literal: -1)
-    // D-FENCE2=A: the retired `@[` / `]@` digraphs lex as fence tokens so
-    // parsing recovers, and each one teaches its `<:` / `:>` respelling.
-    if (kind == K_FENCE_OPEN && byte_at(source, start) == 64) || (kind == K_FENCE_CLOSE && byte_at(source, start) == 93) {
-        retired_text :: if kind == K_FENCE_OPEN -> "@[" else -> "]@"
-        respelled :: if kind == K_FENCE_OPEN -> "<:" else -> ":>"
-        previous :: byte_at(source, start - 1)
-        new_text :: if previous == 58 || previous == 60 -> " {respelled}" else -> respelled
-        span :: Span{start: start, end: end}
-        retired :: diagnostic_from_registry("E-FENCE-SPELLING", Val(span), "`{retired_text}` is the retired fence spelling", "statement-expansion fences are spelled `<: … :>`; prefix `@` belongs to compile-time marks", "replace `{retired_text}` with `{respelled}`")
-        &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: new_text}))
-    }
     if kind == K_BLOCK_COMMENT && scan_block_comment_end(source, start) < 0 {
         add_diagnostic(&diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
     }

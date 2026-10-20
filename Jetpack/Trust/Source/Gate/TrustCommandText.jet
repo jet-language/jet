@@ -9,26 +9,26 @@
 fn trust_record_json(record: TrustRecord) -> String Never! {
     if record == {
         .Hash(hash) -> trust_json_object_text([TrustJSONField]{
-            TrustJSONField{key: "type", value: Dyn.Text("hash")},
-            TrustJSONField{key: "hash", value: Dyn.Text(hash.copy())},
-            TrustJSONField{key: "revocationKey", value: Dyn.Text("{TRUST_HASH_PREFIX}{hash}")}
+            {key: "type", value: Dyn.Text("hash")},
+            {key: "hash", value: Dyn.Text(hash.copy())},
+            {key: "revocationKey", value: Dyn.Text("{TRUST_HASH_PREFIX}{hash}")}
         })
         .Pattern(pattern) -> trust_json_object_text([TrustJSONField]{
-            TrustJSONField{key: "type", value: Dyn.Text("pattern")},
-            TrustJSONField{key: "pattern", value: Dyn.Text(pattern.copy())},
-            TrustJSONField{key: "revocationKey", value: Dyn.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
+            {key: "type", value: Dyn.Text("pattern")},
+            {key: "pattern", value: Dyn.Text(pattern.copy())},
+            {key: "revocationKey", value: Dyn.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
         })
         .Grant(grant) -> trust_json_object_text([TrustJSONField]{
-            TrustJSONField{key: "type", value: Dyn.Text("grant")},
-            TrustJSONField{key: "authority", value: Dyn.Text(grant.authority.copy())},
-            TrustJSONField{key: "subject", value: Dyn.Text(grant.subject.copy())},
-            TrustJSONField{key: "scope", value: Dyn.Text(grant.scope.copy())},
-            TrustJSONField{key: "revocationKey", value: Dyn.Text(grant.key())}
+            {key: "type", value: Dyn.Text("grant")},
+            {key: "authority", value: Dyn.Text(grant.authority.copy())},
+            {key: "subject", value: Dyn.Text(grant.subject.copy())},
+            {key: "scope", value: Dyn.Text(grant.scope.copy())},
+            {key: "revocationKey", value: Dyn.Text(grant.key())}
         })
         .Raw(line) -> trust_json_object_text([TrustJSONField]{
-            TrustJSONField{key: "type", value: Dyn.Text("raw")},
-            TrustJSONField{key: "line", value: Dyn.Text(line.copy())},
-            TrustJSONField{key: "revocationKey", value: Dyn.Text(line.copy())}
+            {key: "type", value: Dyn.Text("raw")},
+            {key: "line", value: Dyn.Text(line.copy())},
+            {key: "revocationKey", value: Dyn.Text(line.copy())}
         })
     }
 }

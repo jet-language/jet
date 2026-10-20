@@ -1,6 +1,6 @@
 // `build: { … }` named build profiles and `build.allow` standing effects
-// (D-BUILDPROFILE1, D-CTEFFECT1), plus the `dev:` development policy
-// (D-LIVE1) (Package/Blocks.rs).
+// plus the `dev:` development policy
+// (Package/Blocks.rs).
 
 // Rust `BuildOptimize::None` is spelled `Off`: `None` is reserved in Jet.
 enum BuildOptimize {
@@ -70,9 +70,9 @@ struct BuildProfileDef {
     debug_info: Bool
     small: Bool
     panic: BuildPanic?
-    // D-CONF-MODULE1=A: profile contributions to declared typed settings.
+    // Profile contributions to declared typed settings.
     settings: [String: String]
-    // D-DX-PROD1: release-only devtools presence form.
+    // Release-only devtools presence form.
     inspect: JetReleaseInspect
     // Game packaging policy resolved from this named profile.
     game_development_stripping: Bool?
@@ -257,7 +257,6 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
                     profile.settings[setting.key] = pkg_unquote(setting.value)
                 }
             }
-            RETIRED_BUILD_FIELD_FEATURES | RETIRED_BUILD_FIELD_ENV -> return Err(PackageParseError.Composition("build profile `{name}` uses retired `{key}:`; declare a typed `settings: {{ key: Type = default }}` entry and override it with `--set key=value`"))
             else -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings)"))
         }
     }
@@ -274,7 +273,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
     Ok(profile)
 }
 
-// D-CTEFFECT1: `build: { allow: #(FS, Exec) }`.
+// `build: { allow: #(FS, Exec) }`.
 fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
     allow := [String]{}
     seen_allow := false

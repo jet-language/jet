@@ -3,12 +3,12 @@
 // content-addressed source cache.
 //
 // Every checkout, fingerprint, copy, and publication works through held
-// directory handles (D-CORE-FILEDIR1): each path component is opened without
+// directory handles each path component is opened without
 // following links, and later operations name entries relative to the held
 // directory, so a component renamed or swapped for a link after opening
 // cannot redirect reads or writes. File identity and link counts come from
-// D-CORE-FILESTAT1, exclusive creation from D-CORE-FILEOPEN1, and cross-
-// directory renames from D-CORE-FILERENAME1. The Rust reference reached this
+// Exclusive creation from and cross-
+// directory renames from. The Rust reference reached this
 // through openat/mkdirat/renameat/unlinkat FFI.
 
 PROVIDER_HELD_PRIVATE_MODE :: prep { 0o700 }
@@ -17,7 +17,7 @@ PROVIDER_READ_CHUNK_BYTES :: prep { 65536 }
 // Resolve a `core` upstream to a local checkout: `path:` sources in place,
 // the embedded batteries catalog, or a fetched git checkout. For a monorepo
 // the fetch is index-first: only the requested member's subtree and its
-// in-repo dependencies are materialized (Slice C, D-MONOREF1).
+// in-repo dependencies are materialized (Slice C).
 fn provider_source_repo(upstream: String, want_package: String, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     if upstream.starts_with("path:") {
         path :: upstream.removeprefix("path:")
@@ -107,7 +107,7 @@ fn provider_sparse_member_fetch_in(remote: RemoteSource, want_package: String, c
     wanted := [String]{target}
     all_dirs :: provider_all_tree_dirs(listing)
     marker := String?{None}
-    marker_names :: [String]{PACKAGE_FILE, PAYLOAD_FILE}
+    marker_names :: [String]{PACKAGE_FILE}
     loop name in marker_names {
         if marker == None -> marker = provider_git_output_in(tmp, [String]{"show", "FETCH_HEAD:{target}/{name}"})
     }

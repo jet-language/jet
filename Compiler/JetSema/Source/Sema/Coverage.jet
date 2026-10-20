@@ -208,7 +208,7 @@ fn sema_coverage_key_set(keys: [String]) -> [String:Bool] Never! {
     set
 }
 
-// D-TAG1: a leaf is covered by itself or by any ancestor group path.
+// A leaf is covered by itself or by any ancestor group path.
 fn sema_coverage_leaf_covered(keys: [String:Bool], leaf: String) -> Bool Never! {
     if keys.get(leaf) != None -> return true
     prefix := ""
@@ -301,7 +301,7 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
     missing
 }
 
-// D-OUTCOME-SHAPE1=A: a `T? E!` subject reports its missing success states
+// A `T? E!` subject reports its missing success states
 // directly (`Val(...)`, `None`), never as `Ok(...)`.
 fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
     missing := [String]{}
@@ -322,7 +322,7 @@ fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [S
 // for an else-less table whose checked pattern conditions leave a case open.
 fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
-    // D-PARSESTR1 / D-BINPAT1 (Rust `report_refutable_pattern_without_else`):
+    // (Rust `report_refutable_pattern_without_else`):
     // a text or byte arm can always fail to match, so the table needs `else`.
     if !multi_head {
         has_text := false
@@ -381,7 +381,7 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
 }
 
 // Rust switches.rs `note_pattern_coverage`: an arm head that an earlier full
-// arm, or an ancestor group arm (D-TAG1), already covers is unreachable —
+// arm, or an ancestor group arm already covers is unreachable —
 // E0365 over an anonymous union subject, L0301 otherwise.
 fn sema_coverage_check_unreachable_arms(conditions: [TExpr], multi_head: Bool, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
@@ -767,14 +767,14 @@ fn sema_pattern_matrix_constructors(ty: Type, environment: SemaScopeEnvironment,
     if ty == {
         .Option(inner) -> {
             return [SemaPatternCoverageConstructor]{
-                SemaPatternCoverageConstructor{name: "Val", payload: [Type]{inner}},
-                SemaPatternCoverageConstructor{name: "None", payload: [Type]{}},
+                {name: "Val", payload: [Type]{inner}},
+                {name: "None", payload: [Type]{}},
             }
         }
         .Result(ok, err) -> {
             return [SemaPatternCoverageConstructor]{
-                SemaPatternCoverageConstructor{name: "Ok", payload: [Type]{ok}},
-                SemaPatternCoverageConstructor{name: "Err", payload: [Type]{err}},
+                {name: "Ok", payload: [Type]{ok}},
+                {name: "Err", payload: [Type]{err}},
             }
         }
         else -> {}

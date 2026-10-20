@@ -336,7 +336,7 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
     Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
 }
 
-// D-VIS-MODULE1 (Rust `Parser::apply_module_visibility`): every declaration
+// (Rust `Parser::apply_module_visibility`): every declaration
 // inside a `priv module` takes the module's privacy. A `priv module` is usable
 // only by its enclosing module, a `priv(package) module` by its package; every
 // other declaration is public. Fields keep their own `priv`; a nested module
@@ -456,12 +456,12 @@ fn parser_methods_visibility(methods: [Func], is_pub: Bool, is_package_pub: Bool
 }
 
 // A code-module body holds top-level items only; a leading `@` is a
-// misspelled applied rule (E0063, D-VERDICT-732-1 / D-ONCE-AT1=D).
+// misspelled applied rule (E0063).
 fn parser_report_module_member(state: &JetParserState) {
     token :: parser_current(&state)
     if token.kind == TOKEN_AT {
         parser_bump(&state)
-        parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
+        parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator", "replace the leading `@` with `#`")
         return
     }
     found :: parser_describe_token(state, token)
@@ -1022,6 +1022,7 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        entry_start :: state.position
         host :: parser_module_dashed_name(&state, "for a host name")
         parser_expect(&state, TOKEN_COLON, "after a host name")
         system :: parser_expect_name(&state, "for `system` in a host entry")
@@ -1030,8 +1031,7 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         target :: parser_module_dashed_name(&state, "for a host system name")
         overrides := Span?{None}
         end := target.span
-        if parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-            parser_bump(&state)
+        if parser_current_kind(&state) == TOKEN_LBRACE {
             open :: parser_bump(&state)
             depth := 1
             close := open.span
@@ -1051,6 +1051,9 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         }
         &entries.push(HostEntry{name: host.name, name_span: host.span, system: target.name, system_span: parser_cover(system.span, target.span), overrides: overrides, span: parser_cover(host.span, end)})
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+        // An entry that consumed nothing has already reported its error; step past the
+        // token so the next entry parses and the map always terminates.
+        if state.position == entry_start -> parser_bump(&state)
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` after hosts")
     entries

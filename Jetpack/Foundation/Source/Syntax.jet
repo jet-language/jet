@@ -4,12 +4,12 @@
 
 // ── Package refs (Syntax/effects_surface.rs, Syntax/jetpack_config.rs) ──
 
-// D-JPK-REF1=A: `package@source`; the package precedes the source.
+// `package@source`; the package precedes the source.
 REF_PROVIDER_AT :: prep { "@" }
-// D-JPK7/15: the `<source>:<package/path>` separator of the internal
+// 15: the `<source>:<package/path>` separator of the internal
 // provider-first upstream form.
 REF_SEPARATOR :: prep { ":" }
-// D-CHANNEL-AUTO1=A amended by D-VERDICT-2190-1: channel policy markers follow
+// This rule amended by channel policy markers follow
 // `@source`. `#latest` is the manual moving tier; `#auto` opts a source into
 // automatic movement. A source with no marker is pinned.
 REF_CHANNEL_MARKER :: prep { "#" }
@@ -17,37 +17,37 @@ REF_CHANNEL_LATEST :: prep { "latest" }
 REF_CHANNEL_MAIN :: prep { "main" }
 REF_CHANNEL_AUTO :: prep { "auto" }
 
-// D-JPK-SNIXREUSE1=A: Jetpack is the canonical package source.
+// Jetpack is the canonical package source.
 REF_SOURCE_JETPACK :: prep { "jetpack" }
-// D-JPK7/15: legacy nixpkgs source token, retained for migration/provenance.
+// 15: legacy nixpkgs source token, retained for migration/provenance.
 REF_SOURCE_NIXPKGS :: prep { "nixpkgs" }
 REF_SOURCE_GITHUB :: prep { "github" }
 REF_SOURCE_PATH :: prep { "path" }
-// D-FFI-R1 / D-JPK-PROVIDERS2: direct CRAN ecosystem root.
+// Direct CRAN ecosystem root.
 REF_SOURCE_CRAN :: prep { "cran" }
-// D-JPK-PROVIDERS2 / D-FFI-LUA1: direct LuaRocks ecosystem root.
+// Direct LuaRocks ecosystem root.
 REF_SOURCE_LUAROCKS :: prep { "luarocks" }
-// D-FFI-RUBY1 / D-JPK7: direct RubyGems ecosystem root.
+// Direct RubyGems ecosystem root.
 REF_SOURCE_RUBY :: prep { "ruby" }
-// D-FFI-PERL1 / D-JPK7: direct CPAN ecosystem root.
+// Direct CPAN ecosystem root.
 REF_SOURCE_PERL :: prep { "perl" }
-// D-FFI-PHP1 / D-JPK7: direct Packagist ecosystem root.
+// Direct Packagist ecosystem root.
 REF_SOURCE_PHP :: prep { "php" }
-// D-JPK-PROVIDERS2 / D-JPK-REGISTRY1: the first-party Jet registry root.
+// The first-party Jet registry root.
 REF_SOURCE_JET_REGISTRY :: prep { "jet-registry" }
-// D-JPK-PROVIDERS2: direct npm ecosystem root.
+// Direct npm ecosystem root.
 REF_SOURCE_NPM :: prep { "npm" }
-// D-JPK-PROVIDERS2: direct Cargo ecosystem root.
+// Direct Cargo ecosystem root.
 REF_SOURCE_CARGO :: prep { "cargo" }
-// D-JPK-EXTPROV1: direct PyPI ecosystem root.
+// Direct PyPI ecosystem root.
 REF_SOURCE_PYPI :: prep { "pypi" }
-// D-JPK-EXTPROV1: direct SwiftPM ecosystem root.
+// Direct SwiftPM ecosystem root.
 REF_SOURCE_SWIFTPM :: prep { "swiftpm" }
-// D-CHANNEL-AUTO1=A / card #2166: the native release-artifact source.
+// Card #2166: the native release-artifact source.
 REF_SOURCE_RELEASES :: prep { "releases" }
 
 // The one home for "which source tokens are built-in providers", in the order
-// a ref may not put them (D-JPK-REF1=A: `target@provider`, never
+// a ref may not put them (`target@provider`, never
 // `provider@target`).
 REF_SOURCE_PROVIDERS :: prep { [String]{
     REF_SOURCE_JETPACK,
@@ -73,31 +73,31 @@ REF_SOURCE_PROVIDERS :: prep { [String]{
 KW_MODULE :: prep { "module" }
 // The workspace module namespace — `module workspace { … }`.
 NS_WORKSPACE :: prep { "workspace" }
-// D-JPK-OVERLAY1=A: reviewed workspace overlay blocks.
+// Reviewed workspace overlay blocks.
 WORKSPACE_OVERLAY :: prep { "overlay" }
 
 // ── Policy and effect-budget manifest keys (Syntax/predicates.rs) ──
 
-// D-EFFBUDGET1: effect names the whole dependency graph may use.
+// Effect names the whole dependency graph may use.
 EFFECTS_FIELD_ALLOW :: prep { "allow" }
-// D-EFFBUDGET1: effect names the dependency graph must never use.
+// Effect names the dependency graph must never use.
 EFFECTS_FIELD_DENY :: prep { "deny" }
-// D-EFFBUDGET1: the audited per-dependency `grants` escape.
+// The audited per-dependency `grants` escape.
 MANIFEST_BLOCK_GRANTS :: prep { "grants" }
-// D-POLICY-WORD1=A: the `policy: { … }` manifest block.
+// The `policy: { … }` manifest block.
 MANIFEST_BLOCK_POLICY :: prep { "policy" }
 
 // ── EnvModel Environment/Workspace (jet_foundation::Syntax, Syntax/jetpack_config.rs) ──
 
 // The canonical package manifest filename.
 PACKAGE_FILE :: prep { "package.jet" }
-// D-WORKSPACE1=B + D-WORKSPACE2=A: the monorepo index filename.
+// The monorepo index filename.
 WORKSPACE_FILE :: prep { "workspace.jet" }
-// D-JPK-FILENAME2=B: the payload adapter filename.
+// The payload adapter filename.
 PAYLOAD_FILE :: prep { "pkg.jet" }
 // The workspace `members: find("./dir")` discovery builtin.
 BUILTIN_FIND :: prep { "find" }
-// D-ENV-INTEGRATIONS1=A: first-party integration call names.
+// First-party integration call names.
 ENV_INTEGRATION_ANDROID :: prep { "env.platform.android" }
 ENV_INTEGRATION_APPLE :: prep { "env.platform.apple" }
 ENV_INTEGRATION_CERTIFICATES :: prep { "env.security.certificates" }
@@ -106,9 +106,9 @@ ENV_INTEGRATION_CODEX :: prep { "env.agent.codex" }
 ENV_INTEGRATION_EDITOR :: prep { "env.editor.vscode" }
 ENV_INTEGRATION_CLOUD :: prep { "env.cloud.credentials" }
 ENV_INTEGRATION_VAULT :: prep { "env.security.vault" }
-// D-ECO6=A: the typed environment's Git hook directory field.
+// The typed environment's Git hook directory field.
 ENV_FIELD_GIT_HOOKS_PATH :: prep { "git_hooks_path" }
-// D-ECO12=A: the typed environment formatter package field.
+// The typed environment formatter package field.
 ENV_FIELD_FORMATTER :: prep { "formatter" }
 
 // ── PackageModel Lock/Workspace/Scripts (jet_foundation::Syntax) ──
@@ -117,11 +117,11 @@ ENV_FIELD_FORMATTER :: prep { "formatter" }
 UNIFIED_LOCK_FILE :: prep { ".jet/lock" }
 // N1: compiler binary name.
 BINARY_NAME :: prep { "jet" }
-// D-JPK1/9: the Jetpack package-manager binary name.
+// 9: the Jetpack package-manager binary name.
 JETPACK_BINARY_NAME :: prep { "jetpack" }
-// D-SHAPE-MODULEINTERNAL1=A: module-internal name prefix.
+// Module-internal name prefix.
 MODULE_INTERNAL_PREFIX :: prep { "_" }
-// D-WORKSPACE1=B: the `members:` field of a workspace module.
+// The `members:` field of a workspace module.
 MODULE_FIELD_MEMBERS :: prep { "members" }
 
 // ── Store Explain/Why (jet_foundation::Syntax, Syntax/jetpack_config.rs) ──
@@ -153,7 +153,7 @@ TYPE_ERR :: prep { "Err" }
 
 // ── Recipe Toolchain (jet_foundation::Syntax, Syntax/predicates.rs) ──
 
-// D-JPK-BUILDTOOL1=A / D-JPK-RINGSHIP1=C: the env var naming a realized
+// The env var naming a realized
 // toolchain object directory (`<dir>/cargo`, `<dir>/version`, `<dir>/ring/<name>`).
 TOOLCHAIN_OBJECT_ENV :: prep { "JET_TOOLCHAIN_FIXTURE" }
 
@@ -163,29 +163,26 @@ TOOLCHAIN_OBJECT_ENV :: prep { "JET_TOOLCHAIN_FIXTURE" }
 FILE_EXT :: prep { "jet" }
 // S52 (ratified M12): package source root directory inside a project.
 SOURCE_ROOT_DIR :: prep { ".jet" }
-// D-JPK-FILENAME2=B: retired manifest filenames; a directory holding one is
-// still an authority-discovery candidate so the CLI can report E1225.
-STALE_MANIFEST_NAMES :: prep { [String]{"pack.jet", "payload.jet", "jet.toml"} }
 
 // ── Environment Shell/Activation/EnvFile (jet_foundation::Syntax, jetpack_config.rs, effects_surface.rs) ──
 
 // The default prompt label; names jetpack rather than the compiler.
 JETPACK_PROMPT_LABEL :: prep { "jetpack" }
-// D-JPK14: shell marker env var set inside a Jetpack shell.
+// Shell marker env var set inside a Jetpack shell.
 JETPACK_ENV_MARKER :: prep { "JETPACK_ENV" }
-// D-JPK14: env var carrying the realized package refs inside a Jetpack shell.
+// Env var carrying the realized package refs inside a Jetpack shell.
 JETPACK_REF_VAR :: prep { "JETPACK_REF" }
-// D-ENV-LIFECYCLE1: prompt hook activation identity.
+// Prompt hook activation identity.
 ENV_HOOK_ACTIVE_HASH_VAR :: prep { "JETPACK_ENV_HASH" }
-// D-ENVHOOK1=A: the root of the env the prompt hook currently has loaded.
+// The root of the env the prompt hook currently has loaded.
 ENV_HOOK_ACTIVE_DIR_VAR :: prep { "JETPACK_ENV_DIR" }
-// D-ENVHOOK1=A: the pre-activation `PATH`, restored verbatim on unload.
+// The pre-activation `PATH`, restored verbatim on unload.
 ENV_HOOK_OLD_PATH_VAR :: prep { "JETPACK_ENV_OLD_PATH" }
-// D-ENVHOOK1=A: the private per-prompt callback verb (`jet env export <shell>`).
+// The private per-prompt callback verb (`jet env export <shell>`).
 ENV_EXPORT_VERB :: prep { "export" }
-// D-JPK-OSHOST1=C: current-repo/external-root config directory.
+// Current-repo/external-root config directory.
 CONFIG_DEFAULT_DIR :: prep { ".jet" }
-// D-JPK17: the `env.jet` directive calls.
+// The `env.jet` directive calls.
 PACK_DIRECTIVE_SOURCE :: prep { "pkg.source" }
 PACK_DIRECTIVE_PACKAGES :: prep { "pkg.packages" }
 PACK_DIRECTIVE_PROMPT :: prep { "pkg.prompt" }
@@ -203,7 +200,7 @@ MAX_TREE_DEPTH :: prep { 256 }
 KW_RUST :: prep { "rust" }
 // S59: C FFI module path root — `c.<lib>`.
 C_MODULE_ROOT :: prep { "c" }
-// D-FFI-CPP1 / D-FFI-UNIFY1: the `cpp.<lib>` namespace root.
+// The `cpp.<lib>` namespace root.
 CPP_MODULE_ROOT :: prep { "cpp" }
 PY_MODULE_ROOT :: prep { "py" }
 JS_MODULE_ROOT :: prep { "js" }
@@ -225,18 +222,18 @@ PHP_MODULE_ROOT :: prep { "php" }
 R_MODULE_ROOT :: prep { "r" }
 OCTAVE_MODULE_ROOT :: prep { "octave" }
 COM_MODULE_ROOT :: prep { "com" }
-// D-FFI-UNIFY1: generated foreign bindings live under `.jet/bindings/<lang>/`.
+// Generated foreign bindings live under `.jet/bindings/<lang>/`.
 BINDINGS_ROOT_SUBDIR :: prep { "bindings" }
 // Repository-relative inputs of the hidden Rust bridge (jet_pkg_model::FFI,
 // Rust-baked `CARGO_MANIFEST_DIR` paths), joined onto foundation_jet_source_root().
 FFI_JET_FOUNDATION_CRATE_PATH :: prep { "crates/jet-foundation" }
 FFI_JET_UNICODE_CRATE_PATH :: prep { "crates/jet-unicode" }
-// S59 / D-CFFI2: the `c@<target>` system-library target (`lib: c@system`).
+// S59 the `c@<target>` system-library target (`lib: c@system`).
 SYSTEM_LIB_TARGET :: prep { "system" }
 
 // ── CLI profile/tool/services/secrets/config (jet_foundation::Syntax, effects_surface.rs, jetpack_config.rs, package_files.rs) ──
 
-// D-JPK-TOOLRUN1=A: `jetpack tool install|list|uninstall` persistent PATH management.
+// `jetpack tool install|list|uninstall` persistent PATH management.
 TOOL_SUBCOMMAND :: prep { "tool" }
 TOOL_VERB_INSTALL :: prep { "install" }
 TOOL_VERB_LIST :: prep { "list" }
@@ -257,7 +254,7 @@ TOOL_DIAG_COLLIDE :: prep { "E1297" }
 // JPK-TOOL-PROVIDER (E1298): external provider not available.
 TOOL_DIAG_PROVIDER :: prep { "E1298" }
 
-// D-JPK-PROFILE1=D: one source-backed package generation engine.
+// One source-backed package generation engine.
 PROFILE_SUBCOMMAND :: prep { "profile" }
 PROFILE_VERB_PLAN :: prep { "plan" }
 PROFILE_VERB_BUILD :: prep { "build" }
@@ -276,7 +273,7 @@ SERVICES_VERB_WAIT :: prep { "wait" }
 SERVICES_VERB_WATCH :: prep { "watch" }
 SERVICES_VERBS :: prep { [String]{SERVICES_VERB_UP, SERVICES_VERB_DOWN, SERVICES_VERB_HEALTH, SERVICES_VERB_LOGS, SERVICES_VERB_RESTART, SERVICES_VERB_WAIT, SERVICES_VERB_WATCH} }
 
-// U13 (D-JPK-SECRET1/D-JPK-SECRETCRYPTO1): `jetpack secrets <verb>`.
+// U13 `jetpack secrets <verb>`.
 SECRETS_SUBCOMMAND :: prep { "secrets" }
 SECRETS_VERB_KEYGEN :: prep { "keygen" }
 SECRETS_VERB_SET :: prep { "set" }
@@ -314,10 +311,10 @@ DEFAULT_ENTRY_FILE :: prep { "run.jet" }
 
 // ── EnvModel ModuleEval (jet_foundation::Syntax, jetpack_config.rs, core_surface.rs, package_files.rs, predicates.rs, math_layout.rs) ──
 
-// D-ONCE-DOLLAR1=B: the comptime/environment mark (`$NAME` in config
+// The comptime/environment mark (`$NAME` in config
 // surfaces; jet-foundation Syntax `COMPTIME_MARK`).
 COMPTIME_MARK :: prep { "$" }
-// D-GENERATED-NAMES1: the compiler-generated name prefix.
+// The compiler-generated name prefix.
 GENERATED_NAME_PREFIX :: prep { "__jet_" }
 TYPE_STRING :: prep { "String" }
 // U3: the type matching each reserved namespace.
@@ -327,7 +324,7 @@ TYPE_PROMPT :: prep { "Prompt" }
 TYPE_SYSTEM :: prep { "System" }
 TYPE_IMAGE :: prep { "Image" }
 TYPE_BUDGET :: prep { "Budget" }
-// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the typed secret-map grammar.
+// The typed secret-map grammar.
 ENV_FIELD_SECRETS :: prep { "secrets" }
 SECRET_COMPOSE :: prep { "compose" }
 SECRET_COMPOSE_FIELD_TEMPLATE :: prep { "template" }
@@ -345,13 +342,13 @@ SECRET_GENERATOR_FIELD_LENGTH :: prep { "length" }
 // U11/U14: record fields shared by `System` and `Image` contributions.
 SYSTEM_FIELD_TARGET :: prep { "target" }
 SYSTEM_FIELD_PACKAGES :: prep { "packages" }
-// D-JPK-PROFILE1=D: package-generation fields.
+// Package-generation fields.
 PROFILE_FIELD_EXTENDS :: prep { "extends" }
 PROFILE_FIELD_PACKAGES :: prep { "packages" }
 PROFILE_FIELD_COLLISIONS :: prep { "collisions" }
-// D-JPK-SERVICE1: the required first field of every `Service` record.
+// The required first field of every `Service` record.
 SERVICE_FIELD_ENABLE :: prep { "enable" }
-// D-JPK-SERVICE1: the recognized fields of a dev-supervised `Service`.
+// The recognized fields of a dev-supervised `Service`.
 DEV_SERVICE_FIELD_PORTS :: prep { "ports" }
 DEV_SERVICE_FIELD_RUN :: prep { "run" }
 DEV_SERVICE_FIELD_SHUTDOWN :: prep { "shutdown" }
@@ -362,11 +359,11 @@ DEV_SERVICE_FIELD_WATCH :: prep { "watch" }
 DEV_SERVICE_FIELD_AFTER :: prep { "after" }
 DEV_SERVICE_FIELD_BEFORE_START :: prep { "before_start" }
 DEV_SERVICE_FIELD_SOCKETS :: prep { "sockets" }
-// D-JPK-PLATFORM1: the typed platform values an image `target` may hold.
+// The typed platform values an image `target` may hold.
 PLATFORM_OS_LINUX :: prep { "linux" }
 PLATFORM_ARCH_X64 :: prep { "x64" }
 PLATFORM_ARCH_ARM64 :: prep { "arm64" }
-// D-JPK-IMAGE1: `Image` record fields and the OCI kind word.
+// `Image` record fields and the OCI kind word.
 IMAGE_FIELD_FROM :: prep { "from" }
 IMAGE_FIELD_FORMAT :: prep { "format" }
 IMAGE_KIND_OCI :: prep { "Oci" }
@@ -380,7 +377,7 @@ IMAGE_FIELD_EXPOSE :: prep { "expose" }
 IMAGE_FIELD_ENV_VARS :: prep { "env_vars" }
 IMAGE_FIELD_FILES :: prep { "files" }
 IMAGE_FIELD_BASE :: prep { "base" }
-// D-ENV-IMAGE1: optional environment-image projection controls.
+// Optional environment-image projection controls.
 IMAGE_FIELD_SERVICES :: prep { "services" }
 IMAGE_FIELD_HEALTH :: prep { "health" }
 IMAGE_FIELD_ENTRYPOINT :: prep { "entrypoint" }
@@ -389,18 +386,18 @@ IMAGE_FIELD_USER :: prep { "user" }
 IMAGE_BASE_FN :: prep { "oci" }
 // U3/U8: the `Env` contribution field carrying the shell prompt label.
 ENV_FIELD_PROMPT :: prep { "prompt" }
-// D-ENV-LIFECYCLE1: typed environment lifecycle fields.
+// Typed environment lifecycle fields.
 ENV_FIELD_DOTENV :: prep { "dotenv" }
 ENV_FIELD_UNSET :: prep { "unset" }
 ENV_FIELD_ON_ENTER :: prep { "on_enter" }
 ENV_FIELD_CHECKS :: prep { "checks" }
 ENV_FIELD_RELOAD :: prep { "reload" }
-// D-ENV-PRESETS1: environment composition fields.
+// Environment composition fields.
 ENV_FIELD_PRESETS :: prep { "presets" }
 ENV_FIELD_LANGUAGES :: prep { "languages" }
-// D-ENV-FILES1: managed project-relative file declarations.
+// Managed project-relative file declarations.
 ENV_FIELD_FILES :: prep { "files" }
-// D-FE-PROMPT-STRIP1: `Prompt{ label: "...", path: .Short, strip: .On }`.
+// `Prompt{ label: "...", path: .Short, strip: .On }`.
 PROMPT_FIELD_LABEL :: prep { "label" }
 PROMPT_FIELD_PATH :: prep { "path" }
 PROMPT_FIELD_STRIP :: prep { "strip" }
@@ -421,7 +418,7 @@ RECIPE_PREBUILT :: prep { "Recipe.prebuilt" }
 RECIPE_FIELD_BIN :: prep { "bin" }
 RECIPE_FIELD_AS :: prep { "as" }
 RECIPE_FIELD_AS_NAME :: prep { "as_name" }
-// D-JPK-BUILDRECIPE1=A: finite executable adapter recipe and step spellings.
+// Finite executable adapter recipe and step spellings.
 RECIPE_BUILD :: prep { "Recipe.build" }
 RECIPE_FIELD_STEPS :: prep { "steps" }
 RECIPE_STEP_FETCH :: prep { ".fetch" }
@@ -441,19 +438,19 @@ ESCAPE_DECODED :: prep { [String]{"\n", "\t", "\"", "\\"} }
 
 // ── CLI env/use/jobs (jet_foundation::Syntax, Syntax/effects_surface.rs) ──
 
-// D-ENVHOOK1=A: reserved first-positional subverbs of `jet env`.
+// Reserved first-positional subverbs of `jet env`.
 ENV_HOOK_VERB :: prep { "hook" }
 ENV_TEST_VERB :: prep { "test" }
 ENV_SYNC_VERB :: prep { "sync" }
 ENV_INFO_VERB :: prep { "info" }
-// D-ENVHOOK1=A: shells the auto-activation hook supports.
+// Shells the auto-activation hook supports.
 ENV_HOOK_SHELLS :: prep { [String]{"bash", "zsh", "fish"} }
-// D-ENVHOOK1=A: a non-empty value disables prompt-hook activation.
+// A non-empty value disables prompt-hook activation.
 ENV_DISABLE_VAR :: prep { "JET_ENV_DISABLE" }
 // U16: foreign shell files the env fallback projects natively.
 FOREIGN_FLAKE_FILE :: prep { "flake.nix" }
 FOREIGN_DEVENV_FILE :: prep { "devenv.nix" }
-// D-JOB-NAME2=B: the `env info` report's split job/check keys.
+// The `env info` report's split job/check keys.
 ENV_REPORT_JOBS_KEY :: prep { "jobs" }
 ENV_REPORT_CHECKS_KEY :: prep { "checks" }
 
@@ -461,7 +458,7 @@ ENV_REPORT_CHECKS_KEY :: prep { "checks" }
 
 // N1: the language display name.
 LANG_NAME :: prep { "Jet" }
-// U1/D-CONF-NAME1: bare identity fields and typed manifest blocks.
+// U1 bare identity fields and typed manifest blocks.
 MANIFEST_FIELD_NAME :: prep { "name" }
 MANIFEST_FIELD_VERSION :: prep { "version" }
 MANIFEST_FIELD_EDITION :: prep { "edition" }
@@ -474,7 +471,7 @@ MANIFEST_BLOCK_BUILD :: prep { "build" }
 MANIFEST_BLOCK_EFFECTS :: prep { "effects" }
 MANIFEST_BLOCK_AUTHORITY :: prep { "authority" }
 MANIFEST_BLOCK_BOUNDARIES :: prep { "boundaries" }
-// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: the one authority block vocabulary.
+// The one authority block vocabulary.
 AUTHORITY_FIELD_HOLDS :: prep { "holds" }
 AUTHORITY_FIELD_NEEDS :: prep { "needs" }
 AUTHORITY_FIELD_GRANTS :: prep { "grants" }
@@ -493,11 +490,11 @@ AUTHORITY_TRUST_DECISION_DENY :: prep { "deny" }
 AUTHORITY_TRUST_REQUIRE_NONE :: prep { "none" }
 AUTHORITY_TRUST_REQUIRE_LOGGED :: prep { "logged" }
 AUTHORITY_TRUST_REQUIRE_ATTESTED :: prep { "attested" }
-// D-JPK-PROVIDERAUTH1: provider authority record fields.
+// Provider authority record fields.
 PROVIDER_FIELD_REGISTRY :: prep { "registry" }
 PROVIDER_FIELD_ALLOW :: prep { "allow" }
 PROVIDER_FIELD_DENY :: prep { "deny" }
-// D-BUILDPROFILE1 / D-CTEFFECT1: `build:` profile vocabulary.
+// `build:` profile vocabulary.
 BUILD_CTOR :: prep { "Build" }
 BUILD_FIELD_ALLOW :: prep { "allow" }
 BUILD_FIELD_OPTIMIZE :: prep { "optimize" }
@@ -511,30 +508,27 @@ BUILD_OPTIMIZE_FULL :: prep { "full" }
 BUILD_PANIC_ABORT :: prep { "abort" }
 BUILD_PANIC_UNWIND :: prep { "unwind" }
 BUILD_PROFILE_RELEASE :: prep { "release" }
-RETIRED_BUILD_FIELD_FEATURES :: prep { "features" }
-RETIRED_BUILD_FIELD_ENV :: prep { "env" }
-// U10/D-TGT1..D-TGT4: package target vocabulary.
+// U10.. Package target vocabulary.
 TARGET_LIBRARY :: prep { "library" }
 TARGET_EXECUTABLE :: prep { "executable" }
 TARGET_TEST :: prep { "test" }
 TARGET_EXAMPLE :: prep { "example" }
 TARGET_SANDBOX :: prep { "sandbox" }
-RETIRED_TARGET_PLUGIN :: prep { "plugin" }
 TARGET_RESERVED :: [String]{}
 TARGET_FIELD_ENTRY :: prep { "entry" }
 TARGET_FIELD_NAME :: prep { "name" }
 TARGET_FIELD_EXPORT :: prep { "export" }
 PACKAGE_FIELD_TARGETS :: prep { "targets" }
 PACKAGE_FIELD_KIND_REMOVED :: prep { "kind" }
-// S59/D-CFFI2: the native C-library dependency provider.
+// S59 the native C-library dependency provider.
 DEP_PROVIDER_C :: prep { "c" }
-// D-LIB-NAME1 / D-LIB-EXPORT1: Library output fields.
+// Library output fields.
 OUTPUT_FIELD_LOADABLE :: prep { "loadable" }
 OUTPUT_FIELD_NATIVE :: prep { "native" }
 OUTPUT_FIELD_BINDINGS :: prep { "bindings" }
-// D-POLICY-WORD1 / D-TEAMPOLICY1 / D-JPK-POLICYSURFACE1: package policy fields.
+// Package policy fields.
 POLICY_FIELD_LINTS :: prep { "lints" }
-// D-LINTPOLICY1: the one `policy.lints` field (Syntax/predicates.rs).
+// The one `policy.lints` field (Syntax/predicates.rs).
 LINTS_FIELD_DENY :: prep { "deny" }
 POLICY_FIELD_EFFECTS :: prep { "effects" }
 POLICY_FIELD_UNSAFE :: prep { "unsafe" }
@@ -551,25 +545,23 @@ POLICY_EXCEPTION_FIELD_ID :: prep { "id" }
 POLICY_EXCEPTION_FIELD_SCOPE :: prep { "scope" }
 POLICY_EXCEPTION_FIELD_REASON :: prep { "reason" }
 POLICY_EXCEPTION_FIELD_EXPIRES :: prep { "expires" }
-// D-ECO-INLINEPACKAGE1=A: the contextual leading package carrier word.
+// The contextual leading package carrier word.
 INLINE_PACKAGE_DECL :: prep { "package" }
-// D-ONCE-RETIRE1=C: the retired entry filename.
-LEGACY_ENTRY_FILE :: prep { "main.jet" }
-// D-CONF-PLANE1: the retired file-backed Config filename.
+// The retired file-backed Config filename.
 CONFIG_FILE :: prep { "config.jet" }
-// D-ROLEFILE1=A / D-CMDOVERRIDE1=A: package-root command role homes.
+// Package-root command role homes.
 COMMAND_FILE_RUN :: prep { "@run.jet" }
 COMMAND_FILE_BUILD :: prep { "@build.jet" }
 COMMAND_FILE_DEV :: prep { "@dev.jet" }
 COMMAND_FILE_TEST :: prep { "@test.jet" }
 COMMAND_ROLE_FILES :: prep { [String]{COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST} }
-// D-BUILDENTRY1: the package build entry and its compiler-owned parameter type.
+// The package build entry and its compiler-owned parameter type.
 BUILD_ENTRY_FN :: prep { "build" }
 TYPE_BUILD_CONTEXT :: prep { "BuildContext" }
-// D-UICAP1: UI capability rights accepted by `authority.needs`.
+// UI capability rights accepted by `authority.needs`.
 UI_CAPABILITY_NAMES :: prep { [String]{"UI.FileDialog", "UI.Clipboard", "UI.IME", "UI.DragDrop", "UI.Shortcuts", "UI.Accessibility", "UI.FontShaping"} }
 
-// D-CMDOVERRIDE1=A: the role home a bare command resolves to (`command_role_file`).
+// The role home a bare command resolves to (`command_role_file`).
 fn syntax_command_role_file(command: String) -> String? Never! {
     if command == {
         "run" -> Val(COMMAND_FILE_RUN)
@@ -587,7 +579,7 @@ fn syntax_is_ui_capability(name: String) -> Bool Never! {
 
 // ── Store (jet_foundation::Syntax) ──
 
-// D-ECO-HANGARPATH1: the pre-resolver machine Hangar path, read only as a
+// The pre-resolver machine Hangar path, read only as a
 // legacy migration source.
 HANGAR_DIR :: prep { "/etc/jet/hangar" }
 
@@ -598,12 +590,12 @@ TRUST_FILE :: prep { "trust" }
 // `jet trust grant --scope user|repo`.
 TRUST_SCOPE_USER :: prep { "user" }
 TRUST_SCOPE_REPO :: prep { "repo" }
-// D-JPK-TOOLCHAIN1=A (#179): re-exec guard marker set to the pinned version.
+// (#179): re-exec guard marker set to the pinned version.
 TOOLCHAIN_EXEC_MARKER_ENV :: prep { "JET_TOOLCHAIN_EXEC" }
 
 // ── Provider (jet_foundation::Syntax, effects_surface.rs) ──
 
-// D-JPK-IMPORTCMD1=A: legacy Nix shell expressions accepted by `jetpack import`.
+// Legacy Nix shell expressions accepted by `jetpack import`.
 FOREIGN_SHELL_FILE :: prep { "shell.nix" }
 FOREIGN_DEFAULT_FILE :: prep { "default.nix" }
 
@@ -612,21 +604,21 @@ FOREIGN_DEFAULT_FILE :: prep { "default.nix" }
 // Card #2216: answer one package's dependent questions without dumping the
 // full dependency graph.
 JETPACK_WHY :: prep { "why" }
-// D-JPK-IMPORTCMD1=A: import a foreign environment into canonical Jet source.
+// Import a foreign environment into canonical Jet source.
 JETPACK_IMPORT_VERB :: prep { "import" }
 // Card #2218: read-only changelog view over the unified `.jet/lock`.
 JETPACK_LOCK_VERB :: prep { "lock" }
-// D-JPK-GRANTCMD1=A: `jet trust <verb>`.
+// `jet trust <verb>`.
 TRUST_SUBCOMMAND :: prep { "trust" }
 // U16: `jetpack bridge <verb>`, translators from a foreign ecosystem descriptor.
 BRIDGE_SUBCOMMAND :: prep { "bridge" }
 // U12: `jetpack services <verb>` supervises the project's dev `services:`.
 SERVICES_SUBCOMMAND :: prep { "services" }
-// D-JPK-IMAGE1=A: `jet image <name>`.
+// `jet image <name>`.
 IMAGE_SUBCOMMAND :: prep { "image" }
-// D-JOS-USERAPPLY1=A: standalone user-profile management entrypoint.
+// Standalone user-profile management entrypoint.
 USER_SUBCOMMAND :: prep { "user" }
-// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock|provision|resolve|list`.
+// (#1187): `jetpack browser lock|provision|resolve|list`.
 BROWSER_SUBCOMMAND :: prep { "browser" }
 BROWSER_ENGINES :: prep { [String]{"chromium", "firefox", "webkit"} }
 BROWSER_DEFAULT_PROTOCOL :: prep { "bidi-2025.5" }
@@ -665,13 +657,13 @@ JETPACK_VERBS :: prep { [String]{
 
 // ── CLI (jet_foundation::Syntax, effects_surface.rs, jetpack_config.rs) ──
 
-// D-JPK-DISPATCH1=B: `jet` probes this hidden flag before every engine
+// `jet` probes this hidden flag before every engine
 // dispatch; the engine answers with its version.
 ENGINE_PROTOCOL_FLAG :: prep { "--engine-protocol" }
-// D-FE-CLI1=D: both spellings bypass mutation confirmation gates.
+// Both spellings bypass mutation confirmation gates.
 CLI_FLAG_YES_SHORT :: prep { "-y" }
 CLI_FLAG_YES_LONG :: prep { "--yes" }
-// D-VERDICT-2192-1: `jetpack update` scope selectors.
+// `jetpack update` scope selectors.
 UPDATE_FLAG_DEPS :: prep { "--deps" }
 UPDATE_FLAG_TOOLS :: prep { "--tools" }
 // Card #2218: `jetpack lock diff [--against <rev>]`.
@@ -683,40 +675,38 @@ TRUST_BYPASS_FLAG :: prep { "--trust" }
 ENV_FLAG_FLAKE :: prep { "--flake" }
 // U16: isolate the foreign projected shell from host variables.
 ENV_FLAG_PURE :: prep { "--pure" }
-// U16 / D-JPK-SELECTOR1=C: ad-hoc packages on env/use, exact workspace
+// U16 ad-hoc packages on env/use, exact workspace
 // members on build/test/run.
 ENV_FLAG_PACKAGE :: prep { "-p" }
-// D-VERDICT-2189-1: materialize without entering; `--prepare` is retired.
+// Materialize without entering.
 ENV_FLAG_PREP :: prep { "--prep" }
-ENV_FLAG_PREP_RETIRED :: prep { "--prepare" }
+ENV_FLAG_PREP_UNKNOWN :: prep { "--prepare" }
 // Card #2214: expand environment acquisition plans to per-package facts.
 ENV_FLAG_EXPLAIN :: prep { "--explain" }
-// D-ENV-PROFILE1 / D-CONF-WORD1=A: select a declared environment preset;
-// `--profile` is retired and only teaches `--preset`.
+// Select a declared environment preset.
 ENV_FLAG_PRESET :: prep { "--preset" }
-ENV_FLAG_PROFILE_RETIRED :: prep { "--profile" }
-// D-ENVFLAG1=A: select one `env.<name>` module; `--env-profile` is retired
-// input only and never an alias.
+ENV_FLAG_PROFILE_UNKNOWN :: prep { "--profile" }
+// Select one `env.<name>` module.
 ENV_FLAG_ENV :: prep { "--env" }
-ENV_FLAG_ENV_RETIRED :: prep { "--env-profile" }
-// D-ECO12=A: the environment formatter language for `jet fmt`.
+ENV_FLAG_ENV_UNKNOWN :: prep { "--env-profile" }
+// The environment formatter language for `jet fmt`.
 FMT_FLAG_LANG :: prep { "--lang" }
-// U27 (D-JPK-BUILDDBG1=A): open a shell in preserved failed build scratch.
+// U27 open a shell in preserved failed build scratch.
 BUILD_FLAG_SHELL_ON_FAIL :: prep { "--shell-on-fail" }
-// D-JPK-GRANTCMD1=A: `jet trust <verb>` and `--scope user|repo`.
+// `jet trust <verb>` and `--scope user|repo`.
 TRUST_FLAG_SCOPE :: prep { "--scope" }
 TRUST_VERB_GRANT :: prep { "grant" }
 TRUST_VERB_LIST :: prep { "list" }
 TRUST_VERB_EXPLAIN :: prep { "explain" }
 TRUST_VERB_REVOKE :: prep { "revoke" }
 TRUST_VERBS :: prep { [String]{TRUST_VERB_GRANT, TRUST_VERB_LIST, TRUST_VERB_EXPLAIN, TRUST_VERB_REVOKE} }
-// D-JPK-IMAGE1: `jet image <name> --push <ref>`.
+// `jet image <name> --push <ref>`.
 IMAGE_FLAG_PUSH :: prep { "--push" }
-// D-JPK-OSGEN1=C: the generic `--name <name>` flag (`hangar ingest`).
+// The generic `--name <name>` flag (`hangar ingest`).
 OS_FLAG_NAME :: prep { "--name" }
 // U16: `jetpack bridge flake`.
 BRIDGE_VERB_FLAKE :: prep { "flake" }
-// D-BROWSER-AUTO1=A (#1187): browser verbs and flags.
+// (#1187): browser verbs and flags.
 BROWSER_VERB_LOCK :: prep { "lock" }
 BROWSER_VERB_PROVISION :: prep { "provision" }
 BROWSER_VERB_RESOLVE :: prep { "resolve" }
@@ -725,12 +715,11 @@ BROWSER_VERBS :: prep { [String]{BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, BROW
 BROWSER_FLAG_BINARY :: prep { "--binary" }
 BROWSER_FLAG_VERSION :: prep { "--version" }
 BROWSER_FLAG_PROTOCOL :: prep { "--protocol" }
-// D-JPK-SELECTOR1=C: members with changed input hashes (plus dependents),
+// Members with changed input hashes (plus dependents),
 // or changed since a git ref.
 WS_FLAG_AFFECTED :: prep { "--affected" }
 WS_FLAG_AFFECTED_SINCE :: prep { "--affected-since" }
-// D-ONCE-RETIRE1=C: the retired TOML config name, a migration sentinel only.
-JETPACK_TOML :: prep { "jetpack.toml" }
+// The retired TOML config name, a migration sentinel only.
 
 // ── Services (jet_foundation::Syntax) ──
 // U12: per-service runtime state lives under `.jet/services/<name>/`.

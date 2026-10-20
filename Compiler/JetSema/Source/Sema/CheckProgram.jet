@@ -260,7 +260,7 @@ struct SemaGraphModuleResult {
     // Why `complete` is false, one line per cause, so a no-diagnostic
     // incomplete module still names what stopped it.
     incomplete_reasons: [String]{[String]{}}
-    // D-FAIL-CONV2=A: keys of the Prelude error conversions sema injected
+    // Keys of the Prelude error conversions sema injected
     // into this module after its bodies. They have no registration row (the
     // Rust reference pushes them as module items), so the driver's identity
     // check admits exactly these keys beside the registered declarations.
@@ -278,7 +278,7 @@ struct SemaFunctionFailureFacts {
     function_key: String
     direct: Bool
     edges: [String]
-    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: this body's default-route row.
+    // This body's default-route row.
     union_members: [Type]{[Type]{}}
     union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
     union_edges: [String]{[String]{}}
@@ -1345,7 +1345,7 @@ fn sema_function_publish_return_views(scopes: &SemaScopeTable, rows: &[String:In
 
 // Rust `contains_view` (`Bundle/Validation.rs` `check_module_bodies`): a
 // declared return type carries view provenance across its signature when it
-// structurally holds a `View`, `ViewMut` or `Pin` (D-PIN1=A), directly or
+// structurally holds a `View`, `ViewMut` or `Pin` directly or
 // through struct fields. `seen` names every nominal already entered, so
 // recursive structs terminate.
 fn sema_check_type_contains_view(graph: SemaRegistrationGraph, module_identity: String, ty: Type, seen: &[String:Bool]) -> Bool {
@@ -1713,7 +1713,7 @@ fn sema_function_kind_owner_type(function_kind: TFuncKind) -> Type? {
     }
 }
 
-// D-COPY-DEFAULT1=A: an unmarked use of a value moves it only when it is the
+// An unmarked use of a value moves it only when it is the
 // last use. A check records each unmarked move site that a later use reached;
 // the function is then checked again with those sites known, where each one
 // checks as the copy `name.copy()` and leaves its source usable. A site whose type
@@ -1917,14 +1917,14 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     context.function_name = sema_inline_member_source_name(func.name)
     context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
     if !complete -> sema_check_unsupported(&context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
-    // D-FAILURE-FOUNDATION1=A / D-NEVER2=B: the declared signature's failure
+    // The declared signature's failure
     // domains and `Never` slots (E2417, E2422).
     generic_names :: loop param in generic_params -> param.name
     if !sema_check_function_failure_contracts(func, updated, program, generic_names, &diagnostics) -> complete = false
-    // D-FAILURE-FOUNDATION1=A (E2421): the public failure carrier, read from
+    // E2421: the public failure carrier, read from
     // the declared signature as the Rust reference's function registration does.
     sema_check_public_failure_carrier(func, updated, program, &diagnostics)
-    // D-MEMO1=A (E0939/E0940): the `#Memo` cache contract (Rust
+    // E0939/E0940: the `#Memo` cache contract (Rust
     // `check_memoized_function`), also proven from the declared signature.
     sema_check_memoized_function(func, updated, program, generic_params, &diagnostics)
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
@@ -1944,7 +1944,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             &diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` can't also declare `-[]>`", "a reactive effect re-runs when signals change, so it is not a pure function", "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`"))
         }
         if func.return_type == .Val(return_type) && return_type != (Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
+            &diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
         }
     }
 
@@ -1963,7 +1963,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         }
         if func.params[param_index].variadic -> parameter_ty = Type.List{element: parameter_ty}
         parameter_ty = sema_function_resolve_declared(updated, program, parameter_ty, module_identity, generic_params)
-        // D-MAP-KEY1 (E0502): a map in a declared parameter type needs a key-eligible key.
+        // E0502: a map in a declared parameter type needs a key-eligible key.
         if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, &diagnostics) -> complete = false
         default_expr := TExpr?{None}
         if func.params[param_index].default != None {
@@ -2032,7 +2032,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if !contract.complete -> complete = false
 
 
-    // D-DISCARD1=A: with no written return type the function returns
+    // With no written return type the function returns
     // nothing, so a value on its last line is lost (E0433). With a value
     // return (not a generator; written, or projected by the bundle failure
     // solve) the last line is the value handed back, and a table on the last
@@ -2519,7 +2519,7 @@ fn sema_keep_going_stub(func: Func, owner_id: SymbolID, function_kind: TFuncKind
     Val(checked)
 }
 
-// D-DISCARD1 reads a function with no written return type as losing the value
+// This rule reads a function with no written return type as losing the value
 // of its last line (E0433). A trap's `todo` is a stop, never a value handed
 // to nobody, so the trap's placeholder return position counts as written.
 fn sema_keep_going_trap_return_span(func: Func) -> Span? Never! {
@@ -3518,14 +3518,14 @@ fn sema_check_pass_environment(graph: ^SemaRegistrationGraph, checked_types: [TT
     environment.checked_type_name_slots = ^tables.checked_type_name_slots
     environment.checked_type_name_rows = ^tables.checked_type_name_rows
     environment.boxed_edges = ^tables.boxed_edges
-    // D-SHAPE-PLACE1=A: every module's functions, so the length-preserving
+    // Every module's functions, so the length-preserving
     // fact covers calls into other modules like the Rust bundle-wide fact.
     environment.fixed_length_write_params = ^fixed_length_write_params
     environment.comptime_body_publication = ^body_values
     ^environment
 }
 
-// D-MEM-VIEWRET1=B (Rust `check_module_bodies`): resolve callable view
+// (Rust `check_module_bodies`): resolve callable view
 // summaries before the real body pass so declaration order cannot affect a
 // public owner contract. Only functions whose declared return type
 // structurally contains a view are summary jobs, checked in name order; each
@@ -5324,7 +5324,7 @@ fn sema_comptime_module_sources(program: SemaProgramTables, module_index: Int) -
 }
 
 // A comptime run pass's item checks, made ahead of the pass on the compiler
-// threads (D-JOBS1). The run checks its pending items one at a time, and a
+// threads. The run checks its pending items one at a time, and a
 // value that lands between two checks types only its own constant; an item
 // check reads only the constants it references, and every referenced
 // constant without a value is one of the check's `dependencies`
@@ -5790,7 +5790,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
                 }
                 if field_symbol != None {
                     symbol :: field_symbol ?? return
-                    // Rust CheckerMarkers (D-SERDE5) evaluates every `field: T{expr}`
+                    // Rust CheckerMarkers evaluates every `field: T{expr}`
                     // default opportunistically; construction lowers the default
                     // expression itself, so only a baked default must evaluate.
                     if field.default != None && field.default_ct == None {
@@ -5871,7 +5871,7 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
-        // D-MODULE-VALUE1: registration reports a non-literal module binding
+        // Registration reports a non-literal module binding
         // (E0622); it is never evaluated.
         if !sema_checked_module_value_evaluates(constant.declaration) -> next
         expression := constant.declaration.value
@@ -6207,7 +6207,7 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaP
         probe.table.comptime_execution_depth = 1
         // S57: `NAME :: expr` fails the build when evaluation cannot complete.
         // The build edge carries the implicit `!Err` rail of `fn run()`
-        // (D-FAIL-EXIT1), so a fallible call here propagates to the build.
+        // so a fallible call here propagates to the build.
         probe.table.failure_carrier = Val(sema_failure_carrier(None))
         context := sema_check_context_init()
         context.host_hooks = probe.host_hooks
@@ -6304,7 +6304,7 @@ fn sema_comptime_policy_deny_diagnostic(package_identity: String, denied: [Strin
 }
 
 // Rust `program_effects` / EffectBudget `entry_reachable_keys`
-// (D-EFFECT-AUTHORITY1): package authority judges the effects reachable from
+// package authority judges the effects reachable from
 // the selected application entry, not every loaded declaration. A function
 // that entry never calls (a bootstrap host hook, an unused helper) is not
 // application provenance, so its row is not checked against
@@ -6377,7 +6377,7 @@ fn sema_failure_inference_candidate(func: Func) -> Bool Never! {
     !func.compiler_generated && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
 }
 
-// #3708 (D-FAILURE-FOUNDATION1=A): "Every function has the structured Error
+// #3708 "Every function has the structured Error
 // route by default. Sema removes it when impossible." After every body is
 // checked, a greatest fixpoint over the bundle's propagation edges finds the
 // unannotated top-level functions whose failure set is empty. A function used
@@ -6708,7 +6708,7 @@ fn sema_failure_module_references(module_result: SemaGraphModuleResult, keys: [S
     false
 }
 
-// D-FAIL-INFER-UNION1=A: the modules the one body check can't keep, in
+// The modules the one body check can't keep, in
 // order. A union contract changes what its callers check against (the cases
 // a match names, the typed payloads), so each module that declares a
 // projected function or a minted `#Error enum`, calls a projected function or
@@ -6749,7 +6749,7 @@ fn sema_failure_recheck_modules(modules: [SemaGraphModuleResult], unions: SemaFa
 // mir.rs `is_result_carrier`, `plain_named_fn_value`). A module checked
 // before the solve projected `projected` takes it here: each projected
 // function's checked signature names the `T Never!` carrier, and a dropped
-// call to one is a discarded result (E0433, D-DISCARD1=A). Its call sites
+// call to one is a discarded result (E0433). Its call sites
 // keep the carrier they were checked against; lowering hands a plain-return
 // callee's value to any `Result` carrier a call site names.
 fn sema_failure_reconcile_infallible(modules: &[SemaGraphModuleResult], projected: [String]) {
@@ -6772,10 +6772,10 @@ fn sema_failure_reconcile_infallible(modules: &[SemaGraphModuleResult], projecte
     }
 }
 
-// D-ENTRY-SCRIPT1=C: only an explicit `fn run` may contain executable entry
+// Only an explicit `fn run` may contain executable entry
 // code. An imported file with loose statements is E0620 and the entry file
 // E0621, spanning the first through the last statement. A file-scope
-// `name :: value` binding is a module global (D-MODULE-BIND1), which the
+// `name :: value` binding is a module global which the
 // parser already registers as a declaration.
 fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
@@ -6808,7 +6808,7 @@ fn sema_finalize_registration_graph(graph: ^SemaRegistrationGraph, resolved: ^Se
     result
 }
 
-// D-META-AUTO1 demand: after the body pass, every generated codec an
+// Demand: after the body pass, every generated codec an
 // Encode/Decode requirement reached gets its body (sema_codec_fill_demanded)
 // and is checked into its module's result. A wave's checks may require more
 // codecs, so waves repeat until no requirement is new; a program that reaches
@@ -6863,14 +6863,14 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     all_modules :: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
     body_graph := sema_finalize_check_modules(^resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, &modules)
-    // D-META-AUTO1 demand: only the generated codecs a requirement reached
+    // Demand: only the generated codecs a requirement reached
     // get bodies, checked into their modules' results before the failure solve.
     after_body_graph := sema_codec_waves(^body_graph, &trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, &modules)
     // #3708: every body is checked, so the failure solve finds the
     // unannotated functions that can never fail.
     if trace_sink == .Val(sink) -> sink.begin("sema.failure", "", -1, -1)
     inferred_infallible := sema_failure_solve(after_body_graph, modules)
-    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: the same rows settle the
+    // The same rows settle the
     // failure union of every unannotated function. Each inferred contract,
     // and the `T Never!` plain return of each infallible one (#3708 T1), is
     // projected onto the graph, so every later check and lowering read that
@@ -6916,7 +6916,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop settle_index in 0..<modules.len() {
         if sema_failure_settle_obligations(&modules[settle_index].diagnostics, infallible_keys) -> modules[settle_index].complete = false
     }
-    // D-METHODMACRO1=A: the `#Inline(Always)` promise (E0917-E0919) needs
+    // The `#Inline(Always)` promise (E0917-E0919) needs
     // every body's function-value references first.
     if sema_marker_rules_check_inline_always(final_graph, modules, &diagnostics) -> complete = false
     if sema_check_script_entries(final_graph, &diagnostics) -> complete = false
@@ -7096,7 +7096,7 @@ fn sema_finalize_authority_constrained(policies: [SemaRegistrationPackagePolicy]
     false
 }
 
-// Rust `program_effects` (D-EFFECT-AUTHORITY1): each checked function the
+// Rust `program_effects` each checked function the
 // entry reaches is judged against its package's `authority.holds` policy,
 // module by module (registered modules only), function by function. Returns
 // false when a check failed.
@@ -7129,7 +7129,7 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
 }
 
 // The Core usage of every registered module, in module order, on up to
-// `threads` compiler threads (D-JOBS1). The walk of a module's items is the
+// `threads` compiler threads. The walk of a module's items is the
 // only part that grows with the program, so the jobs are consecutive item
 // ranges (one module each, about equal source bytes, every module's ranges
 // consecutive), claimed dynamically; each thread walks its claimed ranges

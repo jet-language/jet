@@ -1,12 +1,11 @@
 // The shared realization front end for CLI verbs, ported from
 // jetpack::CLI::realize: classify explicit refs, assemble the acquisition
 // plan before provider realization, realize one ref or adapter through the
-// single verified Store boundary, and print the ledger row (D-JPK-CACHE1,
-// D-FE-CLI1).
+// single verified Store boundary, and print the ledger row (
 
-// How `cli_realize_ref_outcome` reports a successful realization (D-FE-CLI1).
+// How `cli_realize_ref_outcome` reports a successful realization.
 enum RowStyle {
-    // The state-column ledger row (`✓ name version state`), D-JPK-CACHE1.
+    // The state-column ledger row (`✓ name version state`).
     Ledger
     // The tier-1 trivial-op row (`✓ name version`, no state or detail).
     Ready
@@ -38,7 +37,7 @@ enum RealizeScope {
 // Classify an explicit CLI ref, accepting any named source declared in the
 // current project's env file (`jetpack use ripgrep@stable`) and any workspace
 // member (`jetpack use logging`, `jetpack use packages/logging`, Slice B,
-// D-MONOREF1=A). Prints the diagnostic on failure.
+// ). Prints the diagnostic on failure.
 fn cli_classify_or_report(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> RefSpec RefError! {
     table :: cli_cwd_table(&cache)
     index :: cli_cwd_workspace_index(&cache)
@@ -180,7 +179,7 @@ fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: Han
 }
 
 // Realize one ref, recording it in the store and printing progress. `table`
-// resolves named sources (D-JPK17); it is empty for direct CLI refs.
+// resolves named sources it is empty for direct CLI refs.
 fn cli_realize_ref(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState)? Never! {
     live := LiveRegion?{None}
     if cli_realize_ref_outcome(&verification, theme, roots, flags, table, spec, name_w, RowStyle.Ledger, &live, RealizeScope.Project) == {
@@ -209,7 +208,7 @@ fn cli_report_offline_nix(theme: Theme, spec: RefSpec) Never! -[IO, Time.Wait]> 
 }
 
 fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: &LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
-    // Tier 2 (D-FE-CLI1: erase live regions before diagnostics). A `Silent`
+    // Tier 2 (erase live regions before diagnostics). A `Silent`
     // caller owns the aggregate line, which its progress sink redraws while
     // this call runs; clear only the spinner/ledger path up front.
     if style != RowStyle.Silent -> cli_clear_live_region(live)
@@ -296,7 +295,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
         }
     }
     ctx := cli_provider_ctx(roots, flags, fixtures, project_dir, nix_index, Val(roots))
-    // D-JPK-BUILDSCRIPT1: a Core Cargo action is an upstream executable
+    // A Core Cargo action is an upstream executable
     // hook. The exact staged source/recipe/capability identity must be
     // approved outside the project metadata before Store realization.
     if provider_approval_facts(spec, table, ctx) == {
@@ -342,7 +341,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
                     }
                 }
             }
-            // T4 (D-JPK-CACHE1): one ledger row per package — how it was
+            // T4 one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
             elapsed :: time.elapsed(started)
             state :: if parts.source_state == SourceState.Built && elapsed.ns >= 1000000000 -> "Built {terminal_human_duration(elapsed)}" else -> parts.source_state.label()

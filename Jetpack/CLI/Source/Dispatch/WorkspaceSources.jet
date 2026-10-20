@@ -64,29 +64,6 @@ fn cli_workspace_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS
     }
 }
 
-fn cli_retired_jetpack_toml_diagnostic() -> Diagnostic Never! {
-    diagnostic_from_registry(
-        "E1225",
-        None,
-        "`jetpack.toml` is retired.",
-        "Package identity and named sources now live in `package.jet` and `env.jet`, so dependency resolution uses one Jet grammar (D-ONCE-RETIRE1).",
-        "Move `[repo]` `name`/`version` to `package.jet`, move `[sources]` entries to `env.jet` `sources: {{ … }}`, then delete `jetpack.toml`."
-    )
-}
-
-// Refuse a retired `jetpack.toml` anywhere up the authority walk. The exit
-// code on refusal, or None to proceed.
-fn cli_reject_retired_jetpack_toml(dir: String) -[IO, FS, Env, Exec, Time.Wait]> Int? Never! {
-    walk := AuthorityResolver.authority_walk_root(dir) ?? cli_report_authority_error(err.diagnostic())
-    loop {
-        if files.is_file(files.join(walk, JETPACK_TOML)) {
-            terminal_write_output(diagnostic_render_all(JETPACK_TOML, "", [Diagnostic]{cli_retired_jetpack_toml_diagnostic()}, false))
-            return Val(EXIT_USAGE)
-        }
-        walk = AuthorityResolver.authority_walk_parent(walk) ?? return None
-    }
-}
-
 // The resolver for `dir` when it is an authority-walk candidate; a missing
 // authority is not an error.
 fn cli_walk_resolver(dir: String) -[FS, Env]> AuthorityResolver? CLIError! {
@@ -238,7 +215,6 @@ fn cli_finish_workspace_load(cache: &WorkspaceDeclarationCache, dir: String, fou
 // built-in sources, so explicit CLI refs are project-aware.
 fn cli_cwd_table(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> SourceTable Never! {
     cwd :: cli_current_dir()
-    if cli_reject_retired_jetpack_toml(cwd) == .Val(code) -> process.exit(code)
     dir :: cli_project_root(&cache, cwd)
     table := if cli_checked_env_file(dir) == {
         .Ok(found) -> if found == {

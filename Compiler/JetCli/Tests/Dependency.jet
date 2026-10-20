@@ -3,10 +3,10 @@
 fn run() {
     lock := LockFile.empty()
     lock.packages = [LockedPackage]{
-        LockedPackage{name: "root", version: "1.0.0", source: .Root},
-        LockedPackage{name: "local", version: "1.0.0", source: .Path("../local")},
-        LockedPackage{name: "zeta", version: "2.3.4", source: .Registry{registry: "stable", reference: "zeta#2.3.4", output: "out", source_hash: "hash", repository: "repo", authority: "auth", tier: "core", gate_status: "passed"}},
-        LockedPackage{name: "alpha", version: "0.1.2", source: .Registry{registry: "community", reference: "alpha#0.1.2", output: "other", source_hash: "hash", repository: "repo", authority: "auth", tier: "community", gate_status: "local"}},
+        {name: "root", version: "1.0.0", source: .Root},
+        {name: "local", version: "1.0.0", source: .Path("../local")},
+        {name: "zeta", version: "2.3.4", source: .Registry{registry: "stable", reference: "zeta#2.3.4", output: "out", source_hash: "hash", repository: "repo", authority: "auth", tier: "core", gate_status: "passed"}},
+        {name: "alpha", version: "0.1.2", source: .Registry{registry: "community", reference: "alpha#0.1.2", output: "other", source_hash: "hash", repository: "repo", authority: "auth", tier: "community", gate_status: "local"}},
     }
     tiers :: "resolved `zeta` 2.3.4 from registry `stable` (tier: core; gate status: passed)\nresolved `alpha` 0.1.2 from registry `community` (tier: community; gate status: local)\n"
     assert_eq(jet_cli_dependency_success(lock, PackageFetchOptions{}), "{tiers}fetched all dependencies\n")

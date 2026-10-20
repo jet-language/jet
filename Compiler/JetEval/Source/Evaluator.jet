@@ -2774,7 +2774,7 @@ fn jet_eval_range_bounds(parts: JetEvalRangeParts, len: Int) -> [Int]? {
     Val([Int]{parts.start, end_exclusive})
 }
 
-// D-RANGE-VALUE1=A: owned range slices share the Prelude bounds kernel
+// Owned range slices share the Prelude bounds kernel
 // (`jet_slice_vec_range` / `jet_slice_range`); every other slice route runs
 // through canonical Prelude dispatch.
 // Rust: crates/jet-codegen/src/Codegen/MIREval.rs eval_prelude range slices
@@ -9835,7 +9835,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             }
             return jet_eval_route_prelude_dispatch(&machine, call, args, [MIRType]{}, result_ty, span)
         }
-        // D-RANGE-VALUE1=A: a Range value is checked data; only LoopRangeInit
+        // A Range value is checked data; only LoopRangeInit
         // builds an iteration cursor. Rust: MIREval.rs MirOperation::Range
         .Range(start, end, exclusive) -> {
             start_data :: jet_eval_data(jet_eval_value(&machine, frame_index, start, span) ?? return None, &machine, span) ?? return None

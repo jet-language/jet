@@ -64,14 +64,14 @@ struct SemaEffectFunctionSource {
     unsafe_span: Span?
     replayable_span: Span?
     effect_via: NamedSpan?
-    // D-EFF1: the body's `#FX(…)` regions with valid cap lists (E0712).
+    // The body's `#FX(…)` regions with valid cap lists (E0712).
     fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
-    // D-AUTHORITY-MEM2: loop statement spans; memory work inside one has no
+    // Loop statement spans; memory work inside one has no
     // static execution count.
     loop_spans: [Span]{[Span]{}}
-    // D-DET1: `assume_deterministic` blocks suspend E3403.
+    // `assume_deterministic` blocks suspend E3403.
     assume_det_spans: [Span]{[Span]{}}
-    // D-MEMO1=A: the first `#Memo` marker of a non-comptime function (E0938).
+    // The first `#Memo` marker of a non-comptime function (E0938).
     memo_span: Span?{None}
 }
 
@@ -89,7 +89,7 @@ struct SemaEffectModuleInput {
     module_index: Int
     sources: [SemaEffectFunctionSource]
     source_segments: [SemaSourceSegment]
-    // D-EFF3 trait-method effect ceilings this module declares (E0742).
+    // This rule trait-method effect ceilings this module declares (E0742).
     trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
     // `{trait}::{owner}` implementations this module declares
     // (sema_effect_trait_implementers), for generic dispatch.
@@ -195,7 +195,7 @@ struct SemaEffectNode {
     // Calls through a trait value whose trait method declares no effect row
     // (`Trait::method` at the call). A ceiling above them is E0743.
     dispatches: [TEffectSpan]
-    // D-AUTHORITY-MEM1: the memory operations this body performs directly
+    // The memory operations this body performs directly
     // and the `-[!Mem.*]>` denials its signature declares (E0921).
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
     memory_denials: [EffectRowEntry]{[EffectRowEntry]{}}
@@ -794,7 +794,7 @@ fn sema_effect_node_from_source(function: TFunc, sources: [SemaEffectFunctionSou
                 next
             }
             if {
-                // D-AUTHORITY-MEM1: memory denials are proved over memory
+                // Memory denials are proved over memory
                 // events (E0921), not the ambient prohibition check.
                 prohibited && sema_effect_root(effect_name) == "Mem" -> {
                     &node.memory_denials.push(EffectRowEntry{name: effect_name, span: entry.span})
@@ -857,7 +857,7 @@ fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, progr
 }
 
 fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
-    // Rust `direct_calls.rs` (D-EFF1): a foreign body with a known effect
+    // Rust `direct_calls.rs` a foreign body with a known effect
     // root records that root and an open memory dispatch; only an extern with
     // no root is an unknown callee that forces the maximal set.
     if fact.foreign_effect_root == .Val(root) {
@@ -1095,7 +1095,7 @@ fn sema_effect_symbol_leaf(key: String) -> String Never! {
     if parts.len() == 0 -> key else -> parts[parts.len() - 1]
 }
 
-// D-EFF3: a call through a trait value sees the trait method's declared
+// A call through a trait value sees the trait method's declared
 // dispatch bound, not one implementation body. A trait method with no
 // declared row is an open-world dispatch (E0743 under a ceiling).
 fn sema_effect_record_dispatch(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, fact: SemaCallSiteFact) Never! {
@@ -1172,7 +1172,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                     if nondeterministic == .Val(api) {
                         // Rust returns before recording the call's effects, so
                         // the pure function reports E3403 instead of E3401.
-                        &diagnostics.push(sema_error("E3403", expression.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine (D-PURE2).", "remove this call, or remove the enclosing function's explicit empty effect bound."))
+                        &diagnostics.push(sema_error("E3403", expression.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else {
                         if !sema_effect_record_static_dispatch(&nodes, facts, node_index, expression, value) {
                             sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
@@ -1681,7 +1681,7 @@ fn sema_effect_trait_bound_diagnostic(bound: SemaEffectTraitBound, over: [String
     diagnostic_with_rights(^diagnostic, "invocation", [String]{impl_key}, [String]{}, None)
 }
 
-// D-EFF3: every impl of a bounded trait method stays within the trait's row.
+// Every impl of a bounded trait method stays within the trait's row.
 fn sema_effect_check_trait_bounds(module_row: SemaEffectModuleInput, functions: [TFunc], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: [String:Int], solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
     loop function in functions {
@@ -1709,7 +1709,7 @@ fn sema_effect_method_name(function: TFunc, sources: [SemaEffectFunctionSource],
     sources[at].name
 }
 
-// D-AUTHORITY-MEM2: the byte bound of `Mem.Alloc(above: N)`.
+// The byte bound of `Mem.Alloc(above: N)`.
 fn sema_effect_memory_bound(name: String) -> Int? {
     if !name.starts_with("Mem.Alloc(") -> return None
     parts :: name.split(":").to_list()
@@ -1885,7 +1885,7 @@ fn sema_effect_memory_violation(nodes: [SemaEffectNode], root: Int, denial: Effe
     sema_error("E0921", span, "`{fact}` cannot be proved through the open dispatch at {open.source}", "{open.reason} is reachable through {path_text}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {provenance}", "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it")
 }
 
-// D-AUTHORITY-MEM1/2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
+// 2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
 // `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial holds for every
 // function the root can reach (E0921).
 fn sema_effect_memory_project(nodes: [SemaEffectNode], node_by_key: [String:Int], root: Int, denial: EffectRowEntry, diagnostics: &[Diagnostic]) -> SemaMemoryProjection {
@@ -1920,7 +1920,7 @@ fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [Strin
 
 fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
-    // D-MEMO1=A with D-EFFECT-OMIT1=A (Rust `check_inferred_memo`, E0938): a
+    // This rule with (Rust `check_inferred_memo`, E0938): a
     // `#Memo` function that is not declared pure is judged by its solved row;
     // panic and memory are deny-only, as for an explicit empty bound.
     if !node.is_pure && node.memo_span == .Val(memo_span) {
@@ -1999,7 +1999,7 @@ fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> 
     diagnostic_with_source_derived_suggestion(diagnostic, Span{start: span.start, end: span.start}, "result :: ")
 }
 
-// D-EFF1: the part of `expression` inside `region` (a `#FX` block span).
+// The part of `expression` inside `region` (a `#FX` block span).
 fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expression: TExpr, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: Int) {
     if sema_effect_span_contains(region, expression.span) {
         sema_effect_walk_expr(&nodes, node_index, expression, facts, &diagnostics, caller)
@@ -2009,7 +2009,7 @@ fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, expre
     sema_effect_walk_expr_children(SemaEffectWalk.Region{node_index: node_index, region: region}, &nodes, facts, &diagnostics, caller, expression)
 }
 
-// D-EFF1 (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
+// (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
 // its own sites, everything its callees reach, and every effect when it makes
 // an unknown call. The region's node is appended to `nodes` for the walk
 // (which writes only that node) and removed again before returning.
@@ -2245,7 +2245,7 @@ SEMA_EFFECT_NODE_BYTES :: 1024
 // Parts per admitted thread, claimed dynamically.
 SEMA_EFFECT_COLLECT_PARTS_PER_THREAD :: 8
 
-// sema_effect_collect_module on up to `threads` compiler threads (D-JOBS1).
+// sema_effect_collect_module on up to `threads` compiler threads.
 // A function's collection writes only its own node (`node_by_key` of its
 // key) and reads of the other nodes only what node construction set
 // (`is_unsafe`, `name`), so with no two functions of the module on one node,
@@ -2405,7 +2405,7 @@ fn sema_effect_shared_facts(call_facts: [SemaCallSiteFact]) -> [SemaCallSiteFact
     facts
 }
 
-// D-EFF1: every `#FX(…)` region of the current module's functions stays
+// Every `#FX(…)` region of the current module's functions stays
 // within its caps.
 fn sema_effect_check_module_regions(functions: [TFunc], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
     region_diagnostics := [Diagnostic]{}

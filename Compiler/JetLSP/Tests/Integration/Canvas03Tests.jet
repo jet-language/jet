@@ -322,7 +322,7 @@ use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_fiel
     dir :: temp_dir("proof_budget_projection")
     fs.create_dir_all(dir.join("src")).unwrap()
     fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
-    // Bare jet budget check resolves canonical run.jet (D-VERDICT-678-1).
+    // Bare jet budget check resolves canonical run.jet.
     entry :: dir.join("src/run.jet")
     fs.write(entry, "module perf.package {{\n    budgets: [Budget{{\n        name: \"public-api\",\n        scope: .Package,\n        metric: .PublicApiItems,\n        comparison: .Absolute,\n        limit: .AtMost(10),\n    }}],\n}}\npub fn api() {{}}\nfn run() {{}}\n").unwrap()
     out :: Command.new(OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())).current_dir(dir).args(["budget", "check", "--json"]).output().unwrap()

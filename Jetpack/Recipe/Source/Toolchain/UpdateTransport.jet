@@ -6,7 +6,7 @@
 //
 // Remote reads use Core HTTP with redirects disabled so every hop passes the
 // toolchain redirect rule below, and a caller-chosen body cap
-// (D-CORE-HTTPBODYLIMIT1). `JETPACK_DENY_NETWORK` still gates every remote read.
+// . `JETPACK_DENY_NETWORK` still gates every remote read.
 
 TOOLCHAIN_FETCH_TIMEOUT_SECONDS :: prep { 120 }
 TOOLCHAIN_FETCH_MAX_REDIRECTS :: prep { 5 }
@@ -340,7 +340,7 @@ fn recipe_update_write_state(path: String, state: ToolchainUpdateState) RecipeEr
             return Err(RecipeError.Update("write toolchain update state: {error}"))
         }
     }
-    // Replace-existing with write-through on every platform (D-CORE-FILERENAME1).
+    // Replace-existing with write-through on every platform.
     if files.rename(partial, path, if_exists: .Replace) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -356,7 +356,7 @@ fn recipe_update_write_all_synced(out: FileWriter, bytes: [U8]) IOError! -[FS]> 
     out.fsync()
 }
 
-// Make a rename inside `parent` durable (folder fsync, D-CORE-FILERENAME1).
+// Make a rename inside `parent` durable (folder fsync).
 fn recipe_update_sync_parent(parent: String) RecipeError! -[FS]> {
     files.fsync(parent) ?? return Err(RecipeError.Update("fsync executable parent: {err}"))
 }

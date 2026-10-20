@@ -91,14 +91,14 @@ struct LexerTestDelimiterCase { source: String, runs: [Span] }
 
 fn lexer_test_delimiter_cases() -> [LexerTestDelimiterCase] Never! {
     [LexerTestDelimiterCase]{
-        LexerTestDelimiterCase{source: "\"\"\"Hello\n    kept\n    \"\"\"", runs: [Span]{Span{start: 3, end: 8}}},
-        LexerTestDelimiterCase{source: "\"\"\"\n    kept\n    end\"\"\"", runs: [Span]{Span{start: 17, end: 20}}},
-        LexerTestDelimiterCase{source: "\"\"\"Hello\n    kept\n    end\"\"\"", runs: [Span]{Span{start: 3, end: 8}, Span{start: 22, end: 25}}},
-        LexerTestDelimiterCase{source: "\"\"\"abc\"\"\"", runs: [Span]{Span{start: 3, end: 6}, Span{start: 3, end: 6}}},
-        LexerTestDelimiterCase{source: "\"\"\"{{name}}\nkept\n\"\"\"", runs: [Span]{Span{start: 3, end: 9}}},
-        LexerTestDelimiterCase{source: "\"\"\" \té😀 rest\nkept\n\"\"\"", runs: [Span]{Span{start: 5, end: 11}}},
-        LexerTestDelimiterCase{source: "SQL{{\"\"\"query\nkept\n\"\"\"}}", runs: [Span]{Span{start: 7, end: 12}}},
-        LexerTestDelimiterCase{source: "\"\"\"{lexer_test_cr()}stray\nkept\n\"\"\"", runs: [Span]{Span{start: 3, end: 9}}},
+        {source: "\"\"\"Hello\n    kept\n    \"\"\"", runs: [Span]{Span{start: 3, end: 8}}},
+        {source: "\"\"\"\n    kept\n    end\"\"\"", runs: [Span]{Span{start: 17, end: 20}}},
+        {source: "\"\"\"Hello\n    kept\n    end\"\"\"", runs: [Span]{Span{start: 3, end: 8}, Span{start: 22, end: 25}}},
+        {source: "\"\"\"abc\"\"\"", runs: [Span]{Span{start: 3, end: 6}, Span{start: 3, end: 6}}},
+        {source: "\"\"\"{{name}}\nkept\n\"\"\"", runs: [Span]{Span{start: 3, end: 9}}},
+        {source: "\"\"\" \té😀 rest\nkept\n\"\"\"", runs: [Span]{Span{start: 5, end: 11}}},
+        {source: "SQL{{\"\"\"query\nkept\n\"\"\"}}", runs: [Span]{Span{start: 7, end: 12}}},
+        {source: "\"\"\"{lexer_test_cr()}stray\nkept\n\"\"\"", runs: [Span]{Span{start: 3, end: 9}}},
     }
 }
 
@@ -244,7 +244,7 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
 }
 
 // Rust: crates/jet-lexer/src/Lexer/Scan.rs:1284 (stale no-diagnostics assert;
-// current lex_raw emits E0003 and $layout, D-META-ROOT3=A).
+// current lex_raw emits E0003 and $layout).
 #Test("at_distinguishes_prefix_package_ref_and_fence") {
     lexed :: lexer_test_raw("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$")
     assert_eq(lexed.diagnostics.len(), 1)
@@ -284,20 +284,6 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
         if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> &kinds.push(token.kind)
     }
     assert_eq(kinds, [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON})
-}
-
-// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1347
-#Test("retired_fence_digraphs_teach_the_new_spelling_with_edits") {
-    lexed :: lexer_test_raw("print(@[ a, b ]@) x:]@")
-    edits := [String]{}
-    loop diagnostic in lexed.diagnostics {
-        assert_eq(diagnostic.code, "E-FENCE-SPELLING")
-        edit :: diagnostic.edit ?? panic("fence respelling edit")
-        &edits.push(edit.new_text.copy())
-    }
-    assert_eq(edits, [String]{"<:", ":>", " :>"})
-    assert_eq(lexed.tokens[2].kind, TOKEN_FENCE_OPEN)
-    assert_eq(lexed.tokens[6].kind, TOKEN_FENCE_CLOSE)
 }
 
 // Rust: tests/selfhost_terminators.rs:387-438

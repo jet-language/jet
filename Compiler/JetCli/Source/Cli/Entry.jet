@@ -1,4 +1,4 @@
-// Project entry resolution for the Jet-hosted `jet` (D-CLI-BARE1=A): which
+// Project entry resolution for the Jet-hosted `jet` which
 // file a bare `jet check`/`jet run`, or one aimed at a directory, compiles.
 // A port of Source/main.rs `resolve_bare_entry`, `resolve_command_target`,
 // `resolve_source_path`, `find_project_entry_with_callable`,
@@ -58,20 +58,13 @@ lex,
 lex_config,
 ]
 
-// Syntax.rs `DEFAULT_ENTRY_FILE`, `LEGACY_ENTRY_FILE`, `PACKAGE_FILE`,
-// `PAYLOAD_FILE`, `WORKSPACE_FILE`, `ENV_FILE`, `CONFIG_FILE`,
-// `UNIFIED_LOCK_FILE`, `STALE_MANIFEST_NAMES`, `COMMAND_ROLE_FILES`.
+// Syntax.rs `DEFAULT_ENTRY_FILE`, `PACKAGE_FILE`, `WORKSPACE_FILE`, `ENV_FILE`,
+// `CONFIG_FILE`, `UNIFIED_LOCK_FILE`, `COMMAND_ROLE_FILES`.
 JET_CLI_DEFAULT_ENTRY_FILE :: "run.jet"
-
-JET_CLI_LEGACY_ENTRY_FILE :: "main.jet"
 
 JET_CLI_PACKAGE_FILE :: "package.jet"
 
-JET_CLI_PAYLOAD_FILE :: "pkg.jet"
-
 JET_CLI_WORKSPACE_FILE :: "workspace.jet"
-
-JET_CLI_STALE_MANIFEST_NAMES :: [String]{"pack.jet", "payload.jet", "jet.toml"}
 
 JET_CLI_COMMAND_ROLE_FILES :: [String]{"@run.jet", "@build.jet", "@dev.jet", "@test.jet"}
 
@@ -501,9 +494,6 @@ fn jet_cli_package_sources(root: String, files: &[JetDriverAuthorizedSourceFile]
     loop file in discovered {
         name :: jet_cli_file_name(file.relative_path)
         if JET_CLI_RESERVED_SOURCE_NAMES.contains(name) -> next
-        if file.relative_path == JET_CLI_LEGACY_ENTRY_FILE || file.relative_path == ("src/{JET_CLI_LEGACY_ENTRY_FILE}") {
-            next
-        }
         &files.push(file)
     }
     None
@@ -514,61 +504,6 @@ fn jet_cli_relative_parent(relative: String) -> String Never! {
     parts :: relative.split("/").to_list()
     if parts.len() <= 1 -> return ""
     jet_cli_prefix(parts, parts.len() - 1).join("/")
-}
-
-enum JetCLIMigration {
-    Unchanged
-    Moved
-    Failed(message: String)
-}
-
-// Package/mod.rs `format_entry_error`.
-fn jet_cli_format_entry_error(origin: String, error: String) -> String Never! {
-    // copy: `error` stays with the caller (`error` is a read parameter: no move out of it, E0201)
-    // and the new value owns its own.
-    if origin == "" -> return error.copy()
-    "{origin}: {error}"
-}
-
-// Package/mod.rs `migrate_retired_entry` (D-VERDICT-678-1): a lone retired
-// `main.jet`, `src/main.jet`, or `.jet/main.jet` beside no canonical entry is
-// renamed once to `run.jet` (`src/run.jet`), with a stderr notice.
-fn jet_cli_migrate_retired_entry(root: String, origin: String, package_name: String, notices: &[String]) -[FS]> JetCLIMigration Never! {
-    candidates :: [[String]]{
-        [String]{JET_CLI_LEGACY_ENTRY_FILE, JET_CLI_DEFAULT_ENTRY_FILE},
-        [String]{"src/{JET_CLI_LEGACY_ENTRY_FILE}", "src/{JET_CLI_DEFAULT_ENTRY_FILE}"},
-        [String]{".jet/{JET_CLI_LEGACY_ENTRY_FILE}", JET_CLI_DEFAULT_ENTRY_FILE},
-    }
-    canonical_paths := [String]{JET_CLI_DEFAULT_ENTRY_FILE, "src/{JET_CLI_DEFAULT_ENTRY_FILE}"}
-    if package_name != "" {
-        named :: "{package_name}.jet"
-        if !canonical_paths.contains(named) -> &canonical_paths.push(named)
-    }
-    canonical := [String]{}
-    loop path in canonical_paths {
-        if jet_cli_checked_file(root, path) != None -> &canonical.push(path)
-    }
-    retired := [Int]{}
-    loop (index, candidate) in candidates {
-        if jet_cli_checked_file(root, candidate[0]) != None -> &retired.push(index)
-    }
-    if retired.len() == 0 -> return JetCLIMigration.Unchanged
-    if retired.len() != 1 || canonical.len() > 0 {
-        old := [String]{}
-        loop index in retired -> &old.push("`{candidates[index][0]}`")
-        current := "no canonical entry"
-        if canonical.len() > 0 {
-            quoted := [String]{}
-            loop path in canonical -> &quoted.push("`{path}`")
-            current = quoted.join(", ")
-        }
-        return JetCLIMigration.Failed{message: jet_cli_format_entry_error(origin, "ambiguous project entry: retired {old.join(", ")} and {current} both identify this project; keep one entry and run again")}
-    }
-    old :: candidates[retired[0]][0]
-    target :: candidates[retired[0]][1]
-    cli_files.rename(jet_cli_entry_join(root, old), jet_cli_entry_join(root, target)) ?? return JetCLIMigration.Failed{message: jet_cli_format_entry_error(origin, "could not migrate `{old}` to `{target}`: {err}")}
-    &notices.push("notice: migrated retired entry `{old}` to `{target}` (D-VERDICT-678-1)\n")
-    JetCLIMigration.Moved
 }
 
 // Package/mod.rs `intent_accepts_kind("run", kind)`.
@@ -622,7 +557,7 @@ fn jet_cli_output_entry_file(root: String, output: JetCLIOutputFact) -[FS]> JetC
         if found.len() != 1 -> return None
         return Val(JetCLIEntry{path: found[0], callable: Val(parts[0])})
     }
-    // D-MOD-CYCLE1=A: `entry: file.callable` names the one member file whose
+    // `entry: file.callable` names the one member file whose
     // stem is `file`, declaring exactly one top-level `callable`. Every source
     // must parse, as Rust `parse_sources` requires.
     programs := [Program]{}
@@ -649,15 +584,9 @@ fn jet_cli_output_entry_file(root: String, output: JetCLIOutputFact) -[FS]> JetC
 fn jet_cli_resolve_run_entry(root: String, manifest: JetCLIManifest?, notices: &[String]) -[FS]> JetCLIStockEntry Never! {
     origin :: if manifest == .Val(facts) -> facts.origin else -> ""
     name :: if manifest == .Val(facts) -> facts.name else -> ""
-    if jet_cli_migrate_retired_entry(root, origin, name, &notices) == .Failed(message) {
-        return JetCLIStockEntry.Failed{message: message}
-    }
     loop relative in JET_CLI_STOCK_ENTRIES {
         path :: jet_cli_checked_file(root, relative) ?? next
         return JetCLIStockEntry.Found{entry: JetCLIEntry{path: path, callable: Val("run")}}
-    }
-    if jet_cli_checked_file(root, JET_CLI_LEGACY_ENTRY_FILE) != None {
-        return JetCLIStockEntry.Failed{message: "{origin}: package entry requires canonical `{JET_CLI_DEFAULT_ENTRY_FILE}`; retired `{JET_CLI_LEGACY_ENTRY_FILE}` is not accepted"}
     }
     facts :: manifest ?? return JetCLIStockEntry.Absent
     compatible := [String]{}
@@ -699,29 +628,10 @@ fn jet_cli_package_run_member(root: String) -[FS]> String? Never! {
     None
 }
 
-// main.rs `report_entry_authority_error` for a retired `pkg.jet` manifest.
-fn jet_cli_retired_manifest(path: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_fail("E1226", "retired manifest `{path}` is not a Package root", "`{JET_CLI_PAYLOAD_FILE}` is retired; Package identity is read only from `{JET_CLI_PACKAGE_FILE}`", "rename `{JET_CLI_PAYLOAD_FILE}` to `{JET_CLI_PACKAGE_FILE}`", color, JET_DRIVER_EXIT_USER_ERROR)
-}
-
-// Authority.rs `checked_manifest` failures that stop resolution: both
-// manifests (E1206) or only the retired one (E1226).
-fn jet_cli_manifest_problem(root: String, color: Bool) -[FS]> JetCLIPlan? Never! {
-    canonical :: jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE)
-    retired :: jet_cli_checked_file(root, JET_CLI_PAYLOAD_FILE) ?? return None
-    if canonical != None {
-        return Val(jet_cli_fail("E1206", "the package has two manifest roots", "`{JET_CLI_PACKAGE_FILE}` and `{JET_CLI_PAYLOAD_FILE}` both exist; choosing one would make package identity ambiguous", "remove `{JET_CLI_PAYLOAD_FILE}` or migrate it into `{JET_CLI_PACKAGE_FILE}`", color, JET_DRIVER_EXIT_USER_ERROR))
-    }
-    Val(jet_cli_retired_manifest(retired, color))
-}
-
 // main.rs `find_project_entry_with_callable`: the stock entry of the
 // project rooted at `root`.
 fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
     root :: cli_files.realpath(root_path) ?? root_path
-    if jet_cli_manifest_problem(root, color) == .Val(problem) {
-        return JetCLIEntryFound.Refused{plan: problem}
-    }
     package := JetCLIManifest?{None}
     if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) != None {
         package = jet_cli_root_manifest(root)
@@ -755,7 +665,7 @@ fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, n
         if jet_cli_checked_file(root, "{manifest.name}.jet") == .Val(named) {
             return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: named, callable: None}}
         }
-        // D-MOD-CYCLE1=A: without `run.jet`, the member declaring the
+        // Without `run.jet`, the member declaring the
         // package's one `fn run` is the entry; a library package has none,
         // and its first source file stands for the package.
         if !cli_files.is_file(jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)) {
@@ -784,15 +694,12 @@ fn jet_cli_command_role_file(command: String) -> String? Never! {
 }
 
 // main.rs `command_override_entry` over Package/mod.rs
-// `resolve_command_entry_checked` (D-CMDOVERRIDE1=A): for `run`, `dev`,
+// `resolve_command_entry_checked` for `run`, `dev`,
 // `build`, and `test`, the package-root role home declaring the command's
 // function, else one root file, else one `src/` file.
 fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
     role :: jet_cli_command_role_file(command) ?? return JetCLIEntryFound.Absent
     root :: cli_files.realpath(root_path) ?? root_path
-    if jet_cli_manifest_problem(root, color) == .Val(problem) {
-        return JetCLIEntryFound.Refused{plan: problem}
-    }
     files := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_package_sources(root, &files) == .Val(problem) {
         return JetCLIEntryFound.Refused{plan: jet_cli_fail("E2105", problem, "command resolution uses the checked package source tree", "repair the package source and run the command again", color, JET_DRIVER_EXIT_USER_ERROR)}
@@ -909,11 +816,6 @@ fn jet_cli_walk_up(dir: String) -> String? Never! {
 // members).
 fn jet_cli_workspace_source(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSource Never! {
     if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) == .Val(manifest_path) {
-        // Both manifests are the E1206 ambiguity, reported before any
-        // membership is read.
-        if jet_cli_manifest_problem(dir, color) == .Val(problem) {
-            return JetCLIWorkspaceSource.Failed{plan: problem}
-        }
         source :: cli_files.read(manifest_path) ?? ""
         if jet_cli_manifest_facts(source, manifest_path).members.len() > 0 {
             return JetCLIWorkspaceSource.Index{path: manifest_path}
@@ -1082,7 +984,7 @@ fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootF
     }
 }
 
-// main.rs `resolve_bare_entry` (D-CLI-BARE1=A): the entry a bare command, or
+// main.rs `resolve_bare_entry` the entry a bare command, or
 // one aimed at the directory `cwd`, compiles. A workspace with more than one
 // runnable member is ambiguous unless `-p <member>` picks one; otherwise the
 // nearest package's stock entry (or its command override).
@@ -1158,53 +1060,9 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
     JetCLIEntryFound.Absent
 }
 
-// main.rs `missing_bare_entry`: a retired manifest name teaches E1226;
-// otherwise there is no file and no project (E2104).
+// main.rs `missing_bare_entry`: no file and no project (E2104).
 fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
-    cache := WorkspaceDeclarationCache.new()
-    if jet_cli_find_stale_manifest(&cache, cwd) == .Val(report) -> return JetCLIPlan.Refused{report: report, color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
     jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
-}
-
-// Loader.rs `find_stale_manifest_name`: one authority/workspace-bounded walk
-// shared by the bare-entry and manifest-required diagnostic paths.
-fn jet_cli_find_stale_manifest(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> Diagnostic? Never! {
-    dir := AuthorityResolver.authority_walk_root(start) ?? return None
-    loop {
-        if AuthorityResolver.open_for_authority_walk(dir) == {
-            .Ok(found) -> {
-                if found == .Val(authority) {
-                    if authority.checked_manifest(".") == {
-                        .Ok(_) -> return None
-                        .Err(error) -> {
-                            if error == .RetiredManifest(_) -> return Val(jet_cli_stale_manifest(dir, JET_CLI_PAYLOAD_FILE))
-                            if !error.is_missing() -> return None
-                        }
-                    }
-                    loop name in JET_CLI_STALE_MANIFEST_NAMES {
-                        if authority.checked_file(name) == {
-                            .Ok(file) -> {
-                                authority.revalidate_file(file) ?? return None
-                                return Val(jet_cli_stale_manifest(dir, name))
-                            }
-                            .Err(error) -> { if !error.is_missing() -> return None }
-                        }
-                    }
-                    if authority.resolve_workspace_source(&cache) == {
-                        .Ok(source) -> { if source != None -> return None }
-                        .Err(_) -> return None
-                    }
-                }
-            }
-            .Err(_) -> return None
-        }
-        dir = AuthorityResolver.authority_walk_parent(dir) ?? return None
-    }
-}
-
-// Loader.rs `stale_manifest_name_diagnostic`.
-fn jet_cli_stale_manifest(dir: String, stale: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1226", None, "`{stale}` is not the package manifest name — Jet reads `{JET_CLI_PACKAGE_FILE}`", "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read", "rename `{jet_cli_entry_join(dir, stale)}` to `{jet_cli_entry_join(dir, JET_CLI_PACKAGE_FILE)}`")
 }
 
 // main.rs `resolve_command_target` for a directory `raw`: the shared bare
@@ -1240,10 +1098,6 @@ fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notice
         .Absent -> entry = jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
     }
     if !cli_files.is_file(entry) {
-        manifest_problem :: jet_cli_manifest_problem(root, color)
-        if manifest_problem == .Val(problem) {
-            return JetCLITarget.Refused{plan: jet_cli_with_notices(written, ^problem)}
-        }
         if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) == .None {
             return JetCLITarget.Refused{plan: jet_cli_with_notices(written, jet_cli_fail("E2105", "no `{JET_CLI_DEFAULT_ENTRY_FILE}` entry in `{raw}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR))}
         }

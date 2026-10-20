@@ -1,4 +1,4 @@
-// D-AUTHORITY-SCOPE1: the `Authority` handle a named `#FX(name: …) { … }`
+// The `Authority` handle a named `#FX(name: …) { … }`
 // region binds is revoked at the end of its block (RAII), so it may only be
 // used in place: as the receiver of a method call, field access, `?`, deref
 // or index. Returning, storing, passing, capturing or otherwise using it as a
@@ -493,7 +493,7 @@ fn sema_authority_region_caps_valid(caps: [NamedSpan]) -> Bool Never! {
     true
 }
 
-// D-EFF1: every `#FX(…)` region of one body with a valid cap list. The effect
+// Every `#FX(…)` region of one body with a valid cap list. The effect
 // pass checks each lowered region (the `TStmt.Region` with the same span)
 // against its caps (E0712). A region with an invalid cap is skipped, like
 // Rust's `bad` cap set: the cap diagnostic is the real problem to fix.
@@ -553,7 +553,7 @@ fn sema_authority_check_statements(statements: [Stmt], outer: [String]?, diagnos
                     if sema_effect_root(effect_name) == "Panic" -> &diagnostics.push(sema_effect_positive_panic(cap.span))
                 }
                 region_caps :: sema_authority_region_caps(caps)
-                // D-AUTHORITY-MODEL1: a nested scope may attenuate the enclosing
+                // A nested scope may attenuate the enclosing
                 // grant, but it cannot mint a right the outer scope did not hold.
                 if outer == .Val(outer_caps) {
                     widening :: sema_effect_uncovered(region_caps, outer_caps)

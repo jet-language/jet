@@ -56,10 +56,10 @@ fn notebook_interop_test_import_error(text: String) -[Rand]> String Never! {
     assert(jet.loss.render().contains("stated-loss") || jet.loss.items.len() >= 2)
     assert(jet.text.contains("answer"))
     fixture :: notebook_interop_test_object([CanonicalJSONField]{
-        CanonicalJSONField{key: "nbformat", value: .Integer("4")},
-        CanonicalJSONField{key: "nbformat_minor", value: .Integer("5")},
-        CanonicalJSONField{key: "metadata", value: notebook_interop_test_object([CanonicalJSONField]{})},
-        CanonicalJSONField{key: "cells", value: .Array([CanonicalJSON]{notebook_interop_test_object([CanonicalJSONField]{
+        {key: "nbformat", value: .Integer("4")},
+        {key: "nbformat_minor", value: .Integer("5")},
+        {key: "metadata", value: notebook_interop_test_object([CanonicalJSONField]{})},
+        {key: "cells", value: .Array([CanonicalJSON]{notebook_interop_test_object([CanonicalJSONField]{
             CanonicalJSONField{key: "id", value: .String("keep-me")},
             CanonicalJSONField{key: "cell_type", value: .String("code")},
             CanonicalJSONField{key: "source", value: .Array([CanonicalJSON]{CanonicalJSON.String("1")})},
@@ -190,7 +190,7 @@ fn notebook_interop_test_import_error(text: String) -[Rand]> String Never! {
     &nb.cells.push(notebook_interop_test_cell("two", "next :: 7\n"))
     &nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer :: 42", theirs_source: "answer :: 7"})
     result :: notebook_export_jet(nb)
-    assert_eq(result.text, "// generated from .jetnb — stated-loss projection (D-NOTEBOOK-DOC1=D)\nanswer :: 42\n\nnext :: 7\n\n")
+    assert_eq(result.text, "// generated from .jetnb — stated-loss projection\nanswer :: 42\n\nnext :: 7\n\n")
     assert_eq(result.loss.items, [String]{"markdown cells omitted", "outputs / trust / cell ids omitted", "notebook environment identity omitted", "1 unresolved merge conflict(s) retained; execution is blocked"})
     assert_eq(NotebookLossReport.default().render(), "no loss\n")
     assert(result.loss.render().contains("execution is blocked"))

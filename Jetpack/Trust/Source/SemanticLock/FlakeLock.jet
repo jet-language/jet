@@ -134,7 +134,7 @@ fn trust_json_parse_record(raw: String) -> [String: Dyn] TrustError! {
 
 fn trust_json_object(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
-        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
             members := [String: Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value
@@ -485,11 +485,11 @@ fn trust_flake_registry_json(entry: FlakeRegistryEntry) -> String Never! {
 fn trust_flake_composition_json(composition: FlakeComposition) -> String Never! {
     // This closed schema has only Text, Bool, and arrays of Text.
     trust_json_object_text([TrustJSONField]{
-        TrustJSONField{key: "framework", value: Dyn.Text(composition.framework.copy())},
-        TrustJSONField{key: "modules", value: trust_json_texts(composition.modules)},
-        TrustJSONField{key: "moduleSources", value: trust_json_texts(composition.module_sources)},
-        TrustJSONField{key: "perSystem", value: Dyn.Bool(composition.per_system)},
-        TrustJSONField{key: "systems", value: trust_json_texts(composition.systems)}
+        {key: "framework", value: Dyn.Text(composition.framework.copy())},
+        {key: "modules", value: trust_json_texts(composition.modules)},
+        {key: "moduleSources", value: trust_json_texts(composition.module_sources)},
+        {key: "perSystem", value: Dyn.Bool(composition.per_system)},
+        {key: "systems", value: trust_json_texts(composition.systems)}
     }) ?? panic("typed flake composition must be JSON-encodable")
 }
 

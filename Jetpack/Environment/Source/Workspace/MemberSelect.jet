@@ -1,10 +1,10 @@
 // Workspace member selection for `jetpack env --prep` and Jet code commands
-// (D-JPK-SELECTOR1=C), ported from jetpack MemberSelect.rs.
+// ported from jetpack MemberSelect.rs.
 //
 // `-p <member>` (exact, repeatable) picks named members; an unknown name is
 // E1231 with did-you-mean. `--affected` / `--affected-since <ref>` compute the
 // changed set from member input hashes (the `tree_hash` shape the action cache
-// uses, D-BUILDCACHE1) and always close under dependents. There is no
+// uses) and always close under dependents. There is no
 // pnpm-style `--filter` pattern DSL.
 
 MEMBER_INPUT_HASHES :: prep { "member-input-hashes" }
@@ -325,11 +325,11 @@ fn env_e1292_bad_ref(query: String, suggestions: [String], why_detail: String) -
     MemberSelectError{diagnostic: diagnostic_from_registry("E1295", None, "git ref `{query}` not found", "`--affected-since` needs a resolvable git ref so Jet can diff member input hashes against that baseline ({why_detail}).", fix)}
 }
 
-// Reject the pnpm-style `--filter` pattern DSL (D-JPK-SELECTOR1=C).
+// Reject the pnpm-style `--filter` pattern DSL.
 fn env_reject_filter_dsl(args: [String]) -> Diagnostic? Never! {
     loop arg in args {
         if arg == "--filter" || arg.starts_with("--filter=") {
-            return Val(diagnostic_from_registry("E1296", None, "`{arg}` is not a Jet workspace selector", "D-JPK-SELECTOR1 rejects pnpm-style `--filter` pattern DSLs; Jet uses exact `-p <member>` and computed `--affected` / `--affected-since <ref>` instead.", "use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`."))
+            return Val(diagnostic_from_registry("E1296", None, "`{arg}` is not a Jet workspace selector", "Jet rejects pnpm-style `--filter` pattern DSLs; Jet uses exact `-p <member>` and computed `--affected` / `--affected-since <ref>` instead.", "use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`."))
         }
     }
     None

@@ -15,7 +15,6 @@ struct DiagnosticExplanation {
     // A short worked example for rows that need more than prose.
     example: String?
     // A retired code is kept only so old build logs stay readable.
-    retired: Bool
 }
 
 fn diagnostic_explanation_example(code: String) -> String? Never! {
@@ -42,7 +41,6 @@ fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
         why: why,
         fix: fix,
         example: diagnostic_explanation_example(row.code),
-        retired: row.status == DiagnosticRegistryStatus.Retired,
     })
 }
 
@@ -68,9 +66,6 @@ fn diagnostic_text_lines(text: String) -> [String] Never! {
 // headers on a terminal.
 fn diagnostic_explanation_render(explanation: DiagnosticExplanation, color: Bool) -> String Never! {
     out := "{diagnostic_theme_accent(color, explanation.code)}\n\n"
-    if explanation.retired {
-        return "{out}This code is retired: it is no longer produced by the current\ncompiler, and is kept here only so old build logs stay readable.\n"
-    }
     what :: explanation.what ?? explanation.meaning
     out = "{out}{diagnostic_theme_bold(color, "What this means:")}\n"
     loop line in diagnostic_text_lines(what) {

@@ -335,7 +335,7 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
     if method == "generate" {
         if args.len() != 1 -> return build_session_fail(state, "`b.generate` requires a name and typed item block")
         name :: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
-        source :: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block; source strings are retired")
+        source :: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
         path :: ".jet/generated/{state.package}/{build_session_safe_name(name)}.jet"
         return build_session_add_generated(&state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None})
     }

@@ -62,11 +62,11 @@ fn fx_trait_values() -> MIRProgram Never! {
     consuming :: fx_function("consume", move_body, fx_string())
     p := fx_program([MIRFunction]{run, implementation, consuming}, [MIRTypeDef]{fx_type_def("NestedTrait", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("NestedTrait", "inner", ty)}, methods: [MIRFunctionID]{}})})
     p.traits = [MIRTraitDef]{
-        MIRTraitDef{id: bound.id, module_id: run.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
-            MIRTraitMethod{id: method, name: "echo", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_string()), return_type: fx_string(), failure: .Infallible, effects: run.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
-            MIRTraitMethod{id: MIRTraitMethodID{value: 779}, name: "consume", span: fx_span(), self_access: Val(MIRAccess.Move), params: [], declared_return: Val(fx_string()), return_type: fx_string(), failure: .Infallible, effects: run.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
+        {id: bound.id, module_id: run.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
+            {id: method, name: "echo", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_string()), return_type: fx_string(), failure: .Infallible, effects: run.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
+            {id: MIRTraitMethodID{value: 779}, name: "consume", span: fx_span(), self_access: Val(MIRAccess.Move), params: [], declared_return: Val(fx_string()), return_type: fx_string(), failure: .Infallible, effects: run.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
         }},
-        MIRTraitDef{id: renderable.id, module_id: run.module_id, key: renderable.name, name: renderable.name, span: fx_span(), visibility: .Private, associated_types: [], methods: []},
+        {id: renderable.id, module_id: run.module_id, key: renderable.name, name: renderable.name, span: fx_span(), visibility: .Private, associated_types: [], methods: []},
     }
     impl_row := fx_display_impl("String.Echo", "Echo", fx_string(), mir_function_id("echo"), 778)
     &impl_row.methods.push(mir_function_id("consume"))
@@ -103,8 +103,8 @@ fn fx_trait_unimplemented_checks() -> Bool {
     report :: fx_function("report", b, fx_unit())
     p := fx_program([MIRFunction]{report}, [MIRTypeDef]{})
     p.traits = [MIRTraitDef]{
-        MIRTraitDef{id: bound.id, module_id: report.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
-            MIRTraitMethod{id: method, name: "begin", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_unit()), return_type: fx_unit(), failure: .Infallible, effects: report.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
+        {id: bound.id, module_id: report.module_id, key: bound.name, name: bound.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{
+            {id: method, name: "begin", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_unit()), return_type: fx_unit(), failure: .Infallible, effects: report.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: None},
         }},
     }
     lowered :: lir_lower_callables(p, [MIRFunctionID]{report.id})

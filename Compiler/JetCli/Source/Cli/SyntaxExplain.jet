@@ -42,7 +42,7 @@ fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: Bool)
         row :: JET_CLI_SYNTAX_ROWS[index]
         explanation :: jet_cli_syntax_explanation(query) ?? panic("a syntax row has its explanation")
         if verbose && !json {
-            text :: "{diagnostic_explanation_render(explanation, color)}\nRegistry name: {row.registry_name}\nDecision: {row.decision}\n"
+            text :: "{diagnostic_explanation_render(explanation, color)}\nRegistry name: {row.registry_name}\n"
             return Val(jet_cli_renderable(text, false))
         }
         return Val(jet_cli_explanation_output(explanation, color, json))
@@ -61,7 +61,7 @@ fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: Bool)
 fn jet_cli_explain_policy(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     key :: policy_key_parse(query.trim()) ?? return None
     name :: policy_key_name(key)
-    explanation :: DiagnosticExplanation{code: name, stage: "policy", meaning: "compiler-owned scoped policy `{name}`", what: Val("`{name}` participates in the package → module → function → block policy ladder."), why: Val("one registry owns applicability, inheritance, conflicts, and provenance"), fix: Val("inspect the semantic index at the target site for the effective value and full declaration chain"), example: None, retired: false}
+    explanation :: DiagnosticExplanation{code: name, stage: "policy", meaning: "compiler-owned scoped policy `{name}`", what: Val("`{name}` participates in the package → module → function → block policy ladder."), why: Val("one registry owns applicability, inheritance, conflicts, and provenance"), fix: Val("inspect the semantic index at the target site for the effective value and full declaration chain"), example: None}
     Val(jet_cli_explanation_output(explanation, color, json))
 }
 
@@ -120,7 +120,7 @@ fn jet_cli_rule_argument_declarations(signature: TAppliedRuleSignature) -> Strin
 }
 
 // Explain.rs `rule_explanation`: one registered rule row's typed signature,
-// sites and status (D-MARK-FORM1=A: the signature says whether parentheses
+// sites and status (the signature says whether parentheses
 // may and must appear).
 fn jet_cli_rule_explanation(rule: TAppliedRule) -> DiagnosticExplanation Never! {
     signature :: rule.signature
@@ -133,16 +133,9 @@ fn jet_cli_rule_explanation(rule: TAppliedRule) -> DiagnosticExplanation Never! 
         signature.params.len() > 0 || signature.variadic != None -> "optional"
         else -> "none"
     }
-    retired := false
-    status := "Active"
-    fix := "move the rule to one of its registered sites"
-    if rule.status == .Retired(replacement) {
-        retired = true
-        status = "Retired {{ replacement: {jet_cli_rust_debug_str(replacement)} }}"
-        fix = "replace it with `{replacement}`"
-    }
-    what :: "arguments: {arguments}; repeatable: {rule.repeatable}; status: {status}; attachment sites: [{rule.sites.join(", ")}].{jet_cli_rule_argument_declarations(signature)}"
-    DiagnosticExplanation{code: rule.name, stage: "rule applicability", meaning: "`#{rule.name}{jet_cli_rule_signature_render(signature)}`", what: Val(what), why: Val("resolution is {rule.resolution}; site-bound authority never becomes ambient policy"), fix: Val(fix), example: None, retired: retired}
+    fix :: "move the rule to one of its registered sites"
+    what :: "arguments: {arguments}; repeatable: {rule.repeatable}; attachment sites: [{rule.sites.join(", ")}].{jet_cli_rule_argument_declarations(signature)}"
+    DiagnosticExplanation{code: rule.name, stage: "rule applicability", meaning: "`#{rule.name}{jet_cli_rule_signature_render(signature)}`", what: Val(what), why: Val("resolution is {rule.resolution}; site-bound authority never becomes ambient policy"), fix: Val(fix), example: None}
 }
 
 fn jet_cli_rule_named(rules: [TAppliedRule], name: String) -> TAppliedRule? Never! {
@@ -152,7 +145,7 @@ fn jet_cli_rule_named(rules: [TAppliedRule], name: String) -> TAppliedRule? Neve
     None
 }
 
-// D-META-REG1=A (Explain.rs `lookup`): a marker syntax row with a registered
+// (Explain.rs `lookup`): a marker syntax row with a registered
 // rule answers from that one row, never from the dictionary's placeholder, so
 // a retired marker is never shown as live. With `bare`, a query that is no
 // syntax row but names a registered rule row answers the same way (the

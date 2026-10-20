@@ -1,4 +1,4 @@
-// D-EACH1=C / D-FENCE2=A fenced statement expansion (`<: a, b :>`).
+// This rule fenced statement expansion (`<: a, b :>`).
 //
 // The parser receives ordinary statements: this token pre-pass copies one
 // authored statement per fence entry and substitutes each fence in lock-step.
@@ -52,7 +52,6 @@ use jet_lexer.[
     TOKEN_KW_TAG,
     TOKEN_KW_TRAIT,
     TOKEN_KW_USE,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LINE_COMMENT,
@@ -223,7 +222,7 @@ fn parser_fence_expand(tokens: [Token], tables: &TokenTables) -> ParserFenceExpa
     loop (index, token) in tokens {
         kind :: token.kind
         previous_kind :: if index > 0 -> tokens[index - 1].kind else -> TOKEN_EOF
-        nested_expression_brace :: kind == TOKEN_LBRACE && (nested_brace_depth > 0 || paren_depth > 0 || bracket_depth > 0 || previous_kind == TOKEN_UNIFIED_ARROW || previous_kind == TOKEN_LAMBDA_ARROW || previous_kind == TOKEN_DOT)
+        nested_expression_brace :: kind == TOKEN_LBRACE && (nested_brace_depth > 0 || paren_depth > 0 || bracket_depth > 0 || previous_kind == TOKEN_UNIFIED_ARROW || previous_kind == TOKEN_DOT)
         top_level :: nested_brace_depth == 0 && paren_depth == 0 && bracket_depth == 0
         boundary :: kind == TOKEN_EOF || (kind == TOKEN_SEMI && top_level) || (kind == TOKEN_LBRACE && !nested_expression_brace) || (kind == TOKEN_RBRACE && top_level)
         if boundary {
@@ -382,7 +381,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
     // `..` falls through and reads as an ordinary expression entry.
     if content.len() == 3 && content[1].kind == TOKEN_DOT_DOT {
         range_span :: Span{start: content[0].span.start, end: content[2].span.end}
-        // D-FENCE-RANGE1=A: expression fences expand only ascending ranges
+        // Expression fences expand only ascending ranges
         // whose endpoints are integer literals. A descending range, or any
         // other endpoint shape, remains one ordinary range expression.
         if !binding_fence && content[0].kind == TOKEN_INT && content[2].kind == TOKEN_INT {
@@ -543,15 +542,12 @@ fn parser_fence_statement_span(segment: [Token]) -> Span Never! {
 }
 
 fn parser_fence_rejected_position(span: Span, what: String) -> Diagnostic {
-    diagnostic_from_registry("E0371", Val(span), what, "D-EACH1 expands complete binding or expression statements, not headers, items, or nested syntax", "move the fence to a binding target or a complete expression statement")
+    diagnostic_from_registry("E0371", Val(span), what, "A fence expands complete binding or expression statements, not headers, items, or nested syntax", "move the fence to a binding target or a complete expression statement")
 }
 
-// D-FENCE2=A reclaims `:>` from the retired D-ARROW-RESPELL1 arrow. A close
-// with no opening `<:` is most often that old arrow, so teach `->` (E0070)
-// with a reviewed edit: a missing `<:` is the other possible intent.
+// A `:>` with no opening `<:`.
 fn parser_fence_stray_close(span: Span) -> Diagnostic {
-    diagnostic :: diagnostic_from_registry("E0070", Val(span), "this `:>` has no opening `<:`", "`:>` only closes a `<: … :>` fence; callables, arms, and lambdas use one arrow: `->`", "write `->` for an arrow, or add the missing `<:`")
-    diagnostic_with_edit_grade(diagnostic, TextEdit{span: span, new_text: "->"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+    diagnostic_from_registry("E0371", Val(span), "this `:>` has no opening `<:`", "`:>` only closes a `<: … :>` fence", "add the missing `<:`, or remove the `:>`")
 }
 
 // Entry-shape rejection: the fence sits in a legal position but one of its

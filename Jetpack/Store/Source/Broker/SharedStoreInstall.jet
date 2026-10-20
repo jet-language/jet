@@ -16,10 +16,10 @@ struct SharedStoreConfig {
     // Descriptor field order.
     fn fields(self) -> [BrokerField] Never! {
         [BrokerField]{
-            BrokerField{key: "socket", value: self.socket},
-            BrokerField{key: "shared_root", value: self.shared_root},
-            BrokerField{key: "trust_key", value: self.trust_key},
-            BrokerField{key: "grants", value: self.grants}
+            {key: "socket", value: self.socket},
+            {key: "shared_root", value: self.shared_root},
+            {key: "trust_key", value: self.trust_key},
+            {key: "grants", value: self.grants}
         }
     }
 
@@ -292,10 +292,10 @@ fn store_broker_validate_config_paths(layout: BrokerLayout, config: SharedStoreC
     base :: files.canonicalize(layout.base) ?? return Err(store_broker_invalid("could not resolve shared-store directory: {err}"))
     socket :: if layout.admin -> STORE_BROKER_ADMIN_SOCKET else -> files.join(base, "broker.sock")
     expected :: [BrokerField]{
-        BrokerField{key: "socket", value: socket},
-        BrokerField{key: "shared root", value: files.join(base, "root")},
-        BrokerField{key: "trust key", value: files.join(base, "trust/hangar.key")},
-        BrokerField{key: "grants", value: files.join(base, "users")}
+        {key: "socket", value: socket},
+        {key: "shared root", value: files.join(base, "root")},
+        {key: "trust key", value: files.join(base, "trust/hangar.key")},
+        {key: "grants", value: files.join(base, "users")}
     }
     actual :: config.fields()
     loop index in 0..<expected.len() {

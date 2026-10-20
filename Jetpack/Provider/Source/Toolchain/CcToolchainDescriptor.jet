@@ -32,7 +32,7 @@ CC_TOOLCHAIN_MAX_MARKER_BYTES :: prep { 16384 }
 CC_TOOLCHAIN_MAX_TARGET_BYTES :: prep { 128 }
 CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: prep { 256 }
 
-// D-ADOPT-CC1=B acquisition record.
+// This rule acquisition record.
 //
 // A small, reviewable description. The compiler and linker bytes are selected
 // from the exact signed Nix index records below; the Nix cache then admits
@@ -67,7 +67,7 @@ struct CcNixAcquisitionRecord {
 // feed publishes both `gcc` and `lld` outputs. Another target needs another
 // signed index/cache record, not a host-PATH guess or a copied sysroot.
 CC_NIX_ACQUISITION_RECORDS :: prep { [CcNixAcquisitionRecord]{
-    CcNixAcquisitionRecord{
+    {
         id: "jet-cc-nixos-unstable-e5bdc4a4-x86_64-linux-v1",
         channel: "nixos-unstable",
         revision: "e5bdc4a41d4c072fe1e3787eaa0320a384741d44",
@@ -709,7 +709,7 @@ fn provider_cc_manifest_number(object: [String: Dyn], field: String) -> Int CcTo
 
 fn provider_cc_manifest_object(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
-        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        // The object's ordered pairs, indexed by name.
         .Object(fields) -> {
             members := [String: Dyn]{}
             loop pair in fields -> members[pair.key] = pair.value

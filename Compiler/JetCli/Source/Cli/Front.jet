@@ -52,14 +52,14 @@ enum JetCLIPlan {
     // the `release` profile (MIR Release mode, LIR O2), otherwise `dev`;
     // `invocation` holds the `--allow`/`--deny` rows.
     Build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
-    // `jet build --target=sandbox <file>` (D-PLUGIN1=B): compile the entry
+    // `jet build --target=sandbox <file>` compile the entry
     // module's `pub fn` rows as a WASM Component guest against the frozen
     // `.jet/cache/api` interface, then build the component with rustc
     // wasm32 and `wasm-tools` (Source/CmdCompile.rs `write_plugin_artifacts`).
     BuildSandbox(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, notice: String)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
-    // before `--`) shows advisory lints (D-LINT-VISIBILITY2=A).
+    // before `--`) shows advisory lints.
     Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String)
     // `jet test <file>`: compile the checked test harness and run it under
     // `options`; native O0 unless the release profile was selected.
@@ -95,7 +95,7 @@ enum JetCLIPlan {
     FmtLang(argv: [String], color: Bool)
     // Normal diagnostic fixes use the shared edit engine and a held codemod
     // transaction. Memory fixes retain their independent witness consumer.
-    Fix(file: String, dry_run: Bool, edition: String?, all: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
+    Fix(file: String, dry_run: Bool, all: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
@@ -450,7 +450,7 @@ fn jet_cli_selected_root_or_cwd() -[FS, Env]> String Never! {
 // Source/main.rs `"gc"`: `gc report` (CmdGc.rs `run`) is the only subcommand.
 fn jet_cli_gc(argv: [String], args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     if args.len() < 2 {
-        return jet_cli_fail("E2101", "`gc` isn't a jet command", "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)", "run `jet clean`", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2101", "`jet gc` needs a subcommand", "`jet gc report` prints the automatic-promotion report; `jet clean` cleans the package store", "run `jet gc report`", color, JET_DRIVER_EXIT_USAGE)
     }
     if args[1] != "report" {
         return jet_cli_fail("E2101", "`{args[1]}` isn't a jet gc command", "jet gc currently exposes only the automatic-promotion report", "run `jet gc report`", color, JET_DRIVER_EXIT_USAGE)
@@ -503,7 +503,7 @@ fn jet_cli_looks_like_source(argument: String) -[FS]> Bool Never! {
     cli_files.exists("{argument}.jet")
 }
 
-// D-JOBS1=A: the commands that compile, and so take `--threads N`.
+// The commands that compile, and so take `--threads N`.
 JET_CLI_THREADS_COMMANDS :: [String]{"build", "run", "check", "test", "dev", "inspect"}
 
 // `--threads N` (or `--threads=N`) before `--`: `None` when absent, else the
@@ -568,7 +568,7 @@ fn jet_cli_trace_refusal(jet_argv: [String], command: String, color: Bool) -> Je
 // `jet check [<file>|<dir>]`, also the target step of `build`, `run`, and
 // `doc` (Source/main.rs bare dispatch and `resolve_command_target`). A bare
 // command, or one aimed at a directory, resolves the project entry
-// (Entry.jet, D-CLI-BARE1=A) and checks it in project scope; a file target
+// (Entry.jet) and checks it in project scope; a file target
 // is read as the user typed it (or with `.jet` appended). A bare or
 // directory `build` is not ported yet. `--show-default` reports the stock
 // default, and `-p <member>` picks a workspace member. `json` carries
@@ -875,7 +875,7 @@ fn jet_cli_has_doctests(source: String) -> Bool Never! {
 }
 
 // Source/main.rs `has_entry_fn(file, "test")`: a top-level `fn test` is the
-// command override (D-CMD-OVERRIDE1=C). Top-level declarations start their line.
+// command override. Top-level declarations start their line.
 fn jet_cli_declares_test_override(source: String) -> Bool Never! {
     loop line in source.split("\n") {
         if line.starts_with("fn test(") || line.starts_with("fn test ") -> return true
@@ -1272,7 +1272,7 @@ fn jet_cli_front(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
 }
 
 fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
-    // D-ADOPT-CCSPELL1=A: the engine compiler aliases own every raw argument
+    // The engine compiler aliases own every raw argument
     // (Source/main.rs `dispatch_alias`), before Jet's output/flag parsing.
     if raw.len() > 0 && (raw[0] == "cc" || raw[0] == "c++") -> return jet_cli_foreign_compile_plan(raw)
     // The internal compiler service owns its raw arguments, as the engine
@@ -1301,8 +1301,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
 
-    // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
-    if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
+    // Moved and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
     // the binding `argv` owns its own.
     argv := raw.copy()
@@ -1442,10 +1441,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
     }
 
-    if command == "jobs" && args.len() > 1 && !jet_argv.contains("--graph") && !jet_argv.contains("--status") && !jet_argv.contains("--explain") && !jet_cli_has(jet_argv, "--watch") {
-        name :: args[1]
-        return jet_cli_fail("E2101", "`jet jobs {name}` no longer runs a job", jet_cli_why("E2101"), "run `jet {name}`; `jet jobs` lists jobs", color, JET_DRIVER_EXIT_USAGE)
-    }
     if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan
     if command == {
         "help" -> {
@@ -1521,14 +1516,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             } else if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
                 file = "{target}.jet"
             }
-            edition := String?{None}
-            loop argument in jet_argv {
-                if argument.starts_with("--edition=") {
-                    edition = Val(argument.removeprefix("--edition="))
-                    break
-                }
-            }
-            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), edition: edition, all: jet_argv.contains("--all"), color: color, quiet: quiet, json: json, notice: notice}
+            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), all: jet_argv.contains("--all"), color: color, quiet: quiet, json: json, notice: notice}
         }
         "gc" -> return jet_cli_gc(argv, args, color, json)
         "cache" -> return JetCLIPlan.Cache{args: jet_cli_tail(argv, 1), json: json}

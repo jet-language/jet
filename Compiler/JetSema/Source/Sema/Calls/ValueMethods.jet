@@ -113,7 +113,7 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
     }
 }
 
-// D-HOLE1: `opt.map(f: T -> R) -> R?`; the callback's own failure carrier
+// `opt.map(f: T -> R) -> R?`; the callback's own failure carrier
 // stays at the call boundary, so the result wraps its success value. The
 // callback result is open (Rust `finish_builtin_method` adopts it), so it is
 // checked like a collection callback and validated below.
@@ -144,7 +144,7 @@ fn sema_value_method_source_arg(value: TExpr) -> TCallArg Never! {
     TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
-// D-FAIL-CARRIER1=A: preserve the old seed TIR method_calls.rs:4287-4288:
+// Preserve the old seed TIR method_calls.rs:4287-4288:
 // materialize the Read receiver first, then the eager reason, with the same
 // owned TCallArg flags. Only this existing view passes those evaluated copies
 // to its canonical source body's move parameters; it does not move the user

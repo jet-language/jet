@@ -117,7 +117,7 @@ fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env,
     }
 }
 
-// D-RINGLAYER1=A M2: persist the inferred runtime profile of the root
+// M2: persist the inferred runtime profile of the root
 // package after a build. A no-op when the lock or package is absent.
 fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: MIRRuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load(project_root) ?? return
@@ -131,7 +131,7 @@ fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, la
     }
 }
 
-// D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
+// (A4): stamp a realized package's output envelope into the
 // lock after it is built, so cache substitution can be driven off the lock.
 // A no-op when the lock or the named package is absent.
 fn pkg_lock_record_envelope(project_root: String, package_name: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
@@ -171,7 +171,7 @@ fn pkg_lock_envelope_output_is(package: LockedPackage, output_hash: String) -> B
     envelope.output_hash == output_hash
 }
 
-// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the
+// After a successful Nix-provider realize, record the
 // locked source identity (resolved ref + portable output digest) and the
 // complete closure record, creating the lock when the project has none. This
 // entry is the trust root a later offline replay matches before reusing the
@@ -267,7 +267,7 @@ fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String, pa
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
 }
 
-// D-JPK-OFFLINE2=B: the complete recorded Nix realization for `reference`.
+// The complete recorded Nix realization for `reference`.
 // The output is a content digest, never a host path; the closure record
 // carries everything offline replay and cache validation need.
 fn pkg_lock_nix_realization(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? {
@@ -423,7 +423,7 @@ fn pkg_lock_registry_realization(project_root: String, registry: String, referen
     None
 }
 
-// D-JPK-TOOLCHAIN1=A (#179): record (or replace) the project's pinned `jet`
+// (#179): record (or replace) the project's pinned `jet`
 // toolchain, keyed by channel. Unlike `pkg_lock_record_envelope` this creates
 // a minimal lock, since `jet update jet` / `jet init` may run before any
 // dependency lock exists.
@@ -448,7 +448,7 @@ fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchain) L
     }
 }
 
-// D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by
+// (#1187): upsert a project-locked browser binary by
 // engine.
 fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load_or_empty(project_root)
@@ -465,13 +465,13 @@ fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[FS, E
     pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
 }
 
-// D-JPK-CHANNEL1=A: read one named source channel lock.
+// Read one named source channel lock.
 fn pkg_lock_locked_source_channel(project_root: String, name: String) -[FS]> LockedSourceChannel? {
     lock :: pkg_lock_load(project_root) ?? return None
     lock.find_source_channel(name)
 }
 
-// D-JPK-CHANNEL1=A: upsert a named source channel lock, keyed by source
+// Upsert a named source channel lock, keyed by source
 // name so moving a channel replaces the prior exact identity.
 fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceChannel) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     source := input

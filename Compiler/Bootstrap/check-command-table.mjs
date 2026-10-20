@@ -126,7 +126,16 @@ class Parser {
       const type = this.tokens[this.index++].value;
       this.expect("]");
       this.expect("{");
-      return { list: this.list("}"), type };
+      const outer = this.elementType;
+      this.elementType = type;
+      const list = this.list("}");
+      this.elementType = outer;
+      return { list, type };
+    }
+    if (token.kind === "punct" && token.value === "{" && this.elementType) {
+      // A typed list element written without its type head: `[T]{ { … } }`.
+      this.index -= 1;
+      return this.headless(this.elementType);
     }
     if (token.kind !== "ident") fail(`unexpected \`${token.value}\``);
     if (token.value === "true" || token.value === "false") return token.value === "true";
@@ -152,6 +161,18 @@ class Parser {
     if (this.eat("(")) return { call: token.value, args: this.list(")") };
     if (token.value in this.constants) return this.constants[token.value];
     return { path: token.value };
+  }
+  headless(type) {
+    this.expect("{");
+    const fields = {};
+    for (;;) {
+      if (this.eat("}")) break;
+      const name = this.tokens[this.index++].value;
+      this.expect(":");
+      fields[name] = this.value();
+      if (!this.eat(",")) { this.expect("}"); break; }
+    }
+    return { struct: type, fields };
   }
 }
 

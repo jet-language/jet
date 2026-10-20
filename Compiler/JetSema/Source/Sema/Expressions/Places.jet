@@ -85,7 +85,7 @@ fn sema_expression_is_place(expr: Expr) -> Bool Never! {
     }
 }
 
-// D-COPY-DEFAULT1=A (#3714): `^place` in a value position is the
+// (#3714): `^place` in a value position is the
 // programmer's exact move. The method-call path removes a receiver's take
 // mark before this point, so a take mark here stands on a bare place. The
 // place gives its value away even when it is read later (any later use is
@@ -186,7 +186,7 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
     context.suppress_partial_move_root_read = previous_root_read
     checked :: checked_value ?? return None
     convention :: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
-    // D-MEMPROVENANCE2 (Rust `Expr::Place`): a subrange of a declared view
+    // (Rust `Expr::Place`): a subrange of a declared view
     // takes its write window from the view's own access; a `View<T>` never
     // lends one.
     if convention == AccessConvention.Write && checked.kind == .Slice(view_base, _, _, _, _) {
@@ -304,7 +304,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: tuple_field_symbol, kind: "field"})
         return sema_expr_expected_owned(^tuple_field, expected, environment, program, &diagnostics)
     }
-    // D-SHAREDGUARD2=A: a guard's held value is a compiler-known place, not
+    // A guard's held value is a compiler-known place, not
     // a stored struct field. The hidden tag records whether the place is
     // editable while diagnostics show one public `SharedGuard<T>`.
     if member == "value" {
@@ -353,20 +353,20 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
             }
         }
     }
-    // D-TIME-INSTANT1=A: the compiler-owned `Instant` is a monotonic Time
+    // The compiler-owned `Instant` is a monotonic Time
     // point with no epoch and no fields; the wall clock is its own read.
     if owner_name == "Instant" && member == "unix_ns" {
         &diagnostics.push(sema_error("E0302", span, "`Instant` has no field `unix_ns`", "`Instant` is a monotonic Time point with no epoch; wall-clock Unix nanoseconds are a separate clock read", "call `time.unix_ns()` for wall-clock Unix nanoseconds"))
         return None
     }
-    // D-OUTCOME-SHAPE1=A: a missing value never leaves the function by
+    // A missing value never leaves the function by
     // itself, so a field read on `T?` is refused with the ways to handle
     // absence rather than unwrapping or returning early.
     if sema_expr_unwrap_tag(base.ty) == .Option(inner) {
-        &diagnostics.push(sema_error("E0310", span, "`.{member}` needs a `{type_name(inner)}`, but this value is `{type_name(base.ty)}` and might be missing", "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it (D-OUTCOME-SHAPE1=A)", "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"))
+        &diagnostics.push(sema_error("E0310", span, "`.{member}` needs a `{type_name(inner)}`, but this value is `{type_name(base.ty)}` and might be missing", "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it", "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"))
         return None
     }
-    // D-FACT-READ1=A: a compiler-owned reflection record (`RANGE.start`,
+    // A compiler-owned reflection record (`RANGE.start`,
     // `EXACTNESS.kind`) exists only as a compile-time value; its rows are typed
     // for prepared-constant paths, which codegen folds to their values.
     reflection :: sema_fact_reflection_field(base, member, span)
@@ -396,17 +396,17 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         &diagnostics.push(sema_error("E0039", member_span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
         return None
     }
-    // D-BUILD-FACT3=A: `$package.*` / `$build.*` fold from the build snapshot.
+    // `$package.*` / `$build.*` fold from the build snapshot.
     build_fact :: sema_fact_build_read(base, member, span, expected, environment, program, &diagnostics)
     if build_fact.handled -> return build_fact.value
-    // D-FACT-READ1=A / D-META-ROOT3=A: `subject.$fact` reads a compiler-held plane.
+    // `subject.$fact` reads a compiler-held plane.
     if member.starts_with("$") {
         fact :: sema_fact_read_check(base, member, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if fact.handled -> return fact.value
     }
     // Rust reports the E0220 owner read at the member name.
     member_span :: Span{start: span.end - member.len(), end: span.end}
-    // D-NUMOPS1 (Rust `infer_field` + `numeric_const_type`): `U8.MAX`,
+    // (Rust `infer_field` + `numeric_const_type`): `U8.MAX`,
     // `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are the
     // numeric type's own constants.
     if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
@@ -463,7 +463,7 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     }
     sema_scope_commit(&scopes, base_scope_mark)
     checked_base :: checked_base_value ?? return None
-    // D-DATATREE-RULES1 (Rust `infer_field` Dyn arm): `tree.member` on a Dyn
+    // (Rust `infer_field` Dyn arm): `tree.member` on a Dyn
     // reads the object member as a checked Dyn; method names stay reserved.
     if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
         if sema_dyn_is_member(member) {
@@ -506,7 +506,7 @@ fn sema_expression_module_constant(alias: String, member: String, span: Span, ex
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-// D-SWIZZLE1 (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to
+// (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to
 // four x/y/z/w lanes of a vector or swizzleable SIMD lane type. One lane reads
 // the scalar; several build a VecN, or the same lane type when all are named.
 enum SemaMathSwizzleParse {
@@ -588,7 +588,7 @@ fn sema_expression_numeric_bound_type(base: Expr, member: String) -> Type? {
     None
 }
 
-// D-CRYPTO-API1: reading a secret-bearing value's raw bytes is an exposure.
+// Reading a secret-bearing value's raw bytes is an exposure.
 // Outside Core source it needs an audited `#Unsafe` region, exactly like the
 // `core.crypto.expert` exposure functions.
 fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -604,13 +604,13 @@ fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span,
         shown.ends_with("SharedSecret") -> "shared_secret_bytes"
         else -> "secret_bytes"
     }
-    &diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate (D-CRYPTO-API1)", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
+    &diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
     return false
     }
     true
 }
 
-// S71 (D-SG6): the chain yields `T?`; an already-optional member flattens, so
+// S71 the chain yields `T?`; an already-optional member flattens, so
 // `user?.address?.city` stays one optional layer deep.
 fn sema_expression_optional_field(base: Expr, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked_base :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -630,7 +630,7 @@ fn sema_expression_optional_field(base: Expr, member: String, member_span: Span,
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
-// S71 / D-SUGAR6: `receiver?.method(args)` checks the ordinary method call on
+// S71 `receiver?.method(args)` checks the ordinary method call on
 // a read-only view of the present payload. The call runs only when the
 // receiver is present; its result lifts to `R?` and flattens like `?.field`.
 // The call keeps its own failure rule: a fallible method propagates exactly as

@@ -3,12 +3,12 @@
 ## User reply
 
 **Before**
-> I've gone ahead and analyzed the constructor situation — essentially, `.{}` is great for POD-like records whereas `.new()` tends to be preferred when there's nontrivial initialization; happy to dig deeper if useful!
+> I've gone ahead and analyzed the constructor situation — essentially, `{}` is great for POD-like records whereas `.new()` tends to be preferred when there's nontrivial initialization; happy to dig deeper if useful!
 
 **After**
 > The analysis is complete.
 >
-> Use `Type.{ … }` for plain data records.
+> Use `Type{ … }` for plain data records.
 > Use `Type.new(…)` when construction has state or special logic.
 >
 > Say if you want more detail on one case.
@@ -21,7 +21,7 @@
 **After**
 > Jet uses two construction forms.
 >
-> Beginners use the struct literal `Type.{ … }` for plain data.
+> Beginners use the struct literal `Type{ … }` for plain data.
 > Experts use `Type.new(…)` when construction allocates memory or applies special rules.
 
 ## Procedure

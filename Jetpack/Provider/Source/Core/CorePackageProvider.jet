@@ -3,7 +3,7 @@
 // source file declaring `module <name>`), decides executable or library, and
 // materializes that source tree into the store — staging `bin/` for an
 // executable, source only for a library, and a Cargo rlib for a library that
-// carries `Cargo.toml` (D-BFS1). Local and git-backed source repos are
+// carries `Cargo.toml`. Local and git-backed source repos are
 // supported.
 
 // Per-process nonce that keeps concurrent scratch directories distinct.
@@ -68,7 +68,7 @@ struct CoreProvider {
         }
         provider_copy_tree(src_dir, out_dir) ?? return Err(ProviderError.CoreBuild("could not place package: {err.message}"))
         // U10 Chunk 4: the repo manifest's `packages:` index decides what goes
-        // on PATH; with no entry the kind is inferred (D-ILE1): a top-level
+        // on PATH; with no entry the kind is inferred a top-level
         // `fn run` means executable, otherwise library.
         manifest :: if canonical == None -> provider_core_legacy_manifest(repo) else -> None
         kind :: canonical_kind ?? (provider_manifest_kind(manifest, spec.package) ?? provider_infer_package_kind(out_dir))
@@ -94,7 +94,7 @@ struct CoreProvider {
             "build.sandbox_policy": artifact.sandbox_policy,
         }
         if artifact.recipe_id == "core-cargo-rlib" {
-            // D-JPK-SANDBOX2: an exact local build grant permits the action,
+            // An exact local build grant permits the action,
             // but its output is private and cannot become shared cache input.
             plan_facts["build.trust"] = "private-untrusted"
             producer_facts["build.trust"] = "private-untrusted"
@@ -128,7 +128,7 @@ struct CoreArtifact {
 
 // An executable stages its prebuilt `bin/`; a library stages source for
 // import and contributes no PATH entry, building its rlib through the
-// resolved toolchain when it ships `Cargo.toml` (D-JPK-BUILDTOOL1=A).
+// resolved toolchain when it ships `Cargo.toml`.
 fn provider_core_artifact(kind: PackageKind, out_dir: String, toolchain: CargoToolchain?, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> CoreArtifact ProviderError! {
     if kind == PackageKind.Executable {
         return Ok(CoreArtifact{bin: files.join(out_dir, "bin"), rlib: "", recipe_id: "core-source", sandbox_class: "non-executing", sandbox_policy: "no child launched"})
@@ -235,7 +235,7 @@ fn provider_core_approval_facts(spec: RefSpec, table: SourceTable, ctx: Provider
     Ok(Val("build-sha256:{pkg_sha256_hex(authority.bytes())}"))
 }
 
-// A hangar-scoped cargo scratch directory (D-JPK-GC1): created under
+// A hangar-scoped cargo scratch directory created under
 // `<hangar>/<build scratch>/<key>-<pid>-<nonce>` with a live marker, removed
 // by its owner when the build ends and swept by Hangar cleanup after a crash.
 struct CargoBuildScratch {
@@ -311,7 +311,7 @@ fn provider_core_manifest_facts(repo: String) -[FS, Env]> PackageFacts? Provider
     Ok(loaded)
 }
 
-// D-BFS1: compile a library package's `Cargo.toml` to an rlib placed inside
+// Compile a library package's `Cargo.toml` to an rlib placed inside
 // the hangar object (`pkg_dir`), so the object is self-contained and
 // content-addressed. The cargo target dir is hangar-scoped scratch removed as
 // soon as the build ends. An rlib already in the object is a cache hit. A

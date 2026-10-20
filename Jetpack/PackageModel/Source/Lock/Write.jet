@@ -87,7 +87,7 @@ fn pkg_lock_write(input: LockFile) -> String Never! {
         .None -> {}
     }
 
-    // D-CTEFFECT1 Tier-1: embed inputs. The hash is a digest and is written
+    // Tier-1: embed inputs. The hash is a digest and is written
     // verbatim.
     loop comptime_input in lock.comptime_inputs {
         &out.push("\n[[comptime_inputs]]\n")
@@ -112,7 +112,7 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
         .None -> {}
     }
     &out.push(pkg_lock_string_field("fingerprint", package.fingerprint))
-    // D-CASTORE1=A: content hash of the installed source tree.
+    // Content hash of the installed source tree.
     if package.content_hash == {
         .Val(hash) -> &out.push(pkg_lock_string_field("content-hash", hash))
         .None -> {}
@@ -126,7 +126,7 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
         .Val(layer) -> &out.push("inferred-layer = \"{jet_ring_layer_name(layer)}\"\n")
         .None -> {}
     }
-    // D-EFFBUDGET1: per-dependency effect provenance and audited grants.
+    // Per-dependency effect provenance and audited grants.
     if package.effects.len() > 0 -> &out.push("effects = {pkg_lock_string_array(package.effects)}\n")
     if package.effect_grants.len() > 0 -> &out.push("effect-grants = {pkg_lock_string_array(package.effect_grants)}\n")
     required :: package.required_effect_roles()
@@ -138,7 +138,7 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
         .Val(authority) -> &out.push(pkg_lock_string_field("effect-authority", authority))
         .None -> {}
     }
-    // D-JPK-CACHE1=A (A4): the realized-output envelope, emitted once the
+    // (A4): the realized-output envelope, emitted once the
     // package is realized.
     if package.envelope == {
         .Val(envelope) -> pkg_lock_write_envelope(&out, envelope)
@@ -198,7 +198,7 @@ fn pkg_lock_write_nix_closure(out: &[String], closure: NixClosureRecord) Never! 
     &out.push(pkg_lock_string_field("nix-project-cas-bundle", closure.project_cas_bundle))
 }
 
-// D-JPK-CACHE1=A (A4): the envelope field set shared by `[[package]]`,
+// (A4): the envelope field set shared by `[[package]]`,
 // `[[toolchain]]`, and `[[browser]]` blocks. `output-hash`, `platform`, and
 // `provenance` are always emitted; the other slots only when filled.
 fn pkg_lock_write_envelope(out: &[String], envelope: LockEnvelope) Never! {
@@ -264,7 +264,7 @@ fn pkg_lock_write_workspace_overlay_policy(out: &[String], policy: OverlayPolicy
     }
 }
 
-// The manifest-shaped `authority = { … }` value (D-AUTHORITY-MANIFEST1=A).
+// The manifest-shaped `authority = { … }` value.
 fn pkg_lock_authority_value(authority: PackageAuthority) -> String Never! {
     fields := [String]{}
 

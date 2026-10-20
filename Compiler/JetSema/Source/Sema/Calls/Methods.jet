@@ -38,7 +38,7 @@ struct SemaMethodSpecialCheck {
 }
 
 fn sema_call_shared_access_forbidden_diagnostic(method: String, span: Span) -> Diagnostic {
-    sema_error("E1116", span, "`Shared.{method}(…)` is the retired closure form for shared access.", "D-CONC-SHARE1=A made a shared value read and write like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step. The closure per touch proved nothing the compiler did not already know.", "Read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact {{ … }}`, or take an expert guard with `.guard_edit()`.")
+    sema_error("E1116", span, "a shared value has no `.{method}(…)` method", "a shared value reads and writes like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step", "read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact {{ … }}`, or take an expert guard with `.guard_edit()`")
 }
 
 fn sema_call_distinct_raw_finish(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -192,12 +192,6 @@ fn sema_call_try_int_abs_source(receiver: Expr, receiver_value: TExpr, method: S
 fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     build :: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if build.handled -> return build
-    // The retired collection alias has no constructor or lookup route.
-    // Parse its arguments normally, then teach the bracket-place spelling.
-    if method == "view" {
-        &diagnostics.push(sema_error("E0214", Span{start: span.end - method.len(), end: span.end}, "`.view(a..b)` is now a bare range place", "place access follows the sigil reading rule", "replace `value.view(a..b)` with `value[a..b]`"))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
     if method == "raw" {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         return sema_call_try_distinct_raw_value(receiver_value, args, span, expected, environment, program, &scopes, &diagnostics)
@@ -734,7 +728,7 @@ fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: St
     Val(checked.value)
 }
 
-// D-WEBAPP1=D: opaque App graph registrations preserve the named handler
+// Opaque App graph registrations preserve the named handler
 // and its typed input binding rather than pretending App is a plain record.
 fn sema_app_method_arity(method: String, actual: Int) -> Int Never! {
     if method == {

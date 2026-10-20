@@ -32,7 +32,6 @@ use jet_lexer.[
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
@@ -374,7 +373,7 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
     parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
     ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
 }
-// S31/D-OPT-LIFT1: only equality against `Val(name)` introduces a binding.
+// S31 only equality against `Val(name)` introduces a binding.
 // Other payload expressions construct a value. This restriction belongs to
 // comparison RHS parsing, not dispatch-arm or nested leading-dot patterns.
 fn parser_comparison_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
@@ -402,14 +401,14 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
         TOKEN_LBRACKET -> parser_typed_pattern_ahead(&state) || parser_bracket_pattern_ahead(&state)
         TOKEN_LBRACE -> parser_literal_fields_ahead(&state) || ((parser_kind_at(&state, 1) == TOKEN_STRING || parser_kind_at(&state, 1) == TOKEN_RAW_STRING) && parser_kind_at(&state, 2) == TOKEN_COLON)
         TOKEN_STRING -> parser_string_pattern_ahead(state, token)
-        // D-ENUMDOT1: a bare `Variant(…)` or `Variant | …` is a pattern that
+        // A bare `Variant(…)` or `Variant | …` is a pattern that
         // lacks its leading dot (E0367).
         TOKEN_IDENT -> parser_typed_pattern_ahead(&state) || parser_bare_variant_head(&state) || parser_named_struct_pattern_ahead(&state)
         else -> false
     }
 }
 
-// Rust `named_struct_pattern_ahead` (D-PAT-RECORD1=A): `Point{…}` starts a
+// Rust `named_struct_pattern_ahead` `Point{…}` starts a
 // named struct pattern only when the head is a non-constant type name and
 // its brace body reads as pattern entries: `..`, `field:`, `field,`, or a
 // lone `field}` followed by what ends the pattern. Typed literals such as
@@ -427,7 +426,7 @@ fn parser_named_struct_pattern_ahead(state: &JetParserState) -> Bool Never! {
     if second == TOKEN_COLON || second == TOKEN_COMMA -> return true
     if second != TOKEN_RBRACE -> return false
     after :: parser_kind_at(&state, 4)
-    after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_LAMBDA_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
+    after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
 }
 
 // Rust `try_typed_pattern_str_body`: `[U8]{"…"}`, `[U8#N]{"…"}` or
@@ -469,7 +468,7 @@ fn parser_pattern_hole_shape_ok(part: StringPart) -> Bool Never! {
     part.tokens[1].kind == TOKEN_COLON && part.tokens.len() >= 3
 }
 
-// D-PAT-NAMED-NEST1=A: `allow_named` admits the named payload form
+// `allow_named` admits the named payload form
 // `.Case{field: pat, ..}`. It is false where a following `{` opens a block
 // (an `if` condition), exactly as for struct literals.
 fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -> ParsedPattern {
@@ -487,7 +486,7 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -
             parser_add_error_here(&state, "expected a variant pattern after `|` in an or-pattern", "or-patterns join two variant patterns: `.A(x) | .B(x)`", "write a leading-dot variant after `|`")
             break
         }
-        // D-PATO: any bare PascalCase alternative lacks its leading dot.
+        // Any bare PascalCase alternative lacks its leading dot.
         alternative :: parser_current(&state)
         alternative_name :: parser_value(state, alternative)
         if alternative.kind == TOKEN_IDENT && parser_pascal_name(alternative_name) && !parser_constant_name(alternative_name) && parser_kind_at(&state, 1) != TOKEN_LPAREN && parser_kind_at(&state, 1) != TOKEN_PIPE && parser_kind_at(&state, 1) != TOKEN_DOT {
@@ -515,7 +514,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
     }
     if start.kind == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, start.span, depth + 1, None)
     if start.kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-        parser_add_fatal_code(&state, "E0320", start.span, "inferred record patterns use `{{…}}`, not `.{{…}}`", "D-LIT-DOT1 drops the constructor dot from every literal head", "write `{{ kind: …, field, .. }}`")
+        parser_add_fatal_code(&state, "E0320", start.span, "inferred record patterns use `{{…}}`, not `.{{…}}`", "literal heads place no dot before their brace", "write `{{ kind: …, field, .. }}`")
         parser_bump(&state)
         return parser_parse_struct_pattern(&state, start.span, depth + 1, None)
     }
@@ -591,7 +590,7 @@ fn parser_pascal_name(name: String) -> Bool Never! {
     first >= 65 && first <= 90
 }
 
-// D-ENUMDOT1: `Variant(…)`, or a non-constant `Variant |`, at the cursor.
+// `Variant(…)`, or a non-constant `Variant |`, at the cursor.
 fn parser_bare_variant_head(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind != TOKEN_IDENT || !parser_pascal_name(parser_value(state, token)) -> return false
@@ -601,7 +600,7 @@ fn parser_bare_variant_head(state: &JetParserState) -> Bool Never! {
 
 fn parser_report_bare_variant(state: &JetParserState, token: Token, payload: String) {
     name :: parser_value(state, token)
-    parser_add_error_code(&state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)", "write `.{name}{payload}`")
+    parser_add_error_code(&state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call", "write `.{name}{payload}`")
 }
 
 fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
@@ -619,7 +618,7 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
     if parser_value(state, name) == "_" -> PatSlot.Wildcard else -> PatSlot.Bind{name: parser_value(state, name), span: name.span}
 }
 
-// D-PAT-NAMED-NEST1=A: in a condition, where `{` usually opens the body,
+// In a condition, where `{` usually opens the body,
 // `.Case{` starts named payload entries only when its first entry reads as
 // one: `..`, `field:`, `field,`, or a lone `field}` directly followed by the
 // body (`{` or `->`). No block starts with those tokens.
@@ -640,7 +639,7 @@ fn parser_skip_named_pattern_line_breaks(state: &JetParserState) Never! {
     loop parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
 }
 
-// D-PAT-NAMED-NEST1=A: the brace body of `.Case{field: pat, field, ..}`.
+// The brace body of `.Case{field: pat, field, ..}`.
 // Each entry is `field: slot` or the shorthand `field` (binds `field`); an
 // optional `..` ends the list. Sema places the entries on the case's
 // positional payload slots.

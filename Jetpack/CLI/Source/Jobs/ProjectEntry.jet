@@ -1,6 +1,6 @@
 // Project entry selection and the checked `#Job` registry, ported from
 // jetpack::CLI::services_secrets_config. jetpack never links the compiler
-// (D-JPK-DISPATCH1): the registry check is the sibling `jet`'s checker,
+// the registry check is the sibling `jet`'s checker,
 // reached through the compiler service (`jet __jetpack check-entry`), because
 // parser-only discovery cannot resolve imported jobs or reject an invalid
 // `after` edge.
@@ -103,7 +103,7 @@ fn cli_job_registry_unchecked(file: String, detail: String) -> JobRegistryCheckE
     JobRegistryCheckError{diagnostics: [Diagnostic]{diagnostic_from_registry("E2105", None, "the project jobs in `{file}` could not be checked: {detail}", "Jet could not complete the named file, tool, or operating-system operation", "check that the `jet` compiler sits beside `jetpack` or on PATH, then run the command again")}}
 }
 
-// D-JPK-TASKRUN1: checked `#Job fn` names in the complete project bundle,
+// Checked `#Job fn` names in the complete project bundle,
 // sorted and distinct; an unchecked bundle has none.
 fn cli_list_project_jobs(file: String) -[FS, Env, Exec, Time.Wait]> [String] Never! {
     registry :: cli_checked_project_job_registry(file) ?? return [String]{}

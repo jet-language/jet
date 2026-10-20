@@ -25,7 +25,7 @@ fn lower_list_element(ty: MIRType) -> MIRType? {
     }
 }
 
-// View<T> / ViewMut<T> (MIRRust.rs: `&[T]` / `&mut [T]`, D-DYNARRAY1) is a
+// View<T> / ViewMut<T> (MIRRust.rs: `&[T]` / `&mut [T]`) is a
 // borrowed window into a List's buffer, laid out as the List header
 // [len, 0, data] in its holder's storage, data at the window's first
 // element. The zero capacity marks a buffer the header does not own (as for a
@@ -2188,7 +2188,7 @@ fn lower_helper_list_remove(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     lir_builder_finish(f.builder)
 }
 
-// D-MEMDISJOINT1: the proof is complete before any mutable descriptor exists.
+// The proof is complete before any mutable descriptor exists.
 // Result owns its box (and a selected-view List owns only its descriptor
 // buffer); each ViewMut header borrows the original receiver's elements.
 fn lower_disjoint_header(f: &LowerFunction, dst: LIRValueID, count: LIRValueID, data: LIRValueID) Never! {
@@ -2608,7 +2608,7 @@ fn lower_helper_list_extend(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     lir_builder_finish(f.builder)
 }
 
-// D-ALLOCFAIL1: negative sizes fail without consuming the fault rail; every
+// Negative sizes fail without consuming the fault rail; every
 // nonnegative reservation consults it exactly once, even when capacity suffices.
 // Allocation failure leaves the existing buffer and all its owners untouched.
 fn lower_helper_list_try_reserve(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {

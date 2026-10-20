@@ -198,7 +198,6 @@
         (source: "fn pick(value: Int String!) -> String {{ value ? ok -> ok }}\n", expected: "A Result handler needs a `!` failure branch", code: "E0003"),
         (source: "fn pick(value: Int String!) -> String {{ value ? same -> same ! same -> same }}\n", expected: "A Result handler cannot bind both payloads to the same name", code: "E0003"),
         (source: "fn pick(value: Int String!) -> String {{ value ? _ -> value ! error -> error }}\n", expected: "A Result handler success branch needs a payload binding", code: "E0003"),
-        (source: "fn pick(value: Int String!) -> String {{ value ? ok => ok ! error -> error }}\n", expected: "This uses a retired arrow spelling", code: "E0070"),
         (source: "fn pick(value: Int String!) -> String {{ value ? ok -> ok ! error -> error ! again -> again }}\n", expected: "A Result handler cannot have two failure branches", code: "E0003"),
     ]
     loop testcase in cases {
@@ -370,28 +369,6 @@
 #Test("source_loops_use_in_for_bindings_and_keep_stride_comma") {
     result :: parser_test_result("\nfn run() {{\n    loop x in xs {{ print(x) }}\n    loop (key, value) in map {{ print(key, value) }}\n    loop n in 0..10, 2 {{ print(n) }}\n    filtered :: loop x in xs if x > 0 -> x\n}}\n")
     assert(result.diagnostics.is_empty(), "canonical source-loop forms should parse: {result.diagnostics:Debug}")
-}
-
-// Rust: crates/jet-parser/src/lib.rs:645
-#Test("retired_source_loop_comma_teaches_in") {
-    result :: parser_test_result("fn run() {{ loop x, xs {{ print(x) }} }}\n")
-    assert(!result.diagnostics.is_empty(), "retired source-loop comma")
-    found := false
-    loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0383" && diagnostic.what.contains("retired comma") && diagnostic.why.contains("`in`") && diagnostic.fix.contains("loop item in items") -> found = true
-    }
-    assert(found, "{result.diagnostics:Debug}")
-}
-
-// Rust: crates/jet-parser/src/lib.rs:662
-#Test("expression_membership_teaches_contains") {
-    result :: parser_test_result("fn run() {{ found :: x in xs }}\n")
-    assert(!result.diagnostics.is_empty(), "membership is not an operator")
-    found := false
-    loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0384" && diagnostic.what.contains("membership") && diagnostic.fix.contains(".contains(x)") -> found = true
-    }
-    assert(found, "{result.diagnostics:Debug}")
 }
 
 // Rust: crates/jet-parser/src/lib.rs:678

@@ -58,7 +58,7 @@ use jet_foundation.[
 
 // A `ViewMut<T>` is already the `&mut [T]` borrow, so a read parameter of
 // that type crosses by value: behind `&` its writes could not reach the owner
-// (D-MEMPROVENANCE2, #4707; MIRRust callable_parameter_borrowed).
+// (#4707; MIRRust callable_parameter_borrowed).
 fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
     if ty.kind == MIRTypeKind.Int -> return true
     if ty.kind == .Apply(name, args) {
@@ -107,7 +107,7 @@ fn jet_rust_emit_callable_return(ctx: &JetRustEmitContext, function: MIRFunction
 fn jet_rust_emit_type_contains_view(ty: MIRType, carriers: [String:Bool]) -> Bool Never! {
     if ty.kind == {
         .Apply(name, args) -> {
-            // D-PIN1=A: `Pin<T>` joins the borrowed-window family (`&mut T`).
+            // `Pin<T>` joins the borrowed-window family (`&mut T`).
             if (name.name == "View" || name.name == "ViewMut" || name.name == "Pin") && args.len() == 1 -> return true
             if carriers.get(name.name) != None -> return true
             loop arg in args {
@@ -144,7 +144,7 @@ fn jet_rust_emit_type_carries_view(ctx: JetRustEmitContext, ty: MIRType) -> Bool
     jet_rust_emit_type_contains_view(ty, ctx.view_carriers)
 }
 
-// MIRRust collect_view_carriers (D-MEM-VIEWRET1, #4392): the names and keys of
+// MIRRust collect_view_carriers (#4392): the names and keys of
 // every Jet-declared type whose stored data holds a view, so its declaration
 // takes the `'__jet_view` lifetime parameter and every use names one. A type
 // holding such a type holds one too; the set grows to its fixed point. Rows
@@ -298,7 +298,7 @@ fn jet_rust_emit_type_def_impl_args(ctx: JetRustEmitContext, definition: MIRType
     jet_rust_emit_signature_generics([String]{"'_"}, args)
 }
 
-// D-MEM-VIEWRET1 (#4392), MIRRust ViewReturnLifetime: the lifetime a callable
+// (#4392), MIRRust ViewReturnLifetime: the lifetime a callable
 // signature names for the views it returns. `owners` index the rendered
 // parameter types that carry `'__jet_view`; `receiver` tags a Rust `self`.
 enum JetRustEmitViewLifetime {
@@ -943,7 +943,7 @@ fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[Strin
     }
 }
 
-// MIRRust callable_type (D-MEMPROVENANCE3=A / #4392): a callable whose
+// MIRRust callable_type (#4392): a callable whose
 // returned view borrows from its arguments names that relation as a
 // higher-ranked lifetime on the borrowed owner arguments.
 fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType], conventions: [MIRAccess], ret: MIRType?, provenance: [MIRViewProvenanceEntry]?) -> String Never! {
@@ -1116,7 +1116,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
         lifetime :: if ctx.view_lifetime == "" -> "" else -> "{ctx.view_lifetime} "
         return "&{lifetime}mut [{jet_rust_emit_type(&ctx, args[0])}]"
     }
-    // D-PIN1=A: a checked `Pin<T>` is the caller's tracked write window, the
+    // A checked `Pin<T>` is the caller's tracked write window, the
     // same exclusive reference Context::rust_type spells.
     if name.name == "Pin" && args.len() == 1 {
         lifetime :: if ctx.view_lifetime == "" -> "" else -> "{ctx.view_lifetime} "
@@ -1145,7 +1145,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
         }
     }
     rendered := [String]{}
-    // MIRRust rust_apply_type (D-MEM-VIEWRET1, #4392): a declared type holding
+    // MIRRust rust_apply_type (#4392): a declared type holding
     // a view takes its lifetime first: the signature's view lifetime, else `'_`.
     if ctx.view_carriers.get(name.name) != None -> &rendered.push(if ctx.view_lifetime == "" -> "'_" else -> ctx.view_lifetime)
     // A reference to a transparent alias passes only the arguments of the
@@ -1528,7 +1528,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 if args.len() == 0 -> return false
                 return jet_rust_emit_type_derive_capability(&ctx, args[0], trait_name, &visiting, bindings, generic_params)
             }
-            // D-PIN1=A: `Pin<T>` is the same exclusive `&mut T` window.
+            // `Pin<T>` is the same exclusive `&mut T` window.
             if name.name == "ViewMut" || name.name == "Pin" {
                 if trait_name == "Clone" -> return false
                 if args.len() == 0 -> return false
@@ -2293,7 +2293,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
     }
     visibility_name :: jet_rust_emit_visibility(visibility)
     name :: jet_rust_emit_type_name(&ctx, definition.id)
-    // MIRRust emit_type_def (D-MEM-VIEWRET1, #4392): a row holding a view
+    // MIRRust emit_type_def (#4392): a row holding a view
     // declares the lifetime its stored views (and nested view-carrying rows)
     // name.
     type_generics :: jet_rust_emit_generic_params(&ctx, jet_rust_emit_declared_generic_params(definition))
@@ -3028,7 +3028,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if name == {
         "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")
         "Query" -> Val("DataQuery")
-        // D-DET1: the source `RNG` handle's Prelude carrier is `jet_std::Rng`.
+        // The source `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "RNG" -> Val("Rng")
         "Group" -> Val("GroupValue")
         "SharedGuard" -> Val("JetSharedGuard")
@@ -3353,7 +3353,7 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if jet_rust_emit_core_crypto_rust_type_name(name.name) == .Val(crypto) -> return Val("{jet_rust_emit_ffi_crate()}::{crypto}")
     if name.name == "Condition" && !user_declared -> return Val("{root}jet_std::JetCondition")
     // Prelude carriers Context::rust_type spells without a declaration row
-    // (D-TTLVAL1=A, D-COLLBREADTH1=A, D-SHARED-CYCLE1=C); a user type wins.
+    // a user type wins.
     if !user_declared {
         if name.name == "Expired" && args.len() == 0 -> return Val("JetExpired")
         if name.name == "Cache" && args.len() == 2 -> return Val("JetCache<{jet_rust_emit_type(&ctx, args[0])}, {jet_rust_emit_type(&ctx, args[1])}>")

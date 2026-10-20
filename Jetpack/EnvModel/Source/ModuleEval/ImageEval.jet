@@ -232,7 +232,7 @@ fn envmodel_eval_user(expr: Expr, scope: ModuleEvalScope, globals: [String: CtVa
     }
 }
 
-// D-JPK-IMAGE1: `kind: .Oci` — a bare leading-dot enum literal (D-ENUMDOT2)
+// `kind: .Oci` — a bare leading-dot enum literal
 // with no arguments. Anything else (a call, a string, `.Foo(x)`) is a shape
 // error, not a semantic one — `envmodel_image_unknown_kind` covers a bare
 // word that just isn't `Oci`.
@@ -246,7 +246,7 @@ fn envmodel_bare_enum_word(expr: Expr, span: Span) -> String EnvModelEvalError! 
     Err(envmodel_image_field_shape(IMAGE_FIELD_KIND, "a bare leading-dot value, e.g. `kind: .Oci`", span))
 }
 
-// D-JPK-IMAGE1: `expose: [Int]` — TCP ports, sorted + deduped so the OCI
+// `expose: [Int]` — TCP ports, sorted + deduped so the OCI
 // config's `ExposedPorts` (and so the built image's digest) don't depend on
 // declaration order.
 fn envmodel_eval_expose(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> [Int] EnvModelEvalError! {
@@ -271,7 +271,7 @@ fn envmodel_eval_expose(expr: Expr, scope: ModuleEvalScope, globals: [String: Ct
     Ok(unique)
 }
 
-// D-JPK-IMAGE1: `env_vars: [KEY: "value"]` — a map literal; the comptime map
+// `env_vars: [KEY: "value"]` — a map literal; the comptime map
 // is key-ordered, so the result is already sorted by key.
 fn envmodel_eval_env_vars(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> [ImageEnvVar] EnvModelEvalError! {
     entries :: if envmodel_evaluate_expression(expr, globals, scope) == {
@@ -293,7 +293,7 @@ fn envmodel_eval_env_vars(expr: Expr, scope: ModuleEvalScope, globals: [String: 
     Ok(out)
 }
 
-// D-JPK-IMAGE1: `files: [String]` — extra project-relative paths, sorted so
+// `files: [String]` — extra project-relative paths, sorted so
 // the tar layer is byte-identical regardless of declaration order.
 fn envmodel_eval_files(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue], span: Span) -> [String] EnvModelEvalError! {
     items :: if envmodel_evaluate_expression(expr, globals, scope) == {
@@ -311,7 +311,7 @@ fn envmodel_eval_files(expr: Expr, scope: ModuleEvalScope, globals: [String: CtV
     Ok(out)
 }
 
-// D-JPK-IMAGE1: `base: oci("<ref>")` — captured as one image fact. The
+// `base: oci("<ref>")` — captured as one image fact. The
 // realization tier accepts verified local `file://` OCI layouts and reports a
 // transport diagnostic for remote refs rather than changing the requested
 // base or silently building from scratch.

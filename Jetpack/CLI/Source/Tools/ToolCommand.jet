@@ -1,4 +1,4 @@
-// D-JPK-TOOLRUN1=A: `jetpack tool install|list|uninstall`, the standalone
+// `jetpack tool install|list|uninstall`, the standalone
 // `jetpack profile <verb> tools` user-tools profile, user-tools channel
 // updates, and drift checks, ported from jetpack::CLI::tool. Persistent
 // installs project bins into `~/.jet/bin` as tool generations under
@@ -80,10 +80,6 @@ fn cli_cmd_tool(verification: &StoreVerification, theme: Theme, parsed: CLIParse
     cache := WorkspaceDeclarationCache.new()
     word :: parsed.positional.get(0) ?? {
         theme.error("`jetpack tool` needs a verb", "verbs are: {TOOL_VERBS.join(", ")} — persistent PATH management.", "try `jetpack use ripgrep -- rg --version`.")
-        return EXIT_USAGE
-    }
-    if word == "run" {
-        theme.error_coded("E1353", "`jetpack tool run` is retired", "one mechanism owns ephemeral package shells and commands", "use `jetpack use <package> -- <command>`")
         return EXIT_USAGE
     }
     verb :: ToolVerb.parse(word) ?? {

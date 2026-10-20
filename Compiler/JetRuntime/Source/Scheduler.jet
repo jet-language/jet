@@ -359,7 +359,7 @@ fn scheduler_cleanup_mask(status: I64) -> I64 {
 }
 
 // Shield defers cancellation/deadline/interrupt-class stops, never a panic
-// or runtime fault: Rust unwinds those through the shield (D-CANCELMODEL1=C).
+// or runtime fault: Rust unwinds those through the shield.
 fn scheduler_delivered_status_unmasked() -> I64 {
     status :: scheduler_control_status(scheduler_control_current())
     if scheduler_shielded() && !(status >= I64{3} && status <= I64{5}) -> I64{0} else -> status

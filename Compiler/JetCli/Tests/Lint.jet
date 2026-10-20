@@ -33,7 +33,7 @@ fn run() Never! {
     if jet_cli_lint_max([String]{"--max=++1"}, false) == .Value(_) -> panic("only one plus is allowed")
 
     inspection :: JetCLIArchitectureInspection{rows: [], reason: None, check: None}
-    expected :: "architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):\n  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n  measurement: benchmark/change-task not measured; no advantage claim\n"
+    expected :: "architecture advice (advisory, operator may reject):\n  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n  measurement: benchmark/change-task not measured; no advantage claim\n"
     if jet_cli_architecture_text(inspection) != expected -> panic("empty architecture inspection text")
     json :: jet_cli_status_json(jet_cli_architecture_value(inspection))
     if json != "{{\"status\":\"advisory\",\"rows\":[],\"operator_action\":\"review_or_reject\"}}" -> panic("empty architecture inspection machine fields")

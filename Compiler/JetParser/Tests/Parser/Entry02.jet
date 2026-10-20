@@ -238,57 +238,10 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 #Test("lambda_interface_lookahead_preserves_grouped_multiplication") {
     _ :: entry02_program("fn run() {{ print((2) * 3) }}\n")
 }
-// Rust: crates/jet-parser/src/Parser/mod.rs:2451 (stale on dev: Rust expect_err panics on the now-canonical fn old() -> Int { return 1 })
-#Test("retired_arrow_control_forms_have_specific_teaching_diagnostics") {
-    accepted :: entry02_program("fn old() -> Int {{ return 1 }}\n")
-    old :: entry02_func(accepted, "old")
-    assert_eq(old.return_type, Val(Type.Int))
-    loop testcase in [
-        (source: "fn old() --[FS]-> Int {{ return 1 }}\n", code: "E0066"),
-        (source: "fn old() :> Int {{ return 1 }}\n", code: "E0068"),
-        (source: "fn old() :> 1\n", code: "E0070"),
-        (source: "fn old() => 1\n", code: "E0070"),
-        (source: "fn old() Int :: 1\n", code: "E0065"),
-        (source: "fn run() {{ if ready send() }}\n", code: "E0372"),
-        (source: "fn run() {{ #Grant(FS) {{ caps -> use_caps(caps) }} }}\n", code: "E0077"),
-        (source: "protocol Old {{ client -> server: Hello(id: Int) }}\n", code: "E0154"),
-        (source: "fn run() {{ f :: take(value) (x: Int) => x + value }}\n", code: "E0057")
-    ] {
-        code :: testcase.code
-        ds :: entry02_errors(testcase.source)
-        diagnostic :: entry02_diag(ds, code)
-        if code == "E0065" -> assert((diagnostic.edit ?? panic("canonical replacement")).new_text == "->")
-        if code == "E0077" { assert(diagnostic.what.contains("#Grant"))
- assert(diagnostic.fix.contains("#FX")) }
-    }
-}
 // Rust: crates/jet-parser/src/Parser/mod.rs:2538
 #Test("adjacent_call_result_has_the_registered_call_value_fix") {
     ds :: entry02_errors("fn run() {{ make()() }}\n")
     assert((entry02_diag(ds, "E-CALL-VALUE").edit ?? panic("call value fix")).new_text == ".call")
-}
-// Rust: crates/jet-parser/src/Parser/mod.rs:2554
-#Test("retired_s14_teaching_is_paused") {
-    retired :: [String]{"E0008", "E0012", "E0013", "E0014", "E0015", "E0016", "E0017", "E0018", "E0021", "E0022", "E0023", "E0024", "E0025", "E0026", "E0027", "E0028", "E0030", "E0032", "E0033", "E0036", "E0044", "E0045", "E0050", "E0051", "E0052", "E0053", "E0054", "E0056", "E0057", "E0984"}
-    loop src in ["def run() {{ return }}", "func run() {{ return }}", "import core.files", "fn run() {{ while true {{ return }} }}", "fn run() {{ for x in xs {{ return }} }}", "fn run() {{ match x {{ 1 -> return }} }}", "fn run() {{ switch x {{ 1 -> return }} }}", "fn run() {{ x :: a or b }}", "fn run() {{ x :: a and b }}", "fn run() {{ x :: not ok }}", "fn run(x: Text) {{ return }}", "fn run() {{ todo }}", "fn run() {{ y :: Some(1) }}", "fn run() {{ y :: lambda x {{ x }} }}", "fn run() {{ y :: append(xs, 1) }}", "class Point {{ x: Int }}", "interface Shape {{ fn draw(self) }}", "fn use_item(mut item: Item) {{ return }}"] {
-        lexed :: lex(src.bytes())
-        assert(lexed.diagnostics.is_empty())
-        admitted :: parser_test_result(src)
-        loop diagnostic in admitted.diagnostics -> assert(!retired.contains(diagnostic.code))
-    }
-    loop src in ["fn run() {{ y :: |x| x + 1 }}", "fn run() {{ y :: 1 |> print }}"] {
-        lexed :: lex(src.bytes())
-        assert(lexed.diagnostics.is_empty())
-        admitted :: parser_test_result(src)
-        _ :: parser_test_diagnostic(admitted.diagnostics, "E0003")
-        loop diagnostic in admitted.diagnostics -> assert(diagnostic.code != "E0033")
-    }
-    loop word in ["while", "for"] {
-        lexed :: lex(word.bytes())
-        assert(lexed.diagnostics.is_empty())
-        assert(lexed.tokens[0].kind == TOKEN_IDENT)
-        assert(token_decoded(lexed.tables, lexed.tokens[0]) == word)
-    }
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2631
 #Test("return_type_question_spacing_disambiguates_option_vs_result") {

@@ -87,9 +87,9 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
 #Test("symbol_db_inlay_hints_keep_module_walk_order_and_borrowed_rows") {
     db := SymbolDB.new()
     db.inlay = [InlayHint]{
-        InlayHint{span: Span{start: 8, end: 9}, module_path: "main.jet", label: ": Int"},
-        InlayHint{span: Span{start: 1, end: 2}, module_path: "other.jet", label: ": Float"},
-        InlayHint{span: Span{start: 3, end: 4}, module_path: "main.jet", label: ": Bool"},
+        {span: Span{start: 8, end: 9}, module_path: "main.jet", label: ": Int"},
+        {span: Span{start: 1, end: 2}, module_path: "other.jet", label: ": Float"},
+        {span: Span{start: 3, end: 4}, module_path: "main.jet", label: ": Bool"},
     }
     hints :: db.inlay_hints_for("main.jet")
     assert_eq(hints.len(), 2)
@@ -212,7 +212,7 @@ fn semindex_build_test_reference(kind: String, path: String, start: Int, end: In
         semindex_build_test_reference("const", "main.jet", 2, 8, None),
         semindex_build_test_reference("module", "main.jet", 10, 12, Val("retained")),
         semindex_build_test_reference("module", "absent.jet", 2, 8, Val("unmatched")),
-        SymRef{name: "unresolved", span: Span{start: 0, end: 0}, module_path: "main.jet", scope_identity: None, target: None, fact: None},
+        {name: "unresolved", span: Span{start: 0, end: 0}, module_path: "main.jet", scope_identity: None, target: None, fact: None},
     }
     &db.align_reference_targets()
     if db.refs[0].target == {

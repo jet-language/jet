@@ -10,16 +10,16 @@
 #Test("semindex_generated_presentation_preserves_replacement_order") {
     text := "__long __lon __long.member"
     semindex_project_text([SemIndexPresentationReplacement]{
-        SemIndexPresentationReplacement{internal: "__long", display: "Public"},
-        SemIndexPresentationReplacement{internal: "__lon", display: "Short"},
+        {internal: "__long", display: "Public"},
+        {internal: "__lon", display: "Short"},
     }, &text)
     assert_eq(text, "Public Short Public.member")
     semindex_project_text([SemIndexPresentationReplacement]{}, &text)
     assert_eq(text, "Public Short Public.member")
     chained := "internal"
     semindex_project_text([SemIndexPresentationReplacement]{
-        SemIndexPresentationReplacement{internal: "internal", display: "middle"},
-        SemIndexPresentationReplacement{internal: "middle", display: "readable"},
+        {internal: "internal", display: "middle"},
+        {internal: "middle", display: "readable"},
     }, &chained)
     assert_eq(chained, "readable")
 }

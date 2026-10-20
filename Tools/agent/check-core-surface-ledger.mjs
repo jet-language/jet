@@ -2782,6 +2782,8 @@ function executableModuleInventory() {
   );
   if (!seed) throw new Error("policy argument declaration seed disappeared");
   const langMembers = new Set(quoted(seed[1]));
+  // TaintKind is a Core type in its own right (the taint tags), not only a marker argument menu.
+  langMembers.add("TaintKind");
   for (const line of read(MARKERS_PATH).split("\n")) {
     if (!line.trim().startsWith("marker ")) continue;
     for (const parameter of line.matchAll(

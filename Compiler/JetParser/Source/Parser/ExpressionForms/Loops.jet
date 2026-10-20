@@ -25,7 +25,6 @@ use jet_lexer.[
     TOKEN_KW_IF,
     TOKEN_KW_IN,
     TOKEN_KW_IT,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LPAREN,
     TOKEN_RPAREN,
@@ -84,11 +83,6 @@ fn parser_expression_form_loop_separator(state: &JetParserState) {
     token :: parser_current(&state)
     if token.kind == TOKEN_KW_IN {
         parser_bump(&state)
-        return
-    }
-    if token.kind == TOKEN_COMMA || token.kind == TOKEN_SEMI {
-        parser_bump(&state)
-        parser_expression_form_error(&state, "E0383", token.span, "a loop source needs `in`", "the source separator names the collection or range after the loop variable", "write `in` between the variable and source")
         return
     }
     parser_expect(&state, TOKEN_KW_IN, "between the loop binding and source").drop("parser_expect records the missing-token diagnostic")
@@ -283,7 +277,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
     head :: parser_current_kind(&state)
     following :: parser_kind_at(&state, 1)
     binding_head :: head == TOKEN_IDENT || head == TOKEN_KW_IT
-    finite_header :: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW || following == TOKEN_LAMBDA_ARROW))
+    finite_header :: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW))
     if !finite_header {
         parser_add_fatal_code(&state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
         return ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}

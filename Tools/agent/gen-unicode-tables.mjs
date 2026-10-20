@@ -752,7 +752,7 @@ function jetNormalizeLookup(name, rows, missing, mapped) {
     const text = jetNormalizeHeader + `fn ${fn}(cp: I64) -> I64 Never! {\n`
       + jetLookupTree(chunk, missing, mapped) + "}\n";
     if (text.length > jetTablesOut.length) throw new Error(`${fn} exceeds existing UnicodeTables.jet size`);
-    jetNormalizeChunks.push([`Compiler/JetRuntime/Source/UnicodeNormalize_${name}_${index}.jet`, text]);
+    jetNormalizeChunks.push([`Compiler/JetRuntime/Source/UnicodeNormalize${name.split("_").map(p => p[0].toUpperCase() + p.slice(1)).join("")}${index}.jet`, text]);
     dispatch.push([chunk[0][0], chunk.at(-1)[1], fn]);
   }
   return `fn unicode_${name}(cp: I64) -> I64 Never! {\n`
@@ -808,7 +808,7 @@ for (const lookup of jetTextLookups) {
   }
   const text = jetTextHeader + lookup;
   if (text.length > jetTablesOut.length) throw new Error(`text lookup exceeds existing UnicodeTables.jet size:\n${lookup.slice(0, 80)}`);
-  jetTextUnits.push([`Compiler/JetRuntime/Source/UnicodeText_${jetTextUnits.length}.jet`, text]);
+  jetTextUnits.push([`Compiler/JetRuntime/Source/UnicodeText${jetTextUnits.length}.jet`, text]);
 }
 
 const outPaths = [

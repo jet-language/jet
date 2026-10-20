@@ -45,16 +45,16 @@ struct Program {
     // L0303 (#3716): each dispatch table's authored `else` arm, so sema can
     // point at an arm that can never run and delete it.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
-    // L0103 (D-LINT-UNUSED1): the local names of this file's imports that the
+    // L0103 the local names of this file's imports that the
     // file spells outside its import declarations, so sema can report an
     // import that is never read.
     used_import_names: [String]{[String]{}}
-    // D-DBG1=A: the authored text of every `debug(…)` call, so sema can
+    // The authored text of every `debug(…)` call, so sema can
     // write the trace site and the E3405 unwrap edit without the source.
     debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
 }
 
-// D-DBG1=A: one `debug(…)` call as written. `name_start` keys it to the call's
+// One `debug(…)` call as written. `name_start` keys it to the call's
 // name span; `text` is the argument exactly as written; `close_end` is the
 // byte after the closing `)`.
 struct DebugTraceSite {
@@ -478,13 +478,13 @@ struct TypeParam {
     name: String
     name_span: Span
     bounds: [String]
-    // D-CONSTGEN2=A: set when the declaration is a compile-time number
+    // Set when the declaration is a compile-time number
     // parameter, `<prep N: Int>`; `bounds` is then empty. `<prep>` and
     // `<prep: Trait>` stay ordinary type parameters named `prep`.
     prep: PrepParam?
 }
 
-// D-CONSTGEN2=A: the declaration head of a compile-time number parameter.
+// The declaration head of a compile-time number parameter.
 // Only the declaration carries `prep`; uses write the plain name. Sema rejects
 // it with E0390 until card #3505 lands substitution, identity and layout.
 struct PrepParam {
@@ -499,7 +499,7 @@ struct TraitDef {
     is_package_pub: Bool
     name: String
     name_span: Span
-    // D-TRAIT-OVERLOAD1=A: the traits this one builds on (`trait T: A`,
+    // The traits this one builds on (`trait T: A`,
     // `trait T: [A, B]`).
     supertraits: [String]
     assoc_types: [NamedSpan]
@@ -771,7 +771,7 @@ struct Param {
     variadic: Bool
     variadic_bound_list: [String]?
     declared_view_from_names: [String]?
-    // D-METHOD-FOOTPRINT1=A: the stated receiver footprint `&self.log` /
+    // The stated receiver footprint `&self.log` /
     // `&self.[log, hits]`; `None` on every other parameter.
     declared_footprint: [NamedSpan]?
 }
@@ -1077,7 +1077,7 @@ struct ConstDef {
     name: String
     name_span: Span
     value: Expr
-    // 3A / D-PUBPKG1=A: `pub NAME :: v` exports the binding like any other
+    // 3A `pub NAME :: v` exports the binding like any other
     // top-level item; `pub(package)` keeps it inside the package.
     is_pub: Bool
     is_package_pub: Bool

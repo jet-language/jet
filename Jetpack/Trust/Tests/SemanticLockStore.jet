@@ -27,8 +27,8 @@ dependencies = ["app"]
     files.write(lock_path, TRUST_TEST_MACHINE_ONLY_LOCK) ?? panic("write machine lock")
     semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
     semantic.inputs = [LockInput]{
-        LockInput{name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
-        LockInput{name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+        {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
+        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
     }
     semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
     trust_semantic_lock_atomic_commit(root, semantic) ?? panic("atomic commit")

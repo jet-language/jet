@@ -1,4 +1,4 @@
-// D-EFFBUDGET1 (ratified 2026-07-01): the package effect budget
+// (ratified 2026-07-01): the package effect budget
 // (jet-pkg-model EffectBudget.rs).
 //
 // Zero-config: every `jet build` prints a one-line summary of the effects the
@@ -312,11 +312,11 @@ fn pkg_effect_budget_rights(names: [String]) -> [String] Never! {
     authority_parse_rights(names)
 }
 
-// D-EFFBUDGET1 whole-graph enforcement: with `authority.holds` declared,
+// Whole-graph enforcement: with `authority.holds` declared,
 // every package (root or dependency) reaching an effect outside `allow` or
 // inside `deny` fails with E1220, unless `authority.grants` covers it for
-// that dependency. D-EFFTREE1: rows may be ancestor roots; the substrate
-// verdict decides. D-PANICROOT1: Panic is deny-only.
+// that dependency. Rows may be ancestor roots; the substrate
+// verdict decides. Panic is deny-only.
 fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
     if !manifest.effects_enabled -> return [Diagnostic]{}
     allow :: if manifest.authority.holds.allow == {
@@ -413,7 +413,7 @@ fn pkg_e1220_at(dependency: String, effect_name: String, site: String?) -> Diagn
         fix)
 }
 
-// E1220 / D-NOPANIC1=D: a package denial keeps the panic provenance visible
+// E1220 a package denial keeps the panic provenance visible
 // and offers the same exits as function-scope prohibition.
 fn pkg_e1220_panic(dependency: String, panic_site: String, span: Span?) -> Diagnostic Never! {
     diagnostic_from_registry("E1220", span,

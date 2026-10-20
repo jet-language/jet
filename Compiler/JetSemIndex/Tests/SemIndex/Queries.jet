@@ -76,14 +76,14 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
             semindex_query_test_definition("first", "other", .Tag),
         },
         [SymbolRef]{
-            SymbolRef{name: "score", module_path: "b", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 9, end: 10}},
-            SymbolRef{name: "main::score", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 1, end: 2}},
-            SymbolRef{name: "score", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 2, end: 3}},
+            {name: "score", module_path: "b", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 9, end: 10}},
+            {name: "main::score", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 1, end: 2}},
+            {name: "score", module_path: "a", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 2, end: 3}},
         },
         [CallEdge]{
-            CallEdge{caller: "first", callee: "score", module_path: "b", call_span: SourceSpan{start: 9, end: 10}},
-            CallEdge{caller: "qualified", callee: "main::score", module_path: "a", call_span: SourceSpan{start: 1, end: 2}},
-            CallEdge{caller: "second", callee: "score", module_path: "a", call_span: SourceSpan{start: 2, end: 3}},
+            {caller: "first", callee: "score", module_path: "b", call_span: SourceSpan{start: 9, end: 10}},
+            {caller: "qualified", callee: "main::score", module_path: "a", call_span: SourceSpan{start: 1, end: 2}},
+            {caller: "second", callee: "score", module_path: "a", call_span: SourceSpan{start: 2, end: 3}},
         }, [MemberFact]{},
     )
     // #4393: explicit option match; do not use ?? return None for View options.
@@ -144,12 +144,12 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
         semindex_query_test_member("title", .Field, .TypeBody, "a", 1, "title"),
     })
     &index.set_bypasses([BypassFact]{
-        BypassFact{kind: .ExplicitDrop, site: "unrelated", detail: "telemetry only", module_path: "z", span: SourceSpan{start: 0, end: 1}},
-        BypassFact{kind: .UnsafeFn, site: "unrelated", detail: "audited", module_path: "a", span: SourceSpan{start: 3, end: 4}},
+        {kind: .ExplicitDrop, site: "unrelated", detail: "telemetry only", module_path: "z", span: SourceSpan{start: 0, end: 1}},
+        {kind: .UnsafeFn, site: "unrelated", detail: "audited", module_path: "a", span: SourceSpan{start: 3, end: 4}},
     })
     &index.set_state_graphs([StateGraphFact]{
-        StateGraphFact{owner: "Other", module_path: "a", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
-        StateGraphFact{owner: "Widget", module_path: "b", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
+        {owner: "Other", module_path: "a", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
+        {owner: "Widget", module_path: "b", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}},
     })
     dossier :: index.dossier("widget-id")
     assert_eq(dossier.target, "Widget")

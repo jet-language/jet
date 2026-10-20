@@ -121,7 +121,7 @@ fn sema_call_check_special_approx(call: Call, expected: Type?, environment: Sema
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
 
-// Rust `is_debuggable` (D-ATTR4=A): the values `debug(value)` can show in
+// Rust `is_debuggable` the values `debug(value)` can show in
 // their Debug form. A nominal needs a registered or auto-derived `Debug`.
 fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
@@ -176,7 +176,7 @@ fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment, prog
     }
 }
 
-// Rust `infer_method_call` (D-AUTODERIVE1): `.debug()` with no arguments is
+// Rust `infer_method_call` `.debug()` with no arguments is
 // the Debug protocol method on every debuggable receiver, auto-derived or
 // handwritten alike; it is the same Debug text `{value:Debug}` renders.
 fn sema_call_try_debug_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -206,7 +206,7 @@ fn sema_call_debug_expression_text(text: String) -> String Never! {
     lines.join(" ")
 }
 
-// D-DBG1=A: `debug(value)` evaluates the value once, writes
+// `debug(value)` evaluates the value once, writes
 // `[debug] file.jet:LINE expr = <Debug form>` to stderr through the shared
 // `core.term.eprint` row, and yields the value unchanged. The trace adds no
 // effect. A shipped artifact or a release-profile build rejects it (E3405)
@@ -317,7 +317,7 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
     }
 }
 
-// D-SHAPE-RESOURCE2=A (Rust `check_call_inner`): `close(^value)` is ambient
+// (Rust `check_call_inner`): `close(^value)` is ambient
 // sugar for the sole nominal `Close.close(^self)` protocol, ahead of every
 // declared function. It takes exactly one resource through the move marker,
 // whose type must implement `Close`, and produces nothing.
@@ -345,7 +345,7 @@ fn sema_call_check_ambient_close(call: Call, environment: SemaScopeEnvironment, 
     Val(sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
 }
 
-// D-SIMD2 / D-LINALG1: the scalar slots of a built-in math value type's
+// The scalar slots of a built-in math value type's
 // positional constructor (Rust `math_arity`): a lane type's lane count, a
 // vector's dimension, a square matrix's N*N column-major components.
 fn sema_call_math_arity(name: String) -> Int Never! {
@@ -377,8 +377,8 @@ fn sema_call_math_scalar_type(name: String) -> Type Never! {
     Type.Float
 }
 
-// `Decimal("12.34")` (D-DECIMAL1), `Complex(re, im)` (D-TYPE2-IMAG1=A) and
-// `Vec3(x, y, z)`-style math constructors (D-SIMD2 / D-LINALG1): each argument
+// `Decimal("12.34")` `Complex(re, im)` and
+// `Vec3(x, y, z)`-style math constructors each argument
 // is checked against its component type in order and the call becomes the
 // type's precise or math builtin, as Rust TIR lowering builds it.
 fn sema_call_check_value_constructor(call: Call, type_name_value: String, components: [Type], math: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -678,7 +678,7 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
-// Rust core_call.rs `("core.mem.scope", "guard")` (D-DEFER1 option B): the
+// Rust core_call.rs `("core.mem.scope", "guard")` (option B): the
 // compiler-owned guard has no registry row. Its one zero-parameter cleanup
 // lambda becomes the `ScopeGuard` whose scope-end drop runs it.
 fn sema_call_try_scope_guard(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -911,9 +911,9 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     }
     message_expr :: message ?? Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span}
     fields :: [ExprField]{
-        ExprField{name: "message", name_span: expr_span(message_expr), value: message_expr},
-        ExprField{name: "code", name_span: span, value: sema_call_default_err_optional(code, code_span, span)},
-        ExprField{name: "cause", name_span: span, value: sema_call_default_err_optional(cause, cause_span, span)},
+        {name: "message", name_span: expr_span(message_expr), value: message_expr},
+        {name: "code", name_span: span, value: sema_call_default_err_optional(code, code_span, span)},
+        {name: "cause", name_span: span, value: sema_call_default_err_optional(cause, cause_span, span)},
     }
     struct_expr :: Expr.StructLit{type_name: "Err", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span}
     payload :: sema_check_expression(struct_expr, Val(Type.Named{name: "Err"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -944,7 +944,7 @@ fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaSco
             if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None {
                 return sema_call_default_err_contextual_result(call, result_value, ok, err, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
-            // D-FAIL-INFER-UNION1=A: record what this `Err` sends down the
+            // Record what this `Err` sends down the
             // default route before the ordinary check below.
             if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, program, &scopes, &state, &tail_store, &context)
         }
@@ -1011,7 +1011,7 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
     SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types}
 }
 
-// D-CALLBACK-ERR1=A: a lambda argument fills a failure-type parameter `E`
+// A lambda argument fills a failure-type parameter `E`
 // written as `fn(..) -> U E!` with the failure its body really has. The lambda
 // is probed on its own; a body that cannot fail, or one that cannot be typed
 // before the other type parameters are known, binds `E` to `Never`.
@@ -1173,7 +1173,7 @@ fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDir
 // (check_call_inner), taken first by sema_expr_check_direct_call. The
 // getenv/async/await teaching errors win even over a same-spelled lexical
 // binding and still infer every argument; `measurement(value, uncertainty:)`
-// and D-STRUCT-POLICY1=A's `apply(policy..., f)` apply only unshadowed.
+// and 's `apply(policy..., f)` apply only unshadowed.
 fn sema_call_try_direct_forms(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.name == "getenv" || call.name == "async" || call.name == "await" {
         if call.name == "getenv" {

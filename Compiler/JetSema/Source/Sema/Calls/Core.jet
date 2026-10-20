@@ -101,7 +101,7 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, program: Sema
 }
 
 // The source module a whole-module import alias binds: `use slots`, or the
-// file import a body-less `module math` declares (D-MOD1). None for a Core
+// file import a body-less `module math` declares. None for a Core
 // module or a member import.
 fn sema_call_source_import_target(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
     if program.registration_graph == .Val(graph) {
@@ -251,7 +251,7 @@ fn sema_call_export_function_target(environment: SemaScopeEnvironment, program: 
 }
 
 // Rust `infer_import_call`: `slots.wrap(..)` through a whole-module alias of a
-// source module calls the function that module (or, D-MOD-CYCLE1=A, its
+// source module calls the function that module (or its
 // package) exports, checked like a direct call. A private function is E0605
 // and any other name E0102. Core aliases keep their own route.
 fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
@@ -263,7 +263,7 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
-            &diagnostics.push(sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)", "use `{member}` from inside its module, or remove `priv` from its module or field"))
+            &diagnostics.push(sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{member}` from inside its module, or remove `priv` from its module or field"))
         } else {
             &diagnostics.push(sema_call_import_member_unknown(member, alias_span))
         }
@@ -306,10 +306,10 @@ fn sema_call_core_module_identity(environment: SemaScopeEnvironment, program: Se
 // Rust `serde_diags::unknown_core_item` (E1004): the one report for a Core
 // module member that does not resolve at this position.
 fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) -> Diagnostic {
-    if module_name == "core.time" && member == "clock" -> return sema_error("E1004", span, "`time.clock` was retired", "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)", "use `Clock.new(seed)`")
-    if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` was retired", "fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)", "use `ExpiringValue.new(value, ttl, clock)`")
-    if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` was retired", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
-    if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` was retired", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
+    if module_name == "core.time" && member == "clock" -> return sema_error("E1004", span, "`time.clock` is not a Core member", "deterministic fresh values use a type-owned `new` constructor", "use `Clock.new(seed)`")
+    if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` is not a Core member", "fresh values use a type-owned `new` constructor", "use `ExpiringValue.new(value, ttl, clock)`")
+    if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` is not a Core member", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
+    if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` is not a Core member", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
     if module_name == "core.crypto" && member.ends_with("_bytes") {
         algorithm :: member.removesuffix("_bytes")
         digest :: if algorithm == {
@@ -317,7 +317,7 @@ fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) 
             "sha512" -> "Digest512"
             else -> ""
         }
-        if digest != "" -> return sema_error("E1004", span, "`crypto.{member}` was retired", "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit", "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes")
+        if digest != "" -> return sema_error("E1004", span, "`crypto.{member}` is not a Core member", "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit", "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes")
     }
     items :: if core_module_export(module_name) == {
         .Val(row) -> row.members
@@ -370,7 +370,7 @@ fn sema_call_core_projection_error(module_name: String, member: String, error: C
 fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     typed_signature :: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
-    // D-VERDICT-1321-1: variadic `core.term.eprint` joins its arguments into
+    // Variadic `core.term.eprint` joins its arguments into
     // one write through the arity-1 row (Rust `checked_core_record(…, 1, …)`);
     // its special checker owns the argument count.
     projection_arity :: if module_name == "core.term" && member == "eprint" -> 1 else -> actual_arity
@@ -478,7 +478,7 @@ fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, progra
         if mir_shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
     }
     diagnostic_count := diagnostics.len()
-    // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
+    // `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
     source :: if sema_compiler_services_is_compiler_query(imported.module_name, member) || variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, program, imported.module_identity, member, type_args, span, false, &diagnostics)
@@ -503,7 +503,7 @@ fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, p
     sema_call_core_resolve_route(environment, program, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, first_is_move, span, &diagnostics)
 }
 
-// D-VERDICT-1321-1 (Rust core_call.rs `("core.term", "print")`): an imported
+// (Rust core_call.rs `("core.term", "print")`): an imported
 // `core.term` print with other than one argument is the qualified twin of the
 // ambient variadic `print`, checked and lowered exactly like it (Rust
 // `print_values`). True when this alias call is that print; the alias
@@ -559,7 +559,7 @@ fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment
 }
 
 // Rust core_call.rs `("core.math", "abs")`: `abs` takes Int, Float or F32
-// (D-FLOATW1) and Complex, returning the argument type (Float for Complex).
+// and Complex, returning the argument type (Float for Complex).
 // The Int form stays the routed source `abs`; a float or Complex argument is
 // the MathBuiltin `abs` that Rust `lower_core_math_abs` lowers it to, which is
 // the route `Complex.abs` already takes. Anything else is not handled here.
@@ -682,7 +682,7 @@ fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: 
     leaf_name :: record.effect_leaf ?? ""
     if record.effect_kind == {
         .Val(effect_kind) -> {
-            // D-EFFTREE1: a precise leaf under the call's own root replaces
+            // A precise leaf under the call's own root replaces
             // that root, so a leaf grant (`FS.Read`, `Exec.Args`) covers the
             // call and the root still covers the leaf. A leaf under another
             // root (`Time.Wait` on a network call) adds to the root instead.

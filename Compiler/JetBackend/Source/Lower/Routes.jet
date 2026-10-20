@@ -313,7 +313,7 @@ fn lower_route_drop(carrier: LowerRouteCarrier) -> LIRDrop Never! {
     }
 }
 
-// Native TLS is unavailable until Jet's own TLS lands (D-NATIVE-TLS1=B).
+// Native TLS is unavailable until Jet's own TLS lands.
 // This predicate runs before route lookup, including missing TLS-client
 // adapters. Pure configuration/PEM rows remain data operations. Shared HTTP/
 // SMTP policy calls jet_rt_http_tls_refuse only in the chosen TLS branch.
@@ -331,7 +331,7 @@ fn lower_tls_transport_route(row: MIRPreludeCall) -> Bool Never! {
 // projects this literal into TrapMessages.jet (trap_msg_native_tls), which the
 // runtime's jet_rt_http_tls_refuse stop and build HTTP leaf report verbatim.
 fn lower_tls_transport_message() -> String Never! {
-    "TLS transport is not available in native builds until Jet's own TLS implementation lands (D-NATIVE-TLS1=B); use plain HTTP or TCP meanwhile"
+    "TLS transport is not available in native builds until Jet's own TLS implementation lands; use plain HTTP or TCP meanwhile"
 }
 
 // Explicit MIR Write arguments must match an adapter lending the caller's

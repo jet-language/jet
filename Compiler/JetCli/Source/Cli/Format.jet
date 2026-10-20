@@ -21,7 +21,7 @@ fn jet_cli_format_stdin(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbO
         report :: if json -> jet_cli_format_diagnostics(label, source, file.diagnostics) else -> diagnostic_render_all(label, source, file.diagnostics, false)
         return JetDriverVerbOutput{stdout: "", stderr: report, exit_code: JET_DRIVER_EXIT_USAGE}
     }
-    JetDriverVerbOutput{stdout: file.formatted, stderr: if request.quiet || json -> "" else -> jet_cli_fmt_statuses(label, file, false), exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: file.formatted, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 fn jet_cli_format_io_error(path: String, message: String) -> String Never! {
@@ -53,7 +53,7 @@ fn jet_cli_format_run(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOut
     results := [JetCLIFmtFile]{}
     loop path in files {
         source :: cli_files.read(path) ?? {
-            &results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, retired_interpolation_selectors: 0, retired_print_family_spellings: 0, retired_type_names: 0, retired_target_spellings: 0, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
+            &results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
             next
         }
         &results.push(jet_cli_fmt_one(path, source, request))
@@ -121,9 +121,6 @@ fn jet_cli_format_run(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOut
     loop result in results {
         if !result.changed -> next
         cli_files.write(result.path, result.formatted) ?? return JetDriverVerbOutput{stdout: "", stderr: "{stderr}{jet_cli_report("E2105", "couldn't write `{result.path}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", exit_code: JET_DRIVER_EXIT_USAGE}
-        if !request.quiet && !json {
-            stderr = "{stderr}{jet_cli_fmt_statuses(result.path, result, true)}"
-        }
     }
     // Rust write mode emits no success status, including --json.
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}

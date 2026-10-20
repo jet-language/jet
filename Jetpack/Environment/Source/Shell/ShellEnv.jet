@@ -1,8 +1,8 @@
-// Env composition and command execution (D-JPK14). Jetpack composes the
+// Env composition and command execution. Jetpack composes the
 // environment itself (PATH plus markers) and runs commands or the user's own
 // shell as a child with that environment; the parent shell's environment is
 // never mutated. A verified executable can instead take over the process
-// (D-CORE-PROCREPLACE1) so the tool owns the terminal and process number.
+// so the tool owns the terminal and process number.
 
 // Rust Platform::clean_path: the minimal host-independent PATH available to
 // clean child processes. Declared Jet bins are prepended by the caller.
@@ -106,7 +106,7 @@ struct ShellEnv {
     }
 
     // Lease handles travel into the child at their pinned slots
-    // (D-CORE-PROCINHERIT1), which also records the process handoff.
+    // which also records the process handoff.
     fn apply_to_base(&self, spec: ProcessSpec, base_path: String) -[Env]> ProcessSpec Never! {
         out := spec
         loop index in 0..<self.cache_leases.len() {

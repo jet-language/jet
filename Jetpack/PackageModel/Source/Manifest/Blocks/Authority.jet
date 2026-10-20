@@ -1,6 +1,5 @@
 // `authority: { holds, needs, grants, trust, providers }`
-// (D-AUTHORITY-MANIFEST1, D-BOUND-PROV1, D-JPK-GRANTSCHEMA1,
-// D-JPK-PROVIDERAUTH1) and the effect-list readers they share with
+// ) and the effect-list readers they share with
 // `build.allow` (Package/Blocks.rs).
 
 enum TrustDecision {
@@ -35,7 +34,7 @@ struct TrustPolicy {
     default: TrustDecision?
     ci_prompt: TrustDecision?
     services: [ServiceTrust]
-    // D-BOUND-PROV1: optional provenance floor for dependency resolution.
+    // Optional provenance floor for dependency resolution.
     require: ProvenanceRequirement?
 
 }
@@ -78,7 +77,7 @@ struct AuthorityBlock {
 }
 
 // `Sema::Effect::parse(root).is_some()`: `root` is one canonical closed
-// effect root (D-EFFTREE1).
+// effect root.
 fn pkg_effect_root_known(root: String) -> Bool Never! {
     if (authority_parse_root(root) ?? "") != root -> return false
     if root == {
@@ -88,7 +87,7 @@ fn pkg_effect_root_known(root: String) -> Bool Never! {
 }
 
 // `Sema::memory_allocation_bound(name).is_some()`: `Mem.Alloc` or
-// `Mem.Alloc(above: <positive bytes>)` (D-AUTHORITY-MEM2).
+// `Mem.Alloc(above: <positive bytes>)`.
 fn pkg_memory_allocation_bound_valid(name: String) -> Bool Never! {
     if name == "Mem.Alloc" -> return true
     parts :: name.split_once("(") ?? return false
@@ -263,15 +262,13 @@ fn pkg_parse_provenance_requirement(value: String) -> ProvenanceRequirement Pack
     }
 }
 
-// `{ … }` after an optional leading dot.
-fn pkg_dotted_record_body(input: String) -> String? Never! {
-    value :: input.trim()
-    rest :: (if value.starts_with(".") -> value.removeprefix(".") else -> value).trim_start()
-    pkg_strip_wrapped(rest, "{{", "}}")
+// The `{ … }` body of a record value.
+fn pkg_braced_record_body(input: String) -> String? Never! {
+    pkg_strip_wrapped(input.trim(), "{{", "}}")
 }
 
 fn pkg_parse_ci_trust_prompt(value: String) -> TrustDecision PackageParseError! {
-    body :: pkg_dotted_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.ci` must be `{{ prompt: allow|prompt|deny }}`"))
+    body :: pkg_braced_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.ci` must be `{{ prompt: allow|prompt|deny }}`"))
     prompt := TrustDecision?{None}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
@@ -285,7 +282,7 @@ fn pkg_parse_ci_trust_prompt(value: String) -> TrustDecision PackageParseError! 
 }
 
 fn pkg_parse_service_trust(value: String) -> [ServiceTrust] PackageParseError! {
-    body :: pkg_dotted_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.services` must be `{{ name: allow|prompt|deny }}`"))
+    body :: pkg_braced_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.services` must be `{{ name: allow|prompt|deny }}`"))
     services := [ServiceTrust]{}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
@@ -307,7 +304,7 @@ fn pkg_parse_trust_decision(value: String) -> TrustDecision PackageParseError! {
     }
 }
 
-// `grants: { "dep": [DB, Net] }` (D-EFFBUDGET1 / D-JPK-GRANTSCHEMA1).
+// `grants: { "dep": [DB, Net] }`.
 fn pkg_parse_grants(body: String) -> [PackageGrant] PackageParseError! {
     out := [PackageGrant]{}
     seen := [String]{}

@@ -339,7 +339,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
     system_names := [String]{}
     loop system in systems -> &system_names.push(system.name)
     known_systems :: if system_names.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {system_names.join(", ")}"
-    // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks
+    // An `.Oci` image's `from: packages.<name>` cross-checks
     // against this project's own package manifest (E1267) — a different
     // manifest than the environment this pass evaluates, so it is loaded here
     // rather than threaded through as a plan field. An `.Iso` image names a
@@ -359,7 +359,7 @@ fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_d
         }
         if image.from_environment {
             if !environment_names.contains(image.from) {
-                return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "D-ENV-IMAGE1: an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `module env.{image.from} {{ … }}`, or point `from:` at an existing environment", None))
+                return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `module env.{image.from} {{ … }}`, or point `from:` at an existing environment", None))
             }
             next
         }
