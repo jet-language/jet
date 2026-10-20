@@ -60,7 +60,8 @@ enum JetCLIPlan {
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints.
-    Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String)
+    // `watch` (`jet dev`): rerun the program whenever a package source changes.
+    Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool)
     // `jet test <file>`: compile the checked test harness and run it under
     // `options`; native O0 unless the release profile was selected.
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
@@ -827,7 +828,7 @@ fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, short
     if entry == {
         .Check(file, source, _, _, _, _, notice, _) -> {
             program_args :: passthrough ?? jet_cli_tail(args, 2)
-            return JetCLIPlan.Run{file: file, source: source, color: color, release: release, verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice}
+            return JetCLIPlan.Run{file: file, source: source, color: color, release: release, verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: false}
         }
         else -> {}
     }
@@ -965,17 +966,37 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         .Selected(release) -> options.release = release
     }
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
-    // A bare `jet test` runs the package (spec S43), not ported yet.
+    // A bare `jet test` or `jet test <dir>` tests the package: its entry file loads the
+    // whole package, and the harness collects every #Test of every package file.
     if positionals.len() == 0 {
         directory :: cli_files.cwd() ?? "."
-        if jet_cli_has_manifest_above(directory) -> return jet_cli_not_ported("test", color)
+        if jet_cli_has_manifest_above(directory) {
+            notices := [String]{}
+            if jet_cli_resolve_bare_entry("test", directory, None, false, color, &notices) == {
+                .Entry(entry) -> return jet_cli_test_file(entry.path, color, verbose, threads, options, fresh, quiet)
+                .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
+                .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("test", directory, color))
+            }
+        }
         return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
     }
     target :: positionals[0]
-    if cli_files.is_dir(target) -> return jet_cli_not_ported("test <directory>", color)
+    if cli_files.is_dir(target) {
+        if jet_cli_resolve_directory_target("test", target, None, false, color) == {
+            .File(path, _, _) -> return jet_cli_test_file(path, color, verbose, threads, options, fresh, quiet)
+            .Refused(plan) -> return plan
+        }
+    }
     // Source/main.rs `resolve_source_path`: the typed spelling, else `<target>.jet`.
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+    jet_cli_test_file(file, color, verbose, threads, options, fresh, quiet)
+}
+
+// One test file (or a package entry file): the harness collects every #Test the file and
+// its package load, and a `fn test(t: Test)` there runs first with the suite.
+fn jet_cli_test_file(file: String, color: Bool, verbose: Bool, threads: Int?, given: JetCLITestOptions, fresh: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+    options := given
     if !cli_files.exists(file) {
         return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "can't find `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
@@ -984,7 +1005,6 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
     if jet_cli_has_doctests(source) -> return jet_cli_not_ported("test <file with doctests>", color)
-    if !show_default && jet_cli_declares_test_override(source) -> return jet_cli_not_ported("test <fn test override>", color)
     options.project_root = jet_cli_manifest_root(jet_cli_parent(file) ?? ".")
     JetCLIPlan.Test{file: file, source: source, color: color, verbose: verbose, threads: threads, options: options}
 }
@@ -1474,6 +1494,17 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
         "build" -> return jet_cli_build(jet_argv, args, color, quiet, threads)
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
+        // Stock `jet dev`: the `jet run` entry, rebuilt and rerun on every source change.
+        // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.
+        "dev" -> {
+            if !jet_argv.contains("--canvas") && !jet_cli_has(jet_argv, "--app") && !jet_cli_has(jet_argv, "--share") {
+                plan :: jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
+                if plan == .Run(file, source, color_flag, release, verbose_flag, threads_cap, program_args, invocation, notice, _) {
+                    return JetCLIPlan.Run{file: file, source: source, color: color_flag, release: release, verbose: verbose_flag, threads: threads_cap, program_args: program_args, invocation: invocation, notice: notice, watch: true}
+                }
+                return plan
+            }
+        }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))

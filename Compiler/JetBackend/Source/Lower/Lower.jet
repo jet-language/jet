@@ -554,6 +554,10 @@ fn lower_selected_in_place(program: &MIRProgram, roots: [MIRFunctionID], wrap_en
     }
     all_roots := roots.copy()
     loop check in checks -> &all_roots.push(check.function)
+    // `fn test(t: Test)` configures the suite before the stock harness runs it.
+    if test_serial != None {
+        if lower_test_override(program) == .Val(override) -> &all_roots.push(override)
+    }
     // Preparation, body, glue and entry lowering resolve type definitions
     // through the type index, attached to the program itself instead of to
     // a copy of it (lower_type_row: the index answers exactly what a scan of

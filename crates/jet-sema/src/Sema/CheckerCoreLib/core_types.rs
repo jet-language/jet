@@ -295,7 +295,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | Syntax::TYPE_SHARED_SNAPSHOT | Syntax::TYPE_SHARED_REVISION_ERROR
         | "Path"
         | "StreamEventTime" | "KeyedStream" | "Window" | "LateEventDisposition"
-        | "TestSuite" | "TestComparison" | "Count" | "HandleID" | "TaskID" | "EventID"
+        | "Test" | "TestComparison" | "Count" | "HandleID" | "TaskID" | "EventID"
         | "HistoryRNG" | "HistoryValue" | "HistoryPrecondition" | "HistoryCase"
         | "HistoryOperation" | "HistoryScheduleChoice" | "HistoryBounds"
         | "HistoryDistribution" | "HistoryStrategy" | "TypedHistoryCase"
@@ -501,7 +501,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Reader" | "Cursor"
         // D-BUILD*: selected-root build-program handles and the read-only
         // graph/diff records returned by `core.build`.
-        | "BuildContext"
+        | "Build"
         | "BuildPlan"
         | "BuildAction"
         | "BuildTarget"
@@ -731,7 +731,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if type_name == "TestSuite" {
+    if type_name == "Test" {
         return matches!(field, "iteration" | "result").then_some(Type::Int);
     }
     if type_name == "TestComparison" {

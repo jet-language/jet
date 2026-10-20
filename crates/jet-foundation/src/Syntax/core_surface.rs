@@ -1119,7 +1119,7 @@ pub const TYPE_AUTHORITY: &str = "Authority";
 /// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.
 /// These names are compiler-known only while the selected root `fn build`
 /// runs; build entry is removed before runtime codegen.
-pub const TYPE_BUILD_CONTEXT: &str = "BuildContext";
+pub const TYPE_BUILD_CONTEXT: &str = "Build";
 pub const TYPE_BUILD_PLAN: &str = "BuildPlan";
 pub const TYPE_BUILD_ACTION: &str = "BuildAction";
 pub const TYPE_BUILD_TARGET: &str = "BuildTarget";

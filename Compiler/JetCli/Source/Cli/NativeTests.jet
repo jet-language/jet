@@ -88,7 +88,6 @@ fn jet_cli_native_test_harness(program: MIRProgram) -> MIRHarnessPlan Err! {
     selected := MIRHarnessPlan?{None}
     loop artifact in program.artifacts {
         if artifact.kind != .TestExecutable && artifact.kind != .TestOverride -> next
-        if artifact.kind == .TestOverride -> return Err("native custom Test overrides are not implemented in Jet")
         id :: artifact.harness ?? return Err("native test artifact has no checked harness identity")
         found := false
         loop harness in program.harnesses {

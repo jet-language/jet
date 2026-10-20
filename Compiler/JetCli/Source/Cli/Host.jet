@@ -749,7 +749,7 @@ fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagno
 // `jet run <file>`: build it as `jet build` does, then run it. Problems with
 // an error stop the run, and so does the application authority check;
 // `run` hides advisory lints unless `--verbose`.
-fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, dev: Bool) -> JetDriverVerbOutput {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_cli_errors(result.diagnostics)
     if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
@@ -762,7 +762,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     built :: jet_cli_build_binary(file, "run", color, release, &result, snapshot)
     if built == {
         .Failed(failure) -> output = ^failure
-        .Binary(binary) -> output = jet_cli_exec(binary, program_args, color)
+        .Binary(binary) -> output = if dev -> JetDriverVerbOutput{stdout: binary, stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_exec(binary, program_args, color)
     }
     output
 }
@@ -774,7 +774,7 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     // The snapshot is copied out before `compiled` is borrowed exclusively below.
     authorized :: jet_cli_compiled_snapshot(compiled)
     if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot")))
+    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"), false))
     // Unreached, as in jet_cli_compile_build.
     output
 }
@@ -1748,7 +1748,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -1773,9 +1773,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             jet_cli_write_notice(notice)
             output = jet_cli_compile_sandbox(file, source, color, quiet, threads)
         }
-        .Run(file, source, color, release, verbose, threads, program_args, invocation, notice) -> {
+        .Run(file, source, color, release, verbose, threads, program_args, invocation, notice, watch) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation, trace_sink)
+            output = if watch -> jet_cli_dev_loop(file, color, release, verbose, threads, program_args, invocation, trace_sink) else -> jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation, trace_sink)
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
@@ -1818,4 +1818,56 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .CompilerService(op) -> output = jet_cli_compiler_service(op)
     }
     output
+}
+
+// Stock `jet dev`: build and run the program; when any source of its package
+// changes, stop it, rebuild and run it again. A build with errors prints them and
+// waits for the next change. Ends only when the user stops it.
+fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -[FS, Env, Exec, Net, Time, Time.Wait, IO]> JetDriverVerbOutput {
+    root :: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
+    loop {
+        stamp :: jet_cli_dev_stamp(root)
+        child := ProcessChild?{None}
+        source :: cli_files.read(file) ?? ""
+        compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
+        authorized :: jet_cli_compiled_snapshot(compiled)
+        if &compiled == .Compiled(result, _) {
+            built :: jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its snapshot"), true)
+            if built.exit_code == JET_DRIVER_EXIT_OK && built.stdout != "" {
+                argv := [String]{built.stdout}
+                loop argument in program_args -> &argv.push(argument)
+                if cli_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == {
+                    .Ok(spawned) -> child = Val(spawned)
+                    .Err(error) -> cli_term.eprint(jet_cli_report("E2105", "couldn't run the built program: {error}", jet_cli_why("E2105"), "correct the named problem; jet dev reruns on the next change", color))
+                }
+            } else {
+                cli_term.eprint(built.stderr)
+            }
+        } else if compiled == .Refused(refusal) {
+            cli_term.eprint(refusal.stderr)
+        }
+        cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)\n")
+        loop jet_cli_dev_stamp(root) == stamp -> cli_time.sleep(200ms)
+        if child == .Val(running) {
+            running.kill().drop("the program may already have exited")
+            running.wait().drop("the stopped program's status is not reported")
+        }
+        cli_term.eprint("jet dev: change detected, rebuilding\n")
+    }
+}
+
+// The latest modification time of any .jet source under `root`, plus the file count
+// so that an added or removed file also counts as a change.
+fn jet_cli_dev_stamp(root: String) -[FS]> String Never! {
+    entries :: cli_files.walk(root, None) ?? return ""
+    latest := ""
+    count := 0
+    loop entry in entries {
+        if entry.is_dir || !entry.path.ends_with(".jet") || entry.relative.starts_with(".jet/") -> next
+        count += 1
+        info :: cli_files.stat(entry.path) ?? next
+        modified :: "{info.modified}"
+        if modified > latest -> latest = modified
+    }
+    "{count}:{latest}"
 }

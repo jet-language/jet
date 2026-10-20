@@ -498,9 +498,7 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
     loop row in rows { if row.fact.selected -> selected = true }
     if (intent == SemaOutputIntent.Run || intent == SemaOutputIntent.Check) && legacy != None && !selected {
         function :: graph.modules[entry_index].functions[legacy ?? 0]
-        app := false
-        if function.declaration.return_type == .Val(ty) { if ty == .Named(name) -> app = name == "App" }
-        if !app -> _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.symbol.span, "change `fn run` to take zero or one typed CLI parameter and return `()` or `() ?`", &diagnostics)
+        _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.symbol.span, "change `fn run` to take zero or one typed CLI parameter and return `()` or `() ?`", &diagnostics)
     }
     // Drain owned rows from the back, avoiding an indexed move or whole-row
     // clone. Publication writes commute; reverse the reference drain once to

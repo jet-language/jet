@@ -2722,7 +2722,7 @@ impl TraitRegistry {
             "Solver",
             "Stat",
             "Stopwatch",
-            "TestSuite",
+            "Test",
             "TcpListener",
             "TcpStream",
             "TempDir",

@@ -547,7 +547,7 @@ pub fn builtin_method_return(
             }
             _ => None,
         },
-        Type::Named(n) if n == "TestSuite" => {
+        Type::Named(n) if n == "Test" => {
             (method == "run" && arg_count == 0).then_some(Some(Type::Int))
         }
         Type::Named(n) if n == Syntax::TYPE_RANGE => match (method, arg_count) {

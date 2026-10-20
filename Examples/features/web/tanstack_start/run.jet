@@ -225,13 +225,13 @@ fn check_carrier(value: String) {
     if value == "" -> return Err("carrier required")
 }
 
-fn run() -> App {
+fn run() {
     // Existing web.app is the shipped derived render surface.  The suite state
     // above remains headless, so browser, native, and devtools hosts consume
     // one projection rather than a JavaScript runtime or fallback renderer.
     // The canonical graph receipt is `jet explain --web-graph`; it reads this
     // app builder graph rather than a second route description.
-    return web.app()
+    web.app()
         .ssr()
         .route("/", home)
         .route("/orders", orders_page)
@@ -245,4 +245,5 @@ fn run() -> App {
         .form("ship-order-progressive", submit_ship_order)
         .assets("public")
         .hydration_dev()
+        .serve()
 }

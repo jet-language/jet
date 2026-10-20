@@ -615,7 +615,7 @@ const TYPE_CONTAINER = {
   Condition: "core.sync",
   WrappedVaultKey: "core.crypto.vault",
   KeyUnlock: "core.crypto.vault",
-  TestSuite: "core.testing",
+  Test: "core.testing",
   Bytes: "Bytes",
   Queue: "Queue",
   Set: "Set",
@@ -3868,7 +3868,7 @@ function discoverTables(sources) {
     if (lhs === "_" || rhs === "None") continue;
     if (
       rhs.includes("match (method")
-      || lhs.includes('"TestSuite"')
+      || lhs.includes('"Test"')
     ) {
       inlineArms.push({ lhs: lhs, rhs: arm.rhs });
       continue;

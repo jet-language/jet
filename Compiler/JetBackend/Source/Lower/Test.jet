@@ -275,6 +275,7 @@ fn lower_test_main(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFuncti
     lower_test_report(p, &m, &f, report_path)
     lower_start(&f, runner, [LIRValueID]{})
     lower_static_fixups(p, &m, &f)
+    lower_test_call_override(p, &m, &f)
     records_path :: lower_test_env(&m, &f, "JET_NATIVE_TEST_RECORDS_PATH")
     present :: lower_test_present(&f, records_path)
     admitted :: lower_new_block(&f)
@@ -358,4 +359,40 @@ fn lower_test_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunc
     lower_fail(&m, &f, "native test helper {glue.helper} has no generator")
     lower_seal(&f, LIRTerminator.Unreachable)
     lir_builder_finish(f.builder)
+}
+
+// The package's `fn test(t: Test)`, when it has one: the project's test entry,
+// called with the suite before the stock harness runs the discovered tests.
+fn lower_test_override(p: MIRProgram) -> MIRFunctionID? Never! {
+    loop function in p.functions {
+        if function.name != "test" || function.params.len() != 1 || function.module_name.starts_with("core") -> next
+        if function.params[0].ty.kind == .Apply(name, _) && name.name == "Test" -> return Val(function.id)
+    }
+    None
+}
+
+fn lower_test_call_override(p: MIRProgram, m: &LowerModule, f: &LowerFunction) Never! {
+    override :: lower_test_override(p) ?? return
+    row :: lower_function_index(m, override)
+    if row < 0 {
+        lower_fail(&m, &f, "the package test entry was not lowered")
+        return
+    }
+    source :: p.functions[row]
+    suite :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_test_suite_new", [LIRValueID]{}, Val(suite))
+    signature :: m.mir_signatures[row].copy()
+    return_layout :: m.signatures[signature.value].result.copy()
+    args := [LIRValueID]{}
+    result := LIRValueID?{None}
+    if m.mir_results[row] > 0 {
+        storage :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, source.return_type), true), source.return_type.identity)
+        lower_emit(&f, LIRInst.StackSlot{dst: storage, size: m.mir_results[row], align: 8})
+        &args.push(storage)
+    } else if return_layout == .Val(layout) {
+        result = Val(lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, source.return_type), true), source.return_type.identity))
+    }
+    &args.push(suite)
+    lower_emit(&f, LIRInst.Call{dst: result, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: row}}, args: args})
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_jet_test_suite", [LIRValueID]{suite}, None)
 }

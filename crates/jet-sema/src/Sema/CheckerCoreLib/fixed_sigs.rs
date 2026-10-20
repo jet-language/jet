@@ -1502,7 +1502,7 @@ fn core_fixed_sig_raw(
             (read, Type::IntN { signed: false, bits: 64 }),
             (read, Type::IntN { signed: false, bits: 64 }),
         ], Some(Type::String))),
-        ("core.testing", "__suite_snapshot") => Some((vec![], Some(Type::Named("TestSuite".into())))),
+        ("core.testing", "__suite_snapshot") => Some((vec![], Some(Type::Named("Test".into())))),
         ("core.sys", "__env_value") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))))),
         ("core.sys", "__env_set") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), Type::Named("EnvError".into()))))),
         ("core.sys", "__env_remove") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::Named("EnvError".into()))))),
