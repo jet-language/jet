@@ -280,7 +280,7 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
         .MissingRecord(field) -> pkg_e1206("`{field}:` needs a record value")
         .MalformedField(value) -> pkg_e1206("malformed field `{value}`")
         .UnknownOutputKind(kind) -> pkg_e1206("unknown Output kind `{kind}`")
-        .RetiredRecordHead -> pkg_e1206("record literals use `{{ … }}`; remove the retired dot before `{{` (D-LIT-DOT1)")
+        .RetiredRecordHead -> pkg_e1206("record literals use `{{ … }}`; remove the dot before `{{`")
         .InvalidValue(field, value) -> {
             if field == "runtime" -> return pkg_e1206("`runtime` must be `core`, `alloc`, or `hosted`, not `{value}`")
             pkg_e1206("invalid value for `{field}`: `{value}`")
@@ -301,20 +301,20 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
         .ReservedSection(section) -> pkg_e1209(path, section)
         .BadEffectsBlock(detail) -> pkg_e1221(detail)
         .RetiredAuthorityField(field, replacement) -> diagnostic_from_registry("E1206", None,
-            "`{field}` is retired",
+            "`{field}` is not a field",
             "`{field}` moved into `{replacement}` in the one `authority:` block.",
             "write `{replacement}` inside `authority: {{ … }}`")
         .BadMemoryPolicy(detail) -> {
-            if detail.contains("retired memory floor") || detail.contains("memory floors belong in `authority.holds.deny`") {
+            if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.holds.deny`") {
                 return diagnostic_from_registry("E1206", None,
-                    "`{PACKAGE_FILE}` uses a retired memory floor",
+                    "`{PACKAGE_FILE}` names an unknown memory floor",
                     "{detail}; memory floors belong in `authority.holds.deny`.",
                     "write the denial in `authority.holds.deny` inside `authority: {{ holds: {{ deny: […] }} }}`")
             }
             pkg_e1206("memory policy is malformed: {detail}")
         }
         .RetiredPolicyField(field, replacement) -> diagnostic_from_registry("E1206", None,
-            "`{field}` is retired",
+            "`{field}` is not a field",
             "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning.",
             "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive")
         .BadGuaranteePolicy(detail) -> pkg_e1206("package guarantee policy is malformed: {detail}")
@@ -330,8 +330,8 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
 fn pkg_e1206_unknown_field(field: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1206", None,
         "unknown field `{field}:` in `{PACKAGE_FILE}`",
-        "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper.",
-        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see Docs/spec/syntax-decisions.md D-CONF-NAME1")
+        "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level — there is no `identity:` or `payload:` wrapper.",
+        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`")
 }
 
 // E1221: a malformed `authority:` block.

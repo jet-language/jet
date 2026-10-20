@@ -269,7 +269,7 @@ fn provider_infer_remote_kind(upstream: String, offline: Bool, cache_dir: String
     remote :: RemoteSource.parse(upstream) ?? return ProviderKind.Nix
     cache :: provider_source_cache_dir(cache_dir, remote)
     if files.is_dir(cache) {
-        return provider_pack_kind(files.is_file(files.join(cache, PACKAGE_FILE)) || files.is_file(files.join(cache, PAYLOAD_FILE)))
+        return provider_pack_kind(files.is_file(files.join(cache, PACKAGE_FILE)))
     }
     exact :: if remote.rev == {
         .Val(rev) -> rev.bytes().len() == 40 && provider_is_ascii_hex(rev)
@@ -333,7 +333,7 @@ fn provider_peek_pack_markers(tmp: String, remote: RemoteSource) -[Env, Exec, Ti
     set_up :: provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})
     fetched :: set_up && provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=tree:0", "origin", rev})
     if !fetched -> return false
-    listing :: provider_git_output_in(tmp, [String]{"ls-tree", "FETCH_HEAD", PACKAGE_FILE, PAYLOAD_FILE}) ?? return false
+    listing :: provider_git_output_in(tmp, [String]{"ls-tree", "FETCH_HEAD", PACKAGE_FILE}) ?? return false
     listing != ""
 }
 

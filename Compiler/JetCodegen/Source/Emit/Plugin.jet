@@ -873,7 +873,7 @@ fn jet_plugin_host_import_bridge(root: String, imports: [String]) -> String Neve
     read_text :: jet_plugin_generated("read_component_text")
     read_io_error :: jet_plugin_generated("read_io_error")
     free_io_error :: jet_plugin_generated("free_io_error")
-    lines := [String]{"// D-PLUGIN1=B: declared host imports use the standard32 canonical ABI.", "#[link(wasm_import_module = \"cm32p2\")]", "extern \"C\" {{"}
+    lines := [String]{"// declared host imports use the standard32 canonical ABI.", "#[link(wasm_import_module = \"cm32p2\")]", "extern \"C\" {{"}
     loop import in imports {
         if import == {
             "FS.Read" -> {
@@ -1033,7 +1033,7 @@ fn jet_rust_emit_plugin(program: MIRProgram, config: JetRustEmitConfig, artifact
     }
     if ctx.failure == .Val(failure) -> return JetPluginEmitResult.Incomplete{failure: failure}
     wit :: "package jet:{package_name}@0.1.0;\n\n{wit_definitions.join("\n")}\nworld {JET_PLUGIN_WORLD_NAME} {{\n{wit_lines.join("\n")}\n}}\n"
-    parts := [String]{whole_program_rust, jet_plugin_time_zones(timezone_data), "\n// D-PLUGIN-EXPORT1=A: generated sandbox export wrappers (JetCodegen Emit/Plugin.jet).", jet_plugin_text_helpers()}
+    parts := [String]{whole_program_rust, jet_plugin_time_zones(timezone_data), "\n// generated sandbox export wrappers (JetCodegen Emit/Plugin.jet).", jet_plugin_text_helpers()}
     if host_imports.contains("FS.Read") || host_imports.contains("FS.Write") -> &parts.push(jet_plugin_io_error_helpers(ctx.config.root_prefix))
     &parts.push(jet_plugin_host_import_bridge(ctx.config.root_prefix, host_imports))
     &parts.push(wrappers.join(""))

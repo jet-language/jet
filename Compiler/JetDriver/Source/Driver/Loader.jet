@@ -33,7 +33,6 @@ use jet_foundation.[
     core_bare_source_module,
     core_module_export,
     core_module_has_member,
-    core_module_retirement,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
     mir_boundary_head_carrier_module,
@@ -984,27 +983,15 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     root := snapshot.roots[root_index]
     entry_root :: jet_driver_entry_root_path(snapshot)
     manifest_file_index := Int?{None}
-    retired_manifest := false
-    retired_manifest_path := ""
     loop file_index in 0..<root.files.len() {
         relative := root.files[file_index].relative_path
         if relative == "package.jet" -> manifest_file_index = Val(file_index)
-        if relative == "jet.toml" {
-            retired_manifest = true
-            retired_manifest_path = jet_driver_display_path(entry_root, root.files[file_index].path)
-        }
     }
     inline_carrier :: jet_driver_root_inline_carrier(snapshot, root_index, manifest_file_index != None, &diagnostics)
-    if manifest_file_index == None && retired_manifest {
-        &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains a retired package manifest", "package identity is read only from the canonical package.jet manifest", "replace the retired manifest with package.jet"))
-    }
     if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
         return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
-    }
-    if manifest_file_index != None && retired_manifest {
-        &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
     }
     // An inline Package feeds its body, at its original offsets, to the same
     // field parser as `package.jet`; its carrier file is the manifest path.
@@ -2458,14 +2445,6 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
         return false
     }
     if declaration.kind == .Module(name, span) {
-        // E0341: the old `jet.<ring>` spelling teaches `core.<ring>`.
-        if name.starts_with("jet.") {
-            ring :: name.slice(4, name.len())
-            if jet_driver_is_ring_module(ring) {
-                &diagnostics.push(jet_driver_diagnostic("E0341", span, "`use jet.{ring}` is the old first-party library spelling", "first-party libraries moved to the `core.*` namespace (D-CORENS1)", "write `use {jet_driver_canonical_ring_module(ring)}` instead"))
-                return false
-            }
-        }
         root :: name.split(".").to_list()[0]
         if JET_DRIVER_FIRST_PARTY_RESERVED.contains(root) {
             &diagnostics.push(jet_driver_diagnostic("E1002", span, "`{root}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "choose a different module name"))
@@ -3500,15 +3479,10 @@ fn jet_driver_core_unit(
     Val(jet_driver_add_core_unit(&source_units, &queued, &generated, module_name, "{module_name}.jet", -1, ""))
 }
 
-// E1001 for a `core.*` path that names no Core module. Rust
-// `retired_core_module_diagnostic`: a removed namespace names its canonical
-// home instead of the module list, and the Core-private `core.<area>.runtime`
-// namespace names its public module. A selective `use core.x.[..]` is checked
+// E1001 for a `core.*` path that names no Core module. The Core-private
+// `core.<area>.runtime` namespace names its public module. A selective `use core.x.[..]` is checked
 // by Rust's checker, whose fix reads "import one of" (`fix_verb`).
 fn jet_driver_unknown_core_module(module_name: String, span: Span, fix_verb: String) -> Diagnostic {
-    if core_module_retirement(module_name) == .Val(retired) {
-        return jet_driver_diagnostic("E1001", span, "core module `{module_name}` was retired", "{retired.decision} removed this free namespace; the canonical home is {retired.canonical}", "use one of: {retired.canonical}")
-    }
     if jet_driver_core_private_unit(module_name, span) == .Val(private) -> return private
     names :: loop row in CORE_MODULE_EXPORTS -> row.module_name
     jet_driver_diagnostic("E1001", span, "there is no core module `{module_name}`", "`core` is compiler-known in M10, and only the frozen core modules exist", "{fix_verb} one of: {names.join(", ")}")

@@ -80,7 +80,7 @@ fn store_cache_parse_endpoint(endpoint: String) -> CacheEndpoint StoreError! {
         return Ok(CacheEndpoint.S3(store_cache_trim_trailing_slashes(endpoint)))
     }
     if endpoint.starts_with("daemon://") || endpoint.starts_with("nix://") {
-        return Err(StoreError.InvalidData("Nix store endpoints are retired; use Jetpack's native cache protocol"))
+        return Err(StoreError.InvalidData("Nix store endpoints are not supported; use Jetpack's native cache protocol"))
     }
     Ok(CacheEndpoint.Local(store_cache_absolute_endpoint_path(endpoint, "cache mirror")))
 }

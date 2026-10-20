@@ -525,12 +525,6 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     resolved_name := type_name
-    // (Rust expr.rs `data_renamed_to_dyn`): the retired
-    // `Data.Variant` spelling points at `Dyn` and checks as the Dyn case.
-    if resolved_name == "Data" && sema_expression_type_symbol(&scopes, environment, program, resolved_name) == None {
-        &diagnostics.push(sema_data_renamed_to_dyn(Span{start: span.start, end: span.start + resolved_name.len()}))
-        resolved_name = "Dyn"
-    }
     if resolved_name == "" {
         expected_ty :: expected ?? {
             &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
@@ -630,7 +624,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             loop candidate in enum_def.variants {
                 if candidate.name.starts_with("{variant}.") -> &leaves.push("`{resolved_name}.{candidate.name}`")
             }
-            &diagnostics.push(sema_error("E0332", variant_span ?? span, "`{variant}` is a group, not a value", "a group names its whole subtree in patterns; an actual value is always a leaf variant (D-TAG1)", "pick a leaf: {leaves.join(", ")}"))
+            &diagnostics.push(sema_error("E0332", variant_span ?? span, "`{variant}` is a group, not a value", "a group names its whole subtree in patterns; an actual value is always a leaf variant", "pick a leaf: {leaves.join(", ")}"))
             return None
         }
         variant_names :: loop candidate in enum_def.variants -> candidate.name

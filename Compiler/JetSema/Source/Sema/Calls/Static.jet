@@ -655,7 +655,7 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
 // `new_random`; the retired `generate` spelling is E1004.
 fn sema_call_retired_entropy_constructor(owner: String, method: String, span: Span) -> Diagnostic? Never! {
     if method != "generate" || (owner != "SigningKey" && owner != "X25519SecretKey") -> return None
-    Val(sema_error("E1004", span, "`{owner}.generate` was retired", "constructors that draw entropy use `new_random` (D-SHAPE-CTORVERB1)", "use `{owner}.new_random()`"))
+    Val(sema_error("E1004", span, "`{owner}` has no `generate`", "constructors that draw entropy use `new_random`", "use `{owner}.new_random()`"))
 }
 
 // The ambient Perf type is an alternate spelling of the checked core.perf

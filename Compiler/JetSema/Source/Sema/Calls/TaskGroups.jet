@@ -806,7 +806,7 @@ fn sema_taskgroup_check_group_method(receiver: Expr, receiver_ty: Type, method: 
         sema_taskgroup_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    message := if method == "select" -> "`Group.select()` is retired" else -> "`Group` has no method `{method}`"
+    message := if method == "select" -> "`Group` has no method `select`" else -> "`Group` has no method `{method}`"
     why := if method == "select" -> "readiness waits are subjectless `if` tables on plain endpoints" else -> "task groups use the `task` surface; Group values do not own readiness waits"
     fix := if method == "select" -> "write a subjectless readiness table" else -> "write `task work()`, `task.all(…)`, or a subjectless readiness table"
     &diagnostics.push(sema_error("E0102", span, message, why, fix))

@@ -465,9 +465,9 @@ fn apply_project_add_target(ctx: ProjectContext, request: String, touched: [Touc
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:989
 fn project_manifest_rel(ctx: ProjectContext, request: String) -> String Err! {
     relative :: json_string_field(request, "manifest").unwrap_or_else(() -> {
-        if ctx.manifest_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PAYLOAD_FILE))
+        if ctx.manifest_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
         if ctx.ecosystem_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
-        Syntax.PAYLOAD_FILE.to_string()
+        Syntax.PACKAGE_FILE.to_string()
     })
     clean_project_rel_path(relative)
 }
@@ -520,10 +520,8 @@ fn apply_project_add_workspace_member(ctx: ProjectContext, request: String, touc
     member_dir :: ctx.project_root.join(member_path)
     validate_project_path(ctx.project_root, member_dir, member_path)?
     package_path :: member_dir.join(Syntax.PACKAGE_FILE)
-    payload_path :: member_dir.join(Syntax.PAYLOAD_FILE)
     validate_project_path(ctx.project_root, package_path, "{member_path}/{Syntax.PACKAGE_FILE}")?
-    validate_project_path(ctx.project_root, payload_path, "{member_path}/{Syntax.PAYLOAD_FILE}")?
-    if !package_path.is_file() && !payload_path.is_file() -> return .Err(project_edit_error("not_found", "workspace member must contain package.jet or pkg.jet"))
+    if !package_path.is_file() -> return .Err(project_edit_error("not_found", "workspace member must contain package.jet"))
     workspace_path :: ctx.project_root.join(workspace_rel)
     validate_project_path(ctx.project_root, workspace_path, workspace_rel)?
     before :: read_source_without_symlinks(workspace_path).unwrap_or_default()
@@ -838,7 +836,7 @@ fn normalize_and_format_project_changes(ctx: &ProjectContext, changes: &[Project
 fn normalize_and_validate_project_changes_inner(ctx: &ProjectContext, changes: &[ProjectChange], check_source: Bool) Err! {
     loop change in changes {
         if change.before == change.after -> next
-        if is_canonical_package_file(change.rel) || change.rel.ends_with("/{Syntax.PAYLOAD_FILE}") || change.rel == Syntax.PAYLOAD_FILE {
+        if is_canonical_package_file(change.rel) {
             Package.PackageFacts.parse(change.after, change.rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
         } else if change.rel.ends_with("/{Syntax.WORKSPACE_FILE}") || change.rel == Syntax.WORKSPACE_FILE {
             WorkspaceFile.evaluate(change.after, ctx.project_root).map_err((d) -> project_edit_error("diagnostic", d.what))?
@@ -951,7 +949,7 @@ fn rollback_project_writes(written: [ProjectWriteBackup]) {
 struct ProjectWriteBackup { path: OSPath, before: String, after: String, existed: Bool }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2084
 fn project_file_kind_for_rel(rel: String) -> String {
-    if is_canonical_package_file(rel) { "package" } else if rel.ends_with("/{Syntax.PAYLOAD_FILE}") || rel == Syntax.PAYLOAD_FILE { "manifest" } else if rel.ends_with("/{Syntax.WORKSPACE_FILE}") || rel == Syntax.WORKSPACE_FILE { "workspace" } else if rel.ends_with("/{Syntax.ENV_FILE}") || rel == Syntax.ENV_FILE { "env" } else if rel == Syntax.UNIFIED_LOCK_FILE { "lock" } else { "source" }
+    if is_canonical_package_file(rel) { "package" } else if rel.ends_with("/{Syntax.WORKSPACE_FILE}") || rel == Syntax.WORKSPACE_FILE { "workspace" } else if rel.ends_with("/{Syntax.ENV_FILE}") || rel == Syntax.ENV_FILE { "env" } else if rel == Syntax.UNIFIED_LOCK_FILE { "lock" } else { "source" }
 }
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2106
 fn diagnostic_json(d: Diagnostic) -> String {

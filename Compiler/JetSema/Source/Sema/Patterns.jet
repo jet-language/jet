@@ -1201,7 +1201,7 @@ fn sema_pattern_source_text(pattern: Pattern) -> String? {
 }
 
 fn sema_pattern_retired_outcome_diagnostic(span: Span, state: Pattern, subject_ty: Type) -> Diagnostic {
-    why :: "a `T? E!` value has three states, matched as `.Val(x)`, `.None` and `.Err(e)`; the nested `.Ok(…)` layer is retired (D-OUTCOME-SHAPE1=A)"
+    why :: "a `T? E!` value has three states, matched as `.Val(x)`, `.None` and `.Err(e)`"
     if sema_pattern_source_text(state) == .Val(text) {
         diagnostic :: sema_error("E0392", span, "`.Ok({text})` wraps a state that `{type_name(subject_ty)}` names directly", why, "write `{text}`")
         return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: text})

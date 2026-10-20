@@ -187,11 +187,8 @@ fn trust_pin_move(root: String, channel_arg: String?, running_version: String) -
 }
 
 // `jet init`: write a `package.jet` pinned to the running toolchain's
-// channel. Never clobbers a manifest or writes beside a migration-era one.
+// channel. Never clobbers a manifest.
 fn trust_pin_write_init(dir: String, name: String, running_version: String) -[FS]> String TrustError! {
-    if files.is_file(files.join(dir, PAYLOAD_FILE)) {
-        return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{PAYLOAD_FILE}` already exists here", "`jet init` will not create a second manifest root beside migration-era input.", "migrate or remove `{PAYLOAD_FILE}` before running `jet init`")))
-    }
     path :: files.join(dir, PACKAGE_FILE)
     if files.exists(path) {
         return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{PACKAGE_FILE}` already exists here", "`jet init` writes a fresh package manifest; overwriting one would discard its dependencies, pins, and identity.", "edit the existing manifest, or run `jet init` in an empty directory.")))

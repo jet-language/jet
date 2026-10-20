@@ -461,7 +461,7 @@ fn parser_report_module_member(state: &JetParserState) {
     token :: parser_current(&state)
     if token.kind == TOKEN_AT {
         parser_bump(&state)
-        parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
+        parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator", "replace the leading `@` with `#`")
         return
     }
     found :: parser_describe_token(state, token)
@@ -1022,6 +1022,7 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        entry_start :: state.position
         host :: parser_module_dashed_name(&state, "for a host name")
         parser_expect(&state, TOKEN_COLON, "after a host name")
         system :: parser_expect_name(&state, "for `system` in a host entry")
@@ -1030,12 +1031,6 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         target :: parser_module_dashed_name(&state, "for a host system name")
         overrides := Span?{None}
         end := target.span
-        // `system.web.{ … }` is not Jet; report E0320 and still
-        // capture the override so one pass reports every error.
-        if parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-            dot :: parser_bump(&state)
-            parser_add_error_code(&state, "E0320", dot.span, "host overrides use `system.{target.name}{{…}}`, not `system.{target.name}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `system.{target.name}{{…}}`")
-        }
         if parser_current_kind(&state) == TOKEN_LBRACE {
             open :: parser_bump(&state)
             depth := 1
@@ -1056,6 +1051,9 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         }
         &entries.push(HostEntry{name: host.name, name_span: host.span, system: target.name, system_span: parser_cover(system.span, target.span), overrides: overrides, span: parser_cover(host.span, end)})
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+        // An entry that consumed nothing has already reported its error; step past the
+        // token so the next entry parses and the map always terminates.
+        if state.position == entry_start -> parser_bump(&state)
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` after hosts")
     entries

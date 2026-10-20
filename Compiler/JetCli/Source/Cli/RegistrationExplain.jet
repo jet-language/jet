@@ -17,7 +17,7 @@ fn jet_cli_registration_fact_explanation(index: Int) -> DiagnosticExplanation Ne
     what :: if row.published_by == .Val(prover) -> "the {prover} prover publishes this row; it is read-only and carries no plane algebra." else -> "attaches to {target}."
     why :: if row.safe_direction == "none" -> "this row holds no fact that moves, so it states no safe direction" else -> "facts tighten silently in the `{row.safe_direction}` direction; loosening one is always written"
     fix :: if row.gates.len() == 0 -> "nothing loosens this row; read it and act on what it says" else -> "to loosen it, write one of: {row.gates.join(", ")}"
-    DiagnosticExplanation{code: row.name, stage: "registration table", meaning: "`{row.name}` — a registered {kind} on {target}", what: Val(what), why: Val(why), fix: Val(fix), example: None, retired: false}
+    DiagnosticExplanation{code: row.name, stage: "registration table", meaning: "`{row.name}` — a registered {kind} on {target}", what: Val(what), why: Val(why), fix: Val(fix), example: None}
 }
 
 fn jet_cli_registration_truth_explanation(index: Int) -> DiagnosticExplanation Never! {
@@ -30,7 +30,6 @@ fn jet_cli_registration_truth_explanation(index: Int) -> DiagnosticExplanation N
         why: Val("`{row.guard_test}` in {row.guard_file} proves there is no second copy; it {row.guard_proof}"),
         fix: Val("change the meaning in {row.home}; a second copy anywhere else fails the guard"),
         example: None,
-        retired: false,
     }
 }
 

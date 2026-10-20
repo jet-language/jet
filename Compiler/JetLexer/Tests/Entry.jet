@@ -286,20 +286,6 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
     assert_eq(kinds, [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON})
 }
 
-// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1347
-#Test("retired_fence_digraphs_teach_the_new_spelling_with_edits") {
-    lexed :: lexer_test_raw("print(@[ a, b ]@) x:]@")
-    edits := [String]{}
-    loop diagnostic in lexed.diagnostics {
-        assert_eq(diagnostic.code, "E-FENCE-SPELLING")
-        edit :: diagnostic.edit ?? panic("fence respelling edit")
-        &edits.push(edit.new_text.copy())
-    }
-    assert_eq(edits, [String]{"<:", ":>", " :>"})
-    assert_eq(lexed.tokens[2].kind, TOKEN_FENCE_OPEN)
-    assert_eq(lexed.tokens[6].kind, TOKEN_FENCE_CLOSE)
-}
-
 // Rust: tests/selfhost_terminators.rs:387-438
 #Test("payload_golden_whitespace_exponents_and_shifted_spans") {
     raw := [U8]{9, 11, 12, 13, 10, 32, 32}

@@ -20,7 +20,7 @@ fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String Discove
     matches := [String]{}
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
-        if file_name == PACKAGE_FILE || file_name == PAYLOAD_FILE -> next
+        if file_name == PACKAGE_FILE -> next
         text :: file.text() ?? next
         if pkg_file_declares_module(text, name) {
             if resolver.revalidate_file(file) == .Err(_) -> return Err(DiscoveryError.NotFound{name: name})
@@ -67,7 +67,7 @@ fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError!
     registry := JobRegistry.default()
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
-        if file_name == PACKAGE_FILE || file_name == PAYLOAD_FILE -> next
+        if file_name == PACKAGE_FILE -> next
         text :: if file.text() == {
             .Ok(read) -> read
             .Err(error) -> {

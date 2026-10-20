@@ -363,7 +363,7 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     // itself, so a field read on `T?` is refused with the ways to handle
     // absence rather than unwrapping or returning early.
     if sema_expr_unwrap_tag(base.ty) == .Option(inner) {
-        &diagnostics.push(sema_error("E0310", span, "`.{member}` needs a `{type_name(inner)}`, but this value is `{type_name(base.ty)}` and might be missing", "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it (D-OUTCOME-SHAPE1=A)", "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"))
+        &diagnostics.push(sema_error("E0310", span, "`.{member}` needs a `{type_name(inner)}`, but this value is `{type_name(base.ty)}` and might be missing", "a missing value never leaves the function by itself; it stays an ordinary value until the code handles it", "write `?.{member}` to keep the result optional, add `?? fallback` for a default, or match `.Val(x)` / `.None`"))
         return None
     }
     // A compiler-owned reflection record (`RANGE.start`,
@@ -604,7 +604,7 @@ fn sema_expression_secret_exposure_allowed(ty: Type, member: String, span: Span,
         shown.ends_with("SharedSecret") -> "shared_secret_bytes"
         else -> "secret_bytes"
     }
-    &diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate (D-CRYPTO-API1)", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
+    &diagnostics.push(sema_error("E0510", span, "reading `{shown}.bytes` exposes secret key material", "secret-bearing values cannot be printed, interpolated, or read as raw bytes outside an audited expert gate", "keep the value inside `crypto` operations, or call `expert.{exposure}(value)` inside `#Unsafe(\"reason\") {{ … }}`"))
     return false
     }
     true

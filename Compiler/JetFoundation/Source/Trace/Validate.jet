@@ -121,9 +121,9 @@ fn jettrace_validate_capture_policy(value: CanonicalJSON) -> JetTraceCaptureLimi
     exclusions :: jettrace_array(fields[jettrace_get(fields, "default_exclusions")].value, "capture_policy.default_exclusions")
     expected := [CanonicalJSON]{}
     loop item in DEFAULT_EXCLUSIONS -> &expected.push(.String(item.copy()))
-    if exclusions.len() != expected.len() -> return Err(jettrace_error("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults"))
+    if exclusions.len() != expected.len() -> return Err(jettrace_error("capture_policy.default_exclusions does not match the default exclusions"))
     loop index in 0..<exclusions.len() {
-        if exclusions[index] != expected[index] -> return Err(jettrace_error("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults"))
+        if exclusions[index] != expected[index] -> return Err(jettrace_error("capture_policy.default_exclusions does not match the default exclusions"))
     }
     if jettrace_unsigned(fields[jettrace_get(fields, "io_row_limit")].value, "capture_policy.io_row_limit") != TRACE_IO_ROW_LIMIT || jettrace_unsigned(fields[jettrace_get(fields, "task_row_limit")].value, "capture_policy.task_row_limit") != TRACE_TASK_ROW_LIMIT -> return Err(jettrace_error("capture_policy row limits do not match this schema"))
     keys :: [String]{"io_rows_truncated", "task_rows_truncated"}

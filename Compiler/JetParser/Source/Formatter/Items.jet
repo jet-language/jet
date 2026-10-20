@@ -72,10 +72,8 @@ use jet_lexer.[
     TOKEN_DOT,
     TOKEN_EQ,
     TOKEN_GT,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
-    TOKEN_MINUS_MINUS,
     TOKEN_RBRACKET,
     TOKEN_UNIFIED_ARROW,
     Token,
@@ -547,66 +545,6 @@ fn jfmt_has_ambiguous_decode_union(items: [Item], ty: Type) -> Bool {
     }
 }
 
-struct JetFmtSourceEdit {
-    start: Int
-    end: Int
-    replacement: String
-}
-
-// Rewrite retired surface tokens inside a migration while preserving its
-// source layout. Migration AST nodes keep operation spans for sema, not the
-// authored punctuation, so token edits are the narrow formatter seam.
-fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
-    tokens := [Token]{}
-    loop token in f.source_toks {
-        if token.span.start >= span.start && token.span.end <= span.end -> &tokens.push(token)
-    }
-    edits := [JetFmtSourceEdit]{}
-    effect_arrows := [Int]{}
-    loop index in 0..<tokens.len() {
-        kind :: tokens[index].kind
-        effect_open :: (kind == TOKEN_EQ || kind == TOKEN_COLON || kind == TOKEN_MINUS_MINUS) && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LBRACKET
-        if !effect_open -> next
-        close := index + 2
-        loop close < tokens.len() && tokens[close].kind != TOKEN_RBRACKET -> close += 1
-        if close >= tokens.len() -> next
-        if close + 1 < tokens.len() {
-            after :: tokens[close + 1].kind
-            if after == TOKEN_GT || after == TOKEN_UNIFIED_ARROW || after == TOKEN_LAMBDA_ARROW {
-                &edits.push(JetFmtSourceEdit{start: tokens[index].span.start, end: tokens[index].span.end, replacement: "-"})
-                &effect_arrows.push(close + 1)
-            }
-        }
-    }
-    loop index in 0..<tokens.len() {
-        token :: tokens[index]
-        is_effect_arrow := false
-        loop arrow in effect_arrows {
-            if arrow == index -> is_effect_arrow = true
-        }
-        replacement := String?{None}
-        if {
-            token.kind == TOKEN_UNIFIED_ARROW && is_effect_arrow -> replacement = Val(">")
-            token.kind == TOKEN_LAMBDA_ARROW && is_effect_arrow -> replacement = Val(">")
-            token.kind == TOKEN_LAMBDA_ARROW -> replacement = Val("->")
-            else -> {}
-        }
-        if replacement == .Val(text) -> &edits.push(JetFmtSourceEdit{start: token.span.start, end: token.span.end, replacement: text})
-    }
-    // Rust `sort_unstable_by_key(start)`.
-    sorted := edits
-    sorted = loop fresh_item in sorted -> fresh_item
-    &sorted.sort_by((left: JetFmtSourceEdit, right: JetFmtSourceEdit) -> left.start <=> right.start)
-    out := ""
-    cursor := span.start
-    loop edit in sorted {
-        if edit.start < cursor -> next
-        out = "{out}{jfmt_src_text(f, cursor, edit.start)}{edit.replacement}"
-        cursor = edit.end
-    }
-    "{out}{jfmt_src_text(f, cursor, span.end)}"
-}
-
 fn jfmt_fmt_decode_type(f: &JetFmt, ty: Type, span: Span, derives_decode: Bool) {
     if derives_decode && jfmt_has_ambiguous_decode_union(f.items, ty) {
         if jfmt_source_type_spelling(f, span.start) == .Val(source_ty) {
@@ -750,11 +688,9 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
             jfmt_newline(&f)
             jfmt_skip_verbatim_comments(&f, ec.body_span.end)
         }
-        // Preserve migration layout while emitting the canonical
-        // arrow and literal spellings inside the block.
+        // A migration block keeps its authored layout.
         .Migration(m) -> {
-            migration_text :: jfmt_canonical_migration_source(f, m.span)
-            jfmt_write(&f, migration_text)
+            jfmt_write(&f, jfmt_src_text(f, m.span.start, m.span.end))
             jfmt_newline(&f)
             jfmt_skip_verbatim_comments(&f, m.span.end)
         }

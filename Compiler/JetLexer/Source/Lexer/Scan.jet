@@ -754,19 +754,9 @@ fn raw_token_facts_range(source: [U8], config_surface: Bool, from: Int, to: Int,
             i += 1
             next
         }
-        // The retired `]@` close keeps its fence kind; Payload
-        // attaches the E-FENCE-SPELLING teaching diagnostic.
         if value == 93 {
-            if {
-                next1 == 64 -> {
-                    last_code = push_code(&facts, K_FENCE_CLOSE, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(&facts, K_RBRACKET, start, start + 1, false)
-                    i += 1
-                }
-            }
+            last_code = push_code(&facts, K_RBRACKET, start, start + 1, false)
+            i += 1
             next
         }
         // `:>` closes a fence (longest match before `::`/`:=`).
@@ -802,24 +792,14 @@ fn raw_token_facts_range(source: [U8], config_surface: Bool, from: Int, to: Int,
             next
         }
         if value == 64 {
-            // The retired `@[` open keeps its fence kind; Payload
-            // attaches the E-FENCE-SPELLING teaching diagnostic.
-            if next1 == 91 {
-                last_code = push_code(&facts, K_FENCE_OPEN, start, start + 2, false)
-                i += 2
-                next
-            }
             if {
                 is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
                     end :: scan_identifier_end(source, i + 1)
                     marker_kind :: word_kind(source, i + 1, end, 0)
                     if {
                         marker_kind == K_IDENT -> {
-                            // A respelled retired root also takes its legacy
-                            // `()` or `.package` suffix (Payload).
-                            token_end :: retired_fact_end(source, start, end)
-                            last_code = push_code(&facts, K_IDENT, start, token_end, false)
-                            i = token_end
+                            last_code = push_code(&facts, K_IDENT, start, end, false)
+                            i = end
                         }
                         else -> {
                             last_code = push_code(&facts, K_AT, start, start + 1, false)
@@ -898,10 +878,6 @@ fn raw_token_facts_range(source: [U8], config_surface: Bool, from: Int, to: Int,
             if {
                 next1 == 61 -> {
                     last_code = push_code(&facts, K_EQ_EQ, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 62 -> {
-                    last_code = push_code(&facts, K_LAMBDA_ARROW, start, start + 2, false)
                     i += 2
                 }
                 else -> {

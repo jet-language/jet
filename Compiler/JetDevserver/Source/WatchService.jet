@@ -12,7 +12,7 @@ use std.ffi.[CString]
 use std.time.[Duration, Instant, SystemTime]
 use jet_driver.Diagnostics.[Diagnostic]
 use jet_driver.Loader as Loader
-use jet_driver.Syntax.[PACKAGE_FILE, PAYLOAD_FILE]
+use jet_driver.Syntax.[PACKAGE_FILE]
 use jet_foundation.JSON.[foundation_json_escape]
 use jet_foundation.Game.[JetGameChangeKind]
 use jet_foundation.SHA256 as SHA256
@@ -404,7 +404,7 @@ struct WatchGraph {
     // Rust: crates/jet-devserver/src/WatchService.rs:863
     fn classify(path: OSPath) -> RootKind {
         name :: path.file_name().and_then((n) -> n.to_str()).unwrap_or("").to_ascii_lowercase()
-        if name == PACKAGE_FILE || name == PAYLOAD_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return .Manifest
+        if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return .Manifest
         if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") -> return .Lock
         if path.parent() == .Val(parent) {
             if parent.components().any((c) -> c.as_os_str() == "generated" || c.as_os_str() == ".jet-gen") -> return .Generated

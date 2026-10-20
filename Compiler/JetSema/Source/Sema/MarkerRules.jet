@@ -22,7 +22,6 @@ use jet_foundation.[
     TAppliedRuleCompanionSite,
     TAppliedRuleParameter,
     TAppliedRuleSignature,
-    TAppliedRuleStatus,
     TComptimeValue,
     TExpr,
     TGenericParam,
@@ -320,13 +319,6 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     inherits :: sema_marker_rules_bool_fact(declaration, "$inherits") ?? return None
     resolution :: sema_marker_rules_resolution(declaration) ?? return None
     companion :: sema_marker_rules_companion(declaration) ?? return None
-    status := TAppliedRuleStatus.Active
-    retired_value_option := sema_marker_rules_metadata_expr(declaration, "$retired")
-    if retired_value_option != None {
-        retired_value :: retired_value_option ?? return None
-        replacement :: sema_marker_rules_string_value(retired_value) ?? return None
-        status = TAppliedRuleStatus.Retired{replacement: replacement}
-    }
     params := [TAppliedRuleParameter]{}
     variadic := TAppliedRuleArgKind?{None}
     variadic_source_type := String?{None}
@@ -354,7 +346,6 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
         repeatable: repeatable,
         owns_menu: owns_menu,
         companion_site: companion.site,
-        status: status,
         inherits: inherits,
         resolution: resolution,
     })
@@ -1247,17 +1238,10 @@ fn sema_marker_rules_edit_distance(left: String, right: String) -> Int Never! {
     previous[b.len()]
 }
 
-fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker, retired: String?) -> Diagnostic {
-    if retired != None {
-        replacement :: retired
-        fix := if replacement.starts_with("#") || replacement.starts_with(".") -> "write `{replacement}` instead" else -> replacement
-        return sema_error("E0927", marker.name_span, "`#{marker.name}` is retired", "the registry keeps this old spelling only to teach its replacement; it no longer applies a rule", fix)
-    }
+fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic {
     names := [String]{}
     loop rule in registry.applied_rules {
-        if rule.status == .Active {
-            sema_marker_rules_append_name(&names, rule.name)
-        }
+        sema_marker_rules_append_name(&names, rule.name)
     }
     loop name in registry.marker_rules {
         sema_marker_rules_append_name(&names, name.name)
@@ -1408,20 +1392,11 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
             next
         }
         if marker.name == "Align" {
-            &diagnostics.push(diagnostic_from_registry("E1118", Val(marker.span), "`#Align(…)` is not a supported layout marker.", "D-PLACE1=A puts alignment in the registered `#Layout(c, align(N))` rule so the layout kind and alignment remain one declaration fact.", "Replace `#Align(64)` with `#Layout(c, align(64))` on the struct declaration."))
+            &diagnostics.push(diagnostic_from_registry("E1118", Val(marker.span), "`#Align(…)` is not a supported layout marker.", "Jet puts alignment in the registered `#Layout(c, align(N))` rule so the layout kind and alignment remain one declaration fact.", "Replace `#Align(64)` with `#Layout(c, align(64))` on the struct declaration."))
             next
         }
-        applied_index := sema_marker_rules_builtin_index(registry, marker)
-        if {
-            applied_index != None -> {
-                row := registry.applied_rules[applied_index ?? 0]
-                if row.status == .Retired(replacement) {
-                    &diagnostics.push(sema_marker_rules_unknown_error(registry, marker, Val(replacement)))
-                }
-            }
-            !sema_marker_rules_marker_is_known(registry, marker) -> {
-                &diagnostics.push(sema_marker_rules_unknown_error(registry, marker, None))
-            }
+        if sema_marker_rules_builtin_index(registry, marker) == None && !sema_marker_rules_marker_is_known(registry, marker) {
+            &diagnostics.push(sema_marker_rules_unknown_error(registry, marker))
         }
     }
 }
@@ -1464,10 +1439,8 @@ fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, pr
         builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
         if builtin_index != None {
             rule := registry.applied_rules[builtin_index ?? 0]
-            if rule.status == .Active {
-                if !sema_marker_rules_fact_allows(rule, application, applications) {
-                    &diagnostics.push(sema_marker_rules_applied_site_error(application.marker, rule, site))
-                }
+            if !sema_marker_rules_fact_allows(rule, application, applications) {
+                &diagnostics.push(sema_marker_rules_applied_site_error(application.marker, rule, site))
             }
             next
         }
@@ -1487,9 +1460,6 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
         if builtin_index == {
             .Val(index) -> {
                 rule := registry.applied_rules[index]
-                if rule.status == .Retired(_) {
-                    next
-                }
                 repeatable = rule.repeatable
             }
             else -> {
@@ -1528,9 +1498,6 @@ fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry
         builtin_index := sema_marker_rules_builtin_index(registry, marker)
         if builtin_index != None {
             rule := registry.applied_rules[builtin_index ?? 0]
-            if rule.status == .Retired(_) {
-                next
-            }
             expected_types :: (loop _ in rule.signature.params -> Type?{None})
             sema_marker_rules_validate_argument_signature(marker, rule.signature, expected_types, None, false, rule.owns_menu, registry, environment, program, &scopes, &state, &tail_store, &context, values, &result.argument_facts, &result.comptime_sources, &result.comptime_requests, &result.diagnostics)
         }

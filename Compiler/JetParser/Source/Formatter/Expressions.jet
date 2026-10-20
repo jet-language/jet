@@ -35,7 +35,6 @@ use jet_foundation.[
 ]
 use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LINE_COMMENT,
     TOKEN_LPAREN,
@@ -264,7 +263,7 @@ fn jfmt_is_result_handler_source(f: JetFmt, expr: Expr) -> Bool Never! {
 
 fn jfmt_result_handler_branch_start(f: JetFmt, pattern_end: Int) -> Int Never! {
     loop token in f.source_toks {
-        if token.span.start >= pattern_end && (token.kind == TOKEN_UNIFIED_ARROW || token.kind == TOKEN_LAMBDA_ARROW) -> return token.span.end
+        if token.span.start >= pattern_end && (token.kind == TOKEN_UNIFIED_ARROW) -> return token.span.end
     }
     pattern_end
 }

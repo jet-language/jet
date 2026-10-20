@@ -1023,7 +1023,7 @@ fn sema_expr_mismatch_diagnostic(required: Type, offered: Type, span: Span) -> D
     // E2426: a callable promised to return `Never` can't be a
     // value-producing function.
     if required == .Fn(_, required_ret, _, _, _, _) && offered == .Fn(_, offered_ret, _, _, _, _) && sema_expr_never_success(required_ret) && !sema_expr_never_success(offered_ret) {
-        return sema_error("E2426", span, "Function value does not satisfy `fn() Never`.", "`fn() Never` promises the callable never completes, so a returning function has the wrong contract (D-NEVER2=B).", "Pass a function declared `Never`, or change the expected function type.")
+        return sema_error("E2426", span, "Function value does not satisfy `fn() Never`.", "`fn() Never` promises the callable never completes, so a returning function has the wrong contract.", "Pass a function declared `Never`, or change the expected function type.")
     }
     // E0401: `T !E` where plain `T` is needed.
     required_plain :: if required == {
@@ -3120,12 +3120,6 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         }
         return sema_expr_check_method_call(Expr.Ident{name: owner_name, span: receiver_span}, method, method_span, inferred_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    // (Rust method_calls.rs `data_renamed_to_dyn`): the retired
-    // `Data.Variant(...)` spelling points at `Dyn` and checks as the Dyn case.
-    if receiver == .Ident(data_name, data_span) && data_name == "Data" && sema_expression_type_symbol(&scopes, environment, program, data_name) == None {
-        &diagnostics.push(sema_data_renamed_to_dyn(data_span))
-        return sema_call_try_data_literal(Type.Named{name: "Dyn"}, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics).value
-    }
     checked_text := sema_expression_checked_text_static_method_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if checked_text.handled -> return checked_text.value
     explicit_unit := sema_expr_try_explicit_unit_method(receiver, method, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3422,10 +3416,10 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         return sema_expr_expected_owned(sema_tir_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
     }
     if sema_expr_is_integer(value.ty) {
-        &diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
+        &diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
         return None
     }
-    &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
+    &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
     None
 }
 
@@ -3602,7 +3596,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     lhs :: lifted_lhs ?? checked_lhs
     rhs :: lifted_rhs ?? checked_rhs
     if op == BinOp.Pow && ((lhs.ty == Type.Float && rhs.ty == Type.Float32) || (lhs.ty == Type.Float32 && rhs.ty == Type.Float)) {
-        &diagnostics.push(sema_error("E0109", span, "`pow` needs both float operands to have the same width", "D-FLOATW1: mixing float widths is not allowed", "convert the operands to the same float width"))
+        &diagnostics.push(sema_error("E0109", span, "`pow` needs both float operands to have the same width", "mixing float widths is not allowed", "convert the operands to the same float width"))
         return None
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
@@ -4148,11 +4142,6 @@ fn sema_expr_check_method_call_expr(receiver: Expr, method: String, method_span:
     checked
 }
 
-// Rust core_types.rs `data_renamed_to_dyn`.
-fn sema_data_renamed_to_dyn(span: Span) -> Diagnostic {
-    sema_error("E0351", span, "the value tree is named `Dyn`, not `Data`", "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Number`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`", "write `Dyn` instead of `Data`")
-}
-
 fn sema_expr_check_list_literal(elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expanded := sema_expression_list_member_spreads(elements)
     sema_expression_list(Expr.ListLit{elements: expanded, span: span}, expanded, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4192,7 +4181,7 @@ SEMA_MAX_SOURCE_NESTING :: 256
 fn sema_enter_source_nesting(context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     depth :: context.source_nesting + 1
     if depth > SEMA_MAX_SOURCE_NESTING {
-        &diagnostics.push(sema_error("E1403", span, "this code nests {depth} levels deep; the limit is {SEMA_MAX_SOURCE_NESTING}", "each nested source form needs one compiler checking frame, and the parser, sema, and TIR evaluator enforce the same published limit (D-COMPILE-STACK1=A)", "pull inner parts out into named bindings or helper functions"))
+        &diagnostics.push(sema_error("E1403", span, "this code nests {depth} levels deep; the limit is {SEMA_MAX_SOURCE_NESTING}", "each nested source form needs one compiler checking frame, and the parser, sema, and TIR evaluator enforce the same published limit", "pull inner parts out into named bindings or helper functions"))
         return false
     }
     context.source_nesting = depth

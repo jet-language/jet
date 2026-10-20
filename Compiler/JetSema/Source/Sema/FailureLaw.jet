@@ -512,19 +512,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
     if ty == {
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
-            // (Rust type_assign.rs `data_renamed_to_dyn`): the
-            // retired `Data` spelling points at `Dyn`.
-            if name == "Data" {
-                &diagnostics.push(sema_data_renamed_to_dyn(span))
-                return
-            }
-            // (Rust `layout_handle_renamed_to_layout`): the
-            // retired `LayoutHandle` spelling points at `Layout`.
-            if name == "LayoutHandle" {
-                &diagnostics.push(sema_error("E2936", span, "the constraint-layout type is named `Layout`, not `LayoutHandle`", "`Layout` is the solver/container value constructed by `name :: Layout.{{ … }}`", "write `Layout` instead of `LayoutHandle`"))
-                return
-            }
-            if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it (D-NEVER2=B).", "Move `Never` to a function return type, or use `()`/another value type."))
+            if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type."))
             // Compiler-owned IO enum/record rows have no public annotation origin.
             // Reuse the Core-only literal origin gate; user declarations stay E0119.
             unresolved := (name == "IOOperation" || name == "IOContext") && !sema_module_is_core_source(environment.module_identity)
@@ -793,12 +781,12 @@ fn sema_stmt_never_return_rejected(value: Expr?, return_type: Type?, function_na
     }
     if !never_success -> return false
     returned :: value ?? {
-        &diagnostics.push(sema_error("E2424", span, "Function `{function_name}` promises `Never` but uses a bare `return`.", "A declared `Never` return cannot complete with an empty return; every path must diverge (D-NEVER2=B).", "Remove the bare `return`, or make this function return a value type."))
+        &diagnostics.push(sema_error("E2424", span, "Function `{function_name}` promises `Never` but uses a bare `return`.", "A declared `Never` return cannot complete with an empty return; every path must diverge.", "Remove the bare `return`, or make this function return a value type."))
         return true
     }
     is_err := sema_never_return_is_err(returned)
     if allows_failure && is_err -> return false
-    &diagnostics.push(sema_error("E2425", expr_span(returned), "Function `{function_name}` promises `Never` but returns a value.", "A declared `Never` return has no success value (D-NEVER2=B).", "Remove the value and diverge, or change the return type."))
+    &diagnostics.push(sema_error("E2425", expr_span(returned), "Function `{function_name}` promises `Never` but returns a value.", "A declared `Never` return has no success value.", "Remove the value and diverge, or change the return type."))
     true
 }
 
@@ -899,7 +887,7 @@ fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, p
     }
     span := func.return_type_span ?? func.name_span
     if func.body.len() > 0 -> span = sema_compiler_index_stmt_span(func.body[func.body.len() - 1])
-    &diagnostics.push(sema_error("E2423", span, "Function `{func.name}` promises `Never` but can reach the end.", "A declared `Never` return means every path must stop; this path falls through instead (D-NEVER2=B).", "End every path with `panic`, a `Never` call, or another diverging operation, or remove `Never`."))
+    &diagnostics.push(sema_error("E2423", span, "Function `{func.name}` promises `Never` but can reach the end.", "A declared `Never` return means every path must stop; this path falls through instead.", "End every path with `panic`, a `Never` call, or another diverging operation, or remove `Never`."))
     false
 }
 

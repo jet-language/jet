@@ -178,16 +178,11 @@ fn sema_scope_members_registry_add_program(registry: &SemaScopeMembersMarkerRegi
 }
 
 
-fn sema_scope_members_rule_is_active(rule: TAppliedRule) -> Bool Never! {
-    if rule.status == {.Active -> true else -> false}
-}
-
 fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
     seen := [String]{}
     loop rule in catalog.rows {
         if seen.contains(rule.name) -> return false
         &seen.push(rule.name)
-        if !sema_scope_members_rule_is_active(rule) -> next
         sema_scope_members_append_name(&registry.known_marker_names, rule.name)
         loop site in rule.sites {
             if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, rule.name)

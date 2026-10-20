@@ -109,7 +109,6 @@ K_BANG :: 50
 
 K_UNIFIED_ARROW :: 51
 
-K_LAMBDA_ARROW :: 53
 
 K_EQ :: 54
 
@@ -196,8 +195,6 @@ fn ends_statement(kind: Int) -> Bool Never! {
         K_RBRACE -> true
         K_QUESTION -> true
         K_BANG -> true
-        K_PLUS_PLUS -> true
-        K_MINUS_MINUS -> true
         K_GT -> true
         K_SHR -> true
         K_FENCE_CLOSE -> true
@@ -240,7 +237,6 @@ fn suppresses_terminator(kind: Int) -> Bool Never! {
 fn arrow(kind: Int) -> Bool Never! {
     if kind == {
         K_UNIFIED_ARROW -> true
-        K_LAMBDA_ARROW -> true
         else -> false
     }
 }
@@ -447,9 +443,6 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
                         if newline_between(source, end, start) && ends_statement(previous) {
                             split :: if kind == {
                                 K_UNIFIED_ARROW -> true
-                                K_LAMBDA_ARROW -> true
-                                K_EQ -> true
-                                K_MINUS_MINUS -> true
                                 K_LBRACE -> true
                                 else -> false
                             }
@@ -481,15 +474,6 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
 fn split_spelling(kind: Int) -> String Never! {
     if kind == {
         K_UNIFIED_ARROW -> "->"
-        K_LAMBDA_ARROW -> "=>"
-        K_EQ -> {
-            spelling :: "-[…]"
-            "{spelling}>"
-        }
-        K_MINUS_MINUS -> {
-            spelling :: "-[…]"
-            "{spelling}>"
-        }
         K_LBRACE -> "{{"
         else -> ""
     }

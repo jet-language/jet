@@ -62,8 +62,8 @@ fn lsp_fix_test(start: Int, end: Int, replacement: String, applicability: FixApp
     source :: "fn run() {{ a :: \"{{x#Debug}}\"; b :: Deque.new() }}\n"
     actions :: lsp_collect_fixes_from_diagnostics([Diagnostic]{}, source)
     assert(actions.len() >= 2)
-    assert_eq(actions[0].title, "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)")
-    assert_eq(actions[actions.len() - 1].title, "rewrite retired Core container name (D-COLLNAME1=A)")
+    assert_eq(actions[0].title, "rewrite retired interpolation selector with `:`")
+    assert_eq(actions[actions.len() - 1].title, "rewrite retired Core container name")
     loop action in actions {
         assert_eq(action.applicability, FixApplicability.Safe)
         assert_eq(action.safety, FixSafety.Formatting)

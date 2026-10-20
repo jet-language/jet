@@ -504,13 +504,13 @@ fn pkg_jetlib_validate_load_metadata(stamp: JetLibStamp, target: String, loader:
 fn pkg_e1338(artifact_version: String, version: String) -> Diagnostic Never! {
     Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E1338",
         what: "this loadable library was built by Jet `{artifact_version}`, but the loading program uses Jet `{version}`",
-        why: "a `.jetlib` artifact pins the exact compiler identity that built it (D-LIB-REUSE1=B) — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped",
+        why: "a `.jetlib` artifact pins the exact compiler identity that built it — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped",
         fix: "rebuild the library with the loading program's Jet version, or install a matching Jet toolchain"}
 }
 fn pkg_e1339(library: String, effect_name: String) -> Diagnostic Never! {
     Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E1339",
         what: "library `{library}` declares the `{effect_name}` effect, which this load site doesn't grant",
-        why: "a loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped",
+        why: "a loadable Jet library declares its effects like any package; the host states what it grants at the load site, and a library asking for more is refused before it is mapped",
         fix: "widen the grant at the load site to include `{effect_name}`, or remove the effect from the library"}
 }
 // Rust Result<(),Diagnostic/Vec<Diagnostic>> uses the existing result-carrier

@@ -154,19 +154,6 @@ struct AuthorityResolver {
     fn checked_manifest(self, directory: String) -[FS, Env]> CheckedManifest AuthorityError! {
         relative :: self.relative_path(directory)
         canonical :: self.probe_file(pkg_authority_relative_join(relative, PACKAGE_FILE))
-        retired :: self.probe_file(pkg_authority_relative_join(relative, PAYLOAD_FILE))
-        // Match the probes instead of comparing them with `None`: a `!= None`
-        // test narrows each Option into a CheckedFile copy, and a CheckedFile
-        // holds a FileReader, which cannot be copied natively.
-        if retired == {
-            .Val(retired_file) -> {
-                if canonical == {
-                    .Val(_) -> return Err(AuthorityError.AmbiguousManifest(pkg_authority_join(self.root, relative)))
-                    .None -> return Err(AuthorityError.RetiredManifest(retired_file.path))
-                }
-            }
-            .None -> {}
-        }
         file :: canonical ?? return Err(AuthorityError.Missing(files.join(pkg_authority_join(self.root, relative), PACKAGE_FILE)))
         text :: file.text()
         facts :: PackageFacts.parse_uncomposed(text, file.path) ?? return Err(AuthorityError.ManifestParse{path: file.path, error: err})
@@ -326,7 +313,7 @@ struct AuthorityResolver {
                 }
             }
             .Err(error) -> {
-                if !error.is_missing() && !pkg_authority_is_retired_manifest(error) -> return Err(error)
+                if !error.is_missing() -> return Err(error)
             }
         }
         budget := AuthorityWalkBudget.new()
@@ -413,7 +400,7 @@ struct AuthorityResolver {
     // Whether `relative` holds its own project boundary marker. A symlinked
     // marker still identifies a nested project; it is never followed.
     fn has_nested_project_boundary(self, relative: String) -[FS, Env]> Bool AuthorityError! {
-        candidate_values :: [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, UNIFIED_LOCK_FILE}
+        candidate_values :: [String]{PACKAGE_FILE, WORKSPACE_FILE, UNIFIED_LOCK_FILE}
         loop candidate in candidate_values {
             // Match the probe in place: binding it to a local copies the
             // Option<CheckedFile>, and its FileReader cannot be copied natively.
@@ -555,13 +542,6 @@ fn pkg_authority_canonicalize_root(root: String) -[FS, Env]> String AuthorityErr
         return Err(AuthorityError.IO{path: root, operation: "resolve", detail: "{error}"})
     }
     Ok(canonical)
-}
-
-fn pkg_authority_is_retired_manifest(error: AuthorityError) -> Bool Never! {
-    if error == {
-        .RetiredManifest(_) -> true
-        else -> false
-    }
 }
 
 fn pkg_authority_is_symlink(error: AuthorityError) -> Bool Never! {

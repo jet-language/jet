@@ -70,54 +70,20 @@ enum JetpackVerb {
     }
 }
 
-// A retired top-level spelling that now belongs to `jet` or to an option:
-// why it moved and what to run instead.
-struct RetiredSpelling {
-    why: String
-    fix: String
-}
-
-fn cli_retired_shell_spelling(verb: String) -> RetiredSpelling? Never! {
-    if verb == {
-        "dev" -> Val(RetiredSpelling{why: "development commands execute Jet source and belong to `jet`", fix: "use `jet dev`"})
-        "test" -> Val(RetiredSpelling{why: "tests execute Jet source and belong to `jet`", fix: "use `jet test`"})
-        "fmt" -> Val(RetiredSpelling{why: "source formatting belongs to `jet`, not `jetpack`", fix: "use `jet fmt`"})
-        "run" -> Val(RetiredSpelling{why: "running Jet source belongs to `jet`; package shells belong to `use`", fix: "use `jet run` for code, or `jetpack use <package> -- <command>` for a package shell"})
-        "enter" -> Val(RetiredSpelling{why: "the project shell is the `env` verb, which also owns positional module selection", fix: "use `jetpack env [<name>]`"})
-        "build" -> Val(RetiredSpelling{why: "materialization is an option on the shell verbs", fix: "use `jetpack env --prep` or `jetpack use <package> --prep`"})
-        else -> None
-    }
-}
-
-// Store verbs that moved under `hangar`.
-fn cli_retired_hangar_route(verb: String) -> String? Never! {
-    if verb == {
-        "list" -> Val("hangar list")
-        "clean" -> Val("hangar clean")
-        "vendor" -> Val("hangar vendor")
-        "cache" -> Val("hangar cache")
-        "shared-store" -> Val("hangar shared")
-        else -> None
-    }
-}
-
-// The teaching refusal for a retired flag before the argument separator,
-// or None.
-fn cli_retired_flag(before_separator: [String]) -> Diagnostic? Never! {
-    retired_env_prefix :: "{ENV_FLAG_ENV_RETIRED}="
+// The refusal for a flag jetpack does not have, before the argument separator,
+// or None. The argument parser has no unknown-flag check of its own.
+fn cli_unknown_flag(before_separator: [String]) -> Diagnostic? Never! {
+    env_prefix :: "{ENV_FLAG_ENV_UNKNOWN}="
     loop arg in before_separator {
-        // The retired selector teaches `--env`; it is never an alias.
-        if arg == ENV_FLAG_ENV_RETIRED || arg.starts_with(retired_env_prefix) {
-            return Val(diagnostic_from_registry("E1342", None, "`{ENV_FLAG_ENV_RETIRED}` is retired", "the environment selector chooses one `env.<name>` module; `--preset` chooses a named composition", "select the module with `{ENV_FLAG_ENV} <name>`"))
+        if arg == ENV_FLAG_ENV_UNKNOWN || arg.starts_with(env_prefix) {
+            return Val(diagnostic_from_registry("E1342", None, "jetpack has no `{ENV_FLAG_ENV_UNKNOWN}` flag", "the environment selector chooses one `env.<name>` module; `--preset` chooses a named composition", "select the module with `{ENV_FLAG_ENV} <name>`"))
         }
     }
-    // `profile` names the optimize bundle; a named
-    // environment composition is a preset.
-    if before_separator.contains(ENV_FLAG_PROFILE_RETIRED) {
-        return Val(diagnostic_from_registry("E1300", None, "`{ENV_FLAG_PROFILE_RETIRED}` is retired", "profile answers how hard to optimize a build; a named environment composition is a preset", "select the composition with `{ENV_FLAG_PRESET} <name>`, declared under `{ENV_FIELD_PRESETS}:`"))
+    if before_separator.contains(ENV_FLAG_PROFILE_UNKNOWN) {
+        return Val(diagnostic_from_registry("E1300", None, "jetpack has no `{ENV_FLAG_PROFILE_UNKNOWN}` flag", "profile answers how hard to optimize a build; a named environment composition is a preset", "select the composition with `{ENV_FLAG_PRESET} <name>`, declared under `{ENV_FIELD_PRESETS}:`"))
     }
-    if before_separator.contains(ENV_FLAG_PREP_RETIRED) {
-        return Val(diagnostic_from_registry("E1353", None, "`{ENV_FLAG_PREP_RETIRED}` is retired", "Jetpack materialization is an explicit preparation step, not a second command spelling", "use `{ENV_FLAG_PREP}` on `env` or `use`"))
+    if before_separator.contains(ENV_FLAG_PREP_UNKNOWN) {
+        return Val(diagnostic_from_registry("E1353", None, "jetpack has no `{ENV_FLAG_PREP_UNKNOWN}` flag", "Jetpack materialization is an explicit preparation step, not a second command spelling", "use `{ENV_FLAG_PREP}` on `env` or `use`"))
     }
     None
 }
@@ -157,16 +123,8 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
         theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
         return EXIT_USAGE
     }
-    if cli_retired_flag(cli_before_argument_separator(rest)) == .Val(diagnostic) {
+    if cli_unknown_flag(cli_before_argument_separator(rest)) == .Val(diagnostic) {
         theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
-        return EXIT_USAGE
-    }
-    if cli_retired_shell_spelling(verb) == .Val(retired) {
-        theme.error_coded("E1353", "`jetpack {verb}` is retired", retired.why, retired.fix)
-        return EXIT_USAGE
-    }
-    if cli_retired_hangar_route(verb) == .Val(route) {
-        theme.error_coded("E1354", "`{verb}` is retired", "store commands are grouped under `hangar`; project commands stay at the top level", "run `{JETPACK_BINARY_NAME} {route}`")
         return EXIT_USAGE
     }
     read_only :: cli_read_only_command(verb, parsed)

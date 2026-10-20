@@ -263,7 +263,7 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
-            &diagnostics.push(sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)", "use `{member}` from inside its module, or remove `priv` from its module or field"))
+            &diagnostics.push(sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{member}` from inside its module, or remove `priv` from its module or field"))
         } else {
             &diagnostics.push(sema_call_import_member_unknown(member, alias_span))
         }
@@ -306,10 +306,10 @@ fn sema_call_core_module_identity(environment: SemaScopeEnvironment, program: Se
 // Rust `serde_diags::unknown_core_item` (E1004): the one report for a Core
 // module member that does not resolve at this position.
 fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) -> Diagnostic {
-    if module_name == "core.time" && member == "clock" -> return sema_error("E1004", span, "`time.clock` was retired", "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)", "use `Clock.new(seed)`")
-    if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` was retired", "fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)", "use `ExpiringValue.new(value, ttl, clock)`")
-    if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` was retired", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
-    if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` was retired", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
+    if module_name == "core.time" && member == "clock" -> return sema_error("E1004", span, "`time.clock` is not a Core member", "deterministic fresh values use a type-owned `new` constructor", "use `Clock.new(seed)`")
+    if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` is not a Core member", "fresh values use a type-owned `new` constructor", "use `ExpiringValue.new(value, ttl, clock)`")
+    if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` is not a Core member", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
+    if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` is not a Core member", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
     if module_name == "core.crypto" && member.ends_with("_bytes") {
         algorithm :: member.removesuffix("_bytes")
         digest :: if algorithm == {
@@ -317,7 +317,7 @@ fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) 
             "sha512" -> "Digest512"
             else -> ""
         }
-        if digest != "" -> return sema_error("E1004", span, "`crypto.{member}` was retired", "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit", "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes")
+        if digest != "" -> return sema_error("E1004", span, "`crypto.{member}` is not a Core member", "`crypto.{algorithm}` returns `{digest}`, so the representation is explicit", "use `crypto.{algorithm}(bytes).hex()` for text or `.bytes()` for raw bytes")
     }
     items :: if core_module_export(module_name) == {
         .Val(row) -> row.members

@@ -25,20 +25,11 @@ struct ParserSelfHostSnapshot {
             assert(!rendered.contains("`;`"), "{testcase.name}: diagnostic names a synthetic terminator: {rendered}")
         }
         actual :: selfhost_parser_result_facts(parsed)
-        if testcase.name.starts_with("unclosed-") || testcase.name.starts_with("retired-step-") {
+        if testcase.name.starts_with("unclosed-") {
             assert(actual[0] == 1, "{testcase.name}: exactly one teaching diagnostic")
         }
         assert(actual == testcase.expected, "{testcase.name}: generated Jet parser parity; actual={actual:Debug}, expected={testcase.expected:Debug}")
     }
-
-    // #3391 intentionally differs from frozen native parsing: retain one range
-    // argument for sema E0214, never split this retired alias into two bounds.
-    expected := [Int]{0, 1, 1, 0, 2, 19, 0, 0, 7}
-    selfhost_parser_text(&expected, "view")
-    loop fact in ([Int]{1, 0, 14, 18, 0, 0, 0, 1}) -> &expected.push(fact)
-    selfhost_parser_text(&expected, "values")
-    loop fact in ([Int]{2, 8}) -> &expected.push(fact)
-    assert(selfhost_parser_probe("f(values.view(0..1))".bytes()) == expected, "retired view retains one ordinary range argument")
 
     // Render actual Jet parser diagnostics, not frozen CLI reports.
     loop snapshot in parser_selfhost_snapshots() {
@@ -311,86 +302,6 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
             116, 104, 101, 32, 116, 101, 120, 116, 32, 97, 115, 32, 96, 96, 226, 128, 166, 96, 96, 32, 102, 111, 114, 32,
             114, 97, 119, 32, 116, 101, 120, 116, 1, 43, 54, 0, 0, 0, 0, 0, 0,
         }},
-        {name: "retired-step-statement", source: "count++", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 43, 43, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 124, 74, 101, 116, 32, 117, 112, 100, 97, 116, 101, 115, 32,
-            97, 32, 110, 117, 109, 98, 101, 114, 32, 119, 105, 116, 104, 32, 99, 111, 109, 112, 111, 117, 110, 100, 32, 97,
-            115, 115, 105, 103, 110, 109, 101, 110, 116, 32, 111, 110, 108, 121, 59, 32, 97, 110, 32, 117, 112, 100, 97, 116,
-            101, 32, 104, 105, 100, 100, 101, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 101, 120, 112, 114, 101,
-            115, 115, 105, 111, 110, 32, 114, 101, 97, 100, 115, 32, 111, 110, 101, 32, 118, 97, 108, 117, 101, 32, 97, 110,
-            100, 32, 115, 116, 111, 114, 101, 115, 32, 97, 110, 111, 116, 104, 101, 114, 18, 87, 114, 105, 116, 101, 32, 96,
-            99, 111, 117, 110, 116, 32, 43, 61, 32, 49, 96, 1, 0, 7, 1, 0, 7, 10, 99, 111, 117, 110, 116, 32,
-            43, 61, 32, 49, 1, 2, 0, 0, 0,
-        }},
-        {name: "retired-step-double-minus", source: "f(a--b)", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 45, 45, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 90, 74, 101, 116, 32, 114, 101, 116, 105, 114, 101, 100, 32,
-            96, 43, 43, 96, 32, 97, 110, 100, 32, 96, 45, 45, 96, 59, 32, 114, 101, 97, 100, 105, 110, 103, 32, 96,
-            97, 45, 45, 98, 96, 32, 97, 115, 32, 96, 97, 32, 45, 32, 45, 98, 96, 32, 119, 111, 117, 108, 100, 32,
-            104, 105, 100, 101, 32, 97, 32, 115, 105, 103, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 111, 112,
-            101, 114, 97, 116, 111, 114, 61, 87, 114, 105, 116, 101, 32, 96, 97, 32, 45, 32, 45, 98, 96, 32, 119, 105,
-            116, 104, 32, 97, 32, 115, 112, 97, 99, 101, 44, 32, 111, 114, 32, 96, 97, 32, 45, 32, 98, 96, 32, 105,
-            102, 32, 111, 110, 101, 32, 115, 105, 103, 110, 32, 119, 97, 115, 32, 109, 101, 97, 110, 116, 1, 3, 5, 0,
-            0, 0, 0, 0, 0,
-        }},
-        {name: "retired-step-prefix-increment", source: "++count", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 43, 43, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 124, 74, 101, 116, 32, 117, 112, 100, 97, 116, 101, 115, 32,
-            97, 32, 110, 117, 109, 98, 101, 114, 32, 119, 105, 116, 104, 32, 99, 111, 109, 112, 111, 117, 110, 100, 32, 97,
-            115, 115, 105, 103, 110, 109, 101, 110, 116, 32, 111, 110, 108, 121, 59, 32, 97, 110, 32, 117, 112, 100, 97, 116,
-            101, 32, 104, 105, 100, 100, 101, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 101, 120, 112, 114, 101,
-            115, 115, 105, 111, 110, 32, 114, 101, 97, 100, 115, 32, 111, 110, 101, 32, 118, 97, 108, 117, 101, 32, 97, 110,
-            100, 32, 115, 116, 111, 114, 101, 115, 32, 97, 110, 111, 116, 104, 101, 114, 18, 87, 114, 105, 116, 101, 32, 96,
-            99, 111, 117, 110, 116, 32, 43, 61, 32, 49, 96, 1, 0, 7, 1, 0, 7, 10, 99, 111, 117, 110, 116, 32,
-            43, 61, 32, 49, 1, 2, 0, 0, 0,
-        }},
-        {name: "retired-step-postfix-decrement", source: "count--", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 45, 45, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 124, 74, 101, 116, 32, 117, 112, 100, 97, 116, 101, 115, 32,
-            97, 32, 110, 117, 109, 98, 101, 114, 32, 119, 105, 116, 104, 32, 99, 111, 109, 112, 111, 117, 110, 100, 32, 97,
-            115, 115, 105, 103, 110, 109, 101, 110, 116, 32, 111, 110, 108, 121, 59, 32, 97, 110, 32, 117, 112, 100, 97, 116,
-            101, 32, 104, 105, 100, 100, 101, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 101, 120, 112, 114, 101,
-            115, 115, 105, 111, 110, 32, 114, 101, 97, 100, 115, 32, 111, 110, 101, 32, 118, 97, 108, 117, 101, 32, 97, 110,
-            100, 32, 115, 116, 111, 114, 101, 115, 32, 97, 110, 111, 116, 104, 101, 114, 18, 87, 114, 105, 116, 101, 32, 96,
-            99, 111, 117, 110, 116, 32, 45, 61, 32, 49, 96, 1, 0, 7, 1, 0, 7, 10, 99, 111, 117, 110, 116, 32,
-            45, 61, 32, 49, 1, 2, 0, 0, 0,
-        }},
-        {name: "retired-step-prefix-decrement", source: "--count", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 45, 45, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 124, 74, 101, 116, 32, 117, 112, 100, 97, 116, 101, 115, 32,
-            97, 32, 110, 117, 109, 98, 101, 114, 32, 119, 105, 116, 104, 32, 99, 111, 109, 112, 111, 117, 110, 100, 32, 97,
-            115, 115, 105, 103, 110, 109, 101, 110, 116, 32, 111, 110, 108, 121, 59, 32, 97, 110, 32, 117, 112, 100, 97, 116,
-            101, 32, 104, 105, 100, 100, 101, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 101, 120, 112, 114, 101,
-            115, 115, 105, 111, 110, 32, 114, 101, 97, 100, 115, 32, 111, 110, 101, 32, 118, 97, 108, 117, 101, 32, 97, 110,
-            100, 32, 115, 116, 111, 114, 101, 115, 32, 97, 110, 111, 116, 104, 101, 114, 18, 87, 114, 105, 116, 101, 32, 96,
-            99, 111, 117, 110, 116, 32, 45, 61, 32, 49, 96, 1, 0, 7, 1, 0, 7, 10, 99, 111, 117, 110, 116, 32,
-            45, 61, 32, 49, 1, 2, 0, 0, 0,
-        }},
-        {name: "retired-step-call-argument", source: "print(n++)", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 43, 43, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 124, 74, 101, 116, 32, 117, 112, 100, 97, 116, 101, 115, 32,
-            97, 32, 110, 117, 109, 98, 101, 114, 32, 119, 105, 116, 104, 32, 99, 111, 109, 112, 111, 117, 110, 100, 32, 97,
-            115, 115, 105, 103, 110, 109, 101, 110, 116, 32, 111, 110, 108, 121, 59, 32, 97, 110, 32, 117, 112, 100, 97, 116,
-            101, 32, 104, 105, 100, 100, 101, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 101, 120, 112, 114, 101,
-            115, 115, 105, 111, 110, 32, 114, 101, 97, 100, 115, 32, 111, 110, 101, 32, 118, 97, 108, 117, 101, 32, 97, 110,
-            100, 32, 115, 116, 111, 114, 101, 115, 32, 97, 110, 111, 116, 104, 101, 114, 70, 85, 115, 101, 32, 96, 110, 96,
-            32, 104, 101, 114, 101, 44, 32, 116, 104, 101, 110, 32, 119, 114, 105, 116, 101, 32, 96, 110, 32, 43, 61, 32,
-            49, 96, 32, 97, 115, 32, 105, 116, 115, 32, 111, 119, 110, 32, 115, 116, 97, 116, 101, 109, 101, 110, 116, 32,
-            97, 102, 116, 101, 114, 32, 116, 104, 105, 115, 32, 108, 105, 110, 101, 1, 6, 9, 0, 0, 0, 0, 0, 0,
-        }},
-        {name: "retired-step-loop-condition", source: "loop --lives > 0 {{ print(lives) }}", expected: [Int]{
-            1, 5, 69, 48, 49, 54, 48, 1, 26, 96, 45, 45, 96, 32, 105, 115, 32, 110, 111, 116, 32, 97, 32, 74,
-            101, 116, 32, 111, 112, 101, 114, 97, 116, 111, 114, 124, 74, 101, 116, 32, 117, 112, 100, 97, 116, 101, 115, 32,
-            97, 32, 110, 117, 109, 98, 101, 114, 32, 119, 105, 116, 104, 32, 99, 111, 109, 112, 111, 117, 110, 100, 32, 97,
-            115, 115, 105, 103, 110, 109, 101, 110, 116, 32, 111, 110, 108, 121, 59, 32, 97, 110, 32, 117, 112, 100, 97, 116,
-            101, 32, 104, 105, 100, 100, 101, 110, 32, 105, 110, 115, 105, 100, 101, 32, 97, 110, 32, 101, 120, 112, 114, 101,
-            115, 115, 105, 111, 110, 32, 114, 101, 97, 100, 115, 32, 111, 110, 101, 32, 118, 97, 108, 117, 101, 32, 97, 110,
-            100, 32, 115, 116, 111, 114, 101, 115, 32, 97, 110, 111, 116, 104, 101, 114, 79, 87, 114, 105, 116, 101, 32, 96,
-            108, 105, 118, 101, 115, 32, 45, 61, 32, 49, 96, 32, 97, 115, 32, 105, 116, 115, 32, 111, 119, 110, 32, 115,
-            116, 97, 116, 101, 109, 101, 110, 116, 32, 98, 101, 102, 111, 114, 101, 32, 116, 104, 105, 115, 32, 108, 105, 110,
-            101, 44, 32, 116, 104, 101, 110, 32, 117, 115, 101, 32, 96, 108, 105, 118, 101, 115, 96, 32, 104, 101, 114, 101,
-            1, 5, 12, 0, 0, 0, 0, 0, 0,
-        }},
         {name: "type-prefix-list-element", source: "struct Entry {{ tags: [?String] }}", expected: [Int]{
             1, 13, 69, 45, 84, 89, 80, 69, 45, 80, 82, 69, 70, 73, 88, 1, 44, 96, 63, 84, 96, 32, 97, 110,
             100, 32, 96, 33, 69, 96, 32, 97, 114, 101, 32, 114, 101, 116, 105, 114, 101, 100, 32, 112, 114, 101, 102, 105,
@@ -499,21 +410,6 @@ fn parser_selfhost_cases() -> [ParserSelfHostCase] {
         {name: "bracket-range-access-marks", source: "f(values[0..1], &values[0..1], ~values[0..1])", expected: [Int]{
             0, 1, 3, 0, 2, 8, 0, 0, 0, 1, 17, 23, 0, 0, 0, 0, 31, 32, 0, 0, 0,
         }},
-        {name: "retired-typed-binding", source: "fn run() {{\n    limit: U8 :: 250\n    print(limit)\n}}\n", expected: [Int]{
-            1, 5, 69, 48, 51, 57, 51, 1, 74, 96, 108, 105, 109, 105, 116, 58, 32, 85, 56, 96, 32, 112, 117, 116,
-            115, 32, 97, 32, 116, 121, 112, 101, 32, 97, 102, 116, 101, 114, 32, 116, 104, 101, 32, 98, 105, 110, 100, 105,
-            110, 103, 32, 110, 97, 109, 101, 44, 32, 119, 104, 105, 99, 104, 32, 74, 101, 116, 32, 100, 111, 101, 115, 32,
-            110, 111, 116, 32, 97, 99, 99, 101, 112, 116, 46, 172, 65, 32, 98, 105, 110, 100, 105, 110, 103, 32, 99, 97,
-            114, 114, 105, 101, 115, 32, 110, 111, 32, 116, 121, 112, 101, 32, 111, 102, 32, 105, 116, 115, 32, 111, 119, 110,
-            32, 40, 68, 45, 66, 73, 78, 68, 45, 66, 65, 82, 69, 49, 41, 59, 32, 96, 84, 121, 112, 101, 123, 32,
-            226, 128, 166, 32, 125, 96, 32, 111, 110, 32, 116, 104, 101, 32, 118, 97, 108, 117, 101, 32, 115, 116, 97, 116,
-            101, 115, 32, 116, 104, 101, 32, 116, 121, 112, 101, 44, 32, 99, 104, 101, 99, 107, 105, 110, 103, 32, 116, 104,
-            101, 32, 118, 97, 108, 117, 101, 32, 111, 114, 32, 99, 111, 110, 118, 101, 114, 116, 105, 110, 103, 32, 105, 116,
-            32, 116, 104, 101, 32, 119, 97, 121, 32, 97, 32, 112, 97, 114, 97, 109, 101, 116, 101, 114, 32, 111, 102, 32,
-            116, 104, 97, 116, 32, 116, 121, 112, 101, 32, 119, 111, 117, 108, 100, 46, 25, 87, 114, 105, 116, 101, 32, 96,
-            108, 105, 109, 105, 116, 32, 58, 58, 32, 85, 56, 123, 50, 53, 48, 125, 96, 46, 1, 20, 24, 1, 15, 31,
-            16, 108, 105, 109, 105, 116, 32, 58, 58, 32, 85, 56, 123, 50, 53, 48, 125, 1, 2, 0, 0, 0,
-        }},
     }
 }
 
@@ -525,9 +421,5 @@ fn parser_selfhost_snapshots() -> [ParserSelfHostSnapshot] {
         {file: "tests/ui/unclosed_brace_interpolation.jet", source: "fn run() {{\n    count :: 1\n    print(\"count {{count\")\n}}\n", expected: "Error [E0002]: This `{{` never gets a matching `}}`\n  --> tests/ui/unclosed_brace_interpolation.jet:3:18\n    |\n  3 |     print(\"count {{count\")\n    |                  ^^^^^^^^\n Why: `{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal\n Fix: Add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text\nMore: jet-lang.dev/e/E0002\n"},
         {file: "tests/ui/logic_mix_or_then_and.jet", source: "fn run() {{\n    a :: true\n    b :: false\n    c :: true\n    print(a || b && c)\n}}\n", expected: "Error [E0082]: `&&` and `||` are mixed here without parentheses\n  --> tests/ui/logic_mix_or_then_and.jet:5:16\n    |\n  5 |     print(a || b && c)\n    |                ^^^^^^\n Why: `&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping\n Fix: Write `(b && c)` to keep today's meaning, or regroup the conditions the way you intended\nMore: jet-lang.dev/e/E0082\n"},
         {file: "tests/ui/logic_mix_and_then_or.jet", source: "fn run() {{\n    a :: true\n    b :: false\n    c :: true\n    print(a && b || c)\n}}\n", expected: "Error [E0082]: `&&` and `||` are mixed here without parentheses\n  --> tests/ui/logic_mix_and_then_or.jet:5:11\n    |\n  5 |     print(a && b || c)\n    |           ^^^^^^\n Why: `&&` binds tighter than `||`, but readers often misjudge that, so Jet asks you to show the grouping\n Fix: Write `(a && b)` to keep today's meaning, or regroup the conditions the way you intended\nMore: jet-lang.dev/e/E0082\n"},
-        {file: "tests/ui/incr_retired_statement.jet", source: "fn run() {{\n    count := 0\n    count++\n    ++count\n    count--\n    --count\n    print(\"{{count}}\")\n}}\n", expected: "Error [E0160]: `++` is not a Jet operator\n  --> tests/ui/incr_retired_statement.jet:3:5\n    |\n  3 |     count++\n    |     ^^^^^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Write `count += 1`\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `++` is not a Jet operator\n  --> tests/ui/incr_retired_statement.jet:4:5\n    |\n  4 |     ++count\n    |     ^^^^^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Write `count += 1`\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `--` is not a Jet operator\n  --> tests/ui/incr_retired_statement.jet:5:5\n    |\n  5 |     count--\n    |     ^^^^^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Write `count -= 1`\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `--` is not a Jet operator\n  --> tests/ui/incr_retired_statement.jet:6:5\n    |\n  6 |     --count\n    |     ^^^^^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Write `count -= 1`\nMore: jet-lang.dev/e/E0160\n"},
-        {file: "tests/ui/incr_retired_expression.jet", source: "fn run() {{\n    n := 5\n    print(n++)\n    lives := 3\n    loop --lives > 0 {{\n        print(\"{{lives}}\")\n    }}\n    i := 1\n    j :: i++ + ++i\n    print(\"{{j}}\")\n}}\n", expected: "Error [E0160]: `++` is not a Jet operator\n  --> tests/ui/incr_retired_expression.jet:3:11\n    |\n  3 |     print(n++)\n    |           ^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Use `n` here, then write `n += 1` as its own statement after this line\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `--` is not a Jet operator\n  --> tests/ui/incr_retired_expression.jet:5:10\n    |\n  5 |     loop --lives > 0 {{\n    |          ^^^^^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Write `lives -= 1` as its own statement before this line, then use `lives` here\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `++` is not a Jet operator\n  --> tests/ui/incr_retired_expression.jet:9:10\n    |\n  9 |     j :: i++ + ++i\n    |          ^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Use `i` here, then write `i += 1` as its own statement after this line\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `++` is not a Jet operator\n  --> tests/ui/incr_retired_expression.jet:9:16\n    |\n  9 |     j :: i++ + ++i\n    |                ^^^\n Why: Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another\n Fix: Write `i += 1` as its own statement before this line, then use `i` here\nMore: jet-lang.dev/e/E0160\n"},
-        {file: "tests/ui/incr_retired_double_minus.jet", source: "fn run() {{\n    a := 5\n    b := 2\n    print(\"{{a--b}}\")\n    c :: a--b\n    print(\"{{c}}\")\n}}\n", expected: "Error [E0160]: `--` is not a Jet operator\n  --> tests/ui/incr_retired_double_minus.jet:4:14\n    |\n  4 |     print(\"{{a--b}}\")\n    |              ^^\n Why: Jet retired `++` and `--`; reading `a--b` as `a - -b` would hide a sign inside an operator\n Fix: Write `a - -b` with a space, or `a - b` if one sign was meant\nMore: jet-lang.dev/e/E0160\n\nError [E0160]: `--` is not a Jet operator\n  --> tests/ui/incr_retired_double_minus.jet:5:11\n    |\n  5 |     c :: a--b\n    |           ^^\n Why: Jet retired `++` and `--`; reading `a--b` as `a - -b` would hide a sign inside an operator\n Fix: Write `a - -b` with a space, or `a - b` if one sign was meant\nMore: jet-lang.dev/e/E0160\n"},
-        {file: "tests/ui/type_mark_prefix_optional_retired.jet", source: "// retired-spelling-fixture: D-TYPE-SUFFIX1 teaches `?T` as `T?`.\nstruct Entry {{\n    id: Int\n    tags: [?String]\n}}\n\nfn find(id: Int) -> ?Entry {{\n    if id > 0 -> return Val(Entry{{id: id, tags: [String?]{{}}}})\n    return None\n}}\n\nfn run() {{\n    limit :: ?Int{{None}}\n    print(limit ?? 0)\n}}\n", expected: "Error [E-TYPE-PREFIX]: `?T` and `!E` are retired prefix type marks.\n  --> tests/ui/type_mark_prefix_optional_retired.jet:4:12\n    |\n  4 |     tags: [?String]\n    |            ^^^^^^^\n Why: A type mark follows the type it marks: `Entry?` may be absent, and `SaveError!` in a function contract names how the call fails.\n Fix: Write `Entry?` for `?Entry`, `SaveError!` for `!SaveError`, and `(A | B)!` for `!(A | B)`.\nMore: jet-lang.dev/e/E-TYPE-PREFIX\n\nError [E-TYPE-PREFIX]: `?T` and `!E` are retired prefix type marks.\n  --> tests/ui/type_mark_prefix_optional_retired.jet:7:21\n    |\n  7 | fn find(id: Int) -> ?Entry {{\n    |                     ^^^^^^\n Why: A type mark follows the type it marks: `Entry?` may be absent, and `SaveError!` in a function contract names how the call fails.\n Fix: Write `Entry?` for `?Entry`, `SaveError!` for `!SaveError`, and `(A | B)!` for `!(A | B)`.\nMore: jet-lang.dev/e/E-TYPE-PREFIX\n\nError [E-TYPE-PREFIX]: `?T` and `!E` are retired prefix type marks.\n  --> tests/ui/type_mark_prefix_optional_retired.jet:13:14\n    |\n 13 |     limit :: ?Int{{None}}\n    |              ^^^^\n Why: A type mark follows the type it marks: `Entry?` may be absent, and `SaveError!` in a function contract names how the call fails.\n Fix: Write `Entry?` for `?Entry`, `SaveError!` for `!SaveError`, and `(A | B)!` for `!(A | B)`.\nMore: jet-lang.dev/e/E-TYPE-PREFIX\n"},
     }
 }

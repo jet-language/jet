@@ -54,12 +54,6 @@ fn pkg_authority_package_error(error: AuthorityError) -> PackageParseError Never
     }
 }
 
-// `origin: error`, or the bare error when there is no origin.
-fn pkg_format_entry_error(origin: String, error: String) -> String Never! {
-    if origin == "" -> return error.copy()
-    "{origin}: {error}"
-}
-
 // Why an entry-resolution command failed (Rust `String` errors).
 #Error
 struct PackageEntryError {
@@ -209,15 +203,10 @@ impl PackageFacts {
         Ok(Val(entry.file.path))
     }
 
-    // The canonical `run.jet` (root, then `src/`) wins; retired `main.jet`
-    // is migrated once first and refused afterwards; otherwise the selected
+    // The canonical `run.jet` (root, then `src/`) wins; otherwise the selected
     // runnable output's entry.
     fn resolve_run_entry_checked(self, resolver: AuthorityResolver) -[FS, Env, IO]> CheckedPackageEntry? PackageEntryError! {
         if self.validate_defaults() == .Err(error) -> return Err(pkg_entry_error(self.origin, error.message()))
-        if pkg_migrate_retired_entry(resolver.root, self.origin, self.name) {
-            fresh :: AuthorityResolver.open(resolver.root) ?? return Err(pkg_entry_error(self.origin, err.message()))
-            return self.resolve_run_entry_checked(fresh)
-        }
         run_name :: DEFAULT_ENTRY_FILE.removesuffix(".jet")
         candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
         loop relative in candidates {
@@ -227,15 +216,6 @@ impl PackageFacts {
             }
             if resolver.revalidate_file(file) == .Err(error) -> return Err(pkg_entry_error(self.origin, error.message()))
             return Ok(Val(CheckedPackageEntry{file: ^file, callable: run_name}))
-        }
-        if resolver.checked_file(LEGACY_ENTRY_FILE) == {
-            .Ok(main) -> {
-                if resolver.revalidate_file(main) == .Err(error) -> return Err(pkg_entry_error(self.origin, error.message()))
-                return Err(pkg_entry_error(self.origin, "package entry requires canonical `{DEFAULT_ENTRY_FILE}`; retired `{pkg_path_file_name(main.path)}` is not accepted"))
-            }
-            .Err(error) -> {
-                if !error.is_missing() -> return Err(pkg_entry_error(self.origin, error.message()))
-            }
         }
         runnable := false
         loop name in self.outputs.keys().to_list() {
@@ -490,11 +470,9 @@ impl PackageFacts {
     }
 
     // The package's own checked source files: nested packages, reserved
-    // metadata files, the root/`src` retired entry, and Config files are
-    // excluded; sorted by relative path.
+    // metadata files, and Config files are excluded; sorted by relative path.
     fn source_files_checked(self, resolver: AuthorityResolver) -[FS, Env]> [CheckedFile] AuthorityError! {
         listed :: resolver.discover_source_files()
-        src_legacy_entry :: "src/{LEGACY_ENTRY_FILE}"
         nested_packages := [String]{}
         loop file in listed {
             if pkg_path_file_name(file.relative) != PACKAGE_FILE -> next
@@ -505,7 +483,7 @@ impl PackageFacts {
         loop file in ^listed {
             if pkg_path_under_any(file.relative, nested_packages) -> next
             name :: pkg_path_file_name(file.relative)
-            reserved :: name == PACKAGE_FILE || name == PAYLOAD_FILE || name == ENV_FILE || name == CONFIG_FILE || name == WORKSPACE_FILE || ((name == LEGACY_ENTRY_FILE) && ((file.relative == LEGACY_ENTRY_FILE) || file.relative == src_legacy_entry))
+            reserved :: name == PACKAGE_FILE || name == ENV_FILE || name == CONFIG_FILE || name == WORKSPACE_FILE
             if reserved || self.is_config_file(file.relative) -> next
             &kept.push(file)
         }
@@ -601,66 +579,3 @@ fn pkg_load_compose_and_validate(facts: &PackageFacts, resolver: AuthorityResolv
     facts.validate_members_in_checked(resolver)
 }
 
-// Migrate one retired entry (`main.jet`,
-// `src/main.jet`, `.jet/main.jet`) to its canonical `run.jet` home before a
-// default run resolves its authority snapshot. True when a file moved.
-fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String) -[FS, Env, IO]> Bool PackageEntryError! {
-    resolver :: if AuthorityResolver.open(root) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
-        }
-    }
-    olds :: [String]{LEGACY_ENTRY_FILE, "src/{LEGACY_ENTRY_FILE}", "{SOURCE_ROOT_DIR}/{LEGACY_ENTRY_FILE}"}
-    news :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}", DEFAULT_ENTRY_FILE}
-    canonical_paths := [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
-    if package_name != "" {
-        named :: "{package_name}.{FILE_EXT}"
-        if !canonical_paths.contains(named) -> &canonical_paths.push(named)
-    }
-    canonical := [String]{}
-    loop path in canonical_paths {
-        if resolver.checked_file(path) == {
-            .Ok(_) -> {
-                &canonical.push(path)
-            }
-            .Err(error) -> {
-                if !error.is_missing() -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
-            }
-        }
-    }
-    retired_files := [CheckedFile]{}
-    retired_index := [Int]{}
-    loop index in 0..<olds.len() {
-        if resolver.checked_file(olds[index]) == {
-            .Ok(file) -> {
-                &retired_files.push(^file)
-                &retired_index.push(index)
-            }
-            .Err(error) -> {
-                if !error.is_missing() -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
-            }
-        }
-    }
-    if retired_files.len() == 0 -> return Ok(false)
-    if retired_files.len() != 1 || canonical.len() > 0 {
-        old_names := [String]{}
-        loop index in retired_index -> &old_names.push("`{olds[index]}`")
-        current :: if canonical.len() == 0 -> "no canonical entry" else -> {
-            quoted := [String]{}
-            loop path in canonical -> &quoted.push("`{path}`")
-            quoted.join(", ")
-        }
-        return Err(PackageEntryError{message: pkg_format_entry_error(origin, "ambiguous project entry: retired {old_names.join(", ")} and {current} both identify this project; keep one entry and run again")})
-    }
-    // Move the only retired file out; indexing would copy a CheckedFile, whose
-    // FileReader cannot be copied natively.
-    file :: &retired_files.pop() ?? return Ok(false)
-    old :: olds[retired_index[0]]
-    target :: news[retired_index[0]]
-    if resolver.revalidate_file(file) == .Err(error) -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, error.message())})
-    destination :: files.join(resolver.root, target)
-    if files.rename(file.path, destination) == .Err(error) -> return Err(PackageEntryError{message: pkg_format_entry_error(origin, "could not migrate `{old}` to `{target}`: {error}")})
-    eprint("notice: migrated retired entry `{old}` to `{target}` (D-VERDICT-678-1)")
-    Ok(true)
-}

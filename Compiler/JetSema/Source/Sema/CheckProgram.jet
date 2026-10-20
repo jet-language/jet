@@ -1944,7 +1944,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             &diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` can't also declare `-[]>`", "a reactive effect re-runs when signals change, so it is not a pure function", "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`"))
         }
         if func.return_type == .Val(return_type) && return_type != (Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
+            &diagnostics.push(sema_error("E2914", func.name_span, "`#Reactive fn` must not return a value", "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value", "drop the return type, or use `#Reactive {{ … }}` inside a plain `fn`"))
         }
     }
 

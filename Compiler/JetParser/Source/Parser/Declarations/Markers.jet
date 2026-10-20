@@ -101,7 +101,7 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
     marker_name :: parser_value(state, name)
     if on.kind == TOKEN_IDENT && parser_value(state, on) == "on" {
         parser_skip_marker_trailer(&state)
-        parser_add_fatal_code(&state, "E0381", on.span, "the checked-text marker declaration is retired", "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form", "write `marker {marker_name}($sites: [.Text])` for a plain rule, or use a built-in typed text head")
+        parser_add_fatal_code(&state, "E0381", on.span, "a marker declaration has no `on` clause", "every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form", "write `marker {marker_name}($sites: [.Text])` for a plain rule, or use a built-in typed text head")
         return Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
     }
     params :: parser_marker_decl_params(&state)
@@ -115,12 +115,12 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
         }
         trailer.kind == TOKEN_IDENT && parser_value(state, trailer) == "on" -> {
             parser_skip_marker_trailer(&state)
-            parser_add_error_code(&state, "E0381", trailer.span, "a trailing `on` clause isn't how a marker states a fact", "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `$` names are fixed metadata values — not a clause after the list", "move the sites into the parameter list as `$sites: [.Function, …]`")
+            parser_add_error_code(&state, "E0381", trailer.span, "a trailing `on` clause isn't how a marker states a fact", "every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `$` names are fixed metadata values — not a clause after the list", "move the sites into the parameter list as `$sites: [.Function, …]`")
             end = parser_lookahead(&state, -1).span
         }
         trailer.kind == TOKEN_LPAREN -> {
             parser_skip_marker_trailer(&state)
-            parser_add_error_code(&state, "E0381", trailer.span, "a second parameter list isn't how a marker states a fact", "D-MARKER-SITES1=B: the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compiler-fact `$` sigil — not two parameter lists", "fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`")
+            parser_add_error_code(&state, "E0381", trailer.span, "a second parameter list isn't how a marker states a fact", "the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compiler-fact `$` sigil — not two parameter lists", "fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`")
             end = parser_lookahead(&state, -1).span
         }
         else -> {}
@@ -206,11 +206,6 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
                             default = Val(parser_parse_expression_no_struct_lit(&state, 1).expr)
                             parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker parameter default")
                         }
-                        parser_current_kind(&state) == TOKEN_EQ -> {
-                            eq :: parser_bump(&state)
-                            parser_add_error_code(&state, "E0385", eq.span, "This declaration uses the retired `name: Type = value` default spelling.", "Declaration defaults ride the type as `name: Type{{value}}`; `=` remains for reassignment and extern slot fill.", "Write `name: Type{{value}}` for a declaration default, or keep `=` for reassignment and extern slot fill.")
-                            default = Val(parser_parse_expression_no_struct_lit(&state, 1).expr)
-                        }
                         else -> {}
                     }
                     &params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: ^default, variadic: variadic})
@@ -274,15 +269,13 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
     }
 }
 
-// A declaration loop is `prep loop`,
-// in marker bodies and at the root. The retired `@loop` head teaches E0388
-// and recovers.
+// A declaration loop is `prep loop`, in marker bodies and at the root.
 fn parser_template_loop_ahead(state: &JetParserState) -> Bool Never! {
-    parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) || (parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) == TOKEN_KW_LOOP)
+    parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP)
 }
 
 fn parser_parse_template_loop(state: &JetParserState) -> ItemTemplateLoop {
-    start :: parser_take_prep_head(&state, "loop")
+    start :: parser_bump(&state)
     parser_expect(&state, TOKEN_KW_LOOP, "after `prep` in a declaration loop")
     variable :: parser_expect_name(&state, "for a declaration loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a declaration loop binding and source")

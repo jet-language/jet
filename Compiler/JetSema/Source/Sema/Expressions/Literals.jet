@@ -515,7 +515,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
                 expected_key = Val(key)
                 expected_value = Val(value)
                 result_ty = Val(normalized)
-                if entries.len() == 0 && !sema_type_map_key_eligible(environment, program, key) -> &diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type (D-MAP-KEY1)", key_span ?? span))
+                if entries.len() == 0 && !sema_type_map_key_eligible(environment, program, key) -> &diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type", key_span ?? span))
             }
             else -> {}
         }
@@ -538,7 +538,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
         checked_value :: value ?? return None
         if !sema_copy_site_check_guard_owned(checked_key, environment, program, scopes, context, &diagnostics, false) -> return None
         if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return None
-        if !sema_type_map_key_eligible(environment, program, checked_key.ty) -> &diagnostics.push(sema_map_key_error("`{type_name(checked_key.ty)}` can't be a map key (D-MAP-KEY1)", expr_span(entry.key)))
+        if !sema_type_map_key_eligible(environment, program, checked_key.ty) -> &diagnostics.push(sema_map_key_error("`{type_name(checked_key.ty)}` can't be a map key", expr_span(entry.key)))
         if expected_key == .Val(key_ty) {
             compatible_key :: sema_expr_expected_assignable(key_ty, checked_key.ty, environment, program) ?? return None
             if !compatible_key -> return None
@@ -571,7 +571,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
 // E0502: one why/fix for every rejected map key, as the Rust
 // reference's declared-type and map-literal sites print it.
 fn sema_map_key_error(what: String, span: Span) -> Diagnostic {
-    sema_error("E0502", span, what, "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible", "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately")
+    sema_error("E0502", span, what, "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow these rules; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible", "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately")
 }
 
 fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

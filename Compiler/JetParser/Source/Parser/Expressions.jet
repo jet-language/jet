@@ -80,7 +80,6 @@ use jet_lexer.[
     TOKEN_LPAREN,
     TOKEN_LT,
     TOKEN_MINUS,
-    TOKEN_MINUS_MINUS,
     TOKEN_NOT_EQ,
     TOKEN_NULL,
     TOKEN_OR_OR,
@@ -88,7 +87,6 @@ use jet_lexer.[
     TOKEN_PERCENT_PERCENT,
     TOKEN_PIPE,
     TOKEN_PLUS,
-    TOKEN_PLUS_PLUS,
     TOKEN_QUESTION,
     TOKEN_QUESTION_DOT,
     TOKEN_QUESTION_QUESTION,
@@ -105,7 +103,6 @@ use jet_lexer.[
     TOKEN_SLASH_PERCENT,
     TOKEN_STAR,
     TOKEN_STRING,
-    TOKEN_TILDE,
     TOKEN_TILDE_PIPE,
     TOKEN_TRUE,
     TOKEN_UNIT_NUMBER,
@@ -125,7 +122,6 @@ struct ParsedExprFields {
     span: Span
 }
 
-// The retired arithmetic precedence slots are diagnostic recovery, not syntax.
 fn parser_expression_precedence(kind: Int) -> Int Never! {
     return if kind == {
         TOKEN_QUESTION_QUESTION -> 1
@@ -140,9 +136,6 @@ fn parser_expression_precedence(kind: Int) -> Int Never! {
         TOKEN_GT -> 5
         TOKEN_GE -> 5
         TOKEN_COMPARE -> 5
-        TOKEN_PIPE -> 6
-        TOKEN_TILDE_PIPE -> 7
-        TOKEN_AMP -> 8
         TOKEN_SHL -> 10
         TOKEN_SHR -> 10
         TOKEN_PLUS -> 11
@@ -152,7 +145,6 @@ fn parser_expression_precedence(kind: Int) -> Int Never! {
         TOKEN_SLASH_PERCENT -> 12
         TOKEN_PERCENT -> 12
         TOKEN_PERCENT_PERCENT -> 12
-        TOKEN_CARET -> 14
         else -> 0
     }
 }
@@ -166,10 +158,6 @@ fn parser_binary_operator(kind: Int) -> BinOp Never! {
         TOKEN_SLASH_PERCENT -> BinOp.FloorDiv
         TOKEN_PERCENT -> BinOp.Mod
         TOKEN_PERCENT_PERCENT -> BinOp.Rem
-        TOKEN_CARET -> BinOp.Pow
-        TOKEN_AMP -> BinOp.BitAnd
-        TOKEN_PIPE -> BinOp.BitOr
-        TOKEN_TILDE_PIPE -> BinOp.BitXor
         TOKEN_SHL -> BinOp.Shl
         TOKEN_SHR -> BinOp.Shr
         TOKEN_EQ_EQ -> BinOp.Eq
@@ -241,16 +229,9 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
     left = parser_parse_postfix(&state, left, depth + 1, allow_struct_lit)
     loop {
         operator := parser_current_kind(&state)
-        // Rust `expr_cmp`: `in` after a comparison operand is the retired
-        // membership spelling (E0384), fatal at the `in`.
-        if operator == TOKEN_KW_IN && minimum <= 5 && !stop_before_comparison {
-            membership :: parser_bump(&state)
-            parser_add_fatal_code(&state, "E0384", membership.span, "Jet has no membership operator here; `in` only joins a source-loop binding to its source.", "Expression `x in xs` has no operator meaning in Jet. Collection membership is a method call.", "Write `xs.contains(x)` (the `.contains(x)` method) instead of `x in xs`.")
-            break
-        }
         precedence := parser_expression_precedence(operator)
         double_star :: operator == TOKEN_STAR && parser_kind_at(&state, 1) == TOKEN_STAR && parser_lookahead(&state, 1).span.start == parser_current(&state).span.end
-        if double_star -> precedence = parser_expression_precedence(TOKEN_CARET)
+        if double_star -> precedence = 14
         if precedence == 0 || precedence < minimum -> break
         if stop_before_comparison && parser_expression_comparison_boundary(operator) -> break
         operator_token :: parser_bump(&state)
@@ -286,18 +267,8 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             next
         }
 
-        next_minimum := precedence + 1
-        if operator == TOKEN_CARET -> next_minimum = precedence
-        right :: parser_parse_expression_restricted(&state, next_minimum, depth + 1, allow_struct_lit, stop_before_comparison)
+        right :: parser_parse_expression_restricted(&state, precedence + 1, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(left.span, right.span)
-        retired_method := if operator == {
-            TOKEN_AMP -> "bit_and"
-            TOKEN_PIPE -> "bit_or"
-            TOKEN_TILDE_PIPE -> "bit_xor"
-            TOKEN_CARET -> "pow"
-            else -> ""
-        }
-        if retired_method != "" -> parser_teach_arithmetic_method(&state, retired_method, left.span, right.span, operator_token.span, false)
 
         if operator == TOKEN_DOT_DOT || operator == TOKEN_DOT_DOT_LT {
             left = ParsedExpr{
@@ -382,33 +353,6 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
         "Write `{grouped}` to keep today's meaning, or regroup the conditions the way you intended",
     )
     &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
-}
-
-// E0941 for the retired prefix copy sigil (Rust
-// `retired_copy_sigil`). The Safe edit rewrites `~operand` to its copy call.
-fn parser_report_retired_copy_sigil(state: &JetParserState, sigil: Span, operand: Span) {
-    if parser_aborting(&state) -> return
-    text :: parser_source_text(state, operand)
-    replacement :: parser_copy_call_source(if text == "" -> "x" else -> text)
-    diagnostic :: diagnostic_from_registry(
-        "E0941",
-        Val(sigil),
-        "the `~` copy sigil is retired; a copy is the method `x.copy()`",
-        "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` (D-COPY-WORD1), so a copy reads as a word and chains like any method",
-        "write `{replacement}`",
-    )
-    if text == "" {
-        &state.diagnostics.push(diagnostic)
-        return
-    }
-    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: parser_cover(sigil, operand), new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
-}
-
-// Rust `Syntax::copy_call_source`: `x.copy()` when the operand text is one
-// postfix chain, otherwise `(a + b).copy()` so the call covers the operand.
-fn parser_copy_call_source(text: String) -> String Never! {
-    if parser_is_postfix_operand(text) -> return "{text}.copy()"
-    "({text}).copy()"
 }
 
 fn parser_is_postfix_operand(text: String) -> Bool Never! {
@@ -653,7 +597,7 @@ fn parser_try_parse_typed_literal(state: &JetParserState, depth: Int) -> ParsedE
     }
     if dotted {
         dot := parser_bump(&state)
-        parser_add_error_code(&state, "E0320", dot.span, "typed collection construction uses `[T]{{…}}`, not `[T].{{…}}`", "D-LIT-DOT1 drops the constructor dot from every literal head", "write `[T]{{…}}`")
+        parser_add_error_code(&state, "E0320", dot.span, "typed collection construction uses `[T]{{…}}`, not `[T].{{…}}`", "literal heads place no dot before their brace", "write `[T]{{…}}`")
     }
     Val(parser_parse_typed_literal_body(&state, Val(parsed.ty), parsed.span, depth + 1))
 }
@@ -694,27 +638,12 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         parser_bump(&state)
         block :: parser_parse_block(&state)
         span :: parser_cover(token.span, block.span)
-        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value in a form this compiler does not support yet", "D-PREP-SURFACE2=A makes the block's final expression its value; today only `name :: prep {{ value }}` with a single final expression is evaluated while building", "write `name :: prep {{ value }}` with one final expression, or bind the result inside a `prep {{ … }}` statement block")
+        parser_add_error_code(&state, "E0391", span, "`prep {{ … }}` is used as a value in a form this compiler does not support yet", "Jet makes the block's final expression its value; today only `name :: prep {{ value }}` with a single final expression is evaluated while building", "write `name :: prep {{ value }}` with one final expression, or bind the result inside a `prep {{ … }}` statement block")
         return ParsedExpr{expr: Expr.Unit{span: span}, span: span}
     }
     if allow_struct_lit && parser_typed_literal_head_ahead(&state) {
         typed :: parser_try_parse_typed_literal(&state, depth + 1)
         if typed == .Val(parsed) -> return parsed
-    }
-    if kind == TOKEN_PLUS_PLUS || kind == TOKEN_MINUS_MINUS {
-        parser_bump(&state)
-        operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
-        parser_report_retired_step(&state, token, operand.expr, parser_cover(token.span, operand.span), token.span.start, true)
-        return operand
-    }
-    // Prefix `~x` is retired — a copy is the built-in method
-    // `x.copy()`. Teach with a Safe rewrite, then recover as the copy node.
-    if kind == TOKEN_TILDE {
-        parser_bump(&state)
-        operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
-        span :: parser_cover(token.span, operand.span)
-        parser_report_retired_copy_sigil(&state, token.span, operand.span)
-        return ParsedExpr{expr: Expr.Copy{value: operand.expr, span: span}, span: span}
     }
     // Rust has no unary `+`: `+1` falls through to "expected a value".
     if kind == TOKEN_MINUS || kind == TOKEN_BANG {
@@ -754,24 +683,13 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.RawOf{value: operand.expr, span: span}, span: span}
     }
-    if kind == TOKEN_KW_MOVE && parser_kind_at(&state, 1) == TOKEN_LPAREN {
-        take_names :: parser_parse_lambda_takes(&state)
-        return parser_parse_lambda(&state, depth + 1, take_names)
-    }
-    if kind == TOKEN_KW_COPY {
-        parser_bump(&state)
-        parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` (D-COPY-WORD1) — so all code reads the same", "write `name.copy()` in place of `copy name`")
-        operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
-        span := parser_cover(token.span, operand.span)
-        return ParsedExpr{expr: Expr.Copy{value: operand.expr, span: span}, span: span}
-    }
     // Rust `primary`: `if` and `loop` in value position are always the value
     // forms (`if cond -> a else -> b`, tables, collecting or result loops).
     if kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP -> return parser_parse_expression_form(&state, depth + 1)
     // `.{ … }` is retired; an inferred record is `{ … }`.
     if kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
         dot :: parser_bump(&state)
-        parser_add_fatal_code(&state, "E0320", dot.span, "inferred record construction uses `{{…}}`, not `.{{…}}`", "D-LIT-DOT1 drops the constructor dot from every literal head", "write `{{…}}`")
+        parser_add_fatal_code(&state, "E0320", dot.span, "inferred record construction uses `{{…}}`, not `.{{…}}`", "literal heads place no dot before their brace", "write `{{…}}`")
         fields :: parser_parse_expression_fields(&state, depth + 1)
         span :: parser_cover(dot.span, fields.span)
         return ParsedExpr{
@@ -824,13 +742,6 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         return parser_parse_typed_literal_body(&state, None, token.span, depth + 1)
     }
 
-    // A retired `@`-marked constant read teaches E0388 and
-    // reads the plain ALL_CAPS name.
-    if parser_reads_retired_constant(&state) {
-        parser_bump(&state)
-        plain :: parser_retire_const_mark(&state, token)
-        return ParsedExpr{expr: Expr.Ident{name: plain, span: token.span}, span: token.span}
-    }
     // Optional constructors keep the contextual EnumLit shape used by Rust;
     // sema supplies the payload type from the expected optional type.
     // `Val` without `(` is still an ordinary identifier.
@@ -1237,46 +1148,6 @@ fn parser_lambda_interface_error(state: &JetParserState, span: Span) {
     parser_add_fatal_code(&state, "E0399", span, "a lambda cannot write a return or error type", "a lambda's arrow introduces its body; return and error types come from the expected callable type", "remove the type; pass the lambda to a typed parameter or slot, or use a named `fn` for a full interface")
 }
 
-fn parser_parse_lambda_takes(state: &JetParserState) -> [NamedSpan] {
-    start :: parser_current(&state).span
-    parser_bump(&state)
-    parser_expect(&state, TOKEN_LPAREN, "after `take` in a capture list")
-    captures := [NamedSpan]{}
-    valid := true
-    if parser_current_kind(&state) != TOKEN_RPAREN {
-        loop {
-            name_kind :: parser_current_kind(&state)
-            name :: parser_expect_name(&state, "in the capture list")
-            if {
-                name_kind == TOKEN_IDENT -> {
-                    &captures.push(NamedSpan{name: parser_value(state, name), span: name.span})
-                }
-                else -> {
-                    valid = false
-                    if name_kind != TOKEN_RPAREN && name_kind != TOKEN_EOF -> parser_bump(&state)
-                }
-            }
-            if parser_current_kind(&state) == TOKEN_RPAREN -> break
-            if parser_current_kind(&state) != TOKEN_COMMA {
-                token :: parser_current(&state)
-                parser_add_error(&state, token.span, "expected `,` between captured names", "capture names are comma-separated", "add a comma or close the capture list")
-                valid = false
-                loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
-                break
-            }
-            parser_bump(&state)
-            if parser_current_kind(&state) == TOKEN_RPAREN -> break
-        }
-    }
-    closed := parser_current_kind(&state) == TOKEN_RPAREN
-    parser_expect(&state, TOKEN_RPAREN, "after the capture list")
-    if !closed -> valid = false
-    if valid {
-        parser_add_error_code(&state, "E0057", start, "this closure uses the retired `take(...)` capture prefix", "closures infer captures: Copy values copy at creation and owned non-Copy values move", "remove `take(...)` and use the captured names directly")
-    }
-    captures
-}
-
 fn parser_parse_lambda(state: &JetParserState, depth: Int, take_names: [NamedSpan]) -> ParsedExpr {
     open :: parser_expect(&state, TOKEN_LPAREN, "`(` before lambda parameters")
     params := [LambdaParam]{}
@@ -1496,7 +1367,7 @@ fn parser_parse_task_surface(state: &JetParserState, depth: Int) -> ParsedExpr {
         close :: parser_expect(&state, TOKEN_RBRACE, "to close the task combinator")
         list_span :: parser_cover(open.span, close.span)
         if mixed == .Val(mixed_span) {
-            parser_add_fatal_code(&state, "E1117", mixed_span, "`task.all` branches must all be named or all positional.", "D-CONC-ALLNAMED1=A gives named results stable record fields and keeps positional results as ordered lists; mixing the two shapes would make the result type ambiguous.", "Use `task.all {{ first: work(), second: other() }}`, or remove every branch label.")
+            parser_add_fatal_code(&state, "E1117", mixed_span, "`task.all` branches must all be named or all positional.", "Jet gives named results stable record fields and keeps positional results as ordered lists; mixing the two shapes would make the result type ambiguous.", "Use `task.all {{ first: work(), second: other() }}`, or remove every branch label.")
         }
         argument :: if saw_named -> Expr.TupleLit{fields: named, span: list_span, ty: None} else -> Expr.ListLit{elements: positional, span: list_span}
         span :: parser_cover(head, close.span)
@@ -1633,7 +1504,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             // invoked with `.call(…)`, never `f()(…)`.
             if parser_is_adjacent_call_result(expression.expr) {
                 open :: parser_current(&state).span
-                parser_add_fatal_code_structured_edit(&state, "E-CALL-VALUE", open, "a function value is invoked with the retired adjacent-call spelling", "named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B)", "write `callee.call(…)`", TextEdit{span: Span{start: open.start, end: open.start}, new_text: ".call"})
+                parser_add_fatal_code_structured_edit(&state, "E-CALL-VALUE", open, "a function value is invoked with an adjacent call `)(`", "named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit", "write `callee.call(…)`", TextEdit{span: Span{start: open.start, end: open.start}, new_text: ".call"})
                 break
             }
             method_name :: if expression.expr == {
@@ -1678,9 +1549,6 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     expression = ParsedExpr{expr: Expr.Call{call: call}, span: span}
                 }
                 .Field(receiver, method, method_span) -> {
-                    // `Shared.new(x)` is retired; teach at
-                    // `new` (Rust `member_span`) and keep the method call.
-                    if method == "new" && parser_literal_head_path(receiver) == "Shared" -> parser_add_error_code(&state, "E1115", Span{start: method_span.end - method.len(), end: method_span.end}, "`Shared.new(…)` is the retired shared-cell constructor.", "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page.", "Write `shared <value>` instead of `Shared.new(<value>)`.")
                     expression = ParsedExpr{
                         expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None},
                         span: span,
@@ -1789,7 +1657,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 if path == "" -> break
                 construction :: if path.contains(".") -> "literal" else -> "struct"
                 brace :: parser_current(&state).span
-                parser_add_error_code(&state, "E0320", brace, "{construction} construction uses `{path}{{…}}`, not `{path}.{{…}}`", "literal heads place no dot before their brace (D-LIT-DOT1)", "write `{path}{{…}}`")
+                parser_add_error_code(&state, "E0320", brace, "{construction} construction uses `{path}{{…}}`, not `{path}.{{…}}`", "literal heads place no dot before their brace", "write `{path}{{…}}`")
                 expression = parser_parse_typed_literal_body(&state, Val(Type.Named{name: path}), expression.span, depth + 1)
                 next
             }
@@ -1829,28 +1697,11 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 next
             }
             if parser_current_kind(&state) != TOKEN_RPAREN {
-                parser_add_fatal_code(&state, "E-ERR-PROPAGATE", operator.span, "Bare `?` propagation is retired.", "Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.", "remove the trailing `?`, or write `?(text)` to add one context frame.")
+                parser_add_fatal_code(&state, "E-ERR-PROPAGATE", operator.span, "A bare `?` has no meaning.", "Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.", "remove the trailing `?`, or write `?(text)` to add one context frame.")
                 break
             }
             span := parser_cover(expression.span, operator.span)
             expression = ParsedExpr{expr: Expr.Try{value: expression.expr, span: span, conversion: TryConvert.NoConversion, context: None}, span: span}
-            next
-        }
-        if kind == TOKEN_PLUS_PLUS || kind == TOKEN_MINUS_MINUS {
-            operator :: parser_bump(&state)
-            following :: parser_current_kind(&state)
-            if following == TOKEN_IDENT || following == TOKEN_INT || following == TOKEN_FLOAT || following == TOKEN_LPAREN || following == TOKEN_SELF {
-                // `a--b` / `a++b`: never read as a silent double sign.
-                sign :: if operator.kind == TOKEN_PLUS_PLUS -> "+" else -> "-"
-                spelling :: "{sign}{sign}"
-                parser_add_error_code(&state, "E0160", operator.span, "`{spelling}` is not a Jet operator", "Jet retired `++` and `--`; reading `a{spelling}b` as `a {sign} {sign}b` would hide a sign inside an operator", "write `a {sign} {sign}b` with a space, or `a {sign} b` if one sign was meant")
-                right :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, false)
-                span := parser_cover(expression.span, right.span)
-                op :: if operator.kind == TOKEN_PLUS_PLUS -> BinOp.Add else -> BinOp.Sub
-                expression = ParsedExpr{expr: Expr.Binary{op: op, left: expression.expr, right: right.expr, span: span}, span: span}
-                next
-            }
-            parser_report_retired_step(&state, operator, expression.expr, parser_cover(expression.span, operator.span), expression.span.start, false)
             next
         }
         break
@@ -1893,43 +1744,6 @@ fn parser_parse_call_type_args(state: &JetParserState, depth: Int) -> [Type] {
     }
     _ := parser_type_gt_span(&state)
     args
-}
-
-// This rule is retired (owner decision 2026-09-28): `x += 1` / `x -= 1` (S17) is
-// the one spelling. `++`/`--` stay lexer tokens only so this one teaching
-// diagnostic fires instead of `--x` parsing as a double negation. The parser
-// keeps the operand for recovery. A step that is its whole statement gets a
-// Safe compound-assignment edit; a step inside an expression must be hoisted
-// into its own statement by hand, preserving the read order.
-fn parser_report_retired_step(state: &JetParserState, operator: Token, operand: Expr, whole: Span, starts_at: Int, prefix: Bool) {
-    state.retired_step = Val(whole)
-    increment :: operator.kind == TOKEN_PLUS_PLUS
-    spelling :: if increment -> "++" else -> "--"
-    compound :: if increment -> "+=" else -> "-="
-    place :: parser_retired_step_place(operand) ?? "x"
-    following :: parser_current_kind(&state)
-    whole_statement :: starts_at == state.statement_start && (following == TOKEN_SEMI || following == TOKEN_RBRACE || following == TOKEN_EOF)
-    replacement :: "{place} {compound} 1"
-    why :: "Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another"
-    if whole_statement && parser_retired_step_place(operand) != None {
-        diagnostic :: diagnostic_from_registry("E0160", Val(whole), "`{spelling}` is not a Jet operator", why, "write `{replacement}`")
-        &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: whole, new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
-        return
-    }
-    fix :: if prefix -> "write `{replacement}` as its own statement before this line, then use `{place}` here" else -> "use `{place}` here, then write `{replacement}` as its own statement after this line"
-    parser_add_error_code(&state, "E0160", whole, "`{spelling}` is not a Jet operator", why, fix)
-}
-
-fn parser_retired_step_place(operand: Expr) -> String? {
-    if operand == {
-        .Ident(name, _) -> return Val(name)
-        .Field(base, member, _) -> {
-            base_text :: parser_retired_step_place(base) ?? return None
-            return Val("{base_text}.{member}")
-        }
-        .Paren(inner, _) -> return parser_retired_step_place(inner)
-        else -> return None
-    }
 }
 
 // True when a projection chain passes

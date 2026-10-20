@@ -763,7 +763,7 @@ fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String,
         // one registration entry for function, method, struct, enum and alias
         // generics, and never registered as a type parameter.
         if parameter.prep != None {
-            &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet", "`<prep N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout (D-CONSTGEN1) are not implemented", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship"))
+            &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet", "`<prep N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship"))
             next
         }
         duplicate :: loop previous in params {
@@ -1900,7 +1900,7 @@ fn sema_registration_value_type_rules(module_row: SemaRegistrationModule, item: 
         }
         .TypeAlias(definition) -> {
             if definition.type_params.len() == 0 && !(definition.target == .Named(_)) {
-                &diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `alias Name<T> :: …`", "transparent `alias` is only for shortening generic spellings (D-TYPEALIAS1)", "for a distinct type name over a primitive, use `struct Name(BaseType)` instead"))
+                &diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `alias Name<T> :: …`", "transparent `alias` is only for shortening generic spellings", "for a distinct type name over a primitive, use `struct Name(BaseType)` instead"))
                 return false
             }
         }

@@ -53,11 +53,6 @@ fn pc_semicolon(source: String, replacement: String) {
 }
 
 fn pc_module_markers() {
-    retired :: parse_source("#Extern module c.sample {{ }}".bytes())
-    pc_require(retired.diagnostics.len() == 1 && retired.diagnostics[0].code == "E0060", "Extern teaches Import")
-    pc_require(retired.diagnostics[0].fix.contains("#Import"), "Extern replacement agrees with registry")
-    pc_require(retired.program.items.len() == 1, "Extern recovery keeps the module")
-    pc_require(if retired.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Extern else -> false, "Extern recovery is an import, not Bindgen")
     active :: parse_source("#Import module c.sqlite3 {{ fn close(database: U64) -> I32 = \"sqlite3_close\" }}\nfn run() {{}}\n".bytes())
     pc_require(active.diagnostics.len() == 0, "canonical module import is active")
     pc_require(active.program.items.len() == 2, "C module heads precede unattached library file rules")

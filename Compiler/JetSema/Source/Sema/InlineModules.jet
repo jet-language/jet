@@ -1287,7 +1287,7 @@ fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, 
                         if declared == {
                             .Val(export) -> {
                                 fix :: if export.symbol.kind == SymbolKind.Function -> "import it from inside its enclosing module, or remove `priv` from its module" else -> "import it from inside its enclosing module, or remove `priv` from its module"
-                                &diagnostics.push(sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)", fix))
+                                &diagnostics.push(sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "an item of a `priv module` is usable only by its enclosing module", fix))
                             }
                             .None -> &diagnostics.push(sema_error("E0611", module_alias_span, "`{original}` is not defined in module `{module_alias}`", "check the module for the item you are importing", "make sure the name is spelled correctly"))
                         }

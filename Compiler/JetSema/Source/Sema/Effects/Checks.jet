@@ -1172,7 +1172,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                     if nondeterministic == .Val(api) {
                         // Rust returns before recording the call's effects, so
                         // the pure function reports E3403 instead of E3401.
-                        &diagnostics.push(sema_error("E3403", expression.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine (D-PURE2).", "remove this call, or remove the enclosing function's explicit empty effect bound."))
+                        &diagnostics.push(sema_error("E3403", expression.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else {
                         if !sema_effect_record_static_dispatch(&nodes, facts, node_index, expression, value) {
                             sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)

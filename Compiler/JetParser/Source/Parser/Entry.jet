@@ -298,7 +298,7 @@ struct ParserChunkOutput {
 // keywords, the visibility words and a `#` marker run (whose item follows
 // inside the same chunk, since `parser_hash_leads_to_item` reads it there).
 fn parser_chunk_head_kind(kind: Int) -> Bool Never! {
-    parser_is_item_keyword(kind) || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME || kind == TOKEN_HASH
+    parser_is_item_keyword(kind) || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_HASH
 }
 
 // The chunk bounds for the admitted threads: `[0, c1, …, tokens.len()]`, or
@@ -308,8 +308,7 @@ fn parser_chunk_head_kind(kind: Int) -> Bool Never! {
 // previous chunk ends exactly where the one-thread parse finishes that item
 // (parser_finish_statement consumed the terminator) and the next begins
 // where its item loop would. The stream stays whole when the parser reads
-// whole-file state: an authored `;` (E0373 reports once per file), a `@`
-// mark (parser_reads_retired_constant scans every token), a file rule
+// whole-file state: an authored `;` (E0373 reports once per file), a file rule
 // (`#PubFile`, `#NoPrelude`, `#HTML`, `#Target`, `#Policy` set program
 // fields that later rules read), or unbalanced delimiters.
 fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threads: CompilerThreads) -> [Int] Never! {
@@ -368,10 +367,8 @@ fn parser_chunk_scan(tokens: [Token], source: [U8], file_rules: [Int], from: Int
             previous = kind
             next
         }
-        if kind == TOKEN_AT -> return whole
         if kind == TOKEN_IDENT {
             start :: tokens[index].span.start
-            if start >= 0 && start < source.len() && source[start] == (U8{64}) -> return whole
             if (hash_ahead || (marker_list && depth == 1 && (previous == TOKEN_LBRACKET || previous == TOKEN_COMMA || previous == TOKEN_BANG))) && file_rules.contains(name_index(tokens[index].decoded)) -> return whole
         }
         if terminated && depth == 0 && parser_chunk_head_kind(kind) -> &candidates.push(index)
@@ -800,11 +797,10 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         if parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
         if {
-            // A top-level `@` other than the
-            // retired `@loop` head is a misspelled applied rule.
-            parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) != TOKEN_KW_LOOP -> {
+            // A top-level `@` is a misspelled applied rule.
+            parser_current_kind(&state) == TOKEN_AT -> {
                 at :: parser_bump(&state)
-                parser_add_error_code(&state, "E0063", at.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
+                parser_add_error_code(&state, "E0063", at.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator", "replace the leading `@` with `#`")
                 parser_sync_top(&state)
             }
             parser_user_policy_ahead(&state) -> {
@@ -1056,7 +1052,6 @@ fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: M
             page :: values[0] ?? return
             program.html_path = parser_html_page_path(page)
         }
-        "Html" -> parser_add_error_code(&state, "E0927", marker.name_span, "`#Html` is retired", "the registry keeps this old spelling only to teach its replacement; it no longer applies a rule", "write `#HTML` instead")
         else -> {}
     }
 }
@@ -1170,34 +1165,19 @@ fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
     token :: parser_current(&state)
     if {
-        parser_known_ahead_at(&state, 0) -> true
-        parser_comptime_const_ahead(&state, 0) -> true
         parser_item_declaration_ahead_at(&state, 0) -> true
         parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
-        kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME -> true
+        kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> true
         token.kind == TOKEN_IDENT && parser_value(state, token) == "alias" -> true
         token.kind == TOKEN_IDENT && parser_value(state, token) == "private" -> parser_foreign_private_ahead(&state)
-        token.kind == TOKEN_IDENT && parser_value(state, token) == "sanitizer" -> parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_kind_at(&state, 1) == TOKEN_KW_PUB
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
     }
 }
 
 fn parser_is_item_keyword(kind: Int) -> Bool Never! {
-    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_CONST || kind == TOKEN_KW_USE || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EXTERN || kind == TOKEN_KW_DERIVE
-}
-
-fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
-    parser_kind_at(&state, offset) == TOKEN_AT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON_COLON
-}
-
-// Rust `at_known_lead`: only the unqualified, non-negated retired marker.
-fn parser_known_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
-    parser_kind_at(&state, offset) == TOKEN_HASH &&
-    parser_kind_at(&state, offset + 1) == TOKEN_IDENT &&
-    parser_value_at(&state, offset + 1) == "Known" &&
-    parser_kind_at(&state, offset + 2) != TOKEN_DOT
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_USE || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EXTERN || kind == TOKEN_KW_DERIVE
 }
 
 // + owner ruling (2026-09-30): an immutable module binding
@@ -1226,61 +1206,17 @@ fn parser_fact_root(name: String) -> Bool Never! {
 fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: Span) {
     body :: if name.starts_with("$") -> name.slice(1..<name.len()) else -> name
     if body != "" && parser_constant_name(body) {
-        parser_add_error(&state, span, "`$NAME` is an environment read for config surfaces only", "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
+        parser_add_error(&state, span, "`$NAME` is an environment read for config surfaces only", "Jet reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
         return
     }
-    parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+    parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
 }
 
-// After `#Static` / `#Inline`, a constant binding `NAME :: …`
-// (or a retired `@`-marked name, which E0388 respells) is a declaration.
+// After `#Static` / `#Inline`, a constant binding `NAME :: …` is a declaration.
 fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     token :: parser_lookahead(&state, offset)
     if token.kind != TOKEN_IDENT || parser_kind_at(&state, offset + 1) != TOKEN_COLON_COLON -> return false
-    name :: parser_value(state, token)
-    name.starts_with("@") || parser_constant_name(name)
-}
-
-// A retired `@`-marked constant read (or a declaration whose
-// value is already `prep { … }`) teaches E0388 with the behavior-preserving
-// respelling, and the parse continues under the plain name so each mention
-// reports once.
-fn parser_retire_const_mark(state: &JetParserState, token: Token) -> String {
-    name :: parser_value(state, token)
-    if !name.starts_with("@") -> return name
-    bytes :: name.bytes()
-    // A block-scope name stays an ordinary snake_case local; only a module
-    // constant is ALL_CAPS, so the mark is dropped and the case kept.
-    plain :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
-    diagnostic :: diagnostic_from_registry("E0388", Val(token.span), "`{name}` is retired; write `{plain}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{name}` with `{plain}`")
-    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: token.span, new_text: plain}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
-    plain
-}
-
-// A retired `@name :: value` declaration always meant
-// compile time, so E0388 teaches `name :: prep { value }` and the parse
-// continues under the plain name as that prepared binding.
-fn parser_retire_const_decl(state: &JetParserState, span: Span, old: String) -> String {
-    bytes :: old.bytes()
-    plain :: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
-    parser_add_error_code(&state, "E0388", span, "`{old}` is retired; write `{plain} :: prep {{ value }}`", "compile time is always explicit, `NAME :: prep {{ value }}`; prefix `@` now marks a live link", "replace `{old} :: value` with `{plain} :: prep {{ value }}`")
-    plain
-}
-
-// An `@`-marked read names a retired constant when the name under the mark
-// is ALL_CAPS or this file declares that marked name with `::`; a called
-// marked root is a retired metadata query, not a constant.
-fn parser_reads_retired_constant(state: &JetParserState) -> Bool Never! {
-    token :: parser_current(&state)
-    name :: parser_value(state, token)
-    if token.kind != TOKEN_IDENT || !name.starts_with("@") || parser_kind_at(&state, 1) == TOKEN_LPAREN -> return false
-    bytes :: name.bytes()
-    if parser_constant_name(String.from_bytes(bytes.slice(1, bytes.len())) ?? "") -> return true
-    loop index in 0..<state.tokens.len() {
-        candidate :: state.tokens[index]
-        if candidate.kind == TOKEN_IDENT && candidate.decoded == token.decoded && index + 1 < state.tokens.len() && state.tokens[index + 1].kind == TOKEN_COLON_COLON -> return true
-    }
-    false
+    parser_constant_name(parser_value(state, token))
 }
 
 // Rust `marker_sequence_leads_to_function`: newline terminators between the
@@ -1327,5 +1263,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_value_at(&state, offset) == "alias")
+    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV) || (kind == TOKEN_IDENT && parser_value_at(&state, offset) == "alias")
 }

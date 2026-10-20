@@ -896,7 +896,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         // Rust `check_switch`: only an all-pattern table can prove that one
         // arm always matches; a text or byte pattern is left to coverage.
         if !multi_head && !sema_stmt_switch_all_patterns(arms) && !sema_stmt_switch_has_text_or_bytes(arms) {
-            &diagnostics.push(sema_error("E0003", span, "this `if` needs an `else` arm", "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)", "add `else -> {{ ... }}` after the last arm"))
+            &diagnostics.push(sema_error("E0003", span, "this `if` needs an `else` arm", "mixed condition arms (or non-pattern arms) must always have a fallback", "add `else -> {{ ... }}` after the last arm"))
             return SemaStatementResult{value: [TStmt]{}, complete: false}
         }
         checked_conditions := [TExpr]{}
@@ -3027,7 +3027,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                                     &context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
                                 }
                                 else -> {
-                                    &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)", "use `{selected_field.name}` from inside its module, or remove `priv` from its module or field"))
+                                    &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{selected_field.name}` from inside its module, or remove `priv` from its module or field"))
                                     field_type = Val(Type.Int)
                                 }
                             }
@@ -4147,7 +4147,7 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
 fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
     forbidden := scopes.comptime_execution_depth > 0
     if forbidden {
-        &diagnostics.push(sema_error("E2914", span, "`#Reactive` can't run at comptime", "reactive effects subscribe to runtime signals and re-run when they change (D-REACTCORE1)", "move `#Reactive {{ … }}` out of the `comptime` block"))
+        &diagnostics.push(sema_error("E2914", span, "`#Reactive` can't run at comptime", "reactive effects subscribe to runtime signals and re-run when they change", "move `#Reactive {{ … }}` out of the `comptime` block"))
     }
     closure_body := body
     &closure_body.push(Stmt.Return{value: None, span: Span{start: span.end, end: span.end}})
@@ -6017,7 +6017,7 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     runtime_local := false
     sema_stmt_reads_runtime_local(condition, &runtime_local)
     if runtime_local {
-        &diagnostics.push(sema_error("E0989", cond_span, "this `prep if` condition can't be known at compile time", "a `prep if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments (D-WHEN1)", "prepare the value first: `flag :: prep {{ … }}`, then write `prep if flag {{ … }}`"))
+        &diagnostics.push(sema_error("E0989", cond_span, "this `prep if` condition can't be known at compile time", "a `prep if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag :: prep {{ … }}`, then write `prep if flag {{ … }}`"))
         return false
     }
     if sema_expr_unwrap_tag(condition.ty) != Type.Bool {
@@ -6106,7 +6106,7 @@ fn sema_stmt_check_prep_switch(subject: Expr, arms: [SwitchArm], else_body: [Stm
                 return false
             }
         }
-        &diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `prep if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2)", "write `prep if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        &diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `prep if … == {{ … }}` dispatch branches on `$build.os`", "`$build.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `prep if $build.os == {{ .Linux -> … .MacOS -> … .Windows -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
     active := ""

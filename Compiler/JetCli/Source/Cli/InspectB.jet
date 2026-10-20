@@ -151,27 +151,22 @@ struct JetCLIReservedEntry {
     note: String
 }
 
-// CLI.rs `TEACHING_RESERVED`
-// identifiers a user cannot bind because the lexer recognizes them only to
-// redirect to their current spelling.
+// Reserved words with no grammar rule: a user cannot bind them.
 JET_CLI_TEACHING_RESERVED :: [JetCLIReservedEntry]{
-    {spelling: "copy", kind: "teaching-reserved word", note: "retired; write `value.copy()` instead (E0991)"},
-    {spelling: "mut", kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)"},
-    {spelling: "take", kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method"},
-    {spelling: "const", kind: "teaching-reserved word", note: "retired; write `@name` instead (E0374)"},
-    {spelling: "unsafe", kind: "teaching-reserved word", note: "the foreign spelling; write `#Unsafe(\"reason\") {{ … }}` instead (E0031/E0003)"},
+    {spelling: "copy", kind: "reserved word", note: "a copy is the method `value.copy()`"},
+    {spelling: "const", kind: "reserved word", note: "a constant is `NAME :: value`"},
+    {spelling: "unsafe", kind: "reserved word", note: "the foreign spelling; write `#Unsafe(\"reason\") {{ … }}` instead (E0031/E0003)"},
 }
 
 // CLI.rs `RESERVED_SIGILS`: sigils with compiler meaning outside ordinary operators.
 JET_CLI_RESERVED_SIGILS :: [JetCLIReservedEntry]{
     {spelling: "::", kind: "sigil", note: "bind an immutable local"},
     {spelling: ":=", kind: "sigil", note: "bind a mutable local"},
-    {spelling: "&", kind: "sigil", note: "borrow for write (D-MEM1)"},
-    {spelling: "^", kind: "sigil", note: "take/move ownership (D-MEM1)"},
-    {spelling: "~", kind: "retired sigil", note: "retired as a prefix copy; write `value.copy()` instead (E0941, D-COPY-WORD1)"},
-    {spelling: "$", kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$sites:` (D-COMPILER-NS1)"},
-    {spelling: "<:", kind: "sigil", note: "open a statement-expansion fence (D-FENCE2)"},
-    {spelling: ":>", kind: "sigil", note: "close a statement-expansion fence (D-FENCE2)"},
+    {spelling: "&", kind: "sigil", note: "borrow for write"},
+    {spelling: "^", kind: "sigil", note: "take/move ownership"},
+    {spelling: "$", kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$sites:`"},
+    {spelling: "<:", kind: "sigil", note: "open a statement-expansion fence"},
+    {spelling: ":>", kind: "sigil", note: "close a statement-expansion fence"},
     {spelling: "...", kind: "sigil", note: "spread elements"},
 }
 
@@ -296,18 +291,13 @@ fn jet_cli_digest_marker_declaration(rule: TAppliedRule) -> String Never! {
         &fields.push("@scopes: [{scopes.join(", ")}]")
     }
     if rule.companion_site == .Val(companion) -> &fields.push("@companion: [{companion.rule}, .{companion.site}]")
-    if rule.status == .Retired(replacement) -> &fields.push("@retired: \"{jet_cli_digest_quote(replacement)}\"")
     "marker {rule.name}({fields.join(", ")})"
 }
 
 fn jet_cli_digest_marker_text(rules: [TAppliedRule]) -> String Never! {
-    out := "status\tname\tregistered declaration"
+    out := "name\tregistered declaration"
     loop rule in rules {
-        status :: if rule.status == {
-            .Active -> "active"
-            .Retired(_) -> "retired"
-        }
-        out = "{out}\n{status}\t{rule.name}\t{jet_cli_digest_marker_declaration(rule)}"
+        out = "{out}\n{rule.name}\t{jet_cli_digest_marker_declaration(rule)}"
     }
     out
 }
@@ -334,7 +324,6 @@ fn jet_cli_digest_diagnostic_text() -> String Never! {
     loop row in diagnostic_registry_rows() {
         status :: if row.status == {
             .Active -> "active"
-            .Retired -> "retired"
             .Reserved -> "reserved"
         }
         severity :: if row.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
@@ -407,13 +396,13 @@ fn jet_cli_llm_digest(color: Bool, json: Bool) -[FS, Env]> JetCLIDigestText Neve
     core_rules_body :: core_rules_lines.join("\n")
     marker_body :: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
     core_body :: "Use a module alias, then call an indexed item: `use core.term as term`; `term.print(\"hi\")`.\n\n```text\n{jet_cli_digest_core_module_text()}\n```"
-    diagnostic_body :: "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked retired or reserved are not current syntax.\n\n```text\n{jet_cli_digest_diagnostic_text()}\n```"
+    diagnostic_body :: "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked reserved are not current syntax.\n\n```text\n{jet_cli_digest_diagnostic_text()}\n```"
     sections :: [String]{
         "# Jet LLM surface digest",
         "",
         "Generated. Current compiler registries own markers, diagnostics, syntax names, and Core items.",
         "Read on demand with `jet inspect digest`; do not maintain a checked-in copy.",
-        "Use active rows only. Retired rows teach replacement; they are not valid current source.",
+        "Use active rows only.",
         "Write one current program. Do not invent aliases, legacy spellings, or library namespaces.",
         "",
         jet_cli_digest_section("First program", first_program_body),
@@ -735,7 +724,6 @@ fn jet_cli_require_inspect_root(start: String, hint: String, color: Bool) -[FS, 
         }
         .Err(error) -> return JetCLIInspectRoot.Refused{plan: JetCLIPlan.Diagnostics{file: JET_CLI_PACKAGE_FILE, source: "", report: error.diagnostic, color: color, notice: ""}}
     }
-    if jet_cli_find_stale_manifest(&cache, start) == .Val(report) -> return JetCLIInspectRoot.Refused{plan: jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{report}, false), JET_DRIVER_EXIT_USER_ERROR)}
     JetCLIInspectRoot.Refused{plan: jet_cli_done("", "{hint}\n", JET_DRIVER_EXIT_USER_ERROR)}
 }
 
@@ -873,7 +861,7 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
     positional :: jet_cli_inspect_positionals(args)
     dry_run :: args.contains("--dry-run")
     if positional.len() == 2 && positional[0] == "dry-run" {
-        return jet_cli_inspect_b_error("E2105", "`jet inspect codemod dry-run` is retired; use `jet inspect codemod <plan.json> --dry-run`", color, json, JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_inspect_b_error("E2105", "`jet inspect codemod dry-run` is not a command; use `jet inspect codemod <plan.json> --dry-run`", color, json, JET_DRIVER_EXIT_USER_ERROR)
     }
     object := String?{None}
     if {

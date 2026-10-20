@@ -28,7 +28,6 @@ use jet_lexer.[
     TOKEN_KW_ELSE,
     TOKEN_KW_IF,
     TOKEN_KW_LOOP,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LE,
@@ -81,7 +80,7 @@ fn parser_guard_table_has_statement_arm(state: JetParserState) -> Bool Never! {
     brackets := 0
     loop index < state.tokens.len() {
         kind :: state.tokens[index].kind
-        if braces == 1 && parens == 0 && brackets == 0 && (kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW) {
+        if braces == 1 && parens == 0 && brackets == 0 && (kind == TOKEN_UNIFIED_ARROW) {
             next_index := index + 1
             loop next_index < state.tokens.len() && parser_is_trivia(state.tokens[next_index].kind) -> next_index += 1
             next_kind :: if next_index < state.tokens.len() -> state.tokens[next_index].kind else -> TOKEN_EOF
@@ -136,7 +135,7 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
 // `->` introduces the body (`if ready -> stmt`), so `name ->` is no lambda.
 // `if` and `loop` reach `parser_parse_expression_form` from the prefix parser.
 fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
-    allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW || (parser_kind_at(&state, 1) == TOKEN_MINUS && parser_kind_at(&state, 2) == TOKEN_LBRACKET))
+    allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || (parser_kind_at(&state, 1) == TOKEN_MINUS && parser_kind_at(&state, 2) == TOKEN_LBRACKET))
 }
 
 fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {

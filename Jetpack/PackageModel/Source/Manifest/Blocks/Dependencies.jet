@@ -73,9 +73,9 @@ fn pkg_bad_dep_value(name: String, value: String) -> PackageParseError Never! {
 
 fn pkg_dep_ref_error(name: String, error: RefError) -> PackageParseError Never! {
     if error == {
-        .ProviderFirst(raw, replacement) -> PackageParseError.Composition("dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`")
-        .RetiredNixpkgs(raw, replacement) -> PackageParseError.Composition("dependency `{name}` uses the retired `nixpkgs` source spelling `{raw}`; write `{replacement}`")
-        .PathProviderRetired(raw, path) -> PackageParseError.Composition("dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`")
+        .ProviderFirst(raw, replacement) -> PackageParseError.Composition("dependency `{name}` puts the provider first in `{raw}`; write `{replacement}`")
+        .RetiredNixpkgs(raw, replacement) -> PackageParseError.Composition("dependency `{name}` names `nixpkgs` as its source in `{raw}`; write `{replacement}`")
+        .PathProviderRetired(raw, path) -> PackageParseError.Composition("dependency `{name}` uses a path-provider ref `{raw}`; write the bare path `{path}`")
         else -> PackageParseError.Composition("dependency `{name}`'s ref is invalid: {pkg_ref_error_debug(error)}")
     }
 }

@@ -69,13 +69,13 @@ fn pkg_authority_read_sorted_entries(directory: Directory, path: String, budget:
     Ok(entries)
 }
 
-// Whether `root` directly holds Jet source or a retired manifest name, the
-// only directories that may become authority roots during upward discovery.
+// Whether `root` directly holds Jet source, the only directories that may
+// become authority roots during upward discovery.
 fn pkg_authority_has_candidate(root: String) -[FS, Env]> Bool AuthorityError! {
     listed :: files.list_dir(root) ?? return Err(pkg_authority_map_io(root, err, true))
     loop entry in listed {
         is_source :: pkg_authority_extension(entry.name) == (Val(FILE_EXT))
-        if is_source || STALE_MANIFEST_NAMES.contains(entry.name) -> return Ok(true)
+        if is_source -> return Ok(true)
     }
     Ok(false)
 }

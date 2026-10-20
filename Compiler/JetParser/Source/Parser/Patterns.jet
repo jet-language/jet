@@ -32,7 +32,6 @@ use jet_lexer.[
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
-    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
@@ -427,7 +426,7 @@ fn parser_named_struct_pattern_ahead(state: &JetParserState) -> Bool Never! {
     if second == TOKEN_COLON || second == TOKEN_COMMA -> return true
     if second != TOKEN_RBRACE -> return false
     after :: parser_kind_at(&state, 4)
-    after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_LAMBDA_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
+    after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
 }
 
 // Rust `try_typed_pattern_str_body`: `[U8]{"…"}`, `[U8#N]{"…"}` or
@@ -515,7 +514,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
     }
     if start.kind == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, start.span, depth + 1, None)
     if start.kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-        parser_add_fatal_code(&state, "E0320", start.span, "inferred record patterns use `{{…}}`, not `.{{…}}`", "D-LIT-DOT1 drops the constructor dot from every literal head", "write `{{ kind: …, field, .. }}`")
+        parser_add_fatal_code(&state, "E0320", start.span, "inferred record patterns use `{{…}}`, not `.{{…}}`", "literal heads place no dot before their brace", "write `{{ kind: …, field, .. }}`")
         parser_bump(&state)
         return parser_parse_struct_pattern(&state, start.span, depth + 1, None)
     }
@@ -601,7 +600,7 @@ fn parser_bare_variant_head(state: &JetParserState) -> Bool Never! {
 
 fn parser_report_bare_variant(state: &JetParserState, token: Token, payload: String) {
     name :: parser_value(state, token)
-    parser_add_error_code(&state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)", "write `.{name}{payload}`")
+    parser_add_error_code(&state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call", "write `.{name}{payload}`")
 }
 
 fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {

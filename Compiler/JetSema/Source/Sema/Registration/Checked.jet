@@ -2068,18 +2068,6 @@ fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnos
     }
 }
 
-// Rust CheckerMarkers.rs a field `#Default(expr)` is
-// retired under its own registered code.
-fn sema_checked_validate_field_default_marker(definition: StructDef, diagnostics: &[Diagnostic]) {
-    loop field_index in 0..<definition.fields.len() {
-        loop marker in definition.fields[field_index].serde_markers {
-            if marker.name != "Default" -> next
-            &diagnostics.push(sema_error("E0375", marker.span, "`#Default` on a field is retired.", "Field absence and construction defaults ride the field's type as `field: T{{expr}}` (D-DEFAULT-SHAPE1=B).", "Write `field: T{{expr}}` instead of `#Default(expr)`."))
-            break
-        }
-    }
-}
-
 fn sema_checked_wire_style_valid(style: String?) -> Bool Never! {
     value :: style ?? return true
     if value == {
@@ -2612,7 +2600,6 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             ownership = sema_checked_ownership(single_use)
             sema_checked_validate_field_policy(value, &diagnostics)
             sema_checked_validate_patchable(value, &diagnostics)
-            sema_checked_validate_field_default_marker(value, &diagnostics)
             sema_checked_validate_layout(value, &diagnostics)
             fields :: sema_checked_struct_fields(graph, module_row, value, generic_params, &diagnostics)
             sema_checked_shared_cycles(graph, module_row.module_identity, nominal, value, &diagnostics)

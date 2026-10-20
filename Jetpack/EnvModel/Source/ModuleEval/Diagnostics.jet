@@ -20,7 +20,7 @@ fn envmodel_error(code: String, what: String, why: String, fix: String, span: Sp
 // E3402 (Rust Sema/Purity.rs `e3402`): ambient I/O or network access
 // attempted during a sandboxed package build or module-value evaluation.
 fn envmodel_e3402(call_name: String, span: Span?) -> Diagnostic Never! {
-    diagnostic_from_registry("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled (D-PURE2)", "compute this value at compile time or pass it in as a parameter")
+    diagnostic_from_registry("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled", "compute this value at compile time or pass it in as a parameter")
 }
 
 // E1242: a fleet or vmtest host references a system that no contribution
@@ -30,11 +30,11 @@ fn envmodel_fleet_unknown_system(fleet: String, host: String, system: String, kn
 }
 
 fn envmodel_bad_source_ref(ref_text: String, span: Span?) -> EnvModelEvalError Never! {
-    envmodel_error("E0968", "`{ref_text}` isn't a `target@provider` source ref or bare path", "D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare", "Write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`", span)
+    envmodel_error("E0968", "`{ref_text}` isn't a `target@provider` source ref or bare path", "Jet puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare", "Write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`", span)
 }
 
 fn envmodel_retired_nixpkgs_source_ref(ref_text: String, replacement: String, span: Span?) -> EnvModelEvalError Never! {
-    envmodel_error("E1317", "`{ref_text}` uses the retired `@nixpkgs` source spelling", "D-JPK-SNIXREUSE1 makes Jetpack the public package source; nixpkgs remains provenance in locks and receipts.", "write `{replacement}`.", span)
+    envmodel_error("E1317", "`{ref_text}` names `@nixpkgs` as its source", "Jet makes Jetpack the public package source; nixpkgs remains provenance in locks and receipts.", "write `{replacement}`.", span)
 }
 
 // E0969: an `imports:` discovery directive must be `find("<dir>")` with a
@@ -107,7 +107,7 @@ fn envmodel_image_bad_format(word: String, span: Span) -> EnvModelEvalError Neve
 
 // E0977: an `Image` with no `from:` field (U14).
 fn envmodel_image_missing_from(span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E0977", "This `Image` has no `from`", "D-JPK-IMAGE1: active Jetpack images are OCI containers built from a package; `system.*` disk images are frozen jetos research", "Add `from: packages.<name>` for an `.Oci` image", Val(span))
+    envmodel_error("E0977", "This `Image` has no `from`", "active Jetpack images are OCI containers built from a package; `system.*` disk images are frozen jetos research", "Add `from: packages.<name>` for an `.Oci` image", Val(span))
 }
 
 // E0977: an `Image` restates a field that is not an active `.Oci` field.
@@ -117,7 +117,7 @@ fn envmodel_image_restated_field(field: String, span: Span) -> EnvModelEvalError
 
 // E1266: an `Image`'s `kind:` doesn't name `.Oci`.
 fn envmodel_image_unknown_kind(word: String, span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E1266", "`{word}` isn't an image kind", "D-JPK-IMAGE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture", "write `kind: .Oci` for active Jetpack images", Val(span))
+    envmodel_error("E1266", "`{word}` isn't an image kind", "active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture", "write `kind: .Oci` for active Jetpack images", Val(span))
 }
 
 // E1266: an explicit or implied `kind:` disagrees with what this image's
@@ -127,20 +127,20 @@ fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalEr
     wants :: if kind == IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
     got :: if kind == IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
     status :: if kind == IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
-    envmodel_error("E1266", "`kind: .{kind}` doesn't match this image's `from:`", "D-JPK-IMAGE1: {status}; this `from:` names a `{got}`", "change `from:` to `{wants}`, or change `kind:` to match what `from:` names", Val(span))
+    envmodel_error("E1266", "`kind: .{kind}` doesn't match this image's `from:`", "{status}; this `from:` names a `{got}`", "change `from:` to `{wants}`, or change `kind:` to match what `from:` names", Val(span))
 }
 
 // E1267: an `.Oci` image's `from: packages.<name>` doesn't name a package
 // declared `executable` in this project's package manifest.
 fn envmodel_oci_from_non_executable(image: String, package: String, is_library: Bool) -> EnvModelEvalError Never! {
     why :: if is_library -> "`{package}` is declared `library` in `pkg.jet` — a library has no binary to containerize" else -> "`{package}` isn't declared in this project's `pkg.jet` `packages:` block"
-    envmodel_error("E1267", "the image `{image}` is built from a non-executable package `{package}`", "D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name an `executable` package — {why}", "declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package", None)
+    envmodel_error("E1267", "the image `{image}` is built from a non-executable package `{package}`", "an `.Oci` image's `from: packages.<name>` must name an `executable` package — {why}", "declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package", None)
 }
 
 // E1269: an `.Oci` image field is written, but not shaped the way
 // This rule spells it.
 fn envmodel_image_field_shape(field: String, expected: String, span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E1269", "`{field}` isn't shaped like {expected}", "D-JPK-IMAGE1: `{field}` is always written as {expected}", "rewrite `{field}:` as {expected}", Val(span))
+    envmodel_error("E1269", "`{field}` isn't shaped like {expected}", "`{field}` is always written as {expected}", "rewrite `{field}:` as {expected}", Val(span))
 }
 
 // Wrap a merge conflict (§6) as a user-facing diagnostic (I4).

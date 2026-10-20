@@ -214,7 +214,6 @@ fn marker_source_declaration(line: String) -> TAppliedRule Never! {
     inherits := false
     resolution := "SiteBound"
     companion_site := TAppliedRuleCompanionSite?{None}
-    status := TAppliedRuleStatus.Active
     loop entry in marker_source_split_top_level(marker_source_slice(rest, open + 1, close)) {
         colon :: marker_source_byte_index(entry, 58) ?? panic("marker parameter without `:` in {line}: {entry}")
         label :: marker_source_slice(entry, 0, colon).trim()
@@ -233,7 +232,6 @@ fn marker_source_declaration(line: String) -> TAppliedRule Never! {
                     if parts.len() != 2 -> panic("`$companion` reads `[Rule, .Site]` in {line}")
                     companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], line)})
                 }
-                "retired" -> status = TAppliedRuleStatus.Retired{replacement: marker_source_unquote(value, line)}
                 else -> panic("unknown marker fact `{label}` in {line}")
             }
             next
@@ -265,7 +263,6 @@ fn marker_source_declaration(line: String) -> TAppliedRule Never! {
         repeatable: repeatable,
         owns_menu: owns_menu,
         companion_site: companion_site,
-        status: status,
         inherits: inherits,
         resolution: resolution,
     }

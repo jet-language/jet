@@ -64,7 +64,6 @@ fn cli_load_project_plan(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, 
 
 fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cwd :: cli_current_dir()
-    if cli_reject_retired_jetpack_toml(cwd) == .Val(code) -> return Err(CLIError.Reported(code))
     dir :: cli_project_env_root(&cache, cwd)
     src :: files.read(EnvFile.path_in(dir)) ?? {
         theme.error("nothing to do", "no ref was given and there is no {ENV_FILE} here.", "try `jet run fastfetch@jetpack`, or `jet add <ref>` first.")

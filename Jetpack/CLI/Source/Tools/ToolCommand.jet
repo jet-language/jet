@@ -82,10 +82,6 @@ fn cli_cmd_tool(verification: &StoreVerification, theme: Theme, parsed: CLIParse
         theme.error("`jetpack tool` needs a verb", "verbs are: {TOOL_VERBS.join(", ")} — persistent PATH management.", "try `jetpack use ripgrep -- rg --version`.")
         return EXIT_USAGE
     }
-    if word == "run" {
-        theme.error_coded("E1353", "`jetpack tool run` is retired", "one mechanism owns ephemeral package shells and commands", "use `jetpack use <package> -- <command>`")
-        return EXIT_USAGE
-    }
     verb :: ToolVerb.parse(word) ?? {
         theme.error("`{word}` is not a jetpack tool verb", "`jetpack tool` verbs are: {TOOL_VERBS.join(", ")}.", "try `jetpack tool install <ref>`, `jetpack tool list`, or `jetpack tool uninstall <name>`.")
         return EXIT_USAGE

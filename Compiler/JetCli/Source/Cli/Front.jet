@@ -450,7 +450,7 @@ fn jet_cli_selected_root_or_cwd() -[FS, Env]> String Never! {
 // Source/main.rs `"gc"`: `gc report` (CmdGc.rs `run`) is the only subcommand.
 fn jet_cli_gc(argv: [String], args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     if args.len() < 2 {
-        return jet_cli_fail("E2101", "`gc` isn't a jet command", "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)", "run `jet clean`", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2101", "`jet gc` needs a subcommand", "`jet gc report` prints the automatic-promotion report; `jet clean` cleans the package store", "run `jet gc report`", color, JET_DRIVER_EXIT_USAGE)
     }
     if args[1] != "report" {
         return jet_cli_fail("E2101", "`{args[1]}` isn't a jet gc command", "jet gc currently exposes only the automatic-promotion report", "run `jet gc report`", color, JET_DRIVER_EXIT_USAGE)
@@ -1301,8 +1301,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
 
-    // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
-    if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
+    // Moved and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     // copy: `raw` stays with the caller (`raw` is a read parameter: no move out of it, E0201) and
     // the binding `argv` owns its own.
     argv := raw.copy()
@@ -1442,10 +1441,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
     }
 
-    if command == "jobs" && args.len() > 1 && !jet_argv.contains("--graph") && !jet_argv.contains("--status") && !jet_argv.contains("--explain") && !jet_cli_has(jet_argv, "--watch") {
-        name :: args[1]
-        return jet_cli_fail("E2101", "`jet jobs {name}` no longer runs a job", jet_cli_why("E2101"), "run `jet {name}`; `jet jobs` lists jobs", color, JET_DRIVER_EXIT_USAGE)
-    }
     if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan
     if command == {
         "help" -> {

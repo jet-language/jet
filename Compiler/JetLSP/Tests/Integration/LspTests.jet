@@ -107,37 +107,6 @@ use common.[Scratch]
     assert(status.success(), "LSP exited unsuccessfully: {status}")
 }
 
-// Rust: tests/lsp.rs:1009
-#Test("lsp_teaching_autocorrect_let_to_val") {
-    jet :: jet_bin()
-    if !jet.exists() -> return
-    _guard :: lock_lsp_process()
-    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
-    stdin := child.stdin.take().expect("stdin")
-    stdout := child.stdout.take().expect("stdout")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
-    init :: read_msg(&stdout)
-    assert(init.contains("textDocumentSync"), "init: {init}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
-    uri :: "file:///tmp/lsp_test_let.jet"
-    src :: "fn run() {{\n    let x = 1;\n}}\n"
-    open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(src)}}}}}}}"
-    send_msg(&stdin, open)
-    diag_msg :: read_msg(&stdout)
-    assert(diag_msg.contains("publishDiagnostics"), "expected publishDiagnostics, got: {diag_msg}")
-    assert(!diag_msg.contains("E0009") && !diag_msg.contains("E0985"), "old binding words must not produce migration diagnostics, got: {diag_msg}")
-    action_req :: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/codeAction\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":1,\"character\":4}},\"end\":{{\"line\":1,\"character\":7}}}},\"context\":{{\"diagnostics\":[]}}}}}}"
-    send_msg(&stdin, action_req)
-    actions :: read_msg(&stdout)
-    assert(!actions.contains("\"newText\":\"val\""), "the retired `val` token-swap quick-fix must be gone, got: {actions}")
-    assert(actions.contains("\"id\":2") && actions.contains("\"result\":[]"), "expected an empty codeAction result for old binding syntax, got: {actions}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{{}}}}")
-    _ :: read_msg(&stdout)
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
-    drop(^stdin)
-    _ :: child.wait()
-}
-
 // Rust: tests/lsp.rs:1091
 #Test("lsp_incremental_sync_range_edit_updates_document") {
     jet :: jet_bin()
@@ -160,7 +129,7 @@ use common.[Scratch]
     req :: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/semanticTokens/full\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}"
     send_msg(&stdin, req)
     diag :: read_msg(&stdout)
-    assert(diag.contains("publishDiagnostics") && !diag.contains("E0009") && !diag.contains("E0985"), "expected range edit to trigger ordinary diagnostics, got: {diag}")
+    assert(diag.contains("publishDiagnostics") && !diag.contains("E0009"), "expected range edit to trigger ordinary diagnostics, got: {diag}")
     tokens :: read_msg(&stdout)
     assert(tokens.contains("\"id\":2") && tokens.contains("\"data\""), "expected semantic token response after dirty flush, got: {tokens}")
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{{}}}}")

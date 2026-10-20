@@ -102,23 +102,6 @@ use std.process.[Command, Stdio]
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/lsp.rs:2046
-#Test("lsp_c_style_snippet_autocorrects") {
-    src :: "fn greet() {{\n    println(\"ok\");\n}}\n\nfn run() {{\n    count :: 1\n    println(\"hi\");\n}}\n"
-    diags :: check_document("snippet.jet", src)
-    assert(diags.iter().any(d -> d.code == "E0037"), "println -> print")
-    assert(diags.iter().all(d -> d.code != "E0008"), "def/func teaching is paused under D-S14-PAUSE")
-    edits := diags.iter().filter_map(d -> d.edit.clone()).collect()
-    edits.sort_by_key(e -> std.cmp.Reverse(e.span.start))
-    fixed := src
-    loop edit in edits { fixed = LSP.apply_edit(fixed, edit) }
-    assert(!fixed.contains("val count"))
-    // E0037 is still a live single-token fix.
-    assert(fixed.contains("print("))
-    assert(!fixed.contains("println("))
-    assert(fixed.contains("fn greet"))
-}
-
 // Rust: tests/lsp.rs:2158
 #Test("lsp_completion_returns_items") {
     jet :: jet_bin()

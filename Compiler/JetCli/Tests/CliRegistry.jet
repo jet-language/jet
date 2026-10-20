@@ -35,14 +35,6 @@ fn cli_registry_moved_commands() Never! {
                 cli_registry_require(jet_cli_moved_command(action.name) == .None, "install keeps its E0043 teaching")
                 next
             }
-            // A retired bare word hard-errors; it never
-            // teaches a grouped move and is never canonical.
-            if jet_cli_is_retired_root(action.name) {
-                cli_registry_require(!action.also_canonical_top_level, "retired {action.name} claims canonical")
-                cli_registry_require(!jet_cli_is_canonical_top_level(action.name), "retired {action.name} is canonical")
-                cli_registry_require(jet_cli_moved_command(action.name) == .None, "retired {action.name} teaches a move")
-                next
-            }
             if action.also_canonical_top_level || cli_registry_is_command(action.name) {
                 cli_registry_require(jet_cli_is_canonical_top_level(action.name), "{action.name} is canonical")
                 cli_registry_require(jet_cli_moved_command(action.name) == .None, "{action.name} is not moved")

@@ -313,7 +313,7 @@ fn envmodel_infer_provider_kind(reference: ProviderRef, base_dir: String) -[FS]>
         .Path -> {
             target :: pkg_split_channel_ref(reference.target).base
             directory :: if envmodel_source_files.is_absolute(target) -> target else -> envmodel_source_files.join(base_dir, target)
-            if envmodel_source_files.is_file(envmodel_source_files.join(directory, PACKAGE_FILE)) || envmodel_source_files.is_file(envmodel_source_files.join(directory, PAYLOAD_FILE)) -> ProviderKind.Core else -> ProviderKind.Nix
+            if envmodel_source_files.is_file(envmodel_source_files.join(directory, PACKAGE_FILE)) -> ProviderKind.Core else -> ProviderKind.Nix
         }
         .Github -> ProviderKind.Infer
         .Cran -> ProviderKind.Cran

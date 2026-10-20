@@ -77,7 +77,7 @@ fn provider_collect_canonical_packages(repo: String, members: [MemberRef], reque
 fn provider_collect_one_canonical_package(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
     if seen.contains(path) -> return
     &seen.push(path)
-    candidates :: [String]{files.join(path, PACKAGE_FILE), files.join(path, PAYLOAD_FILE)}
+    candidates :: [String]{files.join(path, PACKAGE_FILE)}
     marker := ""
     loop candidate in candidates {
         if marker == "" && files.is_file(candidate) -> marker = candidate
