@@ -1862,9 +1862,11 @@ fn jet_driver_find_module_import_target(
             if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else -> pascal_path = pascal
         }
         candidate_paths :: if module_path.len() > 0 -> [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"} else -> [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
+        // Only this lookup's own problems stop the fallbacks; earlier imports' errors don't.
+        lookup_start :: diagnostics.len()
         target := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, candidate_paths, &diagnostics, span)
         if target != None -> return target
-        if module_path.len() == 0 && !jet_driver_has_errors(diagnostics) {
+        if module_path.len() == 0 && diagnostics.len() == lookup_start {
             root_entry := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, [String]{"run.jet"}, &diagnostics, span)
             if root_entry != None -> return root_entry
             // A dependency package is one namespace; any member
