@@ -2962,14 +2962,16 @@ fn sema_registration_import_local(item: ImportedItem) -> String Never! {
 }
 
 fn sema_registration_direct_symbol(module_row: SemaRegistrationModule, name: String) -> SemaRegistrationExport? {
-    loop export in module_row.exports {
-        if export.name == name -> return Val(export)
-    }
+    // The module's own declarations first: they carry the live symbol (a constant's staged type
+    // lands on it after registration), while an export row holds a registration-time copy.
     loop index in 0..<module_row.symbols.len() {
         if module_row.symbols[index].name == name {
             declaration :: sema_registration_declaration_for_symbol(module_row, module_row.symbols[index])
             return Val(SemaRegistrationExport{name: name, symbol: module_row.symbols[index], declaration: declaration, source_module_identity: module_row.module_identity, visibility: module_row.symbols[index].visibility})
         }
+    }
+    loop export in module_row.exports {
+        if export.name == name -> return Val(export)
     }
     None
 }

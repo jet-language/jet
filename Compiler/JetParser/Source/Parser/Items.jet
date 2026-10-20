@@ -2065,6 +2065,8 @@ fn parser_module_binding_item(statement: Stmt, start: Span, end: Int) -> Item? {
         definition.ct = binding.ct
         definition.ty = binding.ty
         definition.mutable = binding.mutable
+        // Everything is public by default (S18), module bindings included.
+        definition.is_pub = true
         return Val(Item.Const{value: definition})
     }
     None
