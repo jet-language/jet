@@ -1,4 +1,4 @@
-// D-AUTHORITY-MODEL1=A, ported from jet_foundation::Authority: one rights
+// Ported from jet_foundation::Authority: one rights
 // tree, one holds relation, one application policy carrier.
 //
 // A rights set (Rust `Holds`, a `BTreeSet<String>`) is a sorted,
@@ -15,17 +15,17 @@ AUTHORITY_EFFECT_ROOTS :: prep { [String]{
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF :: prep { "Exec.Args" }
-// ApplicationAuthority::AMBIENT_BASIC_EFFECTS (D-AUTH-AMBIENT1=A): print,
+// ApplicationAuthority::AMBIENT_BASIC_EFFECTS print,
 // allocate, and read arguments. Never the `Exec` root.
 AUTHORITY_AMBIENT_BASIC_EFFECTS :: prep { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
 // ApplicationAuthority::APPLICATION_DEFAULT: the manifest-less policy source.
 AUTHORITY_APPLICATION_DEFAULT :: prep { "application default" }
 // ApplicationAuthority::PACKAGE_DEFAULT: a package.jet with no authority.holds.
 AUTHORITY_PACKAGE_DEFAULT :: prep { "package.jet default" }
-// The deny-only stop root (D-PANICROOT1).
+// The deny-only stop root.
 AUTHORITY_PANIC_ROOT :: prep { "Panic" }
 // jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
-// work, a deny-only leaf (D-AUTH-AMBIENT2=A).
+// work, a deny-only leaf.
 AUTHORITY_TIME_WAIT_LEAF :: prep { "Time.Wait" }
 
 // jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root and the
@@ -111,7 +111,7 @@ fn authority_parse_right(right: String) -> String? Never! {
     Val(root)
 }
 
-// D-EFFTREE1: a bound covers itself and every descendant in the rights tree.
+// A bound covers itself and every descendant in the rights tree.
 // Resource-qualified rights use `:` for hosts and paths (`FS.Read:/data`); a
 // qualified descendant must cross a `/` boundary, so `/data` does not cover
 // `/database`.
@@ -139,7 +139,7 @@ fn authority_answer(held: [String], denied: [String], right: String) -> Authorit
     AuthorityVerdict.Missing
 }
 
-// D-AUTHORITY-MODEL1: an inner scope may only tighten its parent's holds.
+// An inner scope may only tighten its parent's holds.
 fn authority_tighten(outer: [String], inner: [String]) -> Bool Never! {
     loop right in inner {
         if !authority_covers_any(outer, right) -> return false
@@ -216,7 +216,7 @@ struct CanonicalAuthority {
     }
 }
 
-// D-EFFECT-AUTHORITY1: the application boundary's one checked policy fact.
+// The application boundary's one checked policy fact.
 // Sema owns `required_effects`; the package loader owns the policy rows.
 struct ApplicationAuthority {
     required_effects: [String]
@@ -224,7 +224,7 @@ struct ApplicationAuthority {
     denied_effects: [String]
     authority: String
 
-    // D-AUTH-AMBIENT1=A: the manifest-less beginner basics.
+    // The manifest-less beginner basics.
     fn ambient_basics() -> ApplicationAuthority Never! {
         ApplicationAuthority.beginner_floor(AUTHORITY_APPLICATION_DEFAULT)
     }
@@ -254,7 +254,7 @@ struct ApplicationAuthority {
     }
 
     // The policy source is the manifest-less default, alone or widened by
-    // invocation flags (D-ECO-INLINEPACKAGE1).
+    // invocation flags.
     fn is_application_default(self) -> Bool Never! {
         self.authority.starts_with(AUTHORITY_APPLICATION_DEFAULT)
     }

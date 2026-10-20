@@ -39,7 +39,7 @@ fn store_test_remote_expectation() -> CacheExpectation Never! {
     envelope :: Envelope.for_output(out, "fastfetch@nixpkgs", "nix")
     recorded := store_record_verified(&verification, roots, "fastfetch", "2.1.0", "fastfetch@nixpkgs", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
     recorded.named_outputs["out"] = envelope.output_hash
-    // Name-and-version first, fingerprint last (D-PM1).
+    // Name-and-version first, fingerprint last.
     assert(recorded.id.starts_with("fastfetch-2.1.0-"))
     listed :: store_list(&verification, roots)
     assert_eq(listed.len(), 1)

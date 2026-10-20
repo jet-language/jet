@@ -65,7 +65,7 @@ fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, En
     pkg_ffi_build_bridge_full(RustBridgeBuild{entries: entries, needs: needs, authority_needs: [String]{}, handle_facts: [FFIHandleFact]{}, record_defs: CRecordDefinitions.empty(), link_closure: FFILinkClosure.empty(), native_link_args: [String]{}, selected_target: pkg_ffi_host_target(), project_root: None})
 }
 
-// The crypto helper crates (D-DEP-CRYPTO1 / D-PWHASH1 / D-CRYPTO-SUITE1).
+// The crypto helper crates.
 fn pkg_ffi_crypto_crate_specs() -> [FFICrateSpec] Never! {
     [FFICrateSpec]{FFI_AES_GCM_CRATE_SPEC, FFI_CHACHA_POLY_CRATE_SPEC, FFI_ED25519_CRATE_SPEC, FFI_ARGON2_CRATE_SPEC, FFI_SHA2_CRATE_SPEC, FFI_BLAKE3_CRATE_SPEC, FFI_HKDF_CRATE_SPEC, FFI_X25519_CRATE_SPEC, FFI_SUBTLE_CRATE_SPEC}
 }
@@ -236,7 +236,7 @@ fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, key: String, deps: [St
         if !handle_names.contains(fact.jet_name) -> &handle_names.push(fact.jet_name)
     }
     wrapper_source := pkg_ffi_emit_wrapper_lib_with_handles(entries, needs, handle_names, request.record_defs)
-    // D-PLUGIN-AUTHORITY1: the hidden host receives the checked package
+    // The hidden host receives the checked package
     // declaration as data; it never reparses package.jet or invents needs.
     if needs.plugin -> wrapper_source = "{wrapper_source}{pkg_ffi_plugin_authority_source(request.authority_needs)}"
     files.write(files.join(src_dir, "lib.rs"), wrapper_source) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI wrappers: {err}"))

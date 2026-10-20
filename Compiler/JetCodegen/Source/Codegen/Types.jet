@@ -1122,7 +1122,7 @@ JET_CODEGEN_COMPILER_OWNED_ENUMS :: prep { [JetCodegenCompilerOwnedEnum]{
     JetCodegenCompilerOwnedEnum{name: "WatchKind", variants: [String]{"Created", "Modified", "Removed", "Error", "Exited", "Ready"}},
     JetCodegenCompilerOwnedEnum{name: "NetReadyInterest", variants: [String]{"Read", "Write", "ReadWrite"}},
     JetCodegenCompilerOwnedEnum{name: "WsError", variants: [String]{"InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"}},
-    // D-REDUCE-VALUE1: the Core lane-reduction enum sema reads from the Core
+    // The Core lane-reduction enum sema reads from the Core
     // enum payload rows (no Core.jet declaration, no Rust COMPILER_OWNED_ENUMS
     // row: Rust lowers `v.reduce(.Op)` as a marker and never compiles Core
     // math's `reduce(op)`). The runtime pack does, so its `op == .Add` test,
@@ -1201,7 +1201,7 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         if variant == "SystemPlus" || variant == "CustomOnly" -> return jet_codegen_compiler_owned_single(Type.Named{name: "TLSRootCertificates"})
         return JetCodegenCompilerOwnedPayload.Unit
     }
-    // D-ENCSTREAM-SURFACE1=A: the canonical twelve DataEvent payloads are the
+    // The canonical twelve DataEvent payloads are the
     // generated Core payload rows (Rust core_types.rs data_event_payload).
     if name == "DataEvent" {
         payload :: core_enum_variant_payload(name, variant) ?? return JetCodegenCompilerOwnedPayload.Unit

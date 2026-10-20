@@ -87,7 +87,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
         resolved :: sema_call_materialize_defaults(params, binding, &checked_args, resolved_defaults, span, &diagnostics) ?? return None
         resolved_binding = resolved
     }
-    // D-CALLSITE-MARK1=A: a lambda that takes a capture with `^` runs once.
+    // A lambda that takes a capture with `^` runs once.
     sema_ownership_call_once_lambda(&state, callee, scopes)
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, "this function value", params, None, false, resolved_binding, &checked_args, environment, program, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     call_callee := callee_value

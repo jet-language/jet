@@ -1,6 +1,6 @@
 // The one structural reader of `package.jet` Package and Config carriers
 // (Package/mod.rs `parse_common` and its field readers). There is no second,
-// legacy-vocabulary parser (D-CONF-PLANE1).
+// legacy-vocabulary parser.
 
 impl PackageFacts {
     // Parse the canonical `package.jet` root shape, validating guarantees and
@@ -116,7 +116,7 @@ fn pkg_parse_common(text: String, origin: String, config: Bool) -> PackageFacts 
         }
         if binding == None -> binding = pkg_split_field(entry)
         found :: binding ?? {
-            // D-BUILDSCOPE1: the package's single `fn build` may live here.
+            // The package's single `fn build` may live here.
             if pkg_is_build_entry_decl(entry) -> next
             return Err(PackageParseError.MalformedField(entry))
         }
@@ -496,7 +496,7 @@ fn pkg_config_wrapper(text: String) -> ManifestEntry? PackageParseError! {
     Ok(Val(ManifestEntry{key: name, value: pkg_record_body(value, "Config")}))
 }
 
-// Whether a top-level manifest entry is the package's `fn build` (D-BUILDSCOPE1).
+// Whether a top-level manifest entry is the package's `fn build`.
 fn pkg_is_build_entry_decl(entry: String) -> Bool Never! {
     rest :: entry.trim_start()
     if !rest.starts_with("fn") -> return false

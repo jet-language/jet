@@ -7,23 +7,23 @@
 /// (and `pack.lock`); the manifest reshape chunk migrates the old paths.
 UNIFIED_LOCK_FILE :: ".jet/lock"
 
-/// Legacy migration source only. D-ECO-HANGARPATH1 moved the default Hangar to
+/// Legacy migration source only. Moved the default Hangar to
 /// the native per-user data path; this retired root-owned path is never used
 /// for new resolution.
 HANGAR_DIR :: "/etc/jet/hangar"
 
-/// D-ONCE-RETIRE1=C (ratified 2026-08-07): the old TOML config filename is
+/// (ratified 2026-08-07): the old TOML config filename is
 /// retained only as a migration sentinel. It is never parsed; the CLI emits
 /// E1225 and points users to the Jet-grammar files that replace its jobs.
 JETPACK_TOML :: "jetpack.toml"
 
-/// D-VERDICT-678-1, amended by D-ROLEFILE1 (ratified 2026-08-10): `run.jet`
+/// Amended by (ratified 2026-08-10): `run.jet`
 /// remains the ordinary zero-ceremony fallback source for `jet run`, but it
 /// is not a reserved command-role filename. The optional command home is
 /// `@run.jet`.
 DEFAULT_ENTRY_FILE :: "run.jet"
 
-/// D-ECO-INLINEPACKAGE1=A: one optional leading contextual Package carrier
+/// One optional leading contextual Package carrier
 /// may live in the entry source as `package { … }`. The word remains
 /// contextual so `pub(package)` keeps its existing visibility meaning.
 INLINE_PACKAGE_DECL :: "package"
@@ -31,7 +31,7 @@ INLINE_PACKAGE_DECL :: "package"
 /// Pre-ruling project entry name, retained only as a one-time migration sentinel.
 LEGACY_ENTRY_FILE :: "main.jet"
 
-/// D-ROLEFILE1=A (ratified 2026-08-10, card #1866): optional package-root
+/// (ratified 2026-08-10, card #1866): optional package-root
 /// command homes. The marked namespace is closed to these four command names;
 /// there is no command directory and no package/module role-file spelling.
 COMMAND_FILE_RUN :: "@run.jet"
@@ -49,22 +49,22 @@ COMMAND_ROLE_FILES :: [String]{
     COMMAND_FILE_TEST,
 }
 
-/// D-LIT-DOT1=B (ratified 2026-08-20): named struct construction `Type{ field: val }`.
+/// (ratified 2026-08-20): named struct construction `Type{ field: val }`.
 /// Inferred form (type from context): `{ field: val }` — no type name.
 /// The retired dotted forms (`.{…}`, `Type.{…}`) are compile errors (E0320).
-/// `jet fmt` still rewrites them. D-UITREE1 (ratified 2026-06-30): the same
+/// `jet fmt` still rewrites them. (ratified 2026-06-30): the same
 /// sigil also constructs a named-payload enum variant — `.Variant{ field: val }`
 /// / `Type.Variant{ field: val }` (S30 multi-field variants). No new token;
 /// `enum_lit_named_fields` in `Parser/Expressions.rs` parses `{` immediately
 /// after a leading-dot variant name.
-/// D-LIT-DOT1=B amends D-DOTCTOR3: the same `Type{ body }` head is universal —
+/// This rule amends the same `Type{ body }` head is universal —
 /// scalars (`U8{ 250 }`), lists (`[U8]{ 1, 2 }`), fixed arrays (`[U8#3]{ … }`),
 /// maps (`[String:Int]{}`), and one-expression assertions (`Int{ fetch_rows() }`).
-/// Body elaborates against the head; it never converts. Amends D-EMPTYLIT1:
+/// Body elaborates against the head; it never converts. Amends
 /// `[T]{}` is the explicit empty; bare `[]` stays contextual. No new token.
 OP_NAMED_CTOR :: "{{"
 
-/// D-VARIADIC1 (ratified 2026-06-27): spread/rest sigil — `name: ...T` variadic
+/// (ratified 2026-06-27): spread/rest sigil — `name: ...T` variadic
 /// parameters (last position only), `f(...xs)` call spread, `[...a, x, ...b]` list spread.
 SIGIL_SPREAD :: "..."
 
@@ -76,22 +76,22 @@ SIGIL_SPREAD :: "..."
 /// case — the parser resolves by position.
 ///
 /// `#` has a third job outside a type: the applied-rule prefix at a
-/// declaration/statement/expression target (D-VERDICT-732-1,
-/// `RULE_PREFIX`/`MARKER_PREFIX`). D-ONCE-HASH1=B keeps all three jobs on
+/// declaration/statement/expression target (
+/// `RULE_PREFIX`/`MARKER_PREFIX`). Keeps all three jobs on
 /// one token, disambiguated only by parser position.
 TYPE_FIXED_SIZE_SEP :: "#"
 
-/// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — declares a
+/// (ratified 2026-06-19): `UserId :: distinct Int` — declares a
 /// distinct type (a separate nominal type sharing the base's representation).
 /// Used in the value position of a `::` immutable binding at item level;
 /// `distinct`-over-`distinct` chaining is rejected in v1.
 KW_DISTINCT :: "distinct"
 
-/// D-DIST3 (ratified 2026-06-20): unwrap method for a distinct type —
+/// (ratified 2026-06-20): unwrap method for a distinct type —
 /// `value.raw()` yields the base value. Named-cast family (S42).
 METHOD_DISTINCT_RAW :: "raw"
 
-/// D-FAIL-CARRIER1=A (ratified 2026-08-06): the one outcome carrier under `?T`
+/// (ratified 2026-08-06): the one outcome carrier under `?T`
 /// and `T !E`. Optional and fallible spellings are distinct; these are the
 /// three reads that reach the carrier's facts.
 ///
@@ -100,7 +100,7 @@ METHOD_DISTINCT_RAW :: "raw"
 /// payload a failure kept and `.notes()` reads what it had to say. Both live on
 /// the outcome value: an error type opts in by carrying them on its report
 /// under the field names below. Writing a note as a `?` hop travels with the
-/// journey and belongs to D-FAIL-CTX1, not here.
+/// journey and belongs to not here.
 METHOD_OUTCOME_OR_ERR :: "or_err"
 
 METHOD_OUTCOME_PARTIAL :: "partial"
@@ -112,18 +112,18 @@ FIELD_OUTCOME_PARTIAL :: "partial"
 
 FIELD_OUTCOME_NOTES :: "notes"
 
-/// D-SHAPE-PLACE1=A (supersedes D-DYNARRAY1): retired `.view(a..b)` method
+/// (supersedes): retired `.view(a..b)` method
 /// name, retained only so parser recovery can emit E0214 and point at the bare
 /// range-place spelling. #567 removes the remaining collection plumbing.
 METHOD_VIEW :: "view"
 
-/// D-CALLVALUE1=B (ratified 2026-08-05): the callable projection for a
+/// (ratified 2026-08-05): the callable projection for a
 /// returned, stored, or otherwise function-valued expression. Sema recognizes
 /// `.call(…)` on function values; a member named `call` on a struct shadows it.
 METHOD_CALL :: "call"
 
-/// D-SHIFT1 (ratified 2026-07-01, c7shift): `cursor.take_pattern("…")` reuses
-/// the D-PARSESTR1 interpolation-literal-as-pattern grammar (`{hole}` /
+/// (ratified 2026-07-01, c7shift): `cursor.take_pattern("…")` reuses
+/// the interpolation-literal-as-pattern grammar (`{hole}` /
 /// `{hole:Type}`), but a typed hole isn't a legal ordinary interpolation
 /// value expression, so the string-literal argument in THIS ONE call
 /// position is parsed as a pattern (`try_str_match_pattern`'s engine, reused
@@ -132,42 +132,42 @@ METHOD_CALL :: "call"
 /// argument shape, no second call-argument grammar.
 METHOD_TAKE_PATTERN :: "take_pattern"
 
-/// D-BYTELIT1=B (ratified 2026-08-27, card #2265): byte text reuses the
+/// (ratified 2026-08-27, card #2265): byte text reuses the
 /// existing typed collection head `[U8]{ "..." }`. ASCII text contributes one
 /// byte per character; `\xNN` contributes the written byte. No `b` prefix is
 /// added.
-/// D-BINPAT1 / D-UNIFYLIT1=A: binary patterns use typed head `[U8]{"…"}`
-/// (byte-mode sibling of D-PARSESTR1 string patterns). Each `{name:U4}` hole
+/// Binary patterns use typed head `[U8]{"…"}`
+/// (byte-mode sibling of string patterns). Each `{name:U4}` hole
 /// reads a fixed-width bit field; an endian suffix (`be`/`le`) picks byte
 /// order on a multi-byte read; a final `{name:...}` captures remaining bytes.
 /// Byte values use the typed list head above; this pattern form remains
 /// distinct because its body contains holes.
-/// D-BINPAT1: multi-byte big-endian read suffix — `{len:U16be}`.
+/// Multi-byte big-endian read suffix — `{len:U16be}`.
 BINPAT_ENDIAN_BIG :: "be"
 
-/// D-BINPAT1: multi-byte little-endian read suffix — `{len:U16le}`.
+/// Multi-byte little-endian read suffix — `{len:U16le}`.
 BINPAT_ENDIAN_LITTLE :: "le"
 
-/// D-DIST3 / D-CAPBUNDLE1 / D-VERDICT-732-1 (formerly D-MARKERMOVE1=B):
+/// (formerly):
 /// `#Numeric` marker enables same-type arithmetic on a distinct type.
 /// Written `#Numeric` on the same line before the distinct-type name (the
-/// sole `#` rule prefix, D-VERDICT-732-1). This is the single merged
+/// sole `#` rule prefix). This is the single merged
 /// spelling for what used to be two markers doing the same job — the
-/// `#Numeric` distinct-type marker (D-DIST3) and the formerly-`@numeric`
-/// capability bundle (D-CAPBUNDLE1) — folded per D-VERDICT-732-1 (I8: one
+/// `#Numeric` distinct-type marker and the formerly-`@numeric`
+/// capability bundle — folded per (I8: one
 /// way to mean it). `MARKER_BUNDLE_NUMERIC` no longer exists as a separate
 /// constant; use this one.
 MARKER_NUMERIC :: "Numeric"
 
-/// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
+/// (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
 /// declares a family of units. Each member mints one distinct `#Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
 /// (`fn subtotal(price: Usd, qty: Int) Usd`). The family is the
-/// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
-/// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
+/// "upgrade to " framing of sugar over the distinct-type
+/// machinery. PascalCase tag per.
 MARKER_UNIT_FAMILY :: "UnitFamily"
 
-/// D-QUANTITY-DECL1=A (card #603): contextual fields in `#UnitFamily`.
+/// (card #603): contextual fields in `#UnitFamily`.
 UNIT_FAMILY_BASE_FIELD :: "base"
 
 UNIT_FAMILY_DIMENSION_FIELD :: "dimension"
@@ -176,49 +176,49 @@ UNIT_FAMILY_SCALE_FIELD :: "scale"
 
 UNIT_FAMILY_OFFSET_FIELD :: "offset"
 
-/// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
+/// (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
 /// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
-MARKER_PUBLISHED_SCHEMA :: "PublishedSchema" // D-MIGRATE1
+MARKER_PUBLISHED_SCHEMA :: "PublishedSchema"
 
-/// D-BOUND-EVOLVE1=A: compiler-owned storage for the original ordered wire
+/// Compiler-owned storage for the original ordered wire
 /// object. This is an emitted field, not a user-facing source spelling.
 PUBLISHED_UNKNOWN_FIELDS :: "__jet_unknown_fields"
 
-/// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
+/// (ratified 2026-06-21, option A; gated on): `#SingleUse` — marks
 /// a type whose values must be consumed exactly once on every reachable path
 /// (moved to a `^` parameter or returned). Using one zero times is E0140
 /// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
 /// with `&`/`view` is E0142. `#SingleUse` values are move-only. The tag is
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
 /// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
-MARKER_SINGLE_USE :: "SingleUse" // D-LIN1
+MARKER_SINGLE_USE :: "SingleUse"
 
-/// D-REPLAY1: `#Replayable fn` marks a function whose reachable effects must be
+/// `#Replayable fn` marks a function whose reachable effects must be
 /// deterministic by default. Ambient `Time`/`Rand`/`Net`/`IO` are rejected unless
 /// the work is routed through explicit deterministic/mockable capabilities.
 MARKER_REPLAYABLE :: "Replayable"
 
-/// D-MUSTUSE1 (c18iwxqx): `#MustUse` — marks a type, function, or method whose
+/// (c18iwxqx): `#MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
-/// Explicit discard uses `.drop("reason")` only (D-IGNORERET2, amended by
-/// D-MARK-DISCARD1=A). Compile-time only; erases in codegen (I3).
-MARKER_MUST_USE :: "MustUse" // D-MUSTUSE1
+/// Explicit discard uses `.drop("reason")` only (amended by
+/// ). Compile-time only; erases in codegen (I3).
+MARKER_MUST_USE :: "MustUse"
 
-/// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
+/// (ratified 2026-06-22): contextual keyword `migration` — introduces
 /// a migration block that declares how a `#PublishedSchema` struct changed between
 /// releases. Used as `migration TypeName { rename old -> new }`.
-/// D-VALIDATE1 (ratified 2026-07-12, card #506): contextual keyword `validate`
+/// (ratified 2026-07-12, card #506): contextual keyword `validate`
 /// — introduces the in-body `validate { … }` block inside a struct definition
 /// (S82 in-body grammar). Rules are `check(cond, at: field, "msg")`
 /// statements; sema resolves `field` as a bare sibling reference
-/// (D-FIELDPOL1) and purity-checks `cond`/`msg` (reuses the `#Pre`/`#Post`
+/// and purity-checks `cond`/`msg` (reuses the `#Pre`/`#Post`
 /// checker). Failing `check`s accumulate into `[FieldError]`; `decode<T>()`
 /// runs the block automatically on a successfully shape-decoded value, and
 /// `Type.validate(value)` runs it standalone. `Validate.over(s)` is the
 /// use-site escape for rules needing outside context.
-KW_VALIDATE_BLOCK :: "validate" // D-VALIDATE1
+KW_VALIDATE_BLOCK :: "validate"
 
-/// D-VALIDATE1: the outside-context validation builder keeps the one
+/// The outside-context validation builder keeps the one
 /// `check(…, at: field, …)` rule vocabulary while remaining compiler-owned.
 TYPE_VALIDATE :: "Validate"
 
@@ -226,92 +226,92 @@ TYPE_VALIDATE_BUILDER :: "__JetValidate"
 
 INTERNAL_VALIDATE_OVER :: String.from_bytes([U8]{0, 106, 101, 116, 46, 118, 97, 108, 105, 100, 97, 116, 101, 46, 111, 118, 101, 114})
 
-/// D-FOUND-RECEIPT1: compiler-owned ambient receipt handle and its one public
+/// Compiler-owned ambient receipt handle and its one public
 /// attachment method. The handle has no source constructor or module export.
 INTERNAL_RECEIPT_HANDLE :: String.from_bytes([U8]{0, 106, 101, 116, 46, 114, 101, 99, 101, 105, 112, 116, 46, 104, 97, 110, 100, 108, 101})
 
 METHOD_RECEIPT_ATTACH :: "attach"
 
-/// D-QUERY-RETAIN1=A / D-SQL-SURFACE1: the checked-SQL list door `[T].query(SQL)`
+/// The checked-SQL list door `[T].query(SQL)`
 /// is a receiver row keyed by this compiler-owned handle. The public spelling
 /// stays `query`; `jet_data_query_sql` is never exported or documented.
 INTERNAL_LIST_QUERY_HANDLE :: String.from_bytes([U8]{0, 106, 101, 116, 46, 113, 117, 101, 114, 121, 46, 108, 105, 115, 116})
 
-/// D-VALIDATE1: the builtin call name inside a `validate { … }` block —
+/// The builtin call name inside a `validate { … }` block —
 /// `check(cond, at: field, "msg")` records one `FieldError { path, reason }`
 /// when `cond` is false. Contextual: recognized as this builtin only inside
 /// a `validate { … }` block; an ordinary function named `check` elsewhere is
 /// unaffected.
-VALIDATE_CHECK_FN :: "check" // D-VALIDATE1
+VALIDATE_CHECK_FN :: "check"
 
-KW_MIGRATION :: "migration" // D-MIGRATE1
+KW_MIGRATION :: "migration"
 
-/// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `rename` inside a
+/// (ratified 2026-06-22): contextual keyword `rename` inside a
 /// `migration { }` block — declares that field `old` was renamed to `new`.
-KW_RENAME :: "rename" // D-MIGRATE1
+KW_RENAME :: "rename"
 
-/// D-MIGRATE2A (ratified): `add f: T = default` inside a `migration { }` block —
+/// (ratified): `add f: T = default` inside a `migration { }` block —
 /// declares a new field plus the default old records are read with.
-KW_ADD :: "add" // D-MIGRATE2
+KW_ADD :: "add"
 
-/// D-MIGRATE2D (ratified): `remove f` inside a `migration { }` block — deletes a
+/// (ratified): `remove f` inside a `migration { }` block — deletes a
 /// field. The verb is `remove`, NOT `drop` (a `drop` op is taught back to this).
-KW_REMOVE :: "remove" // D-MIGRATE2
+KW_REMOVE :: "remove"
 
-/// D-MIGRATE2E, amended by D-ARROW-CONTROL1:
+/// Amended by
 /// `change f: Old -> New [via { … }]` inside a
 /// `migration { }` block — a field type change with an optional inline converter.
-KW_CHANGE :: "change" // D-MIGRATE2
+KW_CHANGE :: "change"
 
-/// D-MIGRATE2E (ratified): the `via { expr }` clause that supplies the inline
+/// (ratified): the `via { expr }` clause that supplies the inline
 /// converter for a `change` op
 /// (`change price: Int -> Usd via { c -> Usd.from_int(c) }`).
 ///
-/// D-EFF2 (ratified 2026-06-22): also the pass-through marker in a `#(via f)`
+/// (ratified 2026-06-22): also the pass-through marker in a `#(via f)`
 /// signature annotation — a function whose published effect set IS whatever the
 /// callback parameter `f` carries (a tight pass-through that holds when the value
 /// escapes, vs. the conservative flow-through default). Erased in codegen (I3).
-KW_VIA :: "via" // D-MIGRATE2 / D-EFF2
+KW_VIA :: "via"
 
-/// D-MIGRATE2F (ratified): the rejected `reorder` verb — field reordering is not
+/// (ratified): the rejected `reorder` verb — field reordering is not
 /// a tracked breaking change and needs no migration. Kept only to teach.
-KW_REORDER_RETIRED :: "reorder" // D-MIGRATE2F
+KW_REORDER_RETIRED :: "reorder"
 
-/// D-MIGRATE1: the `drop` verb a user might reach for instead of `remove` — kept
+/// The `drop` verb a user might reach for instead of `remove` — kept
 /// only to emit the E0911 teaching error pointing at `remove`.
-KW_DROP_RETIRED :: "drop" // D-MIGRATE2D
+KW_DROP_RETIRED :: "drop"
 
-/// D-MIGRATE2C (ratified): `jet inspect schema` subcommand and its verbs. `status`
+/// (ratified): `jet inspect schema` subcommand and its verbs. `status`
 /// reports each `#PublishedSchema` type's pinned shape; `squash --before <ver>`
 /// re-baselines snapshots to the current shape. There is NO `check` verb —
 /// `jet build`'s E0910 is already the CI gate.
-CMD_SCHEMA :: "schema" // D-MIGRATE2C
+CMD_SCHEMA :: "schema"
 
-SCHEMA_VERB_STATUS :: "status" // D-MIGRATE2C
+SCHEMA_VERB_STATUS :: "status"
 
-SCHEMA_VERB_SQUASH :: "squash" // D-MIGRATE2C
+SCHEMA_VERB_SQUASH :: "squash"
 
-/// D-CLAIM-BENCH1=A (ratified 2026-08-07, card #1641): measurement mode on
+/// (ratified 2026-08-07, card #1641): measurement mode on
 /// the one test verb.
 TEST_FLAG_MEASURE :: "--measure"
 
-/// D-RUN-WATCH1=A (ratified 2026-08-07, card #1641): one watch modifier on
+/// (ratified 2026-08-07, card #1641): one watch modifier on
 /// every runnable verb named by the ballot.
 RUN_FLAG_WATCH :: "--watch"
 
-/// D-RUN-PREPARE1=A (ratified 2026-09-05): refuse implicit Jetpack project
+/// (ratified 2026-09-05): refuse implicit Jetpack project
 /// preparation only when the caller explicitly opts out.
 RUN_FLAG_NO_PREPARE :: "--no-prepare"
 
-/// D-RUN-RECORD1=A (ratified 2026-08-07, card #1641): named replay recording
+/// (ratified 2026-08-07, card #1641): named replay recording
 /// producer on `run`, `dev`, and `test`.
 RUN_FLAG_RECORD :: "--record="
 
-/// D-RUN-RECORD1=A (ratified 2026-08-07, card #1641): named replay consumer
+/// (ratified 2026-08-07, card #1641): named replay consumer
 /// on `jet debug`.
 DEBUG_FLAG_REPLAY :: "--replay="
 
-/// D-RUN-SESSION1=A (ratified 2026-08-07, card #1641): exact resident-session
+/// (ratified 2026-08-07, card #1641): exact resident-session
 /// key bytes. The owner casing note applies to action labels, not these keys.
 SESSION_KEY_RERUN :: "r"
 
@@ -323,59 +323,59 @@ SESSION_KEY_FAILED_CLAIMS :: "f"
 
 SESSION_KEY_QUIT :: "q"
 
-/// D-DBG1 (ratified 2026-06-19 = A): `jet debug <file>` — the dedicated
+/// (ratified 2026-06-19 = A): `jet debug <file>` — the dedicated
 /// source-level debugger entry verb, parallel to `jet run`/`jet test`. The
 /// editor launches the same command.
-CMD_DEBUG :: "debug" // D-DBG1
+CMD_DEBUG :: "debug"
 
-/// D-DBG3 (ratified 2026-06-24 = A): the in-session `jet debug` command
+/// (ratified 2026-06-24 = A): the in-session `jet debug` command
 /// surface. The prompt is `(jet)`; the step verbs are lldb-familiar with
 /// single-letter aliases. Only Jet frames/lines/safe-locals are shown by
-/// default (I2; D-DBG2 `--raw-frames` is the expert carve-out).
-DBG_PROMPT :: "(jet)" // D-DBG3
+/// default (I2 `--raw-frames` is the expert carve-out).
+DBG_PROMPT :: "(jet)"
 
-DBG_STEP :: "step" // D-DBG3 (alias `s`)
+DBG_STEP :: "step" // (alias `s`)
 
-DBG_NEXT :: "next" // D-DBG3 (alias `n`)
+DBG_NEXT :: "next" // (alias `n`)
 
-DBG_CONTINUE :: "continue" // D-DBG3 (alias `c`)
+DBG_CONTINUE :: "continue" // (alias `c`)
 
-DBG_FINISH :: "finish" // D-DBG3 (alias `f`)
+DBG_FINISH :: "finish" // (alias `f`)
 
-DBG_BREAK :: "break" // D-DBG3 (alias `b`): set a line breakpoint
+DBG_BREAK :: "break" // (alias `b`): set a line breakpoint
 
-DBG_LIST :: "list" // D-DBG3 (alias `l`): show source around `here`
+DBG_LIST :: "list" // (alias `l`): show source around `here`
 
-DBG_PRINT :: "print" // D-DBG3 (alias `p`): show one local's value
+DBG_PRINT :: "print" // (alias `p`): show one local's value
 
-DBG_LOCALS :: "locals" // D-DBG3: dump all locals in the frame
+DBG_LOCALS :: "locals" // Dump all locals in the frame
 
-DBG_BACKTRACE :: "backtrace" // D-DBG3 (alias `bt`): the Jet call stack
+DBG_BACKTRACE :: "backtrace" // (alias `bt`): the Jet call stack
 
-DBG_WHY :: "why" // D-DEVR-CAUSE1=A: query recorded acts that produced a value
+DBG_WHY :: "why" // Query recorded acts that produced a value
 
-DBG_WHEN :: "when" // D-DEVR-CAUSE1=A: query recorded changes for a place
+DBG_WHEN :: "when" // Query recorded changes for a place
 
-DBG_HELP :: "help" // D-DBG3 (alias `h`): list the verbs
+DBG_HELP :: "help" // (alias `h`): list the verbs
 
-DBG_QUIT :: "quit" // D-DBG3 (alias `q`): end the session (E2204)
+DBG_QUIT :: "quit" // (alias `q`): end the session (E2204)
 
-DBG_BACK :: "back" // D-DX-DEBUGBACK1: reverse one statement
+DBG_BACK :: "back" // Reverse one statement
 
-DBG_REVERSE_CONTINUE :: "reverse-continue" // D-DX-DEBUGBACK1
+DBG_REVERSE_CONTINUE :: "reverse-continue"
 
-DBG_WATCH :: "watch" // D-DX-DEBUGBACK1
+DBG_WATCH :: "watch"
 
-DBG_UNWATCH :: "unwatch" // D-DX-DEBUGBACK1
+DBG_UNWATCH :: "unwatch"
 
-DBG_FIX :: "fix" // D-DX-DEBUGBACK1: checked source repair
+DBG_FIX :: "fix" // Checked source repair
 
-/// D-MIGRATE1 (ratified 2026-06-22): subdirectory under the project `.jet/`
+/// (ratified 2026-06-22): subdirectory under the project `.jet/`
 /// managed folder where schema snapshots are stored. Full path is
 /// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.
-SCHEMA_CACHE_SUBDIR :: "cache/schema" // D-MIGRATE1
+SCHEMA_CACHE_SUBDIR :: "cache/schema"
 
-/// S2/D-MEM1 (was c129/D-CAP4/D-CAP6/D-CAP8): subdirectory under the project
+/// S2 (was c129): subdirectory under the project
 /// `.jet/` managed folder where public-fn signature snapshots are stored.
 /// Full path is `<project_root>/.jet/cache/api/<package>.api`. Written at
 /// `jet registry publish` time, unconditionally, for every library target; read by the
@@ -383,13 +383,13 @@ SCHEMA_CACHE_SUBDIR :: "cache/schema" // D-MIGRATE1
 /// interface contract, not a build artifact.
 API_CACHE_SUBDIR :: "cache/api"
 
-/// D-DETACH1 (ratified; D-DETACH1 = A): consumes a Task handle without joining
+/// (ratified = A): consumes a Task handle without joining
 /// — fire-and-forget daemon semantics. Main may return while the task runs.
 /// Only valid on owned tasks; capturing a `view` borrow is rejected at spawn
 /// time (E1102) and flagged again at the detach site (E1103).
-TASK_DETACH :: "detach" // D-DETACH1
+TASK_DETACH :: "detach"
 
-/// D-REPRC1 (ratified; D-REPRC1 = B) / D-PLACE1=A / D-LAYOUT-ALIGN1=A:
+/// (ratified = B)
 /// `#Layout(…)` struct attribute controls the memory layout of the generated
 /// Rust struct. `#Layout(c)` stamps `#[repr(C)]` for C interop;
 /// `#Layout(c, align(N))` requests a portable profile-supported power-of-two
@@ -397,97 +397,97 @@ TASK_DETACH :: "detach" // D-DETACH1
 /// target profile for larger proven boundaries. Field order is preserved as
 /// written. Growable fields (`[T]`, `Map`, `String`) are rejected (E1104);
 /// unsupported or unproven alignment values are rejected by sema (E1119).
-/// PascalCase per D-MARKERCASE1=A.
-MARKER_LAYOUT :: "Layout" // D-REPRC1 / D-MARKERCASE1
+/// PascalCase per.
+MARKER_LAYOUT :: "Layout"
 
-/// D-REPRC1: the C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
-LAYOUT_C :: "c" // D-REPRC1
+/// The C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
+LAYOUT_C :: "c"
 
-/// D-REPRC1: `packed` and first-argument `align` remain reserved.
-LAYOUT_PACKED :: "packed" // D-REPRC1 (reserved)
+/// `packed` and first-argument `align` remain reserved.
+LAYOUT_PACKED :: "packed" // (reserved)
 
-/// D-PLACE1=A: explicit alignment is the second argument of `#Layout(c)`.
-LAYOUT_ALIGN :: "align" // D-PLACE1
+/// Explicit alignment is the second argument of `#Layout(c)`.
+LAYOUT_ALIGN :: "align"
 
-/// D-SOA1 / D-SOA2A=C (implemented): the struct-of-arrays layout variant —
+/// (implemented): the struct-of-arrays layout variant —
 /// `#Layout(columnar) struct S` stores a `[S]` collection column-per-field.
-/// Whole-struct only in v1 (D-SOA2B); the partial form `#Layout(columnar: …)`
+/// Whole-struct only in v1 the partial form `#Layout(columnar: …)`
 /// is rejected (E1109) and the per-container prefix `columnar [T]` is reserved
-/// (D-SOA2C, E1107).
-LAYOUT_COLUMNAR :: "columnar" // D-SOA1 / D-SOA2A
+/// E1107.
+LAYOUT_COLUMNAR :: "columnar"
 
-// ── Serde derive markers + attributes (D-SERDE2–8, D-ENC1; bracket form D-ATTR2) ──
-// Derive markers (PascalCase per D-CASING1, written `#[…]` before a struct/enum,
-// D-VERDICT-732-1, formerly D-MARKERMOVE1=B): `#[Codable]` derives BOTH
+// ── Serde derive markers + attributes (–8 bracket form) ──
+// Derive markers (PascalCase per written `#[…]` before a struct/enum,
+// Formerly): `#[Codable]` derives BOTH
 // directions (sugar for `#[Encode, Decode]`); `#[Encode]` is write-only;
-// `#[Decode]` is read-only. Owner (D-SERDE4 = B, modified): the
+// `#[Decode]` is read-only. Owner (= B, modified): the
 // collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
-MARKER_CODABLE :: "Codable" // D-SERDE4
+MARKER_CODABLE :: "Codable"
 
-MARKER_RECEIPT :: "Receipt" // D-FOUND-RECEIPT1
+MARKER_RECEIPT :: "Receipt"
 
-MARKER_ENCODE :: "Encode" // D-SERDE4
+MARKER_ENCODE :: "Encode"
 
-MARKER_DECODE :: "Decode" // D-SERDE4
+MARKER_DECODE :: "Decode"
 
-                                          // D-VERDICT-732-1 (formerly D-MARKERMOVE3, B, ratified 2026-07-02): the
+                                          // (formerly B, ratified 2026-07-02): the
                                           // other built-in derive markers that join Codable/Encode/Decode — all on
                                           // `#`, the sole rule prefix.
-                                          // D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: all six structural
+                                          // All six structural
                                           // auto-derive controls accept the same leading `!` refusal, including
                                           // `#!Codable`. User derives (`derive T.Wire { … }`, applied as
                                           // `#[Wire]`) also stay `#` — built-in and user derives share the
                                           // same prefix; only the derive name tells them apart.
-MARKER_COMPARABLE :: "Comparable" // D-VERDICT-732-1 (formerly D-MARKERMOVE3)
+MARKER_COMPARABLE :: "Comparable" // (formerly)
 
-                                                  // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
-MARKER_RENAME :: "Rename" // D-SERDE5  #[Rename("wire_key")]
+                                                  // Per-field attributes (= A), written `#[…]` before a field.
+MARKER_RENAME :: "Rename" // #[Rename("wire_key")]
 
-MARKER_SKIP :: "Skip" // D-SERDE5  #[Skip]
+MARKER_SKIP :: "Skip" // #[Skip]
 
-MARKER_DEFAULT :: "Default" // D-SERDE5  #[Default] / #[Default(expr)]
+MARKER_DEFAULT :: "Default" // #[Default] / #[Default(expr)]
 
-MARKER_FLATTEN :: "Flatten" // D-SERDE5  #[Flatten]
+MARKER_FLATTEN :: "Flatten" // #[Flatten]
 
-                                            // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
-MARKER_RENAME_ALL :: "RenameAll" // D-SERDE3  #[RenameAll(camel)]
+                                            // Container attributes (7/8), written `#[…]` before a struct/enum.
+MARKER_RENAME_ALL :: "RenameAll" // #[RenameAll(camel)]
 
-MARKER_DENY_UNKNOWN_FIELDS :: "DenyUnknownFields" // D-SERDE8
+MARKER_DENY_UNKNOWN_FIELDS :: "DenyUnknownFields"
 
-/// D-MARKER-NAME-HYGIENE1=A: serde's internal discriminant field is not a
+/// Serde's internal discriminant field is not a
 /// compile-time fact tag.
-MARKER_TAG :: "Discriminant" // D-SERDE7, D-MARKER-NAME-HYGIENE1
+MARKER_TAG :: "Discriminant"
 
-MARKER_UNTAGGED :: "Untagged" // D-SERDE7  #[Untagged]
+MARKER_UNTAGGED :: "Untagged" // #[Untagged]
 
-                                              // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
-RENAME_ALL_CAMEL :: "camel" // D-SERDE3
+                                              // (= C) RenameAll casing keywords — closed typed menu, own-case args.
+RENAME_ALL_CAMEL :: "camel"
 
-RENAME_ALL_SNAKE :: "snake" // D-SERDE3
+RENAME_ALL_SNAKE :: "snake"
 
-RENAME_ALL_PASCAL :: "pascal" // D-SERDE3
+RENAME_ALL_PASCAL :: "pascal"
 
-RENAME_ALL_KEBAB :: "kebab" // D-SERDE3
+RENAME_ALL_KEBAB :: "kebab"
 
-RENAME_ALL_SCREAMING :: "screaming" // D-SERDE3
+RENAME_ALL_SCREAMING :: "screaming"
 
-// ── Maturity metadata values (D-MARK-META1=B, ratified 2026-07-12) ──────────
+// ── Maturity metadata values (ratified 2026-07-12) ──────────
 // Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.
 // They are not standalone markers and therefore are absent from marker-plane
 // registries. No sema/codegen effect.
-MARKER_EXPERIMENTAL :: "Experimental" // D-MARK-META1
+MARKER_EXPERIMENTAL :: "Experimental"
 
-MARKER_TESTED :: "Tested" // D-MARK-META1
+MARKER_TESTED :: "Tested"
 
-MARKER_HARDENED :: "Hardened" // D-MARK-META1
+MARKER_HARDENED :: "Hardened"
 
-// ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28; amended by
-// D-MARK-DISCARD1=A, ratified 2026-07-11, card #498) ─────────────────────────
+// ── Explicit discard (ratified 2026-06-28; amended by
+// Ratified 2026-07-11, card #498) ─────────────────────────
 // `.drop("reason")` — method-style terminal that silences E0402 for a
 // fallible or #MustUse result. It is now the SOLE discard spelling; the
 // `#Suppress(MustUse) { … }` lexical-scope form is retired outright
 // (ordinary unknown-marker error — no MARKER_SUPPRESS registration).
-METHOD_DROP :: "drop" // D-IGNORERET2 method; distinct from consume builtin
+METHOD_DROP :: "drop" // This rule method; distinct from consume builtin
 
 /// Canonical list of real Jet keywords for LSP completion and rename validation.
 ///
@@ -495,7 +495,7 @@ METHOD_DROP :: "drop" // D-IGNORERET2 method; distinct from consume builtin
 /// FOREIGN_* teaching-error words must NOT appear here — they are recognized only
 /// to emit a diagnostic, not valid syntax.
 JET_KEYWORD_LIST :: [String]{
-    // Core structure (S1, D-VIS-MODULE1, S16, S50, U3)
+    // Core structure (S1 S16, S50, U3)
     KW_FN,
     KW_PUB,
     KW_PRIV,
@@ -514,7 +514,7 @@ JET_KEYWORD_LIST :: [String]{
     KW_RETURN,
     KW_YIELD,
     KW_DEFER,
-    // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
+    // Types and declarations (M2, S30, S27, M2, S28, S55, S57)
     KW_STRUCT,
     KW_ENUM,
     KW_ALIAS,
@@ -525,57 +525,57 @@ JET_KEYWORD_LIST :: [String]{
     KW_TAG,
     KW_EFFECT_DECL,
     KW_DERIVE,
-    // Preparation and compiler facts (D-PREP-SURFACE2, D-FACTDECL1).
+    // Preparation and compiler facts.
     KW_PREP,
     KW_FACT,
     KW_DISTINCT,
-    // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
+    // Schema migrations
     KW_MIGRATION,
     KW_RENAME,
     KW_ADD,
     KW_REMOVE,
     KW_CHANGE,
     KW_VIA,
-    // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE
-    // in favor of the `&`/`^` sigils, and D-SHAPE-COPY1=A retired KW_COPY (a
-    // copy is now the method `x.copy()`, D-COPY-WORD1=A) — they live only as teaching errors (E0056/E0057/
+    // Ownership / borrow keywords (S10, M2). Retired KW_MUTATE/KW_MOVE
+    // in favor of the `&`/`^` sigils, and retired KW_COPY (a
+    // copy is now the method `x.copy()`) — they live only as teaching errors (E0056/E0057/
     // E0991) now, so none of them are in the keyword list. The retired
     // `ref[label]` field spelling (once taught via KW_STORED) is gone
-    // outright with stored-reference fields (D-MEM1/S3) — `ref` is an
+    // outright with stored-reference fields (S3) — `ref` is an
     // ordinary identifier again.
     KW_SELF,
-    // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1, D-CTEFFECT1)
+    // Memory / expert tier (S58)
     KW_UNSAFE,
     KW_IMPURE,
     CTX_BLOCK,
-    // D-CONC-SPAWN1=D: one reserved word owns task spawning and fan-out.
+    // One reserved word owns task spawning and fan-out.
     KW_CONC_TASK,
-    // D-CONC-FREEZE1=A: immutable task-crossing snapshot verb.
+    // Immutable task-crossing snapshot verb.
     KW_FREEZE,
-    // D-CONC-SHARE1=A: shared-cell construction is contextual syntax.
+    // Shared-cell construction is contextual syntax.
     KW_SHARED,
-    // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
+    // Transactions (–): `#Transact(name) { … }`
     KW_TRANSACT,
-    // Schedule-as-code (D-SCHEDULE1, card #505): `#Job fn` — `#Every(…)`
+    // Schedule-as-code (card #505): `#Job fn` — `#Every(…)`
     // stays out of this list, matching MARKER_TARGET/MARKER_META (paren-arg
     // config markers aren't bare completion words).
     KW_JOB,
-    // Test / tooling (S43, S60, D-TOOL2)
+    // Test / tooling (S43, S60)
     KW_TEST,
     KW_TODO,
-    // D-TAG-SURFACE1=A retired `Tainted`/`Sanitizer`; direct declared tags and
+    // This rule retired `Tainted`/`Sanitizer`; direct declared tags and
     // `#Scrub(Tag)` come from the applied-rule registry.
-    // Typestate (D-STATE1 / D-STATE-HOME1 / D-STATE-REQ / D-STATE-TRANS)
+    // Typestate
     KW_STATE,
     KW_TRANSITION,
     KW_STATE_DECL,
-    // Session/protocol types (D-PROTO1 / D-PROTO2)
+    // Session/protocol types
     KW_PROTOCOL,
     PROTO_CLIENT,
     PROTO_SERVER,
-    // Rule declarations (D-META-NAME1 / D-META-FORM1 / D-MARKER-SITES1)
+    // Rule declarations
     KW_MARKER,
-    // In-body struct validation (D-VALIDATE1, card #506)
+    // In-body struct validation (card #506)
     KW_VALIDATE_BLOCK,
     VALIDATE_CHECK_FN,
     // Reserved literals: boolean (S11), option (S32), synthetic (M4).
@@ -635,51 +635,51 @@ JET_TYPE_LIST :: [String]{
     TYPE_F64,
 }
 
-/// D-BUILDPROFILE1 (ratified 2026-06-25): the `build { }` block in `pkg.jet`
+/// (ratified 2026-06-25): the `build { }` block in `pkg.jet`
 /// where named build profiles are defined. A profile is a `Build{ optimize: … }`
 /// value; blessed names `release`/`debug` carry built-in defaults; all others
 /// must be declared here. Active profile is chosen by `--release` (sugar for
 /// `--profile=release`) or `--profile=<name>` — never by ambient environment.
-MANIFEST_BLOCK_BUILD :: "build" // D-BUILDPROFILE1
+MANIFEST_BLOCK_BUILD :: "build"
 
-/// D-BUILDPROFILE1: the constructor type for a build profile value inside
+/// The constructor type for a build profile value inside
 /// `pkg.jet`'s `build { }` block — written as `Build{ optimize: … }`.
-BUILD_CTOR :: "Build" // D-BUILDPROFILE1
+BUILD_CTOR :: "Build"
 
-/// D-BUILDPROFILE1: the field inside a `Build{ … }` profile value that sets
+/// The field inside a `Build{ … }` profile value that sets
 /// the optimization level.
-BUILD_FIELD_OPTIMIZE :: "optimize" // D-BUILDPROFILE1
+BUILD_FIELD_OPTIMIZE :: "optimize"
 
-/// D-BUILDPROFILE1: blessed profile names — `release`, `debug`, `ci`, and
+/// Blessed profile names — `release`, `debug`, `ci`, and
 /// `hardened` carry built-in defaults and need no explicit declaration in
 /// `build { }`.
-BUILD_PROFILE_RELEASE :: "release" // D-BUILDPROFILE1
+BUILD_PROFILE_RELEASE :: "release"
 
-BUILD_PROFILE_DEBUG :: "debug" // D-BUILDPROFILE1
+BUILD_PROFILE_DEBUG :: "debug"
 
-BUILD_PROFILE_CI :: "ci" // D-BUILDPROFILE1
+BUILD_PROFILE_CI :: "ci"
 
-BUILD_PROFILE_HARDENED :: "hardened" // D-MEM-SENTRY1
+BUILD_PROFILE_HARDENED :: "hardened"
 
-/// D-BUILDPROFILE1: optional fields inside `Build{ … }` profile values.
-BUILD_FIELD_DEBUG_INFO :: "debug_info" // D-BUILDPROFILE1
+/// Optional fields inside `Build{ … }` profile values.
+BUILD_FIELD_DEBUG_INFO :: "debug_info"
 
-BUILD_FIELD_SMALL :: "small" // D-BUILDPROFILE1
+BUILD_FIELD_SMALL :: "small"
 
-BUILD_FIELD_PANIC :: "panic" // D-BUILDPROFILE1
+BUILD_FIELD_PANIC :: "panic"
 
-BUILD_FIELD_SETTINGS :: "settings" // D-CONF-KEY1
+BUILD_FIELD_SETTINGS :: "settings"
 
-/// D-CONF-KEY1: retired Build fields are recognized only to teach the typed
+/// Retired Build fields are recognized only to teach the typed
 /// `settings:` replacement; they never contribute compiler configuration.
 RETIRED_BUILD_FIELD_FEATURES :: "features"
 
 RETIRED_BUILD_FIELD_ENV :: "env"
 
-/// D-BUILDSCOPE1=A: standing programmable-build authority grant.
+/// Standing programmable-build authority grant.
 BUILD_FIELD_ALLOW :: "allow"
 
-/// D-JPK-ADAPTNAME1=A (ratified 2026-07-03): canonical adapter declaration
+/// (ratified 2026-07-03): canonical adapter declaration
 /// and recipe spellings. These are named module calls, not lexer keywords, so
 /// they do not add a grammar token or editor highlight.
 PKG_ADAPT :: "Pkg.adapt"
@@ -712,7 +712,7 @@ RECIPE_CMAKE :: "Recipe.cmake"
 
 RECIPE_MAKE :: "Recipe.make"
 
-/// D-JPK-BUILDRECIPE1=A (ratified 2026-08-03): finite executable adapter
+/// (ratified 2026-08-03): finite executable adapter
 /// recipe and step spellings.
 RECIPE_TYPE :: "Recipe"
 
@@ -753,19 +753,19 @@ ADAPTER_RECIPE_NAMES :: [String]{
     RECIPE_MAKE,
 }
 
-/// D-BUILDPROFILE1: `panic:` values for `Build{ panic: … }`.
-BUILD_PANIC_ABORT :: "abort" // D-BUILDPROFILE1
+/// `panic:` values for `Build{ panic: … }`.
+BUILD_PANIC_ABORT :: "abort"
 
-BUILD_PANIC_UNWIND :: "unwind" // D-BUILDPROFILE1
+BUILD_PANIC_UNWIND :: "unwind"
 
-/// D-BUILDPROFILE1: `optimize:` levels for `Build{ optimize: … }`:
+/// `optimize:` levels for `Build{ optimize: … }`:
 /// `none` (no optimization, fastest compile), `basic` (opt-level=2, the
 /// driver default), `full` (opt-level=3, maximum throughput).
-BUILD_OPTIMIZE_NONE :: "none" // D-BUILDPROFILE1
+BUILD_OPTIMIZE_NONE :: "none"
 
-BUILD_OPTIMIZE_BASIC :: "basic" // D-BUILDPROFILE1
+BUILD_OPTIMIZE_BASIC :: "basic"
 
-BUILD_OPTIMIZE_FULL :: "full" // D-BUILDPROFILE1
+BUILD_OPTIMIZE_FULL :: "full"
 
 /// Canonical list of impure builtins (write stdout/stderr or read stdin).
 ///

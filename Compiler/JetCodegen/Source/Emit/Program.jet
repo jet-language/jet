@@ -262,7 +262,7 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
 fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRConstantDef) -> String Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
     name :: jet_rust_emit_generated_path(definition.key)
-    // A constant's views can only borrow static data (D-MEM-VIEWRET1).
+    // A constant's views can only borrow static data.
     ty :: jet_rust_emit_type_with_view_lifetime(&ctx, definition.ty, "'static")
     root :: ctx.config.root_prefix.copy()
     if definition.value == .SharedSite(site) {
@@ -331,7 +331,7 @@ fn jet_rust_emit_ordinary_constant_definition(ctx: &JetRustEmitContext, definiti
     "#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}"
 }
 
-// MIRRust shared_constant (D-MEM-COPYSEM1): a folded aggregate constant (text,
+// MIRRust shared_constant a folded aggregate constant (text,
 // list, map, option, result, tuple, or nominal value) on a hosted target is one
 // shared per-thread value; a read holds it in a `JetSharedSlot` and borrows it
 // in place, and only an owned use copies it. Scalars stay plain values.
@@ -576,7 +576,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     jet_rust_emit_result(&ctx, lines.join("\n"))
 }
 
-// Function printing threads (D-JOBS1, compiler_threads_admit): a thread is
+// Function printing threads (compiler_threads_admit): a thread is
 // admitted for at least this many MIR instructions, so a small program
 // prints on the calling thread.
 JET_RUST_EMIT_MIN_INSTRUCTIONS_PER_THREAD :: 20000

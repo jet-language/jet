@@ -10,20 +10,20 @@
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
 // order is the document order. `canonical` is the one byte-exact form, RFC 8785
-// JCS (D-JSONCANON1=A): keys sorted by UTF-16 code units, ECMAScript shortest
+// JCS keys sorted by UTF-16 code units, ECMAScript shortest
 // numbers, and explicit `EncodingError`s for values JCS cannot encode.
 // Native typed-decode carriers are inspected only inside audited Core regions;
 // strict parse errors stay on their original EncodingError location rail.
 //
-// Duplicate object names (D-CORE-JSON-DUP1=A): `parse`, `decode`, and
+// Duplicate object names `parse`, `decode`, and
 // `reader` reject them with the key's path, line, and column. The named
 // `parse_allow_duplicates` keeps the later value in the first key's position;
 // bounded native streaming readers remain strict. The duplicate check uses
 // the object's own key map, so the input bound
 // (`EncodingLimits.safe().max_item_bytes`) also bounds it.
 //
-// `pointer` is RFC 6901 selection (D-CORE-JSON-POINTER1=A) and `patch` is RFC
-// 6902 application (D-CORE-JSON-PATCH1=A). Both leave their inputs unchanged.
+// `pointer` is RFC 6901 selection and `patch` is RFC
+// 6902 application. Both leave their inputs unchanged.
 //
 // Allocates one output tree plus the decoded strings. Depth is bounded by
 // `EncodingLimits.safe().max_depth` (256) so hostile nesting cannot run the
@@ -91,7 +91,7 @@ fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false) }
 /// value at the first name's position.
 fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true) }
 
-/// D-JSON3: coerce strings that are exactly booleans or finite numbers.
+/// Coerce strings that are exactly booleans or finite numbers.
 fn decode(text: String) -> Dyn EncodingError! {
     tree :: parse(text) ?? return Err(err)
     coerce_tree(tree, "", (line: String) -> { emit_coercion(line) })
@@ -171,7 +171,7 @@ fn dump(value: Dyn) -> String EncodingError! { render_json(value, false) }
 /// Two-space indented JSON text.
 fn to_string_pretty<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), true) }
 
-/// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
+/// RFC 8785 JSON Canonicalization Scheme bytes compact,
 /// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
 /// spelling, `-0.0` as `0`. Rejects NaN and infinities, an `Int` that binary64
 /// cannot hold exactly, and repeated keys, naming the failing value's JSON
@@ -215,7 +215,7 @@ fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, ca
     Ok(JSONWriter{output: ^output})
 }
 
-/// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
+/// RFC 6901 JSON Pointer selection. `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
 /// array steps are canonical decimal indices (no `-`). JSON `null` is a value,
 /// not absence. A missing member, bad index, bad escape, or step into a scalar
@@ -230,7 +230,7 @@ fn pointer(tree: Dyn, path: String) -> Dyn EncodingError! {
     pointer_select(tree, segments, 0)
 }
 
-/// RFC 6902 JSON Patch (D-CORE-JSON-PATCH1=A) under `EncodingLimits.safe()`.
+/// RFC 6902 JSON Patch under `EncodingLimits.safe()`.
 /// See `patch_with_limits`.
 fn patch(doc: Dyn, ops: Dyn) -> Dyn EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
 

@@ -24,11 +24,11 @@ enum PatSlot {
     Range(lo: Int, hi: Int)
     // S31: a nested pattern tests this payload slot.
     Nested(pattern: Pattern)
-    // D-PAT-NAMED-NEST1=A: one `field: slot` entry of `.Case{field: pat, …}`;
+    // One `field: slot` entry of `.Case{field: pat, …}`;
     // a bare `field` is `field: field`. Sema places each entry at the
     // positional slot its field names.
     Named(field: String, field_span: Span, slot: PatSlot)
-    // D-PAT-NAMED-NEST1=A: the trailing `..` of `.Case{field: pat, ..}`.
+    // The trailing `..` of `.Case{field: pat, ..}`.
     Rest(span: Span)
     Value(value: Expr)
 }
@@ -108,7 +108,7 @@ enum OrFallback {
 
 // Rust `Pattern::binding_names`: the capture names a successful match
 // introduces. The parser turns a pattern test with a diverging fallback into
-// a binding of exactly these names (D-CHOOSE-TEST1); sema types each one.
+// a binding of exactly these names sema types each one.
 fn pattern_binding_names(pattern: Pattern) -> [BindName] Never! {
     names := [BindName]{}
     pattern_collect_binding_names(pattern, &names)

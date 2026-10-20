@@ -1430,7 +1430,7 @@ fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, envir
     context.lambda_escapes = Val(false)
     open_result := false
     if expected == .Val(.Fn(_, ret, _, _, _, _)) && ret == None -> open_result = true
-    // D-SUBJECT-CALL1=A: `.member` shorthand is the ordinary unary lambda.
+    // `.member` shorthand is the ordinary unary lambda.
     shorthand :: sema_expr_subject_shorthand(expr, expected, context, &diagnostics)
     if shorthand != None -> context.subject_shorthand_depth += 1
     source :: if shorthand == .Val(lambda) -> Expr.Lambda{lambda: lambda} else -> expr
@@ -1718,7 +1718,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     lambda_parent_state := sema_ownership_state_snapshot(state)
     lambda_state := sema_ownership_state_snapshot(state)
     lambda_context := sema_check_context_snapshot(context)
-    // D-CONC-SPAWN1 (Rust `check_lambda`): this lambda is a `task` body when
+    // (Rust `check_lambda`): this lambda is a `task` body when
     // the spawn named it and no callable is expected of it. The fact and the
     // propagation it harvests belong to this body alone, never a nested one.
     task_body :: !inline_loop && expected == None && context.taskgroups.spawn_body
@@ -1805,7 +1805,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 lambda_context.failure_inference = false
                 lambda_context.inferred_failure_carrier = None
             } else {
-                // D-FAILURE-FOUNDATION1=A: a callback expected to return a Result
+                // A callback expected to return a Result
                 // propagates into that carrier. An unannotated callback whose
                 // expected function type returns a plain non-Unit value (or
                 // nothing), or that has no expected function type at all, infers
@@ -1836,7 +1836,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     if !inline_loop -> lambda_scopes.loop_depth = 0
 
     first_reference := lambda_state.references.len()
-    // D-COPY-DEFAULT1=A (Rust `record_share_site` keeps one checker-wide
+    // (Rust `record_share_site` keeps one checker-wide
     // list): a share site the body finds is found for the enclosing function
     // too, even when that use stops this body's check with its E0121.
     body_result_ty := Type.Named{name: "Unit"}
@@ -1957,7 +1957,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     loop name in direct_effects -> sema_expression_lambda_append_name(&effect_seed, name)
     lambda_work.meta.effect_direct = direct_effects
     lambda_work.meta.effect_solved = effect_seed
-    // Rust `check_lambda` (D-EFFECT-LAMBDA1): the lambda's call edges, so the
+    // Rust `check_lambda` the lambda's call edges, so the
     // enclosing function's effect node and the lambda's projected row both
     // reach its callees.
     lambda_work.meta.effect_call_edges = effect_edges
@@ -1967,7 +1967,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     lambda_work.meta.effect_maximal = effect_maximal
 
-    // D-CALLSITE-MARK1=A (Rust `once_lambda_sites`): a `^` take of a captured
+    // (Rust `once_lambda_sites`): a `^` take of a captured
     // name inside the body moves it into the lambda, and the lambda runs
     // once. The capture is gone for the enclosing body too. An explicit
     // `task ^name` capture keeps its own capture move.
@@ -2119,7 +2119,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     }
 
-    // D-CONC-SPAWN1 (Rust `fallible_propagation`): a `task` body that
+    // (Rust `fallible_propagation`): a `task` body that
     // propagated into the enclosing carrier is not a total lambda, so it keeps
     // its plain success type rather than taking the Never rail below.
     if task_body && lambda_context.task_body_propagates -> lambda_work.meta.fallible_propagation = true
@@ -2221,7 +2221,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     loop edge_index in failure_edge_start..<lambda_context.failure_edges.len() -> &context.failure_edges.push(lambda_context.failure_edges[edge_index])
     if lambda_work.meta.fallible_propagation {
         &context.failure_edges.push("")
-        // D-FAIL-INFER-UNION1=A: the callback's failures belong to its own
+        // The callback's failures belong to its own
         // carrier, so the enclosing default route only learns that the
         // general `Err` reaches it.
         context.failure_union_general = true

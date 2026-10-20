@@ -156,18 +156,18 @@ fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBrid
     out = "{out}{record_defs.source}"
     loop descriptor in pkg_ffi_foreign_descriptor_stamps(entries) -> out = "{out}// jet-ffi-descriptor={descriptor}\n"
     if entries.len() > 0 -> out = "{out}\n"
-    // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
+    // The database runtime is the only place `rusqlite` is touched.
     if needs.db -> out = "{out}{pkg_ffi_runtime_mod("__jet_db", "{FFI_DB_RUNTIME}\n")}"
-    // D-DATA-READER1=A: the Parquet/Arrow closure registers its C export with Foundation.
+    // The Parquet/Arrow closure registers its C export with Foundation.
     if needs.parquet -> out = "{out}{pkg_ffi_runtime_mod("__jet_parquet", "{FFI_PARQUET_RUNTIME}\n")}"
-    // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately ratified TLS seam.
+    // Native HTTP; rustls is the separately ratified TLS seam.
     if needs.http_client -> out = "{out}{pkg_ffi_runtime_mod("__jet_http_client", "const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"{FFI_HTTP_PUBLIC_SUFFIX_LIST}\"################;\n{FFI_HTTP_CLIENT_RUNTIME}\n")}"
-    // D-TLSSERVE1=A: the server TLS runtime is the only place serving touches rustls.
+    // The server TLS runtime is the only place serving touches rustls.
     if needs.http_server_tls -> out = "{out}{pkg_ffi_runtime_mod("__jet_http_server_tls", "{FFI_HTTP_SERVER_TLS_RUNTIME}\n")}"
-    // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
+    // Client stream TLS over an existing TcpStream.
     if needs.net_tls -> out = "{out}{pkg_ffi_runtime_mod("__jet_net_tls", "{FFI_NET_TLS_RUNTIME}\n")}"
     if needs.crypto || needs.secrets -> out = "{out}{pkg_ffi_crypto_modules(needs)}"
-    // D-DEP-WASM1=A: the application `core.plugin` host; the compiler-extension
+    // The application `core.plugin` host; the compiler-extension
     // host is a separate runtime.
     if needs.plugin -> out = "{out}{pkg_ffi_runtime_mod("__jet_plugin", "{FFI_PLUGIN_RUNTIME}\n")}"
     has_trampoline := false
@@ -214,9 +214,9 @@ fn pkg_ffi_crypto_modules(needs: RustBridgeNeeds) -> String Never! {
         loop root in roots -> out = "{out}mod {root.name} {{\n{root.source}\n}}\n"
     }
     body := ""
-    // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
+    // The crypto runtime is the only place RustCrypto is touched.
     if needs.crypto -> body = "{body}{pkg_ffi_standalone_outcome_runtime()}\n{FFI_CRYPTO_ENTROPY_RUNTIME}\nuse jet_crypto_entropy::{{jet_crypto_entropy_fill, JetCryptoEntropyError}};\n{FFI_CRYPTO_RUNTIME}\n"
-    // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place `age` is touched.
+    // U13 the secrets runtime is the only place `age` is touched.
     if needs.secrets -> body = "{body}{FFI_UNICODE_TABLES_RUNTIME}\n{FFI_VAULT_NFC_RUNTIME}\n{FFI_SECRETS_RUNTIME}\n{FFI_VAULT_KEY_WRAP_RUNTIME}\n"
     "{out}{pkg_ffi_runtime_mod("__jet_crypto", body)}"
 }
@@ -497,7 +497,7 @@ fn pkg_ffi_inline_rust_type(ty: Type) -> String Never! {
     }
 }
 
-// D-FFI-CAP1: inline C/C++/asm wrappers keep the `extern rust` capability
+// Inline C/C++/asm wrappers keep the `extern rust` capability
 // shape; an exclusive lend is a pointer to the live Jet slot, never a
 // read-only reference or copied temporary. Move stays consuming.
 fn pkg_ffi_inline_rust_param_type(convention: AccessConvention, ty: Type) -> String Never! {
@@ -655,7 +655,7 @@ fn pkg_ffi_emit_wrapper_fn(entry: ExternEntry, user_types: [String]) -> String N
     "pub fn {entry.wrapper_name}({params.join(", ")}){ret_decl} {{\n    {body}\n}}\n"
 }
 
-// D-FFI-CAP1: the Rust bridge preserves the declaration's ownership at its
+// The Rust bridge preserves the declaration's ownership at its
 // safe wrapper edge. Read and move stay ordinary Rust values; `&` is the one
 // exclusive borrow lasting for this call only.
 fn pkg_ffi_foreign_rust_param_type(convention: AccessConvention, ty: Type, user_types: [String]) -> String Never! {
@@ -968,7 +968,7 @@ fn pkg_ffi_rust_type(ty: Type, user_types: [String]) -> String Never! {
         .Char -> "char"
         .List(inner) -> "Vec<{pkg_ffi_rust_type(inner, user_types)}>"
         .Map(key, _, value) -> "std::collections::BTreeMap<{pkg_ffi_rust_type(key, user_types)}, {pkg_ffi_rust_type(value, user_types)}>"
-        // D-MEM1 S6: the main codegen renders `Shared` as `jet_std::JetShared`;
+        // S6: the main codegen renders `Shared` as `jet_std::JetShared`;
         // a concurrency handle in a C-ABI signature is not a realistic shape,
         // so this bridge keeps the pre-S6 mapping rather than guessing.
         .Shared(inner) -> "std::sync::Arc<{pkg_ffi_rust_type(inner, user_types)}>"
@@ -979,10 +979,10 @@ fn pkg_ffi_rust_type(ty: Type, user_types: [String]) -> String Never! {
         .Apply(name, args) -> if user_types.contains(name) -> "{pkg_ffi_mangle_path(name)}<{pkg_ffi_join_rust_types(args, user_types)}>" else -> "Box<dyn std::any::Any>"
         .TraitObject(_) -> "Box<dyn std::any::Any>"
         .Tuple(_) -> "Box<dyn std::any::Any>"
-        // D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`.
+        // `[T#N]` lowers to a real Rust array `[T; N]`.
         .FixedList(elem, len) -> "[{pkg_ffi_rust_type(elem, user_types)}; {measure_expression(len)}]"
         .Tagged(_, inner) -> pkg_ffi_rust_type(inner, user_types)
-        // D-UNIONTYPE1=A: anonymous unions are rejected by FFI sema.
+        // Anonymous unions are rejected by FFI sema.
         .Union(_) -> panic("anonymous unions are rejected by FFI sema")
         // Runtime values carry no dimension metadata (I3).
         .Quantity(base, _) -> pkg_ffi_rust_type(base, user_types)

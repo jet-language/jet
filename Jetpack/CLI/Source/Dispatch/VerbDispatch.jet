@@ -106,12 +106,12 @@ fn cli_retired_hangar_route(verb: String) -> String? Never! {
 fn cli_retired_flag(before_separator: [String]) -> Diagnostic? Never! {
     retired_env_prefix :: "{ENV_FLAG_ENV_RETIRED}="
     loop arg in before_separator {
-        // D-ENVFLAG1=A: the retired selector teaches `--env`; it is never an alias.
+        // The retired selector teaches `--env`; it is never an alias.
         if arg == ENV_FLAG_ENV_RETIRED || arg.starts_with(retired_env_prefix) {
             return Val(diagnostic_from_registry("E1342", None, "`{ENV_FLAG_ENV_RETIRED}` is retired", "the environment selector chooses one `env.<name>` module; `--preset` chooses a named composition", "select the module with `{ENV_FLAG_ENV} <name>`"))
         }
     }
-    // D-CONF-WORD1=A: `profile` names the optimize bundle; a named
+    // `profile` names the optimize bundle; a named
     // environment composition is a preset.
     if before_separator.contains(ENV_FLAG_PROFILE_RETIRED) {
         return Val(diagnostic_from_registry("E1300", None, "`{ENV_FLAG_PROFILE_RETIRED}` is retired", "profile answers how hard to optimize a build; a named environment composition is a preset", "select the composition with `{ENV_FLAG_PRESET} <name>`, declared under `{ENV_FIELD_PRESETS}:`"))

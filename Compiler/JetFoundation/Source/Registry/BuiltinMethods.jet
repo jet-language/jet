@@ -49,7 +49,7 @@ enum BuiltinMethodLowering {
     // Float predicates and integer bit-population queries.
     Predicate
     BitCount
-    // D-SIGIL-ALGEBRA1=B: checked by sema_expr_check_binary / numeric unary.
+    // Checked by sema_expr_check_binary / numeric unary.
     Arithmetic(operation: TBinaryOp)
     BitNot
     // Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
@@ -137,7 +137,7 @@ BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "repeat", parameters: [Type]{Type.Int}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Repeat}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "slice", parameters: [Type]{Type.Int, Type.Int}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.StringSlice},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "slice", parameters: [Type]{Type.Named{name: "Range"}}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.StringRangeSlice},
-    // D-STR-AFTER1: first-occurrence substring split; an absent separator
+    // First-occurrence substring split; an absent separator
     // yields the whole original string. A `::` binding of `trim`/`after`/
     // `before` becomes a zero-copy view (Ownership/StringViews.jet).
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "after", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.After}},
@@ -167,7 +167,7 @@ BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "parse", parameters: [Type]{}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseInt}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "to_int", parameters: [Type]{}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseInt}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "to_float", parameters: [Type]{}, result: Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseFloat}},
-    // D-STR-DECLINE1=C: one core.regex engine; a bad pattern is the `!String` failure.
+    // One core.regex engine; a bad pattern is the `!String` failure.
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "matches", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Bool, err: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "matches"}}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.String, name: "match", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Option{inner: Type.String}, err: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "match"}}},
 
@@ -241,7 +241,7 @@ BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Bytes, name: "write_bytes", parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: "write_bytes"}}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Bytes, name: "write", parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: "write"}}},
 
-    // Numbers (D-SG9/D-NUMOPS1, D-GO127-STDLIB1=A, D-INTBIG1).
+    // Numbers.
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Scalar, name: "to_string", parameters: [Type]{}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Show},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Integer, name: "bit_and", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitAnd}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Integer, name: "bit_or", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitOr}},
@@ -272,16 +272,16 @@ BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.FixedInt, name: "saturating_add", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "saturating", operation: "add"}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.FixedInt, name: "saturating_sub", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "saturating", operation: "sub"}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.FixedInt, name: "saturating_mul", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "saturating", operation: "mul"}},
-    // D-PORT-ROTATE1: rotations ride the same overflow-policy seam.
+    // Rotations ride the same overflow-policy seam.
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.FixedInt, name: "rotate_left", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "rotate_left", operation: "rotate"}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.FixedInt, name: "rotate_right", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "rotate_right", operation: "rotate"}},
 
-    // Ordering combinators (D-CMP3WAY1).
+    // Ordering combinators.
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Ordering, name: "then", parameters: [Type]{Type.Named{name: "Ordering"}}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.OrderingThen}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Ordering, name: "reverse", parameters: [Type]{}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.OrderingReverse}},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Range, name: "contains", parameters: [Type]{Type.Int}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Contains}},
 
-    // Atomic<T> (D-PLACE1): one lock-free scalar, read and written through a shared receiver.
+    // Atomic<T> one lock-free scalar, read and written through a shared receiver.
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Atomic, name: "load", parameters: [Type]{}, result: Type.Named{name: "T"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Atomic, name: "observe", parameters: [Type]{}, result: Type.Named{name: "T"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},
     BuiltinMethodRow{receiver: BuiltinMethodReceiver.Atomic, name: "store", parameters: [Type]{Type.Named{name: "T"}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic},

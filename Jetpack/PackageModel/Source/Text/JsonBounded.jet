@@ -1,5 +1,5 @@
 // Bounded JSON parsing through Core's caller-chosen limits
-// (D-CORE-JSONLIMIT1=A). Split from JsonTree.jet so the Compiler unit's shared
+// . Split from JsonTree.jet so the Compiler unit's shared
 // Jetpack block (accessors only) does not need `json.parse(limits:)` until
 // Core implements it (#3593); Jetpack's own build lists both files.
 
@@ -21,7 +21,7 @@ fn pkg_json_parse_protocol(text: String) -> PkgJSONDocument Never! {
 }
 
 // Rust `JSON::parse_json_with_limit`: at most `max_bytes` and 64 nesting
-// levels, through Core's caller-chosen limits (D-CORE-JSONLIMIT1=A).
+// levels, through Core's caller-chosen limits.
 fn pkg_json_parse_bounded(text: String, max_bytes: Int) -> PkgJSONDocument Never! {
     limits := encoding.EncodingLimits.safe()
     limits.max_total_bytes = Val(max_bytes)

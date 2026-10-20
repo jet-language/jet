@@ -179,7 +179,7 @@ struct JetCodegenSwitchSubject {
     ty: Type
 }
 
-// D-OPT-WRITE1 (#3974): a pattern subject read from a `&place` write window.
+// (#3974): a pattern subject read from a `&place` write window.
 struct JetCodegenPatternWindow {
     value: MIRValueID
     place: MIRPlaceID
@@ -471,7 +471,7 @@ struct JetCodegenBuilder {
     pattern_lookup_head: MIRBlockID?
     pattern_lookup_caches: [String:MIRPlaceID]
     window_aliases: [String]
-    // D-MEM-COPYSEM1: window places (by place ID) rooted at a read
+    // Window places (by place ID) rooted at a read
     // parameter. A pattern on one tests it in place and binds each payload
     // name as a read-only alias: the parameter cannot change while the
     // function runs, so the alias reads exactly what a copy would hold.
@@ -487,7 +487,7 @@ struct JetCodegenBuilder {
     // a read window binding names another value's slot, so a consuming use
     // copies it instead of moving the slot out of its owner.
     read_alias_places: [U64:Bool]
-    // D-MEM-COPYSEM1: the immutable place bindings of the function whose root
+    // The immutable place bindings of the function whose root
     // their scope leaves alone (jet_codegen_stable_element_lets), by
     // jet_codegen_element_let_key.
     stable_element_lets: [String:Bool]
@@ -1634,7 +1634,7 @@ fn jet_codegen_operation_can_stop(builder: JetCodegenBuilder, operation: MIROper
 }
 
 fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
-    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
+    // A read parameter's place has no storage to give up,
     // and neither has an element of a container (Rust `lower_receiver_place`
     // never moves an index place). Consuming a read alias of one (a read
     // window or a read-place binding) copies the place, exactly as consuming
@@ -2322,7 +2322,7 @@ fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
     }
 }
 
-/// D-SHAPE-RESOURCE1=A: explicit deferred actions run first in reverse
+/// Explicit deferred actions run first in reverse
 /// registration order; the automatic safety net then closes or releases every
 /// still-live local in reverse declaration order.
 // Current and already-run actions are absent before the operation is emitted.

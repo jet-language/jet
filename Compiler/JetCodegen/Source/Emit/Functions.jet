@@ -1995,7 +1995,7 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
         &params.push(jet_rust_emit_function_param_text(function, parameter, ty))
         &types.push(ty)
     }
-    // D-MEM-VIEWRET1 (#4392): returned views name the lifetime of the owners
+    // (#4392): returned views name the lifetime of the owners
     // sema proved for them (MIRRust emit_callable_named).
     view_lifetime :: jet_rust_emit_view_return_lifetime(&ctx, function.return_type, function.return_view_provenance, None, receiver_index, declared_indexes, types, function.span)
     lifetimes := [String]{}
@@ -2333,7 +2333,7 @@ fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String,
         &types.push(ty)
         &params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {ty}")
     }
-    // D-MEM-VIEWRET1 (#4392), MIRRust emit_trait_method: the declaration
+    // (#4392), MIRRust emit_trait_method: the declaration
     // states the same view lifetime contract as every implementation.
     provenance :: jet_rust_emit_view_contract(method.return_view_provenance)
     view_lifetime :: jet_rust_emit_view_return_lifetime(&ctx, method.return_type, provenance, method.self_access, -1, declared_indexes, types, method.span)
@@ -2687,7 +2687,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     if implementation.trait_ref == .Val(impl_trait) -> method_name = jet_rust_emit_trait_impl_method_symbol(&ctx, impl_trait.id, function.name)
     if encode_codec -> method_name = "jet_encode"
     if decode_codec -> method_name = "jet_decode"
-    // D-MEM-VIEWRET1 (#4392), MIRRust emit_callable_named: returned views name
+    // (#4392), MIRRust emit_callable_named: returned views name
     // the lifetime of the trait's (or the method's own) proven owners.
     signature_provenance :: jet_rust_emit_signature_view_provenance(ctx, function)
     view_lifetime :: if encode_codec || decode_codec -> JetRustEmitViewLifetime.Elided else -> jet_rust_emit_view_return_lifetime(&ctx, function.return_type, signature_provenance, self_access, -1, declared_indexes, types, function.span)
@@ -2925,7 +2925,7 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         }
         &lines.push("}}")
     }
-    // D-ITER-HOOK: a user `Iterable` is a native loop source. The runtime
+    // A user `Iterable` is a native loop source. The runtime
     // bridge takes `Iterable.iter` once and steps `Iterator.next` through the
     // shared loop cursor (MIRRust emit_impl, `jet_iterable_loop_source`). A
     // generic owner states the bridge's `'static` item bounds.
@@ -3594,7 +3594,7 @@ fn jet_rust_emit_function_text(ctx: &JetRustEmitContext, function: MIRFunction, 
     if !retain_stack_frame -> &lines.push("{indent}    #[cfg(not(jet_release))]")
     &lines.push("{indent}    {jet_rust_emit_function_stack_frame(&ctx, function)}")
     if function.unsafe_gate != None || jet_rust_emit_function_has_unsafe_scope(function) -> &lines.push("{indent}    let __jet_sentry_frame = jet_mem::jet_sentry_frame();")
-    // MIRRust emit_callable_named (D-MEM-SENTRY1 / I1): a gated `#Unsafe fn`
+    // MIRRust emit_callable_named (I1): a gated `#Unsafe fn`
     // is one audited region, so its whole body runs inside that gate's sentry.
     // Declared before the block-scope stack, it drops last and restores the caller.
     if function.unsafe_gate == .Val(gate) -> &lines.push("{indent}    let __jet_function_gate = {jet_rust_emit_sentry_gate_scope(gate)};")

@@ -51,7 +51,7 @@ use jet_foundation.[
     type_name,
 ]
 
-// D-MOD2: a type named by a local binding, through a module alias
+// A type named by a local binding, through a module alias
 // (`types.Kind`), or by the canonical identity a declared type resolves to
 // (`module::Kind`, the form declared types carry after resolution) is the
 // declared type itself, so constructors, leading-dot variants and field reads
@@ -278,7 +278,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
     Val(SemaExpressionResolvedType{ty: resolved_ty, owner: resolved_owner})
 }
 
-// D-PLACE1 / Rust CheckerItems::atomic_field_inner: only supported Atomic
+// Rust CheckerItems::atomic_field_inner: only supported Atomic
 // fields take a scalar initializer. Ordinary generic owners keep their type.
 fn sema_atomic_field_inner(ty: Type) -> Type? Never! {
     if ty == .Apply(name, args) {
@@ -525,7 +525,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     resolved_name := type_name
-    // D-SERDE13=B (Rust expr.rs `data_renamed_to_dyn`): the retired
+    // (Rust expr.rs `data_renamed_to_dyn`): the retired
     // `Data.Variant` spelling points at `Dyn` and checks as the Dyn case.
     if resolved_name == "Data" && sema_expression_type_symbol(&scopes, environment, program, resolved_name) == None {
         &diagnostics.push(sema_data_renamed_to_dyn(Span{start: span.start, end: span.start + resolved_name.len()}))
@@ -544,7 +544,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 .Named(name) -> name
                 else -> ""
             }
-            // D-ERR-CASES1=A: a case that exactly one union member declares
+            // A case that exactly one union member declares
             // builds that member.
             .Union(_) -> sema_pattern_flat_union_owner_name(normalized, variant, environment, program, span) ?? ""
             else -> ""
@@ -554,7 +554,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             return None
         }
     }
-    // D-FACT-ENUM-TIR: `ExactnessKind.Approximate` / `.Approximate` builds a
+    // `ExactnessKind.Approximate` / `.Approximate` builds a
     // compiler-owned fact enum value, which has no registered declaration.
     fact_enum :: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, program, &diagnostics)
     if fact_enum.handled -> return fact_enum.value
@@ -623,7 +623,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     selected_variant :: selected ?? {
-        // D-TAG1 (E0332): a group name in value position; a value is always a leaf.
+        // E0332: a group name in value position; a value is always a leaf.
         loop group in enum_def.groups {
             if group.path != variant -> next
             leaves := [String]{}
@@ -996,7 +996,7 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
     }}, span))
 }
 
-// D-TEXTHEAD-TYPE1=A: `Type.raw(text)` is the expert escape that wraps one
+// `Type.raw(text)` is the expert escape that wraps one
 // audited String without running the declared checker, so it needs an
 // audited `#Unsafe` region (E0387).
 fn sema_expression_checked_text_raw(target: SemaExpressionCheckedTextTarget, type_name: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -1150,7 +1150,7 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
 }
 
 
-// D-BYTELIT1=B: the bytes a `[U8]{"…"}` body spells. ASCII text contributes
+// The bytes a `[U8]{"…"}` body spells. ASCII text contributes
 // one byte per character and `\xNN` the written byte; non-ASCII text is E0119.
 fn sema_expression_typed_literal_byte_text(parts: [ByteTextPart], head: Type, span: Span, diagnostics: &[Diagnostic]) -> [U8]? {
     bytes := [U8]{}
@@ -1354,7 +1354,7 @@ fn sema_expression_typed_literal_mismatch(head: Type, span: Span, diagnostics: &
     None
 }
 
-// #3739 (amends D-DOTCTOR3=A): a list head's lone expression is the whole
+// #3739 (amends): a list head's lone expression is the whole
 // value when it checks as a value of the head the way a parameter of that
 // type accepts it; otherwise it is the literal's single element. The probe
 // runs on snapshots, so the caller re-checks the chosen reading and every
@@ -1386,7 +1386,7 @@ struct SemaExpressionVariantHead {
     variant: String
 }
 
-// D-UITREE1/D-DOTCTOR1: `Enum.Variant{field: value}` constructs a
+// `Enum.Variant{field: value}` constructs a
 // named-payload variant. The parser reads the dotted head as a type path;
 // resolve it here against the enum declaration so the payload is checked by
 // the enum constructor, never by the struct-literal path.
@@ -1409,7 +1409,7 @@ fn sema_expression_field_is_shorthand(field: ExprField) -> Bool Never! {
     false
 }
 
-// D-DIST1/D-DIST3 (E0128): a distinct head never re-types its base value;
+// E0128: a distinct head never re-types its base value;
 // the destination owns the explicit conversion. Returns true when reported.
 fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if value.ty == head -> return false
@@ -1499,7 +1499,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         }
         .Named(name) -> if body == {
             .Fields(fields) -> {
-                // D-DIST1 (#4764): a distinct head is not a record, so `CustomerID{n}`
+                // (#4764): a distinct head is not a record, so `CustomerID{n}`
                 // is its one-expression body (the parser reads `{n}` as a field
                 // shorthand before types are known) and reaches the E0128 conversion rule.
                 if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) && sema_expr_distinct_facts(result_head, environment, program, &scopes) != None {
@@ -1526,7 +1526,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             }
             else -> {}
         }
-        // D-DOTCTOR3 / D-TYPE-SUFFIX1=A: `T?{ body }` checks its one-expression
+        // `T?{ body }` checks its one-expression
         // body in the expected `T?` position, so `None` and `Val(x)` both elaborate.
         .Option(_) -> if body == {
             .Value(value) -> {
@@ -1585,7 +1585,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
 }
 
-// D-DOTCTOR3 scalar heads use parameter acceptance, never a numeric retag.
+// This rule scalar heads use parameter acceptance, never a numeric retag.
 fn sema_expression_typed_literal_float_to_integer(head: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if (offered == Type.Float || offered == Type.Float32) && sema_expr_is_integer(head) {
         &diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "use `{type_name(head)}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int"))

@@ -2,8 +2,8 @@
 // read-only audit projection, lease inventory, whole-Hangar crash recovery,
 // and the human-readable entry identities.
 //
-// End-state roots are user-owned by default (D-JPK12, U2, U28 /
-// D-JPK-NODAEMON1=A): `JETPACK_ROOT` overrides everything, the ordinary path
+// End-state roots are user-owned by default (U2, U28 /
+// ): `JETPACK_ROOT` overrides everything, the ordinary path
 // is per-user and coordinated with file locks. Root resolution and the
 // model-only listing live in the package model (`HangarRoots`,
 // `pkg_store_list`); this facade is the checked engine boundary above it.
@@ -285,7 +285,7 @@ fn store_parse_decimal(text: String) -> Int? Never! {
 
 // Build the store id for a realization: human-readable `<name>-<version>`
 // first, then a short fingerprint of (ref, out) so two realizations of the
-// same name+version from different refs don't collide (D-PM1). The version
+// same name+version from different refs don't collide. The version
 // segment is dropped when unknown. Never hash-first: identity for
 // correctness is the lockfile, the directory name is for humans.
 fn store_entry_id(name: String, version: String, reference: String, out: String) -> String Never! {

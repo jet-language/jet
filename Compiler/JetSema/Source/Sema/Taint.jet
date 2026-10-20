@@ -426,7 +426,7 @@ fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationG
 fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
     module_row :: graph.modules[module_index]
-    // D-MOD-CYCLE1=A: the package names bind after the imports before
+    // The package names bind after the imports before
     // `namespace_import_split`, unless the module declares the name itself.
     namespace_from :: if module_row.namespace_import_split < 0 -> module_row.imports.len() else -> module_row.namespace_import_split
     loop (import_index, import) in module_row.imports {

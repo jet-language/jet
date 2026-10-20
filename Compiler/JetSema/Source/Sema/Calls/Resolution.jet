@@ -128,7 +128,7 @@ fn sema_call_not_callable(name: String, ty: Type, span: Span) -> Diagnostic {
     sema_error("E0803", span, "`{name}` is {type_name(ty)}, not a function", "a direct call target must have a function type", "call a function or use a function value with a callable type")
 }
 
-// D-OP-CALL1=A: parentheses call functions and lambdas only. A value binding
+// Parentheses call functions and lambdas only. A value binding
 // of another type names its type and the methods it has, as Rust
 // `not_callable_value_diagnostic` does.
 fn sema_call_not_callable_value(name: String, ty: Type, environment: SemaScopeEnvironment, span: Span) -> Diagnostic {
@@ -174,7 +174,7 @@ fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, 
     sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site type arguments have to line up", "provide exactly the declared type arguments")
 }
 
-// D-NEVER2=B / D-CALLBACK-ERR1=A: an explicit `Never` type argument may fill
+// An explicit `Never` type argument may fill
 // only a failure-domain type parameter, one the signature names as a `!`
 // domain (`fn(T) -> U E!`); in any other parameter it puts `Never` in a value
 // position (E2422 at the callee name).
@@ -599,7 +599,7 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
     candidates
 }
 
-// Rust `synthesize_impls` (D-LIB2 default bodies, S62 `using` delegation): a
+// Rust `synthesize_impls` (default bodies, S62 `using` delegation): a
 // nominal's trait impl answers a method it doesn't write with the trait's
 // default body, and a delegating impl answers every trait method. The call
 // dispatches through the trait, whose emitted form carries the default body

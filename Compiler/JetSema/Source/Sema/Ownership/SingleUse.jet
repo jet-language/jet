@@ -1,4 +1,4 @@
-// D-LIN1 / D-LIN1-DROP / D-DROP-WORD1: a `#SingleUse` value carries a job
+// A `#SingleUse` value carries a job
 // that has to be done exactly once, so the binding that owns it carries the
 // duty to consume it on every path.
 //
@@ -11,7 +11,7 @@
 // Parameters never own the duty (Rust `single_use_span: None`). A value that
 // holds a task handle owes its job the same way (Rust `type_is_single_use`
 // over `type_requires_owned_iteration`); a bare task's job is `join`, so its
-// undone duty is L1101 rather than E0140 (D-CONC-JOIN1).
+// undone duty is L1101 rather than E0140.
 use jet_foundation.[
     AccessConvention,
     Call,
@@ -49,7 +49,7 @@ fn sema_single_use_is_task(ty: Type) -> Bool Never! {
     false
 }
 
-// D-LIN1: a binding that owns a `#SingleUse` value carries the consume duty.
+// A binding that owns a `#SingleUse` value carries the consume duty.
 // The duty transfers on `y :: x`: the move marks `x` consumed and `y` owns it.
 fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty :: symbol.ty ?? return
@@ -60,7 +60,7 @@ fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, envi
     if sema_single_use_is_task(ty) -> state.declarations[row].owes_join = true
 }
 
-// E0140 (D-FACT-WORD1=A): `_ :: value` skips the job of a `#SingleUse` value.
+// E0140 `_ :: value` skips the job of a `#SingleUse` value.
 // A discarded task skips its join instead (L1101), except inside a
 // `task.group` spawn, whose group joins it.
 fn sema_single_use_check_discard(ty: Type, span: Span, in_taskgroup_spawn: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
@@ -127,7 +127,7 @@ fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershipSta
     sema_scope_leave(&scopes, &state)
 }
 
-// D-LIN1 / D-FACT-FLOW1: E0141. The merged move store is a union, so a value
+// E0141. The merged move store is a union, so a value
 // consumed on only one path would look consumed after the branch. Compare
 // the paths that reach the merge directly, over the bindings of the current
 // scope that were unconsumed before the branch. `before` is the state of the
@@ -149,7 +149,7 @@ fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwnership
     }
 }
 
-// D-LIN1-DROP: `consume(x)` moves one value to nowhere, running its cleanup.
+// `consume(x)` moves one value to nowhere, running its cleanup.
 // Discarding a `#SingleUse` value this way is legal only in an audited
 // `#Unsafe("reason")` region or function (E0143). The value is consumed even
 // on the E0143 path, so no E0140 cascades at scope end.
@@ -190,7 +190,7 @@ fn sema_single_use_diag_unaudited(name: String, span: Span) -> Diagnostic {
     sema_error("E0143", span, "`{name}` is `#SingleUse` — discarding it with `consume` needs an audited reason", "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down", "wrap it in an audited region: `#Unsafe(\"why discarding this is fine\") {{ consume({name}) }}`")
 }
 
-// D-CONC-JOIN1 / D-FACT-WORD1=A (Rust `l1101_unjoined_task`): one duty voice
+// (Rust `l1101_unjoined_task`): one duty voice
 // for every task-owes-join site.
 fn sema_single_use_diag_unjoined(subject: String, why: String, span: Span) -> Diagnostic {
     sema_error("L1101", span, "`{subject}` still owes `join`", why, "join it with `.join()`, use its result, or write `.detach()` to let it go free")

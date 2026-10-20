@@ -1,4 +1,4 @@
-// Project entry resolution for the Jet-hosted `jet` (D-CLI-BARE1=A): which
+// Project entry resolution for the Jet-hosted `jet` which
 // file a bare `jet check`/`jet run`, or one aimed at a directory, compiles.
 // A port of Source/main.rs `resolve_bare_entry`, `resolve_command_target`,
 // `resolve_source_path`, `find_project_entry_with_callable`,
@@ -530,7 +530,7 @@ fn jet_cli_format_entry_error(origin: String, error: String) -> String Never! {
     "{origin}: {error}"
 }
 
-// Package/mod.rs `migrate_retired_entry` (D-VERDICT-678-1): a lone retired
+// Package/mod.rs `migrate_retired_entry` a lone retired
 // `main.jet`, `src/main.jet`, or `.jet/main.jet` beside no canonical entry is
 // renamed once to `run.jet` (`src/run.jet`), with a stderr notice.
 fn jet_cli_migrate_retired_entry(root: String, origin: String, package_name: String, notices: &[String]) -[FS]> JetCLIMigration Never! {
@@ -622,7 +622,7 @@ fn jet_cli_output_entry_file(root: String, output: JetCLIOutputFact) -[FS]> JetC
         if found.len() != 1 -> return None
         return Val(JetCLIEntry{path: found[0], callable: Val(parts[0])})
     }
-    // D-MOD-CYCLE1=A: `entry: file.callable` names the one member file whose
+    // `entry: file.callable` names the one member file whose
     // stem is `file`, declaring exactly one top-level `callable`. Every source
     // must parse, as Rust `parse_sources` requires.
     programs := [Program]{}
@@ -755,7 +755,7 @@ fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, n
         if jet_cli_checked_file(root, "{manifest.name}.jet") == .Val(named) {
             return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: named, callable: None}}
         }
-        // D-MOD-CYCLE1=A: without `run.jet`, the member declaring the
+        // Without `run.jet`, the member declaring the
         // package's one `fn run` is the entry; a library package has none,
         // and its first source file stands for the package.
         if !cli_files.is_file(jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)) {
@@ -784,7 +784,7 @@ fn jet_cli_command_role_file(command: String) -> String? Never! {
 }
 
 // main.rs `command_override_entry` over Package/mod.rs
-// `resolve_command_entry_checked` (D-CMDOVERRIDE1=A): for `run`, `dev`,
+// `resolve_command_entry_checked` for `run`, `dev`,
 // `build`, and `test`, the package-root role home declaring the command's
 // function, else one root file, else one `src/` file.
 fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
@@ -1082,7 +1082,7 @@ fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootF
     }
 }
 
-// main.rs `resolve_bare_entry` (D-CLI-BARE1=A): the entry a bare command, or
+// main.rs `resolve_bare_entry` the entry a bare command, or
 // one aimed at the directory `cwd`, compiles. A workspace with more than one
 // runnable member is ambiguous unless `-p <member>` picks one; otherwise the
 // nearest package's stock entry (or its command override).

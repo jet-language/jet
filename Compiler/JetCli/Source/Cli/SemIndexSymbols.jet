@@ -253,7 +253,7 @@ fn jet_cli_symbol_is_lower_or_digit(byte: U8) -> Bool Never! {
     (code >= 97 && code <= 122) || (code >= 48 && code <= 57)
 }
 
-// Syntax.rs `canonical_name_case(_, Snake)` (D-ACRO-CASE1=A: the mechanical
+// Syntax.rs `canonical_name_case(_, Snake)` (the mechanical
 // acronym split, `HTTPServer` -> `http_server`).
 fn jet_cli_symbol_snake(name: String) -> String Never! {
     bytes :: name.bytes()
@@ -572,7 +572,7 @@ fn jet_cli_symbol_shape(name: String, kind: JetCLISemKind, owner: String?) -> Je
         .Function(callable) -> {
             params :: jet_cli_sem_parameter_parts(callable.params).join(", ")
             prefix :: if owner == .Val(owner_name) -> "{owner_name}.{name}" else -> "fn {name}"
-            // D-SIG-AFTER1=A: the effect ceiling splits the one arrow; Panic
+            // The effect ceiling splits the one arrow; Panic
             // and Mem are deny-only and never shown in a positive ceiling.
             shown := [String]{}
             if callable.effects == .Val(row) {
@@ -637,7 +637,7 @@ fn jet_cli_symbol_expr_source(source: String, span: Span) -> String Never! {
     text
 }
 
-// Symbols.rs `marker_declaration_signature` (D-MARKER-SITES1=B).
+// Symbols.rs `marker_declaration_signature`.
 fn jet_cli_symbol_marker_signature(modules: [JetDriverDocModule], def: JetCLISemDef) -> String? Never! {
     if !def.identity.starts_with("rule:") -> return None
     loop doc_module in modules {

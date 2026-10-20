@@ -145,7 +145,7 @@ fn pkg_lock_verify_lock_matches_manifest(lock: LockFile, manifest: Manifest, loc
     }
 }
 
-// Stronger, bidirectional completeness check (D-SUPPLY1, Step 2): every
+// Stronger, bidirectional completeness check (Step 2): every
 // manifest dependency must carry the exact generated facts a locked/offline
 // realization consumes. Source-kind mismatches stay with the stale verifier
 // so callers can tell "regenerate the lock" from "update the lock".
@@ -153,7 +153,7 @@ fn pkg_lock_verify_all_manifest_deps_locked(manifest: Manifest, lock: LockFile) 
     pkg_lock_validate_manifest_lock_completeness(manifest, lock)
 }
 
-// D-RINGLAYER1=A M2: the manifest `runtime:` ceiling set on locked packages
+// M2: the manifest `runtime:` ceiling set on locked packages
 // at fetch time.
 fn pkg_lock_layer_from_manifest(manifest: Manifest) -> MIRRuntimeLayer? Never! {
     manifest.package.layer
@@ -163,7 +163,7 @@ fn pkg_lock_e3512(what: String, why: String, fix: String) -> Diagnostic Never! {
     diagnostic_from_registry("E3512", None, what, why, fix)
 }
 
-// D-BUILDGEN1: `--locked` requires every generated input to already be in
+// `--locked` requires every generated input to already be in
 // the unified lock with the same hash.
 fn pkg_lock_verify_locked_generated_inputs(project_root: String, generated: [ComptimeInput]) LockError! -[FS]> {
     loaded :: pkg_lock_load(project_root)
@@ -177,7 +177,7 @@ fn pkg_lock_verify_locked_generated_inputs(project_root: String, generated: [Com
     }
 }
 
-// D-BUILDGEN1: record generated-module output hashes in the unified lock,
+// Record generated-module output hashes in the unified lock,
 // upserting by managed path so a rebuild replaces drift instead of
 // appending.
 fn pkg_lock_record_generated_inputs(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
@@ -265,7 +265,7 @@ fn pkg_lock_locked_build_contribution_set(package: String, contributions: [FactC
     pkg_lock_sorted_contributions(records)
 }
 
-// D-CONF-SPLIT1=A: locked builds replay the exact computed writer set.
+// Locked builds replay the exact computed writer set.
 fn pkg_lock_verify_locked_build_contributions(project_root: String, package: String, contributions: [FactContribution]) LockError! -[FS]> {
     actual :: pkg_lock_locked_build_contribution_set(package, contributions)
     loaded :: pkg_lock_load(project_root)
@@ -282,7 +282,7 @@ fn pkg_lock_verify_locked_build_contributions(project_root: String, package: Str
     return Err(LockError.Reported(pkg_lock_e3512("locked build contribution for `{package}` drifted", "the computed fact writer chain differs from the chain recorded in `.jet/lock`", "rerun without `--locked` to review and record the new contribution chain")))
 }
 
-// D-CONF-SPLIT1=A: replace one package's computed writer records in the
+// Replace one package's computed writer records in the
 // unified lock after the selected runtime bundle passed the front end.
 fn pkg_lock_record_build_contributions(project_root: String, package: String, contributions: [FactContribution], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
     if locked -> return pkg_lock_verify_locked_build_contributions(project_root, package, contributions)
@@ -309,7 +309,7 @@ fn pkg_lock_write_error(path: String, error: String) -> Diagnostic Never! {
 }
 
 // The plan fingerprint of one package: sha256 over the source tree hash,
-// the sorted direct-dependency fingerprints, and (S2/D-MEM1) the snapshotted
+// the sorted direct-dependency fingerprints, and (S2) the snapshotted
 // public-fn capability digest when one exists, each NUL-terminated. An
 // empty `cap_digest` (first publish) leaves the tree+deps form unchanged.
 fn pkg_lock_compute_fingerprint(tree_hash: String, dep_fingerprints: [String], cap_digest: String) -> String Never! {

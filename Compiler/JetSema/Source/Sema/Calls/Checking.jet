@@ -361,7 +361,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
         compatible :: if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
         if !compatible {
-            // D-ANY-JAI1 / D-VARARGBOUND1 (Rust `check_variadic_bound_tail`,
+            // (Rust `check_variadic_bound_tail`,
             // E1313): a trait-bounded variadic argument is checked against
             // each bound trait it fails to implement. A builtin trait stays a
             // named bound after resolution.
@@ -383,7 +383,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             &diagnostics.push(sema_type_mismatch(required, value.ty, args[index].span))
             return None
         }
-        // D-COPY-DEFAULT1=A: the ownership check that follows moves an
+        // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
         if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 {
             if sema_ownership_note_implicit_take(&state, args[index].expr, value.ty, required, environment, program, context.generic_params, scopes) == .Val(key) {

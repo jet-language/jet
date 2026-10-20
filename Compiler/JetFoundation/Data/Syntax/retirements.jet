@@ -8,8 +8,8 @@ RETIRED_JET_TIME_FORMAT :: "jet.time.format"
 
 /// Every retirement the compiler knows about.
 RETIREMENTS :: [Retirement]{
-    // D-AUTHORITY-ROOTS1=A: flat language roots are semantic retirements, not
-    // aliases. Their names remain here only for the D-ONCE-RETIRE1 ratchet.
+    // Flat language roots are semantic retirements, not
+    // aliases. Their names remain here only for the ratchet.
     Retirement{id: "effect-flat-ffi-go", retired: "Go", canonical: "FFI.Go", kind: RetirementKind.Semantic, decision: "D-AUTHORITY-ROOTS1=A", since: "2026-08-06", code: Val("E0119")},
     Retirement{id: "effect-flat-ffi-java", retired: "Java", canonical: "FFI.Java", kind: RetirementKind.Semantic, decision: "D-AUTHORITY-ROOTS1=A", since: "2026-08-06", code: Val("E0119")},
     Retirement{id: "effect-flat-ffi-dotnet", retired: "DotNet", canonical: "FFI.DotNet", kind: RetirementKind.Semantic, decision: "D-AUTHORITY-ROOTS1=A", since: "2026-08-06", code: Val("E0119")},
@@ -128,11 +128,10 @@ RETIREMENTS :: [Retirement]{
         since: "2026-08-08",
         code: None,
     },
-    // D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
     // compiler facts and declaration metadata carry `$` (`T.$layout`,
     // `$build.os`, `$package.version`, `$sites:`). The `@` spelling is refused
     // with E0003 and a machine-applicable respelling; prefix `@` in code now
-    // means a D-MEMREF1 link.
+    // means a link.
     Retirement {
         id: "fact-mark",
         retired: RETIRED_COMPTIME_MARK,
@@ -574,7 +573,7 @@ RETIREMENTS :: [Retirement]{
         since: "2026-09-28",
         code: Val("E0160"),
     },
-    // D-OUTCOME-SHAPE1=A: `T? E!` matches its three states directly; the
+    // `T? E!` matches its three states directly; the
     // nested `.Ok(…)` layer around an optional state is refused with a
     // behavior-preserving edit to the flat state.
     Retirement {
@@ -586,10 +585,10 @@ RETIREMENTS :: [Retirement]{
         since: "2026-09-29",
         code: Val("E0392"),
     },
-    // D-PREP-SURFACE2=A + owner ruling (2026-09-30): compile time is always
+    // + owner ruling (2026-09-30): compile time is always
     // explicit, `NAME :: prep { value }`; casing never implies it. The `@`
     // mark on a constant is refused with E0388 and that behavior-preserving
-    // edit; prefix `@` in code now means a D-MEMREF1 link.
+    // edit; prefix `@` in code now means a link.
     Retirement {
         id: "comptime-constant-mark",
         retired: "@NAME :: value",
@@ -599,10 +598,10 @@ RETIREMENTS :: [Retirement]{
         since: "2026-09-30",
         code: Val("E0388"),
     },
-    // D-NAME-SPLICE1=B: a template name splice carries the fact sigil
+    // A template name splice carries the fact sigil
     // (`fn $method`, `self.$field`, `.$left`). The `@` splice is refused with
     // E0388 and a machine-applicable `$` respelling; prefix `@` in code now
-    // means only a D-MEMREF1 link.
+    // means only a link.
     Retirement {
         id: "template-name-splice-mark",
         retired: "fn @method / self.@field / .@left",

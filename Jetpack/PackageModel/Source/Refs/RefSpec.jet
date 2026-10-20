@@ -1,5 +1,4 @@
 // Jetpack ref classifier: `name['@'source]['#'selector]` or `source.package`
-// (D-JPK-REF1=A, D-MONOREF1=A).
 //
 // A ref reads like an address: the package, its source, then its version or
 // channel. Bare `./`, `../`, and `/` paths need no provider word.
@@ -9,10 +8,10 @@
 //   `./my-env`
 
 // Where a ref is resolved from. The built-in sources need no declaration;
-// `Named` is a source declared in an `env.jet` (D-JPK17) that resolves to an
+// `Named` is a source declared in an `env.jet` that resolves to an
 // upstream/pin through a `SourceTable`.
 enum RefSource {
-    // The canonical Jetpack package catalog (D-JPK-SNIXREUSE1).
+    // The canonical Jetpack package catalog.
     Jetpack
     // The nixpkgs collection, retained as an internal migration alias; its
     // locked identity is canonicalized to `jetpack`.
@@ -21,29 +20,29 @@ enum RefSource {
     Github
     // A local directory holding a pack file or used as a flake fallback.
     Path
-    // A package from the CRAN R package registry (D-FFI-R1).
+    // A package from the CRAN R package registry.
     Cran
-    // A package from the LuaRocks registry (D-FFI-LUA1).
+    // A package from the LuaRocks registry.
     LuaRocks
-    // A package from RubyGems (D-FFI-RUBY1).
+    // A package from RubyGems.
     RubyGems
-    // A distribution from CPAN (D-FFI-PERL1).
+    // A distribution from CPAN.
     Cpan
-    // A package from Packagist (D-FFI-PHP1).
+    // A package from Packagist.
     Packagist
-    // A package from Jet's first-party registry (D-JPK-REGISTRY1).
+    // A package from Jet's first-party registry.
     JetRegistry
-    // A package from npm (D-JPK-PROVIDERS2).
+    // A package from npm.
     Npm
-    // A package from Cargo (D-JPK-PROVIDERS2).
+    // A package from Cargo.
     Cargo
-    // A distribution from PyPI (D-JPK-EXTPROV1).
+    // A distribution from PyPI.
     PyPI
-    // A package from Swift Package Manager (D-JPK-EXTPROV1).
+    // A package from Swift Package Manager.
     SwiftPM
     // A verified release artifact admitted directly by Jetpack (card #2166).
     Releases
-    // A pack-declared named source, e.g. `stable` -> a pinned nixpkgs (D-JPK17).
+    // A pack-declared named source, e.g. `stable` -> a pinned nixpkgs.
     Named(String)
 
     // The source token as written after the `@` in a ref.
@@ -203,7 +202,7 @@ enum ProviderKind {
     }
 }
 
-// D-CHANNEL-AUTO1=A: who is allowed to move a source pin.
+// Who is allowed to move a source pin.
 enum ChannelPolicy {
     // No channel marker: the declaration never moves.
     Pinned
@@ -257,7 +256,7 @@ struct SourceTableEntry {
     raw: String
 }
 
-// The named sources an `env.jet` declares (D-JPK17): name -> upstream/pin and
+// The named sources an `env.jet` declares name -> upstream/pin and
 // the provider that realizes it. Built-in sources always resolve and are not
 // stored here. Every listing is in name order.
 struct SourceTable {
@@ -367,7 +366,7 @@ struct RefSpec {
     }
 
     // Classify a ref, accepting built-in sources plus any named source declared
-    // in `table` (D-JPK17). D-JPK-REF1=A puts the package before `@`; a local
+    // in `table`. Puts the package before `@`; a local
     // path is bare. A provider word before `@` is a teaching error only when
     // the suffix is not a source; a valid source suffix makes the left half a
     // package name.
@@ -400,14 +399,14 @@ struct RefSpec {
             }
             .None -> {}
         }
-        // D-JPK-SNIXREUSE1=A: a bare package is the Jetpack catalog spelling.
+        // A bare package is the Jetpack catalog spelling.
         // Workspace-aware callers probe their member index before reaching
         // this branch; a direct classifier has no workspace to consult.
         if raw != "" && !raw.contains("/") -> return RefSpec.classify_in(pkg_with_default_source(raw), table)
         Err(RefError.MissingSeparator(raw))
     }
 
-    // Classify a ref with workspace-member awareness (Slice B, D-MONOREF1=A).
+    // Classify a ref with workspace-member awareness (Slice B).
     //
     // Resolution order, first match wins:
     //   1. source forms `package@source` and `source.package` (classify_in)
@@ -476,7 +475,7 @@ enum RefError {
     // The source suffix is neither a built-in nor a declared named source.
     // `declared` lists the pack's named sources so the message can help.
     UnknownSource(source: String, raw: String, declared: [String])
-    // D-MONOREF1=A: bare name with no source suffix, and no workspace member
+    // Bare name with no source suffix, and no workspace member
     // matches, or the match was ambiguous.
     AmbiguousBare(String)
     // E1230: a bare or path-form ref matched more than one workspace member.
@@ -586,7 +585,7 @@ fn pkg_normalize_member_path(path: String) -> String Never! {
     out
 }
 
-// True for D-JPK-REF1 bare local-path refs.
+// True for bare local-path refs.
 fn pkg_is_bare_path(raw: String) -> Bool Never! {
     raw.starts_with("./") || raw.starts_with("../") || raw.starts_with("/")
 }
@@ -671,13 +670,13 @@ fn pkg_edit_distance(a: String, b: String) -> Int Never! {
     row[right.len()]
 }
 
-// ── `target@provider` source refs (D-JPK-REF1=A; amends U6) ──
+// ── `target@provider` source refs (amends U6) ──
 //
 // The typed authoring surface (env.jet/package.jet `sources:`/`packages:`)
 // writes source refs as `target@provider` — `owner/repo/rev@github`,
 // `channel@nixpkgs`. Local paths are bare (`./local`, `../local`, `/opt/local`).
 
-// D-JPK-CHANNEL1=A: a source ref tracking intent, resolved only by update
+// A source ref tracking intent, resolved only by update
 // verbs and stored exact in `.jet/lock`.
 enum ChannelRef {
     Latest

@@ -179,7 +179,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return (byte_head: false, raw_head: false)
     before_open :: previous_code_index(facts, open)
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
-    // D-BOUND-RAW1=A: a typed head is a name whose first character is an
+    // A typed head is a name whose first character is an
     // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
     if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
         first :: byte_at(source, facts[before_open * 4 + 1])
@@ -709,7 +709,7 @@ fn decode_raw_string(text: String, source_start: Int, tables: &TokenTables) -> (
     (decoded: decoded, parts: parts)
 }
 
-// D-TRIPLE-DELIM1=A: use the same first offending run and byte span as Native.
+// Use the same first offending run and byte span as Native.
 fn check_triple_delimiter_text(source: [U8], begin: Int, end: Int, position: String, diagnostics: &[Diagnostic]) {
     finish := end
     if byte_at(source, end) == 10 && finish > begin && byte_at(source, finish - 1) == 13 -> finish -= 1
@@ -873,10 +873,9 @@ fn retired_declaration_metadata(name: String) -> Bool Never! {
     text_in(name, [String]{"sites", "repeatable", "holds", "safe", "gates", "decision", "retired", "proved_by", "inherits", "companion", "scopes", "resolution", "owns_menu", "identity", "name"})
 }
 
-// D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A:
 // compiler facts and declaration metadata moved from `@` to `$`. A retired
 // spelling teaches E0003 with a machine-applicable edit, and the word then
-// reads as its `$` respelling so parsing recovers. D-NAME-SPLICE1=B: any
+// reads as its `$` respelling so parsing recovers. Any
 // other `@name` after `.` (`self.@field`, `.@left`) or naming a declaration
 // (`fn @method`, `impl @type_name`) is a retired template name splice; it
 // teaches E0388 and reads as `$name`.
@@ -1097,7 +1096,7 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, co
         return (decoded: name_intern(&tables.names, raw.decoded), keep: true, literal: literal_row(&tables, text_literal(0, raw.parts)))
     }
     if kind == K_CHAR -> return (decoded: name_intern(&tables.names, decode_char(slice_text(source, start, end), start, &diagnostics)), keep: true, literal: -1)
-    // D-FENCE2=A: the retired `@[` / `]@` digraphs lex as fence tokens so
+    // The retired `@[` / `]@` digraphs lex as fence tokens so
     // parsing recovers, and each one teaches its `<:` / `:>` respelling.
     if (kind == K_FENCE_OPEN && byte_at(source, start) == 64) || (kind == K_FENCE_CLOSE && byte_at(source, start) == 93) {
         retired_text :: if kind == K_FENCE_OPEN -> "@[" else -> "]@"

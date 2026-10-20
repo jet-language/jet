@@ -6,8 +6,8 @@
 //
 // The Rust reference reaches this through openat/mkdirat/renameat/linkat/
 // unlinkat/fdopendir FFI on Unix and pinned handles on Windows. Here the held
-// directory is the ratified Core directory handle (D-CORE-FILEDIR1) and member
-// identity is the ratified Stat identity (D-CORE-FILESTAT1); the per-platform
+// directory is the ratified Core directory handle and member
+// identity is the ratified Stat identity the per-platform
 // flags and the unsupported-platform fallback are Core's responsibility.
 
 STORE_PINNED_PRIVATE_MODE :: prep { 0o700 }
@@ -152,7 +152,7 @@ fn store_pinned_valid_name(name: String) StoreError! {
     if invalid -> return Err(StoreError.InvalidInput("invalid pinned-directory member name"))
 }
 
-// The Core error kinds lifecycle recovery branches on (D-CORE-FILEERROR1
+// The Core error kinds lifecycle recovery branches on (
 // names AlreadyExists; NotFound is in the IOError tree today).
 fn store_io_is_not_found(error: IOError) -> Bool Never! {
     if error == {

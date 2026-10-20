@@ -608,7 +608,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         if !sema_call_builtin_static_bound(bindings, name) -> &bindings.push(SemaInferenceBinding{name: name, ty: Type.Int, source: "builtin static default"})
     }
     result := sema_inference_substitute_type_bindings(row.return_type, bindings)
-    // D-SET-HASH1 (E0506): `Set.new()` / `Set.from(list)` / `Tally.new()` need a hashable element.
+    // E0506: `Set.new()` / `Set.from(list)` / `Tally.new()` need a hashable element.
     if (row.owner == "Set" || row.owner == "Tally") && result == .Apply(_, result_args) && result_args.len() == 1 && !sema_type_hashable(environment, program, result_args[0]) {
         element_name :: type_name(result_args[0])
         &diagnostics.push(sema_error("E0506", span, "`{row.owner}<{element_name}>` is not valid — `{element_name}` is not hashable", "{row.owner} elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type", "change the element type to a hashable type, or use a `[{element_name}]` list instead"))
@@ -651,7 +651,7 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-// Rust `infer_method_call` (D-SHAPE-CTORVERB1): entropy constructors use
+// Rust `infer_method_call` entropy constructors use
 // `new_random`; the retired `generate` spelling is E1004.
 fn sema_call_retired_entropy_constructor(owner: String, method: String, span: Span) -> Diagnostic? Never! {
     if method != "generate" || (owner != "SigningKey" && owner != "X25519SecretKey") -> return None
@@ -788,7 +788,7 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
 
-// D-SHAPE-CONVERT1=A: the numeric destination conversion a distinct type
+// The numeric destination conversion a distinct type
 // inherits from its numeric base (`UserID.from_int`, `Meters.from_float`):
 // the base's own built-in conversion row.
 fn sema_call_distinct_numeric_row(base: Type, method: String) -> BuiltinStaticRow? {
@@ -819,7 +819,7 @@ fn sema_call_distinct_conversion_failed() -> SemaMethodSpecialCheck Never! {
     SemaMethodSpecialCheck{handled: true, value: None}
 }
 
-// D-SHAPE-CONVERT1=A / D-RANGETYPE1: a distinct type owns the conversion
+// A distinct type owns the conversion
 // from its base (`UserID.from_int(42)`). A literal is proved against a range
 // type's bounds here (E0135); a runtime value makes the range type's
 // conversion fallible, which a binding then reports (E0136).
@@ -876,7 +876,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 
-// D-TYPE2-SPELL1 (#1549): `Int(lo..hi)` written as a call is the type head of
+// (#1549): `Int(lo..hi)` written as a call is the type head of
 // an inline range conversion, not a runtime constructor.
 fn sema_call_inline_range_descriptor(descriptor: Call) -> SemaIntegerRange? {
     if descriptor.name != "Int" || descriptor.args.len() != 1 -> return None
@@ -889,12 +889,12 @@ fn sema_call_inline_range_descriptor(descriptor: Call) -> SemaIntegerRange? {
     None
 }
 
-// D-RANGETYPE1 (E0135): an integer literal outside an inline range.
+// E0135: an integer literal outside an inline range.
 fn sema_inline_range_out_of_bounds(value: Int, lo: Int, hi: Int, span: Span) -> Diagnostic {
     sema_error("E0135", span, "`{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}", "a range type only holds values inside its bounds; `{value}` can never be an `Int({lo}..{hi})`", "use a value in `{lo}..{hi}`, or widen the type's range")
 }
 
-// D-TYPE2-SPELL1: `Int(lo..hi).from_int(value)`. A literal is proved against
+// `Int(lo..hi).from_int(value)`. A literal is proved against
 // the interval here (E0135); a runtime value converts fallibly.
 fn sema_call_try_inline_range_conversion(descriptor: Call, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "from_int" -> return sema_call_distinct_conversion_unhandled()
@@ -930,7 +930,7 @@ fn sema_call_try_inline_range_conversion(descriptor: Call, method: String, args:
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, program, context, &diagnostics)}
 }
 
-// D-RANGETYPE1 (E0136): a runtime value entering a range type needs the
+// E0136: a runtime value entering a range type needs the
 // fallible conversion's failure handled.
 fn sema_range_runtime_conversion(head: String, method: String, span: Span) -> Diagnostic {
     sema_error("E0136", span, "making a `{head}` from a runtime value can fail", "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled", "write `{head}.{method}(raw)?` and handle the failure")

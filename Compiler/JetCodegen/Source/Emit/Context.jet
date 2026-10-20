@@ -48,7 +48,7 @@ struct JetRustEmitConfig {
     // JET_KEEP_GOING (jet_rust_emit_program_keep_going): every failure is
     // kept with the function being printed and emission runs to the end.
     keep_going: Bool{false}
-    // The compiler threads function printing may use (D-JOBS1): more than
+    // The compiler threads function printing may use more than
     // one admitted thread prints the functions in consecutive parts, each on
     // its own copy of the emission context, joined in program order.
     threads: CompilerThreads
@@ -245,7 +245,7 @@ struct JetRustEmitContext {
     // Comparable) or owned by an undemanded derived codec impl
     // (mir_demanded_codec_impls).
     skipped_methods: [U64:Bool]
-    // D-MEM-COPYSEM1 move facts of the function being printed
+    // This rule move facts of the function being printed
     // (jet_rust_emit_move_facts): values read once in their own block, and
     // moved enum subjects whose payload bindings take them apart once.
     move_facts: JetRustEmitMoveFacts
@@ -265,7 +265,7 @@ struct JetRustEmitContext {
     all_modules_selected: Bool
     // Every failure, in order, under `config.keep_going`.
     kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
-    // D-MEM-VIEWRET1 (#4392), MIRRust view_lifetime: the lifetime a View/ViewMut
+    // (#4392), MIRRust view_lifetime: the lifetime a View/ViewMut
     // carrier names while a callable signature renders its returned views and
     // their owners; "" renders the elided `&[T]` used everywhere else.
     view_lifetime: String{""}

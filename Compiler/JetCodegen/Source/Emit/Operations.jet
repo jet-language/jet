@@ -381,7 +381,7 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
         // formal materializes an owner in call_arg_for_formal instead.
         if jet_rust_emit_string_view_argument(&ctx, function, arg) == .Val(view) -> return view
     }
-    // D-MEMPROVENANCE2 (#4707): a `ViewMut<T>` crosses by value as the
+    // (#4707): a `ViewMut<T>` crosses by value as the
     // `&mut [T]` reborrow its read produced; it moves, it never clones
     // (MIRRust call_arg_for_function).
     if !borrowed && arg.access == MIRAccess.Read {
@@ -881,7 +881,7 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
         }
     }
     if jet_rust_emit_comparison_by_reference(&ctx, function, op, left) {
-        // D-MEM-COPYSEM1: a comparison only inspects its operands, so it
+        // A comparison only inspects its operands, so it
         // compares them in place, never copies.
         left_text :: jet_rust_emit_inspected_value_reference(&ctx, function, left)
         right_text :: jet_rust_emit_inspected_value_reference(&ctx, function, right)
@@ -906,7 +906,7 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
     jet_rust_emit_primitive_binary(&ctx, op, left_text, right_text)
 }
 
-// D-MEM-COPYSEM1: true when `op` is a comparison whose operands (typed like
+// True when `op` is a comparison whose operands (typed like
 // `left`) are compared through references rather than copies: every operand
 // type but the scalars, which copy for free (MIRRust comparison_by_reference).
 fn jet_rust_emit_comparison_by_reference(ctx: &JetRustEmitContext, function: MIRFunction, op: MIRBinaryOp, left: MIRValueID) -> Bool Never! {
@@ -1921,7 +1921,7 @@ fn jet_rust_emit_foreign_argument(ctx: &JetRustEmitContext, function: MIRFunctio
         value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, false)
         return jet_rust_emit_native_int_argument(&ctx, value, None)
     }
-    // D-FFI-CAP1: the Rust bridge's `jet_ffi_<name>` wrapper takes a read
+    // The Rust bridge's `jet_ffi_<name>` wrapper takes a read
     // parameter as an owned Rust value, so only other languages borrow it.
     borrowed :: arg.access == MIRAccess.Read && !mir_type_is_scalar(parameter.ty) && foreign.foreign_language != MIRForeignLanguage.Rust
     jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
@@ -2504,7 +2504,7 @@ fn jet_rust_emit_foreign_call(ctx: &JetRustEmitContext, function: MIRFunction, i
     "unreachable!(\"missing foreign call\")"
 }
 
-// MIRRust foreign_call (D-MEM-SENTRY1 / I1): an audited foreign declaration is
+// MIRRust foreign_call (I1): an audited foreign declaration is
 // its own `#Unsafe` region; the foreign body runs inside that gate's sentry.
 fn jet_rust_emit_foreign_gated_call(foreign: MIRForeign, call: String) -> String Never! {
     gate :: foreign.unsafe_gate ?? return call
@@ -2835,12 +2835,12 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
         loop arg in args -> &layers.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true))
         return Val("{{ let __jet_argv = {root}jet_std_io_args(); let __jet_spec = {spec}; {root}jet_config_merge::<{target}>(&__jet_spec, &__jet_argv, {names}, {layers.join(", ")}) }}")
     }
-    // D-JSON3: the typed form shares the one generated Decode engine.
+    // The typed form shares the one generated Decode engine.
     if module_name == "core.encoding.json" && member == "decode" && type_args.len() > 0 {
         rendered := jet_rust_emit_call_arguments(&ctx, function, args, route_info.signature.borrow_mask)
         return Val("{root}jet_enc_json_decode{jet_rust_emit_generic_call_args(&ctx, type_args)}({rendered})")
     }
-    // D-WEBQUERY1: the checked callback carries JetErr; the AOT query kernel
+    // The checked callback carries JetErr; the AOT query kernel
     // takes text failures through this one narrowing seam.
     if module_name == "core.web.query" && member == "live" && args.len() > 0 {
         values := [String]{}
@@ -2960,7 +2960,7 @@ fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunct
             else -> {}
         }
     }
-    // MIRRust core_call_path_argument (D-CORE-PATH1): a Path value in a formal
+    // MIRRust core_call_path_argument a Path value in a formal
     // that admits Path crosses as the native kernel's String carrier, never as
     // the checked union value.
     if jet_rust_emit_nominal_name(value_type) == (Val("Path")) && jet_rust_emit_core_formal_admits_path(declared) {
@@ -4332,7 +4332,7 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
     value
 }
 
-// D-OPT-WRITE1 (#3974): the Rust pattern that binds a `MIRProjection.Payload`
+// (#3974): the Rust pattern that binds a `MIRProjection.Payload`
 // slot as `payload`.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::payload_pattern
 fn jet_rust_emit_payload_pattern(ctx: &JetRustEmitContext, kind: MIRPayloadKind) -> String Never! {
@@ -4995,7 +4995,7 @@ fn jet_rust_emit_is_nonowning_reference_type(ty: MIRType) -> Bool Never! {
     }
 }
 
-// MIRRust is_pin_type (D-PIN1=A): `Pin<T>`, the exclusive reference to a pinned place.
+// MIRRust is_pin_type `Pin<T>`, the exclusive reference to a pinned place.
 fn jet_rust_emit_is_pin_type(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Tagged(_, inner) -> return jet_rust_emit_is_pin_type(inner)
@@ -5965,7 +5965,7 @@ fn jet_rust_emit_sole_later_use(ctx: JetRustEmitContext, function: MIRFunction, 
 }
 
 // MIRRust eager_list_adapter (#4566 slice 5): the receiver and callback of
-// an eager list `map`, `map_mut` or `filter` (D-LOOPMAP1=B), and whether it
+// an eager list `map`, `map_mut` or `filter` and whether it
 // filters.
 struct JetRustEmitEagerAdapter {
     receiver: MIRValueID
@@ -6413,7 +6413,7 @@ fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MI
     if fact == MIRCopyFact.ViewMaterialize -> return jet_rust_emit_view_copy(&ctx, function, value, result)
     if jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.Int && jet_rust_emit_value_single_use(ctx, value) {
         mode :: jet_rust_emit_value_mode(ctx, function, value)
-        // D-MEM-COPYSEM1: an owned source read only by this copy is dead
+        // An owned source read only by this copy is dead
         // after it, so the copy takes it.
         if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> return jet_rust_emit_value_move(ctx, value)
     }
@@ -6540,7 +6540,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             return "match {jet_rust_emit_previous_slot()} {{ {rows.join(", ")}, _ => unreachable!(\"invalid MIR phi predecessor\") }}"
         }
         .ReadPlace(place) -> {
-            // D-MEMPROVENANCE2 (#4707): reading a write view hands on the
+            // (#4707): reading a write view hands on the
             // `&mut [T]` borrow (a reborrow of the window), never a copy
             // (MIRRust operation_expression / view_mut_reborrow).
             if result == .Val(value) {
@@ -6613,7 +6613,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .OptionIsSome(subject) | .ResultIsOk(subject) -> return "matches!({jet_rust_emit_inspected_value_reference(&ctx, function, subject)}, Ok(_))"
         .PatternMatched(subject) -> return "matches!({jet_rust_emit_value_reference(ctx, subject, false)}, Ok(_))"
         .OptionValue(subject) -> {
-            // D-MEM-COPYSEM1: over a read parameter's place only the payload is copied.
+            // Over a read parameter's place only the payload is copied.
             if jet_rust_emit_immutable_read_place(&ctx, function, subject) == .Val(place) -> return "match {jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR option payload missing\") }}"
             return "match {jet_rust_emit_value_move(ctx, subject)} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}"
         }
@@ -6678,7 +6678,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         // MIRRust: an owned SSA result holds the declared place value; borrow
         // consumers re-derive the place reference at their own boundary
         // (jet_rust_emit_borrowed_value_reference), so storing `&T` in the
-        // `Option<T>` slot would change its type. D-PIN1=A: a `Pin<T>` result
+        // `Option<T>` slot would change its type. A `Pin<T>` result
         // (`mem.pin(&place)`) is the exclusive reference itself.
         .AddressOf(place, access) -> {
             if access == MIRAccess.Move -> return jet_rust_emit_place_reference(&ctx, function, place, access)
@@ -6874,7 +6874,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 else -> false
             }
             shared_slice :: !by_value && !byte_loop && listed && jet_rust_emit_shared_constant_value(&ctx, function, collection)
-            // D-MEM-COPYSEM1: a read loop whose collection value is read only
+            // A read loop whose collection value is read only
             // here already holds its own copy, so the cursor takes that copy by
             // value rather than copying the whole collection a second time.
             keyed :: if jet_rust_emit_value_type(ctx, function, collection).kind == {

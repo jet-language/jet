@@ -1,4 +1,4 @@
-// The process side of the Jet-hosted `jet` (D-JETCLI-HOST1=A): run the front
+// The process side of the Jet-hosted `jet` run the front
 // door, carry out its plan, and write the bytes. The process entry passes
 // argv without the program name and exits with the returned status.
 use core.files as cli_files
@@ -381,7 +381,7 @@ fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> Strin
 // the profile passes, write `object_path`, realize the program's C closure
 // (c@path archives, #FFI(c) inline bodies, the musl platform), then use the
 // in-process linker to bind the packaged runtime of `runtime_dir` into a
-// static x86-64 executable at `executable_path` (D-EXEC1: the one compiled
+// static x86-64 executable at `executable_path` (the one compiled
 // runtime). Link inputs are always [object, runtime, C closure...]; a program
 // with a C closure links the Jet-only runtime object instead of the pack.
 // `keep_going` (JET_KEEP_GOING, the bootstrap feed only): a function whose
@@ -709,7 +709,7 @@ fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
     jet_cli_write_output(output)
     cli_process.exit(output.exit_code)
     // Unreachable: `exit` is `Never Never!`. Kept while a0_001 seeds the
-    // round: its D-NEVER2 proof knows only direct `Never` calls, not module
+    // round: its proof knows only direct `Never` calls, not module
     // calls (08fa56aaa). Remove once a seed carries 08fa56aaa.
     panic("the process outlived its exit")
 }
@@ -733,7 +733,7 @@ fn jet_cli_exec(binary: String, program_args: [String], color: Bool) -[Exec, Tim
 
 // Under `--verbose`, the advisory lints (not a11y) of a compile with no
 // errors, written to stderr before the built program runs, so they precede
-// its output on the shared streams (D-LINT-VISIBILITY2=A).
+// its output on the shared streams.
 fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagnostics: [Diagnostic]) {
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
@@ -1173,7 +1173,7 @@ fn jet_cli_fmt_plural(count: Int, singular: String, plural: String) -> String Ne
     if count == 1 -> singular else -> plural
 }
 
-// CmdCompile.rs `is_package_manifest_file` (D-ECO-FILEROOT1=A): the one
+// CmdCompile.rs `is_package_manifest_file` the one
 // reserved Package root filename; its `config.jet`/`env.jet` siblings are
 // ordinary modules.
 fn jet_cli_fmt_is_package_manifest_file(origin: String) -> Bool Never! {
@@ -1195,7 +1195,7 @@ JET_CLI_FMT_EXPLICIT_COPIES_POLICY :: "#Policy(copies: .Explicit)\n"
 
 // CmdCompile.rs `format_source_for_fmt` copy materialization: `origin` must
 // check clean as written, then `.copy()` goes in at every implicit copy site. The
-// sites are sema's one copy-site rule (D-MEM-COPYSEM1, #3738): the Safe `.copy()`
+// sites are sema's one copy-site rule (#3738): the Safe `.copy()`
 // edits it gives the same bytes under `#Policy(copies: .Explicit)` are the
 // copies the default policy makes implicitly. Sema spans point into the
 // source as read, so marks go in before any package-target migration.

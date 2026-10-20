@@ -1,5 +1,4 @@
-// The Jet env file `env.jet` (D-JPK20/U3): the directive author surface
-// (D-JPK17).
+// The Jet env file `env.jet` (U3): the directive author surface
 //
 //     // env.jet: a Jetpack project environment (dev-shell descriptor)
 //     use jetpack as pkg
@@ -15,7 +14,7 @@
 // The directive calls are read structurally so `jetpack add/remove/build`
 // can resolve and edit the declared environment. The env file stays the
 // declarative front door: add and remove edit this file, never a hidden
-// install database (D-JPK4).
+// install database.
 
 // A named source declaration: `pkg.source("<name>", "<upstream>" [, "<via>"])`.
 // `via` selects the provider (`nix` by default, `core` for first-party Jet
@@ -55,7 +54,7 @@ struct EnvFile {
         env_file_published_source(source)
     }
 
-    // The named-source resolution table for this env (D-JPK17).
+    // The named-source resolution table for this env.
     fn source_table(self) -> SourceTable Never! {
         decls := [NamedSourceDecl]{}
         loop source in self.named {
@@ -127,7 +126,7 @@ struct EnvFile {
 
     // Parse the directive calls out of env-file text. Tolerant: anything
     // unrecognized is ignored. Every `pkg.source` is read: one argument sets
-    // the default source, two or three declare a named source (D-JPK17).
+    // the default source, two or three declare a named source.
     fn parse(text: String) -> EnvFile Never! {
         file := EnvFile.empty()
         loop call in env_file_all_call_args(text, PACK_DIRECTIVE_SOURCE) {

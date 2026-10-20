@@ -61,7 +61,7 @@ use jet_lexer.[
 ]
 
 JFMT_INDENT :: 4
-// D-FMT1: the width floor (gate d) for keeping a body on one line.
+// The width floor (gate d) for keeping a body on one line.
 JFMT_MAX_WIDTH :: 100
 // Rust `usize::MAX`: no trailing-comment limit.
 JFMT_NO_LIMIT :: 9223372036854775807
@@ -79,7 +79,7 @@ JFMT_PREC_SHIFT :: 8
 JFMT_PREC_ADD :: 9
 JFMT_PREC_MUL :: 10
 JFMT_PREC_UNARY :: 11
-// D-EXPSEM1=A: `^` binds tighter than unary minus and looser than postfix.
+// `^` binds tighter than unary minus and looser than postfix.
 JFMT_PREC_POW :: 12
 JFMT_PREC_POSTFIX :: 13
 JFMT_PREC_PRIMARY :: 14
@@ -114,7 +114,7 @@ struct JetFmt {
     trailing_comment_limit: Int
     items: [Item]
     policy_declarations: [PolicyDeclaration]
-    // D-EACH1=C authored forms corresponding to expanded AST statements.
+    // This rule authored forms corresponding to expanded AST statements.
     fenced_statements: [FencedStatement]
     simplify: Bool
     // The return type supplies the expected type for a direct returned
@@ -354,7 +354,7 @@ fn jfmt_is_generated_label(name: String) -> Bool Never! {
     name.starts_with("__jet_")
 }
 
-// ---- D-FMT1 inline eligibility ----
+// ---- inline eligibility ----
 
 // May this statement render inline inside a one-line brace body? Only
 // non-block statements qualify.
@@ -512,7 +512,7 @@ fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
         .Const(constant) -> {
             if constant.is_persist -> return jfmt_rfind_or(f, constant.name_span.start, "#Persist", constant.name_span.start)
             if constant.attrs.len() > 0 {
-                // D-CONSTMARK1: only a storage marker can sit in front of a
+                // Only a storage marker can sit in front of a
                 // constant's name.
                 found :: jfmt_bytes_rfind(f.src_bytes, constant.name_span.start, "#Static")
                 if found >= 0 -> return found
@@ -580,7 +580,7 @@ fn jfmt_item_span_end(item: Item) -> Int Never! {
         .Distinct(definition) -> definition.span.end
         .TypeAlias(definition) -> definition.span.end
         .UnitFamily(definition) -> definition.span.end
-        // D-ERR-CONV: body_span.end is after the closing `}`.
+        // Body_span.end is after the closing `}`.
         .ErrorConv(definition) -> definition.body_span.end
         .Migration(declaration) -> declaration.span.end
         .ProtocolDecl(declaration) -> declaration.span.end
@@ -974,7 +974,7 @@ fn jfmt_statement_source_end(f: JetFmt, stmt: Stmt) -> Int Never! {
     last_end
 }
 
-// S69 (D-SG3): did the author break the line before this chain step's `.`?
+// S69 did the author break the line before this chain step's `.`?
 fn jfmt_chain_break_between(f: JetFmt, from: Int, to: Int) -> Bool Never! {
     from <= to && jfmt_src_valid(f, from, to) && jfmt_bytes_have_newline(f.src_bytes, from, to)
 }
@@ -1175,7 +1175,7 @@ fn jfmt_list_item_spans(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never! 
     None
 }
 
-// ---- brace bodies (D-FMT1 / D-FMTCOLLAPSE1=B) ----
+// ---- brace bodies ----
 
 fn jfmt_fmt_body(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_control_body(&f, body)
@@ -1235,7 +1235,7 @@ fn jfmt_value_block_braces(f: JetFmt, value: Expr) -> JetFmtBraces? Never! {
     if open <= close -> Val(JetFmtBraces{open: open, close: close}) else -> None
 }
 
-// D-FMT1: attempt the inline branch `{ value }`; rolls back on overflow. The
+// Attempt the inline branch `{ value }`; rolls back on overflow. The
 // caller has already emitted the opening `{`.
 fn jfmt_try_inline_value_block(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if !jfmt_value_block_inlineable(f, stmts, value) -> return false
@@ -1271,7 +1271,7 @@ fn jfmt_fmt_control_body(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_body_expanded(&f, body)
 }
 
-// ---- D-OPT-LIFT1=A / D-FMT-SIMPLIFY1=A: redundant `Val(x)` returns ----
+// ---- redundant `Val(x)` returns ----
 
 // `Val(x)` returned from a function declared `-> T?` drops its `Val` when the
 // payload's type never comes from the optional context: a name, a field
@@ -1570,7 +1570,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_newline(&f)
         first = false
     }
-    // D-PRELUDEX1=A: `#NoPrelude` is emitted before imports.
+    // `#NoPrelude` is emitted before imports.
     if prog.no_prelude && !grouped_file_rules && !has_ordered_file_rules {
         if !first -> jfmt_newline(&f)
         first = false
@@ -1589,7 +1589,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         first = false
         jfmt_fmt_marker_group(&f, ordered_file_rules, "#", true)
     }
-    // D-WEBDEFAULT1 / D-WASM1: fixed post-import position.
+    // Fixed post-import position.
     if web_default && !grouped_file_rules && !has_ordered_file_rules {
         if !first -> jfmt_blank_line_between_items(&f)
         first = false
@@ -1604,7 +1604,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             jfmt_newline(&f)
         }
     }
-    // D-HTMLPAIR1: `#HTML(Path{"path.html"})`.
+    // `#HTML(Path{"path.html"})`.
     if prog.html_path == .Val(html_path) {
         if !grouped_file_rules && !has_ordered_file_rules {
             if !first -> jfmt_blank_line_between_items(&f)
@@ -1614,7 +1614,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             jfmt_newline(&f)
         }
     }
-    // D-POLICY-WORD1=A: module-scoped `#Policy(...)` at a fixed position.
+    // Module-scoped `#Policy(...)` at a fixed position.
     module_policies := [PolicyDeclaration]{}
     loop declaration in prog.policy_declarations {
         if jfmt_is_module_policy(declaration) -> &module_policies.push(declaration)
@@ -1628,7 +1628,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_newline(&f)
         jfmt_emit_trailing(&f, policy_span.end)
     }
-    // D-STRUCT-POLICY1=A: user settings stay on the declaration plane.
+    // User settings stay on the declaration plane.
     loop declaration in prog.user_policy_declarations {
         if !first -> jfmt_blank_line_between_items(&f)
         first = false
@@ -1636,7 +1636,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_fmt_user_policy_decl(&f, declaration)
         jfmt_emit_trailing(&f, declaration.span.end)
     }
-    // D-ENTRY-SCRIPT1=C: loose statements interleave with items by position.
+    // Loose statements interleave with items by position.
     item_i := 0
     stmt_i := 0
     previous_was_script := false
@@ -1696,7 +1696,7 @@ fn jet_format_source(src: String, simplify_requested: Bool) -> JetFormatResult {
         if !jfmt_fmt_parse_accepts(parsed.diagnostics) -> return JetFormatResult{ok: false, text: "", diagnostics: parsed.diagnostics}
     }
     prog := parsed.program
-    // D-OPT-LIFT1=A: dropping a redundant `Val(x)` rewrites the program itself.
+    // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
     JetFormatResult{ok: true, text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify), diagnostics: [Diagnostic]{}}
 }

@@ -686,7 +686,7 @@ struct SemaCheckedForeignFunction {
     // The target-checked operand contract of an `#FFI(asm)` body (Rust
     // `check_inline_asm` stores it on the function); None for every other row.
     asm_contract: InlineAsmContract?
-    // D-MEM-SENTRY1: the audited `#Unsafe` gate an inline foreign declaration
+    // The audited `#Unsafe` gate an inline foreign declaration
     // carries; every call to the row runs inside this sentry scope.
     unsafe_gate: TUnsafeGate?
 }
@@ -1093,7 +1093,7 @@ fn sema_checked_foreign_abi(graph: SemaRegistrationGraph, registered: SemaRegist
         &diagnostics.push(sema_error("E3212", abi.span, "`{abi.name}` is not a known C calling convention", "`#ABI` accepts only the ratified native ABI names", "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`"))
         return false
     }
-    // D-CABI-PLATFORM1=A: admissibility follows the selected target, not the compiler host.
+    // Admissibility follows the selected target, not the compiler host.
     windows :: graph.target_machine.triple.contains("windows")
     x86 :: graph.target_machine.triple.starts_with("i686-")
     x64 :: graph.target_machine.triple.starts_with("x86_64-")
@@ -2049,7 +2049,7 @@ fn sema_checked_computed_field_visit(struct_name: String, node: Int, names: [Str
     colors[node] = 2
 }
 
-// Rust CheckerPatchable.rs `validate_patchable_struct` (D-PATCH1).
+// Rust CheckerPatchable.rs `validate_patchable_struct`.
 fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnostic]) {
     patchable := false
     loop derived in definition.derives {
@@ -2068,7 +2068,7 @@ fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnos
     }
 }
 
-// Rust CheckerMarkers.rs (D-DEFAULT-SHAPE1=B): a field `#Default(expr)` is
+// Rust CheckerMarkers.rs a field `#Default(expr)` is
 // retired under its own registered code.
 fn sema_checked_validate_field_default_marker(definition: StructDef, diagnostics: &[Diagnostic]) {
     loop field_index in 0..<definition.fields.len() {
@@ -2417,7 +2417,7 @@ fn sema_checked_item_span(item: Item) -> Span Never! {
     }
 }
 
-// D-SHARED-CYCLE1=C. Resolve nominal identity through the registration graph,
+// . Resolve nominal identity through the registration graph,
 // not a leaf-name scan, and only traverse structs like Rust StrongSharedCycleGraph.
 fn sema_checked_shared_reaches(graph: SemaRegistrationGraph, owner: String, caller: String, ty: Type, memo: &[String:Bool], active: &[String:Bool]) -> (reaches: Bool, cut: Bool) Never! {
     if ty == {
@@ -2874,7 +2874,7 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
     }
 }
 
-// Rust `TraitRegistry` coherence (D-QUAL2, D-OPDEF1, orphan rule). Top-level
+// Rust `TraitRegistry` coherence (orphan rule). Top-level
 // impls register in source order, then the derive requests, then the trait
 // blocks of struct and enum declarations, so a duplicate reports at the later
 // block. An operator impl's identity includes its right-hand type.
@@ -2961,7 +2961,7 @@ fn sema_checked_coherence_owner_type(state: SemaCheckedCoherence, owner_name: St
 }
 
 // Rust `local_traits`: a builtin or synthetic protocol trait, a trait this
-// module declares, or one imported from the same package (D-MOD-CYCLE1=A: the
+// module declares, or one imported from the same package (the
 // package is the orphan unit).
 fn sema_checked_coherence_local_trait(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, trait_name: String) -> Bool Never! {
     if trait_name.contains(".") -> return false
@@ -3010,7 +3010,7 @@ fn sema_checked_coherence_operator_valid(trait_name: String, owner_type: Type, r
     }
 }
 
-// D-DISPLAY-SHAPE + D-MEM1: the compiler-owned Display hook is
+// The compiler-owned Display hook is
 // `display(self) -> String`, with a read receiver. It has no source nominal
 // for sema_checked_validate_impl to find; check it at the shared top-level
 // and inline impl coherence boundary, just as Rust checks built-in shapes.
@@ -3140,7 +3140,7 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     }
 }
 
-// D-MEMBER-NAMESPACE1=A: fields and methods have separate namespaces.
+// Fields and methods have separate namespaces.
 // Only operator hooks may repeat a method name (pair coherence checks the RHS).
 fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
     names := [String:Bool]{}
@@ -3358,7 +3358,7 @@ fn sema_checked_constant_type(definition: ConstDef) -> Type? {
     }
 }
 
-// D-BIND-BARE1: preserve the type on a scalar literal when no staged type
+// Preserve the type on a scalar literal when no staged type
 // has been installed yet. Calls/operators remain outside module storage.
 fn sema_checked_typed_scalar_literal_type(value: Expr) -> Type? {
     if value == .TypedLit(head, body, _) {
@@ -3459,7 +3459,7 @@ fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: S
     }
 }
 
-// D-MODULE-VALUE1: a comptime `@name` binding evaluates any pure expression,
+// A comptime `@name` binding evaluates any pure expression,
 // and a typed Output carries its own closed shape. Every other module binding
 // holds literal data, which the compile-time evaluator folds once.
 fn sema_checked_module_value_evaluates(definition: ConstDef) -> Bool Never! {

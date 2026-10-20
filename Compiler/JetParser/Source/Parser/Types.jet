@@ -62,14 +62,14 @@ fn parser_parse_type(state: &JetParserState, depth: Int) -> ParsedType {
     }
 
     start :: parser_current(&state)
-    // D-TYPE-SUFFIX1=A: a whole type position may hold only a contract,
+    // A whole type position may hold only a contract,
     // `E!` or `(A | B)!`, the unit-success carrier.
     if parser_suffix_contract_ahead(&state) >= 0 {
         error_type :: parser_parse_suffix_contract(&state, depth + 1)
         return ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: error_type.ty}, span: parser_cover(start.span, error_type.span)}
     }
     ty :: parser_parse_type_atom(&state, depth + 1)
-    // D-TYPE-SUFFIX1=A: the error contract follows the success type:
+    // The error contract follows the success type:
     // `Int ParseError!`, `Entry? (DBError | TimeoutError)!`.
     if parser_suffix_contract_ahead(&state) >= 0 {
         error_type :: parser_parse_suffix_contract(&state, depth + 1)
@@ -95,7 +95,7 @@ fn parser_next_code_index(state: JetParserState, start: Int) -> Int Never! {
     -1
 }
 
-// D-TYPE-SUFFIX1=A: the index just past one error-contract member (a dotted
+// The index just past one error-contract member (a dotted
 // type path with optional `<...>` arguments, a `( ... )` group, or a
 // `[ ... ]` list of errors), or -1.
 fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int Never! {
@@ -145,7 +145,7 @@ fn parser_scan_contract_member(state: JetParserState, start: Int) -> Int Never! 
     index
 }
 
-// D-TYPE-SUFFIX1=A: does an error contract start here? -1 when none, 0 for
+// Does an error contract start here? -1 when none, 0 for
 // `E!` or `(A | B)!`, and 1 for the rejected unparenthesized `A | B!`.
 fn parser_suffix_contract_ahead(state: &JetParserState) -> Int Never! {
     if state.pending_type_gt -> return -1
@@ -185,7 +185,7 @@ fn parser_retired_infix_contract_at(state: JetParserState, bang: Int) -> Bool Ne
     kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_RPAREN || kind == TOKEN_EQ
 }
 
-// D-TYPE-SUFFIX1=A: the error half of a contract and its `!`. A union needs
+// The error half of a contract and its `!`. A union needs
 // its parentheses: `A | B!` is taught as `(A | B)!`.
 fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedType {
     bare_union :: parser_suffix_contract_ahead(&state) == 1
@@ -205,7 +205,7 @@ fn parser_type_starts(kind: Int) -> Bool Never! {
     kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_STAR || kind == TOKEN_KW_FN
 }
 
-// D-TYPE-SUFFIX1=A: a retired prefix error contract (`!E`, `!(A | B)`, or
+// A retired prefix error contract (`!E`, `!(A | B)`, or
 // infix `T ! E`) after its `!`: parse the error type and teach `E!`.
 fn parser_parse_retired_prefix_error(state: &JetParserState, bang: Span, depth: Int) -> ParsedType {
     first :: parser_current(&state)
@@ -239,7 +239,7 @@ fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String Nev
     out
 }
 
-// D-TYPE-SUFFIX1=A: source text of a type written before a suffix mark,
+// Source text of a type written before a suffix mark,
 // grouped when the mark would otherwise bind to its last member.
 fn parser_marked_type_text(state: JetParserState, ty: Type, first: Int, end: Int) -> String Never! {
     text :: parser_tokens_text(state, first, end)
@@ -275,7 +275,7 @@ fn parser_parse_type_union_tail(state: &JetParserState, first: ParsedType, depth
     result
 }
 
-// D-TYPE-SUFFIX1=A: `?` follows the type it marks and binds tightly, so
+// `?` follows the type it marks and binds tightly, so
 // `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
 fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
     base :: parser_parse_type_base(&state, depth + 1)
@@ -299,7 +299,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
     kind :: start.kind
 
     if kind == {
-        // D-TYPE-SUFFIX1=A: the retired prefix optional `?T` teaches `T?`.
+        // The retired prefix optional `?T` teaches `T?`.
         TOKEN_QUESTION -> {
             parser_bump(&state)
             parser_skip_trivia(&state)
@@ -310,7 +310,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
             parser_add_type_mark_error(&state, "E-TYPE-PREFIX", span, "`?{text}` is a retired prefix type mark", "a type mark follows the type it marks; `{text}?` may be absent", "write `{text}?`", "{text}?")
             ParsedType{ty: Type.Option{inner: inner.ty}, span: ^span}
         }
-        // D-TYPE-SUFFIX1=A: the retired prefix contract `!E` teaches `E!`.
+        // The retired prefix contract `!E` teaches `E!`.
         TOKEN_BANG -> {
             bang :: parser_bump(&state)
             err :: parser_parse_retired_prefix_error(&state, bang.span, depth + 1)
@@ -331,7 +331,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
-            // D-SOA2C (Rust `Types.rs` E1107): the per-container prefix
+            // (Rust `Types.rs` E1107): the per-container prefix
             // spelling `columnar [T]` is reserved; nothing ships, so it is a
             // fatal teaching error at the prefix word.
             if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
@@ -367,7 +367,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: parser_cover(start.span, end)}
             }
             if parser_current_kind(&state) == TOKEN_LT {
-                // D-TYPE-SUFFIX1=A: `Result<T, E>` is the retired fallible spelling.
+                // `Result<T, E>` is the retired fallible spelling.
                 if name == "Result" -> parser_add_error_code(&state, "E0406", start.span, "`Result<T, E>` is old Jet error syntax", "fallible Jet types write the error contract after the success type", "write `T? E!`, `T (E1 | E2)!`, or omit the contract for implicit `Err`")
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
             }
@@ -432,7 +432,7 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
 }
 
 // A function type `fn(T1, …) -> R`, `fn(T1, …) -[E]> R` or `fn(…) E!`. It
-// reuses the parameter grammar's zone separators (D-APILABEL1=A): public
+// reuses the parameter grammar's zone separators public
 // labels and zones are part of callable identity, local names are not.
 fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType {
     start :: parser_bump(&state)
@@ -576,7 +576,7 @@ fn parser_has_type(value: ParsedType?) -> Bool Never! {
     false
 }
 
-// D-EFF1: the effect row of a function type, `-[E]>`; the retired `:[E]>`,
+// The effect row of a function type, `-[E]>`; the retired `:[E]>`,
 // `=[E]=>` and `--[E]->` spellings are read after their E0066 teaching.
 fn parser_parse_effect_arrow_row(state: &JetParserState, canonical: Bool, retired_colon: Bool, retired_eq: Bool) -> [EffectRowEntry] {
     if {

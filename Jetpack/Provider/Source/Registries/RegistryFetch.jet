@@ -3,11 +3,11 @@
 // jetpack::Provider::fetch.
 //
 // Downloads go through one Core HTTP client that connects only to public
-// addresses (D-CORE-HTTPDEST1), follows at most five redirects and only to
-// the authorized hosts (D-CORE-HTTPREDIRECT1), ignores ambient proxies, and
-// caps every body (D-CORE-HTTPBODYLIMIT1). Archives are inspected as streams:
+// addresses follows at most five redirects and only to
+// the authorized hosts ignores ambient proxies, and
+// caps every body. Archives are inspected as streams:
 // raw tar headers through the preflight walker, then entry kinds, names, and
-// sizes through Core's tar reader (D-CORE-CODECSTREAM1, D-CORE-TARSTREAM1).
+// sizes through Core's tar reader.
 
 PROVIDER_MAX_DOWNLOAD_BYTES :: prep { 67108864 }
 PROVIDER_MAX_ARCHIVE_ENTRIES :: prep { 4096 }
@@ -509,7 +509,7 @@ struct RegistryAuthority {
 }
 
 // The lowercase host of an HTTPS URL, refusing credentials, non-443 ports,
-// malformed hosts, and non-public IP literals (D-CORE-NETPUBLIC1 table).
+// malformed hosts, and non-public IP literals (table).
 fn provider_registry_authority_of(url: String) -> String RegistryError! {
     if pkg_text_has_control(url) -> return Err(RegistryError.Reason("provider fetch URL contains control characters"))
     if !url.starts_with("https://") -> return Err(RegistryError.Reason("provider fetch URL must use HTTPS"))

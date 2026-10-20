@@ -168,7 +168,7 @@ fn jfmt_type_text(f: JetFmt, ty: Type) -> String {
     jfmt_out_text(scratch)
 }
 
-// D-FMT-SIMPLIFY1=A / R3: a direct returned struct literal already has its
+// R3: a direct returned struct literal already has its
 // type from the function contract, so its `Type.` head is redundant.
 fn jfmt_struct_lit_head_is_redundant(f: JetFmt, type_name: String, type_args: [Type], import_ns: String?) -> Bool {
     expected :: f.expected_return_type ?? return false
@@ -186,7 +186,7 @@ fn jfmt_struct_lit_head_is_redundant(f: JetFmt, type_name: String, type_args: [T
     }
 }
 
-// D-FMT1: render an `if`-expression chain with a shared `inline` decision.
+// Render an `if`-expression chain with a shared `inline` decision.
 fn jfmt_fmt_if_expr(f: &JetFmt, expr: Expr, inline: Bool) {
     parts :: jfmt_if_parts(expr) ?? return
     jfmt_write(&f, "if ")
@@ -227,7 +227,7 @@ fn jfmt_payload_binding(pattern: Pattern, want_ok: Bool) -> String? Never! {
     }
 }
 
-// D-RESULT-DECON2=B: recover the compact two-arm surface.
+// Recover the compact two-arm surface.
 fn jfmt_result_handler_parts(f: JetFmt, expr: Expr) -> JetFmtResultHandler? Never! {
     outer :: jfmt_if_parts(expr) ?? return None
     ok_test :: jfmt_pattern_test_parts(outer.cond) ?? return None
@@ -442,7 +442,7 @@ fn jfmt_expr_start(expr: Expr) -> Int Never! {
     own
 }
 
-// D-TIME-IN1=C: every postfix member spelling is emitted verbatim.
+// Every postfix member spelling is emitted verbatim.
 fn jfmt_write_postfix_member(f: &JetFmt, member: String) Never! {
     jfmt_write(&f, member)
 }
@@ -466,7 +466,7 @@ fn jfmt_is_guard_expr(f: JetFmt, expr: Expr) -> Bool Never! {
     if !jfmt_bytes_starts_at(f.src_bytes, span.start, "if") -> return false
     rest :: jfmt_trim_start_bytes(f.src_bytes, span.start + 2)
     if rest < span.end && f.src_bytes[rest] == 123 -> return true
-    // D-IFDIST1: `if subject OP { … }` value tables share the guard surface.
+    // `if subject OP { … }` value tables share the guard surface.
     jfmt_dispatch_value_head(f, expr) != None
 }
 
@@ -709,7 +709,7 @@ fn jfmt_same_dispatch_subject(f: JetFmt, candidate: Expr, subject: Expr) -> Bool
     jfmt_src_text(f, candidate_start, candidate_span.end) == jfmt_src_text(f, subject_start, subject_span.end)
 }
 
-// D-FMT1: every branch of an `if`-expression chain is inline-eligible.
+// Every branch of an `if`-expression chain is inline-eligible.
 fn jfmt_if_expr_chain_inlineable(f: JetFmt, expr: Expr) -> Bool {
     parts :: jfmt_if_parts(expr) ?? return false
     if !jfmt_value_block_inlineable(f, parts.then_body, parts.then_value) -> return false
@@ -782,7 +782,7 @@ fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
             jfmt_fmt_type(&f, inner)
             jfmt_write(&f, ">")
         }
-        // D-TYPE-SUFFIX1=A: the optional mark follows the type it marks.
+        // The optional mark follows the type it marks.
         .Option(inner) -> {
             jfmt_fmt_marked_type(&f, inner)
             jfmt_write(&f, "?")
@@ -798,7 +798,7 @@ fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
         }
         .Fn(params, ret, effect_bound, param_contract, _, return_view_provenance) -> {
             jfmt_write(&f, "fn(")
-            // D-APILABEL1=A: reprint the declared call contract — labels and
+            // Reprint the declared call contract — labels and
             // the `/` and `*` zone separators.
             contract :: param_contract ?? [CallContractRow]{}
             entries := [JetFmtFnEntry]{}
@@ -879,7 +879,7 @@ fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
             }
         }
         .Named(name) -> jfmt_write(&f, if name == "Unit" -> "()" else -> name)
-        // D-CAP9: the raw-pointer type renders as the canonical `*T`.
+        // The raw-pointer type renders as the canonical `*T`.
         .Apply(name, args) -> {
             if name == "Ptr" && args.len() == 1 {
                 jfmt_write(&f, "*")
@@ -892,7 +892,7 @@ fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
             jfmt_fmt_type_list(&f, args, type_source, fallback_span)
             jfmt_write(&f, ">")
         }
-        // D-QUANTITY-TYPE1=A: sema-synthesized; kept for exhaustiveness.
+        // Sema-synthesized; kept for exhaustiveness.
         .Quantity(base, dimension) -> {
             jfmt_write(&f, "Quantity<")
             jfmt_fmt_type(&f, base)
@@ -900,7 +900,7 @@ fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
             jfmt_write(&f, dimension_display_name(dimension))
             jfmt_write(&f, ">")
         }
-        // D-TYPE2-MEASURE1=A: shape arguments use the measure spelling.
+        // Shape arguments use the measure spelling.
         .Measure(measure) -> jfmt_write(&f, measure_expression(measure))
         .TraitObject(bounds) -> jfmt_write(&f, bounds.join(" + "))
         .Tuple(fields) -> {
@@ -926,14 +926,14 @@ fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
             jfmt_write(&f, measure_expression(len))
             jfmt_write(&f, "]")
         }
-        // D-QUAL4=A: `#TagName Type` — prefix value-tag.
+        // `#TagName Type` — prefix value-tag.
         .Tagged(marker, inner) -> {
             jfmt_write(&f, "#")
             if marker == .User(name) -> jfmt_write(&f, name)
             jfmt_write(&f, " ")
             jfmt_fmt_type(&f, inner)
         }
-        // D-UNIONTYPE1=A: `A | B | …` (canonical order).
+        // `A | B | …` (canonical order).
         .Union(members) -> {
             loop (index, member) in members {
                 if index > 0 -> jfmt_write(&f, " | ")
@@ -953,7 +953,7 @@ fn jfmt_is_unit_type(ty: Type) -> Bool Never! {
     false
 }
 
-// D-TYPE-SUFFIX1=A: a type before a suffix mark, grouped when the mark would
+// A type before a suffix mark, grouped when the mark would
 // otherwise bind to its last member.
 fn jfmt_fmt_marked_type(f: &JetFmt, ty: Type) {
     grouped :: if ty == {
@@ -969,7 +969,7 @@ fn jfmt_fmt_marked_type(f: &JetFmt, ty: Type) {
     }
 }
 
-// D-TYPE-SUFFIX1=A: the error contract `E!` / `(E1 | E2)!`.
+// The error contract `E!` / `(E1 | E2)!`.
 fn jfmt_fmt_error_contract(f: &JetFmt, err: Type) {
     jfmt_fmt_marked_type(&f, err)
     jfmt_write(&f, "!")
@@ -1062,7 +1062,7 @@ fn jfmt_layout_selector_name(name: String) -> String? Never! {
 }
 
 fn jfmt_fmt_err_constructor(f: &JetFmt, fields: [ExprField], span: Span) {
-    // D-FAIL-ERROR1=A: sema stores the constructor as a private three-field
+    // Sema stores the constructor as a private three-field
     // value; source has one canonical call shape.
     jfmt_write(&f, "Err(")
     source :: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN)
@@ -1109,7 +1109,7 @@ fn jfmt_fmt_err_constructor(f: &JetFmt, fields: [ExprField], span: Span) {
 }
 
 fn jfmt_fmt_typed_lit(f: &JetFmt, head: Type?, body: TypedLitBody, span: Span) {
-    // D-DOTCTOR3: print the head (when present) and the body shape.
+    // Print the head (when present) and the body shape.
     if head == .Val(head_type) -> jfmt_fmt_type(&f, head_type)
     jfmt_write(&f, "{{")
     multiline :: jfmt_source_span_multiline(f, span)
@@ -1211,7 +1211,7 @@ fn jfmt_fmt_enum_lit(f: &JetFmt, type_name: String, variant: String, variant_spa
     }
     jfmt_write(&f, variant)
     if args.len() == 0 -> return
-    // D-UITREE1/D-LIT-DOT1: named payloads use braces; positional payloads
+    // Named payloads use braces; positional payloads
     // keep the paren call form.
     named :: if args[0] == {
         .Named(_, _) -> true
@@ -1241,7 +1241,7 @@ fn jfmt_fmt_enum_lit(f: &JetFmt, type_name: String, variant: String, variant_spa
 }
 
 fn jfmt_fmt_method_call(f: &JetFmt, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg]) {
-    // D-CONC-SHARE1=A: `shared expr` is the only spelling that builds this.
+    // `shared expr` is the only spelling that builds this.
     if receiver == .Ident(name, _) {
         if name == "Shared" && method == "new" && args.len() == 1 {
             jfmt_write(&f, "shared ")
@@ -1253,7 +1253,7 @@ fn jfmt_fmt_method_call(f: &JetFmt, receiver: Expr, method: String, method_span:
     jfmt_fmt_expr(&f, receiver, JFMT_PREC_POSTFIX)
     receiver_end :: expr_span(receiver).end
     jfmt_fmt_call_type_args(&f, owner_type_args, receiver_end)
-    // S69 (D-SG3): keep an author-placed break before `.method(...)`.
+    // S69 keep an author-placed break before `.method(...)`.
     if jfmt_chain_break_between(f, receiver_end, method_span.start) {
         jfmt_emit_trailing(&f, receiver_end)
         f.indent += 1
@@ -1273,7 +1273,7 @@ fn jfmt_fmt_method_call(f: &JetFmt, receiver: Expr, method: String, method_span:
 
 fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
     if expr == {
-        // S68 (D-SG2): `if` used as a value.
+        // S68 `if` used as a value.
         .If(_, _, _, _, _, _) -> {
             if jfmt_is_result_handler_source(f, expr) {
                 jfmt_fmt_result_handler_expr(&f, expr)
@@ -1283,7 +1283,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
                 jfmt_fmt_guard_expr(&f, expr)
                 return
             }
-            // D-FMT1: the whole chain shares one line shape.
+            // The whole chain shares one line shape.
             if jfmt_if_expr_chain_inlineable(f, expr) {
                 mark :: jfmt_mark(f)
                 jfmt_fmt_if_expr(&f, expr, true)
@@ -1297,19 +1297,19 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             }
         }
         .Str(parts, span) -> {
-            // D-RAWSTR1=A: source spans identify raw ordinary strings.
+            // Source spans identify raw ordinary strings.
             if {
                 jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_starts_at(f.src_bytes, span.start, "`") -> jfmt_fmt_str_raw(&f, parts)
                 jfmt_src_valid(f, span.start, span.start + 3) && jfmt_bytes_starts_at(f.src_bytes, span.start, "\"\"\"") -> jfmt_fmt_str_multiline(&f, parts)
                 else -> jfmt_fmt_str(&f, parts)
             }
         }
-        // D-SHIFT1 (c7shift): a pattern-literal argument.
+        // (c7shift): a pattern-literal argument.
         .StrMatchLit(parts, span) -> {
             typed_head :: jfmt_is_typed_head_body(f, span)
             jfmt_fmt_str_match_parts(&f, parts, typed_head)
         }
-        // D-BINPAT1: the byte-mode sibling.
+        // The byte-mode sibling.
         .BinMatchLit(parts, _) -> jfmt_fmt_bin_match_parts(&f, parts)
         // S34/S67: keep the author's radix, separators and hex case.
         .Int(value, span, _, raw) -> {
@@ -1317,7 +1317,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(&f, spelling)
         }
         .Float(value, _, _, raw) -> jfmt_write(&f, jfmt_float_literal_spelling(value, raw))
-        // D-UNITLIT1: `500ms` — no space between number and suffix.
+        // `500ms` — no space between number and suffix.
         .UnitLit(raw, _, _, suffix, _, _) -> {
             jfmt_write(&f, raw)
             jfmt_write(&f, suffix)
@@ -1331,7 +1331,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr_list(&f, elements, span)
             jfmt_write(&f, "]")
         }
-        // D-SPREAD1=A: re-emit member spread sugar.
+        // Re-emit member spread sugar.
         .MemberSpread(base, members, span) -> {
             jfmt_fmt_expr(&f, base, JFMT_PREC_POSTFIX)
             jfmt_write(&f, ".[")
@@ -1383,7 +1383,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             }
             jfmt_write(&f, ")")
         }
-        // D-EMPTYLIT1: an empty map is spelled `[]`, like an empty list.
+        // An empty map is spelled `[]`, like an empty list.
         .MapLit(entries, span) -> {
             jfmt_write(&f, "[")
             if jfmt_source_span_multiline(f, span) {
@@ -1460,10 +1460,10 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
         .Binary(op, left, right, _) -> {
             op_prec :: jfmt_prec_of_bin(op)
             spelled :: jfmt_bin_op_spell(op)
-            // D-EXPSEM1=A: `^` is right-associative.
+            // `^` is right-associative.
             left_prec := if spelled == "^" -> JFMT_PREC_POSTFIX else -> op_prec
             right_prec := if spelled == "^" -> JFMT_PREC_UNARY else -> jfmt_prec_add_rhs(op_prec)
-            // E0082 (D-ARMHEAD-PAREN1): an `&&` operand of `||` always
+            // E0082 an `&&` operand of `||` always
             // prints with its grouping parentheses.
             if spelled == "||" {
                 if left == .Binary(left_op, _, _, _) {
@@ -1479,7 +1479,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(&f, right, right_prec)
             if prec > op_prec -> jfmt_write(&f, ")")
         }
-        // D-CHAINCMP1: `0 <= sev < 10` — same-direction relational chain.
+        // `0 <= sev < 10` — same-direction relational chain.
         .CompareChain(operands, ops, _, _) -> {
             op_prec :: jfmt_prec_of_bin(ops[0])
             if prec > op_prec -> jfmt_write(&f, "(")
@@ -1491,17 +1491,17 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             }
             if prec > op_prec -> jfmt_write(&f, ")")
         }
-        // D-CAP9: postfix `p.*` deref.
+        // Postfix `p.*` deref.
         .Deref(inner, _) -> {
             jfmt_fmt_expr(&f, inner, JFMT_PREC_POSTFIX)
             jfmt_write(&f, ".*")
         }
-        // D-CAP9: prefix `*x` raw-pointer-of.
+        // Prefix `*x` raw-pointer-of.
         .RawOf(inner, _) -> {
             jfmt_write(&f, "*")
             jfmt_fmt_expr(&f, inner, JFMT_PREC_UNARY)
         }
-        // D-SHAPE-COPY1=A: prefix `x.copy()`.
+        // Prefix `x.copy()`.
         .Copy(inner, _) -> {
             jfmt_write(&f, "~")
             jfmt_fmt_expr(&f, inner, JFMT_PREC_UNARY)
@@ -1509,7 +1509,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
         .Place(inner, access, _) -> {
             if access == {
                 .Write -> jfmt_write(&f, "&")
-                // D-CAP-RECEIVER1=D: the take mark on a consumed receiver.
+                // The take mark on a consumed receiver.
                 .Take -> jfmt_write(&f, "^")
                 .Read -> {}
             }
@@ -1518,7 +1518,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
         .Field(base, field, span) -> {
             jfmt_fmt_expr(&f, base, JFMT_PREC_POSTFIX)
             base_end :: expr_span(base).end
-            // S69 (D-SG3): keep an author-placed break before `.field`.
+            // S69 keep an author-placed break before `.field`.
             if jfmt_chain_break_between(f, base_end, span.end) {
                 jfmt_emit_trailing(&f, base_end)
                 f.indent += 1
@@ -1537,7 +1537,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write_postfix_member(&f, member)
         }
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _, _) -> jfmt_fmt_method_call(&f, receiver, method, method_span, owner_type_args, type_args, args)
-        // S71 / D-SUGAR6: `receiver?.method(args)`.
+        // S71 `receiver?.method(args)`.
         .OptMethodCall(receiver, method, method_span, type_args, args, _) -> {
             jfmt_fmt_expr(&f, receiver, JFMT_PREC_POSTFIX)
             jfmt_write(&f, "?.")
@@ -1550,7 +1550,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
                 jfmt_fmt_err_constructor(&f, fields, span)
                 return
             }
-            // D-LIT-DOT1: `Type{ … }` (named) or `{ … }` (inferred); also the
+            // `Type{ … }` (named) or `{ … }` (inferred); also the
             // E0320 auto-fix for the old `Type { … }`.
             head_dropped :: inferred || (f.simplify && jfmt_struct_lit_head_is_redundant(f, type_name, type_args, import_ns))
             if !head_dropped -> jfmt_fmt_named_struct_head(&f, type_name, type_args, import_ns, Val(span))
@@ -1558,7 +1558,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
         }
         .TypedLit(head, body, span) -> jfmt_fmt_typed_lit(&f, head, body, span)
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span) -> jfmt_fmt_enum_lit(&f, type_name, variant, variant_span, args, leading_dot, span)
-        // D-TAG-SURFACE1=A: a direct value-fact application.
+        // A direct value-fact application.
         .Tainted(inner, kind, _) -> {
             fact :: kind ?? "Input"
             jfmt_write(&f, "#{fact} ")
@@ -1633,7 +1633,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
                     }
                 }
             }
-            // D-CALLVALUE1=B: direct calls on lambdas, fields and indexes keep
+            // Direct calls on lambdas, fields and indexes keep
             // their spelling.
             if prec > JFMT_PREC_POSTFIX -> jfmt_write(&f, "(")
             jfmt_fmt_expr(&f, callee, JFMT_PREC_POSTFIX)
@@ -1649,15 +1649,15 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(&f, addr, JFMT_PREC_OR_FALLBACK)
             jfmt_write(&f, ")")
         }
-        // D-META-STAGE1=B: the mark is part of the name.
+        // The mark is part of the name.
         .ComptimeName(name, _, _) -> jfmt_write(&f, name)
-        // D-FMTPARENS1=A: author-written grouping parens are re-emitted.
+        // Author-written grouping parens are re-emitted.
         .Paren(inner, _) -> {
             jfmt_write(&f, "(")
             jfmt_fmt_expr(&f, inner, JFMT_PREC_OR_FALLBACK)
             jfmt_write(&f, ")")
         }
-        // D-VARIADIC1: spread call argument.
+        // Spread call argument.
         .Spread(inner, _) -> {
             jfmt_write(&f, "...")
             jfmt_fmt_expr(&f, inner, JFMT_PREC_POSTFIX)
@@ -1719,7 +1719,7 @@ fn jfmt_fmt_value_loop(f: &JetFmt, body: [Stmt], route_attached: Bool) {
 }
 
 fn jfmt_fmt_for_header(f: &JetFmt, var: String, var2: NamedSpan?, kind: ForKind) {
-    // D-LOOP-SUBJECT1: the bindingless form writes its subject bare.
+    // The bindingless form writes its subject bare.
     if !(var2 == None && var == "it") {
         if var2 != None -> jfmt_write(&f, "(")
         jfmt_write(&f, var)
@@ -1865,7 +1865,7 @@ fn jfmt_fmt_limited_block(f: &JetFmt, statements: [Stmt], limit: Int) {
 }
 
 fn jfmt_fmt_lambda(f: &JetFmt, lambda: Lambda) {
-    // D-LAMBDAINFER1: preserve the bare one-parameter spelling.
+    // Preserve the bare one-parameter spelling.
     bare_param :: lambda.take_names.len() == 0 && lambda.params.len() == 1 && lambda.params[0].ty == None && lambda.span.start == lambda.params[0].name_span.start
     if !bare_param -> jfmt_write(&f, "(")
     loop (index, param) in lambda.params {
@@ -1938,7 +1938,7 @@ fn jfmt_slot_bind_name(slot: PatSlot) -> String? Never! {
 fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
     if pattern == {
         .Variant(variant, bindings, _, _) -> {
-            // D-ENUMDOT1: leading dot is canonical for variant patterns.
+            // Leading dot is canonical for variant patterns.
             jfmt_write(&f, ".")
             jfmt_write(&f, variant)
             named := false
@@ -1949,7 +1949,7 @@ fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
                 }
             }
             if named {
-                // D-PAT-NAMED-NEST1=A: `field: field` prints as `field`.
+                // `field: field` prints as `field`.
                 jfmt_write(&f, "{{")
                 loop (index, slot) in bindings {
                     if index > 0 -> jfmt_write(&f, ", ")
@@ -1977,16 +1977,16 @@ fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
         .Ok(binding, _, inner, _) -> jfmt_fmt_payload_pattern(&f, "Ok", binding, inner)
         .Err(binding, _, inner, _) -> jfmt_fmt_payload_pattern(&f, "Err", binding, inner)
         .Absent(_) -> jfmt_write(&f, ".None")
-        // D-PATR: range pattern at arm-head level.
+        // Range pattern at arm-head level.
         .Range(lo, hi, _) -> jfmt_write(&f, "{lo}..{hi}")
-        // D-PATO: or-pattern `A(x) | B(x)`.
+        // Or-pattern `A(x) | B(x)`.
         .Or(alternatives, _) -> {
             loop (index, alternative) in alternatives {
                 if index > 0 -> jfmt_write(&f, " | ")
                 jfmt_fmt_pattern(&f, alternative)
             }
         }
-        // D-DESTRUCT1: struct-shaped dispatch arm head.
+        // Struct-shaped dispatch arm head.
         .Struct(fields, rest, _, type_head) -> {
             if type_head == .Val(head) -> jfmt_write(&f, head.name)
             jfmt_write(&f, "{{")
@@ -2047,12 +2047,12 @@ fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
             }
             jfmt_write(&f, "]")
         }
-        // D-PARSESTR1: an interpolation literal used as a pattern.
+        // An interpolation literal used as a pattern.
         .StrMatch(parts, span) -> {
             typed_head :: jfmt_is_typed_head_body(f, span)
             jfmt_fmt_str_match_parts(&f, parts, typed_head)
         }
-        // D-BINPAT1 / D-UNIFYLIT1=A: `[U8]{"…"}` binary pattern.
+        // `[U8]{"…"}` binary pattern.
         .BinMatch(parts, _) -> jfmt_fmt_bin_match_parts(&f, parts)
     }
 }
@@ -2090,7 +2090,7 @@ fn jfmt_hex2(value: Int) -> String Never! {
     String.from_bytes(bytes) ?? "00"
 }
 
-// D-BYTELIT1=B: retain byte escapes in the canonical `[U8]{"..."}` form.
+// Retain byte escapes in the canonical `[U8]{"..."}` form.
 fn jfmt_fmt_byte_text_parts(f: &JetFmt, parts: [ByteTextPart]) Never! {
     jfmt_write(&f, "\"")
     loop part in parts {
@@ -2135,7 +2135,7 @@ fn jfmt_escape_binary_lit(bytes: [U8]) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-// D-BINPAT1 / D-UNIFYLIT1=A: a `BinMatchPart` list as `[U8]{"…"}`.
+// A `BinMatchPart` list as `[U8]{"…"}`.
 fn jfmt_fmt_bin_match_parts(f: &JetFmt, parts: [BinMatchPart]) Never! {
     jfmt_write(&f, "[U8]{{\"")
     loop part in parts {
@@ -2161,7 +2161,7 @@ fn jfmt_fmt_bin_match_parts(f: &JetFmt, parts: [BinMatchPart]) Never! {
     jfmt_write(&f, "\"}}")
 }
 
-// D-PARSESTR1: a `StrMatchPart` list renders like a format literal plus a
+// A `StrMatchPart` list renders like a format literal plus a
 // `:Type` suffix on typed holes.
 fn jfmt_fmt_str_match_parts(f: &JetFmt, parts: [StrMatchPart], raw_head: Bool) {
     if raw_head -> jfmt_write(&f, "String{{")
@@ -2183,7 +2183,7 @@ fn jfmt_fmt_str_match_parts(f: &JetFmt, parts: [StrMatchPart], raw_head: Bool) {
     if raw_head -> jfmt_write(&f, "}}")
 }
 
-// D-BOUND-RAW1=A: only an explicit `String{"…"}` pattern body owns backslashes.
+// Only an explicit `String{"…"}` pattern body owns backslashes.
 fn jfmt_is_typed_head_body(f: JetFmt, span: Span) -> Bool Never! {
     jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_starts_at(f.src_bytes, span.start, "String")
 }
@@ -2194,7 +2194,7 @@ fn jfmt_fmt_call(f: &JetFmt, call: Call) {
     jfmt_fmt_call_args_or_trailing_block(&f, call.args, Val(call.name_span.end))
 }
 
-// D-GENERIC-CALL1=A: call-site type arguments `<T, …>`.
+// Call-site type arguments `<T, …>`.
 fn jfmt_fmt_call_type_args(f: &JetFmt, type_args: [Type], start: Int) {
     if type_args.len() == 0 -> return
     jfmt_write(&f, "<")
@@ -2217,7 +2217,7 @@ fn jfmt_fmt_spawn_body(f: &JetFmt, lambda: Lambda) {
     }
 }
 
-// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: restore the one-word task surface
+// Restore the one-word task surface
 // from its compiler-private method-call form.
 fn jfmt_fmt_task_surface_method(f: &JetFmt, method: String, args: [CallArg]) -> Bool {
     if method == jfmt_internal_name("jet.task.timeout") && args.len() == 1 {
@@ -2305,7 +2305,7 @@ fn jfmt_fmt_method_args(f: &JetFmt, method: String, args: [CallArg], source_star
     jfmt_fmt_view_or_call_args(&f, method, args, source_start)
 }
 
-// D-UI-CLOSURE1=A: `view(a..b)` keeps its range spelling.
+// `view(a..b)` keeps its range spelling.
 fn jfmt_fmt_view_or_call_args(f: &JetFmt, method: String, args: [CallArg], source_start: Int?) {
     if method == "view" && args.len() == 2 {
         jfmt_write(&f, "(")
@@ -2319,8 +2319,8 @@ fn jfmt_fmt_view_or_call_args(f: &JetFmt, method: String, args: [CallArg], sourc
 }
 
 fn jfmt_fmt_call_args_or_trailing_block(f: &JetFmt, args: [CallArg], source_start: Int?) {
-    // D-META-BODY1=A: a typed template rides as a hidden final argument;
-    // D-UI-CLOSURE1=A: so does a parser-owned trailing block closure.
+    // A typed template rides as a hidden final argument;
+    // So does a parser-owned trailing block closure.
     template := CallArg?{None}
     trailing := Lambda?{None}
     if args.len() > 0 {
@@ -2405,13 +2405,13 @@ fn jfmt_fmt_call_args(f: &JetFmt, args: [CallArg]) {
 }
 
 fn jfmt_fmt_call_arg(f: &JetFmt, arg: CallArg) {
-    // D-MEM1: the call-site capability sigil comes before the label.
+    // The call-site capability sigil comes before the label.
     if arg.convention == {
         .Read -> {}
         .Write -> jfmt_write(&f, "&")
         .Move -> jfmt_write(&f, "^")
     }
-    // D-VARIADIC1: `f(...xs)` call spread.
+    // `f(...xs)` call spread.
     if arg.spread -> jfmt_write(&f, "...")
     // S61: the call-site argument label `name:`.
     if arg.label == .Val(label) {
@@ -2456,7 +2456,7 @@ fn jfmt_fmt_str_raw(f: &JetFmt, parts: [StrPart]) {
     jfmt_write(&f, fence)
 }
 
-// D-FMT-INTERP2: the parser expands `{expr=}` to Lit(label) + Lit(" = ") +
+// The parser expands `{expr=}` to Lit(label) + Lit(" = ") +
 // Interp; reprint the surface form. Returns true when parts[i..i+3] matched.
 fn jfmt_fmt_debug_interp(f: &JetFmt, parts: [StrPart], index: Int) -> Bool {
     if index + 2 >= parts.len() -> return false
@@ -2509,7 +2509,7 @@ fn jfmt_fmt_str(f: &JetFmt, parts: [StrPart]) {
     jfmt_write(&f, "\"")
 }
 
-// D-BOUND-RAW1=A: typed head bodies preserve written backslashes.
+// Typed head bodies preserve written backslashes.
 fn jfmt_fmt_typed_head_str(f: &JetFmt, parts: [StrPart], span: Span) {
     if {
         jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_starts_at(f.src_bytes, span.start, "`") -> jfmt_fmt_str_raw(&f, parts)
@@ -2595,7 +2595,7 @@ fn jfmt_fmt_str_format(f: &JetFmt, format: StrFormat) Never! {
     }
 }
 
-// S70 (D-SG5): re-emit a triple-quoted string at the current indent, so
+// S70 re-emit a triple-quoted string at the current indent, so
 // re-lexing strips exactly the prefix the closing `"""` sets.
 fn jfmt_fmt_str_multiline(f: &JetFmt, parts: [StrPart]) {
     jfmt_write(&f, "\"\"\"")
@@ -2632,7 +2632,7 @@ fn jfmt_escape_typed_head_lit(text: String) -> String Never! {
 }
 
 // Single-line typed bodies keep written slashes; a quote still needs a
-// preceding slash so it is not the closer (D-BOUND-RAW1).
+// preceding slash so it is not the closer.
 fn jfmt_escape_typed_head_single_line(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {

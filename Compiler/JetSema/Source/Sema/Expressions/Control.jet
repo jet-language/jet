@@ -325,7 +325,7 @@ fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConve
     }
 }
 
-// D-FAILURE-FOUNDATION1=A: a call is a value-producing expression, and its
+// A call is a value-producing expression, and its
 // Result carrier is transparent in an ordinary value position. An expectation
 // is the carrier itself only when it names a reachable failure domain, or when
 // both sides agree that failure is unreachable (`Never!`).
@@ -358,7 +358,7 @@ fn sema_expression_carrier_payload(ty: Type) -> Type? {
 
 // A call root that may acquire the automatic propagation `Try`. Contextual
 // `Ok`/`Err` constructors build a carrier, and a finite value loop keeps its
-// own exhaustion route (D-CHOOSE-FIND1=A).
+// own exhaustion route.
 fn sema_expression_propagating_call(expr: Expr) -> Bool Never! {
     if expr == {
         .Call(call) -> call.name != "Ok" && call.name != "Err"
@@ -424,7 +424,7 @@ fn sema_failure_conversion_name_part(name: String) -> String Never! {
     "__{bytes.len()}_{String.from_bytes(encoded) ?? ""}"
 }
 
-// D-FAIL-CONV1=A: the canonical routine name of `impl Source -> Target`,
+// The canonical routine name of `impl Source -> Target`,
 // matching the Rust reference's `error_conv_fn_name`.
 fn sema_failure_conversion_function_name(source: Type, target: Type) -> String Never! {
     "errconv_{sema_failure_conversion_name_part(type_name(source))}_to_{sema_failure_conversion_name_part(type_name(target))}"
@@ -446,7 +446,7 @@ fn sema_failure_conversion_leaf(ty: Type) -> String Never! {
 
 // A declared conversion is one registered function under the canonical name;
 // the checked route carries that routine's symbol key, the identity lowering
-// resolves. D-FAIL-CONV2=A's standard-library family takes the same route
+// resolves. 's standard-library family takes the same route
 // through `sema_prelude_error_conversion_key`.
 fn sema_failure_declared_conversion(source: Type, target: Type, scopes: SemaScopeTable) -> String? {
     name :: sema_failure_declared_conversion_name(sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
@@ -575,7 +575,7 @@ fn sema_failure_record_edge(callee: SemaFailureCallee?, context: &SemaCheckConte
     &context.failure_edges.push("")
 }
 
-// D-FAIL-INFER-UNION1=A: a failure passing up into the default `Err` route
+// A failure passing up into the default `Err` route
 // joins this body's failure-union row: an unannotated callee as an edge the
 // bundle solve joins, any other failure as a member (the Rust reference's
 // failure-union probe arm of `infer_try`).
@@ -674,7 +674,7 @@ fn sema_failure_parent_error(operand_error: Type, scopes: SemaScopeTable, contex
     None
 }
 
-// D-FAIL-CONV1/2 and D-FAILURE-FOUNDATION1: the one conversion law shared by
+// 2 and the one conversion law shared by
 // explicit `?` and automatic call propagation. `implicit` selects wording only.
 fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span: Span, implicit: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
     operand :: sema_expr_unwrap_tag(inner.ty)
@@ -739,7 +739,7 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
     }
 }
 
-// D-CONC-SPAWN1 (Rust `task_body_propagates`): a failure that leaves this
+// (Rust `task_body_propagates`): a failure that leaves this
 // body through the enclosing carrier. A lambda scopes and harvests the fact.
 fn sema_expression_propagation_taken(context: &SemaCheckContext, conversion: TTryConvert) -> TTryConvert? Never! {
     context.task_body_propagates = true
@@ -826,10 +826,10 @@ fn sema_expression_propagated(inner: TExpr, conversion: TTryConvert, span: Span)
     Val(sema_tir_node(payload, TExprKind.Try{value: inner, conversion: conversion, failure: sema_expression_failure_carrier(inner.ty)}, span))
 }
 
-// D-FAILURE-FOUNDATION1=A: automatic propagation of a call root. Only a
+// Automatic propagation of a call root. Only a
 // Result carrier propagates; an optional result is an ordinary value. The
 // propagation site joins the failure journey like an explicit `?(text)` hop,
-// without a note (D-ERRCTX1, #3713).
+// without a note (#3713).
 fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Own only the checked tree, never the READ source AST. Carrier metadata
     // and conversion reads finish before its owner enters the replacement.
@@ -1058,7 +1058,7 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
     }
     route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_node(checked_route.payload, TExprKind.Unit, span)}
-    // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
+    // (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
     // first its Result route (where `err` is bound and a value fallback is
     // lifted to `Val(fallback)`), then the remaining Option route. Only one
@@ -1380,7 +1380,7 @@ fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: E
     owner :: sema_scope_local_owner_key(scopes)
     id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
     symbol :: Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
-    // D-OPT-WRITE1 (#3974): a hoisted `&place` subject aliases its place, so
+    // (#3974): a hoisted `&place` subject aliases its place, so
     // the arm patterns that test it bind write windows.
     window :: if init.kind == {
         .Borrow(_, access) -> access == AccessConvention.Write
@@ -1426,7 +1426,7 @@ fn sema_expression_condition_binds(condition: Expr) -> Bool Never! {
     }
 }
 
-// D-OPT-WRITE1 (#3974): the place a pattern subject windows when it is a
+// (#3974): the place a pattern subject windows when it is a
 // `&place` write window, or the hoisted switch local bound to one.
 fn sema_expression_window_source(subject: Expr, scopes: SemaScopeTable) -> Expr? {
     return if subject == {
@@ -1554,7 +1554,7 @@ fn sema_expression_pattern_slot_sources(slot: TPatternBinding, ty: Type, source:
 
 // One pattern test condition, with payload aliases for the success branch.
 fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
-    // D-FAILURE-FOUNDATION1=A: an `.Ok`/`.Err` pattern consumes the subject's
+    // An `.Ok`/`.Err` pattern consumes the subject's
     // Result carrier, so its call root must not propagate.
     subject_value :: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(subject, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     checked_subject :: subject_value ?? return None
@@ -1621,7 +1621,7 @@ fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScope
     Val(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
 }
 
-// D-FLOWTYPE1=A: whether `expr` is a bare `None` / `.None`.
+// Whether `expr` is a bare `None` / `.None`.
 fn sema_expression_absent_none(expr: Expr) -> Bool Never! {
     if expr == {
         .Absent(_) -> true
@@ -1638,7 +1638,7 @@ fn sema_expression_ident_name(expr: Expr) -> BindName? {
     }
 }
 
-// D-FLOWTYPE1=A: the name and test span of an atomic `x == None` /
+// The name and test span of an atomic `x == None` /
 // `x == .None` test (Rust `atomic_absent_optional_subject`).
 fn sema_expression_absent_optional_test(condition: Expr) -> (name: BindName, span: Span)? {
     if condition == {
@@ -1667,7 +1667,7 @@ fn sema_expression_absent_optional_test(condition: Expr) -> (name: BindName, spa
     }
 }
 
-// D-FLOWTYPE1=A: the payload type of a stable Optional, an immutable local or
+// The payload type of a stable Optional, an immutable local or
 // parameter of type `T?` that a proven test may refine to `T` (Rust
 // `flow_narrowable_optional_inner`).
 fn sema_expression_flow_optional_payload(scopes: SemaScopeTable, name: String) -> Type? {
@@ -1681,13 +1681,13 @@ fn sema_expression_flow_optional_payload(scopes: SemaScopeTable, name: String) -
     }
 }
 
-// D-FLOWTYPE1=A: the S31 presence test `x == .Val(x)`, whose success branch
+// The S31 presence test `x == .Val(x)`, whose success branch
 // holds the payload of the Optional `x` under the same name.
 fn sema_expression_presence_test(name: BindName, span: Span) -> Expr Never! {
     Expr.PatternTest{subject: Expr.Ident{name: name.name, span: name.span}, pattern: Pattern.Present{binding: name.name, binding_span: name.span, inner: None, span: span}, span: span}
 }
 
-// D-FLOWTYPE1=A: a stable `x != None` test, alone or along a `&&` chain, reads
+// A stable `x != None` test, alone or along a `&&` chain, reads
 // as the presence test `x == .Val(x)` (Rust `rewrite_optional_flow_ne_none`).
 // None when the condition has no such test.
 fn sema_expression_rewrite_optional_ne_none(condition: Expr, scopes: SemaScopeTable) -> Expr? {
@@ -1741,7 +1741,7 @@ fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBinding], 
                 if track -> &diagnostics.push(sema_already_defined(binding.symbol.name, binding.symbol.span))
                 next
             }
-            // D-FLOWTYPE1=A: `x == .Val(x)` over a stable Optional refines
+            // `x == .Val(x)` over a stable Optional refines
             // `x` to its payload (Rust `declare_condition_binding`).
             sema_scope_refine_local(&scopes, binding.symbol)
         }
@@ -1752,7 +1752,7 @@ fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBinding], 
     }
 }
 
-// D-FLOWTYPE1=A: a payload binding that shadows the stable Optional it was
+// A payload binding that shadows the stable Optional it was
 // tested from refines that name (Rust `is_optional_flow_refine`).
 fn sema_expression_refines_optional(scopes: SemaScopeTable, symbol: Symbol) -> Bool {
     payload :: sema_expression_flow_optional_payload(scopes, symbol.name) ?? return false
@@ -1789,7 +1789,7 @@ fn sema_expression_if_continues_dispatch(else_value: Expr, name: String) -> Bool
     false
 }
 
-// D-FLOWTYPE1=A: whether a stable `x == None` level swaps into the presence
+// Whether a stable `x == None` level swaps into the presence
 // test. The last arm of an else-less table (`else_value` is `NoElse`) never
 // does: Rust checks the table as one switch, the swapped payload branch would
 // be the empty `NoElse`, and the table's E0307 coverage would then read the
@@ -1802,7 +1802,7 @@ fn sema_expression_if_absent_test_swaps(else_value: Expr, name: String) -> Bool 
 fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     dispatch_subject :: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    // D-FLOWTYPE1=A: a stable `x == None` test reads as the presence test
+    // A stable `x == None` test reads as the presence test
     // with the branches swapped, so the other branch holds the payload (Rust
     // value `if`). Source order of evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
@@ -1838,7 +1838,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // `None` arm takes its optional type from the sibling arm of the same
     // value-if or match. A leading `None` arm waits for the else arm's type.
     sibling_rule :: !sema_expression_expects_optional(expected)
-    // Arm-result unification / D-FAIL-ERROR1: an uncontextual Err arm adopts
+    // Arm-result unification an uncontextual Err arm adopts
     // a fallible sibling's carrier in either order. Keep only that sibling
     // root from propagating; its nested calls still propagate normally.
     // The paired root-26 corpus also covers deferred payload moves/scopes.

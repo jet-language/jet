@@ -183,7 +183,7 @@ fn jet_codegen_lower_condition(builder: &JetCodegenBuilder, program: JetCodegenP
             jet_codegen_lower_pattern_condition(&builder, program, pattern, subject, subject_value, true)
         }
         .Matches(pattern, subject) -> {
-            // D-FACT-ENUM-TIR: a fact-enum test over a prepared value is a constant.
+            // A fact-enum test over a prepared value is a constant.
             folded :: jet_codegen_fold_fact_enum_test(&builder, program, subject, subject, pattern)
             if folded == .Val(value) -> return value
             subject_value := jet_codegen_lower_pattern_subject(&builder, program, subject)
@@ -1028,7 +1028,7 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, program: JetCod
     }
 }
 
-// D-MEM-COPYSEM1: a plain `loop item in list` (or `loop (index, item) in
+// A plain `loop item in list` (or `loop (index, item) in
 // list`) over a read parameter's list walks the list in place: an index runs
 // over the list's length and the item is a read-only alias of its slot, so
 // neither the list nor any item is copied; the two-name form binds that index
@@ -1038,7 +1038,7 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, program: JetCod
 // rooted at a local or any parameter. A fixed list walks over its literal
 // length; one whose length is not a literal keeps the iterator. False
 // (nothing emitted) when `collection` is not such a sequence. A columnar list
-// (D-SOA1) stores one column per field, so its slots are not places an alias
+// stores one column per field, so its slots are not places an alias
 // can name; the caller keeps the gathered-record iteration for it.
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs::read_list_walk
 fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, program: JetCodegenProgram, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, source_stable: Bool, body: [TStmt], span: Span) -> Bool {
@@ -2316,7 +2316,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                     if local.uninit_scalar || local.uninit_fixed -> panic("checked initialized let carries an uninitialized-local fact")
                     // `name := &place` binds an alias of the place, never a
                     // copy: a write borrow is a window whose edits reach the
-                    // owner (D-OPT-WRITE1 (#3974): arm patterns on a hoisted
+                    // owner ((#3974): arm patterns on a hoisted
                     // `&place` switch subject are write windows too), a read
                     // borrow reads the place itself. A range borrow's write
                     // window over a list or a declared `ViewMut<T>` is the
@@ -2350,7 +2350,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                         _ := jet_codegen_bind_local_alias(&builder, program, local, alias_ty, window, write_alias)
                         if write_alias -> &builder.window_aliases.push(local.name)
                     } else {
-                        // D-MEM-COPYSEM1: an immutable binding of a read
+                        // An immutable binding of a read
                         // parameter's place (a field path or a list element
                         // below it, or its payload past a diverging `??`)
                         // aliases the place. The parameter cannot change
@@ -2713,7 +2713,7 @@ fn jet_codegen_lower_fallback_failure(builder: &JetCodegenBuilder, program: JetC
     result
 }
 
-// D-MEM-COPYSEM1: `name :: place ?? <diverging fallback>` over a read
+// `name :: place ?? <diverging fallback>` over a read
 // parameter's place, or (`stable_root`) over a place whose root the
 // binding's scope leaves alone (jet_codegen_stable_window_place). The carrier
 // test reads the place itself and the success route names the payload in
@@ -2722,7 +2722,7 @@ fn jet_codegen_lower_fallback_failure(builder: &JetCodegenBuilder, program: JetC
 // `subject` is not such a place or the fallback can produce a value. A
 // `.Value` fallback qualifies when it always leaves
 // (jet_codegen_fallback_value_exits): the exit block of `x :: p ?? { ...;
-// return }` and of the D-FLOWTYPE1 guard `if p == None -> return`, and the
+// return }` and of the guard `if p == None -> return`, and the
 // `<no else arm>` of an else-complement refinement.
 // Rust: tir_to_mir_expr.rs lower_or_fallback_window / inline_block_diverges.
 fn jet_codegen_lower_or_fallback_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, fallback: TOrFallback, ambient_err: TLocal?, stable_root: Bool) -> MIRPlaceID? {
@@ -3266,7 +3266,7 @@ fn jet_codegen_lower_split_view(builder: &JetCodegenBuilder, program: JetCodegen
         _ := jet_codegen_bind_local_alias(&builder, program, local, element_type, place, true)
         return
     }
-    // D-SHAPE-PLACE1=A (#4707): a constant-bound write window aliases the
+    // (#4707): a constant-bound write window aliases the
     // owner's range place, exactly as `w :: &list[a..b]` does, so writes
     // through it land in the owner on every tier (Rust: lower_split_view).
     if write && !single {
@@ -3295,7 +3295,7 @@ fn jet_codegen_lower_split_view(builder: &JetCodegenBuilder, program: JetCodegen
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: value})
 }
 
-// D-MEM-COPYSEM1 (Rust `check_binding` read window, E0212): which immutable
+// (Rust `check_binding` read window, E0212): which immutable
 // place bindings of a body may alias their place: a `::` binding of a place
 // (`row :: rows[i]`, `item :: p.items[j]`, `g :: program.graph`, `x :: p.opt
 // ?? return`), a pattern's payload and field bindings over a place subject

@@ -70,7 +70,7 @@ fn sema_call_collections_check_argument(argument: CallArg, required: Type, callb
     // (`fn(T)` with no return) accepts any function value; the method's own
     // shape rules decide its use (a named `fn(T, T) -> Ordering` is the
     // `sort_by` comparator). Only a lambda, or the `.member` subject
-    // shorthand that is one (D-SUBJECT-CALL1=A), is checked against the slot.
+    // shorthand that is one is checked against the slot.
     open_slot := false
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
         is_lambda := if argument.expr == {
@@ -202,7 +202,7 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
     return params
 }
 
-// Rust builtin_methods.rs D-LISTREMOVE1/F: a literal `RemoveBy` selector of a
+// Rust builtin_methods.rs F: a literal `RemoveBy` selector of a
 // two-argument `remove` fixes the removal mode before argument inference, so
 // `.Slot` takes an Int position and `.Val` an element; any other selector
 // stays a run-time choice.
@@ -301,7 +301,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                 else -> callback_mutable
             }
         }
-        // D-CMP3WAY1=B: a named binary function given to `sort_by` is its
+        // A named binary function given to `sort_by` is its
         // comparator, like a two-parameter lambda.
         if callback && index == 0 && contract.accepts_comparator && !comparator && value.ty == .Fn(callback_params, _, _, _, _, _) && callback_params.len() == 2 {
             comparator = true

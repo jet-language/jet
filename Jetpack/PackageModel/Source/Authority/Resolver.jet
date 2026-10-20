@@ -6,9 +6,9 @@
 //
 // The Rust reference reaches descriptor-relative no-follow opens through
 // openat FFI with a per-platform fallback; here the held root is the ratified
-// Core directory handle (D-CORE-FILEDIR1), whose relative opens refuse links,
+// Core directory handle whose relative opens refuse links,
 // `.`, `..`, and absolute names, and identity/link counts come from the
-// ratified Stat (D-CORE-FILESTAT1).
+// ratified Stat.
 
 // The largest chunk one handle read requests.
 AUTHORITY_READ_CHUNK :: prep { 65536 }
@@ -310,7 +310,7 @@ struct AuthorityResolver {
     }
 
     // Resolve workspace authority from checked top-level source snapshots.
-    // D-ECO-FILEROOT1/D-ECO-GRAPH1: a Package root with `members:` owns
+    // A Package root with `members:` owns
     // membership; the declaration-resolved workspace source remains below
     // only while a root still waits for its list to fold into package.jet.
     fn resolve_workspace_source(self, cache: &WorkspaceDeclarationCache) -[FS, Env]> WorkspaceSource? AuthorityError! {

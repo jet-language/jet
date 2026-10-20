@@ -67,7 +67,7 @@ use std.process.[Command, Stdio]
     fs.create_dir_all(root.join("src")).unwrap()
     fs.write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
     source :: "module perf.package {{\n    budgets: [Budget{{ name: \"api\", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }}]\n}}\npub fn api() {{}}\nfn run() {{}}\n"
-    // D-VERDICT-678-1: budget discovery uses canonical run.jet, never main.jet.
+    // Budget discovery uses canonical run.jet, never main.jet.
     path :: root.join("src/run.jet")
     fs.write(path, source).unwrap()
     measured :: Command.new(jet).args(["budget", "check", "--json"]).current_dir(root).output().unwrap()

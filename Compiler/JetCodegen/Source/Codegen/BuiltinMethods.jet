@@ -468,7 +468,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         }
         .LenString -> return jet_codegen_builtin_route("len_string", "jet_char_len", 1, [Bool]{true}, None)
         .LenList | .IsEmpty | .GetMap | .GetList | .First | .Last | .Contains | .ContainsKey | .DequeCapacity | .SetCapacity | .MapFromKeys | .SetShuffle | .ListUnion | .ListIntersection | .ListDifference | .ListRandom -> return jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
-        // D-FLOATSORT1: Float extrema use the collection sort order, so a NaN
+        // Float extrema use the collection sort order, so a NaN
         // item is the greatest value and never the least.
         .Max(float) -> {
             if float -> return jet_codegen_builtin_route("max_float", "jet_list_max_float", 1, [Bool]{false}, None)

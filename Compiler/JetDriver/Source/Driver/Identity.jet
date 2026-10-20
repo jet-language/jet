@@ -117,7 +117,7 @@ enum JetDriverCompileTarget {
     release_devtools_policy: JetReleaseDevtoolsPolicy,
     profile: MIRArtifactBuildMode,
     )
-    // `--target=sandbox` (D-PLUGIN1=B): the entry module's `pub fn` rows
+    // `--target=sandbox` the entry module's `pub fn` rows
     // become a WASM Component guest. `export_name` is the manifest `export:`
     // name (the package name when absent); `frozen_interfaces` are the texts
     // of the `.jet/cache/api/plugin__*.api` snapshots the host read (the
@@ -229,7 +229,7 @@ struct JetDriverCompileRequest {
     // legality on entry and Lint on the final program. Tests and `--verify`
     // turn it on; ordinary compiles leave it off.
     mir_lint_every_pass: Bool
-    // The compiler threads this compile may use (D-JOBS1=A `--threads N`;
+    // The compiler threads this compile may use (`--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
     compiler_threads: CompilerThreads
@@ -284,7 +284,7 @@ struct JetDriverGatePolicy {
 // `stamp` reports a file's (size, mtime, ctime, inode) stamp so an unchanged
 // file can skip rehashing; a stamp never decides freshness. The host reads and
 // writes the store's files, so each call declares that row (an undeclared
-// dynamic dispatch is the maximal row, D-EFF2).
+// dynamic dispatch is the maximal row).
 trait JetDriverRecordStore {
     fn record(self, schema: String, key: String) -[FS]> [U8]?
     fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
@@ -409,7 +409,7 @@ struct JetDriverSourceUnit {
     relative_path: String
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
-    // D-MOD-CYCLE1=A: a file of a `package.jet` package shares its package's
+    // A file of a `package.jet` package shares its package's
     // namespace. Loose files, one-file (inline Package) packages, embedded
     // Core sources, and synthetic modules have none.
     in_namespace: Bool
@@ -456,7 +456,7 @@ struct JetDriverPackageInfo {
     // Manifest inputs compose package facts, never ordinary source bindings.
     configs: [String]
     dependencies: [JetDriverPackageDependency]
-    // D-MOD-CYCLE1=A: the kinds the manifest's `outputs:` declare. A package
+    // The kinds the manifest's `outputs:` declare. A package
     // that declares a Library and no Executable has no `fn run` (E0625).
     outputs: JetDriverPackageOutputs
 }
@@ -515,7 +515,7 @@ struct JetDriverLoadedModule {
     module_identity: String
     module_name: String
     program: Program
-    // D-MOD-CYCLE1=A (jet_driver_bind_package_namespaces): the package
+    // (jet_driver_bind_package_namespaces): the package
     // namespace of a member file ("" outside one), the names it contributes
     // in declaration order, and the names of other members its source can
     // reach (jet_driver_namespace_reach).
@@ -781,7 +781,7 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
     }
 }
 
-// D-BUILD-NOCHANGE1=A: the Receipt closure for one driver request. The host
+// The Receipt closure for one driver request. The host
 // store keys a recorded outcome (typed diagnostics, artifact digest) by this
 // digest. It frames the verb, the host's compiler identity and target, every
 // option that changes what the verb checks, and each authorized source's

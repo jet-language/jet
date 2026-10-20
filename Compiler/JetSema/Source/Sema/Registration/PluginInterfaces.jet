@@ -374,7 +374,7 @@ fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) ->
         .Shared(inner) -> return "Shared<{sema_plugin_api_type_name(inner, dimensions)}>"
         .Option(inner) -> return "{sema_plugin_api_marked_name(inner, dimensions)}?"
         .Result(ok, err) -> {
-            // D-TYPE-SUFFIX1=A: the error contract follows its type: `E!`.
+            // The error contract follows its type: `E!`.
             contract :: "{sema_plugin_api_marked_name(err, dimensions)}!"
             if ok == (Type.Named{name: "Unit"}) -> return contract
             if err == (Type.Named{name: "Err"}) -> return sema_plugin_api_type_name(ok, dimensions)
@@ -410,7 +410,7 @@ fn sema_plugin_api_type_name(ty: Type, dimensions: [SemaPluginUnitDimension]) ->
     }
 }
 
-// D-TYPE-SUFFIX1=A: a type written before a suffix mark is grouped when the
+// A type written before a suffix mark is grouped when the
 // mark would otherwise bind to its last member.
 fn sema_plugin_api_marked_name(ty: Type, dimensions: [SemaPluginUnitDimension]) -> String Never! {
     name :: sema_plugin_api_type_name(ty, dimensions)

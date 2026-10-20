@@ -98,21 +98,21 @@ struct SemaOwnershipViewProducer {
 struct SemaOwnershipMoveOrigin {
     span: Span
     consumer: String
-    // D-COPY-DEFAULT1=A: the moved binding's type when this was an unmarked
+    // The moved binding's type when this was an unmarked
     // move of a whole binding written as its plain name. A later use turns
     // that site into a share; `None` for an exact `^` move or a projection.
     share_ty: Type?
-    // D-COPY-DEFAULT1=A: the callee when this was an unmarked argument to a
+    // The callee when this was an unmarked argument to a
     // take parameter, moved as its name's last use. A later use reports
     // E0209 at the argument (pass a copy with `.copy()`) instead of sharing it.
     implicit_take: String?{None}
-    // D-CALLSITE-MARK1=A: the captured name a run-once lambda takes with
+    // The captured name a run-once lambda takes with
     // `^`, when this move is that lambda binding's call. A later call
     // reports E0121 naming the capture (Rust `moved_use_diagnostic`).
     once_capture: String?{None}
 }
 
-// D-CALLSITE-MARK1=A: a lambda whose body takes a captured name with `^`.
+// A lambda whose body takes a captured name with `^`.
 // `site` is the lambda's span; `key` is the binding that holds it, once bound.
 struct SemaOwnershipOnceLambda {
     site: Span
@@ -120,7 +120,7 @@ struct SemaOwnershipOnceLambda {
     capture: String
 }
 
-// D-COPY-DEFAULT1=A: an unmarked move site that a later use reached. The
+// An unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
 // the authored copy `name.copy()`.
 struct SemaOwnershipShareSite {
@@ -156,12 +156,12 @@ struct SemaOwnershipBindingFact {
     references: Int
     writes: Int
     active: Bool
-    // D-LIN1: this binding owns a `#SingleUse` value's consume duty
+    // This binding owns a `#SingleUse` value's consume duty
     // (Ownership/SingleUse.jet).
     single_use: Bool
-    // D-CONC-JOIN1: the duty is a task handle's `join` (L1101), not `consume`.
+    // The duty is a task handle's `join` (L1101), not `consume`.
     owes_join: Bool{false}
-    // D-CONC-FREEZE1=A: provenance belongs to this exact binding, not its name.
+    // Provenance belongs to this exact binding, not its name.
     frozen_site: SemaOwnershipFreezeSite?{None}
 }
 
@@ -188,25 +188,25 @@ struct SemaOwnershipState {
     views: [SemaOwnershipViewFact]
     references: [SemaOwnershipReference]
     receiver_frames: [SemaReceiverMarkFrame]
-    // D-COPY-DEFAULT1=A: share sites this check applies, and the sites it
+    // Share sites this check applies, and the sites it
     // found that a later use reached.
     share_known: [Span]
     share_found: [SemaOwnershipShareSite]
-    // D-COPY-DEFAULT1=A: unmarked take arguments the typed argument check
+    // Unmarked take arguments the typed argument check
     // found eligible to move at their last use (Rust
     // `take_unmarked_last_use`); the call ownership check makes the move.
     implicit_take_ok: [Span]{[Span]{}}
-    // D-CALLSITE-MARK1=A: eligible unmarked take arguments whose name another
+    // Eligible unmarked take arguments whose name another
     // argument of the same call also names. Such a name has no last use in
     // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
     implicit_take_twice: [Span]{[Span]{}}
-    // D-CALLSITE-MARK1=A: run-once lambdas found in this function, and the
+    // Run-once lambdas found in this function, and the
     // bindings holding them (Rust `once_lambda_sites` / `once_lambdas`).
     once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}}
-    // D-SHAPE-PLACE1=A: `function#parameter` keys of list write parameters
+    // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
     fixed_length_write_params: [String]
-    // D-UNINIT-SENTINEL2 (E0420): `Type{ uninit }` bindings not yet
+    // E0420: `Type{ uninit }` bindings not yet
     // definitely written on every path reaching this point.
     uninit: [SemaOwnershipUninitFact]
     // Rust `is_static_move_root`: keys of this module's `#Persist`, mutable,
@@ -297,7 +297,7 @@ struct SemaOwnershipFreezeSite {
     column: Int
 }
 
-// D-UNINIT1: one `Type{ uninit }` binding that is not yet definitely written.
+// One `Type{ uninit }` binding that is not yet definitely written.
 // A fixed list tracks the literal slots written so far; `fixed_len` is None
 // for a scalar, or once two paths disagree on the length.
 struct SemaOwnershipUninitFact {
@@ -307,13 +307,13 @@ struct SemaOwnershipUninitFact {
     initialized: [Int]
 }
 
-// D-CAP-RECEIVER1=D: a written `&`/`^` mark on a method receiver place.
+// A written `&`/`^` mark on a method receiver place.
 struct SemaReceiverMark {
     mark_span: Span
     access: PlaceAccess
 }
 
-// D-CAP-RECEIVER1=D: one frame per method call being checked. Receiver hooks
+// One frame per method call being checked. Receiver hooks
 // record the strongest convention the resolved call uses for its receiver.
 struct SemaReceiverMarkFrame {
     receiver_span: Span
@@ -964,7 +964,7 @@ fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostics: &
     }
 }
 
-// D-FLOWTYPE1=A: `x == None` over a stable optional reads as the presence
+// `x == None` over a stable optional reads as the presence
 // test `x == .Val(x)`, which rebinds the payload under the same name at the
 // read of `x`. That rebinding is the narrowed `x` itself (Rust refines the
 // one binding's type), so it is not a separate unused local.
@@ -1968,7 +1968,7 @@ fn sema_ownership_place_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
     None
 }
 
-// D-COPY-DEFAULT1=A: an unmarked move site that a later use reached checks
+// An unmarked move site that a later use reached checks
 // as the copy `name.copy()`, so the source stays usable.
 fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool Never! {
     loop site in state.share_known {
@@ -1977,7 +1977,7 @@ fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool N
     false
 }
 
-// D-COPY-DEFAULT1=A (Rust `move_is_shareable`): only a whole binding moved
+// (Rust `move_is_shareable`): only a whole binding moved
 // by its plain name, whose type is not known to refuse a copy, can later
 // become a share. Rust keys that move on the binding itself
 // (`mark_moved(name)`), so a read payload or view binding moved by name
@@ -2034,7 +2034,7 @@ fn sema_ownership_note_share_found(state: &SemaOwnershipState, found: SemaOwners
     &state.share_found.push(found)
 }
 
-// D-COPY-DEFAULT1=A: a share site found on a branch path is found for the
+// A share site found on a branch path is found for the
 // function even when that path's check stops early (its E0121 is the reason
 // it stopped) or never reaches the join; the next pass treats it as a share.
 fn sema_ownership_keep_share_found(state: &SemaOwnershipState, branch: SemaOwnershipState) Never! {
@@ -2386,7 +2386,7 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
         if action == "be assigned" && sema_ownership_report_assignment_capability(expr, places[0].root, info, &diagnostics) -> return false
         if info.access == {
             .Read -> {
-                // D-PARAM-CONST1=A: an unmarked parameter is read access for
+                // An unmarked parameter is read access for
                 // the whole call; the fix is the parameter's `&` mark.
                 if info.symbol.kind == SymbolKind.Parameter {
                     param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
@@ -2505,7 +2505,7 @@ fn sema_ownership_mark_move(state: &SemaOwnershipState, expr: Expr, scopes: Sema
     sema_ownership_mark_move_as(&state, expr, scopes, consumer, false, &diagnostics)
 }
 
-// D-COPY-DEFAULT1=A: an unmarked owning position (binding, assignment,
+// An unmarked owning position (binding, assignment,
 // return, field, element). A later use turns this move into a share.
 fn sema_ownership_mark_unmarked_move(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, diagnostics: &[Diagnostic]) -> Bool {
     sema_ownership_mark_move_as(&state, expr, scopes, consumer, true, &diagnostics)
@@ -2525,7 +2525,7 @@ fn sema_ownership_unmarked_moves_name(expr: Expr) -> Bool Never! {
 }
 
 fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, unmarked: Bool, diagnostics: &[Diagnostic]) -> Bool {
-    // D-COPY-DEFAULT1=A: a share site copies; the source stays usable.
+    // A share site copies; the source stays usable.
     if unmarked && sema_ownership_is_share_site(state, expr_span(expr)) -> return true
     if sema_ownership_report_invalidated_view(&state, expr, scopes, expr_span(expr), &diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
@@ -2545,7 +2545,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
             return true
         }
     }
-    // D-COPY-DEFAULT1=A (spec "Copies, moves, and owned destinations"): an
+    // (spec "Copies, moves, and owned destinations"): an
     // exact `^name` on storage this scope does not own has nothing to give
     // away, and lowering would copy the value instead (`jet audit copies`
     // lists the site as an implicit read-view copy). A binding position
@@ -2602,7 +2602,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     }
     if !sema_ownership_type_is_copy(move_ty) {
         origin := sema_ownership_move_origin(expr, move_ty, consumer, unmarked)
-        // D-LIN1: a `#SingleUse` value keeps its exact move; it never copies.
+        // A `#SingleUse` value keeps its exact move; it never copies.
         if sema_single_use_key(state, places[0].root_key) -> origin.share_ty = None
         loop place in sema_ownership_moved_record_places(expr, places, scopes, unmarked) -> &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
     }
@@ -2630,7 +2630,7 @@ fn sema_ownership_moved_name(expr: Expr) -> Expr? Never! {
 }
 
 fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, diagnostics: &[Diagnostic]) -> Bool {
-    // D-COPY-DEFAULT1=A (#3714): `^place` is one exact move. The expression
+    // (#3714): `^place` is one exact move. The expression
     // check and the consuming position both reach it, so a place this very
     // mark already moved is the same move, not a use after it.
     if expr == .Place(value, access, _) {
@@ -2701,13 +2701,13 @@ fn sema_ownership_call_diag_write_required(callee: String, name: String, span: S
     sema_error("E0202", span, "parameter `{name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`; passing it without that marker grants only read access", "write the write-access marker `&` (`&{name}`) when calling `{callee}`")
 }
 
-// D-SHAPE-PLACE1=A: `&` grants write access to a place — a name followed by
+// `&` grants write access to a place — a name followed by
 // field, index, or range projections. Only a temporary lacks one.
 fn sema_ownership_call_diag_write_place(span: Span) -> Diagnostic {
     sema_error("E0202", span, "the write-access marker `&` needs a place after it", "write access reaches only a place: a name, optionally followed by field, index, or range projections such as `buf.items[0]`; a temporary expression has no storage for the edit to land in", "bind the value first: `x := ...` then pass `&x` with the write-access marker `&`")
 }
 
-// D-SHAPE-PLACE1=A: a range window has a fixed length, while this callee may
+// A range window has a fixed length, while this callee may
 // grow or shrink the list it receives.
 fn sema_ownership_call_diag_write_range_window(span: Span) -> Diagnostic {
     sema_error("E0202", span, "a range write window can't fill a list parameter that may resize", "a range window has a fixed length, but this function may grow or shrink the list it receives through the write-access marker `&`", "pass the whole list with the write-access marker `&`: `fill(&values)`")
@@ -2790,7 +2790,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             write_place_ok = false
             &diagnostics.push(sema_ownership_call_diag_write_place(arg.span))
         }
-        // D-CALLSITE-MARK1=A (Rust `reject_unbacked_write_mark`): a written
+        // (Rust `reject_unbacked_write_mark`): a written
         // `&` always means the call edits; a write window parameter keeps it.
         if arg.convention == AccessConvention.Write && write_place_ok && param.convention == AccessConvention.Read && !sema_ownership_is_window_type(param.ty ?? Type.Named{name: "Unit"}) {
             accepted = false
@@ -2848,14 +2848,14 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
                 next
             }
-            // D-CALLSITE-MARK1=A: a name in two argument slots of one call has
+            // A name in two argument slots of one call has
             // no last use there (Rust `named_elsewhere`).
             if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_twice, arg.expr) {
                 accepted = false
                 &diagnostics.push(sema_ownership_diag_take_twice(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
                 next
             }
-            // D-COPY-DEFAULT1=A (Rust `take_unmarked_last_use`): an eligible
+            // (Rust `take_unmarked_last_use`): an eligible
             // unmarked argument moves like `^name`; a later use reports E0209.
             if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_ok, arg.expr) {
                 mark_implicit_take = true
@@ -2982,7 +2982,7 @@ fn sema_ownership_mark_implicit_take(state: &SemaOwnershipState, expr: Expr, sco
     true
 }
 
-// D-CALLSITE-MARK1=A (Rust `once_lambda_sites`): the lambda at `site` takes
+// (Rust `once_lambda_sites`): the lambda at `site` takes
 // its captured `capture` with `^`, so it can run only once.
 fn sema_ownership_note_once_lambda(state: &SemaOwnershipState, site: Span, capture: String) Never! {
     loop once in state.once_lambdas {
@@ -2991,7 +2991,7 @@ fn sema_ownership_note_once_lambda(state: &SemaOwnershipState, site: Span, captu
     &state.once_lambdas.push(SemaOwnershipOnceLambda{site: site, key: "", capture: capture})
 }
 
-// D-CALLSITE-MARK1=A (Rust `once_lambdas`): the binding `key` holds the
+// (Rust `once_lambdas`): the binding `key` holds the
 // run-once lambda at `site`.
 fn sema_ownership_bind_once_lambda(state: &SemaOwnershipState, site: Span, key: String) Never! {
     loop index in 0..<state.once_lambdas.len() {
@@ -2999,7 +2999,7 @@ fn sema_ownership_bind_once_lambda(state: &SemaOwnershipState, site: Span, key: 
     }
 }
 
-// D-CALLSITE-MARK1=A: a call of a run-once lambda binding moves the binding,
+// A call of a run-once lambda binding moves the binding,
 // so a later call on any path reports E0121 naming the taken capture. The
 // callee's own use check already reported a call after the move.
 fn sema_ownership_call_once_lambda(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable) Never! {
@@ -3018,7 +3018,7 @@ fn sema_ownership_call_once_lambda(state: &SemaOwnershipState, callee: Expr, sco
     }
 }
 
-// D-COPY-DEFAULT1=A (Rust `take_unmarked_last_use`): the typed argument
+// (Rust `take_unmarked_last_use`): the typed argument
 // check notes an unmarked argument to a take parameter that may move at its
 // name's last use. Only a plain owned local or take parameter of an ordinary
 // copyable value qualifies: a value with cleanup (a `Close` resource, a
@@ -3042,7 +3042,7 @@ fn sema_ownership_note_implicit_take(state: &SemaOwnershipState, expr: Expr, ty:
     None
 }
 
-// D-CALLSITE-MARK1=A: a noted take argument whose name another argument of
+// A noted take argument whose name another argument of
 // the same call also references has no last use in that call; the call
 // ownership check reports E0209 there instead of moving it.
 fn sema_ownership_note_implicit_take_twice(state: &SemaOwnershipState, span: Span) Never! {
@@ -3154,7 +3154,7 @@ fn sema_ownership_check_receiver_write(state: &SemaOwnershipState, receiver: Exp
     false
 }
 
-// D-CAP-RECEIVER1=D: mark the value, not the call. The method-call check lifts
+// Mark the value, not the call. The method-call check lifts
 // a written `&`/`^` mark off its receiver before resolution, the receiver hook
 // above records the resolved convention, and the finish step compares them:
 // E0224 missing, E0225 extra, E0226 wrong mark. A write window receiver
@@ -3248,7 +3248,7 @@ fn sema_receiver_mark_is_write_window(state: SemaOwnershipState, root: String) -
     false
 }
 
-// D-COPY-DEFAULT1=A: a taking call on a whole local at its last use moves
+// A taking call on a whole local at its last use moves
 // the local with no mark, so the compiler chooses and `^` stays optional
 // there. A writing call still needs `&`, and a take anywhere else (a field,
 // or a local read again later) still needs `^`.
@@ -3411,7 +3411,7 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
             valid
         }
         .Place(value, access, _) -> {
-            // D-COPY-DEFAULT1=A (#3714): a take mark on a bare place is an
+            // (#3714): a take mark on a bare place is an
             // exact move, which the expression check records; it opens no view.
             if access == PlaceAccess.Take || sema_ownership_places_from_expr_in_state(value, scopes, &state).len() == 0 -> return sema_ownership_check_expression(&state, value, scopes, &diagnostics)
             first_seq :: state.next_seq
@@ -3941,7 +3941,7 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
             }
         }
     }
-    // D-COPY-DEFAULT1=A: a share site found on either path is found.
+    // A share site found on either path is found.
     share_found := found
     loop site in then_path.share_found -> sema_ownership_share_found_add(&share_found, site)
     loop site in else_path.share_found -> sema_ownership_share_found_add(&share_found, site)
@@ -3980,7 +3980,7 @@ fn sema_ownership_path_join(index: SemaOwnershipState, fork: SemaOwnershipFork, 
         moved: merged_moves,
         loans: merged_loans,
         views: merged_views,
-        // D-UNINIT1: a binding unwritten on either path stays unwritten.
+        // A binding unwritten on either path stays unwritten.
         uninit: sema_ownership_uninit_join(then_path.uninit, else_path.uninit),
         share_found: share_found,
         frozen: frozen,
@@ -4003,7 +4003,7 @@ fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnershipSt
     sema_ownership_fork_apply(&state, joined)
 }
 
-// D-UNINIT1 branch merge (Rust `UninitState::merge_paths`): a binding left
+// This rule branch merge (Rust `UninitState::merge_paths`): a binding left
 // unwritten by either path stays unwritten, and a fixed-list slot counts as
 // written only where every path wrote it.
 fn sema_ownership_uninit_join(left: [SemaOwnershipUninitFact], right: [SemaOwnershipUninitFact]) -> [SemaOwnershipUninitFact] Never! {

@@ -1,4 +1,4 @@
-// Package discovery (U10, D-ECO-FILEROOT1=A) (Package/Discovery.rs):
+// Package discovery (U10) (Package/Discovery.rs):
 // resolve a package name to the directory of the unique `.jet` file that
 // declares `module <name>` at the top level, and project `#Job` declarations
 // into the shared job registry.
@@ -13,7 +13,7 @@ enum DiscoveryError {
 }
 
 // The directory holding the one file declaring `module <name>`. An explicit
-// named lookup, so D-SHAPE-MODULEINTERNAL1 does not filter `_name`.
+// named lookup, so does not filter `_name`.
 fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String DiscoveryError! {
     resolver :: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound{name: name})
     listed :: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound{name: name})

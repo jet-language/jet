@@ -128,7 +128,7 @@ fn parse_lexed_with_source_threads(lexed: ^Lexed, source: [U8], line_starts: [In
 
 // Parse a Jetpack config surface (Rust `parse_config_with_source`): the
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
-// as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
+// as the typed environment read `source` stays available
 // for config values whose spelling is not a general Jet expression.
 fn parse_config_with_source(lexed: ^Lexed, source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(^lexed, source, parser_line_starts(source), true)
@@ -220,7 +220,7 @@ fn parse_tokens(tokens: [Token], tables: TokenTables) -> ParseResult {
     parser_parse_prepared(^prepared, [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false, ^owned_tables)
 }
 
-// D-EACH1=C: fence expansion runs before parsing. A fence error stops the
+// Fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
 fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^TokenTables) -> ParseResult {
     prepared := ^input
@@ -247,7 +247,7 @@ fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagn
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
 
-// Parallel parsing of one source (D-JOBS1=A). The prepared token stream is
+// Parallel parsing of one source. The prepared token stream is
 // cut at top-level item boundaries and each run of items parses on its own
 // thread with its own parser state; the whole-file program is joined from
 // the chunk programs in chunk order. Every parser decision inside an item
@@ -629,10 +629,10 @@ fn parser_parse_chunk_part(inputs: Shared<ParserChunkShared>, part: Shared<Parse
     1
 }
 
-// L0103 (D-LINT-UNUSED1): an import's local name is read when the file spells
+// L0103 an import's local name is read when the file spells
 // it outside every import declaration, interpolations included. The module
 // root of a member import (`b` in `use b.[f]`) reads that name as well. A
-// body-less `module name` is the file import the loader binds for it (D-MOD1).
+// body-less `module name` is the file import the loader binds for it.
 // Rust: none (Jet-only pass)
 fn parser_used_import_names(tokens: [Token], tables: TokenTables, imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
     candidates := [String]{}
@@ -746,7 +746,7 @@ fn parser_collect_used_import_names(tokens: [Token], tables: TokenTables, indexe
     }
 }
 
-// D-DBG1=A: record each `debug(…)` call's argument text as written, so sema
+// Record each `debug(…)` call's argument text as written, so sema
 // can name the traced expression and build the E3405 unwrap edit. The text
 // runs from the first token after `(` to the last one before its matching
 // `)`, leaving out a trailing comma. Interpolations are scanned as well.
@@ -800,7 +800,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         if parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
         if {
-            // D-VERDICT-732-1 / D-ONCE-AT1=D: a top-level `@` other than the
+            // A top-level `@` other than the
             // retired `@loop` head is a misspelled applied rule.
             parser_current_kind(&state) == TOKEN_AT && parser_kind_at(&state, 1) != TOKEN_KW_LOOP -> {
                 at :: parser_bump(&state)
@@ -836,7 +836,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                     }
                 }
             }
-            // D-MODULE-BIND1 (Rust `module_binding_def`): the binding parser
+            // (Rust `module_binding_def`): the binding parser
             // reads one named module binding; a destructuring head or a failed
             // binding reports and resynchronizes at the next item.
             parser_module_binding_ahead(&state) -> {
@@ -922,7 +922,7 @@ fn parser_unattached_marker_at_end(state: &JetParserState) -> Bool Never! {
     parser_kind_at(&state, offset) == TOKEN_EOF
 }
 
-// File rules (D-VISDEFAULT2, D-PRELUDEX1, D-WEBDEFAULT1, D-HTMLPAIR1): bare
+// File rules bare
 // `#PubFile`/`#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]`
 // list of them. The retired `#PublicFile`/`#Html` spellings are read to teach.
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
@@ -1034,7 +1034,7 @@ fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: M
     hash :: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
-        // D-VIS-MODULE1: the retired file marker; E0418 deletes it.
+        // The retired file marker; E0418 deletes it.
         "PubFile" | "PublicFile" -> {
             deletion :: parser_deletion_edit(state, marker.span)
             parser_add_error_code_edit(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker", deletion)
@@ -1072,7 +1072,7 @@ fn parser_html_page_path(page: Expr) -> String? {
     parser_expr_literal_string(page)
 }
 
-// D-WASM1=A / D-WEBDEFAULT1 / D-OSTARGET1=A (Rust `web_target_from_marker`):
+// (Rust `web_target_from_marker`):
 // `#Target(Web)` picks the file's default CLI backend, `#Target(Wasm|JS)`
 // caps its web partition, and `#Target(OS.…)` only gates an `impl`.
 fn parser_apply_file_target(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
@@ -1150,7 +1150,7 @@ fn parser_report_grouped_target_conflict(state: &JetParserState, marker: Marker)
     parser_add_error(&state, marker.span, "this grouped `#Target` duplicates or cannot attach at file scope", "a file marker list may contain one file target and one companion `#HTML` marker", "remove the duplicate, or move an OS target directly onto its `impl`")
 }
 
-// D-VISDEFAULT2=A: `pub:` / `priv:` section labels would let one line flip
+// `pub:` / `priv:` section labels would let one line flip
 // the visibility of everything below it; E0415 rejects the label itself.
 fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
     if parser_kind_at(&state, 1) != TOKEN_COLON -> return false
@@ -1200,7 +1200,7 @@ fn parser_known_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(&state, offset + 2) != TOKEN_DOT
 }
 
-// D-PREP-SURFACE2=A + owner ruling (2026-09-30): an immutable module binding
+// + owner ruling (2026-09-30): an immutable module binding
 // is named in ALL_CAPS, `MAX_ROWS :: 100`. This is the casing predicate only;
 // compile time is always the explicit `NAME :: prep { value }`.
 fn parser_constant_name(name: String) -> Bool Never! {
@@ -1213,14 +1213,14 @@ fn parser_constant_name(name: String) -> Bool Never! {
     has_upper
 }
 
-// D-COMPILER-NS1=A / D-META-ROOT3=A: the subjectless compiler fact roots.
+// The subjectless compiler fact roots.
 fn parser_fact_root(name: String) -> Bool Never! {
     name == "$build" || name == "$package" || name == "$phase" || name == "$program"
 }
 
-// Rust `Parser::unknown_fact_root` (D-COMPILER-NS1=A / D-META-ROOT3=A): a `$`
+// Rust `Parser::unknown_fact_root` a `$`
 // word in ordinary expression position that is no fact root. An ALL_CAPS
-// `$NAME` is the config-only environment read (D-ONCE-DOLLAR1=B); any other
+// `$NAME` is the config-only environment read any other
 // `$word` is not a compiler fact. Both report the whole word. Fatal, as Rust
 // returns it as the expression's `Err`.
 fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: Span) {
@@ -1232,7 +1232,7 @@ fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: S
     parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
 }
 
-// D-CONSTMARK1: after `#Static` / `#Inline`, a constant binding `NAME :: …`
+// After `#Static` / `#Inline`, a constant binding `NAME :: …`
 // (or a retired `@`-marked name, which E0388 respells) is a declaration.
 fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     token :: parser_lookahead(&state, offset)
@@ -1241,7 +1241,7 @@ fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never!
     name.starts_with("@") || parser_constant_name(name)
 }
 
-// D-PREP-SURFACE2=A: a retired `@`-marked constant read (or a declaration whose
+// A retired `@`-marked constant read (or a declaration whose
 // value is already `prep { … }`) teaches E0388 with the behavior-preserving
 // respelling, and the parse continues under the plain name so each mention
 // reports once.
@@ -1257,7 +1257,7 @@ fn parser_retire_const_mark(state: &JetParserState, token: Token) -> String {
     plain
 }
 
-// D-PREP-SURFACE2=A: a retired `@name :: value` declaration always meant
+// A retired `@name :: value` declaration always meant
 // compile time, so E0388 teaches `name :: prep { value }` and the parse
 // continues under the plain name as that prepared binding.
 fn parser_retire_const_decl(state: &JetParserState, span: Span, old: String) -> String {

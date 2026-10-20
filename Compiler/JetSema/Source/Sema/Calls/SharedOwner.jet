@@ -66,7 +66,7 @@ fn sema_call_shared_owner_param(name: String, convention: AccessConvention, ty: 
     SemaCallParam{label: name, name: name, zone: ParamZone.Either, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
-// D-SHARED-REVISION1=A: capture either the whole cloneable payload or one
+// Capture either the whole cloneable payload or one
 // pure, cloneable projection. The callback runs under the Shared read lock,
 // so its returned value is paired with one committed revision.
 fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -104,7 +104,7 @@ fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: 
     sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
-// D-SHARED-REVISION1=A: consume one owner-bound snapshot ticket plus a
+// Consume one owner-bound snapshot ticket plus a
 // replacement payload. The runtime performs the atomic owner/revision
 // comparison; sema only fixes the generic source type.
 fn sema_call_shared_owner_try_replace(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -174,7 +174,7 @@ fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, meth
             if method == "same" -> return sema_call_shared_owner_same(receiver, receiver_value, inner, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
             if method == "guard_read" || method == "guard_edit" -> return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            // D-SHARED-CYCLE1=C: expert weak edge for intentional cycles.
+            // Expert weak edge for intentional cycles.
             if method == "downgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
             if method == "strong_count" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         }

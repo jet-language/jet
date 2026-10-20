@@ -1,4 +1,4 @@
-// D-METADERIVE1=A / D-META-USER1=A / D-STRUCT-ONCE1=A: package-authored
+// Package-authored
 // templates (user `derive T.Name` providers, declared marker bodies and root
 // `prep loop` declarations) expand through the same typed template engine as
 // the Prelude providers (Registration/Derives.jet). Generated items re-enter
@@ -231,7 +231,7 @@ fn sema_user_template_register(graph: &SemaRegistrationGraph, module_index: Int,
 }
 
 // ---------------------------------------------------------------------------
-// User derives (D-METADERIVE1=A). A struct requesting `#Name` expands the
+// User derives. A struct requesting `#Name` expands the
 // `derive T.Name` provider preferring the entry module, then the target's
 // own module. The orphan law (E2711) requires the provider or the target to
 // be entry-local. Generated functions become ordinary members of the target;
@@ -345,7 +345,7 @@ fn sema_user_derive_expand_module(graph: &SemaRegistrationGraph, module_index: I
 }
 
 // ---------------------------------------------------------------------------
-// Declared marker bodies (D-META-USER1=A). `target` is the struct's TypeInfo
+// Declared marker bodies. `target` is the struct's TypeInfo
 // or the function's FunctionInfo. A generated impl may add members but never
 // change or shadow a written (or earlier generated) member.
 
@@ -441,7 +441,7 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
             }
         }
     }
-    // D-META-DSL1=A: a `.Block` rule receives the text inside Jet's closed
+    // A `.Block` rule receives the text inside Jet's closed
     // braces as its `target` value. The rule body can check that text and
     // emit ordinary Jet items through the same typed path as a type or
     // function rule (Rust `CheckInner.rs` declared text blocks).
@@ -573,7 +573,7 @@ fn sema_user_text_blocks_in_item(item: Item, source: String, block_spans: [Span]
     }
 }
 
-// D-META-DSL1=A: a text block is checked by its rule only when the rule's
+// A text block is checked by its rule only when the rule's
 // first declaration has a body (Rust `marker_vocabulary.declaration`).
 fn sema_registration_declared_text_rule(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
     loop module_row_index in 0..<graph.modules.len() {

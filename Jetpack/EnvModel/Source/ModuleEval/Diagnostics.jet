@@ -121,7 +121,7 @@ fn envmodel_image_unknown_kind(word: String, span: Span) -> EnvModelEvalError Ne
 }
 
 // E1266: an explicit or implied `kind:` disagrees with what this image's
-// `from:` names (D-JPK-IMAGE1) — e.g. `kind: .Iso` alongside
+// `from:` names — e.g. `kind: .Iso` alongside
 // `from: packages.<name>`, or any `from: system.<name>`.
 fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalError Never! {
     wants :: if kind == IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
@@ -131,14 +131,14 @@ fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalEr
 }
 
 // E1267: an `.Oci` image's `from: packages.<name>` doesn't name a package
-// declared `executable` in this project's package manifest (D-JPK-IMAGE1).
+// declared `executable` in this project's package manifest.
 fn envmodel_oci_from_non_executable(image: String, package: String, is_library: Bool) -> EnvModelEvalError Never! {
     why :: if is_library -> "`{package}` is declared `library` in `pkg.jet` — a library has no binary to containerize" else -> "`{package}` isn't declared in this project's `pkg.jet` `packages:` block"
     envmodel_error("E1267", "the image `{image}` is built from a non-executable package `{package}`", "D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name an `executable` package — {why}", "declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package", None)
 }
 
 // E1269: an `.Oci` image field is written, but not shaped the way
-// D-JPK-IMAGE1 spells it.
+// This rule spells it.
 fn envmodel_image_field_shape(field: String, expected: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E1269", "`{field}` isn't shaped like {expected}", "D-JPK-IMAGE1: `{field}` is always written as {expected}", "rewrite `{field}:` as {expected}", Val(span))
 }

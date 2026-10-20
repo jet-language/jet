@@ -70,7 +70,7 @@ fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
     if label == { .Val(value) -> value.name else -> "" }
 }
 
-// D-META-NAME1=A / D-MARKER-SITES1=B: a canonical `marker Name(…)`, or the
+// A canonical `marker Name(…)`, or the
 // retired checked-text `marker Name on …` so the parser can teach it.
 fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
     if !(parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT) -> return false
@@ -82,7 +82,7 @@ fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
-// D-META-FORM1=A / D-META-USER1=A / D-MARKER-SITES1=B: the one canonical
+// The one canonical
 // `marker Name(params…)` declaration. The retired checked-text form and the
 // rejected trailers (an `on` clause, a second parameter list) teach E0381.
 fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
@@ -169,9 +169,9 @@ fn parser_parse_fact_decl(state: &JetParserState) -> Item {
     Item.FactDecl{value: FactDecl{name: parser_value(state, name), name_span: name.span, params: params, span: parser_cover(start.span, end)}}
 }
 
-// D-META-FORM1=A / D-DEFAULT-SHAPE1=B: rule arguments read `name: Type{default}`;
+// Rule arguments read `name: Type{default}`;
 // a fixed fact about the rule reads `$name: value`. A parameter may be named
-// by any written word, including a keyword (D-VERDICT-1455-1).
+// by any written word, including a keyword.
 fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
     parser_expect(&state, TOKEN_LPAREN, "`(` to open the marker's parameter list")
     params := [MarkerDeclParam]{}
@@ -274,7 +274,7 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
     }
 }
 
-// D-STRUCT-ONCE1=A / D-PREP-BRANCH1=A: a declaration loop is `prep loop`,
+// A declaration loop is `prep loop`,
 // in marker bodies and at the root. The retired `@loop` head teaches E0388
 // and recovers.
 fn parser_template_loop_ahead(state: &JetParserState) -> Bool Never! {
@@ -299,7 +299,7 @@ fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
     DeriveBodyItem.Loop{var: parsed.var, var_span: parsed.var_span, source: parsed.source, body: parsed.body, span: parsed.span}
 }
 
-// D-SHAPE2: one `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every
+// One `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every
 // entry is read like a bare marker, and a list of one is E0999.
 fn parser_parse_marker_group_list(state: &JetParserState) -> ParsedMarkerGroup {
     parser_parse_marker_group_entries(&state, false)
@@ -345,7 +345,7 @@ fn parser_parse_marker_group_entries(state: &JetParserState, declaration: Bool) 
     ParsedMarkerGroup{markers: markers, span: span}
 }
 
-// D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: `!` refuses only a trait the
+// `!` refuses only a trait the
 // structural auto-derive engine can provide, bare or inside `#[…]`.
 fn parser_check_signed_marker(state: &JetParserState, bang_start: Int, name: Token) {
     marker_name :: parser_value(state, name)
@@ -423,7 +423,7 @@ fn parser_report_singleton_marker_group(state: &JetParserState, span: Span, mark
     &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
 }
 
-// D-MARK-STACK1=A (Rust `parse_attached_marker_sequence`): two or more
+// (Rust `parse_attached_marker_sequence`): two or more
 // distinct rules on one target are one ordered `#[A, B]` list. `chunks`
 // counts the bare markers and lists written; `span` covers all of them.
 fn parser_report_adjacent_markers(state: &JetParserState, markers: [Marker], chunks: Int, bracket_chunks: Int, span: Span, noun: String) {

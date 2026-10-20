@@ -77,7 +77,7 @@ fn pc_trait_effect_slots() {
     pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
     free :: parse_source("fn begin(name: String) Never! -[FS]>\nfn run() {{}}\n".bytes())
     pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
-    // D-CALLABLE-ONE1 / D-FAIL-UNIT1: the unit error contract precedes effects.
+    // The unit error contract precedes effects.
     once :: jet_format_source("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() IOError! -[FS]> {{}}\nfn pure() Never! -[]> {{}}\ntrait Sink {{ fn save(self) IOError! -[FS]> }}\n", false)
     pc_require(once.ok, "unit-fallible signatures format")
     pc_require(once.text.contains("fn save(path: String) IOError!"), "unit success omits the plain arrow")
@@ -129,7 +129,7 @@ fn pc_marker_metadata() {
     }
     pc_require(seen == PC_MARKER_STATUS.len(), "every marker status is covered")
     pc_require((PC_MARKER_STATUS.get("Extern") ?? "") == "#Import", "Extern registry retirement")
-    // D-DECL-META1=A: rule facts are values in the same named-parameter list.
+    // Rule facts are values in the same named-parameter list.
     facts :: parse_source("marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {{}}\n".bytes())
     pc_require(facts.diagnostics.len() == 0, "named marker metadata parses")
     names := [String]{}
@@ -337,7 +337,7 @@ fn pc_lexical_and_parser_diagnostics() {
     pc_require(reserved && retired, "parser teaching survives lexical reserved-name errors")
 }
 
-// D-PAT-RECORD1=A: after `==`, `Name{` is a struct pattern only when its
+// After `==`, `Name{` is a struct pattern only when its
 // brace body reads as pattern entries; typed literals and a constant before
 // an `if` body stay value equality.
 fn pc_named_struct_pattern_rhs_init(source: String, label: String) -> Expr {

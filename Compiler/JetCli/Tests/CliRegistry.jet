@@ -21,7 +21,7 @@ fn cli_registry_tables() Never! {
             }
         }
     }
-    // D-FFI-AUTO1: `jet inspect bind` and `jet bind` are both canonical.
+    // `jet inspect bind` and `jet bind` are both canonical.
     bind :: jet_cli_nested_command("inspect", "bind") ?? panic("inspect bind is registered")
     cli_registry_require(JET_CLI_COMMANDS[bind.group].actions[bind.action].also_canonical_top_level, "inspect bind is also canonical at the top level")
     cli_registry_require(jet_cli_is_canonical_top_level("bind") && jet_cli_moved_command("bind") == .None, "bare bind is canonical")
@@ -35,7 +35,7 @@ fn cli_registry_moved_commands() Never! {
                 cli_registry_require(jet_cli_moved_command(action.name) == .None, "install keeps its E0043 teaching")
                 next
             }
-            // D-ONCE-RETIRE1=C: a retired bare word hard-errors; it never
+            // A retired bare word hard-errors; it never
             // teaches a grouped move and is never canonical.
             if jet_cli_is_retired_root(action.name) {
                 cli_registry_require(!action.also_canonical_top_level, "retired {action.name} claims canonical")
@@ -54,7 +54,7 @@ fn cli_registry_moved_commands() Never! {
             cli_registry_require(owner.actions[moved.action].name == action.name, "{action.name} moved to the wrong action of {owner.name}")
         }
     }
-    // D-CLI-ONE1 retired the `report` root: `gc report` is nested only.
+    // This rule retired the `report` root: `gc report` is nested only.
     report :: jet_cli_nested_command("gc", "report") ?? panic("gc report is registered")
     cli_registry_require(!JET_CLI_COMMANDS[report.group].actions[report.action].also_canonical_top_level, "gc report is not canonical at the top level")
     cli_registry_require(jet_cli_moved_command("report") == .None && !jet_cli_is_canonical_top_level("report"), "the retired report root stays retired")

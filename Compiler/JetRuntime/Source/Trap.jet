@@ -594,7 +594,7 @@ fn trap_scalar(address: I64) -> TrapScalar {
     TrapScalar{code: (first.bit_and(I64{7})) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 
-// D-STR-ESCAPE1: NUL uses the generic \u{0} escape, CR uses \r, and
+// NUL uses the generic \u{0} escape, CR uses \r, and
 // printable braces are copied unchanged so the result lexes to equal text.
 fn trap_debug_short(code: I64) -> I64 Never! {
     if (code == I64{9}) -> return I64{116}
@@ -604,7 +604,7 @@ fn trap_debug_short(code: I64) -> I64 Never! {
     I64{-1}
 }
 
-// D-STR-ESCAPE1 Jet text quoting shares the exact Rust debug escaper, except
+// Jet text quoting shares the exact Rust debug escaper, except
 // NUL is \u{0} here rather than Rust's \0. One table, decoder and escape loop.
 #Export(c) fn jet_rt_require_debug_string(value: I64) -> I64 {
     capacity :: rt_text_len(value) * I64{10} + I64{2}

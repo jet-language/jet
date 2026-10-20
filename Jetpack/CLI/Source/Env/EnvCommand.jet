@@ -5,7 +5,7 @@
 // realize path as a manifest ref) and the `--flake` / no-`env.*` fallback to
 // a foreign `flake.nix` / `devenv.nix` through the bounded native
 // projection. The reserved subverbs `hook`, `export`, `test`, `sync`, and
-// `info` share this entry (D-ENVHOOK1=A, D-JPK-DISPATCH1).
+// `info` share this entry.
 
 // The reserved first-positional subverbs of `jet env`.
 enum EnvSubverb {
@@ -29,7 +29,7 @@ enum EnvSubverb {
 
 fn cli_cmd_env(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
-    // D-JPK-VERIFYONCE1=A: one env command verifies each Hangar object once.
+    // One env command verifies each Hangar object once.
     store_arm_command_memo(&verification)
     if parsed.positional.len() == 0 -> return cli_cmd_env_project(&verification, &cache, theme, parsed)
     first :: parsed.positional[0]

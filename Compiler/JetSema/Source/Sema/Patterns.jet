@@ -139,7 +139,7 @@ fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistration
     }
 }
 
-// D-UNIONTYPE1=A (Rust `union_member_tag`): the tag an arm names for one
+// (Rust `union_member_tag`): the tag an arm names for one
 // union member, read without module qualifiers (`.LocalDate`, `.M__String_`).
 fn sema_pattern_union_tag(ty: Type) -> String Never! {
     type_union_member_tag(sema_pattern_unwrap_tags(ty))
@@ -156,14 +156,14 @@ fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
             "Bytes" -> Val([Type.List{element: Type.IntN{signed: false, bits: 8}}])
             "DateTime" -> Val([Type.Named{name: "ZonedDateTime"}])
             "Array" -> Val([Type.List{element: sema_dyn_type()}])
-            // D-DATATREE-ORDER1=A: an object is its fields in arrival order.
+            // An object is its fields in arrival order.
             "Object" -> Val([sema_data_object_pairs_type()])
             "Number" -> Val([Type.String])
             else -> None
         }
     }
     if owner == {
-        // D-ENCSTREAM-SURFACE1=A: the canonical twelve generated payload rows.
+        // The canonical twelve generated payload rows.
         "DataEvent" -> core_enum_variant_payload(owner, variant)
         "Key" -> if variant == {
             "Char" | "Ctrl" -> Val([Type.Char])
@@ -193,7 +193,7 @@ fn sema_pattern_core_enum_payload(owner_name: String, variant: String, span: Spa
     result
 }
 
-// D-ERR-CASES1=A: the one union member whose enum declares the case
+// The one union member whose enum declares the case
 // `variant`, when `variant` is not itself a member tag. `None` for an
 // unknown or ambiguous case, which reaches the ordinary E0305 member check.
 fn sema_pattern_flat_union_owner(carrier: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Type? {
@@ -431,7 +431,7 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, 
     complete
 }
 
-// D-PAT-NAMED-NEST1=A: whether a variant pattern uses the named payload
+// Whether a variant pattern uses the named payload
 // form `.Case{field: pat, ..}`.
 fn sema_pattern_has_named_slots(slots: [PatSlot]) -> Bool {
     loop slot in slots {
@@ -467,7 +467,7 @@ fn sema_pattern_slot_text(slot: PatSlot) -> String {
     }
 }
 
-// D-PAT-NAMED-NEST1=A: braces on a case whose payload is positional; the
+// Braces on a case whose payload is positional; the
 // fix spells the positional form.
 fn sema_pattern_unnamed_payload_error(variant: String, slots: [PatSlot], arity: Int, span: Span) -> Diagnostic {
     positional :: sema_pattern_strip_named_slots(slots)
@@ -485,7 +485,7 @@ fn sema_pattern_unnamed_payload_error(variant: String, slots: [PatSlot], arity: 
     sema_error("E0303", span, "case `{variant}` has no field names to match", "only a case declared with named fields can be matched with `{{field: pattern}}`; this case's payload is positional", fix)
 }
 
-// D-PAT-NAMED-NEST1=A: place each `field: slot` entry at its field's
+// Place each `field: slot` entry at its field's
 // position. A left-out field needs the trailing `..` (E0326) and then
 // matches anything; `..` after every field is redundant (E0327).
 fn sema_pattern_place_named_slots(written: [PatSlot], fields: [VariantField], variant: String, span: Span, diagnostics: &[Diagnostic]) -> [PatSlot] {
@@ -534,14 +534,14 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
         &diagnostics.push(sema_pattern_unnamed_payload_error(variant, written_slots, arity, span))
         return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
     }
-    // D-ERR-CASES1=A: a case that exactly one union member declares may be
+    // A case that exactly one union member declares may be
     // matched flat (`.Err(.NotFound(w))` over `FindError | ParseError`); it is
     // checked as the member arm `.FindError(.NotFound(w))`.
     if sema_pattern_flat_union_owner(carrier, variant, env, program, span) == .Val(owner) {
         flat :: Pattern.Variant{variant: variant, bindings: written_slots, leading_dot: leading_dot, span: span}
         return sema_pattern_validate_variant(subject_ty, sema_pattern_union_tag(owner), [PatSlot.Nested{pattern: flat}], true, span, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
     }
-    // D-FACT-ENUM-TIR: a compiler-owned fact enum has no registered nominal.
+    // A compiler-owned fact enum has no registered nominal.
     fact_enum :: sema_fact_enum_pattern(carrier, variant, written_slots, leading_dot, span, env, program, &diagnostics)
     if fact_enum == .Val(validation) -> return validation
     payload :: sema_pattern_payload(subject_ty, variant, env, program, span, &diagnostics)
@@ -803,7 +803,7 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
     SemaPatternValidation{shape: TPatternShape.Map{entries: lowered, rest: rest != None, span: span}, enum_type: None, bindings: facts, complete: complete}
 }
 
-// D-PATTERN-HOLE-NAME1=A. Validation happens before branch scopes or
+// . Validation happens before branch scopes or
 // Optional refinements, including tests whose bindings never escape.
 fn sema_pattern_hole_name_available(name: String, scopes: SemaScopeTable) -> Bool Never! {
     if name == "_" -> return true
@@ -820,12 +820,12 @@ fn sema_pattern_reused_hole(name: String, hole_span: Span, diagnostics: &[Diagno
     }
 }
 
-// S31/D-OPT-LIFT1=A with D-PATTERN-HOLE-NAME1=A (#4713): `subject == Val(name)`
+// S31 with (#4713): `subject == Val(name)`
 // binds `name` in every expression position. In a value position a name that
 // already holds a value is this E0118; `Val((name))` is the comparison with
 // the held value (a parenthesized payload constructs it). Conditions report a
 // held name when they declare their bindings
-// (sema_expression_declare_condition_bindings), which keeps the D-FLOWTYPE1
+// (sema_expression_declare_condition_bindings), which keeps the
 // refinement `x == .Val(x)` that every `x != None` test is rewritten into.
 fn sema_pattern_test_reused_payload_name(pattern: Pattern, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     name := ""
@@ -998,7 +998,7 @@ fn sema_pattern_normalize_contextual(pattern: Pattern, subject_ty: Type, env: Se
         }
         .Variant(variant, slots, leading_dot, span) -> {
             normalized_ty :: sema_pattern_unwrap_tags(subject_ty)
-            // D-OUTCOME-SHAPE1=A: `T? E!` names its success states directly;
+            // `T? E!` names its success states directly;
             // `.Val(x)` / `.None` test the carrier's `Ok` payload.
             if normalized_ty == .Result(ok, _) && (variant == "Val" || variant == "None") {
                 if sema_pattern_is_option(sema_pattern_unwrap_tags(ok)) {
@@ -1150,7 +1150,7 @@ fn sema_pattern_binding_facts(checked: SemaCheckedPattern) -> [TPatternBindingFa
     checked.bindings
 }
 
-// D-OUTCOME-SHAPE1=A: true when `pattern` names only optional states
+// True when `pattern` names only optional states
 // (`.Val(…)`, `.None`, or an or-pattern of them) — the payload the retired
 // nested `.Ok(…)` spelling wrapped.
 fn sema_pattern_names_optional_state(pattern: Pattern) -> Bool Never! {
@@ -1209,7 +1209,7 @@ fn sema_pattern_retired_outcome_diagnostic(span: Span, state: Pattern, subject_t
     sema_error("E0392", span, "`.Ok(…)` wraps a state that `{type_name(subject_ty)}` names directly", why, "write `.Val(…)` or `.None`")
 }
 
-// D-OUTCOME-SHAPE1=A: `T? E!` names its three states directly, so a source
+// `T? E!` names its three states directly, so a source
 // `.Ok(.Val(x))` / `.Ok(.None)` on such a value is the retired nested
 // spelling (E0392). Walks the raw pattern before normalization.
 fn sema_pattern_report_retired_outcome(pattern: Pattern, subject_ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) Never! {

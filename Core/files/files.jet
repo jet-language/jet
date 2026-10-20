@@ -48,7 +48,7 @@ struct DirEntry {
     is_dir: Bool
 }
 
-/// D-CORE-FILEDIR1=A: one entry of `Directory.list`. `raw_name` is the exact
+/// One entry of `Directory.list`. `raw_name` is the exact
 /// name the system stores; `name_is_unicode` is false when those bytes are not
 /// valid UTF-8, and then `name` and `path` show each non-ASCII byte as U+FFFD,
 /// so only `raw_name` identifies the entry exactly.
@@ -90,21 +90,21 @@ fn raw_name_order(left: [U8], right: [U8]) -> Ordering Never! {
     left.len() <=> right.len()
 }
 
-/// D-CORE-FILEOPEN1=A: whether `create` may replace an existing file.
+/// Whether `create` may replace an existing file.
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
 enum CreateIfExists {
     Replace
     Refuse
 }
 
-/// D-CORE-FILEOPEN1=A: whether a call follows a final symbolic link. `Refuse`
+/// Whether a call follows a final symbolic link. `Refuse`
 /// reports `IOError.InvalidInput` when the path ends in a link.
 enum LinkPolicy {
     Follow
     Refuse
 }
 
-/// D-CORE-FILERENAME1=A: what `rename` does when the target name exists.
+/// What `rename` does when the target name exists.
 /// `Refuse` reports `IOError.AlreadyExists`; `Swap` exchanges both names in
 /// one step and reports `IOError.Unsupported` where the system cannot.
 enum RenameIfExists {
@@ -113,7 +113,7 @@ enum RenameIfExists {
     Swap
 }
 
-/// D-CORE-FILESTAT1=A: a file's identity, its device plus its file number.
+/// A file's identity, its device plus its file number.
 /// Two paths name the same file exactly when their ids are equal.
 struct FileID {
     device: Int
@@ -227,7 +227,7 @@ impl AdvisoryLock.Close {
 struct FileReader {
     path: String
 
-    /// D-CORE-FILESTAT1=A: what the open file is now (fstat). Comparing
+    /// What the open file is now (fstat). Comparing
     /// `id` with a later `files.stat(path).id` shows whether the path was
     /// replaced after the open.
     fn stat(self) -[FS.Read]> Stat IOError! {
@@ -244,7 +244,7 @@ struct FileReader {
 struct FileWriter {
     path: String
 
-    /// D-CORE-FILESTAT1=A: what the open file is now (fstat). Bytes still
+    /// What the open file is now (fstat). Bytes still
     /// buffered are not counted until `flush` or `fsync`.
     fn stat(self) -[FS.Read]> Stat IOError! {
         stat_from_row(core.files.__writer_stat(self))
@@ -261,14 +261,14 @@ struct FileWriter {
 fn scope(authority: Authority) -[FS]> FileScope Never! { {authority: authority} }
 
 
-/// D-CORE-FILEOPEN1=A: open `path` for reading. `links: .Refuse` refuses a
+/// Open `path` for reading. `links: .Refuse` refuses a
 /// path that ends in a symbolic link. Every handle is close-on-exec.
 fn open(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
     core.files.__open_reader(-1, path_text(path), link_code(links))
 }
 
 
-/// D-CORE-FILEOPEN1=A: open `path` for writing from empty. `if_exists:
+/// Open `path` for writing from empty. `if_exists:
 /// .Refuse` creates exclusively; `mode` sets a new file's permission bits
 /// before the process umask and leaves an existing file's bits alone.
 fn create(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
@@ -276,7 +276,7 @@ fn create(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{N
 }
 
 
-/// D-CORE-FILEOPEN1=A: open `path` for appending, creating it when missing.
+/// Open `path` for appending, creating it when missing.
 fn append(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
     core.files.__open_writer(-1, path_text(path), true, 0, mode ?? -1, link_code(links))
 }
@@ -311,7 +311,7 @@ fn rename_code(if_exists: RenameIfExists) -> Int Never! {
 }
 
 
-/// D-CORE-FILEDIR1=A: a directory held open. It keeps working after its path
+/// A directory held open. It keeps working after its path
 /// is renamed or removed. Every method takes a relative name made of plain
 /// parts separated by `/`; each part is opened without following a link, and
 /// `..`, `.`, empty parts, and absolute names are refused with
@@ -391,7 +391,7 @@ struct Directory {
         Ok(stat_from_row(row))
     }
 
-    /// The text stored in the link `name`, exactly as stored (D-CORE-HANDLEFD1=A).
+    /// The text stored in the link `name`, exactly as stored.
     fn read_link(self, name: String) -[FS.Read]> String IOError! {
         held_name(self.path, name, false)
         core.files.__read_link_at(self.handle, name)
@@ -513,7 +513,7 @@ impl Directory.Close {
 }
 
 
-/// D-CORE-FILEDIR1=A: hold the directory at `path`. The last part must be a
+/// Hold the directory at `path`. The last part must be a
 /// real directory, not a link.
 fn open_directory(path: String) -[FS.Read]> Directory IOError! {
     key :: core.files.__open_directory(-1, path)
@@ -539,7 +539,7 @@ fn held_name_error(shown: String, write: Bool, why: String) -> IOError Never! {
 }
 
 
-// D-CORE-FILEDIR1=A: a held-directory name is plain parts separated by `/`.
+// A held-directory name is plain parts separated by `/`.
 fn held_name(base: String, name: String, write: Bool) IOError! {
     shown :: join(base.copy(), name.copy())
     raw :: (name.copy()).bytes()
@@ -594,19 +594,19 @@ fn stat_from_row(row: [Int]) -> Stat Never! {
 }
 
 
-/// D-CORE-FILEXATTR1=A: the extended-attribute names on `path` itself, in
+/// The extended-attribute names on `path` itself, in
 /// sorted order. A final link is never followed. Windows and file systems
 /// without attributes report none.
 fn extended_attribute_names(path: String) -[FS.Read]> [String] IOError! { core.files.__xattr_names(path) }
 
 
-/// D-CORE-FILEXATTR1=A: one extended-attribute value, or None when absent.
+/// One extended-attribute value, or None when absent.
 fn extended_attribute(path: String, name: String) -[FS.Read]> [U8]? IOError! {
     core.files.__xattr_get(path, name)
 }
 
 
-/// D-CORE-FILEXATTR1=A: write one extended-attribute value on `path` itself.
+/// Write one extended-attribute value on `path` itself.
 /// Windows and file systems without attributes report `IOError.Unsupported`.
 fn set_extended_attribute(path: String, name: String, value: [U8]) IOError! -[FS.Write]> {
     core.files.__xattr_set(path, name, value)
@@ -792,7 +792,7 @@ fn is_dir(path: String | Path) -[FS.Read]> Bool Never! {
 }
 
 
-/// D-CORE-FILESTAT1=A: describe `path` without following a final link.
+/// Describe `path` without following a final link.
 fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
     text :: path_text(path)
     file_fault("FS.Read", .Read, text)
@@ -1150,7 +1150,7 @@ fn entries_copy_tree(context: Int, directory: Int, resource: String) IOError! -[
 }
 
 
-/// D-CORE-FILERENAME1=A: rename `from` to `to`. `if_exists: .Replace`
+/// Rename `from` to `to`. `if_exists: .Replace`
 /// replaces an existing target, `.Refuse` reports `IOError.AlreadyExists`,
 /// and `.Swap` exchanges the two names in one step (both must exist).
 /// Follow with `fsync(dirname(to))` to make the rename durable.
@@ -1604,7 +1604,7 @@ fn temp_file(prefix: String) -[FS]> TempFile IOError! {
 }
 
 
-/// D-CORE-FILELOCK1=A: wait for an exclusive operating-system lock. A missing
+/// Wait for an exclusive operating-system lock. A missing
 /// lock file is created owner-only; a final symbolic link is refused. Closing
 /// the returned owner releases the lock but never removes the lock file.
 /// `timeout` bounds acquisition; omitting it waits without limit.
@@ -2018,7 +2018,7 @@ fn getmtime(path: String) -[FS]> Int IOError! {
 fn lexists(path: String) -[FS]> Bool Never! { exists_impl(path) || is_symlink(path) }
 
 
-/// D-CORE-FILESTAT1=A: whether `a` and `b` name the same file (equal ids).
+/// Whether `a` and `b` name the same file (equal ids).
 fn samefile(a: String, b: String) -[FS]> Bool IOError! {
     left :: stat(a)
     right :: stat(b)

@@ -66,7 +66,7 @@ fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagn
     valid
 }
 
-// D-NARG-D2 (E0126): a default expression may name only parameters written
+// E0126: a default expression may name only parameters written
 // before its own; defaults fill left to right. `self` is not a parameter here.
 fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
     names := [String]{}
@@ -171,7 +171,7 @@ fn sema_function_header_marker_projected(name: String) -> Bool Never! {
     name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post"
 }
 
-// D-WRAP-SCOPE1=A (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
+// (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
 // a function opens its lexical fixed-width arithmetic mode for the whole
 // body; an argument that names no mode opens none.
 fn sema_function_arithmetic_policy(markers: [Marker]) -> ArithmeticPolicyFact? Never! {
@@ -215,7 +215,7 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         sema_check_unsupported(&context, "the external method header `fn Type.{function.name}` is not normalized into an impl by the self-hosted checker yet")
         supported = false
     }
-    // D-FFI-INLINE1=A (Rust `check_fn`): an `#FFI(<lang>)` body is foreign
+    // (Rust `check_fn`): an `#FFI(<lang>)` body is foreign
     // source, never Jet statements. The registration foreign stage validates
     // it (E3220/E3215/E3222/E3102/E3223) and calls bind to its checked foreign
     // row, so the module loops never send it here; any other route has no Jet
@@ -249,7 +249,7 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
             sema_check_unsupported(&context, "the declared `from` view sources on parameter `{function.params[parameter_index].name}` are not supported by the self-hosted checker yet")
             supported = false
         }
-        // D-METHOD-FOOTPRINT1=A: the Rust checker owns the E0231 body check
+        // The Rust checker owns the E0231 body check
         // and API publication of a stated receiver footprint.
         if function.params[parameter_index].declared_footprint != None {
             sema_check_unsupported(&context, "the stated receiver footprint on `{function.name}` is not supported by the self-hosted checker yet")
@@ -278,7 +278,7 @@ fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) 
     false
 }
 
-// D-ANY-JAI1 (Rust `check_variadic_bound_body_shape`, E1314): a
+// (Rust `check_variadic_bound_body_shape`, E1314): a
 // trait-bounded variadic parameter (`...Trait` / `...[A, B]`) has no single
 // Rust type, so its only supported use is the collection of one top-level
 // `loop x in name { … }` loop. Every other reference is reported.

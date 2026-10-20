@@ -157,7 +157,7 @@ fn store_test_make_writable(path: String) Never! {
     store_arm_command_memo(&verification)
     assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val((digest)))
     // Drift the tuple identity mid-command: one command holds one coherent
-    // verified view (D-JPK-VERIFYONCE1=A), so the memoized verdict stands.
+    // verified view so the memoized verdict stands.
     payload :: files.join(object, "payload")
     store_test_set_mtime(payload, store_test_mtime_seconds(payload) + 7)
     assert(store_check_seal(&verification, object, hangar) ?? panic("check") == Val((digest)))
@@ -281,7 +281,7 @@ fn store_test_set_census_enabled(verification: &StoreVerification, enabled: Bool
 }
 
 // Rust closure_object_rehashes + Seal::remove: a proven member stays trusted
-// for its owner inside the D-JPK-VERIFYONCE1=A window even after its bytes
+// for its owner inside the window even after its bytes
 // drift, another owner re-hashes and sees the drift, and removing the seal
 // drops the owner's proof so the next check re-hashes real bytes.
 #Test("store seal removal invalidates the owner's proven closure member") {

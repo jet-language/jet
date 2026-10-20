@@ -1,7 +1,7 @@
-// D-SHAPE-CASE1 identifier casing law (E0357), owner-amended so module-global
+// This rule identifier casing law (E0357), owner-amended so module-global
 // constants are ALL_CAPS. Type-like names are PascalCase and value-like names
 // are snake_case. The category chosen at each declaration site fixes the case;
-// foreign declarations are exempt zones (D-SHAPE-CASE2=A). Mirrors
+// foreign declarations are exempt zones. Mirrors
 // crates/jet-sema/src/Sema/Casing.rs, whose UI snapshots are the spec.
 use core.text as unicode
 use jet_foundation.[
@@ -44,7 +44,7 @@ use jet_foundation.[
 
 
 fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: &[Diagnostic]) {
-    // Compiler-reserved names have their own D-SHAPE-DUNDER2 diagnostic.
+    // Compiler-reserved names have their own diagnostic.
     if name == "" || name.starts_with("__") || sema_casing_has_case(name, case) -> return
     expected :: if case == {
         .Pascal -> "PascalCase"
@@ -61,7 +61,7 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
     ))
 }
 
-// D-ACRO-LEX1=A applied acronym lexicon: every initials-formed word in current
+// This rule applied acronym lexicon: every initials-formed word in current
 // Jet names, in canonical caps. Mirrors `ACRONYMS` in
 // crates/jet-foundation/src/Syntax/acronyms.rs.
 SEMA_CASING_ACRONYMS :: prep { [String]{
@@ -118,7 +118,7 @@ fn sema_casing_acronym_name(name: String) -> String {
     segments.join("_")
 }
 
-// D-ACRO-LEX1=A (E0358): a type-like declaration keeps every lexicon acronym
+// E0358: a type-like declaration keeps every lexicon acronym
 // in caps. The edit replaces the whole written name when the span covers it.
 fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
     if span.start == span.end -> return
@@ -165,7 +165,7 @@ fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics
     }
 }
 
-// D-CONSTGEN2=A: a `<prep N: Int>` number parameter is rejected with E0390 by
+// A `<prep N: Int>` number parameter is rejected with E0390 by
 // registration, so it has no type-parameter casing to check.
 fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) {
     if parameter.prep != None -> return
@@ -236,7 +236,7 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
         .UnitFamily(definition) -> {
             sema_casing_pascal(definition.family, definition.family_span, "unit family", &diagnostics)
             loop member in definition.members {
-                // D-UNIT-SCALE-PROVENANCE1: SI-accepted `mmHg` keeps its
+                // SI-accepted `mmHg` keeps its
                 // published symbol; all other user members follow snake_case.
                 if member.name != "mmHg" -> sema_casing_snake(member.name, member.name_span, "unit member", &diagnostics)
             }
@@ -297,7 +297,7 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
             sema_casing_pascal(definition.trait_name, definition.trait_span, "trait", &diagnostics)
             sema_casing_derive_body(definition.body, &diagnostics)
         }
-        // D-SHAPE-CASE2=A: foreign declarations are exempt zones. Other
+        // Foreign declarations are exempt zones. Other
         // declaration families carry no user-defined identifier category.
         else -> {}
     }
@@ -438,7 +438,7 @@ fn sema_casing_stmts(statements: [Stmt], diagnostics: &[Diagnostic]) {
                 loop arg in args -> sema_casing_expr(arg, &diagnostics)
                 sema_casing_stmts(body, &diagnostics)
             }
-            // D-AUTHORITY-SCOPE1=A: the optional name-before-list head binds
+            // The optional name-before-list head binds
             // the scoped Authority handle.
             .AuthorityScope(_, _, handle, body, _) -> {
                 if handle == .Val(value) -> sema_casing_snake(value.name, value.span, "local", &diagnostics)
@@ -507,7 +507,7 @@ fn sema_casing_pattern_slot(slot: PatSlot, diagnostics: &[Diagnostic]) {
     if slot == {
         .Bind(name, span) -> sema_casing_snake(name, span, "pattern binding", &diagnostics)
         .Nested(nested) -> sema_casing_pattern(nested, &diagnostics)
-        // D-PAT-NAMED-NEST1=A: `field: slot` binds what its slot binds.
+        // `field: slot` binds what its slot binds.
         .Named(_, _, inner) -> sema_casing_pattern_slot(inner, &diagnostics)
         .Value(value) -> sema_casing_expr(value, &diagnostics)
         .Wildcard | .Range(_, _) | .Rest(_) -> {}

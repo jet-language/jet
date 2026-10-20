@@ -220,7 +220,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
             binding_index :: sema_scope_resolve_index_at(scopes, name, span) ?? return true
             binding := scopes.bindings[binding_index]
             if binding.symbol.kind != SymbolKind.Local -> return true
-            // D-COPY-DEFAULT1=A: a share site copies; the source stays usable.
+            // A share site copies; the source stays usable.
             if sema_ownership_is_share_site(state, span) -> return true
             if sema_ownership_report_invalidated_view(&state, value, scopes, span, &diagnostics) -> return false
             places := sema_ownership_places_from_expr_in_state(value, scopes, &state)
@@ -568,7 +568,7 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
     sema_expr_expected_owned(sema_tir_node(ty, TExprKind.Map{entries: lowered}, span), expected, environment, program, &diagnostics)
 }
 
-// D-MAP-KEY1 (E0502): one why/fix for every rejected map key, as the Rust
+// E0502: one why/fix for every rejected map key, as the Rust
 // reference's declared-type and map-literal sites print it.
 fn sema_map_key_error(what: String, span: Span) -> Diagnostic {
     sema_error("E0502", span, what, "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible", "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately")
@@ -650,7 +650,7 @@ fn sema_expression_range(start: Expr, end: Expr, exclusive: Bool, span: Span, ex
         &diagnostics.push(sema_error("E0505", expr_span(end), "range bounds must be Int", "a Range stores whole-number start and end bounds", "use Int values on both sides of the range"))
         return None
     }
-    // D-RANGE-BACKWARD1=A: a stored range or slice with written ends in the
+    // A stored range or slice with written ends in the
     // wrong order is E0170; computed ends stay empty at run time.
     if sema_range_backward_diagnostic(start, end, None, exclusive, false) == .Val(backward) -> &diagnostics.push(backward)
     value :: sema_tir_node(Type.Named{name: "Range"}, TExprKind.Range{start: lhs, end: rhs, exclusive: exclusive}, span)
@@ -697,7 +697,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         else -> None
     }
     checked_index :: sema_check_expression(index, index_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    // D-DATATREE-RULES1 (Rust `infer` Index arm): `tree[key]` / `tree[i]` on a
+    // (Rust `infer` Index arm): `tree[key]` / `tree[i]` on a
     // `Dyn` reads an object member or array position as a checked Dyn.
     if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment, program)) {
         site :: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
@@ -759,7 +759,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         }
         .Apply(name, args) -> {
             if (name == "View" || name == "ViewMut") && args.len() == 1 {
-                // D-MEMPROVENANCE2 (Rust `infer_index`): `view[a..b]` is a
+                // (Rust `infer_index`): `view[a..b]` is a
                 // `Slice` typed `View<T>`, a read reborrow of the view's owner.
                 if checked_index.ty == (Type.Named{name: "Range"}) {
                     if sema_expression_view_subrange_type(base_ty) == .Val(window) {
@@ -835,7 +835,7 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
     sema_expr_expected(result, expected, environment, program, &diagnostics)
 }
 
-// D-MEMPROVENANCE2 (Rust `view_subrange_type`): a subrange of a declared
+// (Rust `view_subrange_type`): a subrange of a declared
 // `View<T>`/`ViewMut<T>` is a `View<T>` read reborrow of the same owner;
 // `&view[a..b]` on a `ViewMut<T>` reopens the write window in the place.
 fn sema_expression_view_subrange_type(ty: Type) -> Type? Never! {
@@ -848,7 +848,7 @@ fn sema_expression_view_subrange_type(ty: Type) -> Type? Never! {
     None
 }
 
-// D-DISPLAY-SHAPE: a nominal type whose `Display` comes from a derive: a
+// A nominal type whose `Display` comes from a derive: a
 // `#Printable` or `#Display` marker, or the auto-derived `Printable` the
 // declaration-marker rule selects for it.
 fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
@@ -868,7 +868,7 @@ fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnviron
     false
 }
 
-// D-DISPLAYDBG1 (Rust `is_displayable`): bare `{value}` needs a value whose
+// (Rust `is_displayable`): bare `{value}` needs a value whose
 // type can be shown through `Display`. The shared reflection gate owns the
 // structural rules; a nominal type also counts when it derives its display
 // or is a unit-family member. Without a registration graph the nominal
@@ -910,7 +910,7 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment, prog
     }
 }
 
-// D-CAPBUNDLE1: the bundle markers of a distinct type named in this scope.
+// The bundle markers of a distinct type named in this scope.
 fn sema_expression_distinct_bundles(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [String]? {
     owner :: sema_expression_type_symbol(&scopes, environment, program, name) ?? return None
     definition :: sema_scope_declaration_distinct(environment, program, owner.id) ?? return None
@@ -939,7 +939,7 @@ fn sema_expression_one_pass_fix(ty: Type) -> String Never! {
     "consume it with a `loop` and show each item instead"
 }
 
-// D-DISPLAY-SHAPE / D-CAPBUNDLE1: bare `{value}` interpolation calls
+// Bare `{value}` interpolation calls
 // `Display`, which has no default. A value without it is refused here
 // (E0915); a nominal `distinct` type without `#Printable` names the bundles
 // it was granted instead (E0138). Returns whether the value can be shown.

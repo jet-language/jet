@@ -72,17 +72,17 @@ struct OutputFact {
     fields: [String: String]
     payload: OutputPayload
 
-    // D-LIB-NAME1=A: `Library{ loadable: true }` requests a `.jetlib`.
+    // `Library{ loadable: true }` requests a `.jetlib`.
     fn is_loadable(self) -> Bool Never! {
         self.kind == PackageOutputKind.Library && self.payload_bool(OUTPUT_FIELD_LOADABLE)
     }
 
-    // D-LIB-EXPORT1=C: a native Library output.
+    // A native Library output.
     fn is_native(self) -> Bool Never! {
         self.kind == PackageOutputKind.Library && self.payload_bool(OUTPUT_FIELD_NATIVE)
     }
 
-    // D-LIB-EXPORT1=C: the checked binding language names of this output.
+    // The checked binding language names of this output.
     fn binding_languages(self) -> [String] Never! {
         out := [String]{}
         fields :: if self.payload == {
@@ -149,7 +149,7 @@ enum MemberRef {
     }
 }
 
-// D-GRADE1=D / D-GRADE-POLICY1=A: the one claims ladder.
+// The one claims ladder.
 enum ClaimsGrade {
     Unchecked
     Checked
@@ -297,7 +297,7 @@ struct PackagePolicyException {
     }
 }
 
-// D-POLICY-WORD1=A / D-TEAMPOLICY1=A: the package's non-memory governance
+// The package's non-memory governance
 // namespace. Memory denials live in `authority.holds.deny`.
 struct PackagePolicy {
     declarations: [PolicyDeclaration]
@@ -313,7 +313,7 @@ struct PackagePolicy {
     // `None`: no dependency wall; otherwise the `.List([...])` allow-list.
     deps: [String]?
     claims_min: ClaimsGrade?
-    // D-MEM-GUARANTEE1=A: contained dependencies, sorted.
+    // Contained dependencies, sorted.
     contain: [String]
     harden: Bool
     licenses: [String]?
@@ -371,10 +371,10 @@ struct PolicyTightenError {
     message: String
 }
 
-// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: package-scope authority facts.
+// Package-scope authority facts.
 struct PackageAuthority {
     holds: AuthorityHolds
-    // D-PLUGIN-AUTHORITY1: guest-declared requirements, never a host grant.
+    // Guest-declared requirements, never a host grant.
     needs: [String]
     grants: [PackageGrant]
     trust: TrustPolicy?
@@ -385,7 +385,7 @@ struct PackageAuthority {
     }
 }
 
-// D-CONF-MODULE1=A: one `settings:` entry — a Tier-0 type and its default.
+// One `settings:` entry — a Tier-0 type and its default.
 struct SettingDecl {
     ty: String
     default: String
@@ -406,20 +406,20 @@ struct ConfigFacts {
 struct PackageFacts {
     name: String
     version: String?
-    // The optional Jet self-toolchain pin (D-JPK-TOOLCHAIN1).
+    // The optional Jet self-toolchain pin.
     jet: String?
     source: String?
     edition: String?
     description: String?
     license: String?
     repository: String?
-    // D-ALLOC-PROGRAM1=A: the hosted whole-program allocator.
+    // The hosted whole-program allocator.
     allocator: MIRAllocatorPolicy
     targets: PackageTargets
-    // D-RINGLAYER1=A: optional runtime ceiling.
+    // Optional runtime ceiling.
     layer: MIRRuntimeLayer?
     deps: [String: DepSource]
-    // D-LIVE1: package-level development mode.
+    // Package-level development mode.
     dev: DevPolicy
     boundaries: [ImportBoundary]
     packages: [PackageEntry]
@@ -428,9 +428,9 @@ struct PackageFacts {
     environments: [String: EnvironmentFact]
     defaults: [String: String]
     build_profiles: [BuildProfileDef]
-    // D-CTEFFECT1: standing capabilities granted to this package's `fn build`.
+    // Standing capabilities granted to this package's `fn build`.
     build_allow: [String]
-    // D-EFFBUDGET1: whether `authority.holds` is present at all.
+    // Whether `authority.holds` is present at all.
     effects_enabled: Bool
     effects_allow: [String]?
     effects_deny: [String]?

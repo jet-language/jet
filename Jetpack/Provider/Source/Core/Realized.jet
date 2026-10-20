@@ -1,4 +1,4 @@
-// The provider translation boundary (Rust `jetpack::Provider`, D-JPK5):
+// The provider translation boundary (Rust `jetpack::Provider`):
 // what a provider needs to realize a ref (`ProviderCtx`), what it returns
 // (`Realized`), how it was satisfied (`SourceState`), the one provider error
 // carrier, and the acquisition plan the resolver shows before downloading.
@@ -6,7 +6,7 @@
 // Jetpack owns the package lifecycle. Nix is a compatibility provider; the
 // native builders sit behind this same `Realized` boundary.
 
-// D-JPK-OFFLINE2=B: the stable recipe id of a Nix-provider realization. Hashed
+// The stable recipe id of a Nix-provider realization. Hashed
 // into the cache identity's recipe fingerprint and recomputed offline, so a
 // lock-backed reuse reproduces it without any Nix or network call.
 PROVIDER_NIX_RECIPE_ID :: prep { "nix-compat-v1" }
@@ -26,7 +26,7 @@ struct ProviderCtx {
     fixtures: String?
     store_dir: String
     offline: Bool
-    // D-JPK-OFFLINE2=B: the project whose `.jet/lock` records and matches a
+    // The project whose `.jet/lock` records and matches a
     // Nix-provider package's locked identity. None records no lock and gets
     // no offline reuse.
     project_dir: String?
@@ -48,18 +48,18 @@ struct ProviderCtx {
 // the directory to prepend to PATH, or empty for a library package (U10).
 struct Realized {
     name: String
-    // Package version for the hangar id (`<name>-<version>-<fp>`, D-PM1), or
+    // Package version for the hangar id (`<name>-<version>-<fp>`), or
     // empty when the provider cannot determine one.
     version: String
     reference: String
     out: String
     bin: String
-    // The built Rust rlib of a library carrying `Cargo.toml` (D-BFS1).
+    // The built Rust rlib of a library carrying `Cargo.toml`.
     rlib: String
-    // D-JPK-CACHE1=A: the A4 envelope of this realized output.
+    // The A4 envelope of this realized output.
     envelope: Envelope
     cache_identity: CacheIdentity
-    // D-JPK-CACHE1 reporting (T4): how this realization was satisfied.
+    // This rule reporting (T4): how this realization was satisfied.
     source_state: SourceState
     // Provider output names mapped to exact immutable paths.
     named_outputs: [String: String]
@@ -70,7 +70,7 @@ struct Realized {
 }
 
 // How a dependency was realized, for the `jet build` per-package report
-// (`Built | Substituted | Cached`, D-JPK-CACHE1).
+// (`Built | Substituted | Cached`).
 enum SourceState {
     // Compiled from source by a first-party provider this run.
     Built
@@ -115,9 +115,9 @@ enum ProviderError {
     LuaRocks(String)
     // Native RubyGems/CPAN/Packagist metadata, integrity, or install failure.
     Registry(title: String, reason: String)
-    // E1232 (D-MONOREF1): sparse subtree checkout and full clone both failed.
+    // E1232 sparse subtree checkout and full clone both failed.
     MonorepoFetch(String)
-    // E1233 (D-MONOREF1): an in-repo dependency is not a workspace member.
+    // E1233 an in-repo dependency is not a workspace member.
     MemberOutsideWorkspace(String)
     // E1270: an adapter source or recipe cannot be realized.
     Adapter(String)

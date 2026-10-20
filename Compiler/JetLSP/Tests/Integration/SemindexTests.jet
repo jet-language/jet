@@ -127,7 +127,7 @@ use std.process.[Command]
 
 // Rust: tests/semindex.rs:363
 #Test("semindex_schema_version") {
-    // D-META-REFLECT2 adds availability states to callable facts.
+    // This rule adds availability states to callable facts.
     assert_eq(SCHEMA_VERSION, 20)
 }
 
@@ -630,7 +630,7 @@ use std.process.[Command]
 
 // Rust: tests/semindex.rs:1476
 #Test("semindex_dossier_bypass_facts") {
-    // D-LINTPOLICY1=A: every spelled bypass surfaces in the program-wide dossier.
+    // Every spelled bypass surfaces in the program-wide dossier.
     src :: "\nstruct Invoice {{\n    #allow(float_money)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
     path :: temp_fixture("dossier_bypass_facts.jet", src)
     idx :: open(path).expect("bypass-fact fixture indexes")

@@ -460,14 +460,14 @@ struct SemaRegistrationModuleInput {
     source_origin: SemaSourceOrigin
     program: Program
     foreign_handles: [SemaRegistrationForeignHandleFacts]
-    // D-MOD-CYCLE1=A, filled by the loader: the package namespace of a member
+    // Filled by the loader: the package namespace of a member
     // file ("" outside one), the names it contributes in declaration order,
     // and the names of other members its source can reach.
     namespace: String{""}
     namespace_names: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
     // The module's source text (Rust `Module::source`). A declared text block
-    // (D-META-DSL1=A) hands the text inside its braces to its rule.
+    // hands the text inside its braces to its rule.
     source: String{""}
 }
 
@@ -525,7 +525,7 @@ struct SemaRegistrationModule {
     // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
     // metadata asks once per query instead of rescanning the declarations.
     declared_trait_impls: [String:Bool]
-    // D-MOD-CYCLE1=A: the module's package namespace (loader key, "" outside
+    // The module's package namespace (loader key, "" outside
     // one) and its `namespace_tables` slot (-1 outside one), what the loader
     // recorded for it, the position in `imports` where the package names
     // bind (before the foreign-provider imports, which register last; -1 =
@@ -557,14 +557,14 @@ struct SemaRegistrationModuleResult {
 // compiler threads share): the driver hands them to each check pass, and a
 // check reaches them through its context (SemaHostHookAccess).
 // Pure compiler services the host installs. Each declares its empty effect
-// row: an unbounded function value is the maximal row (D-EFF2), which would
+// row: an unbounded function value is the maximal row which would
 // make every checker path that consults a hook reach every effect.
 struct SemaRegistrationHostHooks {
     numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -[]> Float?)?
     typed_boundary_literal_validate: (fn(MIRTypedHeadKind, [String]) -[]> String?)?
 }
 
-// D-BUILD-FACT3=A / D-CONF-READ1=A: the folded build snapshot the driver
+// The folded build snapshot the driver
 // seeds before checking (Rust `BuildFactSnapshot`). Sema folds `$package.*`
 // and `$build.*` reads from these values and never probes the host.
 struct SemaBuildFacts {
@@ -576,11 +576,11 @@ struct SemaBuildFacts {
     stamp_dirty: Bool
     stamp_toolchain: String
     stamp_at: String
-    // D-DBG1=A: this compile produces a shipped artifact (`jet build`).
+    // This compile produces a shipped artifact (`jet build`).
     artifact_build: Bool{false}
 }
 
-// D-DBG1=A: `debug(…)` traces are development-only. A shipped artifact or a
+// `debug(…)` traces are development-only. A shipped artifact or a
 // release-profile compile rejects any that remain (E3405).
 fn sema_build_facts_reject_debug_traces(facts: SemaBuildFacts) -> Bool Never! {
     facts.artifact_build || facts.profile == "release" || facts.profile == "hardened"
@@ -661,7 +661,7 @@ struct SemaRegistrationGraph {
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
     test_mode: Bool{false}
-    // D-MOD-CYCLE1=A: one table per package namespace (Rust
+    // One table per package namespace (Rust
     // `NameLedger::namespace_owner`): namespace -> slot, and per slot name ->
     // entry; entry -> declaring module and name. Entries are numbered in
     // module order, then declaration order.
@@ -674,7 +674,7 @@ struct SemaRegistrationGraph {
     // module's settled program (derived impls, inferred failure contracts) in
     // `SemaGraphResult.programs`.
     retain_programs: Bool{false}
-    // D-META-AUTO1 demand (sema_serde_index_codec_methods): every generated
+    // This rule demand (sema_serde_index_codec_methods): every generated
     // codec impl registers its header only. `codec_method_rows` maps each
     // generated codec method key to its impl row; `codec_demand` collects the
     // Encode/Decode requirements the checks reach (bound checks, codec calls,
@@ -720,7 +720,7 @@ fn sema_registration_visibility(is_pub: Bool, is_package_pub: Bool) -> Int Never
     }
 }
 
-// D-MOD-CYCLE1=A: the files of one manifest package share one namespace. A
+// The files of one manifest package share one namespace. A
 // loose source root (the loader's `source-root:` identity) has none: each
 // loose file keeps its private names to itself.
 fn sema_registration_package_is_namespace(package_identity: String) -> Bool Never! {
@@ -757,7 +757,7 @@ fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrati
 fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
-        // D-CONSTGEN2=A: `<prep N: Int>` parses into `TypeParam.prep`, but
+        // `<prep N: Int>` parses into `TypeParam.prep`, but
         // number-parameter substitution, instance identity and layout belong
         // to card #3505. Until they land, the parameter is rejected here, the
         // one registration entry for function, method, struct, enum and alias
@@ -1805,7 +1805,7 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
             sema_registration_push_declaration(&module_row, item)
             return complete
         }
-        // D-MOD1: a body-less `module name` declares a file module the loader
+        // A body-less `module name` declares a file module the loader
         // binds as the synthetic file import aliased `name` (Rust `load_file`);
         // that import owns the name, so the declaration adds no second symbol.
         .CodeModule(definition) -> if definition.body == None {
@@ -1876,7 +1876,7 @@ fn sema_registration_reserved_type_rule(module_row: SemaRegistrationModule, item
     false
 }
 
-// D-DIST1/D-RANGETYPE1/D-TYPEALIAS1: the registration rules of the Rust
+// The registration rules of the Rust
 // reference's `register_distinct` and `register_type_alias`. A distinct
 // built on a distinct declared earlier (E0129) and an alias without type
 // parameters (E0324) are not registered; a range constraint on a base other
@@ -1938,7 +1938,7 @@ fn sema_registration_impl_rows(module_row: SemaRegistrationModule) -> SemaRegist
 }
 
 // `owner_row` declares the implemented type: the impl's own module, or
-// (D-MOD-CYCLE1=A) the member file of its package that declares it.
+// the member file of its package that declares it.
 // `owner_rows` indexes `owner_row`'s nominals and `trait_rows` the impl
 // module's (sema_registration_impl_rows of each).
 fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDef, owner_row: SemaRegistrationModule, owner_rows: SemaRegistrationImplRows, trait_rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) -> SemaRegistrationImpl {
@@ -1956,7 +1956,7 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
         target_module_identity = Val(owner_row.module_identity)
         owner_id = nominal.symbol.id
     } else {
-        // D-OPMIX1: an operator hook on a built-in scalar (`impl Int.Mul(Price)`)
+        // An operator hook on a built-in scalar (`impl Int.Mul(Price)`)
         // receives that scalar as `self`.
         scalar :: sema_registration_builtin_scalar(definition.type_name)
         if scalar == .Val(builtin_type) {
@@ -2018,7 +2018,7 @@ fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, r
     if item == {
         .Impl(definition) -> {
             row := sema_registration_impl(module_row, definition, module_row, rows, rows, &diagnostics)
-            // D-MOD-CYCLE1=A: in a package, the type may be declared by a
+            // In a package, the type may be declared by a
             // sibling member; sema_registration_attach_namespace_impls owns
             // that impl's E0301 once every member is registered.
             if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(module_row, definition) {
@@ -2075,7 +2075,7 @@ fn sema_registration_index_source_impls(graph: &SemaRegistrationGraph) Never! {
     graph.source_impl_owner_modules = ^owners
 }
 
-// D-OPMIX1 (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
+// (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
 // type belongs to the package that declares the other operand, so
 // `impl Int.Mul(Price)` is legal when this module declares `Price`.
 fn sema_registration_opmix_builtin_impl(module_row: SemaRegistrationModule, definition: ImplDef) -> Bool {
@@ -2113,7 +2113,7 @@ fn sema_registration_declared_type_name(item: Item) -> String Never! {
     }
 }
 
-// D-MOD-CYCLE1=A: a package is one namespace, so `impl Span` may sit in a
+// A package is one namespace, so `impl Span` may sit in a
 // member file beside the one declaring `Span`. Its row and methods belong to
 // the declaring member's nominal; an impl whose type no member declares is
 // E0301.
@@ -2241,10 +2241,10 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     if module_row.package_identity == "" || module_row.module_identity == "" || module_row.module_name == "" || module_row.module_path == "" || module_row.source_file == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "a declaration registry row is missing source identity", "package, module, display path, and source identity remain separate semantic inputs", "provide the loader's canonical package, module, display-path, and source-file identities"))
     }
-    // D-SHAPE-CASE1: identifier casing is checked on the parsed source before
+    // Identifier casing is checked on the parsed source before
     // any declaration is registered or rewritten.
     sema_casing_program(module_row.program, &diagnostics)
-    // D-STRUCT-LIFE1=A (E0932): `#Deprecated` retires a public item; checked
+    // E0932: `#Deprecated` retires a public item; checked
     // on the parsed items, inline module bodies included, before inline
     // modules are lowered.
     sema_registration_deprecated_visibility(module_row.program.items, &diagnostics)
@@ -2261,18 +2261,18 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
             &module_row.nominals.push(value)
         }
     }
-    // D-CONF-GENSPELL1=A: each valid module alias becomes an expanded module
+    // Each valid module alias becomes an expanded module
     // instance before anything else sees the items (Rust expands before
     // sibling mangling and registration).
     // Each rewrite below updates the program in place and leaves it
     // untouched (uncopied) when it has nothing to rewrite.
     sema_generic_modules_expand(&module_row.program, module_row.module_identity, templates)
-    // D-MOD2/D-MOD3: inline modules give their members one lifted identity
+    // Inline modules give their members one lifted identity
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
     module_row.inline_bindings = sema_inline_modules_lower(&module_row.program, &diagnostics)
     sema_policy_materialize(&module_row.program, policies, module_row.module_identity, module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
-    // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
+    // Root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
     // Reject reserved type declarations before automatic capability expansion:
@@ -2285,17 +2285,17 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
             item_index += 1
         }
     }
-    // D-VALIDATE1: each struct's `validate { … }` block becomes its
+    // Each struct's `validate { … }` block becomes its
     // generated `T.validate(value)` before any declaration is registered.
     sema_validate_blocks(&module_row.program.items, &diagnostics)
-    // D-ERR-CONV: declared conversions register once per module and become
+    // Declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
     sema_error_conversion_items(&module_row.program.items, &diagnostics)
-    // D-ONCE-DERIVE1=A: selected built-in capabilities expand from the Prelude
+    // Selected built-in capabilities expand from the Prelude
     // derive templates into compiler-generated trait blocks before any
     // declaration, impl, or known-time value is registered.
     sema_derive_expand_builtin_items(&module_row.program.items, &diagnostics)
-    // D-SERDE2=A / D-META-AUTO1=A: explicit and structurally selected codecs
+    // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
     sema_serde_expand_builtin_items(&module_row.program.items)
     row_source_file :: module_row.source_file.copy()
@@ -2311,11 +2311,11 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         }
     }
     module_row.program.items = ^items
-    // D-SERDE (E2408, E2415): serde field markers and anonymous-union decode
+    // (E2408, E2415): serde field markers and anonymous-union decode
     // shapes are checked on the registered items, as the Rust reference's
     // `validate_serde_items` runs after the trait registry is built.
     sema_registration_serde_items(module_row.program.items, &diagnostics)
-    // D-CLIFLAG1 / D-CLI-GLOBAL1=E / D-CLI-POS1 / D-CLI-FIELD-MARKERS1: checked
+    // Checked
     // on the registered items, as the Rust reference's `validate_cli_items`
     // runs after struct registration.
     sema_registration_cli_items(module_row.program.items, &diagnostics)
@@ -2654,7 +2654,7 @@ fn sema_registration_cli_marker_string(marker: Marker) -> String? {
     None
 }
 
-// D-SERDE (Rust `validate_serde_items`): on every type that derives a codec
+// (Rust `validate_serde_items`): on every type that derives a codec
 // explicitly, `#Flatten` needs a struct-typed field (E2408), every encoded or
 // decoded field or payload needs a wire form (E2411), and every decoded
 // anonymous union needs one distinct outer wire shape per member (E2415, or
@@ -2740,7 +2740,7 @@ fn sema_registration_serde_wire_form(items: [Item], facts: SemaDeriveItemIndex, 
     }
 }
 
-// D-STRUCT-LIFE1=A (Rust `check_deprecated_visibility`, E0932): a
+// (Rust `check_deprecated_visibility`, E0932): a
 // `#Deprecated` marker needs a public (not package-public) item. Functions,
 // type markers, inherent and trait-impl methods, distinct types, and impl
 // methods are checked; an inline module body is walked as its own item list.
@@ -2794,7 +2794,7 @@ fn sema_registration_serde_struct_named(ty: Type) -> Bool Never! {
 }
 
 // Rust `validate_union_decode_shapes`. The Rust parser hands sema every union
-// in canonical member order (D-UNIONTYPE1=A `canonicalize_union`); the native
+// in canonical member order (`canonicalize_union`); the native
 // parser keeps the written order, so each union is canonicalized here first.
 fn sema_registration_serde_union_shapes(items: [Item], ty: Type, span: Span, diagnostics: &[Diagnostic]) {
     if ty == .Union(written) {
@@ -3008,7 +3008,7 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
             }
         }
     }
-    // D-MOD-CYCLE1=A: a dependency package is bound through one member file;
+    // A dependency package is bound through one member file;
     // a name belongs to whichever member of that package declares it.
     if sema_registration_package_is_namespace(module_row.package_identity) {
         loop (sibling_index, sibling) in graph.modules {
@@ -3088,7 +3088,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
     source_identity := graph.modules[module_index].module_identity
     source_package := graph.modules[module_index].package_identity
     import_count :: graph.modules[module_index].imports.len()
-    // D-MOD-CYCLE1=A: the package names bind after this module's own
+    // The package names bind after this module's own
     // declarations and the imports before `namespace_from`; an import after
     // it (a foreign provider) can't take a package name.
     namespace_from :: if graph.modules[module_index].namespace_import_split < 0 -> import_count else -> graph.modules[module_index].namespace_import_split
@@ -3107,7 +3107,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
         if declaration.kind == {
             .Unqualified(_, _, items, _, _) -> loop item in items {
                 local :: sema_registration_import_local(item)
-                // D-CORE-USELIST1=A (Rust `core_list_path`): a member naming a
+                // (Rust `core_list_path`): a member naming a
                 // Core submodule (`use core.mem`, `core.encoding.[json]`) binds
                 // that module as a namespace, exactly like `use core.mem as mem`.
                 submodule :: "{target_name}.{item.original}"
@@ -3140,7 +3140,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         }
                     }
                     .None -> {
-                        // D-CORE-USELIST1=A (Rust CheckInner `core_list_path`
+                        // (Rust CheckInner `core_list_path`
                         // Item): a Core module's ledger member with no source
                         // declaration (a host leaf such as
                         // `core.files.__host_path_join`) binds as a Core item
@@ -3189,7 +3189,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
     if namespace_from >= import_count -> sema_registration_namespace_collisions(&graph, module_index, import_count)
 }
 
-// D-MOD-CYCLE1=A: a package name binds after the module's own declarations
+// A package name binds after the module's own declarations
 // and the imports registered before the package names (`import_count` of
 // them), as Rust consults `namespace_owner` last. A name one of those already
 // binds stays theirs; the package binding of it is refused (E0105), reported
@@ -3313,7 +3313,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     generic_module_index :: sema_generic_modules_index(prepared_inputs, edges)
-    // D-STRUCT-POLICY1=A: user policies are package-scoped, so every module
+    // User policies are package-scoped, so every module
     // of a package materializes the same checked declarations. Policies and
     // imported templates are read off every input in place first: the loop
     // below consumes the inputs, and a template module may precede its
@@ -3457,7 +3457,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     }
     sema_type_alias_cycles_check(&graph)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
-    // D-CONF-GENSPELL1=A: generic-module aliases resolve and check their
+    // Generic-module aliases resolve and check their
     // arguments once every import is bound (Rust's expansion pre-pass).
     sema_generic_modules_check(&graph, written_inputs)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
@@ -3474,7 +3474,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
             }
         }
     }
-    // D-METADERIVE1=A / D-META-USER1=A: user derives and declared marker
+    // User derives and declared marker
     // bodies expand over the complete graph's reflection and register their
     // generated items before any body is checked.
     own_symbols :: loop row_index in 0..<graph.modules.len() -> graph.modules[row_index].symbols.len()
@@ -3504,7 +3504,7 @@ fn sema_registration_item_is_expanded_template(item: Item) -> Bool Never! {
 // `seen` does not hold yet, and records it there: maximal runs of ASCII
 // letters, digits and `_`, and of non-ASCII bytes, so a multi-byte letter
 // stays inside its word. Comments and strings count too, so the words are a
-// superset of the names the range spells (D-MOD-CYCLE1=A namespace reach).
+// superset of the names the range spells (namespace reach).
 fn sema_source_words(bytes: [U8], start: Int, end: Int, seen: &[String:Bool], words: &[String]) Never! {
     stop :: if end < bytes.len() -> end else -> bytes.len()
     cursor := if start > 0 -> start else -> 0
@@ -3527,7 +3527,7 @@ fn sema_source_word_byte(byte: U8) -> Bool Never! {
     n >= 128 || n == 95 || (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
 }
 
-// D-MOD-CYCLE1=A: numbers every package namespace name once, per package one
+// Numbers every package namespace name once, per package one
 // name -> entry table (Rust `NameLedger` namespace names). Entries run in
 // module order, then declaration order; the loader already rejected a name
 // two members declare (E0624). The tables are filled from rows sorted by
@@ -3565,7 +3565,7 @@ fn sema_registration_index_namespaces(graph: &SemaRegistrationGraph) Never! {
     loop at in 0..<rows.len() -> graph.namespace_tables[rows[at].slot][rows[at].name] = rows[at].entry
 }
 
-// D-MOD-CYCLE1=A (Rust `NameLedger::namespace_owner`): the registered symbol
+// (Rust `NameLedger::namespace_owner`): the registered symbol
 // row of `name` in the other member of `module_index`'s package that
 // declares it, or none (no namespace, the module's own name, or a
 // declaration that did not register).
@@ -3579,7 +3579,7 @@ fn sema_registration_namespace_owner(graph: SemaRegistrationGraph, module_index:
     Val(SemaRegistrationRowRef{module_index: owner, row: row})
 }
 
-// D-MOD-CYCLE1=A: the sibling declarations each package member's module
+// The sibling declarations each package member's module
 // scope binds (`namespace_bindings`), in entry order. They are the namespace
 // names its source can reach (the loader's `namespace_refs`) and those the
 // Prelude derive templates spell, since derived items expand into the

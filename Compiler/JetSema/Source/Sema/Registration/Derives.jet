@@ -1,4 +1,4 @@
-// D-ONCE-DERIVE1=A / D-META-CODE1=A: built-in derive providers are the ordinary
+// Built-in derive providers are the ordinary
 // Prelude declarations in `Prelude/Derives.jet` (generated view:
 // PreludeDerives.jet). Each selected capability expands the provider's typed
 // template body for one declaration and enters registration as a
@@ -307,7 +307,7 @@ fn sema_derive_named_row(owner: CtValue, rows: String, name: String) -> CtValue?
     None
 }
 
-// D-FACT-READ1: `handle.$read` over a reflected handle without a direct
+// `handle.$read` over a reflected handle without a direct
 // field reads the handle's homed fact row of that name; the fact value keeps
 // its detail under the same name.
 fn sema_derive_fact_read(owner: CtValue, read: String) -> CtValue? Never! {
@@ -426,7 +426,7 @@ fn sema_derive_literal_expr(value: CtValue, span: Span) -> Expr? Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Name splices (D-NAME-SPLICE1=B): `$name` splices the template binding `name`.
+// Name splices `$name` splices the template binding `name`.
 
 fn sema_derive_expand_name(expansion: &SemaDeriveExpansion, name: String, span: Span) -> String Never! {
     explicit :: name.starts_with("$")
@@ -1472,7 +1472,7 @@ fn sema_derive_exec_value(expansion: &SemaDeriveExpansion, expression: Expr) Nev
     }
 }
 
-// D-META-USER1=A (Rust `dispatch.rs` `reject` + `project_rejection`): a
+// (Rust `dispatch.rs` `reject` + `project_rejection`): a
 // checked rule rejects with a registered project diagnostic at the `reject`
 // name. The labels keep the product fields explicit; the registry owns the
 // code's severity and rendering metadata.
@@ -1814,7 +1814,7 @@ struct SemaDeriveReadiness {
     relied_on: [Int]
 }
 
-// D-META-AUTO1=A: the codec traits are structural auto-derives too.
+// The codec traits are structural auto-derives too.
 fn sema_derive_codec_trait(trait_name: String) -> Bool Never! {
     trait_name == "Encode" || trait_name == "Decode"
 }
@@ -1830,8 +1830,7 @@ fn sema_derive_builtin_supports(name: String, trait_name: String) -> Bool {
     }
     if name == "Int" || name == "Bool" || name == "String" || name == "Char" || name == "U8" || name == "Ordering" -> return true
     if name == "Float" || name == "Float32" -> return trait_name != "Comparable"
-    // D-TIME-ORDER1=A / D-DECIMAL1 / D-RANGE-VALUE1=A / D-CORESURF-SMALL1 /
-    // D-ENCSTREAM-SURFACE1=A: the Prelude carriers with registered value
+    // The Prelude carriers with registered value
     // equality and order (Rust `register_synthetic_display_debug`).
     if name == "DateTime" || name == "LocalDate" || name == "LocalTime" || name == "Duration" || name == "Instant" || name == "ZonedDateTime" -> return true
     if trait_name == "Comparable" -> return name == "Decimal"
@@ -2016,7 +2015,7 @@ fn sema_derive_builtin_traits() -> [String] {
 }
 
 
-// D-ONCE-DERIVE1=A / I3: compiler-owned capability requests use the same
+// I3: compiler-owned capability requests use the same
 // typed derive-template engine as user-authored code. A struct or enum
 // derives Equatable/Comparable when its markers request it (explicitly, or
 // through the package auto-derive default with every field ready); every

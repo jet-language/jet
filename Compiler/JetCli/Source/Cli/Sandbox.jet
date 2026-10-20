@@ -1,5 +1,5 @@
-// `jet build --target=sandbox <file>` (D-PLUGIN1=B, D-PLUGIN-VERSION1=A,
-// D-DEP-WASM1=A): the Jet host of Source/CmdCompile.rs's sandbox branch and
+// `jet build --target=sandbox <file>` (
+// ): the Jet host of Source/CmdCompile.rs's sandbox branch and
 // `write_plugin_artifacts`. The compile checks the export surface (E1260)
 // and diffs it against the frozen interface (E1257); this host reads and
 // stores that interface under `.jet/cache/api` (crates/jet-sema ApiFreeze.rs
@@ -35,7 +35,7 @@ fn jet_cli_sandbox_api_dir(root: String) -[Env]> String Never! {
 // compile picks the one its resolved export name owns.
 fn jet_cli_sandbox_frozen_interfaces(api_dir: String) -[FS]> [String] Never! {
     texts := [String]{}
-    // Core lists a directory's entries already sorted by name (D-LSDIR1).
+    // Core lists a directory's entries already sorted by name.
     listing :: cli_files.list_dir(api_dir) ?? return texts
     loop entry in listing {
         if !entry.name.starts_with(JET_CLI_SANDBOX_SNAPSHOT_PREFIX) || !entry.name.ends_with(".api") -> next

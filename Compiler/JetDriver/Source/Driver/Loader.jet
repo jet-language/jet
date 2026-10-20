@@ -299,7 +299,7 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
         item :: jet_driver_manifest_field_value(source, tokens, item_index)
         name := item.text.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
         if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) -> name = token_decoded(tables, tokens[item_index])
-        // D-PANICROOT1=A: a positive `Panic` entry is one E0751 at that entry and grants nothing.
+        // A positive `Panic` entry is one E0751 at that entry and grants nothing.
         if {
             name.len() == 0 -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
             sema_effect_parse_name(sema_effect_root(name)) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
@@ -745,7 +745,7 @@ fn jet_driver_dependency_path(root: String, source: String) -> JetDriverFilePath
     JetDriverFilePath{path: path, valid: true}
 }
 
-// D-MOD-CYCLE1=A: whether the root package reaches `path`: it declares that
+// Whether the root package reaches `path`: it declares that
 // directory, or the directory lies beside one it declares outside its tree.
 fn jet_driver_root_reaches(declared: [String], sibling_dirs: [String], path: String) -> Bool Never! {
     loop candidate in declared {
@@ -771,7 +771,7 @@ fn jet_driver_parent_path(path: String) -> String Never! {
 }
 
 fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) {
-    // D-MOD-CYCLE1=A: a path dependency that a dependency declares stays below
+    // A path dependency that a dependency declares stays below
     // that dependency's directory (E1206) unless the root package reaches it:
     // the root declares that directory itself, or the directory lies beside
     // one the root declares outside its own tree (`Compiler/JetSema ->
@@ -893,7 +893,7 @@ fn jet_driver_no_package_outputs() -> JetDriverPackageOutputs Never! {
     JetDriverPackageOutputs{library: false, executable: false, entry_modules: [String]{}}
 }
 
-// D-MOD-CYCLE1=A: the output kinds an `outputs:` block declares and, by owner
+// The output kinds an `outputs:` block declares and, by owner
 // ruling B, the member file each Executable `entry: stem.run` names.
 fn jet_driver_manifest_outputs(tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int) -> JetDriverPackageOutputs Never! {
     outputs := jet_driver_no_package_outputs()
@@ -928,7 +928,7 @@ fn jet_driver_manifest_outputs(tokens: [Token], tables: TokenTables, open_index:
 }
 
 // The file of the entry root whose leading `package { … }` block is the
-// root's Package (D-ECO-INLINEPACKAGE1).
+// root's Package.
 struct JetDriverInlineCarrier {
     file_index: Int
     block: JetDriverInlinePackage
@@ -1877,7 +1877,7 @@ fn jet_driver_find_module_import_target(
         if module_path.len() == 0 && !jet_driver_has_errors(diagnostics) {
             root_entry := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, [String]{"run.jet"}, &diagnostics, span)
             if root_entry != None -> return root_entry
-            // D-MOD-CYCLE1=A: a dependency package is one namespace; any member
+            // A dependency package is one namespace; any member
             // file stands for it, and loading that member loads the whole package.
             loop (member_index, member) in source_units {
                 if member.root_index == selected_dependency.target_root_index && jet_driver_unit_is_namespace_member(member) -> return Val(member_index)
@@ -2013,7 +2013,7 @@ fn jet_driver_unit_is_loose(unit: JetDriverSourceUnit) -> Bool Never! {
     unit.package_identity.starts_with("source-root:")
 }
 
-// D-MOD-CYCLE1=A: a package is one namespace. Every `.jet` source of a
+// A package is one namespace. Every `.jet` source of a
 // manifest package belongs to it except the package's payload and workspace
 // modules; loose files and embedded Core modules have no namespace.
 fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never! {
@@ -2041,7 +2041,7 @@ fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_
     jet_driver_find_source_path(source_units, importing_unit.root_index, [String]{resolved.path}, &diagnostics, span)
 }
 
-// D-MOD1 (Rust `resolve_code_module_file`): the source unit a body-less
+// (Rust `resolve_code_module_file`): the source unit a body-less
 // `module name` declares, `name.jet` beside the declaring file, else
 // `name/module.jet`; E0607 when neither is in the source snapshot.
 fn jet_driver_code_module_file(source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, name: String, name_span: Span, diagnostics: &[Diagnostic]) -> Int? {
@@ -2086,7 +2086,7 @@ fn jet_driver_imports_bind_alias(imports: [ImportDecl], alias: String) -> Bool N
     false
 }
 
-// D-MOD-CYCLE1=A: `use dep.[names]` names members of a dependency package
+// `use dep.[names]` names members of a dependency package
 // directly; it binds the package itself, as `use dep` would. The binding is a
 // compiler-owned module import with a zero-width span at the package name.
 fn jet_driver_bind_dependency_imports(program: &Program, unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo]) {
@@ -2108,7 +2108,7 @@ fn jet_driver_bind_dependency_imports(program: &Program, unit: JetDriverSourceUn
     program.imports = bindings
 }
 
-// D-MOD-CYCLE1=A: the top-level names one package file contributes to its
+// The top-level names one package file contributes to its
 // package namespace, with their declaring spans.
 fn jet_driver_namespace_item_names(items: [Item]) -> [NamedSpan] Never! {
     names := [NamedSpan]{}
@@ -2143,7 +2143,7 @@ fn jet_driver_module_source_bytes(unit: JetDriverSourceUnit, roots: [JetDriverAu
     roots[unit.root_index].files[unit.file_index].source.bytes()
 }
 
-// D-MOD-CYCLE1=A: the source bytes of one default (a parameter default or
+// The source bytes of one default (a parameter default or
 // precondition, or a field default or computed value) that a call or struct
 // literal splices into the calling module's body, where its names resolve.
 // `key` is the name the caller spells (function or method); "" marks a
@@ -2227,7 +2227,7 @@ fn jet_driver_template_default_regions(body: [DeriveBodyItem], module_index: Int
     }
 }
 
-// D-MOD-CYCLE1=A: the names of other members each package member can reach,
+// The names of other members each package member can reach,
 // stored as its `namespace_refs`. Semantic registration binds only these in
 // the member's module scope, so a module scope holds the names its body can
 // spell rather than every name of the package (M files x N names). A member
@@ -2309,7 +2309,7 @@ fn jet_driver_path_leaf(path: String) -> String Never! {
     &parts.pop() ?? path
 }
 
-// D-MOD-CYCLE1=A: make every package one namespace. A name declared in two
+// Make every package one namespace. A name declared in two
 // member files is E0624 and a library package declaring `fn run` is E0625.
 // Each member records its package (`namespace`) and the names it contributes
 // (`namespace_names`); semantic registration keeps ONE name -> declaring
@@ -2337,7 +2337,7 @@ fn jet_driver_bind_package_namespaces(
         // One `fn run` per package, unless the manifest names each entry
         // (owner ruling B, like Cargo `[[bin]]`): `.Executable{ entry:
         // tool.run }` keeps `tool.jet`'s `run` its own. A package-root command
-        // home (`@run.jet`, D-ROLEFILE1) keeps its command function too.
+        // home (`@run.jet`) keeps its command function too.
         names := [[NamedSpan]]{}
         loop module_index in members {
             unit :: source_units[modules[module_index].source_unit_index]
@@ -2458,7 +2458,7 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
         return false
     }
     if declaration.kind == .Module(name, span) {
-        // D-CORENS1 / E0341: the old `jet.<ring>` spelling teaches `core.<ring>`.
+        // E0341: the old `jet.<ring>` spelling teaches `core.<ring>`.
         if name.starts_with("jet.") {
             ring :: name.slice(4, name.len())
             if jet_driver_is_ring_module(ring) {
@@ -2487,7 +2487,7 @@ fn jet_driver_canonical_ring_module(name: String) -> String Never! {
     "core.{name}"
 }
 
-// D-ECO-INLINEPACKAGE1: the one leading `package { … }` carrier of a source
+// The one leading `package { … }` carrier of a source
 // (Rust `Package::extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
 struct JetDriverInlinePackage {
@@ -3784,7 +3784,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
         is_core :: jet_driver_unit_is_core(unit)
         is_runtime_entry :: entry_module != "" && source_unit_index == (entry_index ?? 0)
         importer_core :: is_core || is_runtime_entry
-        // D-MOD-CYCLE1=A: a package is one namespace. Loading any file of a
+        // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
         // the packages they use), so each member sees the whole namespace.
         if jet_driver_unit_is_namespace_member(unit) && !namespace_expanded[unit.root_index] {
@@ -3882,7 +3882,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
             target_index := Int?{None}
             if scoped.declaration.kind == {
                 .File(path, span) -> {
-                    // D-MOD-CYCLE1=A: the files of one package share one
+                    // The files of one package share one
                     // namespace; only loose files import files by path. A
                     // `..` path keeps its more specific E0602.
                     if !path.contains("..") && !jet_driver_unit_is_loose(unit) {
@@ -3967,7 +3967,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                 &pending.push(target_unit_index)
             }
         }
-        // D-MOD1 (Rust `load_file`): a body-less `module name` loads the file
+        // (Rust `load_file`): a body-less `module name` loads the file
         // it declares and binds it as a synthetic file import aliased `name`,
         // after the file's own imports. Body-less modules of Core sources
         // name sibling Core files the catalog already holds as modules.

@@ -296,7 +296,7 @@ impl PackageFacts {
         Ok(^entry.file)
     }
 
-    // One optional command-function override (D-CMDOVERRIDE1=A): a matching
+    // One optional command-function override a matching
     // package-root role home, then one root file, then one `src/` file.
     fn resolve_command_entry(self, root: String, command: String) -[FS, Env]> String? PackageEntryError! {
         resolver :: AuthorityResolver.open(root) ?? return Err(pkg_entry_error(self.origin, err.message()))
@@ -601,7 +601,7 @@ fn pkg_load_compose_and_validate(facts: &PackageFacts, resolver: AuthorityResolv
     facts.validate_members_in_checked(resolver)
 }
 
-// D-ONCE-RETIRE1=C / D-VERDICT-678-1: migrate one retired entry (`main.jet`,
+// Migrate one retired entry (`main.jet`,
 // `src/main.jet`, `.jet/main.jet`) to its canonical `run.jet` home before a
 // default run resolves its authority snapshot. True when a file moved.
 fn pkg_migrate_retired_entry(root: String, origin: String, package_name: String) -[FS, Env, IO]> Bool PackageEntryError! {

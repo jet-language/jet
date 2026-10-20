@@ -69,12 +69,12 @@ struct SemaScopeBinding {
     integer_bounds: TIntegerBounds?
     string_view: Bool
     compiler_builtin: Bool
-    // D-PREP-SURFACE2=A: a `name :: prep { … }` local reads as this value.
+    // A `name :: prep { … }` local reads as this value.
     prepared: TComptimeValue?{None}
-    // D-TRACK-ORIGIN1=A: the `#Track` origin row for this binding; `None`
+    // The `#Track` origin row for this binding; `None`
     // is the untracked row.
     origin: SemaOriginFact?{None}
-    // D-COPY-DEFAULT1=A: this `::` name reads a field or element of a place
+    // This `::` name reads a field or element of a place
     // through a view, or is a loop name over a collection a read or write
     // parameter owns. It owns nothing to give away: an exact `^` on it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
@@ -102,7 +102,7 @@ struct SemaCallSiteFact {
     discarded: Bool
     // The statement drops this call's result, but the callee's checked
     // carrier can still fail. The bundle failure solve sets `discarded` when
-    // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
+    // it projects the callee onto `T Never!` (#3708).
     discarded_if_infallible: Bool{false}
     // Rust `sig.foreign_effect_root`: the callee is an extern body (an
     // `#FFI(<lang>)` function or a foreign row) whose effect is this one root.
@@ -428,10 +428,10 @@ struct SemaScopeEnvironment {
     comptime_body_values: SemaComptimeBodyValues
     // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
-    // D-SHAPE-PLACE1=A: the module's proven length-preserving list write
+    // The module's proven length-preserving list write
     // parameters, copied into each function's ownership state.
     fixed_length_write_params: [String]{[String]{}}
-    // D-DBG1=A: the module's `debug(…)` call texts, from the parser.
+    // The module's `debug(…)` call texts, from the parser.
     debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
     // The enclosing named callable being checked; panic and propagation
     // locations name it (Rust `capture_panic_loc` `fn_name`).
@@ -481,7 +481,7 @@ struct SemaScopeProbeConstant {
 }
 
 // `Namespace`: a package name bound from its declaring member's symbol row
-// (D-MOD-CYCLE1=A, SemaRegistrationModule.namespace_bindings).
+// (SemaRegistrationModule.namespace_bindings).
 enum SemaScopeProbeSource {
     Symbol(position: Int)
     Import(import_index: Int, binding: Int)
@@ -536,7 +536,7 @@ struct SemaCheckContext {
     reactive_local_keys: [String]
     reactive_shared_keys: [String]
     taskgroups: SemaTaskGroupState
-    // D-FAILURE-FOUNDATION1=A: `failure_carrier_root` is the one-shot token a
+    // `failure_carrier_root` is the one-shot token a
     // carrier consumer (`??`, `?`, an `.Ok`/`.Err` pattern) sets so its call
     // subject keeps the Result carrier; `failure_success_view` tells the call
     // being checked that its expectation describes the success value.
@@ -548,7 +548,7 @@ struct SemaCheckContext {
     inferred_failure_carrier: TFailureCarrier?
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
-    // The enclosing named callable, for the D-NEVER2 return verdicts.
+    // The enclosing named callable, for the return verdicts.
     function_name: String
     // E0408/E0409: a fallback with no failure report to name (`??` on an
     // optional, or a pure pattern miss) denies `err` with this code.
@@ -556,10 +556,10 @@ struct SemaCheckContext {
     // Source starts of else-less value dispatch chains already proved (E0307);
     // every level of one chain shares its span, and the outermost level wins.
     noelse_chain_starts: [Int]
-    // D-DISCARD1=A: the last statement of a named function with no written
+    // The last statement of a named function with no written
     // return type; a non-Unit value there is thrown away (E0433).
     lost_tail_span: Span?
-    // D-DISCARD1=A / #3886: the last statement of a named function with a
+    // #3886: the last statement of a named function with a
     // written value return; it is checked as the value the function hands back.
     value_tail_span: Span?
     // #3708: the function keys whose failures this body propagates; "" marks a
@@ -569,7 +569,7 @@ struct SemaCheckContext {
     // #3708: a direct failure source outside callbacks (a fallible value
     // returned as-is, or a statement that owns its own failure route).
     failure_direct_source: Bool
-    // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: what reaches this body's default
+    // What reaches this body's default
     // `Err` route outside callbacks: typed failures (made here or passed up
     // from a callee with a written contract), function-owned cases
     // (`Err(.NotFound(n))`), the unannotated callees whose failures pass up,
@@ -579,24 +579,24 @@ struct SemaCheckContext {
     failure_union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
     failure_union_edges: [String]{[String]{}}
     failure_union_general: Bool{false}
-    // D-CONC-SPAWN1 (Rust `task_body_propagates`): a failure in this lambda
+    // (Rust `task_body_propagates`): a failure in this lambda
     // body leaves through the enclosing callable's carrier. Every lambda body
     // starts it false (a checking snapshot does not copy it) and harvests it.
     task_body_propagates: Bool{false}
     // Rust `iter_borrowed` (E0507): the collections an active `loop x in xs`
     // reads across its body, so a change to one of them there is rejected.
     iter_borrowed: [String]{[String]{}}
-    // D-RANGETYPE1 (E0136): a binding's initializer is being checked, so a
+    // E0136: a binding's initializer is being checked, so a
     // propagating runtime range conversion inside it is reported there.
     binding_initializer: Bool{false}
-    // D-COMPILE-STACK1=A (E1403): source forms being checked right now, one per
+    // E1403: source forms being checked right now, one per
     // statement and per expression level, against the limit the parser and
     // the TIR evaluator share.
     source_nesting: Int{0}
-    // D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects, where a
+    // Active bindingless collecting-loop subjects, where a
     // bare `.member` chain reads the implicit `it`.
     implicit_loop_subject_depth: Int{0}
-    // D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes (L0512).
+    // Active subject-shorthand lambda scopes (L0512).
     subject_shorthand_depth: Int{0}
     // Why this body stopped without a diagnostic: a construct the checker
     // does not handle yet or a lost compiler invariant. These reach the
@@ -606,7 +606,7 @@ struct SemaCheckContext {
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
-    // D-WRAP-SCOPE1=A (Rust `arithmetic_policy_stack`): the active lexical
+    // (Rust `arithmetic_policy_stack`): the active lexical
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
@@ -644,7 +644,7 @@ struct SemaScopeTable {
     transaction_depth: Int
     transaction_wall_depth: Int
     unit_explicit_units: Bool
-    // D-MEM-COPYSEM1: `copies: .Explicit` is active for the function being
+    // `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     copies_explicit: Bool{false}
     // Derived from the immutable graph installed by seed_unit_policy.
@@ -1824,7 +1824,7 @@ fn sema_scope_mark_place_alias(table: &SemaScopeTable, name: String) Never! {
     table.bindings[index].place_alias = true
 }
 
-// D-FLOWTYPE1=A: a proven payload refines a stable Optional name for the rest
+// A proven payload refines a stable Optional name for the rest
 // of its scope. The refinement shadows the carrier binding on purpose, so it
 // skips the duplicate-name rule that ordinary declarations obey.
 fn sema_scope_refine_local(table: &SemaScopeTable, symbol: Symbol) Never! {

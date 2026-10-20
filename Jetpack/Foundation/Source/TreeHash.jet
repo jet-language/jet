@@ -3,7 +3,7 @@
 // canonical SHA-256 compression (Compiler/JetFoundation/Source/Hash/
 // SHA256.jet) through a streaming hasher, so large files are never held
 // whole. Every read and write refuses links and checks the opened file's
-// identity (D-CORE-FILEOPEN1, D-CORE-FILEDIR1, D-CORE-FILESTAT1).
+// identity.
 //
 // The tree bounds MAX_TREE_FILE_BYTES, MAX_TREE_TOTAL_BYTES,
 // MAX_TREE_FILES, and MAX_TREE_DEPTH live in Syntax.jet.
@@ -148,7 +148,7 @@ fn foundation_tree_hash(root: String) -[FS]> String Never! {
 }
 
 fn foundation_collect_tree_files(directory: String, relative_dir: String, root: String, out: &[TreeHashFile], depth: Int, budget: &TreeHashBudget) TreeHashError! -[FS]> {
-    // Internal modules stay hash inputs: D-SHAPE-MODULEINTERNAL1=A changes
+    // Internal modules stay hash inputs: changes
     // automatic membership, not explicit imports or source-tree identity.
     entries :: if files.list_dir(directory) == {
         .Ok(listed) -> listed
@@ -368,7 +368,7 @@ fn foundation_write_file_nofollow_at_root(root: String, relative: String, conten
     }
     parent :: directories[directories.len() - 1].handle
     final_name :: components[components.len() - 1]
-    // D-FAIL-BIND1: preserve absence separately from an inspection failure.
+    // Preserve absence separately from an inspection failure.
     expected_destination := FileID?{None}
     if foundation_inspect_destination(parent, final_name, policy.destination_links) == {
         .Val(identity) -> expected_destination = Val(identity)

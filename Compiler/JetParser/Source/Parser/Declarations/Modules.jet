@@ -336,7 +336,7 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
     Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
 }
 
-// D-VIS-MODULE1 (Rust `Parser::apply_module_visibility`): every declaration
+// (Rust `Parser::apply_module_visibility`): every declaration
 // inside a `priv module` takes the module's privacy. A `priv module` is usable
 // only by its enclosing module, a `priv(package) module` by its package; every
 // other declaration is public. Fields keep their own `priv`; a nested module
@@ -456,7 +456,7 @@ fn parser_methods_visibility(methods: [Func], is_pub: Bool, is_package_pub: Bool
 }
 
 // A code-module body holds top-level items only; a leading `@` is a
-// misspelled applied rule (E0063, D-VERDICT-732-1 / D-ONCE-AT1=D).
+// misspelled applied rule (E0063).
 fn parser_report_module_member(state: &JetParserState) {
     token :: parser_current(&state)
     if token.kind == TOKEN_AT {
@@ -1030,7 +1030,7 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         target :: parser_module_dashed_name(&state, "for a host system name")
         overrides := Span?{None}
         end := target.span
-        // D-LIT-DOT1: `system.web.{ … }` is not Jet; report E0320 and still
+        // `system.web.{ … }` is not Jet; report E0320 and still
         // capture the override so one pass reports every error.
         if parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
             dot :: parser_bump(&state)

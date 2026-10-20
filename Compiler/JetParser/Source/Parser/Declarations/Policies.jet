@@ -1,4 +1,4 @@
-// D-MARK-SCOPE1: a `#Policy(...)` line that ends at its closing parenthesis
+// A `#Policy(...)` line that ends at its closing parenthesis
 // is a file-scoped source policy (Rust `policy_is_file_decl` and
 // `policy_declarations_from_marker`). Its arguments become the module's
 // policy declarations; a callable policy (`#Policy(retry(3))`) stays a marker
@@ -28,7 +28,7 @@ fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT || parser_value(state, name) != "Policy" -> return false
     if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
-    // D-CALLPOLICY2=C: a callable policy starts with a policy call.
+    // A callable policy starts with a policy call.
     if parser_kind_at(&state, 3) == TOKEN_IDENT && parser_kind_at(&state, 4) == TOKEN_LPAREN -> return false
     offset := 2
     depth := 0
@@ -56,7 +56,7 @@ fn parser_parse_policy_file_decl(state: &JetParserState, program: &Program) {
     loop declaration in declarations -> &program.policy_declarations.push(declaration)
 }
 
-// D-MARK-SCOPE1: `#Policy(...) { … }` scopes its declarations to the block
+// `#Policy(...) { … }` scopes its declarations to the block
 // (Rust `at_policy_stmt`). Each declaration targets the whole statement.
 fn parser_policy_block_stmt(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt? {
     declarations := parser_policy_declarations_from_marker(&state, marker, PolicyScope.Block) ?? return None

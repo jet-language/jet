@@ -1,4 +1,4 @@
-// D-MOD2/D-MOD3: inline code modules (`module bank { ... }`). The Rust
+// Inline code modules (`module bank { ... }`). The Rust
 // bootstrap gives every member one compiler-owned identity before any
 // declaration is registered (`Bundle/GenericModules/Expansion.rs`
 // `hoist_inline_module_member_types`, `Bundle/InlineCalls.rs`
@@ -563,7 +563,7 @@ fn sema_inline_rewrite_enum_args(rewrite: &SemaInlineRewrite, args: [EnumLitArg]
 // `bank.f(...)` from anywhere in the file (Rust `infer_code_module_call`):
 // a `pub use` re-export calls its owner, a member function its member
 // identity; any other name is E0608. The file is the enclosing module, so it
-// reaches the members of its `priv module`s too (D-VIS-MODULE1).
+// reaches the members of its `priv module`s too.
 fn sema_inline_rewrite_module_call(rewrite: &SemaInlineRewrite, surface: SemaInlineModuleSurface, alias_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr? Never! {
     if surface.reexports.get(method) == .Val(target) {
         if target.qualified -> return Val(sema_inline_qualified_call(&rewrite, target, method_span, type_args, args))
@@ -1069,7 +1069,7 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
         // module's compiler-owned spelling; normalize it to this identity.
         direct_types[sema_inline_type_name(display_alias, name)] = resolved
         &direct_names.push(name)
-        // D-VIS-MODULE1: the enclosing file reaches private member types by
+        // The enclosing file reaches private member types by
         // their full module path too. Do not export a nested relative name.
         hoist.exported["{source_path}.{name}"] = resolved
         hoist.has_exported = true
@@ -1165,7 +1165,7 @@ fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [
 }
 
 // ---------------------------------------------------------------------------
-// `use bank.[f as g]` over an inline module (Rust CheckInner D-MOD3/4).
+// `use bank.[f as g]` over an inline module (Rust CheckInner 4).
 
 fn sema_inline_import_target(declaration: ImportDecl, inline_names: [String:Bool]) -> String? Never! {
     if declaration.kind == .Unqualified(module_alias, _, _, _, _) {

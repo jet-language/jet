@@ -1,9 +1,9 @@
 // Read-only slice of the Jetpack hangar store (jet-pkg-model Store.rs;
-// D-JPK12, U2): root resolution and listing of already-recorded entries.
+// U2): root resolution and listing of already-recorded entries.
 // Realization, verification, leasing, GC, and quarantine stay in the Store
 // area, which builds on these names instead of re-homing them.
 
-// D-ECO-HANGARPATH1: the native data-directory leaf (macOS/Windows spell it
+// The native data-directory leaf (macOS/Windows spell it
 // `Hangar`); explicit roots keep the historical lower-case child.
 HANGAR_NATIVE_SUBDIR_TITLE :: prep { "Hangar" }
 HANGAR_LEGACY_SUBDIR :: prep { "hangar" }
@@ -109,7 +109,7 @@ fn pkg_lock_path(project: String) -> String Never! {
 }
 
 // Resolve the Jetpack root: `JETPACK_ROOT` when set, else the platform data
-// directory from D-ECO-HANGARPATH1.
+// directory from.
 fn pkg_resolve_roots() -[Env]> HangarRoots Never! {
     explicit :: pkg_environment_path("JETPACK_ROOT") ?? return HangarRoots{root: pkg_user_data_root(), dev_mode: true}
     HangarRoots{root: explicit, dev_mode: false}
@@ -146,13 +146,13 @@ fn pkg_user_data_root() -[Env]> String Never! {
     files.join(data, "jet")
 }
 
-// The pre-D-ECO-HANGARPATH1 user root, kept only as a migration source.
+// The pre- user root, kept only as a migration source.
 fn pkg_legacy_user_root() -[Env]> String Never! {
     state :: pkg_absolute_environment_path("XDG_STATE_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "state")
     files.join(state, "jet")
 }
 
-// The old Hangar path of the pre-D-ECO-HANGARPATH1 resolver.
+// The old Hangar path of the pre- resolver.
 fn pkg_legacy_user_hangar_dir() -[Env]> String Never! {
     files.join(pkg_legacy_user_root(), HANGAR_LEGACY_SUBDIR)
 }
@@ -171,7 +171,7 @@ struct CacheIdentity {
 
 // A realized package recorded under the Jetpack store.
 struct StoreEntry {
-    // Directory name under the hangar, e.g. `fastfetch-2.1.0-<fp>` (D-PM1:
+    // Directory name under the hangar, e.g. `fastfetch-2.1.0-<fp>` (
     // name and version first, fingerprint last).
     id: String
     name: String
@@ -183,9 +183,9 @@ struct StoreEntry {
     // The `bin` directory to add to PATH.
     bin: String
     // The built Rust rlib of a library package compiled from Cargo.toml
-    // (D-BFS1); empty otherwise.
+    // empty otherwise.
     rlib: String
-    // D-JPK-CACHE1=A: the A4 envelope; empty for pre-envelope records.
+    // The A4 envelope; empty for pre-envelope records.
     envelope: Envelope
     cache_identity: CacheIdentity
     // Content digests this object references (runtime/build closure edges).
@@ -196,7 +196,7 @@ struct StoreEntry {
     platform_artifact_kind: String
     // Versioned canonical producer/action/source replay record.
     producer_record: String
-    // D-ECO-RECEIPT2: digest of the immutable Hangar receipt.
+    // Digest of the immutable Hangar receipt.
     receipt: String
     // Unix seconds when this hangar object was first realized.
     realized_at: Int

@@ -1,11 +1,11 @@
 // `WorkspacePlan`, the workspace-source authority, and workspace members:
-// the data produced by evaluating a workspace declaration (D-WORKSPACE1=B,
-// D-WORKSPACE2=A). They live in the package model so the evaluator
+// the data produced by evaluating a workspace declaration (
+// ). They live in the package model so the evaluator
 // (EnvModel `WorkspaceFile`) and the read-only lock reader share one
 // definition without depending on each other.
 
 // The role of a declaration-resolved workspace source. `workspace.jet` is
-// the D-WORKSPACE2 index; another top-level declaration establishes an
+// the index; another top-level declaration establishes an
 // authority boundary but is not a workspace index.
 enum WorkspaceSourceRole {
     Index
@@ -25,10 +25,10 @@ struct WorkspaceSource {
 struct WorkspacePlan {
     // Member packages in source order (the order `members:` produced them).
     members: [WorkspacePlanMember]
-    // D-CTEFFECT1 Tier-1: content-addressed inputs a `members:` expression
+    // Tier-1: content-addressed inputs a `members:` expression
     // pulled in during evaluation, recorded so the index is reproducible.
     comptime_inputs: [ComptimeInput]
-    // D-JPK-OVERLAY1=A: reviewed overlay/override policy from the workspace
+    // Reviewed overlay/override policy from the workspace
     // declaration; commands may draft this source but never hide override
     // state.
     overlay_policy: OverlayPolicy
@@ -65,7 +65,7 @@ struct WorkspaceSourceError {
 
 // Resolve the one top-level `.jet` source that declares `module workspace`.
 // The filename and declaration jointly select the role: a declared
-// `workspace.jet` is the strict D-WORKSPACE2 index; a workspace module in
+// `workspace.jet` is the strict index; a workspace module in
 // another top-level file is an authority boundary evaluated only for
 // policy. Candidates are inspected in filename order; more than one usable
 // declaration is E1239, and any discovery I/O failure is an error rather
@@ -174,7 +174,7 @@ fn pkg_declares_workspace_module(cache: &WorkspaceDeclarationCache, src: String)
 
 // True when a workspace declaration also supplies a `members:` index field.
 // A top-level `.jet` file that lists members is an index, not
-// authority-only metadata (D-JPK-FILENAME2=B).
+// authority-only metadata.
 fn pkg_declares_workspace_members(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
     pkg_workspace_declaration_probe(&cache, src).declares_members
 }

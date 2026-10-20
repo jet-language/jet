@@ -65,7 +65,7 @@ fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEvalErro
 fn envmodel_collect_environment_reads(all_tokens: [Token], tables: TokenTables, reads: &[EnvironmentRead]) Never! {
     tokens :: lexer_without_comments(all_tokens)
     loop token in tokens {
-        // The lexer reads `$NAME` as one identifier word (D-ONCE-DOLLAR1=B).
+        // The lexer reads `$NAME` as one identifier word.
         if token.kind == TOKEN_IDENT && token_decoded(tables, token).starts_with(COMPTIME_MARK) {
             name :: token_decoded(tables, token)
             seen := false

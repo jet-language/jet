@@ -1,4 +1,4 @@
-// D-JET-VERBS1=A: the shared command registry owns help, completion and
+// The shared command registry owns help, completion and
 // semantic job-name reservation. Rust keeps its copy in foundation
 // (commands) and jet-cli (flags); check-command-table.mjs compares both.
 JET_CLI_JOB_INVOCATION_HELP :: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
@@ -243,7 +243,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         usage: Val("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>]"),
         actions: [JetCLIActionSpec]{},
     },
-    // D-DX-GENERATE1=A: generation is source-ordered, explicit, and receipt-backed;
+    // Generation is source-ordered, explicit, and receipt-backed;
     // build/check/test never call this command implicitly.
     JetCLICommandSpec{
         name: "generate",
@@ -299,7 +299,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         usage: None,
         actions: [JetCLIActionSpec]{},
     },
-    // D-DEVR-STATUS1=A: the one project-truth surface. The renderer reads
+    // The one project-truth surface. The renderer reads
     // receipts and does not perform a check, test, build, or proof.
     JetCLICommandSpec{
         name: "status",
@@ -479,7 +479,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         frequency_rank: 17,
         exhaustive: false,
         usage: None,
-        // D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
+        // These are the shipped
         // `jetpack env` subverbs exposed through Jet's environment front door. `env`
         // stays non-exhaustive because `export` is a private callback used by the shell
         // hook and must continue downstream.
@@ -553,9 +553,9 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         frequency_rank: 11,
         exhaustive: false,
         usage: None,
-        // D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
+        // `push`/`bridge`/`services`/`config` move under `jet os`.
         // This group is *not* exhaustive (see `CommandSpec::exhaustive`) — jetos's
-        // own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
+        // own native verbs (`check`/`build`/`switch`/…) stay entirely
         // owned by the `jet os` dispatcher and are not modeled here.
         actions: [JetCLIActionSpec]{
             JetCLIActionSpec{name: "push", usage: "push", summary: "Deploy one or more Jetos machines", handler: "Push", also_canonical_top_level: false},
@@ -703,7 +703,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         frequency_rank: 19,
         exhaustive: true,
         usage: None,
-        // D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run` and
+        // `jet perf` owns collection/view/compare/export. `run` and
         // `test` stay canonical top-level intents and also live here so the group help
         // lists the full family. Measurement remains a mode of the canonical test
         // intent, not another perf-session action.
@@ -793,12 +793,12 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--locked", help: "With build/fetch/jobs/run: Require locked dependency and provenance facts"},
     JetCLIFlagSpec{long: "--effect", help: "With find: Require an effect such as FS.Read"},
     JetCLIFlagSpec{long: "--example", help: "With find: Search by input/output example"},
-    // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
+    // Script locking folds into `fetch`, not a separate verb.
     JetCLIFlagSpec{long: "--lock", help: "With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy"},
     JetCLIFlagSpec{long: "--read-only", help: "With shared-store enroll: Grant read-only broker access"},
     JetCLIFlagSpec{long: "--host", help: "With cache limit: Host-wide store cap"},
     JetCLIFlagSpec{long: "--fd", help: "With shared-store broker: Inherited broker socket descriptor"},
-    // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
+    // Select one workspace member.
     JetCLIFlagSpec{long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name"},
     JetCLIFlagSpec{long: "--annotated", help: "With new: Include commented example deps"},
     JetCLIFlagSpec{long: "--force", help: "With publish: Bypass pre-publish gate (with warning)"},
@@ -859,7 +859,7 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--bind", help: "With notebook: Bind the local HTTP client to this address"},
     JetCLIFlagSpec{long: "--token", help: "With notebook/dev: Require a bearer token for the session"},
     // E2-M16 flags.
-    // D-RUN-PREPARE1=A: `jet run` delegates project environment realization
+    // `jet run` delegates project environment realization
     // to Jetpack unless the caller explicitly opts out.
     JetCLIFlagSpec{long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation"},
     JetCLIFlagSpec{long: "--pure", help: "With eval: Reject code with side effects"},
@@ -885,7 +885,7 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "-print-sysroot", help: "With cc/c++: Print the pinned virtual sysroot"},
     JetCLIFlagSpec{long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version"},
     JetCLIFlagSpec{long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely"},
-    // D-ONCE-GATE1=A: one invocation gate surface covers every audited escape.
+    // One invocation gate surface covers every audited escape.
     JetCLIFlagSpec{long: "--gate", help: "With build/run/dev/jobs: Allow one audited gate as --gate name=allow"},
     JetCLIFlagSpec{long: "--target", help: "With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)"},
     JetCLIFlagSpec{long: "--up", help: "With db migrate/new: Checked forward SQL"},
@@ -894,7 +894,7 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--database", help: "With db migrate: Project-relative database path (receipt identity is redacted)"},
     JetCLIFlagSpec{long: "--risk", help: "With db migrate/new: Data-risk note shown before writes"},
     JetCLIFlagSpec{long: "--step", help: "With db migrate: Number of ordered migrations to apply or roll back"},
-    // D-DB-CONSOLE1=A: bounded SQL console options share the canonical flag
+    // Bounded SQL console options share the canonical flag
     // registry with migration options and generated help/completions.
     JetCLIFlagSpec{long: "--format", help: "With db: Output format: human, text, json, jsonl, or csv"},
     JetCLIFlagSpec{long: "--csv", help: "With db: Select deterministic CSV output"},
@@ -942,10 +942,10 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--scripts-only", help: "With package: Cook only script assets"},
     JetCLIFlagSpec{long: "--run-now", help: "With package: Explicitly opt into the run phase"},
     JetCLIFlagSpec{long: "--run", help: "With package: Include the run phase"},
-    // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
+    // `--env` selects one environment module; it never names a
     // preset and has no retired-spelling alias.
     JetCLIFlagSpec{long: "--env", help: "With env/run/dev/test: Select one declared env.<name> module"},
-    // D-CONF-WORD1=A: `--preset` selects a named environment composition.
+    // `--preset` selects a named environment composition.
     JetCLIFlagSpec{long: "--preset", help: "With env/run/dev/test: Select one declared environment preset"},
     JetCLIFlagSpec{long: "--explain-partition", help: "With build --target=web: Show which code becomes JavaScript or WebAssembly"},
     JetCLIFlagSpec{long: "--fresh", help: "With test: Bypass only cached test results (default off); the build cache remains reusable"},
@@ -966,33 +966,33 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--fn", help: "With emit --ast/--mir/--lir: Print only the named function"},
     JetCLIFlagSpec{long: "--emit-generated", help: "With build: Copy generated Jet sources into `.jet/generated/`"},
     JetCLIFlagSpec{long: "-u", help: "Short form of --update-snapshots"},
-    // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
+    // (ratified 2026-06-25): named optimization bundles.
     JetCLIFlagSpec{long: "--release", help: "With build/run/dev/jobs/test: Optimize for release"},
     JetCLIFlagSpec{long: "--profile", help: "With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle"},
-    // D-CONF-KEY1=A: command-line contribution to one typed package setting.
+    // Command-line contribution to one typed package setting.
     JetCLIFlagSpec{long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value"},
-    // D-JOBS1=A: the compiler's thread cap; never the program's own threads.
+    // The compiler's thread cap; never the program's own threads.
     JetCLIFlagSpec{long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
     // Jet-only (owner-directed 2026-10-16): the compiler's streaming trace,
     // the flag form of JET_TRACE_FILE; the frozen Rust host table never gains
     // it (Compiler/Bootstrap/check-command-table.mjs).
     JetCLIFlagSpec{long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE"},
     JetCLIFlagSpec{long: "--builder", help: "With build/jobs: Select a previously bound remote builder"},
-    // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
+    // (c134 Phase 6): accessibility is an opt-in lint category.
     JetCLIFlagSpec{long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics"},
     JetCLIFlagSpec{long: "--complexity", help: "With lint: Report per-function cognitive complexity"},
     JetCLIFlagSpec{long: "--cost", help: "With lint/explain: Show typed hidden-copy and fallback costs"},
     JetCLIFlagSpec{long: "--max", help: "With lint --complexity: Fail when a function exceeds this score"},
     JetCLIFlagSpec{long: "--scope", help: "With inspect: Choose a ledger or trust scope"},
     JetCLIFlagSpec{long: "--core", help: "With inspect structure: Show the canonical core module export facts"},
-    // D-TESTKIT1=A: the shared test name-selection flag.
+    // The shared test name-selection flag.
     JetCLIFlagSpec{long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>"},
     JetCLIFlagSpec{long: "--grade", help: "With test: Select the generated property-test grade as --grade=generated"},
     JetCLIFlagSpec{long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order"},
     JetCLIFlagSpec{long: "--serial", help: "With test: Run tests one at a time instead of the parallel default"},
     JetCLIFlagSpec{long: "--show-default", help: "With run/build/dev/test: Use and report the stock default"},
     JetCLIFlagSpec{long: "--measure", help: "With test: Measure `.measure` claims"},
-    // D-DX-BROWSERTEST1=A: native cross-browser test controls.
+    // Native cross-browser test controls.
     JetCLIFlagSpec{long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector"},
     JetCLIFlagSpec{long: "--browser-retries", help: "With test: Retry each browser attempt up to five times"},
     JetCLIFlagSpec{long: "--browser-reporter", help: "With test: Browser report format: text, json, or html"},
@@ -1002,7 +1002,7 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>"},
     JetCLIFlagSpec{long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>"},
     JetCLIFlagSpec{long: "--replay", help: "With inspect/debug: Consume a named replay artifact"},
-    // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
+    // `jet fuzz` (its own bespoke flags below are validated by
     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
     JetCLIFlagSpec{long: "--iterations", help: "With fuzz: Case budget --iterations=<n> (default 1000)"},
     JetCLIFlagSpec{long: "--time", help: "With fuzz: Wall-clock budget in seconds --time=<n>"},

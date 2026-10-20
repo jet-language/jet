@@ -72,17 +72,17 @@ struct SemaTaskGroupState {
     scoped_loan_read_reported: Bool
     current_binding: String?
     time_effects: [TEffectSpan]
-    // D-DETACH1 (Rust `current_binding_name` / `task_spawn_binding_name`):
+    // (Rust `current_binding_name` / `task_spawn_binding_name`):
     // the binding whose initializer is being checked, and the binding a task
     // spawn initializes while its body is checked.
     binding_name: String?{None}
     spawn_binding: String?{None}
-    // D-DETACH1 (Rust `view_borrow_escape_tasks` / `view_capture_tasks`): the
+    // (Rust `view_borrow_escape_tasks` / `view_capture_tasks`): the
     // task bindings whose spawn captured a view borrow (E1106 at `.detach()`)
     // or failed sendability another way (E1103 at `.detach()`).
     detach_view_tasks: [String]{[String]{}}
     detach_unsound_tasks: [String]{[String]{}}
-    // D-CONC-SPAWN1: the lambda about to be checked is a `task` body. Its
+    // The lambda about to be checked is a `task` body. Its
     // lambda check consumes the fact, so nested lambdas never see it.
     spawn_body: Bool{false}
 }
@@ -203,7 +203,7 @@ fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: String?)
     previous
 }
 
-// D-DETACH1 (Rust `report_unsendable` in a task spawn context): an E1102 at a
+// (Rust `report_unsendable` in a task spawn context): an E1102 at a
 // task capture or result records the task binding, so `.detach()` reports the
 // right refusal: a view borrow is E1106, any other sendability failure E1103.
 fn sema_taskgroup_note_detach_problem(context: &SemaCheckContext, view_borrow: Bool) Never! {
@@ -833,15 +833,15 @@ fn sema_taskgroup_is_canonical_task(ty: Type, environment: SemaScopeEnvironment,
     }
 }
 
-// `Task<T>.join()` and `.detach()` consume the handle. D-CONC-FAIL1=A:
+// `Task<T>.join()` and `.detach()` consume the handle.
 // join returns `T !TaskFailure` and blocks (`Time.Wait`). The element T is
 // retained even when it is itself an outcome; only the task's wait failure
-// occupies the outer rail. D-DETACH1: a detach returns nothing.
+// occupies the outer rail. A detach returns nothing.
 fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if (method != "join" && method != "detach") || args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     payload :: sema_taskgroup_task_payload(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    // D-DETACH1 (Rust builtin `Task.detach`): a task whose spawn captured a
+    // (Rust builtin `Task.detach`): a task whose spawn captured a
     // view borrow may outlive it (E1106); one with any other sendability
     // failure is unsound to run unsupervised (E1103).
     if method == "detach" && receiver == .Ident(name, _) {

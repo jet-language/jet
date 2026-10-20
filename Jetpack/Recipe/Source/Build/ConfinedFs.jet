@@ -4,12 +4,12 @@
 //
 // The Rust reference holds directory descriptors through openat/mkdirat/
 // renameat/renameat2/unlinkat FFI. Here the held directory is the ratified
-// Core directory handle (D-CORE-FILEDIR1): every stage allocation,
+// Core directory handle every stage allocation,
 // publication and cleanup names a member relative to that handle, so a
 // concurrent replacement of the path cannot redirect a write into another
-// tree. Atomic exchange is `rename(if_exists: .Swap)` (D-CORE-FILERENAME1),
-// no-follow opens are `links: .Refuse` (D-CORE-FILEOPEN1), and file identity
-// is `Stat.id` (D-CORE-FILESTAT1).
+// tree. Atomic exchange is `rename(if_exists: .Swap)`
+// no-follow opens are `links: .Refuse` and file identity
+// is `Stat.id`.
 
 RECIPE_PRIVATE_MODE :: prep { 0o700 }
 RECIPE_EXCLUSIVE_ATTEMPTS :: prep { 16 }

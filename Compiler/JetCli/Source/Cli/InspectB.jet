@@ -53,7 +53,7 @@ fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: 
 
 // The inspect commands the host carries out because they run another process
 // or evaluate a config surface through the compiler's comptime stage.
-// (`audit` / `sbom` rejoin as host plans with D-FSDIR1, #4697: restore the
+// (`audit` / `sbom` rejoin as host plans with #4697: restore the
 // `Audit`/`Sbom` variants, host arms and supply host of commit bf658e410.)
 enum JetCLIInspectBPlan {
     // EngineDispatch.rs `dispatch`: run `engine` with `argv` on inherited stdio.
@@ -151,7 +151,7 @@ struct JetCLIReservedEntry {
     note: String
 }
 
-// CLI.rs `TEACHING_RESERVED` (D-MEM1 / D-SHAPE-COPY1=A / D-CONST-RETIRE1):
+// CLI.rs `TEACHING_RESERVED`
 // identifiers a user cannot bind because the lexer recognizes them only to
 // redirect to their current spelling.
 JET_CLI_TEACHING_RESERVED :: [JetCLIReservedEntry]{
@@ -593,7 +593,7 @@ fn jet_cli_digest(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCLI
 }
 
 // ---------------------------------------------------------------------------
-// Engine-verb process dispatch (Source/EngineDispatch.rs, D-JPK-DISPATCH1=B):
+// Engine-verb process dispatch (Source/EngineDispatch.rs):
 // `jet` never links the Jetpack engine; it runs the engine binary by name
 // after a protocol handshake. The engine's exit code is `jet`'s, its stdio is
 // this process's, and every flag is forwarded verbatim.
@@ -892,7 +892,7 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
 // the copy ledger is not ported. The lockfile/advisory-feed audit
 // (CmdSupply.rs `run_audit`) starts with `package_input`, which needs the
 // no-follow package resolver (Core directory handles, #3593), so it refuses
-// right after `require_manifest_root` until D-FSDIR1 (#4697); the host port is
+// right after `require_manifest_root` until (#4697); the host port is
 // in commit bf658e410 (InspectB.jet).
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)

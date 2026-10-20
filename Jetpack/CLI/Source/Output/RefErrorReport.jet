@@ -14,7 +14,7 @@ fn cli_ref_error(theme: Theme, error: RefError) Never! -[IO, Time.Wait]> {
             known :: if declared.len() == 0 -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet `sources:`." else -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet. This env declares: {declared.join(", ")}."
             theme.error("`{source}` is not a known source", known, "declare `{source}` in `sources:`, or use a known source name.")
         }
-        // D-MONOREF1=A: a bare name with no separator matched no workspace member.
+        // A bare name with no separator matched no workspace member.
         .AmbiguousBare(raw) -> theme.error("`{raw}` is ambiguous — no workspace member matches", "A bare package name (no `@source` suffix) resolves against the workspace member list. Either this name isn't a member, or there are multiple matches.", "use `package@source` to be explicit.")
         // E1230: a bare or path ref matched more than one workspace member.
         .AmbiguousMember(query, candidates) -> theme.error_coded("E1230", "`{query}` matches more than one workspace member", "A bare or path-form ref resolves against the workspace member index, and this one matches several members: {candidates.join(", ")}.", "address one member by its path (e.g. `packages/logging`), or use `package@source`.")

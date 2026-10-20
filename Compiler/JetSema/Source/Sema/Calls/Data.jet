@@ -219,7 +219,7 @@ fn sema_data_check_encode(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-// D-VALIDATE-DECODE1=B (Rust method_calls.rs `FieldError.under`): one shared
+// (Rust method_calls.rs `FieldError.under`): one shared
 // transform frames every error of a child Result under a path segment while
 // keeping its success type. Generated codecs use it at each field boundary;
 // it is an error-list helper, not another decode API.
@@ -366,7 +366,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             if name == "DBValue" -> return sema_data_try_dbvalue_accessor(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            // D-TYPEDSQL-SINK1=A: `.template()`/`.params()` project the checked
+            // `.template()`/`.params()` project the checked
             // `SQL` value (the Rust reference's TypedText SQLTemplate/SQLParams).
             if name == "SQL" && (method == "template" || method == "params") {
                 if args.len() != 0 -> sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
@@ -377,7 +377,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                 form :: if method == "template" -> TTypedTextForm.SQLTemplate else -> TTypedTextForm.SQLParams
                 return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(ret, TExprKind.HostCall{call: THostCall.TypedText{kind: form, argument: receiver_value}}, span), expected, environment, program, &diagnostics)}
             }
-            // D-TYPEDTEXT1=D: `.text()` reads the escaped HTML as a String copy
+            // `.text()` reads the escaped HTML as a String copy
             // (the Rust reference's `HTML.text` route).
             if name == "HTML" && method == "text" {
                 if args.len() != 0 -> sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
@@ -477,7 +477,7 @@ fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
     }
 }
 
-// D-DATATREE-ORDER1=A: an object is its fields in arrival order, the pair list
+// An object is its fields in arrival order, the pair list
 // `[(key: String, value: Dyn)]`. A list literal or a local of that type is
 // handed over in list order; anything else is a `[String: Dyn]` Map, which
 // hands over its sorted order.
@@ -534,7 +534,7 @@ fn sema_data_dbvalue_payload_live_after(ty: Type, argument: Expr, tail_store: &S
     }
 }
 
-// D-TYPEDTEXT1=D: `HTML.raw("…")` is the audited escape from a runtime
+// `HTML.raw("…")` is the audited escape from a runtime
 // String into checked HTML. `HTML` names the type here; the caller routes
 // only an owner no local value shadows (the Rust reference's typed-text raw).
 fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -579,7 +579,7 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
     }
     expected_payload := sema_data_literal_expected(ty, variant)
     if private_number -> expected_payload = Val(Type.String)
-    // D-DATATREE-ORDER1=A (Rust `is_object_pairs_arg`): a pair-list literal or
+    // (Rust `is_object_pairs_arg`): a pair-list literal or
     // local keeps its arrival order; anything else is read as a Map.
     if variant == "Object" && ty != (Type.Named{name: "DBValue"}) && args.len() == 1 && sema_data_object_pairs_argument(args[0].expr, scopes) -> expected_payload = Val(sema_data_object_pairs_type())
     expected_count := if expected_payload == None -> 0 else -> 1
@@ -802,7 +802,7 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     argument_types := contract.argument_types
     result_type := contract.result_type
     effective_type_args := contract.type_args
-    // D-CONFIG-ENV1: `env.decode<T>()` binds its labeled config fields to their
+    // `env.decode<T>()` binds its labeled config fields to their
     // registered defaults before the shared arity and argument checks.
     if module_name == "core.sys" {
         params := [SemaCallParam]{

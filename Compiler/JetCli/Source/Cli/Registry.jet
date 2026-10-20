@@ -20,7 +20,7 @@ struct JetCLIActionRef {
     action: Int
 }
 
-// One retired command route (D-ONCE-RETIRE1=C). Every row is a semantic
+// One retired command route. Every row is a semantic
 // retirement that teaches E2101 with its current home.
 struct JetCLIRetiredSpec {
     spelling: String
@@ -88,7 +88,7 @@ fn jet_cli_nested_command(group: String, action: String) -> JetCLIActionRef? Nev
 // A bare nested-action word typed as a top-level command (`jet publish`).
 // Group names, top-level commands, and actions that are also canonical at the
 // top level win the bare word; a retired bare word keeps its hard error
-// (D-ONCE-RETIRE1=C); E0043 keeps bare `install` for its own teaching.
+// E0043 keeps bare `install` for its own teaching.
 fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     if jet_cli_command_index(name) != None -> return None
     if jet_cli_is_retired_root(name) -> return None
@@ -351,7 +351,7 @@ fn jet_cli_command_before(left: Int, right: Int, order: String) -> Bool Never! {
     JET_CLI_COMMANDS[left].frequency_rank < JET_CLI_COMMANDS[right].frequency_rank
 }
 
-// The accepted `jet help --sort` values (D-HELP-SORT1=A).
+// The accepted `jet help --sort` values.
 JET_CLI_HELP_ORDERS :: "frequency, az, za"
 
 fn jet_cli_is_help_order(value: String) -> Bool Never! {

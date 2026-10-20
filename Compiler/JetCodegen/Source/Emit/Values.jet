@@ -1104,7 +1104,7 @@ fn jet_rust_emit_parameter_place(ctx: &JetRustEmitContext, function: MIRFunction
             parameter :: jet_rust_emit_find_parameter(function, index)
             if mutable {
                 if parameter.access == MIRAccess.Move -> return name
-                // D-MEMPROVENANCE2: a by-value `ViewMut<T>` parameter is
+                // A by-value `ViewMut<T>` parameter is
                 // itself a `&mut [T]`; a write subrange reborrows through it
                 // (MIRRust parameter_place `mutable_view`).
                 mutable_view := false
@@ -1359,7 +1359,7 @@ fn jet_rust_emit_partial_projection_only(ctx: &JetRustEmitContext, function: MIR
     true
 }
 
-// D-MEM-COPYSEM1: the place a `ReadPlace` value reads when a consumer that
+// The place a `ReadPlace` value reads when a consumer that
 // only inspects the value may read that place instead of a materialized copy
 // (and the copy is never emitted when every consumer does). The place
 // projects fields, payloads, and list indexes from a read parameter, which
@@ -1506,7 +1506,7 @@ fn jet_rust_emit_is_stm_type(ty: MIRType) -> Bool Never! {
     false
 }
 
-// D-MEM-COPYSEM1: true when no operation that may change or release `local`
+// True when no operation that may change or release `local`
 // (body_index.local_writes) runs between the `ReadPlace` defining `value` and
 // any use of `value`, so each use reads in the local's place exactly what the
 // copy would hold. A local that escapes place-based tracking
@@ -2290,7 +2290,7 @@ fn jet_rust_emit_shared_guard_projection_only(ctx: &JetRustEmitContext, function
     used
 }
 
-// D-MEM-COPYSEM1: true when `value` reads a stable place and every consumer
+// True when `value` reads a stable place and every consumer
 // only inspects it (variant tests, payload reads, comparisons of non-scalar
 // operands, prints, a borrowing slice), so the copy is never emitted. A read or
 // address that only feeds consumers borrowing the place itself (builtin routes

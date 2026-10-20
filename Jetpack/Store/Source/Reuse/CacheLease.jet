@@ -5,7 +5,7 @@
 // snapshot file and executable, and the Hangar objects of a Nix closure.
 // Consumers only ever receive descriptor-view paths of those handles.
 //
-// Handles reach a child through D-CORE-PROCINHERIT1: `keep_open_for` pins
+// Handles reach a child through `keep_open_for` pins
 // every held handle at its lease slot (`/proc/self/fd/<slot>` on Linux,
 // `/dev/fd/<slot>` elsewhere), so a path swap after verification cannot
 // redirect the consumer. Slots are unique across the process.
@@ -145,7 +145,7 @@ struct CacheLease {
     }
 
     // Rust clears close-on-exec on every lease handle; here the handles are
-    // pinned into the child spec at their slots (D-CORE-PROCINHERIT1). The
+    // pinned into the child spec at their slots. The
     // live lease lock goes with them, so the lease container outlives the
     // parent while any descendant runs.
     fn keep_open_for(&self, spec: ProcessSpec) -> ProcessSpec Never! {
