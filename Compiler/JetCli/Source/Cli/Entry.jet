@@ -989,9 +989,6 @@ fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootF
 // runnable member is ambiguous unless `-p <member>` picks one; otherwise the
 // nearest package's stock entry (or its command override).
 fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
-    if command == "build" {
-        return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, "project", color)}
-    }
     root :: cli_files.realpath(cwd) ?? return JetCLIEntryFound.Absent
     source :: jet_cli_workspace_source(root, color)
     if source == .Failed(plan) -> return JetCLIEntryFound.Refused{plan: plan}

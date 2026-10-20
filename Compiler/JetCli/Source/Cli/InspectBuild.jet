@@ -2,6 +2,7 @@
 use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision, MIRSourceFile]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
+use core.files as build_files
 use core.math as build_math
 
 fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
@@ -78,6 +79,41 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
     return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
+// `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
+// then compile each selected executable target from its source, named after the target.
+fn jet_cli_build_package(file: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    selection := BuildPlanSelection?{None}
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    if ^prepared == {
+        .Refused(output) -> return output
+        .Prepared(request, _) -> {
+            scope := JetDriverBuildQueryScope{next_session_id: 1}
+            response := jet_driver_query_build_plan(^request, &scope)
+            query := ^response.query
+            if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(response.request, query, file, false, color, false)
+            plan :: query.plan ?? return jet_cli_ice("the completed build query has no plan")
+            selection = Val(build_plan_selection(plan))
+        }
+    }
+    selected :: selection ?? return jet_cli_ice("the completed build query has no plan")
+    if selected.unsupported.len() > 0 {
+        return jet_cli_build_failed("`jet build` doesn't run these build targets yet: {selected.unsupported.join(", ")}", jet_cli_why("E2105"), "select an executable target with `b.default(...)`, or build its source file directly", color)
+    }
+    root :: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
+    loop executable in selected.executables {
+        source_path :: jet_cli_entry_join(root, executable.source)
+        source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
+        built :: jet_cli_compile_build(source_path, source, color, release, threads, invocation, trace_sink)
+        if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+        produced :: "{root}/.jet/build/{jet_cli_stem(source_path)}"
+        named :: "{root}/.jet/build/{executable.name}"
+        if produced != named {
+            build_files.rename(produced, named) ?? return jet_cli_build_failed("couldn't name the built target `{named}`: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
+        }
+    }
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
 fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(^owned_request, &scope)
     request := ^response.request

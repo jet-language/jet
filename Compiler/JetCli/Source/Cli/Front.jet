@@ -52,6 +52,8 @@ enum JetCLIPlan {
     // the `release` profile (MIR Release mode, LIR O2), otherwise `dev`;
     // `invocation` holds the `--allow`/`--deny` rows.
     Build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
+    // A package build its `fn build(b: Build)` in `file` configures.
+    BuildPackage(file: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
     // `jet build --target=sandbox <file>` compile the entry
     // module's `pub fn` rows as a WASM Component guest against the frozen
     // `.jet/cache/api` interface, then build the component with rustc
@@ -581,7 +583,6 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     if args.len() < 2 {
         directory :: cli_files.cwd() ?? "."
         if command == "build" {
-            if jet_cli_has_manifest_above(directory) -> return jet_cli_not_ported(command, color)
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
         }
         notices := [String]{}
@@ -594,7 +595,6 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     }
     target :: args[1]
     if cli_files.is_dir(target) {
-        if command == "build" -> return jet_cli_not_ported("{command} <directory>", color)
         if jet_cli_resolve_directory_target(command, target, member_flag, !show_default, color) == {
             .File(path, _, notice) -> return jet_cli_read_entry(path, command, color, quiet, threads, command == "check", "{notice}{status}", json)
             .Refused(plan) -> return plan
@@ -778,6 +778,23 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
         .Named(name) -> {
             if name != JET_CLI_TARGET_SANDBOX -> return jet_cli_not_ported("build --target={name}", color)
             sandbox = true
+        }
+    }
+    // A package (no file given, or a directory): its `fn build(b: Build)` when it declares one,
+    // otherwise the stock build of its run entry.
+    if !sandbox && (args.len() < 2 || cli_files.is_dir(args[1])) {
+        directory :: if args.len() < 2 -> cli_files.cwd() ?? "." else -> args[1]
+        notices := [String]{}
+        resolved :: jet_cli_resolve_bare_entry("build", directory, jet_cli_option_value(jet_argv, "-p"), !jet_argv.contains("--show-default"), color, &notices)
+        if resolved == {
+            .Entry(found) -> {
+                if (found.callable ?? "") == "build" -> return JetCLIPlan.BuildPackage{file: found.path, color: color, release: release, threads: threads, invocation: invocation, notice: notices.join("")}
+                planned :: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), false)
+                if planned == .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation, notice: notice}
+                return planned
+            }
+            .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
+            .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("build", directory, color))
         }
     }
     entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads, false)

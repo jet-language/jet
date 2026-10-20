@@ -1745,7 +1745,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -1765,6 +1765,10 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Build(file, source, color, release, threads, invocation, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_compile_build(file, source, color, release, threads, invocation, trace_sink)
+        }
+        .BuildPackage(file, color, release, threads, invocation, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_build_package(file, color, release, threads, invocation, trace_sink)
         }
         .BuildSandbox(file, source, color, quiet, threads, notice) -> {
             jet_cli_write_notice(notice)

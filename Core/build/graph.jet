@@ -173,6 +173,53 @@ fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> 
     if build_session_validate(state, default) == .Val(error) -> return {plan: None, diagnostics: [BuildSessionDiagnostic]{error}}
     {plan: Val(BuildSessionPlan{storage: session.storage, default: default}), diagnostics: state.diagnostics}
 }
+// What `jet build` runs: the selected targets (the default and its dependencies, or every
+// target), dependencies first. `executables` compile their first source; `unsupported` names
+// the selected targets the build executor does not run yet (other kinds, or own actions).
+struct BuildPlanExecutable { name: String source: String }
+struct BuildPlanSelection { executables: [BuildPlanExecutable] unsupported: [String] }
+fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
+    permit :: plan.storage.guard_read()
+    order := [Int]{}
+    visiting := [Int]{}
+    pending := [Int]{}
+    if plan.default >= 0 -> &pending.push(plan.default)
+    else {
+        index := permit.value.targets.len() - 1
+        loop index >= 0 {
+            &pending.push(index)
+            index -= 1
+        }
+    }
+    // Iterative post-order: a target follows every dependency it names.
+    loop pending.len() > 0 {
+        current :: pending[pending.len() - 1]
+        if build_session_contains_int(order, current) {
+            _ :: &pending.pop()
+            next
+        }
+        if build_session_contains_int(visiting, current) {
+            _ :: &pending.pop()
+            &order.push(current)
+            next
+        }
+        &visiting.push(current)
+        loop dependency in permit.value.targets[current].deps {
+            if !build_session_contains_int(order, dependency) -> &pending.push(dependency)
+        }
+    }
+    executables := [BuildPlanExecutable]{}
+    unsupported := [String]{}
+    loop index in order {
+        target :: permit.value.targets[index]
+        if target.kind == "executable" && target.actions.len() == 0 && target.sources.len() > 0 {
+            &executables.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy()})
+        } else {
+            &unsupported.push("{target.name} ({target.kind})")
+        }
+    }
+    {executables: executables, unsupported: unsupported}
+}
 fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
     permit :: plan.storage.guard_read()
     build_session_project(permit.value)

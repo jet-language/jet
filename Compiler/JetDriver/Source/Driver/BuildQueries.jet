@@ -193,7 +193,6 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
     entry :: compiled.entry_function ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
     mir :: ^compiled.mir ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
-    if request.eval_config.host_adapter == None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
     session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
     config := jet_eval_runtime_config(request.eval_config)
