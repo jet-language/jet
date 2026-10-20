@@ -6265,10 +6265,8 @@ fn jet_eval_discharge_call_boundary(machine: &JetEvalMachine, args: [JetEvalRunt
 
 
 fn jet_eval_host_target_exchange(machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalRuntimeValue], result_ty: MIRType?, arg_shapes: [JetEvalHostTypeShape], move_permissions: [Bool], static_operand: JetEvalHostStaticOperand?, span: Span) -> JetEvalRuntimeValue? {
-    adapter :: jet_eval_host_adapter_clone(&machine, span) ?? return None
-    result_shape := JetEvalHostTypeShape?{None}
-    if result_ty != None -> result_shape = Val(jet_eval_host_type_shape(&machine, result_ty, span) ?? return None)
-    host_args :: jet_eval_host_arguments(&machine, args, move_permissions, span) ?? return None
+    // A fn-build invocation's Build calls go to its build adapter alone; every other host
+    // route needs the invocation's general host adapter.
     build_adapter := JetEvalBuildHostAdapter?{None}
     if target == .Prelude(row)
         && row.module_name == "core.host"
@@ -6276,9 +6274,13 @@ fn jet_eval_host_target_exchange(machine: &JetEvalMachine, target: JetEvalHostCa
         && machine.config.build_host_adapter == .Val(host) {
         build_adapter = Val(host.clone_adapter())
     }
+    result_shape := JetEvalHostTypeShape?{None}
+    if result_ty != None -> result_shape = Val(jet_eval_host_type_shape(&machine, result_ty, span) ?? return None)
+    host_args :: jet_eval_host_arguments(&machine, args, move_permissions, span) ?? return None
     reply :: if build_adapter == .Val(owned) -> {
         owned.build_call(&machine, target, ^host_args, span)
     } else -> {
+        adapter :: jet_eval_host_adapter_clone(&machine, span) ?? return None
         adapter.host_call(&machine, target, static_operand, ^host_args, result_shape, arg_shapes, span)
     } ?? {
         jet_eval_unsupported(&machine, span, "MIR ambient route is unavailable to the canonical host adapter")
