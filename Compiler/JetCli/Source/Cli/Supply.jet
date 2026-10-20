@@ -1,6 +1,9 @@
 // Source/CmdSupply.rs package_input and run_sbom. Supply commands may inspect
 // an extracted Package without an entry; dependency commands still require the
 // entry. Both use the SAME checked Package/facts reader and Publication model.
+use jet_pkg_model.[WorkspaceDeclarationCache, pkg_lock_load, pkg_package_facts_for_root]
+use jet_driver.[JET_DRIVER_EXIT_OK, JetDriverVerbOutput]
+
 fn jet_cli_supply_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
     entry :: jet_cli_package_input_entry(root, color, json)
     if cli_files.is_file(entry.path) {

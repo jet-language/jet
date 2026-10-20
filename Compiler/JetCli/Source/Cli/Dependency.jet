@@ -3,6 +3,19 @@
 // The front owns root discovery and the distinct script-lock/toolchain routes.
 // Success is plain stdout even in machine mode; source-owned parse/fetch errors
 // remain direct, uncolored diagnostics, unlike spanless CLI input/IO errors.
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+use jet_pkg_model.[
+    AuthorityResolver, DepSpec, GitSelector, InlinePackageBlock, LockFile, Manifest, PackageFacts,
+    WorkspaceDeclarationCache, pkg_add_dependency, pkg_binder_slice, pkg_extract_inline_package,
+    pkg_lock_load, pkg_manifest_path_checked, pkg_package_facts_for_entry, pkg_remove_dependency,
+    pkg_to_manifest,
+]
+use jetpack_foundation.[
+    FoundationFileAuthority, FoundationPublicationError, MAX_TREE_FILE_BYTES,
+    foundation_open_file_authority, foundation_write_file_nofollow_at_root,
+]
+use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+
 #Error
 struct JetCLIDependencyError { output: JetDriverVerbOutput }
 struct JetCLIPackageInput {

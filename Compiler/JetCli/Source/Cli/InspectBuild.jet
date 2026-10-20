@@ -1,9 +1,16 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
-use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_driver.[
+    JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
+    JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan,
+    jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
+    jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
+]
 use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision, MIRSourceFile]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
 use core.files as build_files
 use core.math as build_math
+use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
 
 fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
     rows := [JetCLIStatusValue]{}

@@ -1,7 +1,12 @@
 // Source/CmdGates.rs: load-only ledger consumer. Package/lock rows belong to
 // the canonical driver/provider; the CLI neither checks bodies nor parses locks.
 use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverGateQueryResult, JetDriverSourceQueryModule, JetDriverVerbOutput, jet_driver_gate_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse, gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at, diagnostic_render_all, diagnostic_from_registry]
+use jet_foundation.[
+    GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse,
+    gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at,
+    diagnostic_render_all, diagnostic_from_registry, MIRSourceFile,
+]
+use jetpack_trust.[TrustRecord]
 
 fn jet_cli_gates_entry(args: [String]) -> String? Never! {
     skip := false

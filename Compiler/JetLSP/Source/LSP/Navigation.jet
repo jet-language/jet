@@ -1,9 +1,13 @@
 use jet_semindex.[SymbolDB, SymDef, SymRef, SymKind, DefinitionAnchor, CallableFactAvailability, CallableFactUnavailable]
-use jet_foundation.[Span, Token, TokKind, Syntax]
+use jet_foundation.[
+    Span, Token, TokKind, Syntax, Diagnostics, Diagnostic, TextEdit, foundation_json_escape,
+]
 use Compiler.Comptime.Build.[BuildPlan]
 use Compiler.Lexer.[lex_generated, without_comments]
 use jet_foundation.Diagnostics.[Diagnostic, TextEdit]
 use jet_foundation.Syntax.[JET_KEYWORDS, JET_TYPES]
+use jet_lexer.[Token, lex_generated]
+use jet_devserver.[edit]
 
 // Rust: Source/LSP/Features.rs:1814
 fn enum_variant_definition_at(db: SymbolDB, tokens: [Token], path: String, index: USize) -> SymDef? {

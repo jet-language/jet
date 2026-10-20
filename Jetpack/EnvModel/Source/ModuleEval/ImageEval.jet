@@ -2,6 +2,15 @@
 // and `image.<name>: { … }` contributions and capture them as `SystemPlan`
 // and `ImagePlan`. OCI realization consumes the typed image plan; system and
 // disk-image realization remain jetos-owned.
+use jetpack_foundation.[
+    IMAGE_BASE_FN, IMAGE_FIELD_BASE, IMAGE_FIELD_ENTRYPOINT, IMAGE_FIELD_ENV_VARS,
+    IMAGE_FIELD_EXPOSE, IMAGE_FIELD_FILES, IMAGE_FIELD_FORMAT, IMAGE_FIELD_HEALTH, IMAGE_FIELD_KIND,
+    IMAGE_FIELD_SERVICES, IMAGE_FIELD_USER, IMAGE_FORMAT_ISO, IMAGE_FORMAT_QCOW, IMAGE_FORMAT_RAW,
+    IMAGE_KIND_ISO, IMAGE_KIND_OCI, PLATFORM_ARCH_ARM64, PLATFORM_ARCH_X64, PLATFORM_OS_LINUX,
+    SERVICE_FIELD_ENABLE, SYSTEM_FIELD_TARGET, TYPE_SYSTEM,
+]
+use jet_foundation.[CtValue, Expr, ImageLit, ServiceEntry, Span, SystemLit, ast_comptime_value_show]
+use jet_pkg_model.[Pkg, pkg_bytes_text]
 
 // The fields an `Image` record may carry besides `from:`/`format:`/`target:`.
 enum EnvModelImageField {

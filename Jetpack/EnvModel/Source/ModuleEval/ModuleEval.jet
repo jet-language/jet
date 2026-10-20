@@ -3,6 +3,17 @@
 // the text-level Pkg-sugar parser for `packages:`), and merge the resulting
 // contributions through the §6 engine.
 use core.sys as envmodel_module_sys
+use jet_foundation.[
+    CtValue, DIAGNOSTIC_ERROR, Diagnostic, Expr, Func, HostEntry, Item, ModuleDecl, Program, Span,
+    SystemFieldValue, ast_comptime_value_show,
+]
+use jet_lexer.[
+    STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_STRING, Token, TokenTables, lex, lex_config,
+    lexer_without_comments, token_decoded, token_string_parts,
+]
+use jet_parser.[parse_config_with_source]
+use jetpack_foundation.[COMPTIME_MARK, DEFAULT_SOURCE, REF_PROVIDER_AT, TYPE_STRING]
+use jet_pkg_model.[EntryContribution, MergeError, MergedEntry, Pkg, pkg_bytes_text, pkg_merge_entry]
 
 // Parse `src` and evaluate every enabled module it declares. `base_dir`
 // resolves `embed_file` inside contribution expressions, same as ordinary

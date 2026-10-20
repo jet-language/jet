@@ -17,6 +17,19 @@
 //   E0995: the file has no `module workspace { … }` body
 //   E0996: `members:` evaluated to something other than a list of strings
 //   E0997: `find("…")` in `members:` points at a missing directory
+use jet_pkg_model.[
+    AuthorityError, AuthorityResolver, ComptimeInput, OverlayError, OverlayPolicy,
+    WorkspaceDeclarationCache, WorkspacePlan, WorkspacePlanMember, WorkspaceSource,
+    WorkspaceSourceRole, checked, pkg_e0995_no_workspace_module, pkg_parse_workspace_policy,
+    pkg_sha256_hex, pkg_strip_overlay_policy,
+]
+use jet_foundation.[
+    CtValue, Diagnostic, Expr, Func, Item, ModuleDecl, Span, comptime_walk_calls,
+    diagnostic_from_registry, expr_span,
+]
+use jet_lexer.[lex]
+use jet_parser.[parse_lexed_with_source, parser_line_starts]
+use jetpack_foundation.[BUILTIN_FIND, NS_WORKSPACE, PACKAGE_FILE]
 
 // A workspace source and the plan evaluated from its still-open snapshot.
 struct WorkspaceSnapshot {

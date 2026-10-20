@@ -1,6 +1,16 @@
 // The one structural reader of `package.jet` Package and Config carriers
 // (Package/mod.rs `parse_common` and its field readers). There is no second,
 // legacy-vocabulary parser.
+use jet_foundation.[Span, jet_ring_parse_manifest_layer]
+use jet_lexer.[
+    Lexed, TOKEN_BLOCK_COMMENT, TOKEN_DOT, TOKEN_EOF, TOKEN_LBRACE, TOKEN_LINE_COMMENT, Token, lex,
+]
+use jetpack_foundation.[
+    BUILD_ENTRY_FN, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES, MANIFEST_BLOCK_BUILD,
+    MANIFEST_BLOCK_DEPS, MANIFEST_BLOCK_MEMBERS, MANIFEST_BLOCK_OUTPUTS, MANIFEST_BLOCK_SETTINGS,
+    MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION, OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE,
+    OUTPUT_FIELD_NATIVE, SYSTEM_FIELD_TARGET,
+]
 
 impl PackageFacts {
     // Parse the canonical `package.jet` root shape, validating guarantees and

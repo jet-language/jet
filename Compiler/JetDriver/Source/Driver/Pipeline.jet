@@ -1,6 +1,39 @@
 // Checked Jet front-end pipeline: parse, check, lower, and assemble package MIR.
 use jet_codegen.[TCostReport]
-use jet_sema.[sema_cost_coverage]
+use jet_sema.[
+    sema_cost_coverage, JET_CANONICAL_EFFECT_MODULE_PATH, JET_CANONICAL_EFFECT_PACKAGE_IDENTITY,
+    SemaBuildFacts, SemaCheckedForeignFunction, SemaCheckedTextEvaluation,
+    SemaComptimeAvailableConstants, SemaComptimeDeclarationStage, SemaComptimeFunctionResult,
+    SemaComptimeItemCheck, SemaComptimeItemKind, SemaComptimeItemRequest, SemaComptimeItemSource,
+    SemaComptimeItemValue, SemaComptimeValueSites, SemaForeignProviderInput, SemaFunctionMemoryPlan,
+    SemaGraphTrail, SemaGraphModuleResult, SemaGraphResult, SemaGraphCheckingFacts,
+    SemaCheckedMemoryFacts, sema_comptime_reflection_layout_engine, sema_checked_layout_projections,
+    SemaLookupCounters, SemaRegistrationForeignHandleFacts, SemaRegistrationGraph,
+    SemaRegistrationImport, SemaRegistrationImportBinding, SemaRegistrationModuleInput,
+    SemaRegistrationPackagePolicy, SemaProgramTables, SemaScopeEnvironment, SemaScopeProbe,
+    SemaSourceLocation, SemaSourceOrigin, SemaSourceSegment, sema_check_comptime_function,
+    check_pure_program_root, sema_check_comptime_item, sema_collect_comptime_declarations,
+    sema_checked_shape_defaults, sema_comptime_append_checked_function_to_module,
+    sema_comptime_available_constants, sema_comptime_available_constants_add,
+    sema_comptime_bare_module, sema_comptime_body_work_flush, sema_comptime_checked_text_source,
+    sema_comptime_dependency_cycle_diagnostic, sema_comptime_environment,
+    sema_comptime_environment_publish_body_values, sema_comptime_find_function_source,
+    sema_comptime_graph_apply_sites, sema_comptime_graph_apply_values,
+    sema_comptime_graph_with_values, sema_comptime_modules_with_values,
+    sema_comptime_precheck_items, sema_comptime_probe_init, sema_comptime_staged_constant_rows,
+    sema_comptime_value_sites, sema_comptime_value_sites_empty, sema_finalize_graph,
+    sema_finalize_registration_graph, sema_output_resolve, SemaOutputIntent,
+    sema_function_memory_plan_from_graph, sema_hardware_use_merge, sema_hardware_use_snapshot,
+    sema_host_hook_access, sema_graph_trail_init, sema_graph_trail_undo,
+    sema_graph_result_take_checking_facts, sema_name_build_facts, sema_name_structure_facts,
+    sema_registration_lookup_counts, sema_registration_original_error_module,
+    sema_registration_prepare_graph, SEMA_PRELUDE_ERROR_SOURCE_PATH,
+    sema_registration_callable_declaration, sema_marker_is_guest_export, sema_source_location_at,
+    SemaExportBoundary, SemaPluginFrozenSnapshotInput, sema_export_unsupported_diagnostic,
+    sema_sandbox_export_functions, sema_sandbox_freeze_diagnostics, sema_sandbox_interface_snapshot,
+    sema_sandbox_parse_snapshot, sema_sandbox_snapshot_package, sema_sandbox_snapshot_text,
+    SemaCompilerModuleSource, sema_graph_result_release_rows,
+]
 use jet_foundation.[
     CanonicalPassJournal,
     CanonicalPassOptions,
@@ -141,6 +174,9 @@ use jet_foundation.[
     tir_each_expr_child,
     tir_each_stmt_child,
     TTypeDef,
+    MIRStructureFact,
+    TConstantDef,
+    TLocal,
 ]
 use jet_parser.[
     parse_source,
