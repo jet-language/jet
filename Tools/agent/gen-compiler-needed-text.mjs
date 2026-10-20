@@ -83,7 +83,7 @@ for (const name of ['ALPHABETIC', 'NUMERIC']) {
       const part = rows.slice(at, at + 96), index = chunks.length;
       const helper = `${symbol}_${index}`;
       chunks.push([part[0][0], part.at(-1)[1], helper]);
-      writeFileSync(root + `Compiler/JetRuntime/Source/CompilerNeededText${label}_${index}.jet`,
+      writeFileSync(root + `Compiler/JetRuntime/Source/CompilerNeededText${label}${index}.jet`,
         header + `fn ${helper}(cp: I64) -> Bool Never! {\n${tree(part)}}\n`);
     }
   }
