@@ -35,6 +35,14 @@ struct SemaHTTPRoutePathField {
     catch_all: Bool
 }
 
+// A route argument as registration sees it: its compile-time pattern, and
+// whether it was refused as an interpolated literal or an invalid pattern.
+struct SemaHTTPRouteLiteral {
+    pattern: String?
+    interpolated: Bool
+    invalid: Bool
+}
+
 struct SemaHTTPRouteResponse {
     status: Int
     schema: String?
@@ -351,6 +359,19 @@ fn sema_http_route_interpolated_source(expression: Expr) -> String? {
 
 fn sema_http_route_invalid_diagnostic(pattern: String, reason: String, span: Span) -> Diagnostic {
     sema_error("E2805", span, "invalid HTTP route `{pattern}`: {reason}", "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree", "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`")
+}
+
+// Router, mux and App route registrations refuse an interpolated or invalid
+// route literal before any other argument check.
+fn sema_http_route_check_literal(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaHTTPRouteLiteral {
+    if sema_http_route_interpolated_source(argument.expr) == .Val(source) {
+        &diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{{name}}` parameter spelling", argument.span))
+        return SemaHTTPRouteLiteral{pattern: None, interpolated: true, invalid: false}
+    }
+    pattern :: sema_http_route_constant_string(argument.expr, environment, program, scopes) ?? return SemaHTTPRouteLiteral{pattern: None, interpolated: false, invalid: false}
+    reason :: sema_http_route_pattern_error(pattern) ?? return SemaHTTPRouteLiteral{pattern: Val(pattern), interpolated: false, invalid: false}
+    &diagnostics.push(sema_http_route_invalid_diagnostic(pattern, reason, argument.span))
+    SemaHTTPRouteLiteral{pattern: Val(pattern), interpolated: false, invalid: true}
 }
 
 fn sema_http_route_json_quote(value: String) -> String Never! {
@@ -951,21 +972,17 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
     if receiver_name == "HTTPMux" && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     supported := if receiver_name == "HTTPRouter" -> method == "get" || method == "post" || method == "put" || method == "delete" else -> method == "get" || method == "post" || method == "put" || method == "delete" || method == "patch" || method == "head" || method == "options"
     if !supported -> return SemaMethodSpecialCheck{handled: false, value: None}
+    literal :: if updated_args.len() > 0 -> sema_http_route_check_literal(updated_args[0], environment, program, scopes, &diagnostics) else -> SemaHTTPRouteLiteral{pattern: None, interpolated: false, invalid: false}
     if updated_args.len() != 2 {
         &diagnostics.push(sema_call_arity_diagnostic(method, 2, updated_args.len(), false, span))
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     path_value :: sema_call_http_check_value(updated_args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    interpolated_source :: sema_http_route_interpolated_source(updated_args[0].expr)
-    static_pattern :: sema_http_route_constant_string(updated_args[0].expr, environment, program, scopes)
-    dynamic :: static_pattern == None
-    pattern :: static_pattern ?? ""
-    pattern_error :: if dynamic -> None else -> sema_http_route_pattern_error(pattern)
-    if interpolated_source == .Val(source) -> &diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{{name}}` parameter spelling", updated_args[0].span))
-    if pattern_error == .Val(reason) -> &diagnostics.push(sema_http_route_invalid_diagnostic(pattern, reason, updated_args[0].span))
+    dynamic :: literal.pattern == None
+    pattern :: literal.pattern ?? ""
     if dynamic && receiver_name != "HTTPMux" {
-        if interpolated_source == None -> &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
+        if !literal.interpolated -> &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !dynamic && sema_expr_place_root_ident(receiver) == .Val(root) {
@@ -978,7 +995,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             }
         }
     }
-    if pattern_error == None {
+    if !literal.invalid {
         path_fields :: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
         handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, context.host_hooks) ?? {
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `(id: Int, req: HTTPRequest) -> ...` or pass a named function"))
@@ -1043,7 +1060,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         loop parameter in handler_shape.params -> &handler_param_types.push(parameter.ty)
         handler_type := Type.Fn{params: handler_param_types, ret: Val(result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         callback :: sema_check_expression_with_lambda_escapes(updated_args[1].expr, Val(handler_type), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        if !sema_call_http_check_middleware_callback(callback, updated_args[1].expr, environment, program, &scopes, &state, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if !sema_call_http_check_middleware_callback(callback, environment, program, &scopes, &state, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         updated_args[1].convention = AccessConvention.Move
         params := [SemaCallParam]{SemaCallParam{label: "path", name: "path", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}, SemaCallParam{label: "handler", name: "handler", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(handler_type), variadic: false}}
         ownership := sema_ownership_check_method_call(&state, "{receiver_name}.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)

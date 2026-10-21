@@ -560,7 +560,9 @@ fn sema_call_http_method_effect(name: String, method: String, count: Int) -> Str
     None
 }
 
-fn sema_call_http_check_middleware_callback(value: TExpr, source: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+// Only a lambda's captures cross the handler boundary; a named function or
+// callable value carries no captured state to prove.
+fn sema_call_http_check_middleware_callback(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if value.kind == {
         .Lambda(lambda) -> {
             updated_lambda := lambda
@@ -583,17 +585,7 @@ fn sema_call_http_check_middleware_callback(value: TExpr, source: Expr, environm
         }
         else -> {}
     }
-    source_is_unbound := if source == {
-        .Ident(name, _) -> sema_scope_resolve_index(scopes, name) == None
-        else -> false
-    }
-    if source_is_unbound {
-        return true
-    }
-    problem := sema_ownership_crossing_problem_for_expr(source, value.ty, SemaSendCrossing.HTTPHandler, true, environment, program, scopes, state, context) ?? return true
-    value_name := if source == {.Ident(name, _) -> name else -> "this value"}
-    &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, value.ty, problem, SemaSendCrossing.HTTPHandler, value.span))
-    false
+    true
 }
 
 fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -610,7 +602,7 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
         &diagnostics.push(sema_type_mismatch(callback_type, callback.ty, updated_args[0].span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_call_http_check_middleware_callback(callback, updated_args[0].expr, environment, program, &scopes, &state, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_call_http_check_middleware_callback(callback, environment, program, &scopes, &state, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args[0].convention = AccessConvention.Move
     parameter := SemaCallParam{label: "middleware", name: "middleware", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(callback_type), variadic: false}
     ownership := sema_ownership_check_method_call(&state, "middleware", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)

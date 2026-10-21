@@ -794,6 +794,7 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
     if receiver_value.ty != (Type.Named{name: "App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     arity :: sema_app_method_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if (method == "route" || method == "page" || method == "layout") && args.len() > 0 -> _ := sema_http_route_check_literal(args[0], environment, program, scopes, &diagnostics)
     if args.len() != arity {
         &diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
