@@ -6175,7 +6175,10 @@ fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, program:
         else -> panic("checked variant pattern subject is not its nominal owner")
     }
     if generic_names.len() != generic_args.len() -> panic("checked variant pattern has incomplete owner type arguments")
-    sema_inference_substitute_type(raw_type, generic_names, generic_args)
+    // The payload type is spelled in the enum's own module: qualify it there,
+    // so a pattern in another package projects the canonical type.
+    qualified :: jet_codegen_qualify_type(raw_type, program.nominals, program.modules[owner_rows[0].module_index].module_identity, generic_names)
+    sema_inference_substitute_type(qualified, generic_names, generic_args)
 }
 
 // The MIR enum a checked variant pattern tests and projects. A union subject
