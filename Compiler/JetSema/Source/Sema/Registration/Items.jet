@@ -3504,6 +3504,14 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // check_guest_symbol_collisions: the C guest boundary is checked once every
     // declaration is registered, before any body is checked.
     sema_guest_check_surfaces(&graph)
+    // Rust CheckInner BudgetSpecs::validate_bundle: every performance role
+    // elaborates into its canonical typed budgets once every declaration is
+    // registered.
+    budget_findings :: sema_budget_validate_graph(graph)
+    loop finding in budget_findings {
+        sema_registration_push_graph_diagnostic(&graph, finding.module_index, finding.diagnostic)
+        graph.complete = false
+    }
     graph
 }
 
