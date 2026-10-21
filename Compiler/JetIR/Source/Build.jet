@@ -69,8 +69,9 @@ struct IRBuilder {
     deferred: [IRDeferredCall]
 }
 
-// The Call at instruction `at` names the checked function `key`.
-struct IRDeferredCall { at: Int, key: String }
+// The Call at instruction `at` of function `function` (-1: the function
+// being built) names the checked function `key`.
+struct IRDeferredCall { at: Int, key: String, function: Int{-1} }
 
 // The checked functions every IR function id may name, by key, and the
 // checked type declarations, by key and by name. A generic function is
@@ -147,7 +148,7 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], constant_defs: ^[
         if function.kind == .TraitMethod(_, _, owner_type, trait_name, _) {
             trait_short :: ir_short_name(trait_name.key)
             selected :: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
-            if selected && function.generic_params.len() == 0 {
+            if selected {
                 key :: "{trait_short}|{ir_render_type_key(type_rows, types, owner_type)}"
                 if render_impls.get(key) == None -> render_impls[key] = index
             }
@@ -411,7 +412,12 @@ fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
 
 fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
     loop call in b.deferred {
-        b.f.a[call.at] = ir_function_id(&m, &p, call.key, [Type]{}) ?? -1
+        callee :: ir_function_id(&m, &p, call.key, [Type]{}) ?? -1
+        if call.function >= 0 {
+            m.functions[call.function].a[call.at] = callee
+        } else {
+            b.f.a[call.at] = callee
+        }
     }
 }
 
@@ -648,28 +654,47 @@ fn ir_location(m: &IRModule, b: &IRBuilder, line: Int) -> [Int] Never! {
 }
 
 // A member of the aggregate at `base`: a nested aggregate is its address,
-// a scalar a load (not owned: the aggregate keeps it).
+// a scalar a load (not owned: the aggregate keeps it); a recursive edge is
+// read through its wrapper box.
 fn ir_member_read(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember) -> Int Never! {
+    holder := base
+    offset := member.offset
+    if member.boxed {
+        pointer_row :: ir_pointer_row(&m)
+        holder = ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Load, holder, base, member.offset, -1, b.line)
+        offset = 0
+    }
     slot :: ir_temp(&m, &b, member.ty)
     if m.types[member.ty].kind == .Aggregate {
-        ir_emit(&b.f, IROp.Offset, slot, base, member.offset, -1, b.line)
+        ir_emit(&b.f, IROp.Offset, slot, holder, offset, -1, b.line)
     } else {
-        ir_emit(&b.f, IROp.Load, slot, base, member.offset, -1, b.line)
+        ir_emit(&b.f, IROp.Load, slot, holder, offset, -1, b.line)
     }
     slot
 }
 
-// Writes `value` into the member of the aggregate at `base`.
+// Writes `value` into the member of the aggregate at `base`; a recursive
+// edge gets a wrapper box of its own.
 fn ir_member_write(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
+    holder := base
+    offset := member.offset
+    if member.boxed {
+        pointer_row :: ir_pointer_row(&m)
+        size :: m.types[member.ty].size
+        holder = ir_box_alloc(&m, &b, if size < 8 -> 8 else -> size, pointer_row)
+        ir_emit(&b.f, IROp.Store, -1, base, member.offset, holder, b.line)
+        offset = 0
+    }
     if m.types[member.ty].kind == .Aggregate {
         address :: ir_temp(&m, &b, member.ty)
-        ir_emit(&b.f, IROp.Offset, address, base, member.offset, -1, b.line)
+        ir_emit(&b.f, IROp.Offset, address, holder, offset, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, address, value, m.types[member.ty].size, b.line)
         b.fresh[value] = false
         return
     }
     owned :: ir_own(&m, &b, value)
-    ir_emit(&b.f, IROp.Store, -1, base, member.offset, owned, b.line)
+    ir_emit(&b.f, IROp.Store, -1, holder, offset, owned, b.line)
     b.fresh[owned] = false
 }
 
@@ -682,7 +707,7 @@ fn ir_member_of(m: &IRModule, p: IRProgram, b: IRBuilder, base: Int, name: Strin
     } else {
         nominal :: ir_nominal_name(ty) ?? return None
         row :: ir_type_def(p, nominal) ?? return None
-        members = ir_struct_members(&m, p, row) ?? return None
+        members = ir_struct_members(&m, p, row, ir_type_args(ty)) ?? return None
     }
     loop member in members {
         if member.name == name -> return Val(member)
@@ -850,6 +875,15 @@ fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span
         return ir_result_box(&m, p, &b, target, true, slot)
     }
     if have_box && !want_box -> return ir_load_at(&m, &b, slot, 8, row)
+    // A member value where its structural union is wanted (a `[A | B]`
+    // literal's element) is boxed as that member's variant (widen_to_union).
+    union_ty :: m.types[row].ty
+    member_ty :: m.types[have].ty
+    if ir_untag(union_ty) == .Union(_) {
+        widens := true
+        if ir_untag(member_ty) == .Union(_) -> widens = false
+        if widens -> return ir_union_box(&m, p, &b, slot, member_ty, union_ty, span)
+    }
     if m.types[have].kind == m.types[row].kind && m.types[have].size == m.types[row].size -> return slot
     ir_fail_slot(&b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
 }

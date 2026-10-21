@@ -5,7 +5,7 @@
 // its variant name, Some/Ok as Present, None as a clean failure and Err as a
 // told one, a fixed-width integer as an Int.
 use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TConstantDef, TFunc, TTypeDef, Type, type_name]
-use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IRTypeKind, ir_build_program, ir_enum_def, ir_list_stride, ir_program_new, ir_struct_members, ir_tuple_members, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IRTypeKind, ir_build_program, ir_enum_def, ir_list_stride, ir_program_new, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 
 // What one IR evaluation produced: its value (when it completed with data),
 // the failure it reports, its output, and the builder failures that kept it
@@ -88,7 +88,10 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
             return Val(TComptimeValue.String{value: text})
         }
         .Word -> {
-            if ir_enum_def(m, p, row) == .Val(definition) -> return jet_eval_ir_enum_data(&m, p, &s, definition, word, word, false)
+            if ir_enum_def(m, p, row) == .Val(definition) {
+                args :: ir_row_args(m, row)
+                return jet_eval_ir_enum_data(&m, p, &s, definition, args, word, word, false)
+            }
             return Val(TComptimeValue.Int{value: word})
         }
         .Pointer -> {
@@ -110,7 +113,8 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
             }
             if ir_enum_def(m, p, row) == .Val(definition) {
                 discriminant :: jet_eval_ir_read(&s, word, 8) ?? return None
-                return jet_eval_ir_enum_data(&m, p, &s, definition, discriminant, word, true)
+                args :: ir_row_args(m, row)
+                return jet_eval_ir_enum_data(&m, p, &s, definition, args, discriminant, word, true)
             }
             return jet_eval_ir_transport_fail(&s, checked)
         }
@@ -140,7 +144,7 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
                 else -> { return jet_eval_ir_transport_fail(&s, checked) }
             }
             definition :: ir_type_def(p, name) ?? return jet_eval_ir_transport_fail(&s, checked)
-            members :: ir_struct_members(&m, p, definition) ?? return jet_eval_ir_transport_fail(&s, checked)
+            members :: ir_struct_members(&m, p, definition, ir_type_args(checked)) ?? return jet_eval_ir_transport_fail(&s, checked)
             output :: jet_eval_ir_fields(&m, p, &s, word, members) ?? return None
             return Val(TComptimeValue.Struct{type_name: p.types[definition].name.copy(), fields: output})
         }
@@ -191,9 +195,9 @@ fn jet_eval_ir_member_value(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base
     jet_eval_ir_data(&m, p, &s, word, member.ty)
 }
 
-// An enum case: variant `index` of declaration `definition`, its payload read
-// from the box at `boxed` when the enum is boxed.
-fn jet_eval_ir_enum_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, definition: Int, index: Int, boxed: Int, has_box: Bool) -> TComptimeValue? {
+// An enum case: variant `index` of declaration `definition` instanced at
+// `type_args`, its payload read from the box at `boxed` when the enum is boxed.
+fn jet_eval_ir_enum_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, definition: Int, type_args: [Type], index: Int, boxed: Int, has_box: Bool) -> TComptimeValue? {
     declaration :: p.types[definition]
     if declaration.kind == .Enum(variants, _) {
         if index < 0 || index >= variants.len() {
@@ -202,7 +206,7 @@ fn jet_eval_ir_enum_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, definit
         }
         args := [TComptimeEnumArg]{}
         if has_box {
-            members :: ir_variant_members(&m, p, definition, index) ?? return jet_eval_ir_transport_fail(&s, Type.Named{name: declaration.name.copy()})
+            members :: ir_variant_members(&m, p, definition, type_args, index) ?? return jet_eval_ir_transport_fail(&s, Type.Named{name: declaration.name.copy()})
             single :: variants[index].payload == .Single(_)
             loop member in members {
                 value :: jet_eval_ir_member_value(&m, p, &s, boxed, member) ?? return None

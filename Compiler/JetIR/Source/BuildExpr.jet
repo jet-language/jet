@@ -674,7 +674,6 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             storage :: ir_fresh_temp(&m, &b, ty)
             ir_emit(&b.f, IROp.StackAddress, storage, m.types[ty].size, 8, -1, b.line)
             loop field in fields {
-                if field.boxed -> return ir_fail_slot(&b, span, "boxed struct field")
                 member :: ir_member_of(&m, p, b, storage, field.field.name) ?? return ir_fail_slot(&b, span, "struct field {field.field.name}")
                 value :: ir_expr(&m, &p, &b, field.value)
                 if ir_failed(b) -> return -1
@@ -1430,8 +1429,23 @@ fn ir_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, place: TExpr, ba
         if ir_kind_of(m, b, base) != .Aggregate -> return ir_fail_slot(&b, span, "write of a field of {ir_type_name(receiver.ty)}")
         member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "write of field {field.name}")
         pointer_row :: ir_pointer_row(&m)
+        holder := base
+        offset := member.offset
+        if member.boxed {
+            // A recursive edge's value lives in its wrapper box; a write
+            // place gets a wrapper of its own, since a copy of the
+            // aggregate shares the old one.
+            size :: m.types[member.ty].size
+            width :: if size < 8 -> 8 else -> size
+            old :: ir_temp(&m, &b, pointer_row)
+            ir_emit(&b.f, IROp.Load, old, base, member.offset, -1, b.line)
+            holder = ir_box_alloc(&m, &b, width, pointer_row)
+            ir_emit(&b.f, IROp.CopyBytes, -1, holder, old, width, b.line)
+            ir_emit(&b.f, IROp.Store, -1, base, member.offset, holder, b.line)
+            offset = 0
+        }
         address :: if m.types[member.ty].kind == .Aggregate -> ir_temp(&m, &b, member.ty) else -> ir_temp(&m, &b, pointer_row)
-        ir_emit(&b.f, IROp.Offset, address, base, member.offset, -1, b.line)
+        ir_emit(&b.f, IROp.Offset, address, holder, offset, -1, b.line)
         return address
     }
     if place.kind == .Index(base, index, kind, _, _, _) {
@@ -1619,6 +1633,7 @@ fn ir_pattern_test(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, sha
     if shape == {
         .Variant(variant, bindings, _, _) -> {
             subject_type :: b.f.slot_type[subject]
+            subject_args :: ir_row_args(m, subject_type)
             row :: ir_enum_def(m, p, subject_type) ?? return ir_fail_slot(&b, span, "variant pattern on a non-enum subject")
             index :: ir_variant_index(p, row, variant) ?? return ir_fail_slot(&b, span, "variant pattern {variant} not in its enum")
             discriminant :: ir_enum_tag_of(&m, &b, subject)
@@ -1627,7 +1642,7 @@ fn ir_pattern_test(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, sha
             result :: ir_temp(&m, &b, bool_row)
             ir_emit(&b.f, IROp.Eq, result, discriminant, index_slot, -1, b.line)
             if bindings.len() > 0 {
-                members :: ir_variant_members(&m, p, row, index) ?? return ir_fail_slot(&b, span, "variant pattern {variant} payload")
+                members :: ir_variant_members(&m, p, row, subject_args, index) ?? return ir_fail_slot(&b, span, "variant pattern {variant} payload")
                 loop (position, binding) in bindings {
                     if position >= members.len() -> return ir_fail_slot(&b, span, "variant pattern {variant} with more bindings than members")
                     member :: members[position]
@@ -1680,7 +1695,7 @@ fn ir_pattern_test(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, sha
                         member :: ir_member_of(&m, p, b, subject, name) ?? return ir_fail_slot(&b, span, "struct pattern field {name}")
                         if local != "_" && local != "" && m.types[member.ty].kind != .Unit {
                             slot :: ir_new_slot(&b, member.ty, IRSlotKind.Local, ir_intern_name(&m, local))
-                            &b.pending.push(IRPending{name: local, slot: slot, subject: subject, offset: member.offset})
+                            &b.pending.push(IRPending{name: local, slot: slot, subject: subject, offset: member.offset, boxed: member.boxed})
                         }
                     }
                     .Value(name, value, _) -> {
@@ -1850,8 +1865,9 @@ fn ir_enum_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, owner: St
         ir_emit(&b.f, IROp.Const, slot, index, -1, -1, b.line)
         return slot
     }
-    members :: ir_variant_members(&m, p, row, index) ?? return ir_fail_slot(&b, span, "payload of {variant}")
-    size :: ir_enum_box_size(&m, p, row) ?? return ir_fail_slot(&b, span, "layout of {owner}")
+    slot_args :: ir_row_args(m, slot_type)
+    members :: ir_variant_members(&m, p, row, slot_args, index) ?? return ir_fail_slot(&b, span, "payload of {variant}")
+    size :: ir_enum_box_size(&m, p, row, slot_args) ?? return ir_fail_slot(&b, span, "layout of {owner}")
     values := [Int]{}
     targets := [IRMember]{}
     if payload == {
@@ -2858,9 +2874,10 @@ fn ir_comptime_enum(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, slot_t
             }
         }
     }
-    members :: ir_variant_members(&m, p, row, index) ?? return ir_fail_slot(&b, span, "payload of {variant}")
+    slot_args :: ir_row_args(m, slot_type)
+    members :: ir_variant_members(&m, p, row, slot_args, index) ?? return ir_fail_slot(&b, span, "payload of {variant}")
     if members.len() != types.len() -> return ir_fail_slot(&b, span, "payload of {variant}")
-    size :: ir_enum_box_size(&m, p, row) ?? return ir_fail_slot(&b, span, "layout of {nominal}")
+    size :: ir_enum_box_size(&m, p, row, slot_args) ?? return ir_fail_slot(&b, span, "layout of {nominal}")
     values := [Int]{}
     targets := [IRMember]{}
     loop (position, arg) in args {

@@ -2,7 +2,7 @@
 // the old path's route table (argument and result carriers, payloads).
 
 use jet_foundation.[CoreCallRecord, Span, Type, TBuiltinOp, TClosureOp, TExpr, tir_builtin_mutates_receiver]
-use jet_backend.[LowerRouteCarrier, lower_float_constant_bits, lower_runtime_handle, lower_runtime_route, runtime_abi_atom]
+use jet_backend.[LowerRouteCarrier, lower_float_constant_bits, lower_runtime_route]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
@@ -1155,32 +1155,15 @@ fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, 
     ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
 }
 
-// A runtime record handle a route wrote to `out` as its struct's declared
-// layout at `offset` of `base` (Lower lower_helper_record_in: each stored
-// field through jet_rt_record_get_<R>_<field>); the handle is dropped after.
+// A runtime record handle a route wrote to `out` as its record's declared
+// layout at `offset` of `base` (Lower lower_route_store_payload: a route
+// record through record.in); the handle is dropped after.
 fn ir_route_record_in(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, out: Int, span: Span) Never! {
-    unsupported :: "runtime route handle payload as {payload}"
-    name :: ir_nominal_name(ir_untag(payload)) ?? return ir_fail(&b, span, unsupported)
-    row :: ir_type_def(p, name) ?? return ir_fail(&b, span, unsupported)
-    runtime := lower_runtime_handle(name)
-    if runtime == None -> runtime = lower_runtime_handle(p.types[row].name)
-    handle :: runtime ?? return ir_fail(&b, span, unsupported)
-    is_struct :: p.types[row].kind == .Struct(_, _)
-    if !ir_record_schema(handle) || !is_struct -> return ir_fail(&b, span, unsupported)
-    members :: ir_struct_members(&m, p, row) ?? return ir_fail(&b, span, "record {name} has a member no runtime export carries")
-    loop member in members {
-        kind :: m.types[member.ty].kind
-        if kind == .Aggregate || kind == .Unit -> return ir_fail(&b, span, "record {name} has a member no runtime export carries")
-    }
+    if ir_record_runtime(&m, p, payload) == None -> return ir_fail(&b, span, "runtime route handle payload as {payload}")
     pointer_row :: ir_pointer_row(&m)
     record :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.Load, record, out, 0, -1, b.line)
-    atom :: runtime_abi_atom(handle.runtime)
-    loop member in members {
-        value :: ir_runtime(&m, &b, "jet_rt_record_get_{atom}_{runtime_abi_atom(member.name)}", [Int]{record}, member.ty)
-        ir_store_at(&m, &b, base, offset + member.offset, value)
-    }
-    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_{atom}", [Int]{record}, -1)
+    ir_record_in(&m, p, &b, payload, record, base, offset, span)
 }
 
 fn ir_route_option(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], some: LowerRouteCarrier, result: Type, span: Span) -> Int Never! {
