@@ -1,0 +1,10 @@
+// The bounded JSON decode of the provider-facts carrier, through the protocol
+// parse (`pkg_json_parse_protocol`).
+impl ProviderFacts {
+    fn from_json(text: String) -> ProviderFacts ProviderFactsError! {
+        if pkg_json_parse_protocol(text) == {
+            .Parsed(tree) -> return ProviderFacts.from_json_tree(tree)
+            .Failed(reason) -> return Err(ProviderFactsError{message: reason})
+        }
+    }
+}

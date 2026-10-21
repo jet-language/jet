@@ -2866,9 +2866,11 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     loop fact in checked_pattern.bindings {
         if !sema_ownership_type_is_copy(fact.ty) -> move_subject = true
     }
+    // The fallback runs only when the pattern missed, so the subject is
+    // still whole there; the success path moves it into the captures after.
+    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     move_valid := true
     if move_subject && !sema_stmt_move_direct(binding.init, &state, scopes, "the pattern binding", &diagnostics) -> move_valid = false
-    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     locals := [TLocal]{}
     checked_pattern_tir := checked_pattern.checked
     loop name in names {

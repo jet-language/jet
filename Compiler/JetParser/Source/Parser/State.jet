@@ -30,6 +30,7 @@ use jet_lexer.[
     TOKEN_KW_ENUM,
     TOKEN_KW_FN,
     TOKEN_KW_IMPL,
+    TOKEN_KW_IN,
     TOKEN_KW_PUB,
     TOKEN_KW_STRUCT,
     TOKEN_KW_TAG,
@@ -486,6 +487,11 @@ fn parser_expect_name(state: &JetParserState, context: String) -> Token {
         return parser_spelled_token(&state, TOKEN_IDENT, keyword.span, "tag")
     }
     token :: parser_current(&state)
+    // Rust `expect_ident`: `in` is the source-loop keyword, never a name.
+    if token.kind == TOKEN_KW_IN {
+        parser_add_error(&state, token.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
+        return parser_synthetic_token(TOKEN_IDENT, token.span)
+    }
     found :: parser_describe_token(state, token)
     parser_add_error(
         &state,

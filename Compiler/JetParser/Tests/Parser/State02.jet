@@ -19,9 +19,9 @@ fn program(source: String) -> Program { parser_test_program(source) }
     // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1383
-#Test("prefix_failure_contracts_cover_nested_type_positions") {
-    parsed :: program("struct Holder {{\noptional: Int?\nunit: !IOError\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: !Never\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
+// Rust: crates/jet-parser/src/Parser/mod.rs:1419
+#Test("suffix_failure_contracts_cover_nested_type_positions") {
+    parsed :: program("struct Holder {{\noptional: Int?\nunit: IOError!\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: Never!\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
     holder :: loop item in parsed.items {
         if item == .Struct(def) && def.name == "Holder" -> break def
     } ?? panic("Holder")

@@ -348,11 +348,11 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
             loop stmt in function.body {
                 if stmt == .Val(binding) {
                     binding.init == .CallValue(callee, _, _) ?? panic("expected collecting loop call, got {binding.init:Debug}")
-                    callee == .Lambda(lambda) ?? panic("expected collecting loop lambda")
+                    callee == .Lambda(lambda) ?? panic("expected collecting loop lambda, got {callee:Debug}")
                     lambda.body == .Block(body) ?? panic("expected collecting loop block")
                     assert(!body.is_empty(), "expected one source loop, got {body:Debug}")
                     body[0] == .For(_, _, _, kind, _, _, _, _, _) ?? panic("expected one source loop, got {body:Debug}")
-                    kind == .Range(_, _, step, _) ?? panic("expected range source")
+                    kind == .Range(_, _, step, _) ?? panic("expected range source, got {kind:Debug}")
                     step == .Val(.Int(value, _, _, _)) ?? panic("expected numeric stride, got {step:Debug}")
                     assert_eq(value, 2)
                     binding_found = true

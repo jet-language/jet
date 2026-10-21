@@ -768,8 +768,13 @@ fn x64_execution_service(runtime_path: String, runtime_identity: String) -> Int 
 }
 
 #Test("native execution JSON integers retain exact Dyn numbers") {
-    assert_eq(x64_execution_int(Dyn.Number("18446744073709551615")), Val(18446744073709551615))
-    assert_eq(x64_execution_int(Dyn.Number("-42")), Val(-42))
-    assert_eq(x64_execution_int(Dyn.Number("1.5")), None)
-    assert_eq(x64_execution_int(Dyn.Text("42")), None)
+    // `Dyn.Number` is Core's private exact-number carrier; the reply reaches
+    // this reader through the JSON parser, so the test parses too.
+    huge :: execution_json.parse("18446744073709551615") ?? panic("an exact integer parses")
+    assert_eq(x64_execution_int(huge), Val(18446744073709551615))
+    negative :: execution_json.parse("-42") ?? panic("a negative integer parses")
+    assert_eq(x64_execution_int(negative), Val(-42))
+    fraction :: execution_json.parse("1.5") ?? panic("a fraction parses")
+    assert_eq(x64_execution_int(fraction), Int?{None})
+    assert_eq(x64_execution_int(Dyn.Text("42")), Int?{None})
 }

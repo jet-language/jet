@@ -76,22 +76,22 @@ fn build_session_add_action(state: &BuildSessionState, method: String, args: [Bu
 #Test("an allowlisted environment name the action does not declare is UndeclaredEnvName") {
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
     session :: build_session_new(73, "envcheck", "fixture-compiler", policy)
-    toolchain_reply :: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text("host"), .Text("x86_64-unknown-linux-gnu")}, None, false, 1, 2)
+    toolchain_reply :: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text(value: "host"), .Text(value: "x86_64-unknown-linux-gnu")}, None, false, 1, 2)
     toolchain :: if toolchain_reply == {.Value(value) -> value else -> panic("toolchain declaration failed")}
-    signing_reply :: build_session_call(&session, "signing", [BuildSessionValue]{.Text("dev"), .Text("Developer")}, None, false, 3, 4)
+    signing_reply :: build_session_call(&session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 3, 4)
     signing :: if signing_reply == {.Value(value) -> value else -> panic("signing declaration failed")}
     empty :: BuildSessionValue.List{values: [BuildSessionValue]{}}
-    outputs :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("generated/env.txt")}}
-    argv :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("env-tool")}}
-    env :: BuildSessionValue.List{values: [BuildSessionValue]{.Text("PATH=/bin")}}
-    base :: [BuildSessionValue]{.Text("env"), empty, outputs, argv, empty, toolchain, empty, signing, .Text("generic"), empty, env}
+    outputs :: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "generated/env.txt")}}
+    argv :: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "env-tool")}}
+    env :: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "PATH=/bin")}}
+    base :: [BuildSessionValue]{.Text(value: "env"), empty, outputs, argv, empty, toolchain, empty, signing, .Text(value: "generic"), empty, env}
     undeclared := base.copy()
-    &undeclared.push(.List([BuildSessionValue]{.Text("HOME")}))
+    &undeclared.push(.List(values: [BuildSessionValue]{.Text(value: "HOME")}))
     refused :: build_session_call(&session, "action", undeclared, None, false, 5, 6)
     error :: if refused == {.Failure(diagnostic) -> diagnostic.error else -> None}
     assert_eq(error, Val(BuildSessionError.UndeclaredEnvName{action: "env", key: "HOME"}))
     declared := base.copy()
-    &declared.push(.List([BuildSessionValue]{.Text("PATH")}))
+    &declared.push(.List(values: [BuildSessionValue]{.Text(value: "PATH")}))
     accepted :: build_session_call(&session, "action", declared, None, false, 7, 8)
     accepted_ok :: if accepted == {.Value(_) -> true else -> false}
     assert(accepted_ok)
