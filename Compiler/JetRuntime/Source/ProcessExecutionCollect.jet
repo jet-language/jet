@@ -299,13 +299,11 @@ fn process_stdin_failure(errno: I64, err: I64) -> I64 {
 #Export(c) fn jet_rt_handle_drop_process_stdin(stdin: I64) { jet_process_drop_raw(stdin) }
 // Writes every byte on a private dup so a concurrent close cannot recycle the
 // descriptor mid-write; Ok(0) is the closed writer, EINTR retries.
-#Export(c) fn jet_process_stdin_write(stdin: I64, text: I64, err: I64) -> I64 {
+fn process_stdin_write_bytes(stdin: I64, data: I64, length: I64, err: I64) -> I64 {
     packed :: spawn_stream_dup(stdin, I64{0})
     if (packed == I64{-9}) -> return process_stdin_closed(err)
     if (packed < I64{0}) -> return process_stdin_failure(-packed, err)
     native :: packed.bit_and(I64{4294967295})
-    data :: rt_text_data(text)
-    length :: rt_text_len(text)
     offset := I64{0}
     failure := I64{0}
     loop offset < length {
@@ -324,6 +322,14 @@ fn process_stdin_failure(errno: I64, err: I64) -> I64 {
     spawn_close(native)
     if (failure != I64{0}) -> return process_stdin_failure(failure, err)
     I64{1}
+}
+#Export(c) fn jet_process_stdin_write(stdin: I64, text: I64, err: I64) -> I64 {
+    process_stdin_write_bytes(stdin, rt_text_data(text), rt_text_len(text), err)
+}
+// ProcessStdin.write_all(bytes): ChildStdin::write_all of a native U8 list
+// (RT_HOST_U8_STRIDE is 1: the list data is the bytes).
+#Export(c) fn jet_process_stdin_write_all(stdin: I64, data: I64, length: I64, err: I64) -> I64 {
+    process_stdin_write_bytes(stdin, data, length, err)
 }
 // Option::take: closing sends EOF once; repeated close is harmless. A terminal
 // child's input shares the PTY master with its output, which stays open.

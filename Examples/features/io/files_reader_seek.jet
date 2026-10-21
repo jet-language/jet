@@ -1,0 +1,42 @@
+package {
+    name: "files_reader_seek"
+    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
+}
+
+// FileReader.seek(position) moves the shared read position to an absolute
+// byte offset (Rust SeekFrom::Start): bytes a line read buffered ahead are
+// dropped, so read, read_line and lines all continue from `position`.
+
+use core.files as files
+
+fn text(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("utf8") }
+
+fn line_of(reader: &FileReader) -> String {
+    if &reader.read_line() == {
+        .Ok(found) -> found ?? "eof"
+        .Err(_) -> "error"
+    }
+}
+
+fn run() {
+    scratch :: files.temp_dir("reader-seek")
+    path :: files.join(scratch.path, "lines.txt")
+    files.write(path, "alpha\nbeta\ngamma\n")
+
+    reader := files.open(path)
+    print("first line: {line_of(&reader)}")
+    &reader.seek(0)
+    print("after seek(0): {text(reader.read(5))}")
+    &reader.seek(11)
+    print("after seek(11): {line_of(&reader)}")
+    &reader.seek(6)
+    first :: line_of(&reader)
+    second :: line_of(&reader)
+    print("lines from 6: {first} {second}")
+    &reader.seek(100)
+    print("past the end reads {reader.read(4).len()} bytes")
+    if &reader.seek(-1) == {
+        .Ok(_) -> print("seek(-1): accepted")
+        .Err(error) -> print("seek(-1): {error == .InvalidInput(_)}")
+    }
+}

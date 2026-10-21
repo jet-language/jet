@@ -436,7 +436,7 @@ fn sema_process_terminal_method(receiver: Expr, receiver_value: TExpr, method: S
 
 fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     result :: if method == {
-        "write" -> {
+        "write" | "write_all" -> {
             if args.len() == 1 -> Val(sema_process_io_result(Type.Named{name: "Unit"})) else -> None
         }
         "close" -> {
@@ -444,30 +444,46 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
         }
         else -> None
     }
-    if method != "write" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    required_arity :: if method == "write" -> 1 else -> 0
+    if method != "write" && method != "write_all" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    required_arity :: if method == "close" -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
         sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    required :: if method == "write" -> [Type]{Type.String} else -> [Type]{}
+    required :: if method == {
+        "write" -> [Type]{Type.String}
+        "write_all" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
+        else -> [Type]{}
+    }
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, "ProcessStdin.{method}", args, required, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    operation :: if method == "write" -> THandleOp.ProcessStdinWrite else -> THandleOp.ProcessStdinClose
+    operation :: if method == {
+        "write" -> THandleOp.ProcessStdinWrite
+        "write_all" -> THandleOp.ProcessStdinWriteAll
+        else -> THandleOp.ProcessStdinClose
+    }
     sema_process_finish(receiver_value, operation, values, result ?? Type.Named{name: "Unit"}, "Exec", "ProcessStdin.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method != "lines" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != 0 {
-        sema_process_wrong_arity(method, 0, args.len(), span, &diagnostics)
+    if method != "lines" && method != "read" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    required_arity :: if method == "read" -> 1 else -> 0
+    if args.len() != required_arity {
+        sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
         sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     stream_name := sema_process_handle_receiver_name(receiver_value.ty)
-    api := "{stream_name}.lines"
-    if !sema_process_check_method_ownership(receiver, api, args, [Type]{}, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    api := "{stream_name}.{method}"
+    required :: if method == "read" -> [Type]{Type.Int} else -> [Type]{}
+    values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    // `read(max)`: Read::read on the pipe, up to `max` bytes, empty at EOF.
+    if method == "read" {
+        operation :: if stream_name == "ProcessStderrStream" -> THandleOp.ProcessStderrRead else -> THandleOp.ProcessStdoutRead
+        return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
+    }
     sema_process_finish(receiver_value, THandleOp.Method{name: "lines"}, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 

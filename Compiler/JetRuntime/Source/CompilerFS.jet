@@ -246,6 +246,34 @@ fn compiler_fs_write_open(path: I64, data: I64, length: I64, error: I64, flags: 
     compiler_fs_bytes_take(bytes, limit, count, output, len)
     I64{1}
 }
+// FileReader.seek(position): std Seek::seek(SeekFrom::Start(position)) on
+// the reader's descriptor. jet_fd_seek_raw drops buffered read-ahead, so the
+// next read, read_line or lines starts at `position`.
+#Export(c) fn jet_std_file_reader_seek(reader: I64, position: I64, error: I64) -> I64 {
+    path :: fd_word(reader, I64{24})
+    if compiler_fs_fault(path, error) -> return I64{0}
+    if (jet_int_compare(position, I64{0}) < I64{0}) {
+        offset :: if int_fits(position, U64{9223372036854775808}) -> jet_int_owned_to_i64(position) else -> I64{-9223372036854775808}
+        cause :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("seek needs a non-negative byte position, got "))
+        rt_text_push_number(cause, offset)
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_builder_finish(cause), error)
+    }
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    result :: jet_fd_seek_raw(reader, position, I64{0}, scratch, scratch + I64{32})
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return I64{0}
+    }
+    if (rt_text_word(scratch) != I64{0} || result == I64{-1}) {
+        code :: rt_text_word(scratch + I64{8})
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+    }
+    jet_rt_int_drop(result)
+    jet_rt_free(scratch, I64{40}, I64{8})
+    I64{1}
+}
 
 fn compiler_fs_time_ns(seconds: I64, nanos: I64) -> I64 {
     scaled :: if (seconds > I64{9223372036}) -> I64{9223372036854775807} else if (seconds < I64{-9223372036}) -> I64{-9223372036854775808} else -> seconds * I64{1000000000}

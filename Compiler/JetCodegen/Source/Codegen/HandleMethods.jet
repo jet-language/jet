@@ -952,6 +952,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         }
         .FileReaderReadLine -> return Val(jet_codegen_handle_h("file_reader.read_line", "jet_std_file_reader_read_line", [Bool]{true}, Val(Effect.FS)))
         .FileReaderRead -> return Val(jet_codegen_handle_h("file_reader.read", "jet_std_file_reader_read", [Bool]{true, false}, Val(Effect.FS)))
+        .FileReaderSeek -> return Val(jet_codegen_handle_h("file_reader.seek", "jet_std_file_reader_seek", [Bool]{true, false}, Val(Effect.FS)))
         .FileReaderPath -> return Val(jet_codegen_handle_h("file_reader.path", "jet_std_file_reader_path", [Bool]{true}, None))
         .MappedFileWindow -> return Val(jet_codegen_handle_h("mapped_file.window", "jet_std_fs_map_window_view", [Bool]{true, false, false}, Val(Effect.FS)))
         .MappedFileWindowLen -> return Val(jet_codegen_handle_h("mapped_file.window_len", "jet_std_fs_map_window_len_view", [Bool]{true, false, false}, Val(Effect.FS)))
@@ -1119,6 +1120,9 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .TerminalSessionResize -> return Val(jet_codegen_handle_h("terminal.resize", "jet_terminal_session_resize", [Bool]{true, true}, Val(Effect.IO)))
         .ProcessStdinWrite -> return Val(jet_codegen_handle_h("process.stdin_write", "jet_process_stdin_write", [Bool]{true, true}, Val(Effect.Exec)))
         .ProcessStdinClose -> return Val(jet_codegen_handle_h("process.stdin_close", "jet_process_stdin_close", [Bool]{true}, Val(Effect.Exec)))
+        .ProcessStdinWriteAll -> return Val(jet_codegen_handle_h("process.stdin_write_all", "jet_process_stdin_write_all", [Bool]{true, true}, Val(Effect.Exec)))
+        .ProcessStdoutRead -> return Val(jet_codegen_handle_h("process.stdout_read", "jet_process_stdout_read", [Bool]{true, false}, Val(Effect.Exec)))
+        .ProcessStderrRead -> return Val(jet_codegen_handle_h("process.stderr_read", "jet_process_stderr_read", [Bool]{true, false}, Val(Effect.Exec)))
         .PathFrom -> return Val(jet_codegen_handle_h("path.from", "jet_path_from", [Bool]{true}, None))
         .PathToString -> return Val(jet_codegen_handle_h("path.to_string", "jet_path_to_string", [Bool]{true}, None))
         .PathHome -> return Val(jet_codegen_handle_h("path.home", "jet_path_home", [Bool]{}, Val(Effect.FS)))
@@ -1325,7 +1329,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
     }
     if operation == {
         .StdinReadLine -> true
-        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .FileReaderRead | .FileReaderSeek | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }

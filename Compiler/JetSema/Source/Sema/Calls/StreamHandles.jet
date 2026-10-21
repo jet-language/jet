@@ -152,6 +152,7 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
     if owner == "FileReader" {
         if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
         if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "seek" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderSeek, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("position", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
     }
     if owner == "FileWriter" {
         if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})

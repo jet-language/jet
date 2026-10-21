@@ -165,3 +165,70 @@ fn pipe_output_name() -> I64 {
     }
     I64{1}
 }
+
+// ProcessStdoutStream.read(max) / ProcessStderrStream.read(max): Read::read
+// on the child's pipe through the same FD72 refill buffer `lines` uses, so
+// the two interleave: bytes a line read buffered ahead are returned first.
+// Up to `maximum` bytes (capped at 16 MiB); empty at EOF or after the stream
+// was taken. 1 => owned compact U8 data+len, 0 => owned IOError.
+fn pipe_read(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
+    fd_put(output, I64{0}, I64{0})
+    fd_put(len, I64{0}, I64{0})
+    limit := I64{16777216}
+    if (jet_int_compare(maximum, limit) < I64{0}) {
+        if (jet_int_compare(maximum, I64{0}) <= I64{0}) {
+            count :: if int_fits(maximum, U64{9223372036854775808}) -> jet_int_owned_to_i64(maximum) else -> I64{-9223372036854775808}
+            cause :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(cause, rt_static_text("read needs a positive byte count, got "))
+            rt_text_push_number(cause, count)
+            return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, pipe_output_name(), I64{0}, jet_rt_string_builder_finish(cause), error)
+        }
+        limit = jet_int_owned_to_i64(maximum)
+    }
+    fd :: pipe_borrow_mut(pipe)
+    if (fd == I64{0}) {
+        pipe_unborrow(pipe)
+        return I64{1}
+    }
+    bytes :: jet_rt_alloc(limit, I64{8})
+    count := I64{0}
+    failure := I64{0}
+    fd_lock(fd)
+    if (fd_word(fd, I64{16}) != I64{0}) {
+        failure = I64{-9}
+    } else if (fd_word(fd, I64{40}) < I64{0}) {
+        failure = fd_flush_locked(fd)
+        if (failure == I64{0}) {
+            fd_put(fd, I64{48}, I64{0})
+            fd_put(fd, I64{56}, I64{0})
+            fd_put(fd, I64{40}, I64{8192})
+        }
+    }
+    if (failure == I64{0}) {
+        pos :: if (fd_word(fd, I64{40}) > I64{0}) -> fd_word(fd, I64{56}) else -> I64{0}
+        filled :: if (fd_word(fd, I64{40}) > I64{0}) -> fd_word(fd, I64{48}) else -> I64{0}
+        if (pos < filled) {
+            count = if (filled - pos < limit) -> filled - pos else -> limit
+            rt_text_bytes_copy(bytes, wrapping(fd_buffer(fd) + pos), count)
+            fd_put(fd, I64{56}, wrapping(pos + count))
+        } else {
+            loop {
+                got :: host_call(I64{0}, fd_word(fd, I64{8}), bytes, limit)
+                if (got == I64{-4}) { next }
+                if (got < I64{0}) { failure = got } else { count = got }
+                break
+            }
+        }
+    }
+    fd_unlock(fd)
+    pipe_unborrow(pipe)
+    if (failure != I64{0}) {
+        jet_rt_free(bytes, limit, I64{8})
+        cause :: if (failure == HOST_WRITE_ZERO) -> host_write_zero_text() else -> host_errno_cause(wrapping(I64{0} - failure))
+        return host_io_other_take(HOST_IO_OP_READ, pipe_output_name(), cause, error)
+    }
+    compiler_fs_bytes_take(bytes, limit, count, output, len)
+    I64{1}
+}
+#Export(c) fn jet_process_stdout_read(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 { pipe_read(pipe, maximum, output, len, error) }
+#Export(c) fn jet_process_stderr_read(pipe: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 { pipe_read(pipe, maximum, output, len, error) }
