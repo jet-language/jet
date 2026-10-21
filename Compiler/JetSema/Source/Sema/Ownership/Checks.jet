@@ -2531,6 +2531,15 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
     if places.len() == 0 -> return true
     binding :: sema_ownership_binding_for_expr(&state, expr, scopes)
+    // An ExpiringSecret loan is lent for the callback only: an exact move of
+    // it is refused (an unmarked read keeps lending it).
+    if !unmarked && binding != None {
+        loan :: binding
+        if sema_contains_expiring_secret_loan(loan.symbol.ty ?? Type.Named{name: "Unit"}) {
+            &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(loan.symbol.name, "be moved", expr_span(expr)))
+            return false
+        }
+    }
     if binding != None {
         info :: binding
         // Rust moves only non-Copy values: every projection of a Copy root
@@ -2725,6 +2734,23 @@ fn sema_ownership_call_diag_not_copyable(callee: String, index: Int, name: Strin
     sema_error("E0201", span, "`{callee}` needs the move marker `^` here — this value can't be copied", "parameter {index + 1} takes ownership through the move marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied", "write the move marker `^` (`^{name}`) to move ownership to `{callee}`")
 }
 
+// The argument names a binding whose value is a secret-bearing crypto type
+// (a generic `^T` slot spells only its formal).
+fn sema_ownership_argument_is_secret(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    binding :: sema_ownership_binding_for_expr(&state, expr, scopes)
+    if binding != None {
+        info :: binding
+        return sema_is_secret_bearing_crypto_type(info.symbol.ty ?? Type.Named{name: "Unit"})
+    }
+    false
+}
+
+// Rust `reject_expiring_secret_loan_change`: the `.with` callback's loan is
+// read-only; moving, changing or dropping it could let the credential escape.
+fn sema_ownership_diag_expiring_secret_loan_change(name: String, action: String, span: Span) -> Diagnostic {
+    sema_error("E0201", span, "ExpiringSecret loan `{name}` cannot {action}", "the callback receives temporary read access; moving, changing, or dropping it could let the credential escape its expiry boundary", "use the loan only for read-only operations inside this callback")
+}
+
 fn sema_ownership_diag_move_from_borrowed(name: String, mark_span: Span) -> Diagnostic {
     sema_error("E0201", mark_span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `.copy()`, or accept it with the move marker `^`")
 }
@@ -2864,9 +2890,13 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 // Rust `check_take_arg_ownership`: a cloneable value is E0209, any
                 // other is E0201. A nominal `Clone` row is registry-owned and not
                 // visible here, so an unresolved nominal takes the cloneable
-                // diagnostic; both reject the unmarked owning argument.
+                // diagnostic; both reject the unmarked owning argument. A
+                // secret-bearing crypto value never clones: a copy would be a
+                // second owned credential.
+                taken_ty :: param.ty ?? Type.Named{name: "Unit"}
+                secret :: sema_is_secret_bearing_crypto_type(taken_ty) || sema_ownership_argument_is_secret(&state, arg.expr, scopes)
                 if {
-                    sema_ownership_type_cloneable(param.ty ?? Type.Named{name: "Unit"}) ?? true -> &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
+                    !secret && (sema_ownership_type_cloneable(taken_ty) ?? true) -> &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
                     else -> {
                         accepted = false
                         &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))

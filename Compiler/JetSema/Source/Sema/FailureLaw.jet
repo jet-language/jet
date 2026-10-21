@@ -565,6 +565,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         }
         .Apply(name, args) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, &diagnostics)
             loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, &diagnostics)
         }
         // E0363: only concrete closed member types.
@@ -574,6 +575,21 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         }
         .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, program, &diagnostics)
         else -> {}
+    }
+}
+
+// `ExpiringSecret<T>` wraps only the closed secret family (E0112). Core's own
+// declarations name the wrapper over their formal `T`.
+fn sema_check_expiring_secret_declared_type(ty: Type, span: Span, generic_names: [String], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+    resolved := ty
+    if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+    if resolved == .Apply(name, args) {
+        if !sema_is_expiring_secret_name(name) -> return
+        if args.len() == 1 {
+            if sema_is_expiring_secret_member_type(args[0]) -> return
+            if sema_module_is_core_source(environment.module_identity) && args[0] == .Named(formal) && generic_names.contains(formal) -> return
+        }
+        &diagnostics.push(sema_error("E0112", span, "`ExpiringSecret<T>` requires a secret type", "only Secret, SigningKey, and X25519SecretKey have the audited move-only zeroizing contract required by this wrapper", "use `ExpiringSecret<crypto.Secret>`, `ExpiringSecret<crypto.SigningKey>`, or `ExpiringSecret<crypto.X25519SecretKey>`"))
     }
 }
 

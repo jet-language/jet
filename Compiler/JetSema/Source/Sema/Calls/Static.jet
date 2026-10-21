@@ -750,6 +750,9 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     }
     type_name :: owner_symbol.name
     if owner_symbol.kind != SymbolKind.Type -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && sema_module_is_core_source(owner_symbol.module_name) {
+        if !sema_call_expiring_secret_new_accepts(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
 
     diagnostics_before := diagnostics.len()
     targets := [SemaStaticMethodTarget]{}
@@ -814,6 +817,33 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}
+
+// `ExpiringSecret.new` owns only the closed secret family (E0112 at the value)
+// and observes only an injected Clock (E0112 at the clock). The arguments are
+// probed: the ordinary source call that follows checks and moves them once.
+fn sema_call_expiring_secret_new_accepts(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    accepted := true
+    probe_diagnostics := [Diagnostic]{}
+    value :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
+    if value == .Val(checked_value) && !sema_is_expiring_secret_member_type(sema_call_resolved_type(checked_value.ty, environment, program)) {
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`ExpiringSecret.new` cannot own {sema_type_show(checked_value.ty)}", "expiring secrets accept only the closed, move-only secret family with audited zeroizing Drop behavior", "convert text or bytes to `crypto.Secret`, or use `crypto.SigningKey` / `crypto.X25519SecretKey`"))
+        accepted = false
+    }
+    clock :: sema_probe_expression(args[2].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
+    if clock == .Val(checked_clock) && !sema_call_is_clock_type(checked_clock.ty) {
+        &diagnostics.push(sema_error("E0112", expr_span(args[2].expr), "`ExpiringSecret.new` wants `Clock` for argument 3, but this is {sema_type_show(checked_clock.ty)}", "secret expiry must observe the explicitly injected clock", "use `Clock.new(...)` for deterministic code or `Clock.system()` for production"))
+        accepted = false
+    }
+    accepted
+}
+
+fn sema_call_is_clock_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "Clock" || sema_core_canonical_leaf(name, "core.time", "Core/time/time.jet") == (Val("Clock"))
+        .Tagged(_, inner) -> sema_call_is_clock_type(inner)
+        else -> false
+    }
 }
 
 // The numeric destination conversion a distinct type

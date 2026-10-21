@@ -674,6 +674,13 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             // A lone spread is a direct List borrow; mixed spread cloning is
             // judged below on the canonical ListSpread, not on its List root.
             next
+        } else if sema_contains_expiring_secret_loan(value.ty) {
+            // Rust `variadic.rs`: a rest slot owns its elements, so collecting
+            // an ExpiringSecret loan moves it, which its callback refuses.
+            if args[index].expr == .Ident(name, name_span) {
+                &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(name, "be moved", name_span))
+                return false
+            }
         } else if !sema_ownership_type_is_copy(value.ty) {
             places :: sema_ownership_places_from_expr_in_state(args[index].expr, scopes, &state)
             borrowed := false

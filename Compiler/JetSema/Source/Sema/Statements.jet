@@ -3213,6 +3213,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_copy_site_check_conditional(binding.init, binding.ty, environment, program, scopes, context, &diagnostics)
+    // An ExpiringSecret loan lives only while its `.with` callback runs.
+    if sema_contains_expiring_secret_loan(init.ty) {
+        &diagnostics.push(sema_error("E0201", expr_span(binding.init), "an ExpiringSecret loan cannot be stored", "the callback parameter is a temporary read-only loan that ends when `.with` returns", "use the loan inside the callback and store only a non-secret result"))
+    }
     // E2502 (Rust `check_binding`): a line stream (`.lines()` on a file,
     // stdin, or process reader) is consumed only directly by a loop; binding
     // it lets it escape loop position.
@@ -4599,7 +4603,7 @@ fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, 
     if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "assignment_target exit 1")
     hooked :: sema_stmt_compound_hook_value(target, op, op_span, expr, environment, scopes)
     if hooked == .Val(binary) -> return sema_stmt_check_assignment_target(target, None, op_span, binary, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if target == {
+    checked :: if target == {
         .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Field(_, _, _) -> sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Index(base, index, _, _) -> {
@@ -4610,12 +4614,17 @@ fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, 
             if op == None && base == .Ident(root, _) && sema_scope_resolve_index(scopes, root) == .Val(root_index) {
                 taken = sema_ownership_uninit_take(&state, scopes.bindings[root_index].symbol.id.key)
             }
-            checked := sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            projected := sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if taken == .Val(fact) -> sema_stmt_uninit_note_slot_write(&state, fact, index)
-            checked
+            projected
         }
         else -> None
     }
+    // An ExpiringSecret loan lives only while its `.with` callback runs.
+    if op == None && checked == .Val(.Assign(_, _, value, _, _)) && sema_contains_expiring_secret_loan(value.ty) {
+        &diagnostics.push(sema_error("E0201", expr_span(expr), "an ExpiringSecret loan cannot replace an owned value", "the callback parameter is a temporary read-only loan that ends when `.with` returns", "use the loan inside the callback and assign only a non-secret result"))
+    }
+    checked
 }
 
 fn sema_stmt_check_loop_step(step: Stmt, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
@@ -4903,6 +4912,9 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     }
     checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_stmt_return_is_view_boundary(return_type) && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
+        &diagnostics.push(sema_error("E0201", expr_span(value), "an ExpiringSecret loan cannot be returned", "the callback parameter is valid only while `.with` is running", "return a non-secret result computed from the loan"))
+    }
     value_is_ident := if value == {
         .Ident(_, _) -> true
         else -> false
