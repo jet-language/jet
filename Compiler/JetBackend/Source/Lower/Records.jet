@@ -245,6 +245,7 @@ fn lower_record_kind_matches(p: MIRProgram, ty: MIRType, kind: String) -> Bool N
     if kind == "Int" -> return lower_is_exact_int(ty)
     if kind == "Flag" -> return ty.kind == .Bool
     if kind == "Float" -> return ty.kind == .Float
+    if kind == "U64" -> return lower_is_unsigned_word(ty)
     if kind.starts_with("List.") || kind.starts_with("Entries.") {
         actual :: lower_record_sequence_kind(p, ty) ?? return false
         return actual == kind
@@ -336,6 +337,7 @@ fn lower_record_sequence_kind(p: MIRProgram, ty: MIRType) -> String? {
     if element.kind == .IntN(signed, bits) {
         if !signed && bits == 8 -> return Val("List.Byte")
     }
+    if element.kind == .String -> return Val("List.Text")
     prefix := "List"
     nested := element
     if element.kind == .Tuple(fields) {
@@ -382,10 +384,10 @@ fn lower_record_is_index(p: MIRProgram, ty: MIRType) -> Bool Never! {
 }
 
 // Whether `ty` crosses inside a record as one carrier word: a String handle,
-// an exact Int, a Float, a Bool or a record enum index.
+// an exact Int, a raw U64, a Float, a Bool or a record enum index.
 fn lower_record_is_leaf(p: MIRProgram, ty: MIRType) -> Bool Never! {
     if ty.kind == .String || ty.kind == .Bool || ty.kind == .Float -> return true
-    if lower_is_exact_int(ty) -> return true
+    if lower_is_exact_int(ty) || lower_is_unsigned_word(ty) -> return true
     lower_record_is_index(p, ty)
 }
 
@@ -730,7 +732,8 @@ fn lower_record_sequence_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerF
     lower_emit(&f, LIRInst.Store{base: target, offset: 16, value: data})
     counted :: lower_record_loop_start(&f, length)
     address :: lower_list_address(&f, data, counted.index, stride)
-    if kind == "List.Byte" {
+    // A Byte is a word; a Text element is the getter's owned String clone.
+    if kind == "List.Byte" || kind == "List.Text" {
         byte :: lower_word(&f)
         lower_call_runtime(&m, &f, "{prefix}_get", [LIRValueID]{sequence, counted.index}, Val(byte))
         lower_write_at(p, &f, address, 0, byte, element)
@@ -765,7 +768,8 @@ fn lower_record_sequence_to_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFun
     counted :: lower_record_loop_start(&f, length)
     address :: lower_list_address(&f, data, counted.index, lower_list_stride(p, element))
     args := [LIRValueID]{sequence}
-    if kind == "List.Byte" {
+    // The pusher copies a Byte word or clones the borrowed String.
+    if kind == "List.Byte" || kind == "List.Text" {
         byte :: lower_read_at(p, &f, address, 0, element) ?? panic("a byte has storage")
         &args.push(byte)
     } else {

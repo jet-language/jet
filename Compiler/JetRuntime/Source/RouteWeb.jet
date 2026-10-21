@@ -1,0 +1,17 @@
+// core.web runtime stops (CoreSlice7WebRaw.rs).
+
+// CoreSlice7WebRaw.rs:4-6: jet_runtime_stop("E2805", "", 0, message). E2805 has
+// no active runtime row, so Outcome.rs jet_render_runtime_stop_from_row renders
+// the host form (RuntimeDiagnosticCore.rs:241-243) with status 101 (:229-231).
+// Core.rs:1106-1113: a task body receives the raw message instead.
+#Export(c) fn jet_openapi_contract_stop_raw(message: I64) {
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{3}) -> return
+    trap_root_prepare()
+    jet_rt_stdout_flush()
+    trap_msg_inactive_row_head()
+    trap_write_word(TEST_SCOPE_E2805, I64{5})
+    trap_msg_inactive_row_tail()
+    trap_write_word(TEST_SCOPE_E2805, I64{5})
+    trap_msg_newline()
+    trap_exit(I64{101})
+}

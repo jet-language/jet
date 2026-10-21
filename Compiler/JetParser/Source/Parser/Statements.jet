@@ -293,9 +293,12 @@ fn parser_parse_block(state: &JetParserState) -> ParsedBlock {
 // where a finite source loop with `->` keeps its collecting meaning
 fn parser_parse_callable_body(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
     saved_tail_depth :: state.callable_tail_depth
+    saved_tail_value :: state.callable_tail_value
     state.callable_tail_depth = state.block_depth + 1
+    state.callable_tail_value = value_tail
     block :: parser_parse_body_block(&state, value_tail)
     state.callable_tail_depth = saved_tail_depth
+    state.callable_tail_value = saved_tail_value
     block
 }
 
@@ -393,11 +396,14 @@ fn parser_parse_value_block(state: &JetParserState, depth: Int, prepared_value: 
     if !prepared_value -> return parser_parse_value_lines(&state, depth, false)
     // Rust reads a prepared value's lines as a callable body (#18).
     saved_tail_depth :: state.callable_tail_depth
+    saved_tail_value :: state.callable_tail_value
     state.block_depth += 1
     state.callable_tail_depth = state.block_depth
+    state.callable_tail_value = true
     block :: parser_parse_value_lines(&state, depth, true)
     state.block_depth -= 1
     state.callable_tail_depth = saved_tail_depth
+    state.callable_tail_value = saved_tail_value
     block
 }
 
@@ -1807,7 +1813,7 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
         }
     }
     saved_tail_depth :: state.callable_tail_depth
-    value_tail :: marker.name == "Unsafe" && state.callable_tail_depth == state.block_depth
+    value_tail :: marker.name == "Unsafe" && state.callable_tail_value && state.callable_tail_depth == state.block_depth
     if value_tail -> state.callable_tail_depth = state.block_depth + 1
     body :: parser_parse_body_block(&state, value_tail)
     state.callable_tail_depth = saved_tail_depth

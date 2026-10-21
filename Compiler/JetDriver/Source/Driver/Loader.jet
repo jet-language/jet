@@ -2866,6 +2866,14 @@ struct JetDriverCoreIdentifierDemand {
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
+    // Rust sema checks a qualified `core.<module>.<member>` call through a root
+    // `use core as core` alias by its fixed typed row and lowers it to the
+    // member's Core ABI host function (fixed_sigs.rs:5488 hmac_sha256,
+    // SHA256Raw.rs:103). Natively that member's body is its Core source
+    // module, so the scan records each `<head>.<segment>` (and
+    // `<head>.<segment>.<segment>`) chain whose first segment names a Core
+    // module, and the loader loads that module when `<head>` aliases `core`.
+    core_paths: [String]
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
@@ -2878,7 +2886,7 @@ struct JetDriverParsedUnit {
 }
 
 fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Never! {
-    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_literal: false}
+    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_literal: false, core_paths: [String]{}}
 }
 
 // The spellings the demand scan looks for, as ids of one lexed source's
@@ -2894,6 +2902,9 @@ struct JetDriverCoreDemandNames {
     regex_name: Int
     bare: [Int]
     bare_alias: [Int]
+    // Ids of the first segments of the Core module paths (`files` for
+    // `core.files`), for the qualified-path demand.
+    core_segments: [Int]
 }
 
 fn jet_driver_core_demand_name(tables: TokenTables, text: String) -> Int Never! {
@@ -2910,7 +2921,14 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
         if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
         &bare_alias.push(alias)
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias}
+    core_segments := [Int]{}
+    loop row in CORE_MODULE_EXPORTS {
+        parts :: row.module_name.split(".").to_list()
+        if parts.len() < 2 || parts[0] != "core" -> next
+        id :: jet_driver_core_demand_name(tables, parts[1])
+        if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
+    }
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias, core_segments: core_segments}
 }
 
 // Interpolation tokens share the enclosing lexed source's spelling/literal table.
@@ -2935,6 +2953,14 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
                 if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
             }
             if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_literal = true
+            if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
+                path :: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
+                if !demand.core_paths.contains(path) -> &demand.core_paths.push(path)
+                if index + 6 < to && tokens[index + 5].kind == TOKEN_DOT && tokens[index + 6].kind == TOKEN_IDENT {
+                    nested :: "{path}.{token_decoded(tables, tokens[index + 4])}"
+                    if !demand.core_paths.contains(nested) -> &demand.core_paths.push(nested)
+                }
+            }
             if collect_bare {
                 loop at in 0..<names.bare.len() {
                     if name == names.bare[at] || name == names.bare_alias[at] {
@@ -3025,6 +3051,9 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.format_selector -> demand.format_selector = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
+        }
+        loop path in output.core_paths {
+            if !demand.core_paths.contains(path) -> &demand.core_paths.push(path)
         }
     }
     JetDriverDemandScan{lexed: jet_driver_demand_shared_take(inputs), demand: ^demand}
@@ -3985,6 +4014,34 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
             if !queued[target_unit_index] {
                 queued[target_unit_index] = true
                 &pending.push(target_unit_index)
+            }
+        }
+        // The qualified-path demand (JetDriverCoreIdentifierDemand.core_paths):
+        // a chain whose head is a root `core` alias of this unit names the
+        // Core source module that owns the called member.
+        if demand.core_paths.len() > 0 {
+            root_aliases := [String]{}
+            loop scoped in scoped_imports {
+                if scoped.declaration.kind == .Module(imported, _) {
+                    if imported == "core" -> &root_aliases.push(scoped.declaration.alias)
+                }
+            }
+            loop path in demand.core_paths {
+                parts :: path.split(".").to_list()
+                if !root_aliases.contains(parts[0]) -> next
+                module_name :: "core.{parts[1..<parts.len()].join(".")}"
+                sourced := false
+                loop row in request.core_sources {
+                    if row.owner == "" && row.module_name == module_name && (!row.runtime || importer_core) -> sourced = true
+                }
+                if !sourced -> next
+                path_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+                if path_index == .Val(index) {
+                    if !queued[index] {
+                        queued[index] = true
+                        &pending.push(index)
+                    }
+                }
             }
         }
         // (Rust `load_file`): a body-less `module name` loads the file

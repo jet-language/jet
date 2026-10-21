@@ -8,6 +8,7 @@
 TEST_SCOPE_E3001 :: prep { I64{211261862725} }
 TEST_SCOPE_E3010 :: prep { I64{206983672645} }
 TEST_SCOPE_E3011 :: prep { I64{211278639941} }
+TEST_SCOPE_E2805 :: prep { I64{228442255941} }
 TEST_SCOPE_R0801 :: prep { I64{211262386258} }
 TEST_SCOPE_R0802 :: prep { I64{215557353554} }
 TEST_SCOPE_R0803 :: prep { I64{219852320850} }
@@ -189,11 +190,13 @@ fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, le
     }
 }
 
-// trap_header numbering: 0 E3001, 1 E3010, 2 E3011 (little-endian words).
+// trap_header numbering: 0 E3001, 1 E3010, 2 E3011; 3 is the host stop
+// E2805 (little-endian words).
 fn test_scope_record_coded_stop(code: I64, message: I64, length: I64) {
     word :: if {
         (code == I64{0}) -> TEST_SCOPE_E3001
         (code == I64{1}) -> TEST_SCOPE_E3010
+        (code == I64{3}) -> TEST_SCOPE_E2805
         else -> TEST_SCOPE_E3011
     }
     test_scope_record_raw_stop(word, I64{5}, message, length)

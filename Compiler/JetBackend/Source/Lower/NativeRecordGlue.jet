@@ -360,6 +360,9 @@ fn lower_native_record_sequence_glue(p: MIRProgram, m: &LowerModule, glue: Lower
                 payload :: lower_read_at(p, &f, address, members[1].offset, members[1].ty) ?? panic("an entry has storage")
                 lower_seal(&f, LIRTerminator.Return{value: Val(payload)})
             }
+        } else if kind == "List.Text" {
+            // An owned String clone, as the record conversion stores it.
+            lower_seal(&f, LIRTerminator.Return{value: Val(lower_native_record_get_value(p, &m, &f, elem, address, 0))})
         } else {
             value :: lower_read_at(p, &f, address, 0, elem) ?? panic("a record sequence element has storage")
             lower_seal(&f, LIRTerminator.Return{value: Val(value)})

@@ -95,6 +95,13 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
     layout_what :: if e3001_what.find("{{msg}}") < 0 -> e3001_what else -> "{before_hole(e3001_what)}invalid box layout{after_hole(e3001_what)}"
     source = "{source}{emit("trap_invalid_layout_head", "Stop [E3001]: {layout_what}\n  --> <core.prelude>:0\n", "trap_write_word")}"
     tls :: native_tls_refusal(routes) ?? return Err(err)
+    // A host stop whose code has no active runtime row renders the host form
+    // of RuntimeDiagnosticCore.rs jet_write_runtime_stop; the code word sits
+    // between these two literals and after the tail.
+    loop code in ["E2805"] {
+        stage :: registry_field(registry, code, "stage") ?? return Err(err)
+        if stage.contains("runtime") -> return Err(generator_fail("{code} is an active runtime row; its stop renders the row, not the host form"))
+    }
     literals :: [MessageLiteral]{
         MessageLiteral{name: "header_panic", text: "Stop [E3001]: {before_hole(e3001_what)}"},
         MessageLiteral{name: "header_numeric", text: "Stop [E3010]: {before_hole(e3010_what)}"},
@@ -141,6 +148,8 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         MessageLiteral{name: "inclusive", text: "inclusive"},
         MessageLiteral{name: "range_end", text: ")`\n"},
         MessageLiteral{name: "native_tls", text: tls},
+        MessageLiteral{name: "inactive_row_head", text: "Internal error: runtime diagnostic `"},
+        MessageLiteral{name: "inactive_row_tail", text: "` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/"},
     }
     loop literal in literals -> source = "{source}\n{emit("trap_msg_{literal.name}", literal.text, "trap_write_word")}"
     // Retype the canonical Debug interval table at generation time. Runtime
