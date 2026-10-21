@@ -131,7 +131,7 @@ IR_X64_MIN_INSTRUCTIONS_PER_THREAD :: 20000
 // bytes are those of the one-thread loop for any thread count. A thread that
 // stops (an internal panic) costs only the function it was selecting: that
 // function gets an error row and fresh threads select the rest.
-fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64Result {
+fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64Result Never! {
     m := ^program
     tables := ir_x64_tables(m)
     count :: m.functions.len()
@@ -167,8 +167,8 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
     loop _ in 0..<workers -> &seats.push(-1)
     inputs :: shared IRX64Inputs{programs: [IRModule]{^m}, tables: [IRX64Tables]{^tables}}
     store :: shared IRX64Store{order: compiler_threads_heaviest_first(weights), next: 0, seats: ^seats, outputs: ^outputs, stops: ^stops}
-    _ := ir_x64_claimers(inputs, store, 0, workers)
-    loop ir_x64_unclaimed(store) -> _ := ir_x64_claimers(inputs, store, 0, workers)
+    _ := ir_x64_claimers(inputs, store, 0, workers) ?? panic("the x64 selection threads failed")
+    loop ir_x64_unclaimed(store) -> _ := ir_x64_claimers(inputs, store, 0, workers) ?? panic("the x64 selection threads failed")
     shells := ir_x64_take_inputs(inputs)
     results := ir_x64_take_store(store)
     // The rows leave their lists last-first (moved, never copied) and are
