@@ -9,7 +9,7 @@ use core.mem as mem
 use core.math as math
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
-fn object_entries(value: Dyn) -> View<(key: String, value: Dyn)> from value {
+fn object_entries(value: Dyn) -> View<(key: String, value: Dyn)> Never! from value {
     if value == .Object(_) {
         #Unsafe("the Object variant was checked immediately before borrowing its ordered backing") {
             return encoding.__object_entries_view(value)
@@ -24,7 +24,7 @@ fn object_from_entries(entries: ^[(key: String, value: Dyn)]) -> Dyn Never! {
     }
 }
 
-fn bytes_payload(value: Dyn) -> View<U8> from value {
+fn bytes_payload(value: Dyn) -> View<U8> Never! from value {
     #Unsafe("check the private Bytes variant immediately before borrowing its backing") {
         if value == .Bytes(_) -> return encoding.__bytes_view(value)
     }
