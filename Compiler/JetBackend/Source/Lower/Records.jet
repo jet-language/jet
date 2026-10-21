@@ -274,14 +274,24 @@ fn lower_record_tail(text: String, from: Int) -> String Never! {
     String.from_bytes(bytes.slice(from, bytes.len())) ?? ""
 }
 
+// A fieldless record enum crosses as its index, so its variants must keep the
+// runtime's order. A payload enum crosses by variant name (record.out calls
+// the named constructor; record.in maps the runtime tag through the schema),
+// so its checked declaration order may differ from the runtime's.
 fn lower_record_shape_matches(p: MIRProgram, definition: MIRTypeDef, schema: LowerRecordSchema) -> Bool Never! {
     if definition.kind == .Enum(variants, _) {
         if schema.fields != "" || schema.variants == "" -> return false
         listed :: schema.variants.split(",").to_list()
         if listed.len() != variants.len() -> return false
+        payload := false
+        loop variant in variants {
+            if variant.payload != .Unit -> payload = true
+        }
         loop (index, variant) in variants {
-            if variant.name != lower_record_entry_name(listed[index]) -> return false
-            kind :: lower_record_entry_kind(listed[index])
+            position := index
+            if payload -> position = lower_record_variant_position(schema, variant.name) ?? return false
+            if variant.name != lower_record_entry_name(listed[position]) -> return false
+            kind :: lower_record_entry_kind(listed[position])
             if kind == "" -> next
             if variant.payload == .Single(inner) {
                 if !lower_record_kind_matches(p, inner, kind) -> return false
@@ -308,6 +318,14 @@ fn lower_record_shape_matches(p: MIRProgram, definition: MIRTypeDef, schema: Low
         return true
     }
     false
+}
+
+// The runtime ordinal of the schema variant `name` (its schema position).
+fn lower_record_variant_position(schema: LowerRecordSchema, name: String) -> Int? Never! {
+    loop (position, entry) in schema.variants.split(",").to_list() {
+        if lower_record_entry_name(entry) == name -> return Val(position)
+    }
+    None
 }
 
 // Recursive collection members preserve their native List/entry-tuple layout.
@@ -650,22 +668,25 @@ fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
         return lir_builder_finish(f.builder)
     }
     variants :: if definition.kind == .Enum(rows, _) -> rows else -> panic("a record is a struct or an enum")
+    schema :: lower_record_schema(p, glue.ty) ?? panic("a record enum has a schema")
     box :: lower_pointer(&f)
     lower_alloc(&m, &f, box, lower_enum_box_size(p, definition))
     lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: box})
-    variant_index :: lower_word(&f)
-    lower_call_runtime(&m, &f, "jet_rt_record_tag_{runtime_abi_atom(runtime)}", [LIRValueID]{handle}, Val(variant_index))
-    lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: variant_index})
+    // The runtime tag is the variant's schema position; the box stores the
+    // checked declaration's discriminant (lower_record_shape_matches).
+    runtime_tag :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_record_tag_{runtime_abi_atom(runtime)}", [LIRValueID]{handle}, Val(runtime_tag))
     done :: lower_new_block(&f)
     loop (index, variant) in variants {
-        if variant.payload == .Unit -> next
-        expected :: lower_const(&f, lower_discriminant(index))
+        ordinal :: lower_record_variant_position(schema, variant.name) ?? panic("a record enum variant is in its schema")
+        expected :: lower_const(&f, ordinal)
         selected :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: variant_index, right: expected})
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: runtime_tag, right: expected})
         body :: lower_new_block(&f)
         next_block :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
         lower_start(&f, body, [LIRValueID]{})
+        lower_store_word(&f, box, 0, lower_discriminant(index))
         if variant.payload == .Single(inner) {
             info :: lower_enum_payload_info(p, definition, variant, 0) ?? panic("a Single payload has storage")
             lower_record_load_member(p, &m, &f, handle, "jet_rt_record_get_{runtime_abi_atom(runtime)}_{runtime_abi_atom(variant.name)}", inner, box, info.offset, info.boxed)

@@ -1,10 +1,11 @@
 // Real initialized runtime plus DynNative.jet. A synthetic checked descriptor
 // deliberately permutes native tags, moves payloads, boxes recursive members,
-// packs bytes and pads object entries. No Rust/native-layout assumption.
+// packs bytes and pads object entries. List payloads are inline 24-byte
+// [len, cap, data] headers, as the native backend lays them out.
 fn compiler_dyn_fixture_schema() -> I64 {
     schema :: jet_rt_alloc(I64{656}, I64{8})
     coll_zero(schema, I64{656})
-    data_tree_store(schema, I64{24})
+    data_tree_store(schema, I64{40})
     data_tree_store(schema + I64{8}, I64{10})
     kind := I64{0}
     loop kind < (I64{10}) {
@@ -12,7 +13,7 @@ fn compiler_dyn_fixture_schema() -> I64 {
         data_tree_store(row, I64{100} + (I64{9} - kind) * I64{3})
         data_tree_store(row + I64{8}, I64{16})
         data_tree_store(row + I64{16}, if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_ARRAY) -> I64{1} else -> I64{0})
-        data_tree_store(row + I64{24}, I64{8})
+        data_tree_store(row + I64{24}, if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) -> DATA_SEQUENCE_BYTES else -> I64{8})
         data_tree_store(row + I64{32}, if (kind == DATA_TREE_BYTE_LIST) -> I64{1} else if (kind == DATA_TREE_OBJECT) -> I64{32} else -> I64{8})
         data_tree_store(row + I64{40}, I64{8})
         data_tree_store(row + I64{48}, I64{24})
