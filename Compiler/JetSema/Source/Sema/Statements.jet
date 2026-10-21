@@ -4395,7 +4395,12 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
             return None
         }
     }
-    place :: sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    place_diagnostics :: diagnostics.len()
+    place_reasons :: context.incomplete_reasons.len()
+    place :: sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        if !sema_has_error_since(diagnostics, place_diagnostics) && context.incomplete_reasons.len() == place_reasons -> sema_check_unsupported(&context, "the assignment place at offset {op_span.start} checked to no place without a report")
+        return None
+    }
     // This rule on a field of a local: the type of the place just checked
     // decides the route, so the field expression is checked once.
     hooked :: sema_stmt_compound_field_hook_value(target, op, op_span, expr, place.ty)
@@ -4453,7 +4458,12 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     if op == None && !plain_self_typed -> expected = Val(place.ty)
     // Same compound contract as `sema_stmt_check_local_assignment`.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)
-    checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    value_diagnostics :: diagnostics.len()
+    value_reasons :: context.incomplete_reasons.len()
+    checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        if !sema_has_error_since(diagnostics, value_diagnostics) && context.incomplete_reasons.len() == value_reasons -> sema_check_unsupported(&context, "the assigned value at offset {expr_span(expr).start} checked to no value without a report")
+        return None
+    }
     if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return None
     checked := checked_value
     if op != None && sema_stmt_compound_widens(checked.ty, place.ty) {
@@ -4479,7 +4489,10 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         .Index(base, index, kind, _, checked_call, location) -> place.kind = TExprKind.Index{base: base, index: index, kind: kind, access: AccessConvention.Write, checked_call: checked_call, location: location}
         else -> {}
     }
-    line :: sema_source_line_at(environment.source_segments, place.span) ?? return None
+    line :: sema_source_line_at(environment.source_segments, place.span) ?? {
+        sema_check_unsupported(&context, "the assignment place span {place.span.start}..{place.span.end} has no source line in this module")
+        return None
+    }
     Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, line: line, span: Span{start: place.span.start, end: expr_span(expr).end}})
 }
 
