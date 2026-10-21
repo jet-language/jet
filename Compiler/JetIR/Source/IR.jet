@@ -60,7 +60,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[Type, mir_sha256_hex]
+use jet_foundation.[Type, mir_sha256_hex, mir_sha256_hex_bytes]
 
 enum IROp {
     Nop
@@ -128,7 +128,9 @@ enum IRTypeKind { Unit Bool Int Word Float Float32 Char String Pointer Aggregate
 enum IRClass { Integer Pointer Float Memory }
 
 // One interned type row: the checked type and its machine layout.
-// `drop` is the runtime symbol that ends a value's life ("" when trivial).
+// `drop` is the runtime symbol that ends a value's life ("" when trivial);
+// `clone` the one that makes an owned copy of it ("" when none: a value
+// with a drop and no clone only moves).
 struct IRType {
     ty: Type
     kind: IRTypeKind
@@ -138,6 +140,7 @@ struct IRType {
     signed: Bool
     bits: Int
     drop: String
+    clone: String{""}
 }
 
 enum IRSlotKind { Param Local Temp }
@@ -230,6 +233,17 @@ fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
     id :: m.data.len()
     &m.data.push(text.bytes())
     m.data_rows[text] = id
+    id
+}
+
+// A read-only data row holding `bytes` (shared by equal byte strings).
+fn ir_intern_bytes(m: &IRModule, bytes: [U8]) -> Int Never! {
+    key :: "bytes:{mir_sha256_hex_bytes(bytes)}"
+    found :: m.data_rows.get(key) ?? -1
+    if found >= 0 -> return found
+    id :: m.data.len()
+    &m.data.push(bytes)
+    m.data_rows[key] = id
     id
 }
 

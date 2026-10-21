@@ -1,0 +1,415 @@
+// The IR builder's Maps (Lower Maps.jet): a Map is a List of its (key,
+// value) entry tuples kept in ascending key order, the same 24-byte header
+// (len, cap, data); iteration, display and every lookup see the entries in
+// BTreeMap order, and a lookup is a binary search. Its operations are
+// helper functions built once per Map type (map.find, map.set, map.get,
+// map.remove, map.insert), as Lower's glue helpers are.
+
+use jet_foundation.[Span, Type, TBinaryOp, TExpr, TMapEntry, TypeTupleField, type_carrier_identity]
+
+// The entry tuple `(key: K, value: V)` of a Map type, None for any other.
+fn ir_map_entry_type(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Map(key, _, value) {
+        return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key}, TypeTupleField{name: "value", ty: value}}})
+    }
+    None
+}
+
+// The row of a Map type whose keys have an order the builder knows and
+// whose keys and values lay out (the entries live behind the header's
+// buffer pointer, so a struct being laid out may hold a Map of itself).
+fn ir_map_row(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
+    if ir_untag(ty) == .Map(key, _, value) {
+        if !ir_pointee_lays_out(&m, p, key, laying) || !ir_pointee_lays_out(&m, p, value, laying) -> return None
+        if ir_unit_type(ir_untag(ir_subst(p, value))) -> return None
+        key_row :: ir_value_type_in(&m, p, key, laying) ?? return None
+        if ir_map_key_kind(m, key_row) == "" -> return None
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+    }
+    None
+}
+
+// One Map type's entry layout and key order ("int": exact Int, "string":
+// byte order, "word"/"uword": a signed/unsigned word's integer order).
+struct IRMapShape { entry: Int, entry_ty: Type, key: IRMember, value: IRMember, value_ty: Type, stride: Int, kind: String }
+
+fn ir_map_shape(m: &IRModule, p: IRProgram, map_row: Int) -> IRMapShape? Never! {
+    entry_ty :: ir_map_entry_type(m.types[map_row].ty) ?? return None
+    fields :: if entry_ty == .Tuple(fields) -> fields else -> { return None }
+    entry :: ir_value_type(&m, p, entry_ty) ?? return None
+    members :: ir_tuple_members(&m, p, fields) ?? return None
+    if members.len() != 2 -> return None
+    Val(IRMapShape{entry: entry, entry_ty: entry_ty, key: members[0], value: members[1], value_ty: fields[1].ty, stride: ir_list_stride(m, entry), kind: ir_map_key_kind(m, members[0].ty)})
+}
+
+fn ir_map_key_kind(m: IRModule, row: Int) -> String Never! {
+    if m.types[row].kind == {
+        .Int -> "int"
+        .String -> "string"
+        .Word -> if m.types[row].signed -> "word" else -> "uword"
+        .Char | .Bool -> "word"
+        else -> ""
+    }
+}
+
+// `left < right` and `left == right` for two keys (Lower lower_map_key_order).
+struct IRMapOrder { less: Int, same: Int }
+
+fn ir_map_order(m: &IRModule, b: &IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
+    if kind == "string" {
+        word_row :: ir_word_row(&m)
+        order :: ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word_row)
+        zero :: ir_word_const(&m, &b, 0)
+        return IRMapOrder{less: ir_bool_op(&m, &b, IROp.Lt, order, zero), same: ir_bool_op(&m, &b, IROp.Eq, order, zero)}
+    }
+    IRMapOrder{less: ir_bool_op(&m, &b, IROp.Lt, left, right), same: ir_bool_op(&m, &b, IROp.Eq, left, right)}
+}
+
+// The id of Map helper `name` of the Map type row `map_row`, built on first use.
+fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
+    key :: "{name}<{type_carrier_identity(m.types[map_row].ty)}>"
+    if m.function_rows.get(key) == .Val(known) -> return known
+    shape :: ir_map_shape(&m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
+    id :: m.functions.len()
+    symbol :: if name == "map.find" -> "find" else if name == "map.set" -> "set" else if name == "map.get" -> "get" else if name == "map.remove" -> "remove" else -> "insert"
+    &m.functions.push(ir_function_new(name, key, "jet_ir_map_{symbol}_{id}", "", 0))
+    m.function_rows[key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    map :: ir_new_slot(&a, map_row, IRSlotKind.Param, ir_intern_name(&m, "map"))
+    probe_key :: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))
+    if name == "map.find" {
+        ir_map_find_body(&m, &a, shape, map, probe_key)
+    } else if name == "map.set" || name == "map.insert" {
+        value :: ir_new_slot(&a, shape.value.ty, IRSlotKind.Param, ir_intern_name(&m, "value"))
+        option_row :: if name == "map.insert" -> ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1 else -> -1
+        ir_map_insert_body(&m, p, &a, shape, map_row, map, probe_key, value, option_row)
+    } else {
+        option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1
+        ir_map_take_body(&m, p, &a, shape, map_row, map, probe_key, option_row, name == "map.remove")
+    }
+    m.functions[id] = ^a.f
+    id
+}
+
+// Binary search over the ascending entries: the entry's index, or
+// -1 - the insertion point when the key is absent (Lower lower_helper_map_find).
+fn ir_map_find_body(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
+    a.f.result = ir_word_row(&m)
+    length :: ir_load_word(&m, &a, map, 0)
+    data :: ir_load_word(&m, &a, map, 16)
+    low :: ir_word_const(&m, &a, 0)
+    word_row :: ir_word_row(&m)
+    high :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, high, length, -1, -1, a.line)
+    exit :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    open :: ir_bool_op(&m, &a, IROp.Lt, low, high)
+    ir_exit_unless(&m, &a, open, exit)
+    span_sum :: ir_word_op(&m, &a, IROp.Add, low, high)
+    one :: ir_word_const(&m, &a, 1)
+    middle :: ir_word_op(&m, &a, IROp.Shr, span_sum, one)
+    entry :: ir_element_address(&m, &a, data, middle, shape.stride)
+    probe :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+    order :: ir_map_order(&m, &a, shape.kind, probe, key)
+    ir_open_if(&a.f, order.same, a.line)
+    ir_emit(&a.f, IROp.Return, -1, middle, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_open_if(&a.f, order.less, a.line)
+    ir_emit(&a.f, IROp.Add, low, middle, one, IR_OVERFLOW_WRAP, a.line)
+    ir_else(&a.f, a.line)
+    ir_emit(&a.f, IROp.Copy, high, middle, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    minus_one :: ir_word_const(&m, &a, -1)
+    insertion :: ir_word_op(&m, &a, IROp.Sub, minus_one, low)
+    ir_emit(&a.f, IROp.Return, -1, insertion, -1, -1, a.line)
+}
+
+// Moves the key and value in: an existing key keeps its entry key (the
+// incoming one is dropped) and its value is replaced, dropped by map.set and
+// returned in an Option box by map.insert (null when the key was new)
+// (Lower lower_helper_map_insert).
+fn ir_map_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, option_row: Int) Never! {
+    a.f.result = option_row
+    word_row :: ir_word_row(&m)
+    index :: ir_map_call(&m, p, &a, map_row, "map.find", [Int]{map, key}, word_row)
+    none :: ir_word_const(&m, &a, 0)
+    present :: ir_bool_op(&m, &a, IROp.Ge, index, none)
+    ir_open_if(&a.f, present, a.line)
+    entries :: ir_load_word(&m, &a, map, 16)
+    entry :: ir_element_address(&m, &a, entries, index, shape.stride)
+    old := -1
+    if option_row >= 0 {
+        value_size :: m.types[shape.value.ty].size
+        old = ir_box_alloc(&m, &a, value_size, option_row)
+        source :: ir_address_at(&m, &a, entry, shape.value.offset)
+        ir_emit(&a.f, IROp.CopyBytes, -1, old, source, ir_align8(value_size), a.line)
+    } else if m.types[shape.value.ty].drop != "" {
+        replaced :: ir_load_at(&m, &a, entry, shape.value.offset, shape.value.ty)
+        ir_emit(&a.f, IROp.Drop, -1, replaced, -1, -1, a.line)
+    }
+    a.fresh[value] = true
+    ir_store_at(&m, &a, entry, shape.value.offset, value)
+    if m.types[shape.key.ty].drop != "" -> ir_emit(&a.f, IROp.Drop, -1, key, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Return, -1, old, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    minus_one :: ir_word_const(&m, &a, -1)
+    point :: ir_word_op(&m, &a, IROp.Sub, minus_one, index)
+    length :: ir_list_reserve(&m, &a, map, shape.entry)
+    room :: ir_load_word(&m, &a, map, 16)
+    target :: ir_element_address(&m, &a, room, point, shape.stride)
+    one :: ir_word_const(&m, &a, 1)
+    after :: ir_word_op(&m, &a, IROp.Add, point, one)
+    shifted :: ir_element_address(&m, &a, room, after, shape.stride)
+    moved :: ir_word_op(&m, &a, IROp.Sub, length, point)
+    width :: ir_word_const(&m, &a, shape.stride)
+    bytes :: ir_word_op(&m, &a, IROp.Mul, moved, width)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
+    a.fresh[key] = true
+    ir_store_at(&m, &a, target, shape.key.offset, key)
+    a.fresh[value] = true
+    ir_store_at(&m, &a, target, shape.value.offset, value)
+    grown :: ir_word_op(&m, &a, IROp.Add, length, one)
+    ir_emit(&a.f, IROp.Store, -1, map, 0, grown, a.line)
+    null := -1
+    if option_row >= 0 {
+        null = ir_temp(&m, &a, option_row)
+        ir_emit(&a.f, IROp.Const, null, 0, -1, -1, a.line)
+    }
+    ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
+}
+
+// The value under a borrowed key in an Option box (null when absent):
+// map.get copies it, map.remove moves it out, drops the entry's key and
+// closes the gap (Lower lower_helper_map_take).
+fn ir_map_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, option_row: Int, removes: Bool) Never! {
+    a.f.result = option_row
+    word_row :: ir_word_row(&m)
+    index :: ir_map_call(&m, p, &a, map_row, "map.find", [Int]{map, key}, word_row)
+    none :: ir_word_const(&m, &a, 0)
+    absent :: ir_bool_op(&m, &a, IROp.Lt, index, none)
+    ir_open_if(&a.f, absent, a.line)
+    null :: ir_temp(&m, &a, option_row)
+    ir_emit(&a.f, IROp.Const, null, 0, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    data :: ir_load_word(&m, &a, map, 16)
+    entry :: ir_element_address(&m, &a, data, index, shape.stride)
+    value_size :: m.types[shape.value.ty].size
+    boxed :: ir_box_alloc(&m, &a, value_size, option_row)
+    if !removes {
+        stored :: ir_load_at(&m, &a, entry, shape.value.offset, shape.value.ty)
+        copied :: ir_copy_value(&m, p, &a, stored, Span{start: 0, end: 0})
+        ir_store_at(&m, &a, boxed, 0, copied)
+        ir_emit(&a.f, IROp.Return, -1, boxed, -1, -1, a.line)
+        return
+    }
+    source :: ir_address_at(&m, &a, entry, shape.value.offset)
+    ir_emit(&a.f, IROp.CopyBytes, -1, boxed, source, ir_align8(value_size), a.line)
+    if m.types[shape.key.ty].drop != "" {
+        removed_key :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+        ir_emit(&a.f, IROp.Drop, -1, removed_key, -1, -1, a.line)
+    }
+    length :: ir_load_word(&m, &a, map, 0)
+    one :: ir_word_const(&m, &a, 1)
+    last :: ir_word_op(&m, &a, IROp.Sub, length, one)
+    after :: ir_word_op(&m, &a, IROp.Add, index, one)
+    from :: ir_element_address(&m, &a, data, after, shape.stride)
+    moved :: ir_word_op(&m, &a, IROp.Sub, last, index)
+    width :: ir_word_const(&m, &a, shape.stride)
+    bytes :: ir_word_op(&m, &a, IROp.Mul, moved, width)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
+    ir_emit(&a.f, IROp.Store, -1, map, 0, last, a.line)
+    ir_emit(&a.f, IROp.Return, -1, boxed, -1, -1, a.line)
+}
+
+// A call of Map helper `name` with result row `result` (-1: none).
+fn ir_map_call(m: &IRModule, p: IRProgram, b: &IRBuilder, map_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
+    callee :: ir_map_helper(&m, p, map_row, name)
+    dst :: if result >= 0 -> ir_fresh_temp(&m, &b, result) else -> -1
+    operands :: ir_args(&b.f, args)
+    ir_emit(&b.f, IROp.Call, dst, callee, operands, args.len(), b.line)
+    dst
+}
+
+// Room for one more element of the list at `list`: grows its buffer to
+// twice its capacity (at least 4) when full (Lower lower_list_reserve);
+// returns the length.
+fn ir_list_reserve(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Never! {
+    stride :: ir_list_stride(m, row)
+    width :: ir_word_const(&m, &b, stride)
+    length :: ir_load_word(&m, &b, list, 0)
+    capacity :: ir_load_word(&m, &b, list, 8)
+    full :: ir_bool_op(&m, &b, IROp.Ge, length, capacity)
+    ir_open_if(&b.f, full, b.line)
+    grown :: ir_word_op(&m, &b, IROp.Add, capacity, capacity)
+    four :: ir_word_const(&m, &b, 4)
+    small :: ir_bool_op(&m, &b, IROp.Lt, grown, four)
+    ir_open_if(&b.f, small, b.line)
+    ir_emit(&b.f, IROp.Copy, grown, four, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    align :: ir_word_const(&m, &b, 8)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, grown, width)
+    word_row :: ir_word_row(&m)
+    data :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    old_data :: ir_load_word(&m, &b, list, 16)
+    used :: ir_word_op(&m, &b, IROp.Mul, length, width)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, old_data, used}, -1)
+    ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
+    ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
+    ir_end(&b.f, b.line)
+    length
+}
+
+// `[k: v, ...]` (BuildMap): an empty header, then each entry set in order,
+// a later duplicate key replacing the earlier value (Lower lower_build_map).
+fn ir_map_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, entries: [TMapEntry], span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map literal of {ir_type_name(ty)}")
+    map :: ir_list_empty(&m, &b, row)
+    loop entry in entries {
+        key :: ir_value_as(&m, &p, &b, entry.key, shape.key.ty, span)
+        value :: ir_value_as(&m, &p, &b, entry.value, shape.value.ty, span)
+        if ir_failed(b) -> return -1
+        if key < 0 || value < 0 -> return ir_fail_slot(&b, span, "Unit map entry")
+        ir_map_set(&m, p, &b, row, map, key, value)
+    }
+    map
+}
+
+// Moves owned copies of `key` and `value` into the map at `map`.
+fn ir_map_set(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int, value: Int) Never! {
+    owned_key :: ir_own(&m, &b, key)
+    owned_value :: if ir_kind_of(m, b, value) == .Aggregate -> ir_copy_value(&m, p, &b, value, Span{start: 0, end: 0}) else -> ir_own(&m, &b, value)
+    _ :: ir_map_call(&m, p, &b, row, "map.set", [Int]{map, owned_key, owned_value}, -1)
+    b.fresh[owned_key] = false
+    b.fresh[owned_value] = false
+}
+
+// The address of the value stored under `key` in the map at `map`; a
+// missing key stops (Lower lower_map_value_address: Core.rs jet_index_map_ref).
+fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int) -> Int Never! {
+    shape :: ir_map_shape(&m, p, row) ?? return -1
+    word_row :: ir_word_row(&m)
+    found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{map, key}, word_row)
+    none :: ir_word_const(&m, &b, 0)
+    absent :: ir_bool_op(&m, &b, IROp.Lt, found, none)
+    ir_open_if(&b.f, absent, b.line)
+    message :: ir_static_text(&m, &b, "the map has no entry for this key")
+    _ :: ir_runtime(&m, &b, "jet_rt_panic_message", message, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    entries :: ir_load_word(&m, &b, map, 16)
+    entry :: ir_element_address(&m, &b, entries, found, shape.stride)
+    ir_address_at(&m, &b, entry, shape.value.offset)
+}
+
+// `map[key]` read as a value (borrowed: the map keeps it).
+fn ir_map_index(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, span: Span) -> Int Never! {
+    map :: ir_expr(&m, &p, &b, base)
+    if ir_failed(b) || map < 0 -> return -1
+    row :: b.f.slot_type[map]
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "map index of {ir_type_name(base.ty)}")
+    key :: ir_value_as(&m, &p, &b, index, shape.key.ty, span)
+    if ir_failed(b) || key < 0 -> return -1
+    address :: ir_map_value_address(&m, p, &b, row, map, key)
+    ir_release(&m, &b, key)
+    ir_load_at(&m, &b, address, 0, shape.value.ty)
+}
+
+// `map[key] (op)= value`: inserts or replaces the key's entry; a compound
+// assignment updates the value in place.
+fn ir_map_index_assign(m: &IRModule, p: &IRProgram, b: &IRBuilder, base: TExpr, index: TExpr, op: TBinaryOp?, value: TExpr, span: Span) Never! {
+    map :: ir_expr(&m, &p, &b, base)
+    if ir_failed(b) || map < 0 -> return
+    row :: b.f.slot_type[map]
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base.ty)}")
+    key :: ir_value_as(&m, &p, &b, index, shape.key.ty, span)
+    right :: ir_value_as(&m, &p, &b, value, shape.value.ty, span)
+    if ir_failed(b) || key < 0 || right < 0 -> return
+    binary :: op ?? return ir_map_set(&m, p, &b, row, map, key, right)
+    address :: ir_map_value_address(&m, p, &b, row, map, key)
+    ir_release(&m, &b, key)
+    current :: ir_load_at(&m, &b, address, 0, shape.value.ty)
+    site :: b.line
+    value_ty :: m.types[shape.value.ty].ty
+    result :: ir_binary(&m, &p, &b, binary, false, site, value_ty, current, right, value.ty, span)
+    ir_release(&m, &b, right)
+    if ir_failed(b) -> return
+    if m.types[shape.value.ty].drop != "" -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)
+    ir_store_at(&m, &b, address, 0, result)
+}
+
+// `[k: v, ...]` in display (Lower Display.jet): `[:]` when empty; keys and
+// values render as themselves.
+fn ir_render_map(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
+    row :: b.f.slot_type[slot]
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "display of {ir_type_name(m.types[row].ty)}")
+    length :: ir_load_word(&m, &b, slot, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    empty :: ir_bool_op(&m, &b, IROp.Eq, length, zero)
+    ir_open_if(&b.f, empty, b.line)
+    ir_push_static(&m, &b, builder, "[:]")
+    ir_else(&b.f, b.line)
+    ir_push_static(&m, &b, builder, "[")
+    walk :: ir_walk_open(&m, &b, slot, shape.entry)
+    first :: ir_word_const(&m, &b, 0)
+    later :: ir_bool_op(&m, &b, IROp.Ne, walk.index, first)
+    ir_open_if(&b.f, later, b.line)
+    ir_push_static(&m, &b, builder, ", ")
+    ir_end(&b.f, b.line)
+    key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
+    ir_render_push_value(&m, p, &b, builder, key, mode, span)
+    ir_push_static(&m, &b, builder, ": ")
+    value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
+    ir_render_push_value(&m, p, &b, builder, value, mode, span)
+    ir_walk_close(&m, &b, walk)
+    ir_push_static(&m, &b, builder, "]")
+    ir_end(&b.f, b.line)
+}
+
+// A Map builtin by its route symbol (Lower lower_map_method): len, is_empty,
+// has_key, get (an owned copy), insert (the replaced value) and remove (the
+// removed value); None when the builder does not lower `symbol` on Maps.
+fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
+    row :: b.f.slot_type[subject]
+    shape :: ir_map_shape(&m, p, row) ?? return None
+    if symbol == "jet_map_len" {
+        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        return Val(ir_load_at(&m, &b, subject, 0, int_row))
+    }
+    if symbol == "jet_map_is_empty" {
+        length :: ir_load_word(&m, &b, subject, 0)
+        zero :: ir_word_const(&m, &b, 0)
+        return Val(ir_bool_op(&m, &b, IROp.Eq, length, zero))
+    }
+    keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
+    if !keyed && symbol != "jet_map_insert" -> return None
+    if operands.len() < 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "map builtin {symbol} without a key"))
+    key :: ir_adapt(&m, p, &b, operands[1], shape.key.ty, span)
+    if ir_failed(b) -> return Val(-1)
+    option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? return Val(ir_fail_slot(&b, span, "map builtin {symbol} result"))
+    if symbol == "jet_map_insert" {
+        if operands.len() != 3 || operands[2] < 0 -> return Val(ir_fail_slot(&b, span, "map insert without a value"))
+        value :: ir_adapt(&m, p, &b, operands[2], shape.value.ty, span)
+        owned_key :: ir_own(&m, &b, key)
+        owned_value :: if ir_kind_of(m, b, value) == .Aggregate -> ir_copy_value(&m, p, &b, value, span) else -> ir_own(&m, &b, value)
+        old :: ir_map_call(&m, p, &b, row, "map.insert", [Int]{subject, owned_key, owned_value}, option_row)
+        b.fresh[owned_key] = false
+        b.fresh[owned_value] = false
+        return Val(old)
+    }
+    result := -1
+    if symbol == "jet_map_has_key" {
+        word_row :: ir_word_row(&m)
+        found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{subject, key}, word_row)
+        none :: ir_word_const(&m, &b, 0)
+        result = ir_bool_op(&m, &b, IROp.Ge, found, none)
+    } else {
+        result = ir_map_call(&m, p, &b, row, if symbol == "jet_map_get_opt" -> "map.get" else -> "map.remove", [Int]{subject, key}, option_row)
+    }
+    ir_release(&m, &b, key)
+    Val(result)
+}

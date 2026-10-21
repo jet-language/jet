@@ -2,7 +2,9 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 
-use jet_foundation.[Span, Type, TypeTupleField, TBinaryOp, TExpr, TNumericOp, TTypeDef, type_carrier_identity]
+use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TExpr, TField, TFunc, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, type_carrier_identity, type_name, type_union_member_tag]
+use jet_backend.[LOWER_GENERATED_RECORDS, LOWER_RECORD_SCHEMAS, LowerRuntimeHandle, lower_native_runtime_carrier, lower_native_type, lower_runtime_handle, runtime_abi_atom]
+use jet_codegen.[JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS, JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS, JET_CODEGEN_COMPILER_OWNED_ENUMS, JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS, JET_CODEGEN_RANGE_RECORD, JetCodegenCompilerOwnedPayload, jet_codegen_compiler_owned_enum_payload, jet_codegen_compiler_owned_generic_params, jet_codegen_compiler_owned_record_fields]
 
 // A rendered type's identity: its declaration key when it names one.
 fn ir_render_type_key(type_rows: [String:Int], types: [TTypeDef], ty: Type) -> String Never! {
@@ -38,15 +40,21 @@ fn ir_layout(kind: IRTypeKind, ty: Type, size: Int, align: Int, class: IRClass, 
     IRType{ty: ty, kind: kind, size: size, align: align, class: class, signed: signed, bits: bits, drop: drop}
 }
 
+// A pointer-sized owned value the runtime ends with `drop` and copies with
+// `clone` ("" when it only moves).
+fn ir_owned_layout(kind: IRTypeKind, ty: Type, drop: String, clone: String) -> IRType Never! {
+    IRType{ty: ty, kind: kind, size: 8, align: 8, class: if kind == .Int -> IRClass.Integer else -> IRClass.Pointer, signed: kind == .Int, bits: 64, drop: drop, clone: clone}
+}
+
 // The type row of a checked type, or None when the builder cannot lay it out yet.
 fn ir_type_row(m: &IRModule, ty: Type) -> Int? Never! {
     row :: if ty == {
-        .Int -> ir_layout(IRTypeKind.Int, ty, 8, 8, IRClass.Integer, true, 64, "jet_rt_int_drop")
+        .Int -> ir_owned_layout(IRTypeKind.Int, ty, "jet_rt_int_drop", "jet_rt_int_clone")
         .Bool -> ir_layout(IRTypeKind.Bool, ty, 1, 1, IRClass.Integer, false, 8, "")
         .Float -> ir_layout(IRTypeKind.Float, ty, 8, 8, IRClass.Float, true, 64, "")
         .Float32 -> ir_layout(IRTypeKind.Float32, ty, 4, 4, IRClass.Float, true, 32, "")
         .Char -> ir_layout(IRTypeKind.Char, ty, 8, 8, IRClass.Integer, false, 32, "")
-        .String -> ir_layout(IRTypeKind.String, ty, 8, 8, IRClass.Pointer, false, 64, "jet_rt_string_drop")
+        .String -> ir_owned_layout(IRTypeKind.String, ty, "jet_rt_string_drop", "jet_rt_string_clone")
         .IntN(signed, bits) -> {
             if bits > 64 { return None }
             // Packed at its width in aggregates (Lower Values.jet packed IntN).
@@ -99,6 +107,7 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         if !ir_pointee_lays_out(&m, p, element, laying) -> return None
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
     }
+    if ty == .Map(_, _, _) -> return ir_map_row(&m, p, ty, laying)
     if ty == .Fn(_, _, _, _, _, _) {
         // A closure box pointer (Lower Closures.jet): reference count at 0,
         // code address at 8, release helper at 16, captures from 24.
@@ -109,13 +118,31 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         size :: ir_struct_size(m, members)
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, "")))
     }
+    if ty == .Union(_) {
+        // A box of its structural enum (Lower LowerRepr.Boxed), one payload
+        // per member (ir_add_union_types).
+        row :: ir_type_def(p, ir_union_key(ty)) ?? return None
+        return Val(ir_intern_type(&m, "enum:{p.types[row].key}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+    }
+    if ir_string_view(ty) -> return ir_type_row(&m, Type.String)
+    if ir_view_element(ty) == .Val(element) {
+        // A View of a List is carried as the List's header (Lower lower_view_element).
+        if !ir_pointee_lays_out(&m, p, element, laying) -> return None
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+    }
     name :: if ty == {
         .Named(name) -> name
         .Apply(name, args) -> { if args.len() > 0 { return None }
             name }
         else -> { return None }
     }
-    row :: ir_type_def(p, name) ?? return None
+    if ir_handle_row(&m, p, ty, name) == .Val(handle) -> return Val(handle)
+    row :: ir_type_def(p, name) ?? {
+        // The compiler-owned `ParseError` (of Int.parse, String.to_int, ...)
+        // is an alias of String (codegen jet_codegen_parse_error_alias_definition).
+        if name == "ParseError" -> return ir_type_row(&m, Type.String)
+        return None
+    }
     definition :: p.types[row]
     if definition.generic_params.len() > 0 -> return None
     if definition.kind == {
@@ -141,6 +168,54 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
     }
 }
 
+// The row of a runtime-owned value behind an owned handle, as Lower
+// lower_repr decides it for a nominal type `name`: the default Err (the
+// runtime's JetErr), a Core type the runtime handle table names that has no
+// Jet declaration, or whose Core declaration has no record schema or native
+// shape; None for any type the program lays out itself.
+fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
+    found :: ir_type_def(p, name)
+    runtime := lower_runtime_handle(name)
+    if found == .Val(row) {
+        definition :: p.types[row]
+        if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
+            runtime = lower_runtime_handle("Err")
+        } else if runtime == None && definition.key.starts_with("<corelib>/") {
+            runtime = lower_runtime_handle(definition.name)
+        }
+    }
+    handle :: runtime ?? return None
+    if found == .Val(row) {
+        definition :: p.types[row]
+        native :: lower_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
+        core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/")
+        owned_shape :: ir_record_schema(handle) || lower_native_type(name) != None || core_source_owns_type(name)
+        if !native && (!core || owned_shape) -> return None
+        if !native && definition.kind == .Struct(_, _) && !name.starts_with("<corelib>/") -> return None
+    }
+    atom :: runtime_abi_atom(handle.runtime)
+    clone :: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
+    Val(ir_intern_type(&m, "handle:{handle.runtime}", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_{atom}", clone)))
+}
+
+// Whether a runtime handle row has a record schema (Lower Records.jet
+// LOWER_RECORD_SCHEMAS, or a generated row keyed by its runtime type): such
+// a type keeps its declared layout and converts at a route boundary.
+fn ir_record_schema(handle: LowerRuntimeHandle) -> Bool Never! {
+    loop schema in LOWER_RECORD_SCHEMAS {
+        if schema.jet_name == handle.jet_name -> return true
+    }
+    loop schema in LOWER_GENERATED_RECORDS {
+        if schema.jet_name == handle.runtime -> return true
+    }
+    false
+}
+
+// Whether type row `row` is a runtime handle (ir_handle_row).
+fn ir_is_handle(m: IRModule, row: Int) -> Bool Never! {
+    m.types[row].kind == .Pointer && m.types[row].drop.starts_with("jet_rt_handle_drop_")
+}
+
 // Whether the value a pointer member points at lays out: a struct already
 // being laid out does (the pointer breaks the cycle).
 fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
@@ -156,6 +231,7 @@ fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [Strin
 
 // The declared payload-free enum an IR slot type stands for, if any.
 fn ir_enum_def(m: IRModule, p: IRProgram, ty: Int) -> Int? Never! {
+    if ir_untag(m.types[ty].ty) == .Union(_) -> return ir_type_def(p, ir_union_key(ir_untag(m.types[ty].ty)))
     name :: if m.types[ty].ty == {
         .Named(name) -> name
         .Apply(name, _) -> name
@@ -196,11 +272,13 @@ enum IRRender { Display Show Debug }
 // The String showing `slot` (Lower lower_render_value): a String renders as
 // itself (not fresh); scalars through their runtime formatter (fresh).
 fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
+    string_row :: ir_string_row(&m)
     if ir_unit_type(ty) {
-        builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, ir_pointer_row(&m))
+        pointer :: ir_pointer_row(&m)
+        builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
         b.fresh[builder] = false
         ir_push_static(&m, &b, builder, "()")
-        return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, ir_string_row(&m))
+        return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
     }
     if slot < 0 -> return ir_fail_slot(&b, span, "display of {ir_type_name(ty)} without a value")
     selected :: ir_render_impl(&m, p, &b, slot, mode)
@@ -208,13 +286,14 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
     kind :: ir_kind_of(m, b, slot)
     if kind == .String {
         if mode != .Debug -> return slot
-        return ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, ir_string_row(&m))
+        return ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, string_row)
     }
     if kind == .Aggregate || ir_carrier_type(ty) || ir_enum_def(m, p, b.f.slot_type[slot]) != None {
-        builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, ir_pointer_row(&m))
+        pointer :: ir_pointer_row(&m)
+        builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
         b.fresh[builder] = false
         ir_render_push(&m, p, &b, builder, slot, mode, false, span)
-        return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, ir_string_row(&m))
+        return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
     }
     row :: m.types[b.f.slot_type[slot]]
     symbol :: if kind == {
@@ -226,7 +305,7 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
         .Float32 -> if mode == .Debug -> "jet_rt_float32_debug" else -> "jet_rt_float32_to_string"
         else -> { return ir_fail_slot(&b, span, "display of {ir_type_name(ty)}") }
     }
-    ir_runtime(&m, &b, symbol, [Int]{slot}, ir_string_row(&m))
+    ir_runtime(&m, &b, symbol, [Int]{slot}, string_row)
 }
 
 fn ir_push_static(m: &IRModule, b: &IRBuilder, builder: Int, text: String) Never! {
@@ -249,7 +328,8 @@ fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IR
     start :: ir_args(&b.f, [Int]{slot})
     at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 1, b.line)
     &b.deferred.push(IRDeferredCall{at: at, key: function.key})
-    text :: ir_adapt(&m, p, &b, dst, ir_string_row(&m), Span{start: 0, end: 0})
+    string_row :: ir_string_row(&m)
+    text :: ir_adapt(&m, p, &b, dst, string_row, Span{start: 0, end: 0})
     if text != dst -> b.fresh[text] = true
     text
 }
@@ -266,7 +346,8 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
         return
     }
     if kind == .String && member {
-        quoted :: ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, ir_string_row(&m))
+        string_row :: ir_string_row(&m)
+        quoted :: ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, string_row)
         _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, quoted}, -1)
         ir_release(&m, &b, quoted)
         return
@@ -279,7 +360,9 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
         ir_render_result(&m, p, &b, builder, slot, ok, err, mode, span)
         return
     }
-    if ir_untag(ty) == .List(element) {
+    if ir_map_entry_type(ty) != None -> return ir_render_map(&m, p, &b, builder, slot, mode, span)
+    list_element :: if ir_untag(ty) == .List(element) -> Val(element.copy()) else -> ir_view_element(ty)
+    if list_element == .Val(element) {
         ir_render_list(&m, p, &b, builder, slot, element, mode, span)
         return
     }
@@ -291,7 +374,8 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
             loop (index, variant) in variants {
                 index_slot :: ir_temp_like(&m, &b, discriminant)
                 ir_emit(&b.f, IROp.Const, index_slot, index, -1, -1, b.line)
-                test :: ir_temp(&m, &b, ir_type_row(&m, Type.Bool) ?? 0)
+                bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+                test :: ir_temp(&m, &b, bool_row)
                 ir_emit(&b.f, IROp.Eq, test, discriminant, index_slot, -1, b.line)
                 ir_open_if(&b.f, test, b.line)
                 members :: ir_variant_members(&m, p, row, index) ?? return ir_fail(&b, span, "display of variant {variant.name}")
@@ -299,7 +383,8 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
                     .Unit -> ir_push_static(&m, &b, builder, ir_render_name(variant.name))
                     .Single(_) -> {
                         ir_push_static(&m, &b, builder, "{ir_render_name(variant.name)}(")
-                        ir_render_push_value_member(&m, p, &b, builder, ir_member_value(&m, &b, slot, members[0]), mode, span)
+                        value :: ir_member_value(&m, &b, slot, members[0])
+                        ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
                         ir_push_static(&m, &b, builder, ")")
                     }
                     .Named(_) -> ir_render_record(&m, p, &b, builder, slot, variant.name, members, mode, span)
@@ -317,7 +402,8 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
         ir_push_static(&m, &b, builder, "(")
         loop (index, field) in members {
             if index > 0 -> ir_push_static(&m, &b, builder, ", ")
-            ir_render_push_value_member(&m, p, &b, builder, ir_member_read(&m, &b, slot, field), mode, span)
+            value :: ir_member_read(&m, &b, slot, field)
+            ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
         }
         if members.len() == 1 -> ir_push_static(&m, &b, builder, ",")
         ir_push_static(&m, &b, builder, ")")
@@ -482,13 +568,20 @@ fn ir_binary(m: &IRModule, p: &IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     site :: if line > 0 -> line else -> b.line
     if ir_compare_op(op) {
-        if kind == .String && op != .Eq && op != .Ne -> return ir_fail_slot(&b, span, "String ordering comparison")
-        if kind != .Int && kind != .Word && kind != .Bool && kind != .Char && kind != .Float && kind != .Float32 && kind != .String -> return ir_fail_slot(&b, span, "comparison of {ir_type_name(left_ty)}")
+        scalar :: kind == .Int || kind == .Word || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String
+        if !scalar {
+            if op != .Eq && op != .Ne -> return ir_fail_slot(&b, span, "comparison of {ir_type_name(left_ty)}")
+            same :: ir_equal(&m, p, &b, left, right, span)
+            if op == .Eq -> return same
+            differ :: ir_temp(&m, &b, bool_row)
+            ir_emit(&b.f, IROp.Not, differ, same, -1, -1, site)
+            return differ
+        }
         dst :: ir_temp(&m, &b, bool_row)
         ir_emit(&b.f, ir_binary_op(op) ?? IROp.Eq, dst, left, right, -1, site)
         return dst
     }
-    if op == .Compare -> return ir_fail_slot(&b, span, "three-way comparison")
+    if op == .Compare -> return ir_three_way(&m, p, &b, left, right, span)
     if kind == .String {
         if op != .Add || right_ty != Type.String -> return ir_fail_slot(&b, span, "String operator {op}")
         dst :: ir_fresh_like(&m, &b, left)
@@ -528,6 +621,511 @@ fn ir_binary(m: &IRModule, p: &IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
         return dst
     }
     ir_fail_slot(&b, span, "operator {op} on {ir_type_name(left_ty)}")
+}
+
+// `left <=> right` (Lower lower_three_way): the Less/Equal/Greater variant
+// of Ordering. Exact Ints and fixed-width words compare as their `<` and
+// `==` do; Strings by the sign of jet_rt_string_compare.
+fn ir_three_way(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
+    kind :: ir_kind_of(m, b, left)
+    left_ty :: m.types[b.f.slot_type[left]].ty
+    if kind != .Int && kind != .Word && kind != .Char && kind != .String -> return ir_fail_slot(&b, span, "operator <=> on {ir_type_name(left_ty)}")
+    ordering :: ir_type_def(p, "Ordering") ?? return ir_fail_slot(&b, span, "`<=>` result Ordering has no definition")
+    result_row :: ir_value_type(&m, p, Type.Named{name: "Ordering"}) ?? return ir_fail_slot(&b, span, "layout of Ordering")
+    less :: ir_variant_index(p, ordering, "Less") ?? return ir_fail_slot(&b, span, "Ordering has no Less variant")
+    equal :: ir_variant_index(p, ordering, "Equal") ?? return ir_fail_slot(&b, span, "Ordering has no Equal variant")
+    greater :: ir_variant_index(p, ordering, "Greater") ?? return ir_fail_slot(&b, span, "Ordering has no Greater variant")
+    a := left
+    c := right
+    if kind == .String {
+        word :: ir_word_row(&m)
+        a = ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word)
+        c = ir_word_const(&m, &b, 0)
+    }
+    dst :: ir_temp(&m, &b, result_row)
+    below :: ir_bool_op(&m, &b, IROp.Lt, a, c)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Const, dst, less, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    same :: ir_bool_op(&m, &b, IROp.Eq, a, c)
+    ir_open_if(&b.f, same, b.line)
+    ir_emit(&b.f, IROp.Const, dst, equal, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    ir_emit(&b.f, IROp.Const, dst, greater, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    dst
+}
+
+// `a < b < c` (codegen jet_codegen_lower_compare_chain): each comparison
+// runs only while every earlier one held, and each operand is evaluated
+// once. The right operand an open test keeps for the next comparison is
+// dropped on the arm that leaves the chain early.
+fn ir_compare_chain(m: &IRModule, p: &IRProgram, b: &IRBuilder, operands: [TExpr], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
+    if operators.len() == 0 || operands.len() != operators.len() + 1 -> return ir_fail_slot(&b, span, "comparison chain shape")
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    result :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    left := ir_expr(&m, &p, &b, operands[0])
+    if ir_failed(b) -> return -1
+    held := [Int]{}
+    loop (index, op) in operators {
+        if index < hooks.len() && hooks[index] -> return ir_fail_slot(&b, span, "comparison chain hook")
+        right :: ir_expr(&m, &p, &b, operands[index + 1])
+        if ir_failed(b) -> return -1
+        site :: b.line
+        test :: ir_binary(&m, &p, &b, op, false, site, operands[index].ty, left, right, operands[index + 1].ty, span)
+        if ir_failed(b) -> return -1
+        ir_release(&m, &b, left)
+        if index + 1 == operators.len() {
+            ir_emit(&b.f, IROp.Copy, result, test, -1, -1, b.line)
+            ir_release(&m, &b, right)
+        } else {
+            &held.push(if right >= 0 && b.fresh[right] && ir_has_drop(m, b, right) -> right else -> -1)
+            ir_open_if(&b.f, test, b.line)
+        }
+        left = right
+    }
+    index := held.len() - 1
+    loop index >= 0 {
+        if held[index] >= 0 {
+            ir_else(&b.f, b.line)
+            ir_emit(&b.f, IROp.Drop, -1, held[index], -1, -1, b.line)
+        }
+        ir_end(&b.f, b.line)
+        index -= 1
+    }
+    result
+}
+
+// `left == right` as a Bool slot (Lower Equal.jet lower_equal_values and
+// lower_helper_equal, the Rust derived PartialEq), compared inline.
+fn ir_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    same :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, same, 0, -1, -1, b.line)
+    differ :: ir_open(&b.f, IROp.Block, b.line)
+    row :: b.f.slot_type[left]
+    ir_equal_into(&m, p, &b, row, left, right, differ, [String]{}, span)
+    ir_emit(&b.f, IROp.Const, same, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    same
+}
+
+// Leaves the Block `differ` unless the values `left` and `right` of type row
+// `row` are equal: scalars and Strings compare in place, a runtime handle
+// through its jet_rt_handle_eq_<T>; an Option, Result, List, Map, tuple,
+// struct or payload enum member by member in declaration order. `comparing`
+// holds the declarations being compared, so a recursive type stops.
+fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, differ: Int, comparing: [String], span: Span) Never! {
+    kind :: m.types[row].kind
+    if kind == .Unit -> return
+    ty :: ir_untag(m.types[row].ty)
+    if left < 0 || right < 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    if kind == .Int || kind == .Word || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+        equal :: ir_bool_op(&m, &b, IROp.Eq, left, right)
+        return ir_exit_unless(&m, &b, equal, differ)
+    }
+    if ir_is_handle(m, row) {
+        symbol :: ir_equal_handle_symbol(p, ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+        equal :: ir_runtime(&m, &b, symbol, [Int]{left, right}, bool_row)
+        return ir_exit_unless(&m, &b, equal, differ)
+    }
+    if ty == .Option(inner) {
+        // Both absent are equal, one absent differs, else the payloads.
+        payload :: ir_value_type(&m, p, inner) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        left_some :: ir_option_is_some(&m, &b, left)
+        right_some :: ir_option_is_some(&m, &b, right)
+        both :: ir_bool_op(&m, &b, IROp.Eq, left_some, right_some)
+        ir_exit_unless(&m, &b, both, differ)
+        ir_open_if(&b.f, left_some, b.line)
+        left_payload :: ir_load_at(&m, &b, left, 0, payload)
+        right_payload :: ir_load_at(&m, &b, right, 0, payload)
+        ir_equal_into(&m, p, &b, payload, left_payload, right_payload, differ, comparing, span)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .Result(ok_ty, err_ty) {
+        ok :: ir_value_type(&m, p, ok_ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        err :: ir_value_type(&m, p, err_ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        left_ok :: ir_result_is_ok(&m, &b, left)
+        right_ok :: ir_result_is_ok(&m, &b, right)
+        both :: ir_bool_op(&m, &b, IROp.Eq, left_ok, right_ok)
+        ir_exit_unless(&m, &b, both, differ)
+        ir_open_if(&b.f, left_ok, b.line)
+        left_value :: ir_load_at(&m, &b, left, 8, ok)
+        right_value :: ir_load_at(&m, &b, right, 8, ok)
+        ir_equal_into(&m, p, &b, ok, left_value, right_value, differ, comparing, span)
+        ir_else(&b.f, b.line)
+        left_error :: ir_load_at(&m, &b, left, 8, err)
+        right_error :: ir_load_at(&m, &b, right, 8, err)
+        ir_equal_into(&m, p, &b, err, left_error, right_error, differ, comparing, span)
+        ir_end(&b.f, b.line)
+        return
+    }
+    element_ty :: if ty == .List(element) -> Val(element.copy()) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
+    if element_ty == .Val(element) {
+        // Equal lengths, then every element (a Map's entries) in order.
+        element_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        stride :: ir_list_stride(m, element_row)
+        length :: ir_load_word(&m, &b, left, 0)
+        right_length :: ir_load_word(&m, &b, right, 0)
+        same_length :: ir_bool_op(&m, &b, IROp.Eq, length, right_length)
+        ir_exit_unless(&m, &b, same_length, differ)
+        left_data :: ir_load_word(&m, &b, left, 16)
+        right_data :: ir_load_word(&m, &b, right, 16)
+        index :: ir_word_const(&m, &b, 0)
+        done :: ir_open(&b.f, IROp.Block, b.line)
+        _ :: ir_open(&b.f, IROp.Loop, b.line)
+        more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
+        ir_exit_unless(&m, &b, more, done)
+        left_at :: ir_element_address(&m, &b, left_data, index, stride)
+        a :: ir_load_at(&m, &b, left_at, 0, element_row)
+        right_at :: ir_element_address(&m, &b, right_data, index, stride)
+        c :: ir_load_at(&m, &b, right_at, 0, element_row)
+        ir_equal_into(&m, p, &b, element_row, a, c, differ, comparing, span)
+        one :: ir_word_const(&m, &b, 1)
+        ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .Tuple(fields) {
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        return ir_equal_members(&m, p, &b, members, left, right, differ, comparing, span)
+    }
+    name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    definition_row :: ir_type_def(p, name) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    key :: p.types[definition_row].key
+    if comparing.contains(key) -> return ir_fail(&b, span, "comparison of recursive {ir_type_name(ty)}")
+    inner := comparing
+    &inner.push(key)
+    if p.types[definition_row].kind == .Struct(_, _) {
+        members :: ir_struct_members(&m, p, definition_row) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        return ir_equal_members(&m, p, &b, members, left, right, differ, inner, span)
+    }
+    if kind == .Pointer && p.types[definition_row].kind == .Enum(variants, _) {
+        // Equal discriminants, then the selected variant's payload members.
+        left_tag :: ir_load_word(&m, &b, left, 0)
+        right_tag :: ir_load_word(&m, &b, right, 0)
+        same_tag :: ir_bool_op(&m, &b, IROp.Eq, left_tag, right_tag)
+        ir_exit_unless(&m, &b, same_tag, differ)
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition_row, index) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+            if members.len() == 0 -> next
+            variant_word :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, left_tag, variant_word)
+            ir_open_if(&b.f, selected, b.line)
+            ir_equal_members(&m, p, &b, members, left, right, differ, inner, span)
+            ir_end(&b.f, b.line)
+        }
+        return
+    }
+    ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+}
+
+fn ir_equal_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMember], left: Int, right: Int, differ: Int, comparing: [String], span: Span) Never! {
+    loop member in members {
+        if ir_failed(b) -> return
+        left_member :: ir_member_value(&m, &b, left, member)
+        right_member :: ir_member_value(&m, &b, right, member)
+        ir_equal_into(&m, p, &b, member.ty, left_member, right_member, differ, comparing, span)
+    }
+}
+
+// The runtime equality of a handle type (Lower lower_equal_handle_symbol):
+// jet_rt_handle_eq_<T> when the runtime type compares.
+fn ir_equal_handle_symbol(p: IRProgram, ty: Type) -> String? Never! {
+    if ty == .Apply(_, args) {
+        if args.len() > 0 -> return None
+    }
+    name :: ir_nominal_name(ty) ?? return None
+    runtime := lower_runtime_handle(name)
+    if ir_type_def(p, name) == .Val(row) {
+        definition :: p.types[row]
+        if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
+            runtime = lower_runtime_handle("Err")
+        } else if runtime == None && definition.key.starts_with("<corelib>/") {
+            runtime = lower_runtime_handle(definition.name)
+        }
+    }
+    handle :: runtime ?? return None
+    if handle.eq -> return Val("jet_rt_handle_eq_{runtime_abi_atom(handle.runtime)}")
+    None
+}
+
+// The declaration key of the structural enum of union type `ty`.
+fn ir_union_key(ty: Type) -> String Never! {
+    "union:{type_carrier_identity(ty)}"
+}
+
+// Adds the structural enum of each union type a signature or a declaration
+// names (codegen jet_codegen_synthetic_union_definition): one variant per
+// member, named by its union member tag and carrying the member.
+fn ir_add_union_types(types: &[TTypeDef], functions: [TFunc]) Never! {
+    if types.len() == 0 -> return
+    found := [Type]{}
+    loop function in functions {
+        if function.generic_params.len() > 0 -> next
+        loop param in function.params -> ir_collect_unions(param.ty, &found)
+        if function.ret == .Val(ret) -> ir_collect_unions(ret, &found)
+    }
+    loop definition in types {
+        if definition.generic_params.len() > 0 -> next
+        if definition.kind == {
+            .Struct(fields, _) -> loop field in fields -> ir_collect_unions(field.ty, &found)
+            .Enum(variants, _) -> loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(inner) -> ir_collect_unions(inner, &found)
+                    .Named(fields) -> loop field in fields -> ir_collect_unions(field.ty, &found)
+                }
+            }
+            else -> {}
+        }
+    }
+    declared := [String:Bool]{}
+    loop definition in types -> declared[definition.key] = true
+    module_identity :: types[0].module_identity.copy()
+    loop ty in found {
+        key :: ir_union_key(ty)
+        if declared.get(key) != None -> next
+        declared[key] = true
+        if ty == .Union(members) {
+            variants :: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: member.copy()}, discriminant: None}
+            &types.push(ir_compiler_owned_def(module_identity, key, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
+        }
+    }
+}
+
+// Every union type `ty` holds, outermost first.
+fn ir_collect_unions(ty: Type, found: &[Type]) Never! {
+    if ty == {
+        .Union(members) -> {
+            &found.push(ty.copy())
+            loop member in members -> ir_collect_unions(member, &found)
+        }
+        .Option(inner) | .List(inner) | .Shared(inner) -> ir_collect_unions(inner, &found)
+        .Tagged(_, inner) -> ir_collect_unions(inner, &found)
+        .Result(ok, err) -> {
+            ir_collect_unions(ok, &found)
+            ir_collect_unions(err, &found)
+        }
+        .Map(key, _, value) -> {
+            ir_collect_unions(key, &found)
+            ir_collect_unions(value, &found)
+        }
+        .Tuple(fields) -> loop field in fields -> ir_collect_unions(field.ty, &found)
+        .Apply(_, args) -> loop arg in args -> ir_collect_unions(arg, &found)
+        else -> {}
+    }
+}
+
+// The call argument `value` widened to the union `union_ty` (sema
+// widen_to_union).
+fn ir_widen_union(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, union_ty: Type, span: Span) -> Int Never! {
+    member_row :: ir_value_type(&m, p, ir_subst(p, value.ty)) ?? return ir_type_fail(&b, span, value.ty)
+    payload :: ir_value_as(&m, &p, &b, value, member_row, span)
+    if ir_failed(b) -> return -1
+    ir_union_box(&m, p, &b, payload, value.ty, union_ty, span)
+}
+
+// A new box of the structural enum of union `union_ty` holding `payload`
+// (of member type `member_ty`) as the variant that member's tag names.
+fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_ty: Type, union_ty: Type, span: Span) -> Int Never! {
+    target :: ir_untag(ir_subst(p, union_ty))
+    row :: ir_type_def(p, ir_union_key(target)) ?? return ir_fail_slot(&b, span, "union {ir_type_name(target)} without a definition")
+    slot_type :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+    member_tag :: type_union_member_tag(ir_untag(ir_subst(p, member_ty)))
+    index :: ir_variant_index(p, row, member_tag) ?? return ir_fail_slot(&b, span, "{ir_type_name(member_ty)} is no member of {ir_type_name(target)}")
+    members :: ir_variant_members(&m, p, row, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
+    size :: ir_enum_box_size(&m, p, row) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
+    boxed :: ir_box_alloc(&m, &b, size, slot_type)
+    tag_word :: ir_word_const(&m, &b, index)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, tag_word, b.line)
+    if payload >= 0 && members.len() == 1 -> ir_member_store(&m, &b, boxed, members[0], payload)
+    boxed
+}
+
+// The Err box the failure edge of `?` returns for the Err box `subject`
+// under the function carrier `success ! error`, its error converted as
+// `conversion` asks (codegen jet_codegen_lower_try_failure_conversion).
+fn ir_try_reraise(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, conversion: TTryConvert, success: Type, error: Type, span: Span) -> Int Never! {
+    if conversion == .NoConversion -> return subject
+    source := Type.Int
+    held :: m.types[b.f.slot_type[subject]].ty
+    if ir_untag(held) == .Result(_, err) -> source = err.copy()
+    source_row :: ir_value_type(&m, p, source) ?? return ir_type_fail(&b, span, source)
+    error_value :: ir_load_at(&m, &b, subject, 8, source_row)
+    payload :: ir_own(&m, &b, error_value)
+    converted := -1
+    if conversion == {
+        .DefaultErr -> {
+            error_row :: ir_value_type(&m, p, error) ?? return ir_type_fail(&b, span, error)
+            converted = ir_runtime(&m, &b, "jet_err_from_message", [Int]{payload}, error_row)
+            b.fresh[converted] = true
+            ir_release(&m, &b, payload)
+        }
+        .Typed(function_name, _, target) -> {
+            row :: p.rows.get(function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
+            callee :: ir_function_id(&m, &p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
+            routine_return :: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(&b, span, "error conversion {function_name} without a result")
+            returned_row :: ir_value_type(&m, p, routine_return) ?? return ir_type_fail(&b, span, routine_return)
+            returned :: ir_fresh_temp(&m, &b, returned_row)
+            start :: ir_args(&b.f, [Int]{payload})
+            ir_emit(&b.f, IROp.Call, returned, callee, start, 1, b.line)
+            b.fresh[payload] = false
+            converted = returned
+            if ir_untag(routine_return) == .Result(_, _) {
+                target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+                converted_value :: ir_load_at(&m, &b, returned, 8, target_row)
+                converted = ir_own(&m, &b, converted_value)
+                b.fresh[converted] = true
+                ir_release(&m, &b, returned)
+            }
+            if ir_default_err(p, target) {
+                // A source-owned Core error reports under its user spelling.
+                source_spelling := type_name(source)
+                if source_spelling.starts_with("<corelib>/") {
+                    owner_parts :: source_spelling.split("::").to_list()
+                    source_spelling = owner_parts[owner_parts.len() - 1]
+                }
+                string_row :: ir_string_row(&m)
+                source_text :: ir_intern_text(&m, source_spelling)
+                target_text :: ir_intern_text(&m, type_name(target))
+                source_name :: ir_temp(&m, &b, string_row)
+                ir_emit(&b.f, IROp.ConstText, source_name, source_text, -1, -1, b.line)
+                target_name :: ir_temp(&m, &b, string_row)
+                ir_emit(&b.f, IROp.ConstText, target_name, target_text, -1, -1, b.line)
+                error_row :: b.f.slot_type[converted]
+                applied :: ir_runtime(&m, &b, "jet_err_apply_conversion", [Int]{converted, source_name, target_name}, error_row)
+                b.fresh[applied] = true
+                ir_release(&m, &b, converted)
+                converted = applied
+            }
+        }
+        .WidenUnion(_, _) -> {
+            converted = ir_union_box(&m, p, &b, payload, source, error, span)
+            if ir_failed(b) -> return -1
+            b.fresh[converted] = true
+        }
+        else -> return ir_fail_slot(&b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
+    }
+    ir_release(&m, &b, subject)
+    ir_result_box(&m, p, &b, Type.Result{ok: success, err: error}, false, converted)
+}
+
+// Whether `ty` is the compiler-owned default error `Err`.
+fn ir_default_err(p: IRProgram, ty: Type) -> Bool Never! {
+    name :: ir_nominal_name(ir_untag(ty)) ?? return false
+    row :: ir_type_def(p, name) ?? return false
+    p.types[row].compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
+}
+
+// The compiler-owned rows no checked module declares, added as codegen
+// jet_codegen_declared_type_slots adds them: each runtime enum
+// (JET_CODEGEN_COMPILER_OWNED_ENUMS), each plain Core enum leaf no program
+// type and no single loaded Core source declares, then `FieldError`, `Range`
+// and the carrier, Core and math records, each under its bare canonical key
+// unless a row already owns it.
+fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
+    if types.len() == 0 -> return
+    module_identity :: types[0].module_identity.copy()
+    declared := [String:Bool]{}
+    program_names := [String:Bool]{}
+    core_enums := [String:Int]{}
+    loop definition in types {
+        declared[definition.key] = true
+        if !definition.key.starts_with("<corelib>/") {
+            program_names[definition.name] = true
+        } else if definition.key != definition.name && definition.kind == .Enum(_, _) {
+            core_enums[definition.name] = (core_enums.get(definition.name) ?? 0) + 1
+        }
+    }
+    loop row in JET_CODEGEN_COMPILER_OWNED_ENUMS {
+        if declared.get(row.name) != None -> next
+        declared[row.name] = true
+        variants :: loop variant in row.variants -> ir_compiler_owned_variant(variant, jet_codegen_compiler_owned_enum_payload(row.name, variant))
+        &types.push(ir_compiler_owned_def(module_identity, row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
+    }
+    loop core_row in CORE_ENUM_ROWS {
+        if declared.get(core_row.name) != None || program_names.get(core_row.name) != None -> next
+        if (core_enums.get(core_row.name) ?? 0) == 1 -> next
+        if core_row.kind == .Enum(names) {
+            declared[core_row.name] = true
+            variants :: loop variant in names -> ir_compiler_owned_variant(variant, JetCodegenCompilerOwnedPayload.Unit)
+            &types.push(ir_compiler_owned_def(module_identity, core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}}))
+        }
+    }
+    records := [String]{"FieldError", JET_CODEGEN_RANGE_RECORD}
+    loop name in JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
+    loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
+    loop record in JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
+    loop name in records {
+        if declared.get(name) != None -> next
+        declared[name] = true
+        fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
+        &types.push(ir_compiler_owned_def(module_identity, name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}}))
+    }
+}
+
+fn ir_compiler_owned_variant(name: String, payload: JetCodegenCompilerOwnedPayload) -> TVariant Never! {
+    checked :: if payload == {
+        .Unit -> TVariantPayload.Unit
+        .Single(ty) -> TVariantPayload.Single{value: ty.copy()}
+        .Named(fields) -> TVariantPayload.Named{fields: ir_compiler_owned_fields(fields)}
+    }
+    TVariant{name: name.copy(), wire_name: name.copy(), span: Span{start: 0, end: 0}, payload: checked, discriminant: None}
+}
+
+// The public stored fields of a compiler-owned row.
+fn ir_compiler_owned_fields(record_fields: [TypeTupleField]) -> [TField] Never! {
+    loop field in record_fields -> TField{
+        name: field.name.copy(),
+        shape_names: TShapeFieldNames{text: field.name.copy(), json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: field.name.copy(), env: field.name.copy(), db: None, layout: None},
+        skip: false,
+        ty: field.ty.copy(),
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        computed: false,
+        has_default: false,
+        redact: false,
+    }
+}
+
+// One compiler-owned row under its bare canonical key, with the row's type
+// parameters (jet_codegen_compiler_owned_definition).
+fn ir_compiler_owned_def(module_identity: String, name: String, kind: ^TTypeDefKind) -> TTypeDef Never! {
+    generic_params :: loop param in jet_codegen_compiler_owned_generic_params(name) -> TGenericParam{name: param, bounds: [SymbolID]{}}
+    TTypeDef{
+        module_identity: module_identity.copy(),
+        key: name.copy(),
+        name: name.copy(),
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        generic_params: generic_params,
+        derives: [String]{},
+        auto_derive_default: false,
+        auto_printable: false,
+        published_schema: false,
+        single_use: false,
+        must_use: false,
+        layout: None,
+        c_layout_tag: None,
+        enum_layout: None,
+        layout_alignment: None,
+        serde: [TSerdeAttribute]{},
+        cli_bindings: [TCLIBinding]{},
+        cli: None,
+        ownership: TDeclarationOwnership.Owned,
+        boxed_edges: [String]{},
+        compiler_builtin: None,
+        kind: ^kind,
+    }
 }
 
 fn ir_carrier_type(ty: Type) -> Bool Never! {
@@ -612,7 +1210,8 @@ fn ir_render_record(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, bas
             ir_push_static(&m, &b, builder, "[redacted]")
             next
         }
-        ir_render_push_value_member(&m, p, &b, builder, ir_member_value(&m, &b, base, member), mode, span)
+        value :: ir_member_value(&m, &b, base, member)
+        ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
         if ir_failed(b) -> return
     }
     ir_push_static(&m, &b, builder, if members.len() == 0 -> "}}" else -> " }}")
@@ -654,13 +1253,16 @@ fn ir_render_push_value(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int,
 // present payload renders bare, as `Val(...)` in Debug.
 fn ir_render_option(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, payload: Type, mode: IRRender, span: Span) Never! {
     row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "display of an Option of {ir_type_name(payload)}")
-    absent :: ir_temp(&m, &b, ir_type_row(&m, Type.Bool) ?? 0)
-    ir_emit(&b.f, IROp.Not, absent, ir_option_is_some(&m, &b, slot), -1, -1, b.line)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    absent :: ir_temp(&m, &b, bool_row)
+    some :: ir_option_is_some(&m, &b, slot)
+    ir_emit(&b.f, IROp.Not, absent, some, -1, -1, b.line)
     ir_open_if(&b.f, absent, b.line)
     ir_push_static(&m, &b, builder, if mode == .Debug -> "None" else -> "null")
     ir_else(&b.f, b.line)
     if mode == .Debug -> ir_push_static(&m, &b, builder, "Val(")
-    ir_render_push_value(&m, p, &b, builder, ir_load_at(&m, &b, slot, 0, row), mode, span)
+    value :: ir_load_at(&m, &b, slot, 0, row)
+    ir_render_push_value(&m, p, &b, builder, value, mode, span)
     if mode == .Debug -> ir_push_static(&m, &b, builder, ")")
     ir_end(&b.f, b.line)
 }
@@ -671,19 +1273,23 @@ fn ir_render_result(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slo
     ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_fail(&b, span, "display of a Result of {ir_type_name(ok_ty)}")
     err_row :: ir_value_type(&m, p, err_ty) ?? return ir_fail(&b, span, "display of a Result error {ir_type_name(err_ty)}")
     clean :: ir_never_type(err_ty) || ir_untag(err_ty) == (Type.Named{name: "Absent"})
-    failed :: ir_temp(&m, &b, ir_type_row(&m, Type.Bool) ?? 0)
-    ir_emit(&b.f, IROp.Not, failed, ir_result_is_ok(&m, &b, slot), -1, -1, b.line)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    failed :: ir_temp(&m, &b, bool_row)
+    ok :: ir_result_is_ok(&m, &b, slot)
+    ir_emit(&b.f, IROp.Not, failed, ok, -1, -1, b.line)
     ir_open_if(&b.f, failed, b.line)
     if clean {
         ir_push_static(&m, &b, builder, if mode == .Debug -> "None" else -> "null")
     } else {
         ir_push_static(&m, &b, builder, "Err(")
-        ir_render_push_value(&m, p, &b, builder, ir_load_at(&m, &b, slot, 8, err_row), mode, span)
+        error :: ir_load_at(&m, &b, slot, 8, err_row)
+        ir_render_push_value(&m, p, &b, builder, error, mode, span)
         ir_push_static(&m, &b, builder, ")")
     }
     ir_else(&b.f, b.line)
     if !clean || mode == .Debug -> ir_push_static(&m, &b, builder, if clean -> "Val(" else -> "Ok(")
-    ir_render_push_value(&m, p, &b, builder, ir_load_at(&m, &b, slot, 8, ok_row), mode, span)
+    value :: ir_load_at(&m, &b, slot, 8, ok_row)
+    ir_render_push_value(&m, p, &b, builder, value, mode, span)
     if !clean || mode == .Debug -> ir_push_static(&m, &b, builder, ")")
     ir_end(&b.f, b.line)
 }
@@ -693,7 +1299,8 @@ fn ir_render_list(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
     row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "display of a List of {ir_type_name(element)}")
     ir_push_static(&m, &b, builder, "[")
     walk :: ir_walk_open(&m, &b, slot, row)
-    later :: ir_bool_op(&m, &b, IROp.Ne, walk.index, ir_word_const(&m, &b, 0))
+    zero :: ir_word_const(&m, &b, 0)
+    later :: ir_bool_op(&m, &b, IROp.Ne, walk.index, zero)
     ir_open_if(&b.f, later, b.line)
     ir_push_static(&m, &b, builder, ", ")
     ir_end(&b.f, b.line)
@@ -714,9 +1321,144 @@ fn ir_list_stride(m: IRModule, row: Int) -> Int Never! {
     ir_align8(m.types[row].size)
 }
 
-// The element type row of a List slot.
+// The element type row of a List slot (a Map's entry tuple: a Map is the
+// List of its entries, BuildMaps.jet).
 fn ir_list_element(m: &IRModule, p: IRProgram, b: IRBuilder, list: Int) -> Int? Never! {
-    if ir_untag(m.types[b.f.slot_type[list]].ty) == .List(element) -> return ir_value_type(&m, p, element)
+    ty :: m.types[b.f.slot_type[list]].ty
+    if ir_untag(ty) == .List(element) -> return ir_value_type(&m, p, element)
+    if ir_view_element(ty) == .Val(element) -> return ir_value_type(&m, p, element)
+    if ir_map_entry_type(ty) == .Val(entry) -> return ir_value_type(&m, p, entry)
+    None
+}
+
+// A `View<str>` (Lower lower_string_view): text, carried as a String.
+fn ir_string_view(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name != "View" || args.len() != 1 -> return false
+        return ir_untag(args[0]) == (Type.Named{name: "str"}) || ir_untag(args[0]) == (Type.Apply{name: "str", args: [Type]{}})
+    }
+    false
+}
+
+// The element of a `View<T>` / `ViewMut<T>` other than text (Lower
+// lower_view_element).
+fn ir_view_element(ty: Type) -> Type? Never! {
+    if ir_string_view(ty) -> return None
+    if ir_untag(ty) == .Apply(name, args) {
+        if (name == "View" || name == "ViewMut") && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
+}
+
+// The Bool test of a text pattern on the String `subject` (Lower
+// lower_scan_match): one 64-byte descriptor row per part
+// [tag, a, b, width, destination, storage, scratch, scratch] for
+// `jet_rt_text_pattern_match`, which writes each capture into its own
+// zeroed frame cell only on a match; the holes bind from those cells.
+fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, parts: [TTextPatternPart], span: Span) -> Int Never! {
+    if ir_kind_of(m, b, subject) != .String -> return ir_fail_slot(&b, span, "text pattern on a non-String subject")
+    word :: ir_word_row(&m)
+    pointer :: ir_pointer_row(&m)
+    rows :: ir_out_slot(&m, &b, 8 * parts.len())
+    pending := [IRPending]{}
+    loop (index, part) in parts {
+        at :: 64 * index
+        part_kind := 0
+        a := -1
+        c := -1
+        width := 0
+        storage := 5
+        destination := -1
+        if part == {
+            .Literal(value) -> {
+                bytes := [U8]{}
+                loop byte in value.bytes() -> &bytes.push(byte)
+                data :: ir_intern_bytes(&m, bytes)
+                address :: ir_temp(&m, &b, pointer)
+                ir_emit(&b.f, IROp.DataAddress, address, data, -1, -1, b.line)
+                a = address
+                c = ir_word_const(&m, &b, bytes.len())
+            }
+            .Hole(name, ty, _) -> {
+                hole :: ir_untag(ty)
+                if hole == {
+                    .String -> {
+                        part_kind = 1
+                        storage = 4
+                    }
+                    .Int -> {
+                        part_kind = 2
+                        storage = 1
+                    }
+                    .IntN(_, bits) -> {
+                        part_kind = 2
+                        storage = 0
+                        width = bits /% 8
+                    }
+                    .Float -> {
+                        part_kind = 3
+                        storage = 2
+                    }
+                    .Bool -> {
+                        part_kind = 4
+                        storage = 3
+                    }
+                    .InlineRange(_, lo, hi) -> {
+                        part_kind = 5
+                        storage = 1
+                        a = ir_word_const(&m, &b, lo)
+                        c = ir_word_const(&m, &b, hi)
+                    }
+                    else -> return ir_fail_slot(&b, span, "text pattern hole of {ir_type_name(ty)}")
+                }
+                if name == "" || name == "_" {
+                    storage = 5
+                } else {
+                    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+                    destination = ir_out_slot(&m, &b, 1)
+                    slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, name))
+                    &pending.push(IRPending{name: name, slot: slot, subject: destination, offset: 0})
+                }
+            }
+        }
+        tag_word :: ir_word_const(&m, &b, part_kind)
+        width_word :: ir_word_const(&m, &b, width)
+        storage_word :: ir_word_const(&m, &b, storage)
+        line :: b.line
+        ir_emit(&b.f, IROp.Store, -1, rows, at, tag_word, line)
+        if a >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 8, a, line)
+        if c >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 16, c, line)
+        ir_emit(&b.f, IROp.Store, -1, rows, at + 24, width_word, line)
+        if destination >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 32, destination, line)
+        ir_emit(&b.f, IROp.Store, -1, rows, at + 40, storage_word, line)
+    }
+    data :: ir_runtime(&m, &b, "jet_rt_string_data", [Int]{subject}, pointer)
+    length :: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{subject}, word)
+    stride :: ir_word_const(&m, &b, 1)
+    count :: ir_word_const(&m, &b, parts.len())
+    hit :: ir_runtime(&m, &b, "jet_rt_text_pattern_match", [Int]{data, length, stride, rows, count}, word)
+    zero :: ir_word_const(&m, &b, 0)
+    test :: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
+    loop row in pending -> &b.pending.push(row)
+    test
+}
+
+// The declared type of member `name` of the struct or tuple type `ty`.
+fn ir_declared_field_type(p: IRProgram, ty: Type, name: String) -> Type? Never! {
+    plain :: ir_untag(ir_subst(p, ty))
+    if plain == .Tuple(fields) {
+        loop field in fields {
+            if field.name == name -> return Val(field.ty)
+        }
+        return None
+    }
+    nominal :: ir_nominal_name(plain) ?? return None
+    row :: ir_type_def(p, nominal) ?? return None
+    if p.types[row].kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.name == name -> return Val(field.ty)
+        }
+    }
     None
 }
 
@@ -744,12 +1486,16 @@ fn ir_numeric_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
         }
         .CheckedIntToFixed(host_kind, _, _, line) -> {
             if ir_kind_of(m, b, value) != .Int || m.types[target].kind != .Word -> return ir_fail_slot(&b, span, "checked fixed conversion of {ir_type_name(receiver.ty)}")
-            args := [Int]{value, ir_int_constant(&m, &b, ir_type_row(&m, Type.Int) ?? 0, host_kind)}
-            loop arg in ir_location(&m, &b, if line > 0 -> line else -> b.line) -> &args.push(arg)
+            int_row :: ir_type_row(&m, Type.Int) ?? 0
+            kind_word :: ir_int_constant(&m, &b, int_row, host_kind)
+            args := [Int]{value, kind_word}
+            site :: if line > 0 -> line else -> b.line
+            loop arg in ir_location(&m, &b, site) -> &args.push(arg)
             result :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_fixed"), args, target)
             ir_release(&m, &b, value)
             return result
         }
+        .FloatToInt(_, _, _, _, _) -> return ir_float_to_int(&m, p, &b, value, ty, span)
         else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
 }
@@ -788,7 +1534,8 @@ fn ir_numeric_cast(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target
             ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
             return result
         }
-        cell :: ir_temp(&m, &b, ir_pointer_row(&m))
+        pointer :: ir_pointer_row(&m)
+        cell :: ir_temp(&m, &b, pointer)
         ir_emit(&b.f, IROp.StackAddress, cell, 8, 8, -1, b.line)
         ir_emit(&b.f, IROp.Store, -1, cell, 0, value, b.line)
         ir_emit(&b.f, IROp.Load, result, cell, 0, -1, b.line)
