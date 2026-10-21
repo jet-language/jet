@@ -155,6 +155,9 @@ fn sema_dyn_try_member(receiver: Expr, receiver_value: TExpr, method: String, ar
     }
     convention :: if method == "remove" -> AccessConvention.Write else -> AccessConvention.Read
     if !sema_ownership_check_call_receiver(&state, receiver, convention, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    // Dyn reads report no receiver convention (Rust `dyn_method_return`), so a
+    // written mark on the receiver is not compared with one.
+    if method != "remove" -> sema_receiver_mark_forget(&state, receiver)
     value :: sema_tir_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
@@ -291,6 +294,7 @@ fn sema_data_try_accessor(receiver: Expr, receiver_value: TExpr, name: String, m
         &typed.push(value)
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_receiver_mark_forget(&state, receiver)
     value := sema_tir_node(contract.result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: contract.operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

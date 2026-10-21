@@ -39,8 +39,11 @@ use jet_foundation.[
     core_enum_variant_payload,
     core_enum_variants,
     core_module_enum_variants,
+    core_module_type_leaf,
     core_record_literal_fields,
     core_record_literal_is_core_only,
+    core_source_owns_type,
+    core_type_modules,
     expr_span,
     mir_typed_head_kind,
     regex_syntax_validate,
@@ -598,12 +601,20 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     if owner_symbol == None {
         core_variants := core_enum_payload_variants(resolved_name)
         if core_variants == None -> core_variants = core_enum_variants(resolved_name)
-        if core_variants == .Val(variants) -> return sema_expression_core_enum_literal(resolved_name, variants, variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if core_variants == .Val(variants) {
+            // A source-owned Core enum is named by its canonical identity.
+            modules :: core_type_modules(resolved_name)
+            display_name :: if core_source_owns_type(resolved_name) && modules.len() == 1 -> "<corelib>/{modules[0]}::{core_module_type_leaf(resolved_name)}" else -> resolved_name
+            return sema_expression_core_enum_literal(resolved_name, display_name, variants, variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
     }
     if owner_symbol == .Val(core_owner) {
         if sema_expression_core_export_variants(environment, program, core_owner) == .Val(variants) {
             &context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
-            return sema_expression_core_enum_literal(core_owner.name, variants, variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            // A payload diagnostic names a Core enum by its canonical
+            // `<corelib>/module::Name` identity (Rust `display_type_name`).
+            display_name :: "{core_owner.module_name}::{core_owner.name}"
+            return sema_expression_core_enum_literal(core_owner.name, display_name, variants, variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
     if type_name == "" {
@@ -780,7 +791,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
 
 // A variant of a Core enum without a source declaration: unit variants take no
 // payload and payload variants take one positional value per row type.
-fn sema_expression_core_enum_literal(enum_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_core_enum_literal(enum_name: String, display_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     payload_types :: core_enum_variant_payload(enum_name, variant) ?? {
         &diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
         return None
@@ -806,13 +817,13 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
         sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
         diagnostic_start :: diagnostics.len()
         checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            sema_expression_enum_payload_replace_mismatch(enum_name, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expression_enum_payload_replace_mismatch(display_name, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return None
         }
         if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
         compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
         if !compatible {
-            &diagnostics.push(sema_expression_enum_payload_mismatch(enum_name, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
+            &diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
             return None
         }
         if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
