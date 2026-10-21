@@ -1,23 +1,8 @@
-// Check one agent-workload report for every required native OS.
-// Usage (from the repository root): jet run Tools/ci/AgentWorkloadMatrix.jet -- REPORT_DIR
-//
-// Every `required` row of the frozen OS matrix needs `<REPORT_DIR>/<os>.tsv`,
-// declaring that OS on its first data row and passing
-// `bash Tools/ci/agent-workload-gate.sh --check`. Every row is checked; the
-// program exits 1 when any check failed.
-package {
-    name: "agent-workload-matrix"
-    version: "0.1.0"
-    edition: "2026"
-    authority: {
-        holds: {
-            allow: [Env, Exec, Exec.Args, FS.Read, IO, Mem, Time.Wait]
-        }
-    }
-}
-
+// The native OS matrix check: every `required` row of the frozen OS matrix
+// needs `<REPORT_DIR>/<os>.tsv`, declaring that OS on its first data row and
+// passing the gate's report check. Every row is checked; the result is 1 when
+// any check failed.
 use core.files as files
-use core.process as process
 use core.term as term
 
 MATRIX_PATH :: "tests/agent_workloads/native_os_matrix.tsv"
@@ -79,26 +64,14 @@ fn absolute_dir(path: String) -[FS, Env]> String Never! {
     }
 }
 
-// The gate's own verdict, its output passed through unchanged.
-fn gate_passes(report: String) -[Exec, IO, Time.Wait]> Bool Never! {
-    if process.cmd([String]{"bash", "Tools/ci/agent-workload-gate.sh", "--check", report.copy()}).stdout(.Capture).stderr(.Capture).run() == {
-        .Ok(receipt) -> {
-            out := term.stdout()
-            &out.write(receipt.output).drop("gate stdout")
-            errors := term.stderr()
-            &errors.write(receipt.errors).drop("gate stderr")
-            receipt.code == 0
-        }
-        .Err(error) -> {
-            term.eprint("agent workload matrix: cannot run the gate for {report}: {error}")
-            false
-        }
-    }
+// The gate's own verdict for one report, with its pass line.
+fn gate_passes(report: String) -[FS, Env, IO, Time.Wait]> Bool Never! {
+    gate_check(report) == 0
 }
 
 fn matrix_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     if args.len() != 1 {
-        term.eprint("usage: jet run Tools/ci/AgentWorkloadMatrix.jet -- REPORT_DIR")
+        term.eprint("usage: jet run Tools/ci/AgentWorkloads -- matrix REPORT_DIR")
         return 64
     }
     report_dir :: absolute_dir(args[0])
@@ -141,11 +114,6 @@ fn matrix_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     if failed -> return 1
     print("agent workload matrix: pass required_os={required} report_dir={report_dir}")
     0
-}
-
-fn run() {
-    code :: matrix_main(process.args())
-    if code != 0 -> process.exit(code)
 }
 
 #Test("matrix rows are complete lines with tab runs as one separator") {

@@ -1,0 +1,12 @@
+// The agent workload corpus gate and its native OS matrix check.
+// Usage (from the repository root):
+//   jet run Tools/ci/AgentWorkloads                      run the corpus (needs JET)
+//   jet run Tools/ci/AgentWorkloads -- --check REPORT    validate one per-host report
+//   jet run Tools/ci/AgentWorkloads -- matrix REPORT_DIR one passing report per required OS
+use core.process as process
+
+fn run() {
+    args :: process.args()
+    code :: if args.len() > 0 && args[0] == "matrix" -> matrix_main(args[1..<args.len()]) else -> gate_main(args)
+    if code != 0 -> process.exit(code)
+}

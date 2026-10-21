@@ -72,8 +72,8 @@ Decision `D-PLATFORM-EVIDENCE1 = D` requires a matching CI pass for a native row
 
 | Platform row | Status | Evidence or remaining action |
 | --- | --- | --- |
-| Linux x86_64 | NEEDS CI JOB | No CI job calls `tools/ci/agent-workload-gate.sh` on Linux. `jetpack-platform` at `.github/workflows/ci.yml:54` runs other tests only. |
-| macOS any | NEEDS CI JOB | No CI job calls `tools/ci/agent-workload-gate.sh` on macOS. The committed report is Linux-only. |
+| Linux x86_64 | NEEDS CI JOB | No CI job runs `jet run Tools/ci/AgentWorkloads` on Linux. `jetpack-platform` at `.github/workflows/ci.yml:54` runs other tests only. |
+| macOS any | NEEDS CI JOB | No CI job runs `jet run Tools/ci/AgentWorkloads` on macOS. The committed report is Linux-only. |
 | Windows any | NEEDS OWNER EXCLUSION | `native_os_matrix.tsv` marks Windows `excluded` because Bash has no native adapter. The owner must name this row and set an expiry or reopen trigger. |
 
 No platform row is closed by a real workload CI job. The following jobs are the exact YAML to add to `.github/workflows/ci.yml`; this file is not edited under the card rules.
@@ -108,7 +108,7 @@ No platform row is closed by a real workload CI job. The following jobs are the 
         run: |
           scratch="$HOME/.cache/jet-dev/scratch"
           mkdir -p "$scratch"
-          TMPDIR="$scratch" nix develop -c bash tools/ci/agent-workload-gate.sh
+          TMPDIR="$scratch" nix develop -c jet run Tools/ci/AgentWorkloads
 
       - name: Upload native corpus report
         if: always()
@@ -137,16 +137,16 @@ No platform row is closed by a real workload CI job. The following jobs are the 
           merge-multiple: true
 
       - name: Check native OS matrix
-        run: jet run Tools/ci/AgentWorkloadMatrix.jet -- agent-workload-reports
+        run: jet run Tools/ci/AgentWorkloads -- matrix agent-workload-reports
 ```
 
 Run the gate on each required native host:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/agent-workload-gate.sh
+TMPDIR="$HOME/.cache/jet-dev/scratch" JET="$(command -v jet)" jet run Tools/ci/AgentWorkloads
 ```
 
-The gate writes the report atomically, checks the frozen task set, and fails when a task that passed in `jet_baseline.tsv` no longer passes. Set `JET_AGENT_WORKLOAD_REPORT` for a per-host CI artifact. After Linux and macOS jobs finish, run `jet run Tools/ci/AgentWorkloadMatrix.jet -- <report-dir>` from the repository root; it requires one passing report for each required OS. Keep the committed report from the selected baseline host at the path above.
+The gate writes the report atomically, checks the frozen task set, and fails when a task that passed in `jet_baseline.tsv` no longer passes. Set `JET_AGENT_WORKLOAD_REPORT` for a per-host CI artifact. `jet run Tools/ci/AgentWorkloads -- --check <report>` validates one report. After Linux and macOS jobs finish, run `jet run Tools/ci/AgentWorkloads -- matrix <report-dir>` from the repository root; it requires one passing report for each required OS. Keep the committed report from the selected baseline host at the path above.
 
 A safety result is green only when the runner proves the required authority and process checks. An unavailable check stays red and names its blocking Tower card.
 

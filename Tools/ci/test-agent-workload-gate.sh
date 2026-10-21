@@ -38,7 +38,7 @@ awk -F '\t' -v OFS='\t' -v policy_digest="$policy_digest" '
 check() {
   local name="$1" expected="$2" path="$3"
   set +e
-  output=$(JET_AGENT_WORKLOAD_BASELINE="$ROOT/tests/agent_workloads/jet_baseline.tsv" bash Tools/ci/agent-workload-gate.sh --check "$path" 2>&1)
+  output=$(JET_AGENT_WORKLOAD_BASELINE="$ROOT/tests/agent_workloads/jet_baseline.tsv" jet run Tools/ci/AgentWorkloads -- --check "$path" 2>&1)
   status=$?
   set -e
   if [ "$status" -ne "$expected" ]; then
@@ -73,7 +73,7 @@ check missing-report 1 "$tmp/missing.tsv" | grep -Fq 'missing report'
 mkdir "$tmp/reports"
 cp "$report" "$tmp/reports/linux.tsv"
 awk -F '\t' -v OFS='\t' '$1 == "1" {$2 = "macos"; $3 = "any"} {print}' "$report" >"$tmp/reports/macos.tsv"
-matrix_output=$(jet run Tools/ci/AgentWorkloadMatrix.jet -- "$tmp/reports" 2>&1)
+matrix_output=$(jet run Tools/ci/AgentWorkloads -- matrix "$tmp/reports" 2>&1)
 printf '%s\n' "$matrix_output" | grep -Fq 'agent workload matrix: pass required_os=2'
 
 echo "agent workload gate self-check: pass"
