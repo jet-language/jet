@@ -343,8 +343,9 @@ struct LowerContext {
     local_slots: [U64:Int]
     // MIR value read or moved out of a root place -> its slot.
     read_slots: [U64:Int]
-    // MIR values a ReadPlace defines (root or projected): the place keeps its
-    // value unless the read is sunk (lower_value_takeable).
+    // MIR values a ReadPlace defines (root or projected), and the Copy of one
+    // (lower_copy aliases a copy no consumer takes): the place keeps its value
+    // unless the read is sunk (lower_value_takeable).
     place_reads: [U64:Bool]
     // MIR value a parameter or temporary place stands for -> its slot.
     defined_slots: [U64:Int]
@@ -2425,6 +2426,25 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
                 }
                 .Move(inner) -> _ := &moves.add(result_value.value, inner.value)
                 else -> {}
+            }
+        }
+    }
+    // A Copy of a place read is that place's value too unless it is sunk:
+    // lower_copy lowers an inline aggregate copy no consumer takes as an
+    // alias of the read (MIRRust.rs transparent_read). A view
+    // materialization is a List of its own.
+    copies_read := true
+    loop copies_read {
+        copies_read = false
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                result_value :: instruction.result ?? next
+                if instruction.operation == .Copy(inner, fact) {
+                    if fact != .ViewMaterialize && place_reads.get(inner.value) != None && place_reads.get(result_value.value) == None {
+                        _ := &place_reads.add(result_value.value, true)
+                        copies_read = true
+                    }
+                }
             }
         }
     }

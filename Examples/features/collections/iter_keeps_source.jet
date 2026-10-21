@@ -1,8 +1,14 @@
 // Running a List through an Iter reads the List: `xs.lazy()`,
 // `xs.try_collect()` and the List methods that run on an Iter (`dedup`,
 // `intersperse`, `last_index_of`, `average`, `is_sorted`) copy the elements,
-// and the source binding keeps every one of them.
+// and the source binding keeps every one of them. So does the source of a
+// `.copy()` collected in place, and a List of Lists an Iter flattens.
 fn ok(text: String) -> String Err! { return Ok("{text}!") }
+
+fn checked(text: String) -> String Err! {
+    if text == "bad" -> return Err("refused {text}")
+    Ok(text)
+}
 
 fn run() {
     xs :: [String]{"a", "a", "b"}
@@ -17,6 +23,17 @@ fn run() {
         .Ok(vs) -> print("{vs.len()} {rs.len()} {vs[0]}")
         .Err(e) -> print("unexpected: {e.message}")
     }
+    if rs.copy().try_collect() == {
+        .Ok(vs) -> print("{vs.len()} {rs.len()} {vs[1]}")
+        .Err(e) -> print("unexpected: {e.message}")
+    }
+    fs :: [String Err!]{checked("m"), checked("bad")}
+    if fs.try_collect() == {
+        .Ok(vs) -> print("unexpected: {vs.len()}")
+        .Err(e) -> print("{e.message} {fs.len()}")
+    }
+    xss :: [[String]]{[String]{"p", "q"}, [String]{"r"}}
+    print("{xss.lazy().flatten().to_list().len()} {xss.len()} {xss[0].len()} {xss[0][1]}")
     // A source whose last use is the call is taken over, not copied.
     last :: [String]{"g"}
     print(last.lazy().to_list().len())
