@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 157b03fe2853c04d81ab89d293138fc7c7de7b92aaefc90849947f88df94fb4d
+// Source SHA-256: adbd7f9c759541a966120b29114424cecfc59ac917aef019ff3a9282c31d36d6
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -202,9 +202,9 @@ const CORE_MODULE_4_MEMBERS: &[&str] = &["compress", "decompress", "is_gzip", "i
 const CORE_MODULE_4_TYPES: &[(&str, CoreLeafKind)] = &[("GzipFileError", CoreLeafKind::Enum(&["Read", "Write", "Malformed", "Unsupported", "Checksum"]))];
 const CORE_MODULE_4_DEPENDENCIES: &[&str] = &["core.archive"];
 
-const CORE_MODULE_5_MEMBERS: &[&str] = &["compress", "decompress", "is_zstd", "magic", "compress_text", "decompress_text", "compress_file", "decompress_file", "ZstdFileError"];
-const CORE_MODULE_5_TYPES: &[(&str, CoreLeafKind)] = &[("ZstdFileError", CoreLeafKind::Enum(&["Read", "Write", "Malformed", "Unsupported", "Checksum"]))];
-const CORE_MODULE_5_DEPENDENCIES: &[&str] = &["core.archive"];
+const CORE_MODULE_5_MEMBERS: &[&str] = &["compress", "decompress", "decoder", "reader", "is_zstd", "magic", "compress_text", "decompress_text", "compress_file", "decompress_file", "ZstdFileError", "ZstdDecoder", "ZstdReader"];
+const CORE_MODULE_5_TYPES: &[(&str, CoreLeafKind)] = &[("ZstdFileError", CoreLeafKind::Enum(&["Read", "Write", "Malformed", "Unsupported", "Checksum"])), ("ZstdDecoder", CoreLeafKind::Plain), ("ZstdReader", CoreLeafKind::Plain)];
+const CORE_MODULE_5_DEPENDENCIES: &[&str] = &["core.archive", "core.files"];
 
 const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "get_bool", "get_int", "get_text", "has", "help_text", "merge", "positionals", "program", "spec", "ArgDef", "ArgsSpec", "apply_defaults", "count_flag", "default_value", "define", "dest", "get_choice", "get_or", "help_from", "missing_required", "remainder", "required", "usage", "wants_help"];
 const CORE_MODULE_6_TYPES: &[(&str, CoreLeafKind)] = &[("ArgDef", CoreLeafKind::Plain), ("ArgsSpec", CoreLeafKind::Plain)];
@@ -765,7 +765,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.devtools", alias: "core_core_devtools", path: "Core/Devtools/Devtools.jet", owned_members: &["publish"], impl_types: &[] },
     CoreSourceModule { module: "core.archive", alias: "core_archive", path: "Core/Archive/Archive.jet", owned_members: &["crc32", "adler32", "deflate", "inflate", "compress", "decompress", "zip_decompress", "zip_names_json", "list", "zip_open", "zip_next", "zip_read", "zip_write", "zip_close", "zip_extract", "unzip", "tar_add", "tar_get", "tar_names_json", "create"], impl_types: &[] },
     CoreSourceModule { module: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/Archive/Gzip.jet", owned_members: &["compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"], impl_types: &[] },
-    CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/Archive/Zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic"], impl_types: &[] },
+    CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/Archive/Zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decoder", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic", "reader"], impl_types: &[] },
     CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/Args/Args.jet", owned_members: &["decode_argv", "get_bool", "get_int", "get_text", "positionals", "program", "help_text", "has", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"], impl_types: &[] },
     CoreSourceModule { module: "core.auth", alias: "core_core_auth", path: "Core/Auth/Auth.jet", owned_members: &["magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto", "__store_load", "__store_replace"], impl_types: &[] },
     CoreSourceModule { module: "core.build", alias: "core_core_build", path: "Core/Build/Build.jet", owned_members: &["graph", "receipt_diff"], impl_types: &[] },
@@ -877,6 +877,8 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
 ];
 
 pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
+    CoreSourceOwnedType { path: "Core/Archive/Zstd.jet", name: "ZstdDecoder" },
+    CoreSourceOwnedType { path: "Core/Archive/Zstd.jet", name: "ZstdReader" },
     CoreSourceOwnedType { path: "Core/Auth/Auth.jet", name: "AuthError" },
     CoreSourceOwnedType { path: "Core/Auth/Auth.jet", name: "Claims" },
     CoreSourceOwnedType { path: "Core/Auth/Auth.jet", name: "Session" },
