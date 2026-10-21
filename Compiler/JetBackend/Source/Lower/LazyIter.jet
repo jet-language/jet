@@ -355,6 +355,17 @@ fn lower_lazy_runtime_symbol(symbol: String) -> String Never! {
     "jet_rt_native_{runtime_abi_atom(tail)}"
 }
 
+// The `by_value` flag jet_rt_native_iter_from_list takes for the List `value`
+// lowered to `list` of `ty`: set only for a takeable List (a move-out, a sunk
+// read or a fresh owner), whose header the runtime takes and whose elements
+// it moves out. A sunk read is a copy-on-write clone still sharing its
+// place's buffer, so the List is first made the buffer's sole owner.
+fn lower_lazy_list_moved(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID, list: LIRValueID, ty: MIRType) -> LIRValueID Never! {
+    if !lower_value_takeable(c, value) -> return lower_const_flag(&f, 0)
+    lower_list_make_unique(p, &m, &f, list, ty)
+    lower_const_flag(&f, 1)
+}
+
 // Common entry for the checked BuiltinMethod and static CoreCall routes.
 // Checked MIR ownership chooses transfer versus snapshot at the boundary.
 fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, values: [MIRValueID]) -> Bool Never! {
@@ -391,7 +402,7 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             return true
         }
         meta :: lower_lazy_meta(p, &m, &f, elem)
-        moved :: lower_const_flag(&f, if lower_value_takeable(c, values[0]) -> 1 else -> 0)
+        moved :: lower_lazy_list_moved(p, c, &m, &f, values[0], source, source_ty)
         lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(dst))
         return true
     }
@@ -413,7 +424,7 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         elem :: lower_list_element(source_ty) ?? return true
         handle :: lower_pointer(&f)
         meta :: lower_lazy_meta(p, &m, &f, elem)
-        moved :: lower_const_flag(&f, if lower_value_takeable(c, values[0]) -> 1 else -> 0)
+        moved :: lower_lazy_list_moved(p, c, &m, &f, values[0], source, source_ty)
         lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(handle))
         source = handle
     }
@@ -454,7 +465,10 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if symbol == "jet_iter_dedup" || symbol == "jet_iter_last_index_of" -> lower_lazy_meta_trait(&m, &f, meta, elem, "equal")
         if symbol == "jet_iter_is_sorted" || symbol == "jet_iter_compare" -> lower_lazy_meta_trait(&m, &f, meta, elem, "compare")
         &call_args.push(meta)
-        if symbol == "jet_iter_compare" || symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of" {
+        if symbol == "jet_iter_compare" {
+            other :: lower_value_type(c, values[1]) ?? return true
+            &call_args.push(lower_lazy_list_moved(p, c, &m, &f, values[1], call_args[1].copy(), other))
+        } else if symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of" {
             &call_args.push(lower_const_flag(&f, if lower_value_takeable(c, values[1]) -> 1 else -> 0))
         }
     } else if collects {
@@ -550,7 +564,7 @@ fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
         elem :: lower_list_element(receiver_ty) ?? return true
         meta :: lower_lazy_meta(p, &m, &f, elem)
         handle :: lower_pointer(&f)
-        moved :: lower_const_flag(&f, if lower_value_takeable(c, receiver) -> 1 else -> 0)
+        moved :: lower_lazy_list_moved(p, c, &m, &f, receiver, source, receiver_ty)
         lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(handle))
         source = handle
     }
