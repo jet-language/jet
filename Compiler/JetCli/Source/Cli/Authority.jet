@@ -16,11 +16,11 @@ use jet_foundation.[
     Diagnostic,
     MIRFunctionID,
     MIRProgram,
+    authority_is_deny_only,
     diagnostic_from_registry,
 ]
 use jet_sema.[
     sema_effect_grantable_roots,
-    sema_effect_without_deny_only,
 ]
 
 // A program with no authority row may print, allocate, and
@@ -224,7 +224,7 @@ fn jet_cli_with_invocation(authority: &JetCLIAuthority, invocation: JetCLIInvoca
 fn jet_cli_undecided(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
-        if sema_effect_without_deny_only([String]{right}).len() > 0 && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> &rights.push(right)
+        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> &rights.push(right)
     }
     rights
 }
@@ -245,11 +245,12 @@ fn jet_cli_is_beginner_floor(authority: JetCLIAuthority) -> Bool Never! {
     jet_cli_is_application_default(authority) || authority.authority.starts_with(JET_CLI_PACKAGE_DEFAULT)
 }
 
-// The complete `allow:` row a beginner-floor program must write.
+// The complete `allow:` row a beginner-floor program must write. Deny-only
+// rights never appear in a positive grant (Authority.rs `inline_allow_row`).
 fn jet_cli_inline_allow_row(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
-        if jet_cli_right_root(right) != "Panic" -> &rights.push(right)
+        if !authority_is_deny_only(right) -> &rights.push(right)
     }
     rights
 }
