@@ -663,17 +663,37 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
 }
 
 // The path a checked source carries through the compile: its source and
-// module identity, MIR source file, panic locations, and diagnostic keys. As
-// in the Rust driver's `relative_display`, a file beneath the entry root is
-// named relative to that root and any other path keeps its canonical form,
-// so compiler output never depends on where the project is checked out.
+// module identity, MIR source file, panic locations, and diagnostic keys. A
+// file beneath the entry root is named relative to that root, and a file
+// outside it (a path dependency beside the entry package) relative to the
+// root through `..` segments, so compiler output never depends on where the
+// project is checked out. A relative path is returned unchanged.
 fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
     // copy: the display path is a new owned String. With no entry root it equals `path`, a read
     // parameter that the caller keeps (a source-file row), so the result needs its own text.
     if entry_root.len() == 0 -> return path.copy()
     if path == entry_root -> return ""
     prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
-    if path.starts_with(prefix) -> path.slice(prefix.len(), path.len()) else -> path
+    if path.starts_with(prefix) -> return path.slice(prefix.len(), path.len())
+    // copy: a path the entry root cannot name relatively stays as the caller's text.
+    if !path.starts_with("/") || !entry_root.starts_with("/") -> return path.copy()
+    root_parts :: jet_driver_path_segments(entry_root)
+    path_parts :: jet_driver_path_segments(path)
+    common := 0
+    loop common < root_parts.len() && common < path_parts.len() && root_parts[common] == path_parts[common] -> common += 1
+    parts := [String]{}
+    loop _ in common..<root_parts.len() -> &parts.push("..")
+    loop index in common..<path_parts.len() -> &parts.push(path_parts[index])
+    parts.join("/")
+}
+
+// The non-empty `/`-separated segments of a path.
+fn jet_driver_path_segments(path: String) -> [String] Never! {
+    segments := [String]{}
+    loop segment in path.split("/").to_list() {
+        if segment.len() > 0 -> &segments.push(segment)
+    }
+    segments
 }
 
 // The canonical path a display path names (the inverse of
@@ -685,7 +705,17 @@ fn jet_driver_physical_path(entry_root: String, display: String) -> String Never
     // copy: the physical path is a new owned String. For an empty display it equals `entry_root`, a
     // read parameter that the caller keeps, so the result needs its own text.
     if display.len() == 0 -> return entry_root.copy()
-    if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
+    if !display.starts_with("../") -> return if entry_root.ends_with("/") -> "{entry_root}{display}" else -> "{entry_root}/{display}"
+    parts := jet_driver_path_segments(entry_root)
+    loop segment in jet_driver_path_segments(display) {
+        if segment != ".." {
+            &parts.push(segment)
+        } else if parts.len() > 0 {
+            _ := &parts.pop()
+        }
+    }
+    joined :: parts.join("/")
+    "/{joined}"
 }
 
 // The canonical path of the snapshot's entry root, or "" when it names none.
