@@ -177,6 +177,12 @@ fn sema_http_route_constant_string(expression: Expr, environment: SemaScopeEnvir
         .Ident(name, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return None
             binding := scopes.bindings[index]
+            if binding.prepared == .Val(known) {
+                if known == {
+                    .String(text) -> { return Val(text) }
+                    else -> { return None }
+                }
+            }
             if binding.symbol.kind != SymbolKind.Constant -> return None
             if program.registration_graph == .Val(graph) {
             loop module_row_index in 0..<graph.modules.len() {
@@ -206,7 +212,18 @@ fn sema_http_route_hex_digit(value: Int) -> Int Never! {
     if value < 10 -> 48 + value else -> 87 + value
 }
 
-fn sema_http_route_decode_static(segment: String) -> String? {
+fn sema_http_route_hex_value(code: Int) -> Int Never! {
+    if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 65 && code <= 70 -> code - 55
+        code >= 97 && code <= 102 -> code - 87
+        else -> -1
+    }
+}
+
+// The first defect of one static route segment (Rust `decode_static`), or
+// None when it percent-decodes to one safe UTF-8 segment.
+fn sema_http_route_static_segment_error(segment: String) -> String? {
     input := segment.bytes()
     decoded := [U8]{}
     index := 0
@@ -217,30 +234,17 @@ fn sema_http_route_decode_static(segment: String) -> String? {
             index = index + 1
             next
         }
-        if index + 2 >= input.len() -> return None
-        high_byte := Int.from_u8(input[index + 1])
-        low_byte := Int.from_u8(input[index + 2])
-        high := if {
-            high_byte >= 48 && high_byte <= 57 -> high_byte - 48
-            high_byte >= 65 && high_byte <= 70 -> high_byte - 55
-            high_byte >= 97 && high_byte <= 102 -> high_byte - 87
-            else -> -1
-        }
-        low := if {
-            low_byte >= 48 && low_byte <= 57 -> low_byte - 48
-            low_byte >= 65 && low_byte <= 70 -> low_byte - 55
-            low_byte >= 97 && low_byte <= 102 -> low_byte - 87
-            else -> -1
-        }
-        if high < 0 || low < 0 -> return None
+        high := if index + 1 < input.len() -> sema_http_route_hex_value(Int.from_u8(input[index + 1])) else -> -1
+        low := if index + 2 < input.len() -> sema_http_route_hex_value(Int.from_u8(input[index + 2])) else -> -1
+        if high < 0 || low < 0 -> return Val("invalid percent escape")
         decoded_byte := high * 16 + low
-        if decoded_byte == 47 -> return None
+        if decoded_byte == 47 -> return Val("encoded slash is ambiguous")
         &decoded.push(U8{decoded_byte})
         index = index + 3
     }
-    value :: String.from_bytes(decoded) ?? return None
-    if value == "." || value == ".." -> return None
-    Val(value)
+    value :: String.from_bytes(decoded) ?? return Val("route segment is not valid UTF-8")
+    if value == "." || value == ".." -> return Val("dot traversal segment is not allowed")
+    None
 }
 
 fn sema_http_route_name_is_valid(name: String) -> Bool Never! {
@@ -280,7 +284,7 @@ fn sema_http_route_path_fields(pattern: String) -> [SemaHTTPRoutePathField]? {
                     &fields.push(SemaHTTPRoutePathField{name: field_name, catch_all: catch_all})
                 }
                 else -> {
-                    _ := sema_http_route_decode_static(segment) ?? return None
+                    if sema_http_route_static_segment_error(segment) != None -> return None
                 }
             }
     }
@@ -303,7 +307,10 @@ fn sema_http_route_pattern_error(pattern: String) -> String? {
                 catch_all := segment.starts_with("*")
                 if catch_all && index != segments.len() - 1 -> return Val("`*name` catch-all must be final")
                 field_name := String.from_bytes(segment.bytes().slice(1, segment.bytes().len())) ?? ""
-                if !sema_http_route_name_is_valid(field_name) -> return Val("route parameter names must match `[A-Za-z_][A-Za-z0-9_]*`")
+                if !sema_http_route_name_is_valid(field_name) {
+                    marker :: if catch_all -> "catch-all" else -> "parameter"
+                    return Val("{marker} names must match `[A-Za-z_][A-Za-z0-9_]*`")
+                }
                 loop prior in 1..<index {
                     prior_segment := segments[prior]
                     if prior_segment.starts_with(":") || prior_segment.starts_with("*") {
@@ -312,12 +319,38 @@ fn sema_http_route_pattern_error(pattern: String) -> String? {
                     }
                 }
             }
-            sema_http_route_decode_static(segment) == None -> {
-                return Val("invalid percent escape, encoded slash, dot traversal, or invalid UTF-8 in route segment")
+            else -> {
+                if sema_http_route_static_segment_error(segment) == .Val(reason) -> return Val(reason)
             }
         }
     }
     None
+}
+
+// An interpolated route literal (Rust `check_http_route_constant`) is refused
+// before constant evaluation; its holes render as `{name}` or `{…}`.
+fn sema_http_route_interpolated_source(expression: Expr) -> String? {
+    if expression == .Str(parts, _) {
+        interpolated := false
+        source := ""
+        loop part in parts {
+            if part == {
+                .Lit(text) -> { source = "{source}{text}" }
+                .Byte(value) -> { source = "{source}{sema_expr_byte_text(value)}" }
+                .Interp(inner, _) -> {
+                    interpolated = true
+                    hole :: if inner == .Ident(name, _) -> name else -> "…"
+                    source = "{source}{{{hole}}}"
+                }
+            }
+        }
+        if interpolated -> return Val(source)
+    }
+    None
+}
+
+fn sema_http_route_invalid_diagnostic(pattern: String, reason: String, span: Span) -> Diagnostic {
+    sema_error("E2805", span, "invalid HTTP route `{pattern}`: {reason}", "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree", "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`")
 }
 
 fn sema_http_route_json_quote(value: String) -> String Never! {
@@ -924,13 +957,17 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     path_value :: sema_call_http_check_value(updated_args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    interpolated_source :: sema_http_route_interpolated_source(updated_args[0].expr)
     static_pattern :: sema_http_route_constant_string(updated_args[0].expr, environment, program, scopes)
     dynamic :: static_pattern == None
+    pattern :: static_pattern ?? ""
+    pattern_error :: if dynamic -> None else -> sema_http_route_pattern_error(pattern)
+    if interpolated_source == .Val(source) -> &diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{{name}}` parameter spelling", updated_args[0].span))
+    if pattern_error == .Val(reason) -> &diagnostics.push(sema_http_route_invalid_diagnostic(pattern, reason, updated_args[0].span))
     if dynamic && receiver_name != "HTTPMux" {
-        &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
+        if interpolated_source == None -> &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    pattern :: static_pattern ?? ""
     if !dynamic && sema_expr_place_root_ident(receiver) == .Val(root) {
         if sema_scope_resolve_index(scopes, root) == .Val(binding_index) {
             key :: "{scopes.bindings[binding_index].symbol.id.key}|{method}|{pattern}"
@@ -941,8 +978,7 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             }
         }
     }
-    pattern_error :: if dynamic -> None else -> sema_http_route_pattern_error(pattern)
-    path_error :: pattern_error ?? {
+    if pattern_error == None {
         path_fields :: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
         handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, context.host_hooks) ?? {
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `(id: Int, req: HTTPRequest) -> ...` or pass a named function"))
@@ -1050,6 +1086,5 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         sema_call_http_router_effect(tir.ty, span, environment, program, &scopes, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
     }
-    &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTP route `{pattern}` is invalid: {path_error}", "route registration accepts named `:parameter` and final `*catch_all` path markers", "fix the route pattern before registering it"))
     SemaMethodSpecialCheck{handled: true, value: None}
 }
