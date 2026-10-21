@@ -257,9 +257,9 @@ Tools/agent/check-agent-doc-flags.mjs	port	ToolPorts
 Tools/agent/check-agent-doc-flags.test.mjs	port	ToolPorts	no in-repo caller
 Tools/agent/check-core-surface-ledger.mjs	blocked-route	ToolPorts	http client
 Tools/agent/check-unsafe-ratchet.mjs	blocked-route	ToolPorts	json via Dyn
-Tools/agent/check-worktree-layout.sh	port	ToolPorts	
+Tools/agent/check-worktree-layout.sh	keep	ToolPorts	Claude session hook (.claude/settings.json, tests/event_hooks.rs); runs on every event, no compile step
 Tools/agent/classify-native-route-glue.mjs	port	ToolPorts	
-Tools/agent/clean-nix-tmp.sh	port	ToolPorts	
+Tools/agent/clean-nix-tmp.sh	keep	ToolPorts	flake.nix shellHook and jet-env entry; runs on every shell, no compile step
 Tools/agent/closeout-gate.mjs	blocked-route	ToolPorts	json via Dyn
 Tools/agent/codemod-copy-word.mjs	deleted	ToolPorts	superseded by migrate-copy-sigil; 0 sites remain
 Tools/agent/codemod-implicit-take.mjs	delete-candidate	ToolPorts	one-off cutover codemod, no caller; confirm 0 sites first; needs a zero-sites check before removal
@@ -311,8 +311,8 @@ Tools/agent/hosted-seed-proof.test.mjs	port	ToolPorts	no in-repo caller
 Tools/agent/jet-env.test.mjs	E-owned	ToolPorts	deleted by the Rust cutover patches (RustExit)
 Tools/agent/jet-state.mjs	blocked-route	ToolPorts	json via Dyn
 Tools/agent/jet-state.test.mjs	port	ToolPorts	no in-repo caller
-Tools/agent/lane-check-regression.mjs	port	ToolPorts	
-Tools/agent/lane-check.sh	port	ToolPorts	
+Tools/agent/lane-check-regression.mjs	E-owned	ToolPorts	regression of the cargo-check lane gate
+Tools/agent/lane-check.sh	E-owned	ToolPorts	cargo-check lane gate; retires with the Rust workspace
 Tools/agent/lexer-keyword-rows.mjs	ported	ToolPorts	Tools/agent/LexerKeywordRows.jet
 Tools/agent/lexer-keyword-rows.test.mjs	ported	ToolPorts	Tools/agent/LexerKeywordRows.jet #Test blocks
 Tools/agent/lexical-ledger.mjs	blocked-route	ToolPorts	json via Dyn
@@ -328,7 +328,7 @@ Tools/agent/native-route-handles.mjs	port	ToolPorts
 Tools/agent/native-route-partition.mjs	port	ToolPorts	
 Tools/agent/native-route-partition.test.mjs	port	ToolPorts	no in-repo caller
 Tools/agent/native-route-records.mjs	port	ToolPorts	
-Tools/agent/native-suite.mjs	port	ToolPorts	
+Tools/agent/native-suite.mjs	blocked-route	ToolPorts	descriptor module of verify-full.mjs (json via Dyn); ports with it
 Tools/agent/port-syntax-registry.mjs	E-owned	ToolPorts	deleted by the Rust cutover patches (RustExit)
 Tools/agent/port/claim.mjs	E-owned	ToolPorts	Rust-to-Jet port queue
 Tools/agent/port/defer.mjs	E-owned	ToolPorts	Rust-to-Jet port queue
@@ -530,9 +530,9 @@ Tools/jetpack-infra/stage-trust-root.sh	port	ToolPorts
 Tools/jetpack-infra/test-index-cache.sh	port	ToolPorts	no in-repo caller
 Tools/jetpack-infra/test-toolchain-update.sh	port	ToolPorts	
 Tools/jetpack-nix-index/publish.sh	port	ToolPorts	no in-repo caller
-Tools/notebook-test/acceptance.mjs	port	ToolPorts	
+Tools/notebook-test/acceptance.mjs	blocked-route	ToolPorts	http client (drives canvas-test/driver.mjs)
 Tools/packaging/build-parent-runtime-host.mjs	E-owned	ToolPorts	cargo host build pipeline
-Tools/packaging/check-runtime-exports.mjs	port	ToolPorts	
+Tools/packaging/check-runtime-exports.mjs	E-owned	ToolPorts	Jet runtime object vs Rust rlib duplicate-definition check
 Tools/packaging/native-c-compiler.mjs	port	ToolPorts	
 Tools/packaging/native-c-compiler.test.mjs	port	ToolPorts	no in-repo caller
 Tools/packaging/prebuild-runtime-shared.mjs	E-owned	ToolPorts	cargo host build pipeline
@@ -540,7 +540,7 @@ Tools/packaging/prebuild-runtime.mjs	blocked-route	ToolPorts	json via Dyn
 Tools/packaging/prebuild-runtime.sh	blocked-route	ToolPorts	node entry for prebuild-runtime.mjs (json via Dyn); ports with it
 Tools/packaging/publish-native-runtime-pack.mjs	blocked-route	ToolPorts	json via Dyn
 Tools/packaging/publish-native-runtime-pack.test.mjs	blocked-route	ToolPorts	json via Dyn
-Tools/packaging/runtime-admission.mjs	port	ToolPorts	
+Tools/packaging/runtime-admission.mjs	E-owned	ToolPorts	imported only by the cargo host build pipeline and crates/jet-codegen
 Tools/packaging/runtime-pack-cache.mjs	blocked-route	ToolPorts	json via Dyn
 Tools/packaging/runtime-pack-cache.test.mjs	port	ToolPorts	no in-repo caller
 Tools/packaging/runtime-shared-seal.mjs	port	ToolPorts	
