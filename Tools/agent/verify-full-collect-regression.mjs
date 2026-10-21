@@ -29,7 +29,7 @@ if(process.argv[1]===fileURLToPath(import.meta.url))console.log(process.argv[3])
     // verdicts go to $JET_CI_EVIDENCE_DIR/<name>.json.
     put('bin/jet', `#!/usr/bin/env node
 const {writeFileSync}=require('node:fs');
-const args=process.argv.slice(2),suite=args[2].split(' ')[1],mode=process.env.FIXTURE_MODE;
+const args=process.argv.slice(2),suite=(args[2]??'').split(' ')[1],mode=process.env.FIXTURE_MODE;
 if(args[0]==='run'&&args[1]==='Tools/ci/TestShards.jet'){console.log('golden\\nui\\ncases\\nregistries');process.exit(0);}
 if(args[0]==='run'&&args[1].endsWith('/Tools/agent/DecisionIndex')&&args[3]==='--check')process.exit(0);
 if(args[0]==='run'&&args[1].endsWith('/Tools/agent/AgentDocFlags')&&args.length===2)process.exit(0);
