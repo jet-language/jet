@@ -349,25 +349,18 @@ impl Parser {
         )
     }
 
+    // Whitespace is read in place: no per-byte `U8?` (a heap box natively).
     fn skip_ws(&self) -> Bool EncodingError! {
         if self.index < 0 -> return Err(self.err("JSON parser index became negative"))
-        loop {
-            if self.peek() == {
-                .None -> return true
-                .Val(b) -> {
-                    n :: Int.from_u8(b)
-                    if n == 32 || n == 9 || n == 10 || n == 13 {
-                        self.index += 1
-                        if n == 10 {
-                            self.line += 1
-                            self.column = 1
-                        } else {
-                            self.column += 1
-                        }
-                    } else {
-                        return true
-                    }
-                }
+        loop self.index < self.bytes.len() {
+            n :: Int.from_u8(self.bytes[self.index])
+            if n != 32 && n != 9 && n != 10 && n != 13 -> return true
+            self.index += 1
+            if n == 10 {
+                self.line += 1
+                self.column = 1
+            } else {
+                self.column += 1
             }
         }
         true
@@ -433,6 +426,18 @@ impl Parser {
         if !&self.expect(U8{34}) -> return Err(self.err("expected a string opening quote"))
         out := [U8]{}
         loop {
+            // The run up to the next quote, escape or control byte is copied
+            // in place (no newline inside: control bytes end the run).
+            run :: self.index
+            loop self.index < self.bytes.len() {
+                n :: Int.from_u8(self.bytes[self.index])
+                if n == 34 || n == 92 || n < 32 -> break
+                self.index += 1
+            }
+            if self.index > run {
+                loop at in run..<self.index -> &out.push(self.bytes[at])
+                self.column += self.index - run
+            }
             b :: &self.bump() ?? return Err(self.err("unterminated string"))
             n :: b
             if n == 34 {
@@ -440,10 +445,6 @@ impl Parser {
                 return Ok(s)
             }
             if n < 32 -> return Err(self.err("unescaped control character in string; use a JSON escape"))
-            if n != 92 {
-                &out.push(b)
-                next
-            }
             esc :: &self.bump() ?? return Err(self.err("unterminated string escape"))
             e :: esc
             if e == 34 || e == 92 || e == 47 {
