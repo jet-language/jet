@@ -275,7 +275,7 @@ fn data_tree_field_error(path: I64, reason: I64, err: I64, err_len: I64) -> I64 
     data_tree_push_count(path_text, position)
     rt_text_push_word(path_text, I64{93}, I64{1})
     path :: jet_rt_string_builder_finish(path_text)
-    if data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_ARRAY -> return data_tree_field_error(path, data_tree_got("expected array, got ", tree), err, err_len)
+    if data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_ARRAY -> return data_tree_field_error(path, data_tree_got(rt_static_text("expected array, got "), tree), err, err_len)
     length :: data_tree_word(data_tree_word(tree + DATA_TREE_PAYLOAD) + DATA_SEQUENCE_LENGTH)
     found :: data_tree_array_item(tree, if (position < I64{0}) -> length + position else -> position)
     if (found == I64{0}) {
