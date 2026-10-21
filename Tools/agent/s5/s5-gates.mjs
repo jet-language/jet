@@ -11,7 +11,7 @@ const cheap = [];
 for (const script of [
   'Tools/agent/gen-core-tables.mjs', 'Tools/agent/check-core-surface-ledger.mjs', 'Tools/agent/gen-unicode-tables.mjs',
   'Tools/agent/gen-runtime-host-carriers.mjs',
-  'Compiler/Bootstrap/generate-prelude-derives.mjs', 'Compiler/Bootstrap/generate-core-sources.mjs',
+  'Compiler/Bootstrap/generate-core-sources.mjs',
 ]) cheap.push(start('check-' + script.split('/').pop().replace(/\.mjs$/, ''), [node, script, '--check']));
 // Jet-authored generators run with the compiler built from this tree (JET): their `--check`s are
 // the fixture gate's `check <generator>` tests, and each generator's own #Test blocks run beside.

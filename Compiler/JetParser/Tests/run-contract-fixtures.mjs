@@ -13,7 +13,10 @@ if (!out) throw new Error("usage: run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]
 const rungs = join(out, "rungs");
 const assembled = spawnSync(process.execPath, [join(repo, "Tools/agent/stage1/ladder.mjs"), "rungs", repo, rungs], { encoding: "utf8" });
 if (assembled.status !== 0) throw new Error(assembled.stderr || assembled.stdout);
-const source = readFileSync(join(repo, "crates/jet-codegen/src/Prelude/Markers.jet"), "utf8");
+// The marker declarations are the raw text of SEMA_PRELUDE_MARKER_SOURCE.
+const markerFile = readFileSync(join(repo, "Compiler/JetSema/Source/Sema/Registration/PreludeMarkers.jet"), "utf8");
+const source = markerFile.match(/^SEMA_PRELUDE_MARKER_SOURCE :: prep \{ ```([\s\S]*?)``` \}$/m)?.[1];
+if (source === undefined) throw new Error("PreludeMarkers.jet has no SEMA_PRELUDE_MARKER_SOURCE raw text");
 const literal = (value) => JSON.stringify(value).replaceAll("{", "{{").replaceAll("}", "}}");
 const rows = source.split("\n").filter((line) => line.startsWith("marker ")).map((line) => {
   const name = line.match(/^marker (\w+)\(/)?.[1];

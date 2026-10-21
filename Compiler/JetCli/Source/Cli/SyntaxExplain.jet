@@ -1,7 +1,6 @@
 // Offline syntax and policy branches of crates/jet-cli Explain.rs.
 // The dictionary is Jet-owned data; source-site policy/fact queries belong to the loader.
-use core.files as cli_files
-use core.sys as cli_sys
+use jet_sema.[SEMA_PRELUDE_MARKER_SOURCE]
 use jet_foundation.[
     CORE_MODULE_EXPORTS,
     DiagnosticExplanation,
@@ -64,21 +63,6 @@ fn jet_cli_explain_policy(query: String, color: Bool, json: Bool) -> JetCLIPlan?
     name :: policy_key_name(key)
     explanation :: DiagnosticExplanation{code: name, stage: "policy", meaning: "compiler-owned scoped policy `{name}`", what: Val("`{name}` participates in the package → module → function → block policy ladder."), why: Val("one registry owns applicability, inheritance, conflicts, and provenance"), fix: Val("inspect the semantic index at the target site for the effective value and full declaration chain"), example: None}
     Val(jet_cli_explanation_output(explanation, color, json))
-}
-
-// The registered rule rows: Prelude/Markers.jet (the file the Rust host
-// embeds, MarkerSource.rs `MARKER_SOURCE`) read from the toolchain tree.
-enum JetCLIRuleRows {
-    Loaded(rules: [TAppliedRule])
-    Failed(plan: JetCLIPlan)
-}
-
-fn jet_cli_rule_rows(color: Bool, json: Bool) -[FS, Env]> JetCLIRuleRows Never! {
-    fix :: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/` and `crates/`"
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLIRuleRows.Failed{plan: jet_cli_inspect_b_fail("E2105", "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the marker registry can't be read", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)}
-    path :: jet_cli_authority_path(toolchain, JET_CLI_MARKER_SOURCE_PATH)
-    markers :: cli_files.read(path) ?? return JetCLIRuleRows.Failed{plan: jet_cli_inspect_b_fail("E2105", "can't read the marker registry `{path}`: {err}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)}
-    JetCLIRuleRows.Loaded{rules: marker_source_read(markers)}
 }
 
 // Policy.rs `RuleSignature::render`: `(name: Type{default}, …, Variadic...)`.
@@ -152,7 +136,7 @@ fn jet_cli_rule_named(rules: [TAppliedRule], name: String) -> TAppliedRule? Neve
 // syntax row but names a registered rule row answers the same way (the
 // registration-table leaf of `lookup`). None leaves the query to the syntax
 // and policy branches.
-fn jet_cli_explain_rule(query: String, bare: Bool, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan? Never! {
+fn jet_cli_explain_rule(query: String, bare: Bool, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     syntax :: jet_cli_syntax_lookup(query)
     if syntax == None && !bare -> return None
     name := query.trim()
@@ -161,10 +145,7 @@ fn jet_cli_explain_rule(query: String, bare: Bool, color: Bool, json: Bool) -[FS
         if row.kind != JetCLISyntaxKind.Marker -> return None
         name = row.token
     }
-    rules :: if jet_cli_rule_rows(color, json) == {
-        .Loaded(rows) -> rows
-        .Failed(plan) -> { return Val(plan) }
-    }
-    rule :: jet_cli_rule_named(rules, name) ?? return None
+    // The registered rule rows are the Prelude marker declarations the compiler embeds.
+    rule :: jet_cli_rule_named(marker_source_read(SEMA_PRELUDE_MARKER_SOURCE), name) ?? return None
     Val(jet_cli_explanation_output(jet_cli_rule_explanation(rule), color, json))
 }
