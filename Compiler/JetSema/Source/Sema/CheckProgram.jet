@@ -2072,7 +2072,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if contract.complete && contract.post.len() > 0 {
         body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
     }
-    sema_ownership_finalize_references(&state, &diagnostics)
+    // Unused-binding lints address authored code; a compiler-generated body
+    // (derived codec scaffolding) binds every slot it may need.
+    if !context.compiler_generated -> sema_ownership_finalize_references(&state, &diagnostics)
     loop fact in context.call_facts -> &call_facts.push(fact)
     loop request in context.comptime_requests -> &comptime_requests.push(request)
     loop reference in context.name_references -> &name_references.push(reference)
