@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[AccessConvention, CoreCallRecord, Span, Type, TypeTupleField, TBinaryOp, TBuiltinOp, TCallArg, TClosureOp, TComptimeValue, TConstantDef, TEnumPayload, TExpr, TExprKind, TFailureCarrier, TFunc, TFuncKind, TIfCond, TIndexKind, TLambda, TLocal, TMatchArm, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStmt, TStrFormat, TStrPart, TTryConvert, TTypeDef, tir_builtin_mutates_receiver, type_carrier_identity]
+use jet_foundation.[AccessConvention, CoreCallRecord, Span, Type, TypeTupleField, TBinaryOp, TBuiltinOp, TCallArg, TClosureOp, TComptimeValue, TConstantDef, TEnumPayload, TExpr, TExprKind, TFailureCarrier, TFunc, TFuncKind, TIfCond, TIndexKind, TLambda, TLocal, TMatchArm, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStmt, TStrFormat, TStrPart, TTryConvert, TTypeDef, tir_builtin_mutates_receiver, tir_each_expr_child, tir_each_stmt_list_child, type_carrier_identity]
 use jet_backend.[LowerRouteCarrier, lower_float_constant_bits, lower_int_inline, lower_runtime_route]
 use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type]
 
@@ -23,17 +23,20 @@ struct IRBuildResult {
 }
 
 // A visible name: `slot` holds the variable named `name`. `indirect` is the
-// type row of a write parameter's value when `slot` holds its address (-1:
-// the slot is the variable itself).
-struct IRBinding { name: String, slot: Int, indirect: Int{-1} }
+// type row of the value when `slot` holds its address (a write parameter, or
+// a variable a closure writes, kept in a frame cell); -1: the slot is the
+// variable itself. `owned`: the variable owns its value, which is dropped
+// when its scope ends (every other holder of the value has its own copy).
+struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false} }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`.
 struct IRWriteBack { cell: Int, slot: Int }
 
 // An open loop: `exit` is the Block that `break` leaves, `next` the
-// construct that `next` (continue) leaves or restarts.
-struct IRLoopFrame { label: String?, exit: Int, next: Int }
+// construct that `next` (continue) leaves or restarts; `mark` the bindings
+// visible when it opened (leaving it drops the owned ones declared since).
+struct IRLoopFrame { label: String?, exit: Int, next: Int, mark: Int }
 
 // Per-function build state. `fresh[slot]` marks a temporary that holds a
 // value nobody else owns yet (a call result, a built String): a borrowing
@@ -56,7 +59,16 @@ struct IRBuilder {
     ret: Type?
     failure: TFailureCarrier
     plain: Bool
+    // Variables some closure of this body writes: they live in frame cells
+    // from their declaration, so every read sees the closure's writes.
+    cells: [String]
+    // Calls emitted where the program is only read (display impls): their
+    // callee ids are resolved when the function is done.
+    deferred: [IRDeferredCall]
 }
+
+// The Call at instruction `at` names the checked function `key`.
+struct IRDeferredCall { at: Int, key: String }
 
 // The checked functions every IR function id may name, by key, and the
 // checked type declarations, by key and by name. A generic function is
@@ -78,6 +90,9 @@ struct IRProgram {
     // Checked constants by key (ConstRef / CtLit values).
     constants: [String:TConstantDef]
     lambdas: [IRLambdaJob]
+    // A selected Display (`display`) or Printable (`show`) implementation
+    // method by "<trait>|<rendered type key>" (Lower Display.jet render rows).
+    render_impls: [String:Int]
 }
 
 // A function waiting to be built: its checked row, IR id and type
@@ -123,7 +138,38 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], constant_defs: ^[
     loop (index, definition) in types {
         if type_rows.get(definition.name) == None -> type_rows[definition.name] = index
     }
-    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}}
+    render_impls := [String:Int]{}
+    loop (index, function) in owned {
+        if function.kind == .TraitMethod(_, _, owner_type, trait_name, _) {
+            trait_short :: ir_short_name(trait_name.key)
+            selected :: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
+            if selected && function.generic_params.len() == 0 {
+                key :: "{trait_short}|{ir_render_type_key(type_rows, types, owner_type)}"
+                if render_impls.get(key) == None -> render_impls[key] = index
+            }
+        }
+    }
+    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls}
+}
+
+// The last segment of a qualified key (`trait:<m>::Display` is `Display`).
+fn ir_short_name(key: String) -> String Never! {
+    short := key
+    separators :: [String]{"::", ".", ":"}
+    loop separator in separators {
+        parts :: short.split(separator).to_list()
+        short = parts[parts.len() - 1]
+    }
+    short
+}
+
+// A rendered type's identity: its declaration key when it names one.
+fn ir_render_type_key(type_rows: [String:Int], types: [TTypeDef], ty: Type) -> String Never! {
+    plain :: ir_untag(ty)
+    if plain == .Named(name) {
+        if type_rows.get(name) == .Val(row) -> return "decl:{types[row].key}"
+    }
+    type_carrier_identity(plain)
 }
 
 // The declaration a nominal type name or key names.
@@ -274,6 +320,7 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) Neve
             if b.error != "" {
                 &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: m.functions[queued.id].name, message: b.error, source_file: job.source_file, span: if b.error_span.end > 0 -> b.error_span else -> job.lambda.source_span})
             }
+            ir_resolve_deferred(&m, &p, &b)
             m.functions[queued.id] = ^b.f
             next
         }
@@ -285,6 +332,7 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) Neve
         if b.error != "" {
             &failures.push(IRBuildFailure{key: m.functions[queued.id].key, name: function.name, message: b.error, source_file: function.source_file, span: if b.error_span.end > 0 -> b.error_span else -> function.source_span})
         }
+        ir_resolve_deferred(&m, &p, &b)
         m.functions[queued.id] = ^b.f
     }
     p.subst_names = [String]{}
@@ -292,7 +340,13 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) Neve
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}}
+}
+
+fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
+    loop call in b.deferred {
+        b.f.a[call.at] = ir_function_id(&m, &p, call.key, [Type]{}) ?? -1
+    }
 }
 
 // A payload binding a condition introduces: `slot` (named `name`) receives
@@ -337,17 +391,20 @@ fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc
     b.failure = function.failure_carrier
     if function.kind == {
         .TopLevel -> {}
-        .Method(_, owner_type) -> {
+        .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> {
+            // An implementation's method is built for its concrete receiver
+            // like an inherent one; a call naming it is a direct call.
             receiver :: ir_receiver_access(function.kind)
             if receiver != "static" {
-                if ir_param_slot(&m, p, &b, owner_type, receiver == "write", "self") == None -> return ir_fail(&b, function.source_span, "method receiver type {ir_type_name(owner_type)}")
+                if ir_param_slot(&m, p, &b, owner_type, receiver == "write", receiver == "move", "self") == None -> return ir_fail(&b, function.source_span, "method receiver type {ir_type_name(owner_type)}")
             }
         }
-        .TraitMethod(_, _, _, _, _) -> return ir_fail(&b, function.source_span, "trait method")
     }
     loop param in function.params {
-        if ir_param_slot(&m, p, &b, param.ty, param.convention == .Write, param.local.name) == None -> return ir_fail(&b, param.span, "parameter type {ir_type_name(param.ty)}")
+        if ir_param_slot(&m, p, &b, param.ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(&b, param.span, "parameter type {ir_type_name(param.ty)}")
     }
+    b.cells = ir_mutable_captures(function.body)
+    ir_cell_params(&m, &b)
     b.plain = ir_plain_return(function) != None
     executable :: ir_executable_return(function)
     if executable == .Val(ret) {
@@ -364,7 +421,7 @@ fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc
 
 // A parameter (or receiver) slot bound to `name`: a write parameter of a
 // non-aggregate type is the address of the caller's variable.
-fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Bool, name: String) -> Int? Never! {
+fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Bool, owned: Bool, name: String) -> Int? Never! {
     row :: ir_value_type(&m, p, ty) ?? return None
     if write && m.types[row].kind != .Aggregate {
         slot :: ir_new_slot(&b, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, name))
@@ -372,8 +429,35 @@ fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Boo
         return Val(slot)
     }
     slot :: ir_new_slot(&b, row, IRSlotKind.Param, ir_intern_name(&m, name))
-    &b.bindings.push(IRBinding{name: name, slot: slot})
+    &b.bindings.push(IRBinding{name: name, slot: slot, owned: owned && m.types[row].drop != ""})
     Val(slot)
+}
+
+// The parameters a closure of the body writes move into frame cells.
+fn ir_cell_params(m: &IRModule, b: &IRBuilder) Never! {
+    if b.cells.len() == 0 -> return
+    loop index in 0..<b.bindings.len() {
+        binding :: b.bindings[index]
+        if binding.indirect >= 0 || !b.cells.contains(binding.name) -> next
+        if ir_kind_of(m, b, binding.slot) == .Aggregate -> next
+        _ :: ir_cell_binding(&m, &b, binding.name)
+    }
+}
+
+// The names of the variables a closure in `body` captures to write.
+fn ir_mutable_captures(body: [TStmt]) -> [String] Never! {
+    names := [String]{}
+    tir_each_stmt_list_child(body, (expression: TExpr) -> ir_collect_mutable_captures(expression, &names))
+    names
+}
+
+fn ir_collect_mutable_captures(expression: TExpr, names: &[String]) Never! {
+    if expression.kind == .Lambda(lambda) | .LambdaValue(lambda) {
+        loop name in lambda.capture_facts.mutable {
+            if !names.contains(name) -> &names.push(name)
+        }
+    }
+    tir_each_expr_child(expression, (child: TExpr) -> ir_collect_mutable_captures(child, &names))
 }
 
 // A `Never`-tagged or pattern-tagged type without its tags.
@@ -422,18 +506,49 @@ fn ir_executable_return(function: TFunc) -> Type? Never! {
 // any other function cannot get here.
 fn ir_return_fallthrough(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
     if b.f.result < 0 {
-        ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+        ir_emit_return(&m, &b, -1)
         return
     }
     ret :: b.ret ?? Type.Named{name: "Unit"}
     if ir_untag(ret) == .Result(ok, _) {
         if ir_unit_type(ir_untag(ok)) {
             boxed :: ir_result_box(&m, p, &b, ret, true, -1)
-            ir_emit(&b.f, IROp.Return, -1, boxed, -1, -1, b.line)
+            ir_emit_return(&m, &b, boxed)
             return
         }
     }
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+// Returns `slot` (-1: nothing) after dropping every owned variable.
+fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+    if slot >= 0 -> b.fresh[slot] = false
+    ir_drop_bindings(&m, &b, 0)
+    ir_emit(&b.f, IROp.Return, -1, slot, -1, -1, b.line)
+}
+
+// Drops the owned variables among bindings[mark..], latest first.
+fn ir_drop_bindings(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
+    index := b.bindings.len() - 1
+    loop index >= mark {
+        binding :: b.bindings[index]
+        index -= 1
+        if !binding.owned -> next
+        value :: ir_read_binding(&m, &b, binding)
+        ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+    }
+}
+
+// `slot` as a value its new holder owns: a fresh value moves; a read of a
+// place another holder keeps is copied when its type has a drop (an exact
+// Int or a String: their runtime clone).
+fn ir_own(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
+    if slot < 0 || b.fresh[slot] || !ir_has_drop(m, b, slot) -> return slot
+    kind :: ir_kind_of(m, b, slot)
+    symbol :: if kind == .String -> "jet_rt_string_clone" else if kind == .Int -> "jet_rt_int_clone" else -> ""
+    if symbol == "" -> return slot
+    row :: b.f.slot_type[slot]
+    ir_runtime(&m, &b, symbol, [Int]{slot}, row)
 }
 
 fn ir_new_slot(b: &IRBuilder, ty: Int, kind: IRSlotKind, name: Int) -> Int Never! {
@@ -643,8 +758,10 @@ fn ir_scope_open(b: &IRBuilder) Never! {
     &b.scopes.push(b.bindings.len())
 }
 
-fn ir_scope_close(b: &IRBuilder) Never! {
+// Closes the innermost scope: its owned variables are dropped, latest first.
+fn ir_scope_close(m: &IRModule, b: &IRBuilder) Never! {
     mark :: &b.scopes.pop() ?? 0
+    ir_drop_bindings(&m, &b, mark)
     loop b.bindings.len() > mark {
         _ :: &b.bindings.pop()
     }
@@ -681,7 +798,7 @@ fn ir_stmts(m: &IRModule, p: &IRProgram, b: &IRBuilder, body: [TStmt]) Never! {
         if ir_failed(b) -> break
         ir_stmt(&m, &p, &b, statement)
     }
-    ir_scope_close(&b)
+    ir_scope_close(&m, &b)
 }
 
 fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! {
@@ -702,7 +819,11 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             ty :: b.f.slot_type[value]
             slot :: ir_new_slot(&b, ty, IRSlotKind.Local, ir_intern_name(&m, local.name))
             ir_store(&m, &b, slot, value)
-            &b.bindings.push(IRBinding{name: local.name, slot: slot})
+            &b.bindings.push(IRBinding{name: local.name, slot: slot, owned: ir_has_drop(m, b, slot)})
+            // A variable a closure writes lives in a frame cell from here on.
+            if b.cells.contains(local.name) && ir_kind_of(m, b, slot) != .Aggregate {
+                _ :: ir_cell_binding(&m, &b, local.name)
+            }
         }
         .Assign(place, op, value, line, span) -> {
             if line > 0 -> b.line = line
@@ -725,13 +846,16 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
                 if ir_failed(b) -> return
             }
             if result < 0 -> return
-            if ir_has_drop(m, b, current) -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)
+            // The variable's old value ends here when it owns it (a write
+            // parameter's or cell's holder owns the value behind the address).
+            owned :: ir_own(&m, &b, result)
+            if (binding.owned || binding.indirect >= 0) && ir_has_drop(m, b, current) -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)
             if binding.indirect >= 0 {
-                ir_emit(&b.f, IROp.Store, -1, binding.slot, 0, result, b.line)
-                b.fresh[result] = false
+                ir_emit(&b.f, IROp.Store, -1, binding.slot, 0, owned, b.line)
+                b.fresh[owned] = false
                 return
             }
-            ir_store(&m, &b, binding.slot, result)
+            ir_store(&m, &b, binding.slot, owned)
         }
         .ExprStmt(value, _) -> {
             result :: ir_expr(&m, &p, &b, value)
@@ -752,12 +876,12 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
                 ir_stmts(&m, &p, &b, otherwise)
             }
             ir_end(&b.f, b.line)
-            ir_scope_close(&b)
+            ir_scope_close(&m, &b)
         }
         .Loop(label, body, _) -> {
             exit :: ir_open(&b.f, IROp.Block, b.line)
             top :: ir_open(&b.f, IROp.Loop, b.line)
-            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top})
+            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len()})
             ir_stmts(&m, &p, &b, body)
             _ :: &b.loops.pop()
             ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -770,7 +894,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             test :: ir_expr(&m, &p, &b, condition)
             if ir_failed(b) -> return
             ir_exit_unless(&m, &b, test, exit)
-            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top})
+            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len()})
             ir_stmts(&m, &p, &b, body)
             _ :: &b.loops.pop()
             ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -784,10 +908,12 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         }
         .Break(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
+            ir_drop_bindings(&m, &b, frame.mark)
             ir_emit(&b.f, IROp.Br, -1, ir_depth(b.f, frame.exit), -1, -1, b.line)
         }
         .Continue(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "next outside a loop")
+            ir_drop_bindings(&m, &b, frame.mark)
             ir_emit(&b.f, IROp.Br, -1, ir_depth(b.f, frame.next), -1, -1, b.line)
         }
         .Inline(body, _) | .Region(body, _) -> ir_stmts(&m, &p, &b, body)
@@ -807,7 +933,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             if ir_failed(b) -> return
             ir_exit_unless(&m, &b, test, exit)
             step_block :: ir_open(&b.f, IROp.Block, b.line)
-            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block})
+            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
             ir_stmts(&m, &p, &b, body)
             _ :: &b.loops.pop()
             ir_end(&b.f, b.line)
@@ -815,7 +941,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
             ir_end(&b.f, b.line)
             ir_end(&b.f, b.line)
-            ir_scope_close(&b)
+            ir_scope_close(&m, &b)
         }
         .TaskGroup(_, _, _, span) -> ir_fail(&b, span, "statement TaskGroup")
         .DeferClose(_, _, _, span) -> ir_fail(&b, span, "statement DeferClose")
@@ -890,9 +1016,10 @@ fn ir_store(m: &IRModule, b: &IRBuilder, slot: Int, value: Int) Never! {
         ir_emit(&b.f, IROp.CopyBytes, -1, slot, value, row.size, b.line)
         return
     }
-    op :: if ir_has_drop(m, b, value) || ir_kind_of(m, b, value) == .Aggregate -> IROp.Move else -> IROp.Copy
-    ir_emit(&b.f, op, slot, value, -1, -1, b.line)
-    b.fresh[value] = false
+    owned :: ir_own(&m, &b, value)
+    op :: if ir_has_drop(m, b, owned) || ir_kind_of(m, b, owned) == .Aggregate -> IROp.Move else -> IROp.Copy
+    ir_emit(&b.f, op, slot, owned, -1, -1, b.line)
+    b.fresh[owned] = false
 }
 
 // `Br` out of the Block `exit` unless `test` holds.
@@ -946,7 +1073,7 @@ fn ir_range_loop(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, loc
     ir_emit(&b.f, compare, test, counter, last, -1, b.line)
     ir_exit_unless(&m, &b, test, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
     ir_stmts(&m, &p, &b, body)
     _ :: &b.loops.pop()
     ir_end(&b.f, b.line)
@@ -954,7 +1081,7 @@ fn ir_range_loop(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, loc
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
-    ir_scope_close(&b)
+    ir_scope_close(&m, &b)
 }
 
 // A Bool slot holding an `if` condition.
@@ -1063,7 +1190,6 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             row :: p.rows.get(method.symbol.key) ?? return ir_fail_slot(&b, span, "method call outside the checked program (trait dispatch?): {method.name}")
             receiver_access :: ir_receiver_access(p.functions[row].kind)
             if receiver_access == "static" -> return ir_call(&m, &p, &b, method.symbol.key, type_args, -1, [IRWriteBack]{}, args, span)
-            if receiver_access == "trait" -> return ir_fail_slot(&b, span, "trait method call {method.name}")
             backs := [IRWriteBack]{}
             self_slot :: if receiver_access == "write" -> ir_place_address(&m, &p, &b, receiver, &backs, span) else -> ir_expr(&m, &p, &b, receiver)
             if ir_failed(b) -> return -1
@@ -1087,7 +1213,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             ir_truncate_bindings(&b, mark)
             ir_branch_value(&m, &p, &b, else_body, else_value, result)
             ir_end(&b.f, b.line)
-            ir_scope_close(&b)
+            ir_scope_close(&m, &b)
             if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
             return result
         }
@@ -1104,11 +1230,12 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             }
             value := -1
             if body[body.len() - 1] == .ExprStmt(tail, _) {
-                value = ir_expr(&m, &p, &b, tail)
+                // The value outlives the block's variables.
+                value = ir_own(&m, &b, ir_expr(&m, &p, &b, tail))
             } else {
                 ir_stmt(&m, &p, &b, body[body.len() - 1])
             }
-            ir_scope_close(&b)
+            ir_scope_close(&m, &b)
             return value
         }
         .ExplicitCopy(value) | .Clone(value, _) -> {
@@ -1270,7 +1397,7 @@ fn ir_branch_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, body: [TStmt], va
     slot :: if result >= 0 -> ir_value_as(&m, &p, &b, value, target_row, value.span) else -> ir_expr(&m, &p, &b, value)
     if !ir_failed(b) && result >= 0 && slot >= 0 -> ir_store(&m, &b, result, slot)
     if !ir_failed(b) && result < 0 -> ir_release(&m, &b, slot)
-    ir_scope_close(&b)
+    ir_scope_close(&m, &b)
 }
 
 // `a && b` / `a || b`: `b` runs only when `a` does not decide.
@@ -1388,6 +1515,8 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
         return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, ir_string_row(&m))
     }
     if slot < 0 -> return ir_fail_slot(&b, span, "display of {ir_type_name(ty)} without a value")
+    selected :: ir_render_impl(&m, p, &b, slot, mode)
+    if selected >= 0 -> return selected
     kind :: ir_kind_of(m, b, slot)
     if kind == .String {
         if mode != .Debug -> return slot
@@ -1418,11 +1547,36 @@ fn ir_push_static(m: &IRModule, b: &IRBuilder, builder: Int, text: String) Never
     _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push_static", args, -1)
 }
 
+// The owned String a selected Display (`display`) or Printable (`show`)
+// implementation makes of `slot` (Lower lower_render_value; Debug never uses
+// one), or -1 when none is selected.
+fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
+    if mode == .Debug || p.render_impls.len() == 0 -> return -1
+    trait_short :: if mode == .Show -> "Printable" else -> "Display"
+    row :: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") ?? return -1
+    function :: p.functions[row]
+    returned :: ir_executable_return(function) ?? return -1
+    result_row :: ir_value_type(&m, p, returned) ?? return -1
+    dst :: ir_fresh_temp(&m, &b, result_row)
+    start :: ir_args(&b.f, [Int]{slot})
+    at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 1, b.line)
+    &b.deferred.push(IRDeferredCall{at: at, key: function.key})
+    text :: ir_adapt(&m, p, &b, dst, ir_string_row(&m), Span{start: 0, end: 0})
+    if text != dst -> b.fresh[text] = true
+    text
+}
+
 // Pushes the rendering of `slot` onto `builder` (Lower lower_render_push /
 // lower_render_member_push when `member`: a String member renders quoted).
 fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
     kind :: ir_kind_of(m, b, slot)
     ty :: m.types[b.f.slot_type[slot]].ty
+    selected :: ir_render_impl(&m, p, &b, slot, mode)
+    if selected >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, selected}, -1)
+        ir_release(&m, &b, selected)
+        return
+    }
     if kind == .String && member {
         quoted :: ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, ir_string_row(&m))
         _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, quoted}, -1)
@@ -1584,10 +1738,12 @@ fn ir_member_write(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember, val
         address :: ir_temp(&m, &b, member.ty)
         ir_emit(&b.f, IROp.Offset, address, base, member.offset, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, address, value, m.types[member.ty].size, b.line)
-    } else {
-        ir_emit(&b.f, IROp.Store, -1, base, member.offset, value, b.line)
+        b.fresh[value] = false
+        return
     }
-    b.fresh[value] = false
+    owned :: ir_own(&m, &b, value)
+    ir_emit(&b.f, IROp.Store, -1, base, member.offset, owned, b.line)
+    b.fresh[owned] = false
 }
 
 // The member `name` of the struct an aggregate slot holds.
@@ -1762,7 +1918,7 @@ fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [
     moves := [Bool]{}
     backs := receiver_backs
     if receiver >= 0 {
-        &slots.push(receiver)
+        &slots.push(if ir_receiver_access(p.functions[row].kind) == "move" -> ir_own(&m, &b, receiver) else -> receiver)
         &moves.push(ir_receiver_access(p.functions[row].kind) == "move")
     }
     loop (index, arg) in args {
@@ -1779,7 +1935,7 @@ fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [
         slot :: ir_value_as(&m, &p, &b, arg.value, param_row, span)
         if ir_failed(b) -> return -1
         if slot < 0 -> return ir_fail_slot(&b, span, "Unit call argument")
-        &slots.push(slot)
+        &slots.push(if params[index].convention == .Move -> ir_own(&m, &b, slot) else -> slot)
         &moves.push(params[index].convention == .Move)
     }
     dst := -1
@@ -1830,20 +1986,19 @@ fn ir_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, place: TExpr, ba
     ir_fail_slot(&b, span, "write place {ir_expr_kind_name(place.kind)}")
 }
 
-// A method's receiver convention: "read", "write", "move", "static" (no
-// receiver) or "trait".
+// A method's receiver convention: "read", "write", "move" or "static" (no
+// receiver).
 fn ir_receiver_access(kind: TFuncKind) -> String Never! {
-    if kind == {
-        .Method(convention, _) -> {
-            access :: convention ?? return "static"
-            return if access == {
-                .Read -> "read"
-                .Write -> "write"
-                .Move -> "move"
-            }
-        }
-        .TraitMethod(_, _, _, _, _) -> return "trait"
-        .TopLevel -> return "static"
+    convention :: if kind == {
+        .Method(convention, _) -> convention
+        .TraitMethod(_, convention, _, _, _) -> convention
+        .TopLevel -> { return "static" }
+    }
+    access :: convention ?? return "static"
+    if access == {
+        .Read -> "read"
+        .Write -> "write"
+        .Move -> "move"
     }
 }
 
@@ -2379,10 +2534,12 @@ fn ir_store_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, value: Int) 
         address :: ir_temp_like(&m, &b, value)
         ir_emit(&b.f, IROp.Offset, address, base, offset, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, address, value, m.types[b.f.slot_type[value]].size, b.line)
-    } else {
-        ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
+        b.fresh[value] = false
+        return
     }
-    b.fresh[value] = false
+    owned :: ir_own(&m, &b, value)
+    ir_emit(&b.f, IROp.Store, -1, base, offset, owned, b.line)
+    b.fresh[owned] = false
 }
 
 // The value of type row `row` at byte `offset` of the storage at `base`
@@ -2482,15 +2639,14 @@ fn ir_return(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr?, span: Sp
         if ir_failed(b) -> return
         ir_release(&m, &b, slot)
         if b.ret != None && !b.plain -> return ir_return_fallthrough(&m, &p, &b)
-        ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+        ir_emit_return(&m, &b, -1)
         return
     }
     result_row :: b.f.result
     slot :: ir_value_as(&m, &p, &b, returned, result_row, span)
     if ir_failed(b) -> return
     if slot < 0 -> return ir_fail(&b, span, "return of a value without a slot")
-    b.fresh[slot] = false
-    ir_emit(&b.f, IROp.Return, -1, slot, -1, -1, b.line)
+    ir_emit_return(&m, &b, ir_own(&m, &b, slot))
 }
 
 fn ir_option_is_some(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
@@ -2542,8 +2698,7 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
     if b.failure == .Result(_, _) {
         if !is_result -> return ir_fail(&b, span, "`?` on an Option in a Result function")
         if conversion != .NoConversion -> return ir_fail(&b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
-        b.fresh[subject] = false
-        ir_emit(&b.f, IROp.Return, -1, subject, -1, -1, b.line)
+        ir_emit_return(&m, &b, subject)
         return
     }
     optional := b.failure == .Optional(_)
@@ -2556,7 +2711,7 @@ fn ir_try_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_re
         result_row :: b.f.result
         null :: ir_temp(&m, &b, result_row)
         ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
-        ir_emit(&b.f, IROp.Return, -1, null, -1, -1, b.line)
+        ir_emit_return(&m, &b, null)
         return
     }
     ir_fail(&b, span, "`?` without a matching failure carrier")
@@ -2633,15 +2788,16 @@ fn ir_fallback_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, fallback: TOrFa
             if ir_failed(b) -> return
             ir_stop(&m, &p, &b, 2, text, ir_word_const(&m, &b, 0), ir_word_const(&m, &b, 0), location)
         }
-        .Break -> ir_loop_jump(&b, None, true, span)
-        .Continue -> ir_loop_jump(&b, None, false, span)
-        .BreakLabel(label) -> ir_loop_jump(&b, Val(label), true, span)
-        .ContinueLabel(label) -> ir_loop_jump(&b, Val(label), false, span)
+        .Break -> ir_loop_jump(&m, &b, None, true, span)
+        .Continue -> ir_loop_jump(&m, &b, None, false, span)
+        .BreakLabel(label) -> ir_loop_jump(&m, &b, Val(label), true, span)
+        .ContinueLabel(label) -> ir_loop_jump(&m, &b, Val(label), false, span)
     }
 }
 
-fn ir_loop_jump(b: &IRBuilder, label: String?, exit: Bool, span: Span) Never! {
+fn ir_loop_jump(m: &IRModule, b: &IRBuilder, label: String?, exit: Bool, span: Span) Never! {
     frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break or next outside a loop")
+    ir_drop_bindings(&m, &b, frame.mark)
     ir_emit(&b.f, IROp.Br, -1, ir_depth(b.f, if exit -> frame.exit else -> frame.next), -1, -1, b.line)
 }
 
@@ -2849,7 +3005,7 @@ fn ir_list_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, vari
     _ :: ir_open(&b.f, IROp.Loop, b.line)
     ir_exit_unless(&m, &b, ir_bool_op(&m, &b, IROp.Lt, index, length), exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
     item :: ir_load_at(&m, &b, ir_element_address(&m, &b, data, index, stride), 0, row)
     if variable_two == .Val(second) {
         position :: ir_new_slot(&b, ir_type_row(&m, Type.Int) ?? 0, IRSlotKind.Local, ir_intern_name(&m, variable.name))
@@ -2867,7 +3023,7 @@ fn ir_list_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, vari
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
-    ir_scope_close(&b)
+    ir_scope_close(&m, &b)
 }
 
 // A copy of the value in `slot` that owns its own storage: Strings and
@@ -3095,7 +3251,7 @@ fn ir_cell_binding(m: &IRModule, b: &IRBuilder, name: String) -> Int Never! {
     cell :: ir_temp(&m, &b, ir_pointer_row(&m))
     ir_emit(&b.f, IROp.StackAddress, cell, if size < 8 -> 8 else -> size, 8, -1, b.line)
     ir_emit(&b.f, IROp.Store, -1, cell, 0, slot, b.line)
-    b.bindings[index] = IRBinding{name: name, slot: cell, indirect: row}
+    b.bindings[index] = IRBinding{name: name, slot: cell, indirect: row, owned: b.bindings[index].owned}
     cell
 }
 
@@ -3106,7 +3262,7 @@ fn ir_build_lambda(m: &IRModule, p: &IRProgram, b: &IRBuilder, job: IRLambdaJob)
     env :: ir_new_slot(&b, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "closure"))
     loop (index, ty) in lambda.param_types {
         name :: if index < lambda.source_params.len() -> lambda.source_params[index] else -> "_{index}"
-        if ir_param_slot(&m, p, &b, ty, false, name) == None -> return ir_fail(&b, span, "lambda parameter type {ir_type_name(ty)}")
+        if ir_param_slot(&m, p, &b, ty, false, false, name) == None -> return ir_fail(&b, span, "lambda parameter type {ir_type_name(ty)}")
     }
     loop capture in job.captures {
         aggregate :: m.types[capture.row].kind == .Aggregate
@@ -3119,6 +3275,14 @@ fn ir_build_lambda(m: &IRModule, p: &IRProgram, b: &IRBuilder, job: IRLambdaJob)
             ir_emit(&b.f, IROp.Offset, address, env, capture.offset, -1, b.line)
             &b.bindings.push(IRBinding{name: capture.name, slot: address, indirect: if aggregate -> -1 else -> capture.row})
         }
+    }
+    if lambda.executable == {
+        .Expr(value) -> {
+            names := [String]{}
+            ir_collect_mutable_captures(value, &names)
+            b.cells = names
+        }
+        .Block(body) | .SharedBlock(body) -> b.cells = ir_mutable_captures(body)
     }
     b.failure = lambda.failure_carrier
     b.ret = lambda.ret
@@ -3518,13 +3682,17 @@ fn ir_closure_op_name(operation: TClosureOp) -> String Never! {
 // slot; an Option or Result result as a tag word with its payload in one
 // zeroed out slot, from which the builder makes its own box.
 
-// `args[i]` is a slot of checked type `arg_types[i]`; `borrowed[i]` whether
-// the route only reads it (a fresh borrowed argument is dropped after the
-// call, a consumed one belongs to the route).
-fn ir_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, args: [Int], borrowed: [Bool], result: Type, span: Span) -> Int Never! {
+// `inputs[i]` is an argument slot; `borrowed[i]` whether the route only reads
+// it (a fresh borrowed argument is dropped after the call; a consumed one
+// belongs to the route, so a read of another holder's value is copied first).
+fn ir_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, span: Span) -> Int Never! {
     name :: ir_route_symbol(symbol)
     route :: lower_runtime_route(name) ?? return ir_fail_slot(&b, span, "runtime route {name}")
-    if route.params.len() != args.len() -> return ir_fail_slot(&b, span, "runtime route {name} takes {route.params.len()} arguments, not {args.len()}")
+    if route.params.len() != inputs.len() -> return ir_fail_slot(&b, span, "runtime route {name} takes {route.params.len()} arguments, not {inputs.len()}")
+    args := [Int]{}
+    loop (index, slot) in inputs {
+        &args.push(if index < borrowed.len() && !borrowed[index] -> ir_own(&m, &b, slot) else -> slot)
+    }
     lowered := [Int]{}
     temporaries := [Int]{}
     loop (index, slot) in args {

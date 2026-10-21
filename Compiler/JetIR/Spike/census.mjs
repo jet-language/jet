@@ -30,17 +30,24 @@ for (let i = 0; i < files.length; i += options.batch) batches.push(files.slice(i
 
 function census(batch) {
   return new Promise((done) => {
-    const child = spawn(options.jet, ['ir', 'census', ...(options.all ? ['--all'] : []), ...batch], {
+    // The compiler recurses deeply: a 1 GiB stack, as every chain stage runs it.
+    const child = spawn('prlimit', ['--stack=1073741824:1073741824', '--', options.jet, 'ir', 'census', ...(options.all ? ['--all'] : []), ...batch], {
       cwd: options.root, env: { ...process.env, NO_COLOR: '1', JET_TOOLCHAIN_ROOT: options.root }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '', err = '';
     child.stdout.on('data', (c) => { out += c; });
     child.stderr.on('data', (c) => { err += c; });
-    child.on('close', (code, signal) => {
+    child.on('close', async (code, signal) => {
       const rows = out.split('\n').filter((l) => l && !l.startsWith('#'));
       const seen = new Set(rows.map((r) => r.split('\t')[0]));
-      // A process that died mid-batch leaves its unreported files as crash rows.
-      for (const file of batch) if (!seen.has(file)) rows.push(`${file}\t-\t-\tcensus crashed (exit ${code ?? signal}): ${err.split('\n').find((l) => l.trim()) ?? ''}\t-`);
+      const unreported = batch.filter((file) => !seen.has(file));
+      // A process that died mid-batch: its unreported files run again one per
+      // process, so a crash costs only the file that crashed.
+      if (unreported.length > 0 && batch.length > 1) {
+        for (const file of unreported) rows.push(...await census([file]));
+      } else {
+        for (const file of unreported) rows.push(`${file}\t-\t-\tcensus crashed (exit ${code ?? signal}): ${err.split('\n').find((l) => l.trim()) ?? ''}\t-`);
+      }
       done(rows);
     });
   });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// differential.mjs --jet SPIKE --root TREE --out FRESH_DIR [--table TSV] [--jobs N] [--timeout S] [FILTER...]
+// differential.mjs --jet SPIKE --root TREE --out FRESH_DIR [--table TSV] [--jobs N] [--timeout S] [--old-cache DIR] [FILTER...]
 // The slot IR route against the ordinary backend, both from the SAME spike
 // binary: per Examples/features program (default: the PASS rows of --table),
 // `jet build` and `jet ir build` (both traced), then both executables, each in
@@ -14,21 +14,28 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { classifyRun, collectFeatureExamples, copyFeatureProject, featureProjectRoot } from '../../../Tools/agent/run-feature-examples.mjs';
+import { pathToFileURL } from 'node:url';
 
-const usage = 'differential.mjs --jet SPIKE --root TREE --out FRESH_DIR [--table TSV] [--jobs N] [--timeout S] [FILTER...]';
+const usage = 'differential.mjs --jet SPIKE --root TREE --out FRESH_DIR [--table TSV] [--jobs N] [--timeout S] [--old-cache DIR] [FILTER...]';
 const options = { table: '/mnt/jetscratch/discovery/golden/full-m-7/table.tsv', jobs: 8, timeout: 120, filters: [] };
 for (let i = 2; i < process.argv.length; i++) {
   const flag = process.argv[i];
-  const key = { '--jet': 'jet', '--root': 'root', '--out': 'out', '--table': 'table', '--jobs': 'jobs', '--timeout': 'timeout' }[flag];
+  const key = { '--jet': 'jet', '--root': 'root', '--out': 'out', '--table': 'table', '--jobs': 'jobs', '--timeout': 'timeout', '--old-cache': 'oldCache' }[flag];
   if (!key) { if (flag.startsWith('--')) throw Error(usage); options.filters.push(flag); continue; }
   const value = process.argv[++i];
   if (value === undefined) throw Error(usage);
   options[key] = key === 'jobs' || key === 'timeout' ? Number(value) : resolve(value);
 }
+// --old-cache DIR: the old side of a program (its build, run and phases) is
+// read from DIR when an earlier run stored it there, else run and stored, so
+// reruns on a new spike only build and run the IR side.
+if (options.oldCache) mkdirSync(options.oldCache, { recursive: true });
 if (!options.jet || !options.root || !options.out) throw Error(usage);
 if (existsSync(options.out)) throw Error(`output already exists; use a fresh directory: ${options.out}`);
 const ROOT = options.root;
+// The example staging and golden classification of TREE itself, so the runner
+// works on any tree (its examples are shown relative to that tree's root).
+const { classifyRun, collectFeatureExamples, copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(ROOT, 'Tools/agent/run-feature-examples.mjs')).href);
 const FEATURES = join(ROOT, 'Examples/features');
 const EXPECTED = join(FEATURES, 'expected');
 mkdirSync(join(options.out, 'cases'), { recursive: true });
@@ -56,7 +63,8 @@ function stage(entry, stageRoot) {
 function run(command, args, cwd, scratch, slot) {
   return new Promise((done) => {
     const started = process.hrtime.bigint();
-    const child = spawn(command, args, {
+    // A 1 GiB stack for the compiler (as every chain stage runs it) and the programs alike.
+    const child = spawn('prlimit', ['--stack=1073741824:1073741824', '--', command, ...args], {
       cwd,
       env: { ...process.env, NO_COLOR: '1', CLICOLOR: '0', JET_STORE_DIR: join(scratch, 'store', String(slot)), TMPDIR: scratch, TMP: scratch, TEMP: scratch, JET_TOOLCHAIN_ROOT: ROOT },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -119,6 +127,15 @@ async function compare(entry, slot) {
   mkdirSync(caseDir, { recursive: true });
   const expected = readExpected(entry.stem);
   const side = async (kind) => {
+    const cached = kind === 'old' && options.oldCache ? join(options.oldCache, `${entry.stem.replaceAll('/', '__')}.json`) : null;
+    if (cached && existsSync(cached)) {
+      const stored = JSON.parse(readFileSync(cached, 'utf8'));
+      const buffers = (r) => r && { ...r, stdout: Buffer.from(r.stdout, 'base64'), stderr: Buffer.from(r.stderr, 'base64') };
+      const restored = { build: buffers(stored.build), binary: stored.binary, executed: buffers(stored.executed), phases: stored.phases };
+      writeFileSync(join(caseDir, 'old.build.err'), restored.build.stderr);
+      if (restored.executed) { writeFileSync(join(caseDir, 'old.run.out'), restored.executed.stdout); writeFileSync(join(caseDir, 'old.run.err'), restored.executed.stderr); }
+      return restored;
+    }
     const root = join(scratch, kind);
     rmSync(root, { recursive: true, force: true });
     stage(entry, root);
@@ -132,7 +149,12 @@ async function compare(entry, slot) {
     writeFileSync(join(caseDir, `${kind}.build.err`), build.stderr);
     if (executed) { writeFileSync(join(caseDir, `${kind}.run.out`), executed.stdout); writeFileSync(join(caseDir, `${kind}.run.err`), executed.stderr); }
     rmSync(root, { recursive: true, force: true });
-    return { build, binary, executed, phases: phases(trace) };
+    const result = { build, binary, executed, phases: phases(trace) };
+    if (cached) {
+      const encoded = (r) => r && { ...r, stdout: r.stdout.toString('base64'), stderr: r.stderr.toString('base64') };
+      writeFileSync(cached, JSON.stringify({ build: encoded(build), binary, executed: encoded(executed), phases: result.phases }));
+    }
+    return result;
   };
   const old = await side('old');
   const ir = await side('ir');

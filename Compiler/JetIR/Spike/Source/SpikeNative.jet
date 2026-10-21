@@ -7,7 +7,7 @@ use jet_foundation.[CompilerThreads]
 use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK]
 use jet_backend.[x64_link_executable]
 use jet_cli.[JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_PACK_FILE, JetCLITraceSink, jet_cli_authority_report, jet_cli_build_failed, jet_cli_exec, jet_cli_runtime_dir, jet_cli_runtime_key, jet_cli_stem, jet_cli_why]
-use jet_ir.[IRBuildFailure, ir_x64_compile_module, ir_x64_object]
+use jet_ir.[IRBuildFailure, IRFunction, IROp, ir_x64_compile_module, ir_x64_object]
 
 // The executable `executable` of `file`, or the report that stopped it.
 // Every IR build failure, then every selection failure, is listed (exit 2).
@@ -23,25 +23,25 @@ fn ir_spike_native(file: String, executable: String, trace_sink: JetCLITraceSink
 }
 
 fn ir_spike_native_input(file: String, input: ^IRSpikeInput, threads: CompilerThreads, executable: String, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    built :: ir_spike_build_ir(^input, false, trace_sink)
-    if built.failures.len() > 0 {
-        rows := [String]{}
-        loop failure in built.failures -> &rows.push("ir.build {failure.name} [{failure.key}]: {ir_spike_field(failure.message)} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
-        return ir_spike_route_failed(file, rows)
+    built := ir_spike_build_ir(^input, false, trace_sink)
+    // Collect-all: a function the builder failed becomes one Unreachable, so
+    // selection still runs over the whole module and reports its own rows.
+    rows := [String]{}
+    loop failure in built.failures {
+        &rows.push("ir.build {failure.name} [{failure.key}]: {ir_spike_field(failure.message)} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+        if built.program.function_rows.get(failure.key) == .Val(id) -> ir_spike_unreachable(&built.program.functions[id])
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
     compiled :: ir_x64_compile_module(built.program, threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
-    if compiled.errors.len() > 0 {
-        rows :: loop error in compiled.errors -> "ir.x64 {ir_spike_field(error)}"
-        return ir_spike_route_failed(file, rows)
-    }
+    loop error in compiled.errors -> &rows.push("ir.x64 {ir_spike_field(error)}")
+    if rows.len() > 0 -> return ir_spike_route_failed(file, rows)
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
     object := ir_x64_object(built.program, compiled, built.program.entry)
     if trace_sink == .Val(sink) -> sink.end("ir.object", compiled.functions.len())
     if object.errors.len() > 0 {
-        rows :: loop error in object.errors -> "ir.object {ir_spike_field(error)}"
-        return ir_spike_route_failed(file, rows)
+        object_rows :: loop error in object.errors -> "ir.object {ir_spike_field(error)}"
+        return ir_spike_route_failed(file, object_rows)
     }
     object_path :: "{executable}.o"
     cli_files.write_bytes(object_path, object.bytes) ?? return jet_cli_build_failed("couldn't write {object_path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", false)
@@ -55,12 +55,25 @@ fn ir_spike_native_input(file: String, input: ^IRSpikeInput, threads: CompilerTh
     image :: x64_link_executable(names, ^bytes)
     if trace_sink == .Val(sink) -> sink.end("ir.link", names.len())
     if image.errors.len() > 0 {
-        rows :: loop error in image.errors -> "ir.link {ir_spike_field(error)}"
-        return ir_spike_route_failed(file, rows)
+        link_rows :: loop error in image.errors -> "ir.link {ir_spike_field(error)}"
+        return ir_spike_route_failed(file, link_rows)
     }
     cli_files.write_bytes(executable, image.bytes) ?? return jet_cli_build_failed("couldn't write {executable}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", false)
     cli_files.set_mode(executable, 0o755) ?? return jet_cli_build_failed("couldn't make {executable} executable: {err}", jet_cli_why("E2105"), "check that the build directory is writable", false)
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The body of a function the builder failed: one Unreachable (its slots and
+// parameters stay, so its callers' calls still select).
+fn ir_spike_unreachable(function: &IRFunction) Never! {
+    function.op = [IROp]{IROp.Unreachable}
+    function.dst = [Int]{-1}
+    function.a = [Int]{-1}
+    function.b = [Int]{-1}
+    function.c = [Int]{-1}
+    function.code_line = [Int]{0}
+    function.args = [Int]{}
+    function.open = [Int]{}
 }
 
 // Exit 2 with every failure row of the route, one per line.
