@@ -2,6 +2,7 @@
 // `differential_corpus`, `assert_corpus_clean`): read `.drv` files into a
 // derivation store and check that parse, ATerm encoding, the drv path and
 // every output path agree byte for byte with Nix.
+use core.files as files
 
 impl NixDerivationStore {
     // Read `drv_path` and, exactly where `hashDerivationModulo` will need
@@ -82,8 +83,7 @@ fn nix_differential_corpus(store_dir: String, limit: Int) -[FS]> NixCorpusReport
             }
             else -> {}
         }
-        verified :: nix_verify_corpus_outputs(&store, store_dir, path, derivation)
-        if verified == {
+        if nix_verify_corpus_outputs(&store, store_dir, path, derivation) == {
             .Err(error) -> {
                 if nix_is_unsupported(error) {
                     report.skipped += 1

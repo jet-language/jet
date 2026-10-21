@@ -1,6 +1,11 @@
 // Fallback import field policy, retained facts and the record walk (Rust
 // `NixFallback::import_record`, exercised by tests/jetpack_criterion8.rs).
 // Records are built in memory so the claims do not depend on `json.parse`.
+use jetpack_nix.[
+    NixFallbackCanonical, NixFallbackProjection, nix_fallback_detect, nix_fallback_import_field,
+    nix_fallback_import_record,
+]
+use jet_pkg_model.[pkg_sha256_hex]
 
 fn nix_test_fallback_error(projection: NixFallbackProjection, keys: [String]) -> String {
     if projection.select(keys) == {

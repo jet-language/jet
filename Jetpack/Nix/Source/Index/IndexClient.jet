@@ -2,6 +2,14 @@
 // against a signed, unexpired, non-rolled-back channel manifest and its
 // content-addressed index target, caching both under the Hangar root, or
 // against an explicit local (unsigned) catalog directory.
+use core.files as files
+use core.process as process
+use core.time as time
+use core.crypto as crypto
+use core.http.client as http_client
+use core.encoding.base64 as base64
+use jet_pkg_model.[HangarRoots, pkg_ascii_lower, pkg_sha256_hex]
+use jetpack_nix_eval.[nixeval_is_ascii_digit, nixeval_is_ascii_hexdigit]
 
 NIX_INDEX_TEST_KEY_ID :: prep { "jet-test-index-v1" }
 NIX_INDEX_ROOT :: prep { "hangar/nix-index/v1" }
@@ -27,7 +35,7 @@ enum NixIndexClock {
 
     fn now_unix(self) -[Time]> Int Never! {
         if self == {
-            .System -> time.instant().unix_ns /% 1000000000
+            .System -> time.unix_ns() /% 1000000000
             .Fixed(unix) -> unix
         }
     }
@@ -83,7 +91,7 @@ struct NixIndexClient {
         if !nix_index_path_exists(catalog) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
         nix_index_ensure_real_directory(catalog)
         transport :: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
-            Err(NixIndexError.Transport("native index transport has no configured endpoint"))
+            nix_index_unconfigured_get(url, max_bytes)
         }}
         Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline, clock: NixIndexClock.System, transport})
     }
@@ -451,16 +459,15 @@ fn nix_index_native_get(client: HTTPClient, scheme: String, url: String, max_byt
     if status != 200 -> return Err(NixIndexError.Transport("index endpoint returned HTTP {status}"))
     declared :: nix_index_content_length(response)
     if (declared ?? 0) > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
-    body := response.body(limit: max_bytes + 1)
-    bytes := [U8]{}
-    loop {
-        chunk :: &body.read(65536) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
-        if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
-        if bytes.len() > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
-    }
-    if declared != None && (declared ?? 0) != bytes.len() -> return Err(NixIndexError.Transport("index response Content-Length disagrees"))
+    bytes :: response.body().bytes(max_bytes + 1) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
+    if bytes.len() > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
+    if declared == .Val(length) && length != bytes.len() -> return Err(NixIndexError.Transport("index response Content-Length disagrees"))
     Ok(bytes)
+}
+
+// The transport of a local catalog client: it never reaches the network.
+fn nix_index_unconfigured_get(url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
+    Err(NixIndexError.Transport("native index transport has no configured endpoint"))
 }
 
 fn nix_index_content_length(response: HTTPResponse) -> Int? Never! {

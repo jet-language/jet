@@ -2,6 +2,10 @@
 // `derivation-aterm.md` protocol: parse and byte-exact encode. Output maps,
 // input sets and the environment are key-ordered like Nix's maps, so every
 // encoder walk goes through sorted keys.
+use jetpack_nix_eval.[
+    nixeval_key_ordered, nixeval_push_byte, nixeval_push_text, nixeval_scalar_width, nixeval_slice,
+    nixeval_sorted, nixeval_sorted_unique,
+]
 
 struct NixDerivationOutput {
     name: String
@@ -204,7 +208,7 @@ struct NixATermCursor {
     }
 
     fn consume(&self, want: String) NixError! {
-        got :: self.bump()
+        got :: &self.bump()
         if (got ?? "") != want {
             return Err(NixError.DrvParse("expected {nix_debug_scalar(want)} at {self.position}, got {nix_debug_optional_scalar(got)}"))
         }
@@ -228,11 +232,11 @@ struct NixATermCursor {
         &self.consume("\"")
         out := [U8]{}
         loop self.position < self.bytes.len() {
-            scalar :: self.bump() ?? return Err(NixError.DrvParse("unterminated escaped string"))
+            scalar :: &self.bump() ?? return Err(NixError.DrvParse("unterminated escaped string"))
             if scalar == {
                 "\"" -> return Ok(String.from_bytes(out) ?? panic("ATerm text is UTF-8"))
                 "\\" -> {
-                    escaped :: self.bump() ?? return Err(NixError.DrvParse("truncated escape"))
+                    escaped :: &self.bump() ?? return Err(NixError.DrvParse("truncated escape"))
                     if escaped == {
                         "n" -> nixeval_push_byte(&out, 10)
                         "r" -> nixeval_push_byte(&out, 13)

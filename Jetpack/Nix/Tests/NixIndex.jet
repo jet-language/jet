@@ -1,6 +1,26 @@
 // Signed nixpkgs index claims ported from the tests of
 // crates/jetpack/src/NixIndex.rs. Each claim works in its own scratch
 // directory and removes it.
+use core.encoding.json as json
+use core.files as files
+use core.time as time
+use core.crypto as crypto
+use core.encoding.base64 as base64
+use core.http.server as http_server
+use jetpack_nix.[
+    NIX_INDEX_LOCAL_INDEX_ROOT, NIX_INDEX_MAX_DECODED_BYTES, NIX_INDEX_ROOT, NIX_INDEX_SCHEMA,
+    NIX_INDEX_TEST_KEY_ID, NixIndexChannelManifest, NixIndexClient, NixIndexClock, NixIndexCoverage,
+    NixIndexCoverageMiss, NixIndexDocument, NixIndexError, NixIndexKey, NixIndexManifestTarget,
+    NixIndexOracleCandidate, NixIndexOutputWire, NixIndexRecord, NixIndexRecordWire,
+    NixIndexSignature, NixIndexTransport, NixIndexTrustTier, nix_index_canonical_test_index,
+    nix_index_decode_index_records_for_producer, nix_index_manifest_signature_request,
+    nix_index_parse_oracle_for_producer, nix_index_producer_coverage_report,
+    nix_index_producer_generate, nix_index_producer_manifest_bytes,
+    nix_index_producer_signature_request, nix_index_signature_sidecar, nix_index_target_for,
+    nix_index_validate_store_path, nix_index_verify_index_signature,
+    nix_index_verify_manifest_signature, nix_index_zstd_decode_bounded,
+]
+use jet_pkg_model.[HangarRoots, pkg_json_object, pkg_sha256_hex]
 
 NIX_TEST_INDEX_REVISION :: prep { "c8f90650c15282fa8656a041bfbbd2403997a9a7" }
 NIX_TEST_RIPGREP_DRV :: prep { "/nix/store/har68bdn10m05zxkvn680q37bdq0bpdx-ripgrep-15.2.0.drv" }
