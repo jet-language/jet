@@ -444,6 +444,81 @@ fn files_entries_sort(data: I64, count: I64) {
 // PathFiles.rs:27: Path.to_string is its Display text.
 #Export(c) fn jet_path_to_string(path: I64) -> I64 { path_handle_render(path) }
 
+// fstat st_mode (kernel x86-64 struct stat: st_mode u32 at 24), or -errno.
+fn files_fd_mode(fd: I64) -> I64 {
+    buffer :: jet_rt_alloc(I64{144}, I64{8})
+    result :: host_call(I64{5}, fd, buffer, I64{0})
+    mode :: rt_text_word(buffer + I64{24}).bit_and(I64{4294967295})
+    jet_rt_free(buffer, I64{144}, I64{8})
+    if (result < I64{0}) -> return result
+    mode
+}
+
+fn files_copy_failed(source: I64, target: I64, code: I64, from: I64, error: I64) -> I64 {
+    if (source >= I64{0}) -> _ := host_call(I64{3}, source, I64{0}, I64{0})
+    if (target >= I64{0}) -> _ := host_call(I64{3}, target, I64{0}, I64{0})
+    compiler_fs_errno(HOST_IO_OP_WRITE, from, code, error)
+}
+
+// Text.rs:1867 std::fs::copy(from, to) on unix: open `from` (a regular file,
+// following links), create/truncate `to` with the source mode, fchmod a
+// regular `to` to that mode, then copy every byte. Every failure is
+// io_error_at(Write, from).
+#Export(c) fn jet_std_fs_copy_raw(from: I64, to: I64, error: I64) -> I64 {
+    if !files_paths_valid(from, to, from, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(from)
+    source := I64{-4}
+    loop source == (I64{-4}) -> source = host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, from)
+    if (source < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, from, -source, error)
+    mode :: files_fd_mode(source)
+    if (mode < I64{0}) -> return files_copy_failed(source, I64{-1}, -mode, from, error)
+    if ((mode.bit_and(I64{61440})) != I64{32768}) {
+        _ := host_call(I64{3}, source, I64{0}, I64{0})
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_WRITE, from, I64{0}, jet_rt_string_clone(rt_static_text("the source path is neither a regular file nor a symlink to a regular file")), error)
+    }
+    permissions :: mode.bit_and(I64{4095})
+    target_name :: fd_c_path(to)
+    target := I64{-4}
+    // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+    loop target == (I64{-4}) -> target = host_call(I64{2}, target_name, I64{524865}, permissions)
+    fd_c_path_drop(target_name, to)
+    if (target < I64{0}) -> return files_copy_failed(source, I64{-1}, -target, from, error)
+    target_mode :: files_fd_mode(target)
+    if (target_mode < I64{0}) -> return files_copy_failed(source, target, -target_mode, from, error)
+    if ((target_mode.bit_and(I64{61440})) == I64{32768}) {
+        changed := I64{-4}
+        loop changed == (I64{-4}) -> changed = host_call(I64{91}, target, permissions, I64{0})
+        if (changed < I64{0}) -> return files_copy_failed(source, target, -changed, from, error)
+    }
+    buffer :: jet_rt_alloc(I64{65536}, I64{8})
+    failure := I64{0}
+    loop {
+        count :: host_call(I64{0}, source, buffer, I64{65536})
+        if (count == I64{-4}) -> next
+        if (count < I64{0}) {
+            failure = count
+            break
+        }
+        if (count == I64{0}) -> break
+        written :: host_write_all(target, buffer, count)
+        if (written != I64{0}) {
+            failure = written
+            break
+        }
+    }
+    jet_rt_free(buffer, I64{65536}, I64{8})
+    if (failure == HOST_WRITE_ZERO) {
+        _ := host_call(I64{3}, source, I64{0}, I64{0})
+        _ := host_call(I64{3}, target, I64{0}, I64{0})
+        return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(from), host_write_zero_text(), error)
+    }
+    if (failure < I64{0}) -> return files_copy_failed(source, target, -failure, from, error)
+    _ := host_call(I64{3}, source, I64{0}, I64{0})
+    _ := host_call(I64{3}, target, I64{0}, I64{0})
+    I64{1}
+}
+
 // std's CString refusal for a two-path call: either path holding NUL fails
 // before the syscall as InvalidInput naming `shown` (io_error_at's path).
 fn files_paths_valid(first: I64, second: I64, shown: I64, operation: I64, error: I64) -> Bool {
