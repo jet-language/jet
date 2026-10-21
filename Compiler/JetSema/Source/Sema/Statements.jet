@@ -4928,7 +4928,15 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
     // The value's own type, inferred without the return type as a target.
     probe_diagnostics := [Diagnostic]{}
     offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
-    diagnostics[mismatch_index] = sema_return_value_mismatch(context.function_name, sema_stmt_return_required_type(return_type), offered.ty, value_span)
+    diagnostics[mismatch_index] = sema_return_value_mismatch(context.function_name, sema_stmt_return_required_type(return_type), offered.ty, sema_stmt_return_value_span(value))
+}
+
+// Rust reports the returned value at its own span, which for a method or
+// module-qualified call is the method name. The native method span covers
+// the receiver path as well, so the name is its trailing bytes.
+fn sema_stmt_return_value_span(value: Expr) -> Span Never! {
+    if value == .MethodCall(_, method, method_span, _, _, _, _, _) -> return Span{start: method_span.end - method.count_bytes(), end: method_span.end}
+    expr_span(value)
 }
 
 // Rust `check_return_expr` infers the value against the whole return type,
