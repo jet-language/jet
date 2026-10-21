@@ -545,3 +545,10 @@ fn expr_source_start(expr: Expr) -> Int Never! {
         else -> return expr_span(expr).start
     }
 }
+
+// An expression's source extent from its first byte (`expr_source_start`)
+// to the end of its own span: a method call covers its receiver path
+// through the method name (`xs.zip`), any other expression its own span.
+fn expr_source_span(expr: Expr) -> Span Never! {
+    Span{start: expr_source_start(expr), end: expr_span(expr).end}
+}

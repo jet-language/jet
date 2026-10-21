@@ -4,7 +4,7 @@
 //   d.watch(path)               watch this file or directory too
 //   d.serve(port) / (port: N)   serve on this port with browser live reload
 //   d.reload(.Restart | .Hot)   rerun on change, or swap code into the running program
-use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, ParamZone, Span, TExpr, TExprKind, THostCall, TStrPart, Type]
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, ParamZone, Span, TExpr, TExprKind, THostCall, TStrPart, Type, expr_source_start]
 
 fn sema_dev_context_method_known(method: String) -> Bool Never! {
     method == "watch" || method == "serve" || method == "reload"
@@ -13,12 +13,14 @@ fn sema_dev_context_method_known(method: String) -> Bool Never! {
 fn sema_call_try_dev_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Dev"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    // A wrong method or arity points at the whole `d.method` head.
+    head :: Span{start: expr_source_start(receiver), end: span.end}
     if !sema_dev_context_method_known(method) {
-        &diagnostics.push(sema_error("E0311", span, "`{method}` isn't a method of `Dev`", "the dev context offers `watch`, `serve` and `reload`", "use `d.watch(path)`, `d.serve(port)` or `d.reload(.Restart)` / `d.reload(.Hot)`"))
+        &diagnostics.push(sema_error("E0311", head, "`{method}` isn't a method of `Dev`", "the dev context offers `watch`, `serve` and `reload`", "use `d.watch(path)`, `d.serve(port)` or `d.reload(.Restart)` / `d.reload(.Hot)`"))
         return failed
     }
     if args.len() != 1 {
-        &diagnostics.push(sema_error("E0104", span, "`Dev.{method}` expects 1 argument, got {args.len()}", "each dev method takes one value", "pass exactly one argument"))
+        &diagnostics.push(sema_error("E0104", head, "`Dev.{method}` expects 1 argument, got {args.len()}", "each dev method takes one value", "pass exactly one argument"))
         return failed
     }
     argument :: args[0]

@@ -71,6 +71,7 @@ use jet_foundation.[
     ast_binding,
     ast_empty_lambda_meta,
     diagnostic_registry_row,
+    expr_source_span,
     expr_span,
     measure_literal_value,
     symbol_id,
@@ -4806,6 +4807,51 @@ fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, environ
     known_type :: sema_stmt_return_known_type(value, environment, scopes) ?? return false
     sema_stmt_return_types_are_carriers(known_type, sema_stmt_return_required_type(return_type))
 }
+// A value `if` in a `T !E` slot that builds the carrier on some arm while
+// another arm is a plain success value (`.Int(_) -> Val(n)` beside
+// `else -> Err(…)`). Rust `check_return_expr` infers the table against the
+// whole carrier and lifts each plain arm into it through `Ok`.
+fn sema_stmt_return_if_mixes_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if !sema_stmt_return_type_is_result(Val(sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type)))) -> return false
+    if value == {
+        .Paren(inner, _) -> return sema_stmt_return_if_mixes_carrier(inner, return_type, environment, scopes)
+        .If(_, _, _, _, _, _) -> return sema_stmt_return_if_builds_carrier(value, return_type, environment, scopes) && !sema_stmt_return_if_arms_fit_carrier(value, return_type, environment, scopes)
+        else -> return false
+    }
+}
+// The table with every plain arm that reaches the merge written as `Ok(arm)`.
+fn sema_stmt_return_lift_if_arms(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Expr {
+    if value == {
+        // copy: `inner` is a payload of read parameter `value`, which keeps the original; the new Expr.Paren owns the lifted one
+        .Paren(inner, span) -> return Expr.Paren{value: sema_stmt_return_lift_if_arms(inner.copy(), return_type, environment, scopes), span: span}
+        .If(cond, then_body, then_value, else_body, else_value, span) -> {
+            then_lifted :: sema_stmt_return_lift_arm(then_body, then_value, return_type, environment, scopes)
+            else_lifted :: sema_stmt_return_lift_arm(else_body, else_value, return_type, environment, scopes)
+            // copy: `cond` and the arm bodies are payloads of read parameter `value`, which keeps the originals; the new Expr.If owns these
+            return Expr.If{cond: cond.copy(), then_body: then_body.copy(), then_value: then_lifted, else_body: else_body.copy(), else_value: else_lifted, span: span}
+        }
+        // copy: the returned Expr is a new owned value; read parameter `value` keeps the original
+        else -> return value.copy()
+    }
+}
+fn sema_stmt_return_lift_arm(body: [Stmt], value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Expr {
+    nested :: if value == {
+        .If(_, _, _, _, _, _) -> true
+        .Paren(inner, _) -> inner == .If(_, _, _, _, _, _)
+        else -> false
+    }
+    if nested -> return sema_stmt_return_lift_if_arms(value, return_type, environment, scopes)
+    diverges :: sema_stmt_block_has_no_fallthrough(body) || (body.len() > 0 && sema_stmt_definitely_returns(body[body.len() - 1]))
+    placeholder :: if value == {
+        .NoElse(_) | .Todo(_, _) -> true
+        else -> false
+    }
+    plain :: !diverges && !placeholder && !sema_stmt_return_if_arms_fit_carrier(value, return_type, environment, scopes)
+    // copy: the arm value is a payload of the caller's read table, which keeps the original; the result owns this one
+    if !plain -> return value.copy()
+    // copy: as above; the new Expr.Ok owns the lifted arm value
+    Expr.Ok{value: value.copy(), span: expr_span(value)}
+}
 fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     diagnostic_start :: diagnostics.len()
     checked :: sema_stmt_check_return_value_typed(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4962,6 +5008,12 @@ fn sema_stmt_return_probe_shape(value: Expr, optional_slot: Bool) -> Bool Never!
 
 fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     required := sema_stmt_return_required_type(return_type)
+    if sema_stmt_return_if_mixes_carrier(value, return_type, environment, scopes) {
+        lifted :: sema_stmt_return_lift_if_arms(value, return_type, environment, scopes)
+        table :: sema_check_expression(lifted, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if sema_stmt_type_is_fallible_result(table.ty) -> context.failure_direct_source = true
+        return Val(table)
+    }
     if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, &state, &tail_store, &context) {
         carrier :: sema_check_expression(value, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
@@ -5439,7 +5491,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         // A source that failed its own check already reported why;
                         // its placeholder type is not a second loop-source error.
                         if item_type_option == None && collection_value != None {
-                            &diagnostics.push(sema_error("E0109", expr_span(collection_expr), "values of type {type_name(collection.ty)} can't be used as a loop source", "a `for` source must provide one checked item type per step", "use a list, map, stream, iterator, reader, or registered Iterable value"))
+                            &diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "values of type {type_name(collection.ty)} can't be used as a loop source", "a `for` source must provide one checked item type per step", "use a list, map, stream, iterator, reader, or registered Iterable value"))
                             valid = false
                         }
                         pair_types := sema_stmt_for_in_pair_types(collection.ty, item_type)
@@ -5449,12 +5501,12 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         if var2 != None && collection_value != None {
                             if {
                                 range_source -> {
-                                    &diagnostics.push(sema_error("E0109", expr_span(collection_expr), "a Range loop has one value per step", "Range values yield whole numbers, not key-value pairs", "use one loop name"))
+                                    &diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "a Range loop has one value per step", "Range values yield whole numbers, not key-value pairs", "use one loop name"))
                                     valid = false
                                     pair_rejected = true
                                 }
                                 !sema_stmt_for_in_method_pair_is_supported(method_kind) || pair_types == None -> {
-                                    &diagnostics.push(sema_error("E0109", expr_span(collection_expr), "`loop (x, y) in` on `{type_name(collection.ty)}` needs one loop name, not two", "this iterator yields one item per step; only maps and indexed sequences yield a pair", "use one loop name for this source"))
+                                    &diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "`loop (x, y) in` on `{type_name(collection.ty)}` needs one loop name, not two", "this iterator yields one item per step; only maps and indexed sequences yield a pair", "use one loop name for this source"))
                                     valid = false
                                     pair_rejected = true
                                 }
@@ -5463,7 +5515,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         consumes_collection := sema_stmt_for_in_consumes_collection(collection.ty, item_type)
                         owns_collection := !consumes_collection || sema_stmt_for_in_can_consume_collection(collection_expr)
                         if !owns_collection {
-                            &diagnostics.push(sema_error("E0120", expr_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first, then loop over that local"))
+                            &diagnostics.push(sema_error("E0120", expr_source_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first, then loop over that local"))
                             valid = false
                         }
                         loop_fork :: sema_ownership_mark(&state)
@@ -5521,7 +5573,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         bindingless :: var == "it" && var2 == None
                         nested_bindingless :: bindingless && context.implicit_loop_subject_depth > 0
                         if nested_bindingless {
-                            &diagnostics.push(sema_error("E0380", expr_span(collection_expr), "this loop needs a named source binding", "an implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding", "write `loop item in source -> ...`; give nested loops named bindings"))
+                            &diagnostics.push(sema_error("E0380", expr_source_span(collection_expr), "this loop needs a named source binding", "an implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding", "write `loop item in source -> ...`; give nested loops named bindings"))
                             valid = false
                         }
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth += 1

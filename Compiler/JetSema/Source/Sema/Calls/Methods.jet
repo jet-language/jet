@@ -622,7 +622,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     host_stored :: sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && scopes.transaction_depth > 0
     typed_option :: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), host_stored) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false)
     typed :: typed_option ?? return None
-    ownership :: sema_ownership_check_two_phase_method_call(&state, resolved_candidate.method.name, receiver, resolved_candidate.receiver_convention, true, params, &checked_args, scopes, span, &diagnostics)
+    ownership :: sema_ownership_check_two_phase_method_call(&state, resolved_candidate.method.name, receiver, resolved_candidate.receiver_convention, true, params, &checked_args, scopes, span, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &checked_args, environment, program)
     if !sema_call_prepare_variadic_elements(typed, params, checked_args, &lowered, environment, program, &scopes, &state, &context, &diagnostics) -> return None
