@@ -28,7 +28,9 @@ fi
 # target dir after the outer process starts, so checking only the caller's
 # environment leaves the same cross-worktree corruption door open.
 check_target_dir() {
-  local checkout="$1"
+  local cargo_guard="${JET_ENV_CARGO_GUARD:-1}"
+  local checkout
+  checkout="$(realpath -m -- "$1")"
 
   # /tmp is RAM-backed tmpfs on this machine; cargo artifacts or test scratch
   # there fill swap and trigger kernel OOM kills. Use a disk path instead.
@@ -46,7 +48,7 @@ check_target_dir() {
     esac
   }
 
-  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  if [ "$cargo_guard" = 1 ] && [ -n "${CARGO_TARGET_DIR:-}" ]; then
     reject_tmpfs_path CARGO_TARGET_DIR "$CARGO_TARGET_DIR"
   fi
   for scratch_var in JET_TEST_SCRATCH_DIR JET_DEV_ORACLE_CACHE_DIR; do
@@ -60,7 +62,7 @@ check_target_dir() {
   # checkout; cargo then reports "Finished" while target/debug/<bin> still holds
   # the other checkout's binary with its embedded assets. Per-checkout caches
   # only (card 1640).
-  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  if [ "$cargo_guard" = 1 ] && [ -n "${CARGO_TARGET_DIR:-}" ]; then
     local target scratch_targets=""
     target="$(realpath -m -- "$CARGO_TARGET_DIR")"
     if [ -n "${JET_SCRATCH_ROOT:-}" ]; then
@@ -93,10 +95,18 @@ check_target_dir() {
 }
 
 set_default_target_dir() {
+  [ "${JET_ENV_CARGO_GUARD:-1}" = 1 ] || return 0
   if [ -z "${CARGO_TARGET_DIR:-}" ]; then
     export CARGO_TARGET_DIR="$1/target"
   fi
 }
+
+# The Cargo target rules guard Cargo's shared target directories. The Jet
+# compiler never reads Cargo state, so a `jet` command (this checkout's or a
+# chain stage's binary) runs without them.
+case "$(basename -- "${1:-}")" in
+  jet) export JET_ENV_CARGO_GUARD=0 ;;
+esac
 
 set_default_target_dir "$repo"
 check_target_dir "$repo"
