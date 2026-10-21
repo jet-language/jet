@@ -547,8 +547,9 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .Trim -> return jet_codegen_builtin_route("string_trim", "jet_unicode_trim", 1, [Bool]{true}, None)
         .TrimStart -> return jet_codegen_builtin_route("string_trim_start", "jet_text_trim_start", 1, [Bool]{true}, None)
         .TrimEnd -> return jet_codegen_builtin_route("string_trim_end", "jet_text_trim_end", 1, [Bool]{true}, None)
-        .PadStart -> return jet_codegen_builtin_route("string_pad_start", "jet_text_pad_start", 3, [Bool]{true, false, true}, None)
-        .PadEnd -> return jet_codegen_builtin_route("string_pad_end", "jet_text_pad_end", 3, [Bool]{true, false, true}, None)
+        // `pad_start`/`pad_end` are `rjust`/`ljust`: one runtime pad route each.
+        .PadStart -> return jet_codegen_builtin_route("rjust", "jet_text_pad_start_ref", 3, [Bool]{true, true, true}, None)
+        .PadEnd -> return jet_codegen_builtin_route("ljust", "jet_text_pad_end_ref", 3, [Bool]{true, true, true}, None)
         .StringIndexOf -> return jet_codegen_builtin_route("string_index_of", "jet_unicode_index_of", 2, [Bool]{true, true}, None)
         .StringCount -> return jet_codegen_builtin_route("string_count", "jet_unicode_count", 2, [Bool]{true, true}, None)
         .StringIsAlphabetic -> return jet_codegen_builtin_route("string_is_alphabetic", "jet_text_is_alphabetic", 1, [Bool]{true}, None)
