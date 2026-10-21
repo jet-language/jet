@@ -65,6 +65,7 @@ use jet_foundation.[
     dimension_divide,
     dimension_identity,
     dimension_multiply,
+    expr_source_start,
     expr_span,
     integer_bounds_exact,
     symbol_id,
@@ -2684,10 +2685,9 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     if !rounded && measured_crossing -> return SemaMethodSpecialCheck{handled: false, value: None}
     if source_fact.package != destination_fact.package || source_fact.family != destination_fact.family || source_fact.dimension != destination_fact.dimension || source_fact.kind != destination_fact.kind -> return SemaMethodSpecialCheck{handled: false, value: None}
 
-    destination_span :: if receiver == {.Ident(_, span) -> span else -> method_span}
     conversion_end := method_span.end
     if args.len() > 0 -> conversion_end = args[args.len() - 1].span.end
-    conversion_span := Span{start: destination_span.start, end: conversion_end}
+    conversion_span := Span{start: expr_source_start(receiver), end: conversion_end}
 
     rounded_allowed := false
     source_value := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, &rounded_allowed) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -3207,7 +3207,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if sema_expr_function_field(receiver_value.ty, method, routed_method, environment, program) {
         call_end := method_span.end
         if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
-        return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: method_span}, args, Span{start: expr_span(receiver).start, end: call_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: Span{start: expr_source_start(receiver), end: method_span.end}}, args, Span{start: expr_span(receiver).start, end: call_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     take_pattern := sema_expr_check_take_pattern_method(receiver, receiver_value, method, args, method_span, expected, environment, program, &scopes, &state, &diagnostics)
     if take_pattern.handled -> return take_pattern.value
@@ -4160,10 +4160,10 @@ fn sema_expr_check_method_call_expr(receiver: Expr, method: String, method_span:
     // `value.copy()` with no arguments is the
     // compiler-owned copy, resolved before ordinary method lookup so
     // no type can redefine it; a type receiver keeps associated
-    // lookup (Rust `copy_receiver_names_type`). The Field-derived
-    // `method_span` already covers `receiver.copy`.
+    // lookup (Rust `copy_receiver_names_type`). The copy spans its receiver
+    // through the method name.
     if method == "copy" && args.len() == 0 && type_args.len() == 0 && !sema_expr_copy_receiver_names_type(receiver, owner_type_args, scopes) {
-        return sema_expr_check_copy(receiver, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expr_check_copy(receiver, Span{start: expr_source_start(receiver), end: method_span.end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     // Check the ordinary unmarked call, then
     // compare the written receiver mark with its resolved convention.

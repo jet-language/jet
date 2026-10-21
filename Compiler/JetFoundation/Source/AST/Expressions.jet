@@ -533,3 +533,15 @@ fn expr_span(expr: Expr) -> Span {
     }
     Span{start: 0, end: 0}
 }
+
+// The first source byte of an expression. A method call is spanned at its
+// method name, so a method chain or a member path starts at its receiver.
+fn expr_source_start(expr: Expr) -> Int Never! {
+    if expr == {
+        .Paren(_, span) -> return span.start
+        .Field(base, _, _) -> return expr_source_start(base)
+        .OptField(base, _, _, _, _) -> return expr_source_start(base)
+        .MethodCall(receiver, _, _, _, _, _, _, _) -> return expr_source_start(receiver)
+        else -> return expr_span(expr).start
+    }
+}
