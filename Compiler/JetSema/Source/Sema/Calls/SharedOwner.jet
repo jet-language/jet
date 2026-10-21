@@ -376,6 +376,41 @@ fn sema_call_try_cell_method(receiver: Expr, receiver_value: TExpr, name: String
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
+// Rust `finish_pool_add` / `finish_pool_remove` and the `("Pool", "ids")` arm:
+// `pool.add(value)` consumes a `T` and returns its `ID<T>`, `pool.remove(id)`
+// returns the removed `T?`, `pool.ids()` lists every live `ID<T>`. None of
+// them records a receiver write; each lowers to the plain `JetPool<T>` method.
+fn sema_call_pool_method(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    id_type :: Type.Apply{name: "ID", args: [Type]{element}}
+    wanted :: if method == "ids" -> 0 else -> 1
+    if args.len() != wanted {
+        if method == "ids" {
+            &diagnostics.push(sema_wrong_core_arity(method, 0, args.len(), span))
+        } else {
+            why :: if method == "add" -> "adding to a pool needs exactly one value" else -> "removing from a pool needs exactly one `ID<T>`"
+            fix :: if method == "add" -> "call `.add(value)` with the value to store" else -> "call `.remove(id)` with the `ID<T>` to remove"
+            &diagnostics.push(sema_error("E0104", span, "`{method}` expects 1 argument, got {args.len()}", why, fix))
+        }
+        sema_call_memory_discard_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    if method == "ids" {
+        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return failed
+        return sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, Type.List{element: id_type}, span, expected, environment, program, &scopes, &context, &diagnostics)
+    }
+    updated_args := args
+    slot :: if method == "add" -> element else -> id_type
+    checked :: sema_check_expression(updated_args[0].expr, Val(slot), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    value :: sema_expr_expected(checked, Val(slot), environment, program, &diagnostics) ?? return failed
+    convention :: if method == "add" -> AccessConvention.Move else -> AccessConvention.Read
+    params :: [SemaCallParam]{sema_call_shared_owner_param(if method == "add" -> "value" else -> "id", convention, slot)}
+    ownership := sema_ownership_check_method_call(&state, "Pool.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    result :: if method == "add" -> id_type else -> Type.Option{inner: element}
+    sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, &scopes, &context, &diagnostics)
+}
+
 fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty == {
         .Shared(inner) -> {
@@ -389,6 +424,7 @@ fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, meth
             if method == "strong_count" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
         }
         .Apply(name, type_args) -> {
+            if name == "Pool" && type_args.len() == 1 && (method == "add" || method == "remove" || method == "ids") -> return sema_call_pool_method(receiver, receiver_value, type_args[0], method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             cell :: sema_call_try_cell_method(receiver, receiver_value, name, type_args, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if cell.handled -> return cell
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}

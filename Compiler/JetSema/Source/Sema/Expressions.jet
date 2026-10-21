@@ -3075,6 +3075,8 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     }
     geometry := sema_call_try_geometry(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if geometry.handled -> return geometry
+    math := sema_call_try_math_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if math.handled -> return math
     transfer_fact := sema_hardware_transfer_fact_for_expr(receiver, scopes, &state)
     hardware := sema_call_try_hardware_method(receiver, receiver_value, method, args, transfer_fact, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if hardware == .Val(result) && result.check.handled -> return sema_expr_record_hardware_result(result, &scopes, &context)

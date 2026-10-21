@@ -259,7 +259,9 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
     }
     payload :: sema_check_expression(updated_args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     parameter := SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload.ty), variadic: false}
-    ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Write, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
+    // Rust `alloc_method_return` records no receiver write: `arena.alloc(v)`
+    // reads the allocator handle (only `reset` writes it).
+    ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     view := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
     result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view

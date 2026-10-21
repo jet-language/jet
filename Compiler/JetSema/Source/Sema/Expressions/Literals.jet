@@ -709,7 +709,8 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         .List(_) -> Val(Type.Int)
         .FixedList(_, _) -> Val(Type.Int)
         .Map(key, _, _) -> Val(key)
-        .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else -> None
+        .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else if name == "Pool" && args.len() == 1 -> Val(Type.Apply{name: "ID", args: [Type]{args[0]}}) else -> None
+        .Named(name) -> if sema_call_math_is_lane(name) -> Val(Type.Int) else -> None
         else -> None
     }
     // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
@@ -739,6 +740,10 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
             value :: sema_tir_node(Type.List{element: item}, TExprKind.Slice{base: checked_base, start: zero, end: zero, range: Val(checked_index), location: sema_expression_panic_location(environment, program, scopes, span)}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
+    }
+    if sema_call_math_builtin_name(base_ty, environment, program) == .Val(lane) && sema_call_math_is_lane(lane) {
+        read :: sema_call_math_lane_index(lane, checked_base, index, checked_index, span, environment, &diagnostics) ?? return None
+        return sema_expr_expected_owned(^read, expected, environment, program, &diagnostics)
     }
     result_ty := Type?{None}
     resolved_kind := ast_kind
@@ -794,6 +799,18 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                 if !sema_expression_integer_index(checked_index, expr_span(index), &diagnostics) -> return None
                 resolved_kind = IndexKind.List
                 result_ty = Val(args[0])
+            }
+            // Rust `infer_index` Pool arm: `pool[id]` reads the slot its own
+            // `ID<T>` names; a stale id panics at run time (`jet_pool_get`).
+            if name == "Pool" && args.len() == 1 {
+                id_type :: Type.Apply{name: "ID", args: [Type]{args[0]}}
+                if !type_identity_equal(checked_index.ty, id_type) {
+                    &diagnostics.push(sema_error("E0112", expr_span(index), "`Pool` indexes need a matching `ID<T>`, not {sema_type_show(checked_index.ty)}", "a pool slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
+                    return None
+                }
+                location :: sema_expression_panic_location(environment, program, scopes, span)
+                slot :: sema_tir_node(args[0], TExprKind.PoolSlot{pool: checked_base, id: checked_index, mutable: false, field: None, line: location.line, source_line: location.source_line}, span)
+                return sema_expr_expected_owned(^slot, expected, environment, program, &diagnostics)
             }
         }
         .String -> {

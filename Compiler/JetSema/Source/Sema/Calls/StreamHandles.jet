@@ -217,37 +217,45 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
         if method == "write_atomic" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWriteAtomic, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "walk" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
+    // Rust `text_cursor_method_return` / `binary_reader_method_return`: the
+    // cursor and reader methods record no receiver write, so a read binding
+    // or parameter calls them without a `&` mark.
     if owner == "Cursor" {
-        if method == "take_until" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CursorTakeUntil, result_type: sema_stream_handle_result(string, Type.String), params: [SemaCallParam]{sema_stream_handle_param("delimiter", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "skip_ws" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CursorSkipWs, result_type: unit, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "take_until" -> return Val(sema_stream_handle_read_spec(THandleOp.CursorTakeUntil, sema_stream_handle_result(string, Type.String), [SemaCallParam]{sema_stream_handle_param("delimiter", string, AccessConvention.Read)}))
+        if method == "skip_ws" -> return Val(sema_stream_handle_read_spec(THandleOp.CursorSkipWs, unit, [SemaCallParam]{}))
     }
     if owner == "Reader" {
-        if method == "read_u8" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU8, result_type: sema_stream_handle_result(u8, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i8" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI8, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 8}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_u16_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU16Le, result_type: sema_stream_handle_result(Type.IntN{signed: false, bits: 16}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_u16_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU16Be, result_type: sema_stream_handle_result(Type.IntN{signed: false, bits: 16}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i16_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI16Le, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 16}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i16_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI16Be, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 16}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_u32_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU32Le, result_type: sema_stream_handle_result(Type.IntN{signed: false, bits: 32}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_u32_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU32Be, result_type: sema_stream_handle_result(Type.IntN{signed: false, bits: 32}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i32_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI32Le, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 32}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i32_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI32Be, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 32}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_u64_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU64Le, result_type: sema_stream_handle_result(Type.IntN{signed: false, bits: 64}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_u64_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadU64Be, result_type: sema_stream_handle_result(Type.IntN{signed: false, bits: 64}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i64_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI64Le, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 64}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_i64_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadI64Be, result_type: sema_stream_handle_result(Type.IntN{signed: true, bits: 64}, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_f32_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadF32Le, result_type: sema_stream_handle_result(Type.Float32, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_f32_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadF32Be, result_type: sema_stream_handle_result(Type.Float32, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_f64_le" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadF64Le, result_type: sema_stream_handle_result(Type.Float, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "read_f64_be" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderReadF64Be, result_type: sema_stream_handle_result(Type.Float, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "peek_u8" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderPeek, result_type: sema_stream_handle_result(u8, string), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        if method == "seek" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderSeek, result_type: sema_stream_handle_result(Type.Named{name: "Unit"}, string), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "skip" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderSkip, result_type: sema_stream_handle_result(Type.Named{name: "Unit"}, string), params: [SemaCallParam]{sema_stream_handle_param("count", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "take" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderTake, result_type: sema_stream_handle_result(bytes, string), params: [SemaCallParam]{sema_stream_handle_param("count", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        if method == "remaining" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderRemaining, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        if method == "is_at_end" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ReaderAtEnd, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        none :: [SemaCallParam]{}
+        if method == "read_u8" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU8, sema_stream_handle_result(u8, string), none))
+        if method == "read_i8" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI8, sema_stream_handle_result(Type.IntN{signed: true, bits: 8}, string), none))
+        if method == "read_u16_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU16Le, sema_stream_handle_result(Type.IntN{signed: false, bits: 16}, string), none))
+        if method == "read_u16_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU16Be, sema_stream_handle_result(Type.IntN{signed: false, bits: 16}, string), none))
+        if method == "read_i16_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI16Le, sema_stream_handle_result(Type.IntN{signed: true, bits: 16}, string), none))
+        if method == "read_i16_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI16Be, sema_stream_handle_result(Type.IntN{signed: true, bits: 16}, string), none))
+        if method == "read_u32_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU32Le, sema_stream_handle_result(Type.IntN{signed: false, bits: 32}, string), none))
+        if method == "read_u32_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU32Be, sema_stream_handle_result(Type.IntN{signed: false, bits: 32}, string), none))
+        if method == "read_i32_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI32Le, sema_stream_handle_result(Type.IntN{signed: true, bits: 32}, string), none))
+        if method == "read_i32_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI32Be, sema_stream_handle_result(Type.IntN{signed: true, bits: 32}, string), none))
+        if method == "read_u64_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU64Le, sema_stream_handle_result(Type.IntN{signed: false, bits: 64}, string), none))
+        if method == "read_u64_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadU64Be, sema_stream_handle_result(Type.IntN{signed: false, bits: 64}, string), none))
+        if method == "read_i64_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI64Le, sema_stream_handle_result(Type.IntN{signed: true, bits: 64}, string), none))
+        if method == "read_i64_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadI64Be, sema_stream_handle_result(Type.IntN{signed: true, bits: 64}, string), none))
+        if method == "read_f32_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadF32Le, sema_stream_handle_result(Type.Float32, string), none))
+        if method == "read_f32_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadF32Be, sema_stream_handle_result(Type.Float32, string), none))
+        if method == "read_f64_le" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadF64Le, sema_stream_handle_result(Type.Float, string), none))
+        if method == "read_f64_be" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderReadF64Be, sema_stream_handle_result(Type.Float, string), none))
+        if method == "peek_u8" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderPeek, sema_stream_handle_result(u8, string), none))
+        if method == "seek" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderSeek, sema_stream_handle_result(Type.Named{name: "Unit"}, string), [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read)}))
+        if method == "skip" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderSkip, sema_stream_handle_result(Type.Named{name: "Unit"}, string), [SemaCallParam]{sema_stream_handle_param("count", Type.Int, AccessConvention.Read)}))
+        if method == "take" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderTake, sema_stream_handle_result(bytes, string), [SemaCallParam]{sema_stream_handle_param("count", Type.Int, AccessConvention.Read)}))
+        if method == "remaining" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderRemaining, Type.Int, none))
+        if method == "is_at_end" -> return Val(sema_stream_handle_read_spec(THandleOp.ReaderAtEnd, Type.Bool, none))
     }
     None
+}
+
+fn sema_stream_handle_read_spec(operation: THandleOp, result_type: Type, params: [SemaCallParam]) -> SemaStreamHandleSpec Never! {
+    SemaStreamHandleSpec{operation: operation, result_type: result_type, params: params, receiver_convention: AccessConvention.Read, effect_name: ""}
 }
 
 fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bool Never! {
