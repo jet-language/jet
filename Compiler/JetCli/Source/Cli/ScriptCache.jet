@@ -186,7 +186,8 @@ fn jet_cli_script_keep(keep: JetCLIScriptKeep, snapshot: JetDriverAuthorizedSour
     cli_files.create_dir_all(directory) ?? return
     program :: "{directory}/{jet_cli_script_key(keep.toolchain, snapshot)}"
     staged :: "{program}.{cli_sys.pid()}"
-    cli_files.copy(binary, staged) ?? return
+    bytes :: cli_files.read_bytes(binary) ?? return
+    cli_files.write_bytes(staged, bytes) ?? return
     cli_files.set_mode(staged, 0o755) ?? return
     cli_files.rename(staged, program) ?? return
     cli_files.write("{staged}.authority", jet_cli_script_authority_encode(authority)) ?? return
