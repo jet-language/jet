@@ -1,6 +1,6 @@
 // Running a List through an Iter reads the List: `xs.lazy()`,
 // `xs.try_collect()` and the List methods that run on an Iter (`dedup`,
-// `intersperse`, `last_index_of`, `average`, `is_sorted`) copy the elements,
+// `intersperse`, `last_index_of`, `average`, `is_sorted`, `compare`) copy the elements,
 // and the source binding keeps every one of them. So does the source of a
 // `.copy()` collected in place, and a List of Lists an Iter flattens.
 fn ok(text: String) -> String Err! { return Ok("{text}!") }
@@ -18,6 +18,8 @@ fn run() {
     print("{xs.last_index_of("a") ?? -1} {xs.len()} {xs[1]}")
     ns :: [Int]{1, 2, 3}
     print("{ns.average()} {ns.is_sorted()} {ns.len()} {ns[2]}")
+    ms :: [Int]{1, 2, 4}
+    print("{ns.compare(ms)} {ms.lazy().compare(ns)} {ns.compare(ns)} {ns.len()} {ms[2]}")
     rs :: [String Err!]{ok("x"), ok("y")}
     if rs.try_collect() == {
         .Ok(vs) -> print("{vs.len()} {rs.len()} {vs[0]}")

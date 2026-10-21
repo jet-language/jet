@@ -2537,7 +2537,7 @@ fn lower_consumed_operands(p: MIRProgram, m: LowerModule, function: MIRFunction,
     if operation == .WritePlace(_, written) -> &consumed.push(written)
     if operation == .ReplacePlace(_, replaced) -> &consumed.push(replaced)
     loop stored in lower_map_stored_operands(p, m, operation) -> &consumed.push(stored)
-    loop stored in lower_lazy_stored_operands(p, m, operation) -> &consumed.push(stored)
+    loop stored in lower_lazy_stored_operands(p, m, function, fact_index, operation) -> &consumed.push(stored)
     loop stored in lower_task_stored_operands(p, m, operation) -> &consumed.push(stored)
     loop stored in lower_parallel_stored_operands(p, m, operation) -> &consumed.push(stored)
     loop stored in lower_atomic_stored_operands(p, m, operation) -> &consumed.push(stored)
@@ -4731,7 +4731,7 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
     if f.partial_drops.len() != 0 || f.closing != None {
         stored := lower_stored_operands(instruction.operation)
         loop value in lower_map_stored_operands(p, m, instruction.operation) -> &stored.push(value)
-        loop value in lower_lazy_stored_operands(p, m, instruction.operation) -> &stored.push(value)
+        loop value in lower_lazy_stored_operands(p, m, c.mir, c.fact_index, instruction.operation) -> &stored.push(value)
         loop value in lower_task_stored_operands(p, m, instruction.operation) -> &stored.push(value)
         loop value in lower_parallel_stored_operands(p, m, instruction.operation) -> &stored.push(value)
         loop value in lower_atomic_stored_operands(p, m, instruction.operation) -> &stored.push(value)
