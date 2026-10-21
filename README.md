@@ -179,7 +179,7 @@ Tools/agent/jet-env "$JET" run Examples/features/basics/hello.jet
 Tools/agent/jet-env "$JET" check Examples/features/basics/functions.jet
 
 # Check one example against its golden output
-Tools/agent/jet-env node tests/golden.mjs --filter Examples/features/basics/hello.jet
+TESTKIT_ARGS="--filter Examples/features/basics/hello.jet" Tools/agent/jet-env "$JET" test Tools/testkit "suite golden"
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and

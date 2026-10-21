@@ -44,17 +44,22 @@ to hide a compiler or runtime regression.
 
 ## Cargo-free golden kit
 
-Build the Jet test package with the admitted compiler, then invoke the reported
-artifact from the repository root:
+The testkit package's own `fn test` is the fixture gate. Run it from the
+repository root with the compiler under test in `JET`:
 
 ```sh
-jet build --release Tools/testkit
-testkit golden --jet /path/to/jet --tier ref --filter basics/fizzbuzz
-testkit golden --jet /path/to/hosted/jet --tier o0,o1,o2 --results /disk/scratch/golden.json
+JET=/path/to/jet jet test Tools/testkit                    # every suite and generator check
+JET=/path/to/jet jet test Tools/testkit "suite golden"     # one suite
+TESTKIT_ARGS="--filter basics/fizzbuzz --tier o0" JET=/path/to/jet jet test Tools/testkit "suite golden"
+JET_CI_EVIDENCE_DIR=/disk/scratch JET=/path/to/jet jet test Tools/testkit "suite golden"  # writes golden.json
 ```
 
-`ref` is the temporary Rust-emitting verification tier and retires with that
-compiler. `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
+Each suite (`suite golden`, `suite ui`, `suite cases`) and each Jet-ported
+generator's `--check` (`check <generator>`) is one test; a failing test lists
+every failing case row. `TESTKIT_ARGS` carries the kit flags below, split like
+`.case` step words.
+
+`o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
 builds with `--release`. Every tier compares against the same expected bytes.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
@@ -85,9 +90,9 @@ documented host-dependent alternatives and must be edited by hand.
 Golden sidecars and CLI cases share one step sequencer and assertion checker.
 In a CLI case, `step: built [args…]` runs the artifact from the preceding
 successful `step: jet build <entry>`; Golden also supplies its implicit build.
-Shared kit record types, callback factories and the step sequencer are colocated
-in `run.jet` while the front end's cross-file identity issue (#4780) is unresolved. List
-field defaults use explicitly typed empty lists, just like kit constructors.
+Shared kit record types, the step sequencer and the gate entry are colocated in
+`run.jet`. List field defaults use explicitly typed empty lists, just like kit
+constructors.
 Fixture copies preserve file permission bits, including executable tools nested
 under `state/` when that directory is staged as `.jet/` in the case workspace.
 
@@ -107,8 +112,8 @@ exact. `Tools/testkit/Ui.jet` owns the rule.
 Expected files are read-only unless explicitly selected for blessing:
 
 ```sh
-testkit golden --jet /path/to/jet --bless Examples/features/basics/fizzbuzz.jet
-testkit golden --jet /path/to/jet --filter basics/ --bless-all --reason "compiler output change"
+TESTKIT_ARGS="--bless Examples/features/basics/fizzbuzz.jet" JET=/path/to/jet jet test Tools/testkit "suite golden"
+TESTKIT_ARGS='--filter basics/ --bless-all --reason "compiler output change"' JET=/path/to/jet jet test Tools/testkit "suite golden"
 ```
 
 `--bless ID` selects only named cases. `--bless-all` requires a nonempty reason;

@@ -81,7 +81,7 @@ fn kit_steps_poll(step: KitStep, index: Int, context: KitStepCtx, previous: KitS
         attempt.duration = if remaining_before < policy.timeout.ns -> remaining_before else -> policy.timeout.ns
         state.json_stdout = None
         state.json_stderr = None
-        invoked :: hooks.invoke(attempt, index, context, state)
+        invoked :: kit_steps_hook_invoke(hooks, attempt, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return invoked
         if state.last.timed_out -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
@@ -100,7 +100,7 @@ fn kit_steps_poll(step: KitStep, index: Int, context: KitStepCtx, previous: KitS
             state.json_stdout = Val(output.text)
             state.json_stderr = Val(errors.text)
         }
-        verdict :: hooks.check(attempt, index, attempt_context, state)
+        verdict :: kit_steps_hook_check(hooks, attempt, index, attempt_context, state)
         if verdict.status != "FAIL" {
             state.last.elapsed_ns = started.elapsed().ns
             return KitStepResult{state: state, verdict: verdict}

@@ -70,7 +70,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         input_error := ""
         if step.stdin == "null" -> child.stdin.close()
         else if prepared.stdin != "" {
-            &child.stdin.write(prepared.stdin) ?? {
+            child.stdin.write(prepared.stdin) ?? {
                 input_error = "session stdin: {err}"
                 ()
             }
@@ -88,7 +88,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
             expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr :: String.from_bytes([U8{13}]) ?? panic("CR")
             framed :: if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
-            &pending.child.stdin.write(framed) ?? return kit_steps_action_error(state, "session send: {err}")
+            pending.child.stdin.write(framed) ?? return kit_steps_action_error(state, "session send: {err}")
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
         if step.action == "signal" {

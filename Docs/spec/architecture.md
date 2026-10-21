@@ -2013,9 +2013,12 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 
 The canonical [Jet testkit](../../Tools/testkit/run.jet) owns diagnostic
 snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
-scenarios (`cases`). Run it with `JET=/absolute/path/to/jet node Tools/testkit/run.mjs`;
-the launcher builds testkit in disk-backed external scratch, never the checkout.
-`tests/golden.mjs` selects the golden suite. O0, O1 and O2 compare the real exit
+scenarios (`cases`). Its package test entry is the fixture gate:
+`JET=/absolute/path/to/jet jet test Tools/testkit` runs each suite and each Jet
+generator's `--check` as one test (`suite golden`, `suite ui`, `suite cases`,
+`check <generator>`; a positional filter selects them), and a failing test names
+every failing case. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
+`--tier`; scratch stays disk-backed outside the checkout. O0, O1 and O2 compare the real exit
 and exact streams; diagnostic text remains a product surface, not a blessable
 implementation accident.
 

@@ -25,13 +25,17 @@ export function assertPinnedSource(source, commit) {if(existsSync(source+'/.corr
 export function proofTargetDirectory(commit) {return '/mnt/jetscratch/targets/source-'+commit;}
 if(process.argv[1]===fileURLToPath(import.meta.url))console.log(process.argv[3]);
 `);
-    put('Tools/testkit/run.mjs', `import {writeFileSync} from 'node:fs';
-const args=process.argv.slice(2),suite=args[0],mode=process.env.FIXTURE_MODE;
+    // The fake compiler answers only `jet test <dir>/Tools/testkit "suite <name>" ...`, as the
+    // fixture gate does: the case verdicts go to $JET_CI_EVIDENCE_DIR/<name>.json.
+    put('bin/jet', `#!/usr/bin/env node
+const {writeFileSync}=require('node:fs');
+const args=process.argv.slice(2),suite=args[2].split(' ')[1],mode=process.env.FIXTURE_MODE;
+if(args[0]!=='test'||!args[1].endsWith('/Tools/testkit'))process.exit(64);
 if(suite==='golden'&&mode==='signal')process.kill(process.pid,'SIGTERM');
 if(suite==='golden'&&mode==='ordinary')process.exit(17);
 const results=[{case:suite,suite,tier:'o0',status:suite==='ui'&&mode==='refused'?'REFUSED':'PASS'}];
 if(suite==='ui'&&mode==='corrupt')writeFileSync('.corrupted','changed');
-writeFileSync(args[args.indexOf('--results')+1],JSON.stringify({jet:process.env.JET,results}));
+writeFileSync(process.env.JET_CI_EVIDENCE_DIR+'/'+suite+'.json',JSON.stringify({jet:process.env.JET,results}));
 `);
     put('Tools/agent/compiler-registries.mjs', `import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 const args=process.argv.slice(2);
@@ -44,7 +48,7 @@ else {if(process.env.FIXTURE_MODE==='registry')process.exit(1);const manifest=JS
         rmSync(join(sandbox, '.corrupted'), { force: true });
         if (mode === 'pinned') writeFileSync(join(container, 'source.manifest.json'), JSON.stringify({ commit: '0123456789012345678901234567890123456789' }));
         const evidence = join(external, mode);
-        const ran = spawnSync('bash', [join(sandbox, 'Tools/agent/verify-full.sh')], { cwd: sandbox, env: { ...process.env, PATH: `${sandbox}/bin:${process.env.PATH}`, JET: process.execPath, FIXTURE_MODE: mode, JET_VERIFY_TMPDIR: external, JET_CI_EVIDENCE_DIR: evidence, JET_TEST_SHARD: '0', JET_TEST_SHARD_COUNT: '1' }, encoding: 'utf8', timeout: 30000 });
+        const ran = spawnSync('bash', [join(sandbox, 'Tools/agent/verify-full.sh')], { cwd: sandbox, env: { ...process.env, PATH: `${sandbox}/bin:${process.env.PATH}`, JET: join(sandbox, 'bin/jet'), FIXTURE_MODE: mode, JET_VERIFY_TMPDIR: external, JET_CI_EVIDENCE_DIR: evidence, JET_TEST_SHARD: '0', JET_TEST_SHARD_COUNT: '1' }, encoding: 'utf8', timeout: 30000 });
         assert.equal(ran.error, undefined); assert.equal(ran.signal, null);
         assert.equal(ran.status, ['pass', 'pinned'].includes(mode) ? 0 : 1, ran.stderr);
         const report = JSON.parse(readFileSync(join(evidence, 'verify-full.json'), 'utf8'));

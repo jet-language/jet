@@ -119,7 +119,7 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     started :: time.instant()
     child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
     input_error := ""
-    &child.stdin.write(stdin) ?? {
+    child.stdin.write(stdin) ?? {
         input_error = "stdin: {err}"
         ()
     }

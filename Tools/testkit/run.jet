@@ -1,4 +1,4 @@
-// #4780: shared nominal types, callback factories, sequencer and suite table stay together; callbacks use forwarding lambdas.
+// The testkit's shared nominal types, step sequencer, suite table and fixture gate entry.
 use core.process as process
 use core.files as files
 use core.sys as sys
@@ -430,23 +430,27 @@ struct KitStepResult {
     verdict: KitVerdict
 }
 
-struct KitStepHooks {
-    invoke: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitStepResult
-    check: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitVerdict
+// Which suite's step invocation and expectations the shared sequencing loop uses.
+enum KitStepHooks {
+    Golden
+    Steps
 }
 
-// Keep callback factories beside their nominal types until #4780 is resolved.
-fn kit_golden_step_hooks() -> KitStepHooks {
-    KitStepHooks{
-        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_invoke(step, index, context, state),
-        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_check(step, index, context, state)
+fn kit_golden_step_hooks() -> KitStepHooks { KitStepHooks.Golden }
+
+fn kit_steps_hooks() -> KitStepHooks { KitStepHooks.Steps }
+
+fn kit_steps_hook_invoke(hooks: KitStepHooks, step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitStepResult {
+    if hooks == {
+        .Golden -> kit_golden_step_invoke(step, index, context, state)
+        .Steps -> kit_steps_invoke(step, index, context, state)
     }
 }
 
-fn kit_steps_hooks() -> KitStepHooks {
-    KitStepHooks{
-        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_invoke(step, index, context, state),
-        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_check_state(step, index, context, state)
+fn kit_steps_hook_check(hooks: KitStepHooks, step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    if hooks == {
+        .Golden -> kit_golden_step_check(step, index, context, state)
+        .Steps -> kit_steps_check_state(step, index, context, state)
     }
 }
 
@@ -603,7 +607,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             return kit_steps_finish(state, kit_expect_verdict("FAIL", step.argv[1]))
         }
         invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
-            kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)
+            kit_steps_action(step, context, state) else -> kit_steps_hook_invoke(hooks, step, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
         if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
@@ -614,7 +618,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         }
         if step.action == "capture" || step.action == "assert" {
             if step.assertions.len() > 0 || step.action == "assert" {
-                verdict :: hooks.check(step, index, context, state)
+                verdict :: kit_steps_hook_check(hooks, step, index, context, state)
                 if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
             }
             next
@@ -646,7 +650,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
                 raw_stdout: kit_steps_replace(state.last.stdout, step.replacements, context, state, false, source_name),
                 raw_stderr: kit_steps_replace(state.last.stderr, step.replacements, context, state, false, source_name)})
         }
-        verdict :: hooks.check(step, index, context, state)
+        verdict :: kit_steps_hook_check(hooks, step, index, context, state)
         if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
         if plan.compile_only -> break
     }
@@ -663,16 +667,9 @@ struct KitCaseResult {
     diff: String{""}
 }
 
-struct KitSuite {
-    name: String
-    discover: fn(KitCtx) -[FS, Mem.Alloc, Panic]> [KitEntry]
-    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
-}
-
 struct KitSelected {
     entry: KitEntry
     suite: String
-    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
 }
 
 struct KitUIDirective {
@@ -716,88 +713,81 @@ struct KitUIAllowance {
     card: String
 }
 
-fn kit_suites() -> [KitSuite] {
-    [KitSuite{name: "golden", discover: (context: KitCtx) -> kit_golden_discover_suite(context), run: (entry: KitEntry, context: KitCtx) -> kit_golden_run_suite(entry, context)},
-     KitSuite{name: "ui", discover: (context: KitCtx) -> kit_ui_discover(context), run: (entry: KitEntry, context: KitCtx) -> kit_ui_run(entry, context)},
-     KitSuite{name: "cases", discover: (context: KitCtx) -> kit_cases_discover(context), run: (entry: KitEntry, context: KitCtx) -> kit_cases_run(entry, context)}]
+fn kit_suites() -> [String] { ["golden", "ui", "cases"] }
+
+fn kit_suite_discover(suite: String, context: KitCtx) -> [KitEntry] {
+    if suite == {
+        "golden" -> kit_golden_discover_suite(context)
+        "ui" -> kit_ui_discover(context)
+        else -> kit_cases_discover(context)
+    }
 }
 
-fn kit_execute_suites(options: KitOptions, root: String) -> Int {
-    selected_suites := [KitSuite]{}
+fn kit_suite_run(suite: String, entry: KitEntry, context: KitCtx) -> [KitOutcome] {
+    if suite == {
+        "golden" -> kit_golden_run_suite(entry, context)
+        "ui" -> kit_ui_run(entry, context)
+        else -> kit_cases_run(entry, context)
+    }
+}
+
+// A suite run's exit code (kit_report_exit_code) and the report row of every case or
+// selection problem that makes it nonzero, so a caller can name every failure at once.
+struct KitExecution {
+    code: Int
+    failures: [String]
+}
+
+fn kit_execution_refused(row: String) -> KitExecution {
+    print(row)
+    KitExecution{code: 2, failures: [row]}
+}
+
+fn kit_case_blocks(status: String) -> Bool {
+    kit_expect_named(["FAIL", "UNEXPECTED-PASS", "REFUSED", "ERROR", "TIMEOUT"], status)
+}
+
+fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
+    selected_suites := [String]{}
     loop suite in kit_suites() {
-        if options.suite == "all" || options.suite == suite.name -> &selected_suites.push(suite)
+        if options.suite == "all" || options.suite == suite -> &selected_suites.push(suite)
     }
-    if selected_suites.len() == 0 {
-        print("REFUSED\tselection\t\tsuite not installed: {options.suite}")
-        return 2
-    }
-    timeout :: Duration.seconds(options.timeout) ?? {
-        print("REFUSED\tselection\t\ttimeout: {err}")
-        return 2
-    }
+    if selected_suites.len() == 0 -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
+    timeout :: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
     discovery_env :: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, memory_limit: 0}
     discovery_ctx :: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless}
     corpus := [KitSelected]{}
     loop suite in selected_suites {
-        loop entry in suite.discover(discovery_ctx) -> &corpus.push(KitSelected{entry: entry, suite: suite.name, run: suite.run})
+        loop entry in kit_suite_discover(suite, discovery_ctx) -> &corpus.push(KitSelected{entry: entry, suite: suite})
     }
     &corpus.sort_by(item -> item.entry.path)
     selection :: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
-    if selection.error != "" {
-        print("REFUSED\tselection\t\t{selection.error}")
-        return 2
-    }
+    if selection.error != "" -> return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
     entries :: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
-    if entries.len() == 0 {
-        print("ERROR\tselection\t\tno matching corpus entries")
-        return 2
-    }
+    if entries.len() == 0 -> return kit_execution_refused("ERROR\tselection\t\tno matching corpus entries")
     if options.list {
         loop item in entries -> print("{item.entry.suite}\t{item.entry.path}")
-        return 0
+        return KitExecution{code: 0, failures: []}
     }
-    if options.jet == "" {
-        print("ERROR\tselection\t\t--jet must name the admitted compiler binary")
-        return 2
-    }
-    jet :: files.canonicalize(options.jet) ?? {
-        print("ERROR\tselection\t\tcompiler: {err}")
-        return 2
-    }
-    jetpack :: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? {
-        print("ERROR\tselection\t\tjetpack: {err}")
-        return 2
-    }
+    if options.jet == "" -> return kit_execution_refused("ERROR\tselection\t\tJET must name the compiler under test")
+    jet :: files.canonicalize(options.jet) ?? return kit_execution_refused("ERROR\tselection\t\tcompiler: {err}")
+    jetpack :: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
     home :: sys.get("HOME") ?? ""
     base :: if options.scratch != "" -> options.scratch else -> sys.get("JET_TEST_SCRATCH_DIR") ?? files.join(home, ".cache/jet-dev/scratch")
-    files.create_dir_all(base) ?? {
-        print("ERROR\tselection\t\tscratch: {err}")
-        return 2
-    }
-    canonical :: files.canonicalize(base) ?? {
-        print("ERROR\tselection\t\tscratch: {err}")
-        return 2
-    }
+    files.create_dir_all(base) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
+    canonical :: files.canonicalize(base) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     if canonical == root || canonical.starts_with("{root}/") || canonical == "/tmp" || canonical.starts_with("/tmp/") {
-        print("ERROR\tselection\t\tscratch must be disk-backed and outside the checkout")
-        return 2
+        return kit_execution_refused("ERROR\tselection\t\tscratch must be disk-backed and outside the checkout")
     }
-    run_scratch :: files.join(canonical, "testkit-{process.current_pid()}")
-    if files.exists(run_scratch) {
-        print("ERROR\tselection\t\tscratch already exists: {run_scratch}")
-        return 2
-    }
-    files.create_dir_all(run_scratch) ?? {
-        print("ERROR\tselection\t\tscratch: {err}")
-        return 2
-    }
+    run_scratch :: files.join(canonical, "testkit-{process.current_pid()}-{options.suite}")
+    if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
+    files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 8589934592}
     if sys.get("JET_NATIVE_TRACE_LOG") != None {
         env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
         env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""
         if env.trace_node == "" || env.trace_cache == "" {
-            print("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
-            return 2
+            return kit_execution_refused("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
         }
     }
     if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, files.join(run_scratch, "ui-source"))
@@ -820,13 +810,14 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
         context.env.trace_case = entry.path
         if !kit_expect_named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
-        loop outcome in item.run(entry, context) {
+        loop outcome in kit_suite_run(item.suite, entry, context) {
             &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
             if outcome.verdict.diff != "" -> print(outcome.verdict.diff)
         }
         if env.trace_node == "" {
             files.remove_all(scratch) ?? {
                 &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+                ()
             }
         }
     }
@@ -837,15 +828,90 @@ fn kit_execute_suites(options: KitOptions, root: String) -> Int {
         files.remove_all(run_scratch) ?? {
             &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
             kit_report_row(results[results.len() - 1])
+            ()
         }
     }
-    kit_report_finish(jet, results, options.results, ran_suites)
+    failures := [String]{}
+    loop result in results {
+        if kit_case_blocks(result.status) -> &failures.push("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
+    }
+    code :: kit_report_finish(jet, results, options.results, ran_suites)
+    if code != 0 && failures.len() == 0 -> &failures.push("ERROR\tresults\t\tthe {options.suite} report could not be written to {options.results}")
+    KitExecution{code: code, failures: failures}
 }
 
+// The checkout this testkit package belongs to: `jet test` runs the harness with
+// JET_PROJECT_ROOT naming the package (Tools/testkit).
+fn kit_gate_root() -> String Err! {
+    package :: sys.get("JET_PROJECT_ROOT") ?? return Err("JET_PROJECT_ROOT is unset; run the gate with `jet test Tools/testkit`")
+    root :: files.canonicalize(files.join(package, "../..")) ?? return Err("checkout root: {err}")
+    Ok(root)
+}
+
+// One suite through the testkit engine: every blocking case row, one per line, or "".
+// TESTKIT_ARGS adds testkit flags, split as `.case` step words (quote a value with spaces);
+// JET_CI_EVIDENCE_DIR receives <suite>.json case verdicts.
+fn kit_gate_suite(suite: String) -> String {
+    args := [String]{suite}
+    words :: kit_steps_words(sys.get("TESTKIT_ARGS") ?? "") ?? return "REFUSED\tselection\t\tTESTKIT_ARGS has an unterminated quote"
+    loop word in words -> &args.push(word)
+    options := kit_parse_options(args)
+    if options.error != "" -> return "REFUSED\tselection\t\t{options.error}"
+    options.opt_in = true
+    evidence :: sys.get("JET_CI_EVIDENCE_DIR") ?? ""
+    if options.results == "" && evidence != "" -> options.results = files.join(evidence, "{suite}.json")
+    root :: kit_gate_root() ?? return "ERROR\tselection\t\t{err}"
+    kit_execute_suites(options, root).failures.join("\n")
+}
+
+// One Jet generator's `--check` under the compiler under test: its report when stale or broken, or "".
+fn kit_gate_generator(path: String) -> String {
+    jet :: sys.get("JET") ?? return "JET must name the compiler under test"
+    root :: kit_gate_root() ?? return "{err}"
+    receipt :: process.cmd([jet, "run", path, "--", "--check"]).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return "{path}: {err}"
+    if receipt.success -> return ""
+    "{path} --check failed:\n{receipt.output}{receipt.errors}"
+}
+
+// `jet test Tools/testkit [<filter>]`: the repository's fixture gate. Each suite and each Jet
+// generator's `--check` is one test; a failing test lists every failing case.
+//   JET                  the compiler under test (required)
+//   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
+//                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --shard I/N, --scratch DIR,
+//                        --jetpack BIN, --list, --coverage (ui), --bless ID, --bless-all
+//                        --reason "TEXT", --allow-shrink ID
+//   JET_TEST_SCRATCH_DIR disk-backed scratch outside the checkout (default ~/.cache/jet-dev/scratch)
+//   JET_CI_EVIDENCE_DIR  each suite writes its case verdicts to <dir>/<suite>.json
+fn test(t: Test) {
+    t.run()
+}
+
+#Test("suite golden") {
+    assert_eq(kit_gate_suite("golden"), "")
+}
+
+#Test("suite ui") {
+    assert_eq(kit_gate_suite("ui"), "")
+}
+
+#Test("suite cases") {
+    assert_eq(kit_gate_suite("cases"), "")
+}
+
+#Test("check RuntimeGenerators") {
+    assert_eq(kit_gate_generator("Tools/agent/RuntimeGenerators"), "")
+}
+
+#Test("check LexerKeywordRows") {
+    assert_eq(kit_gate_generator("Tools/agent/LexerKeywordRows.jet"), "")
+}
+
+// The testkit binary (`jet build Tools/testkit/run.jet`) for census and registry tooling that
+// shards or lists the corpus across processes; the fixture gate itself is `jet test Tools/testkit`.
 fn run() {
     args :: process.args()
     if args.len() == 0 || args[0] == "--help" {
-        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
+        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--opt-in] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
         return
     }
     options :: kit_parse_options(args)
@@ -861,6 +927,6 @@ fn run() {
         return
     }
     root :: files.canonicalize(cwd) ?? panic("checkout root: {err}")
-    code :: kit_execute_suites(options, root)
+    code :: kit_execute_suites(options, root).code
     if code != 0 -> process.exit(code)
 }

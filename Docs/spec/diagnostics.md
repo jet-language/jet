@@ -201,11 +201,10 @@ new diagnostic or change compiler semantics.
 
 ### Running and blessing snapshots
 
-Build the Jet test runner once with `jet build --release Tools/testkit/run.jet`. From
-the checkout root, run the reported artifact as `testkit ui --jet <compiler>`
-to compare UI and lint snapshots; use `--filter <repo-relative-name>` for a
-focused selection, and `--results <file>` for machine-readable verdicts.
-`testkit ui --coverage --jet <compiler>` checks independently derived emitted
+From the checkout root, `JET=<compiler> jet test Tools/testkit "suite ui"` compares
+UI and lint snapshots; `TESTKIT_ARGS="--filter <repo-relative-name>"` focuses the
+selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable verdicts to
+`<dir>/ui.json`. `TESTKIT_ARGS=--coverage` checks independently derived emitted
 and rendered code sets, owned exclusions in
 `tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152), and
 the exact per-plane repair counts in `tests/diagnostics_coverage_baseline.txt`.
@@ -227,7 +226,7 @@ capability are `REFUSED`, never silently converted to ordinary checks.
 After reviewing a compiler change, bless only the affected fixture:
 
 ```sh
-testkit ui --jet <compiler> --bless tests/ui/example.jet
+TESTKIT_ARGS="--bless tests/ui/example.jet" JET=<compiler> jet test Tools/testkit "suite ui"
 ```
 
 Blessing creates or updates that fixture's snapshot from actual tool output.
