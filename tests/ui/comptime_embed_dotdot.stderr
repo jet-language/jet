@@ -1,17 +1,8 @@
 Error [E0957]: `embed_file` path escapes the project with `..`
-  --> tests/ui/comptime_embed_dotdot.jet:1:7
+  --> tests/ui/comptime_embed_dotdot.jet:1:13
     |
-  1 | @d :: embed_file("../secret.txt")
-    |       ^^^^^^^^^^
+  1 | D :: prep { embed_file("../secret.txt") }
+    |             ^^^^^^^^^^
  Why: `..` could read files outside your project; comptime inputs must stay inside it
  Fix: Drop the `..` and use a path under this file's directory
 More: jet-lang.dev/e/E0957
-
-Error [E0107]: Nothing named `@d` exists here
-  --> tests/ui/comptime_embed_dotdot.jet:4:13
-    |
-  4 |     print("{@d}")
-    |             ^^
- Why: A name must be declared before it's used
- Fix: Declare it first: `@d :: ...`
-More: jet-lang.dev/e/E0107

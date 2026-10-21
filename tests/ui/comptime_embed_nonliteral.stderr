@@ -1,17 +1,8 @@
 Error [E0957]: `embed_file` path must be a string literal
-  --> tests/ui/comptime_embed_nonliteral.jet:1:7
+  --> tests/ui/comptime_embed_nonliteral.jet:1:13
     |
-  1 | @d :: embed_file("a" + "b")
-    |       ^^^^^^^^^^
+  1 | D :: prep { embed_file("a" + "b") }
+    |             ^^^^^^^^^^
  Why: A computed path can't be audited at build time, so the compiler can't tell which file it reads
  Fix: Pass the path inline, e.g. `embed_file("data/file")`
 More: jet-lang.dev/e/E0957
-
-Error [E0107]: Nothing named `@d` exists here
-  --> tests/ui/comptime_embed_nonliteral.jet:4:13
-    |
-  4 |     print("{@d}")
-    |             ^^
- Why: A name must be declared before it's used
- Fix: Declare it first: `@d :: ...`
-More: jet-lang.dev/e/E0107
