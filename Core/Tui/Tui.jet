@@ -8,6 +8,7 @@ package {
         tui: .Library{ entry: tui }
     }
 }
+use core.sys as tui_sys
 use core as core
 use core.ui as ui
 use core.ui.[Rect, UINode]
@@ -144,7 +145,7 @@ fn capability_inputs() -> TUICapabilityInputs Never! {
     TUICapabilityInputs{
         columns: columns, lines: lines, term: term, color_term: color_term,
         ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
-        usize_max: core.sys.usize_max()
+        usize_max: tui_sys.usize_max()
     }
 }
 
@@ -466,7 +467,7 @@ fn table_line(values: [String], columns: Int, width: Int) -> String Never! {
 
 fn normalized_weight(weight: Float) -> Float Never! {
     // This conversion is bounded and truncating: positive half ties round up.
-    rounded :: Int{bounded_float(weight, 65535.0) + 0.5}
+    rounded :: Int.from_float(bounded_float(weight, 65535.0) + 0.5) ?? panic("a bounded weight is finite")
     Float{clamp_int(rounded, 65535)}
 }
 
