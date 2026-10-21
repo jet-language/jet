@@ -1,0 +1,461 @@
+// Command-frequency census for `jet help` (#3724).
+//
+// For every command row in Compiler/JetFoundation/Source/Registry/CLICommands.jet, counts the files in
+// the repository's teaching and test text (Docs/, Examples/, tests/, Tools/;
+// tracked plus untracked files that git does not ignore) that invoke
+// `jet <command>`. A file counts once per command, so one generated evidence
+// dump cannot outweigh the guides and tests. Rows are ranked most-used first,
+// ties broken A-Z, and each row's `frequency_rank` is written in place.
+// `jet help` lists commands in that order; `jet help --sort az|za` lists them
+// alphabetically.
+//
+// usage: jet run Tools/cli-census/Census.jet [-- --check]   (from the repository root)
+//   (no flag) rewrite the ranks in the shared Jet and Rust command registries
+//   --check    print the ranking; exit 1 when either table holds different ranks
+//
+// Output is deterministic: the ranking is a pure function of the scanned text.
+package {
+    name: "cli-census"
+    version: "0.1.0"
+    edition: "2026"
+    authority: {
+        holds: {
+            allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem, Time.Wait]
+        }
+    }
+}
+
+use core.files as files
+use core.process as process
+use core.term as term
+
+SCAN_ROOTS :: [String]{"Docs", "Examples", "tests", "Tools"}
+
+// Excluded: the board's own data, this census, and tests/cli/, whose help,
+// man, and completion snapshots are renderings of the registry itself and
+// would feed the census its own output.
+EXCLUDED_PREFIXES :: [String]{"Tools/tower/.tower/", "Tools/cli-census/", "tests/cli/"}
+
+// One command table: the text that opens and closes its row list, and the
+// lines that open one top-level row. The Jet table is the source; the Rust
+// host keeps a frozen copy, so both carry the same ranks.
+struct CommandTable {
+    path: String
+    open: String
+    close: String
+    row_openers: [String]
+}
+
+fn command_tables() -> [CommandTable] Never! {
+    [CommandTable]{
+        CommandTable{
+            path: "Compiler/JetFoundation/Source/Registry/CLICommands.jet",
+            open: "JET_CLI_COMMANDS :: prep {{ [JetCLICommandSpec]{{\n",
+            close: "\n}} }}\n",
+            row_openers: [String]{"    {{", "    JetCLICommandSpec{{"},
+        },
+        CommandTable{
+            path: "crates/jet-foundation/src/CLICommands.rs",
+            open: "pub const COMMANDS: &[CommandSpec] = &[\n",
+            close: "\n];\n",
+            row_openers: [String]{"    CommandSpec {{"},
+        },
+    }
+}
+
+// One top-level command row: its byte span in the table body and the byte
+// span of its `frequency_rank` digits.
+struct CommandRow {
+    start: Int
+    end: Int
+    name: String
+    rank: Int
+    rank_start: Int
+    rank_end: Int
+}
+
+struct TableRead {
+    table: CommandTable
+    source: String
+    body_start: Int
+    body_end: Int
+    rows: [CommandRow]
+}
+
+struct RankedCommand {
+    name: String
+    count: Int
+}
+
+#Error
+struct CensusError {
+    message: String
+    code: Int
+}
+
+fn census_fail(message: String) -> CensusError Never! { CensusError{message: message, code: 1} }
+
+fn byte_slice(text: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
+
+fn byte_len(text: String) -> Int Never! { text.bytes().len() }
+
+fn is_digit(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
+
+fn is_lower(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
+
+fn is_upper(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
+
+// A byte that may not stand right before `jet`: a word character, `.` or `-`.
+fn joins_word(code: Int) -> Bool Never! {
+    is_digit(code) || is_lower(code) || is_upper(code) || code == 95 || code == 46 || code == 45
+}
+
+fn digits_value(text: String) -> Int Never! {
+    value := 0
+    loop byte in text.bytes() -> value = value * 10 + Int.from_u8(byte) - 48
+    value
+}
+
+struct ByteSpan {
+    start: Int
+    end: Int
+}
+
+// Byte spans [start, end) of every line of `text`, without the newline.
+fn line_spans(text: String) -> [ByteSpan] Never! {
+    bytes :: text.bytes()
+    spans := [ByteSpan]{}
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) {
+            &spans.push(ByteSpan{start: start, end: index})
+            start = index + 1
+        }
+    }
+    &spans.push(ByteSpan{start: start, end: bytes.len()})
+    spans
+}
+
+// `        frequency_rank: <digits>,` -> the digits' byte span inside `line`.
+fn rank_digits(line: String) -> ByteSpan? Never! {
+    prefix :: "        frequency_rank: "
+    if !line.starts_with(prefix) || !line.ends_with(",") -> return None
+    start :: byte_len(prefix)
+    end :: byte_len(line) - 1
+    if end <= start -> return None
+    loop byte in line.bytes()[start..<end] {
+        if !is_digit(Int.from_u8(byte)) -> return None
+    }
+    Val(ByteSpan{start: start, end: end})
+}
+
+// `        name: "word",` -> the word, or `        name: CONSTANT,` -> the
+// constant's `pub const CONSTANT: &str = "word";` value in `source`.
+fn row_name(line: String, source: String) -> String? Never! {
+    prefix :: "        name: "
+    if !line.starts_with(prefix) || !line.ends_with(",") -> return None
+    value :: byte_slice(line, byte_len(prefix), byte_len(line) - 1)
+    bytes :: value.bytes()
+    if bytes.len() >= 3 && bytes[0] == (U8{34}) && bytes[bytes.len() - 1] == (U8{34}) {
+        inner :: byte_slice(value, 1, bytes.len() - 1)
+        if inner.contains("\"") -> return None
+        return Val(inner)
+    }
+    if bytes.len() == 0 || !is_upper(Int.from_u8(bytes[0])) -> return None
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if !is_upper(code) && !is_digit(code) && code != 95 -> return None
+    }
+    constant :: "pub const {value}: &str = \""
+    loop span in line_spans(source) {
+        candidate :: byte_slice(source, span.start, span.end)
+        if candidate.starts_with(constant) && candidate.ends_with("\";") {
+            inner :: byte_slice(candidate, byte_len(constant), byte_len(candidate) - 2)
+            if inner != "" && !inner.contains("\"") -> return Val(inner)
+        }
+    }
+    None
+}
+
+// The top-level rows of `body`: an opener line through the first following
+// line that is exactly `    }` or `    },`.
+fn table_rows(body: String, source: String, row_openers: [String]) -> [CommandRow] CensusError! {
+    spans :: line_spans(body)
+    rows := [CommandRow]{}
+    index := 0
+    loop index < spans.len() {
+        opener :: byte_slice(body, spans[index].start, spans[index].end)
+        if !row_openers.contains(opener) || index + 1 >= spans.len() {
+            index += 1
+            next
+        }
+        closing := -1
+        loop candidate in index + 1..<spans.len() {
+            line :: byte_slice(body, spans[candidate].start, spans[candidate].end)
+            if line == "    }}" || line == "    }}," {
+                closing = candidate
+                break
+            }
+        }
+        if closing < 0 {
+            index += 1
+            next
+        }
+        start :: spans[index].start
+        end :: spans[closing].end
+        name := String?{None}
+        rank := -1
+        rank_start := -1
+        rank_end := -1
+        loop row_line in index + 1..<closing + 1 {
+            line :: byte_slice(body, spans[row_line].start, spans[row_line].end)
+            if name == None -> name = row_name(line, source)
+            if rank_start < 0 {
+                if rank_digits(line) == .Val(digits) {
+                    rank_start = spans[row_line].start + digits.start
+                    rank_end = spans[row_line].start + digits.end
+                    rank = digits_value(byte_slice(line, digits.start, digits.end))
+                }
+            }
+        }
+        found :: name ?? return Err(census_fail("census: command row lacks name or frequency_rank:\n{byte_slice(body, start, end)}"))
+        if rank_start < 0 -> return Err(census_fail("census: command row lacks name or frequency_rank:\n{byte_slice(body, start, end)}"))
+        &rows.push(CommandRow{start: start, end: end, name: found, rank: rank, rank_start: rank_start, rank_end: rank_end})
+        index = closing + 1
+    }
+    Ok(rows)
+}
+
+fn read_table(table: CommandTable) -[FS]> TableRead CensusError! {
+    source :: files.read(table.path) ?? return Err(census_fail("census: cannot read {table.path}: {err}"))
+    open :: source.find(table.open)
+    if open < 0 -> return Err(census_fail("census: command table not found in {table.path}"))
+    body_start :: open + byte_len(table.open)
+    after :: byte_slice(source, body_start, byte_len(source))
+    close :: after.find(table.close)
+    if close < 0 -> return Err(census_fail("census: command table in {table.path} has no end"))
+    body_end :: body_start + close
+    rows :: table_rows(byte_slice(source, body_start, body_end), source, table.row_openers) ?? return Err(err)
+    Ok(TableRead{table: table, source: source, body_start: body_start, body_end: body_end, rows: rows})
+}
+
+// The command words `bytes` invokes as `jet <word>`: `jet` as its own word
+// (a path such as `target/debug/jet` counts), blanks, then the whole command
+// word, so `jet test-compare` never counts as `jet test`.
+fn invoked_commands(bytes: [U8], commands: [String:Int]) -> [String] Never! {
+    invoked := [String]{}
+    seen := [String:Bool]{}
+    count :: bytes.len()
+    index := 0
+    loop index + 3 <= count {
+        if bytes[index] != (U8{106}) || bytes[index + 1] != (U8{101}) || bytes[index + 2] != (U8{116}) || (index > 0 && joins_word(Int.from_u8(bytes[index - 1]))) {
+            index += 1
+            next
+        }
+        word_start := index + 3
+        loop word_start < count && (bytes[word_start] == (U8{32}) || bytes[word_start] == (U8{9})) -> word_start += 1
+        if word_start == index + 3 || word_start >= count || !is_lower(Int.from_u8(bytes[word_start])) {
+            index += 1
+            next
+        }
+        word_end := word_start + 1
+        loop word_end < count {
+            code :: Int.from_u8(bytes[word_end])
+            if !is_lower(code) && !is_digit(code) && code != 43 && code != 45 -> break
+            word_end += 1
+        }
+        word :: String.from_bytes_lossy(bytes[word_start..<word_end])
+        if commands.get(word) != None && seen.get(word) == None {
+            seen[word] = true
+            &invoked.push(word)
+        }
+        index = word_end
+    }
+    invoked
+}
+
+fn has_zero_byte(bytes: [U8]) -> Bool Never! {
+    loop byte in bytes {
+        if byte == (U8{0}) -> return true
+    }
+    false
+}
+
+fn scanned_files() -[Exec, Time.Wait]> [String] CensusError! {
+    argv := [String]{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}
+    loop root in SCAN_ROOTS -> &argv.push(root)
+    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(census_fail("census: git ls-files failed: {err}"))
+    if receipt.code != 0 -> return Err(census_fail("census: git ls-files failed: {receipt.errors}"))
+    paths := [String]{}
+    seen := [String:Bool]{}
+    output :: receipt.output.bytes()
+    start := 0
+    limit :: output.len() + 1
+    loop index in 0..<limit {
+        if index < output.len() && output[index] != (U8{0}) -> next
+        path :: String.from_bytes_lossy(output[start..<index])
+        start = index + 1
+        if path == "" || seen.get(path) != None -> next
+        excluded := false
+        loop prefix in EXCLUDED_PREFIXES {
+            if path.starts_with(prefix) -> excluded = true
+        }
+        if excluded -> next
+        seen[path] = true
+        &paths.push(path)
+    }
+    &paths.sort()
+    Ok(paths)
+}
+
+// Most-used first, ties A-Z.
+fn rank_commands(counts: [String:Int], names: [String]) -> [RankedCommand] Never! {
+    ranked := [RankedCommand]{}
+    loop name in names -> &ranked.push(RankedCommand{name: name, count: counts.get(name) ?? 0})
+    &ranked.sort_by((left: RankedCommand, right: RankedCommand) -> (right.count <=> left.count).then(left.name <=> right.name))
+    ranked
+}
+
+// `value` right-aligned in `width` columns.
+fn right_aligned(value: Int, width: Int) -> String Never! {
+    text := "{value}"
+    loop byte_len(text) < width -> text = " {text}"
+    text
+}
+
+fn ranking_line(rank: Int, ranked: RankedCommand) -> String Never! {
+    "{right_aligned(rank, 3)} {right_aligned(ranked.count, 6)} {ranked.name}"
+}
+
+// The table source with every row's rank replaced by its census rank.
+fn rewritten_source(read: TableRead, rank_of: [String:Int]) -> String Never! {
+    body :: byte_slice(read.source, read.body_start, read.body_end)
+    out := byte_slice(read.source, 0, read.body_start)
+    cursor := 0
+    loop row in read.rows {
+        out = "{out}{byte_slice(body, cursor, row.rank_start)}{rank_of.get(row.name) ?? 0}"
+        cursor = row.rank_end
+    }
+    "{out}{byte_slice(body, cursor, byte_len(body))}{byte_slice(read.source, read.body_end, byte_len(read.source))}"
+}
+
+fn census_main(args: [String]) -[FS, IO, Exec, Time.Wait]> Int CensusError! {
+    check := false
+    loop arg in args {
+        if arg == "--check" {
+            check = true
+            next
+        }
+        return Err(CensusError{message: "census: unknown argument {arg}; usage: Census.jet [--check]", code: 64})
+    }
+    reads := [TableRead]{}
+    loop table in command_tables() {
+        read :: read_table(table) ?? return Err(err)
+        &reads.push(read)
+    }
+    names := [String]{}
+    counts := [String:Int]{}
+    loop row in reads[0].rows {
+        if counts.get(row.name) == None {
+            counts[row.name] = 0
+            &names.push(row.name)
+        }
+    }
+    paths :: scanned_files() ?? return Err(err)
+    loop path in paths {
+        if files.read_bytes(path) == {
+            .Ok(bytes) -> {
+                if !has_zero_byte(bytes) {
+                    loop name in invoked_commands(bytes, counts) -> counts[name] = (counts.get(name) ?? 0) + 1
+                }
+            }
+            .Err(_) -> {}
+        }
+    }
+    ranked :: rank_commands(counts, names)
+    rank_of := [String:Int]{}
+    loop (index, command) in ranked {
+        rank_of[command.name] = index + 1
+        print(ranking_line(index + 1, command))
+    }
+    if check {
+        stale := [String]{}
+        loop read in reads {
+            loop row in read.rows {
+                expected :: rank_of.get(row.name) ?? 0
+                if row.rank != expected -> &stale.push("census: {row.name} has frequency_rank {row.rank} in {read.table.path}, census says {expected}")
+            }
+        }
+        if stale.len() == 0 -> return Ok(0)
+        loop line in stale -> term.eprint(line)
+        term.eprint("census: run `jet run Tools/cli-census/Census.jet` to rewrite the ranks")
+        return Ok(1)
+    }
+    loop read in reads {
+        changed := false
+        loop row in read.rows {
+            if row.rank != (rank_of.get(row.name) ?? 0) -> changed = true
+        }
+        if !changed -> next
+        files.write(read.table.path, rewritten_source(read, rank_of)) ?? return Err(census_fail("census: cannot write {read.table.path}: {err}"))
+    }
+    Ok(0)
+}
+
+fn run() {
+    if census_main(process.args()) == {
+        .Ok(code) -> {
+            if code != 0 -> process.exit(code)
+        }
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(error.code)
+        }
+    }
+}
+
+fn invoked_text(text: String) -> String Never! {
+    commands := [String:Int]{}
+    names :: [String]{"run", "test", "build", "c++"}
+    loop name in names -> commands[name] = 0
+    invoked_commands(text.bytes(), commands).join(",")
+}
+
+#Test("an invocation is `jet` as its own word, blanks, then a whole command word") {
+    assert_eq(invoked_text("run `jet run x.jet` and target/debug/jet\ttest"), "run,test")
+    assert_eq(invoked_text("jet test-compare, my-jet run, x.jet build, jetrun, jet"), "")
+    assert_eq(invoked_text("jet c++ then jet run then jet run"), "c++,run")
+    assert_eq(invoked_text("jet jet build"), "")
+}
+
+#Test("rows are read from opener to closer and ranks are rewritten in place") {
+    source :: "pub const JOBS: &str = \"jobs\";\nT :: [\n    CommandSpec {{\n        name: \"run\",\n        nested: {{\n        }},\n        frequency_rank: 7,\n    }},\n    CommandSpec {{\n        name: JOBS,\n        frequency_rank: 12,\n    }}\n];\n"
+    table :: CommandTable{path: "t", open: "T :: [\n", close: "\n];\n", row_openers: [String]{"    CommandSpec {{"}}
+    open :: source.find(table.open)
+    body_start :: open + byte_len(table.open)
+    body_end :: body_start + byte_slice(source, body_start, byte_len(source)).find(table.close)
+    rows :: table_rows(byte_slice(source, body_start, body_end), source, table.row_openers) ?? panic("the rows did not read: {err.message}")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].name, "run")
+    assert_eq(rows[0].rank, 7)
+    assert_eq(rows[1].name, "jobs")
+    assert_eq(rows[1].rank, 12)
+    rank_of := [String:Int]{}
+    rank_of["run"] = 2
+    rank_of["jobs"] = 1
+    expected :: "pub const JOBS: &str = \"jobs\";\nT :: [\n    CommandSpec {{\n        name: \"run\",\n        nested: {{\n        }},\n        frequency_rank: 2,\n    }},\n    CommandSpec {{\n        name: JOBS,\n        frequency_rank: 1,\n    }}\n];\n"
+    assert_eq(rewritten_source(TableRead{table: table, source: source, body_start: body_start, body_end: body_end, rows: rows}, rank_of), expected)
+}
+
+#Test("the ranking is most-used first, ties A-Z, right-aligned") {
+    counts := [String:Int]{}
+    counts["b"] = 3
+    counts["a"] = 3
+    counts["c"] = 9
+    ranked :: rank_commands(counts, [String]{"b", "a", "c"})
+    assert_eq(ranking_line(1, ranked[0]), "  1      9 c")
+    assert_eq(ranking_line(2, ranked[1]), "  2      3 a")
+    assert_eq(ranking_line(3, ranked[2]), "  3      3 b")
+}

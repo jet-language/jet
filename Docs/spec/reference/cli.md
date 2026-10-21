@@ -189,7 +189,7 @@ not become argv-reachable.
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists
-the most used commands first, in the order `node Tools/cli-census/census.mjs`
+the most used commands first, in the order `jet run Tools/cli-census/Census.jet`
 measures from the guides, examples, and tests; `jet help --sort az` lists the
 same commands A to Z and `jet help --sort za` Z to A:
 

@@ -2706,7 +2706,7 @@ fn authority_flags_render_in_registry_completions_and_man() {
         let expected: Vec<u16> = (1..=COMMANDS.len() as u16).collect();
         assert_eq!(
             ranks, expected,
-            "run `node Tools/cli-census/census.mjs` to rank every COMMANDS row"
+            "run `jet run Tools/cli-census/Census.jet` to rank every COMMANDS row"
         );
     }
 
