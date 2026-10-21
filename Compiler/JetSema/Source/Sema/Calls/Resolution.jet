@@ -429,7 +429,7 @@ fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg]
             &diagnostics.push(diagnostic)
             return None
         }
-        &diagnostics.push(sema_error("E0311", span, "`{method}` isn't a method on this value", "method resolution found no candidate with a compatible receiver", "use a registered method for this receiver type"))
+        &diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
         return None
     }
     shape_matches :: loop candidate in receiver_matches if sema_call_method_shape_matches(candidate, method, args, span) -> candidate

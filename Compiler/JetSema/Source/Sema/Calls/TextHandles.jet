@@ -15,6 +15,7 @@ use jet_foundation.[
     TExpr,
     THandleOp,
     Type,
+    core_identity_is,
 ]
 
 fn sema_text_handle_parameter(name: String, ty: Type) -> SemaCallParam Never! {
@@ -83,26 +84,49 @@ fn sema_text_handle_owner_module(owner: String) -> String Never! {
     ""
 }
 
+// A Core owner reaches sema either by its bare leaf (`Regex`) or by the
+// canonical identity Registration gives a source-declared Core nominal
+// (`<corelib>/core.regex::Regex`); both name the same owner.
 fn sema_text_handle_nominal_owner(ty: Type) -> String? {
     if ty == {
-        .Named(name) -> Val(name)
-        .Apply(name, _) -> Val(name)
+        .Named(name) -> Val(sema_text_handle_owner_leaf(name))
+        .Apply(name, _) -> Val(sema_text_handle_owner_leaf(name))
         .Tagged(_, inner) -> sema_text_handle_nominal_owner(inner)
         else -> None
     }
 }
 
+fn sema_text_handle_owner_leaf(name: String) -> String Never! {
+    loop leaf in ([String]{"Regex", "Match", "Message", "Mailer"}) {
+        if core_identity_is(name, sema_text_handle_owner_module(leaf), leaf) -> return leaf
+    }
+    name.copy()
+}
+
+fn sema_text_handle_written_name(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) | .Apply(name, _) -> name
+        .Tagged(_, inner) -> sema_text_handle_written_name(inner)
+        else -> ""
+    }
+}
+
+// Rust `regex_method_return` / `email_method_return` claim a receiver by its
+// type name alone (net_text_time.rs:668). A canonical Core identity is the
+// owner itself; a bare name the module resolves names the Core owner only
+// when that declaration belongs to the owner's Core module, and a bare name
+// the module does not bind is the Core handle.
 fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_text_handle_nominal_owner(receiver_type) ?? return false
     if actual != owner -> return false
     expected_module := sema_text_handle_owner_module(owner)
+    written :: sema_text_handle_written_name(receiver_type)
+    if written != owner -> return core_identity_is(written, expected_module, owner)
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
         if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
-        return false
-    } else {
-        return true
     }
+    true
 }
 
 // Nominal Regex/Match methods. The matching TIR kinds already

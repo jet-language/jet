@@ -19,6 +19,7 @@ use jet_foundation.[
     TagMarker,
     Type,
     type_name,
+    core_identity_is,
     tir_symbol_local,
 ]
 
@@ -401,7 +402,65 @@ fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, metho
         if method != "round" -> return sema_time_duration_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_time_civil_method(receiver, receiver_value, receiver_name, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    if sema_time_testing_handle_is(receiver_name, "DeterministicWorld") -> return sema_time_world_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sema_time_testing_handle_is(receiver_name, "HistoryRNG") -> return sema_time_history_rng_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// The runtime-owned `core.testing` handles keep their bare leaf; a
+// canonical Core identity names the same handle.
+fn sema_time_testing_handle_is(name: String, leaf: String) -> Bool Never! {
+    name == leaf || core_identity_is(name, "core.testing", leaf)
+}
+
+// One fixed built-in handle method: its TIR operation, checked result and
+// declared argument types.
+struct SemaTimeHandleContract {
+    operation: THandleOp
+    result: Type
+    required: [Type]
+}
+
+// Rust `deterministic_world_method_return` (jet-foundation
+// Collections.rs:2042) with the TIR ops of `handle_method_op`
+// (subset/handles.rs:191-194). The world is read through its receiver, and
+// Rust gives its arguments no declared type, so `advance(2s)` checks its
+// argument as written.
+fn sema_time_world_contract(method: String, argc: Int) -> SemaTimeHandleContract? {
+    return if {
+        method == "now" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldNow, result: Type.Int, required: [Type]{}})
+        method == "advance" && argc == 1 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldAdvance, result: Type.Int, required: [Type]{}})
+        method == "wait_idle" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldWaitIdle, result: sema_time_named("Unit"), required: [Type]{}})
+        method == "history" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldHistory, result: Type.String, required: [Type]{}})
+        else -> None
+    }
+}
+
+fn sema_time_world_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    contract :: sema_time_world_contract(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    values :: sema_time_untyped_values(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_time_finish_handle(receiver_value, contract.operation, values, contract.result, "", "DeterministicWorld.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+}
+
+// Rust `history_rng_method_return` / `builtin_method_arg_types`
+// (Collections.rs:2086, 3856): `next_u64()` and `below(bound: U64)` both
+// advance the stream, so the receiver needs edit access
+// (`builtin_method_mutates`, Collections.rs:2884).
+fn sema_time_history_rng_contract(method: String, argc: Int) -> SemaTimeHandleContract? {
+    u64 :: Type.IntN{signed: false, bits: 64}
+    return if {
+        method == "next_u64" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.HistoryRNGNextU64, result: u64, required: [Type]{}})
+        method == "below" && argc == 1 -> Val(SemaTimeHandleContract{operation: THandleOp.HistoryRNGBelow, result: u64, required: [Type]{u64}})
+        else -> None
+    }
+}
+
+fn sema_time_history_rng_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    contract :: sema_time_history_rng_contract(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    values :: sema_time_check_values(args, contract.required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_time_check_method_ownership(receiver, method, args, contract.required, AccessConvention.Write, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_time_finish_handle(receiver_value, contract.operation, values, contract.result, "", "HistoryRNG.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 // Rust `duration_method_return` / `builtin_method_arg_types` (

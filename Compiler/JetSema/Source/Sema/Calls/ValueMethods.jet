@@ -22,7 +22,7 @@ use jet_foundation.[
     TClosureOp,
     TExpr,
     TExprKind,
-    TNumericOp,
+    THandleOp,
     Type,
     builtin_method_bind,
     builtin_method_row,
@@ -167,11 +167,65 @@ fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner:
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
+// Rust `decimal_method_return` / `fraction_method_return` (jet-foundation
+// Numeric.rs:281-308), lowered as `handle_method_op` does
+// (subset/handles.rs:235-253) to one precise-method operation. Neither
+// owner has declared argument types (`builtin_method_arg_types`), so the
+// arguments are checked as written; the receiver is read.
+fn sema_value_method_precise_result(owner: String, method: String, argc: Int) -> Type? {
+    decimal :: Type.Named{name: "Decimal"}
+    fraction :: Type.Named{name: "Fraction"}
+    if owner == "Decimal" {
+        return if {
+            (method == "add" || method == "sub" || method == "mul") && argc == 1 -> Val(decimal)
+            method == "div" && argc == 1 -> Val(fraction)
+            (method == "round" || method == "floor" || method == "ceil") && argc == 0 -> Val(decimal)
+            method == "equal" && argc == 1 -> Val(Type.Bool)
+            method == "compare" && argc == 1 -> Val(Type.Named{name: "Ordering"})
+            method == "to_string" && argc == 0 -> Val(Type.String)
+            method == "to_float" && argc == 0 -> Val(Type.Float)
+            else -> None
+        }
+    }
+    if owner == "Fraction" {
+        return if {
+            (method == "add" || method == "sub" || method == "mul" || method == "div") && argc == 1 -> Val(fraction)
+            (method == "numerator" || method == "denominator") && argc == 0 -> Val(Type.Int)
+            method == "to_string" && argc == 0 -> Val(Type.String)
+            method == "to_float" && argc == 0 -> Val(Type.Float)
+            method == "is_zero" && argc == 0 -> Val(Type.Bool)
+            method == "equal" && argc == 1 -> Val(Type.Bool)
+            else -> None
+        }
+    }
+    None
+}
+
+fn sema_value_method_precise(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    owner :: if sema_expr_unwrap_tag(receiver_value.ty) == {
+        .Named(name) -> name
+        else -> ""
+    }
+    result :: sema_value_method_precise_result(owner, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_value_method_check_labels(method, args, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    typed := [TExpr]{}
+    loop argument in args {
+        value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &typed.push(value)
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
 fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if sema_expr_unwrap_tag(receiver_value.ty) == .Option(inner) && args.len() == 1 {
         if method == "map" -> return sema_value_method_option_map(receiver, receiver_value, inner, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if method == "or_err" -> return sema_value_method_option_or_err(receiver, receiver_value, inner, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    precise := sema_value_method_precise(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if precise.handled -> return precise
     row :: builtin_method_row(receiver_value.ty, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     owner := sema_value_method_owner(receiver_value.ty)
     if row.lowering == BuiltinMethodLowering.Atomic && scopes.transaction_wall_depth > 0 {
