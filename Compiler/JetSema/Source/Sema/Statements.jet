@@ -781,20 +781,29 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     arm_found := [SemaOwnershipShareSite]{}
     complete := true
     single_use_paths := [SemaOwnershipPath]{}
+    // Rust `check_switch`: a subjectless table with a readiness arm waits on
+    // channels and timers; its heads are not Boolean guards.
+    readiness :: subjectless_guard && sema_readiness_is_table(arms)
+    readiness_table := sema_readiness_table_new()
     arm_index := 0
     loop arm_index < arms.len() {
         // The arm is read in place (`arms[arm_index]`): binding it copied the
         // whole arm, its body included.
-        condition_result := sema_expression_check_condition(arms[arm_index].cond, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         arm_bindings := [SemaConditionBinding]{}
-        if condition_result == {
-            .Val(condition) -> {
-                arm_bindings = condition.bindings
-                &conditions.push(Val(condition))
-            }
-            else -> {
-                &conditions.push(None)
-                complete = false
+        if readiness {
+            if sema_readiness_check_head(arms[arm_index].cond, &readiness_table, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) == .Val(binding) -> &arm_bindings.push(binding)
+            if readiness_table.arms[arm_index] == None -> complete = false
+        } else {
+            condition_result := sema_expression_check_condition(arms[arm_index].cond, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if condition_result == {
+                .Val(condition) -> {
+                    arm_bindings = condition.bindings
+                    &conditions.push(Val(condition))
+                }
+                else -> {
+                    &conditions.push(None)
+                    complete = false
+                }
             }
         }
         branch_mark :: sema_scope_mark(&scopes)
@@ -864,7 +873,9 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             branch_hardware_index += 1
         }
     }
-    else_reaches_merge :: else_body == None || sema_stmt_tir_block_can_fall_through(else_result ?? [TStmt]{})
+    // A blocking readiness wait always selects an arm, so without an `else`
+    // no path skips the table (Rust merges only the arm paths).
+    else_reaches_merge :: if else_body == None -> !readiness else -> sema_stmt_tir_block_can_fall_through(else_result ?? [TStmt]{})
     // The fallthrough path ends here: the live state is the one before the
     // table again, which the single-use check reads; the join reports
     // nothing, so the order holds.
@@ -884,6 +895,10 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
     sema_scope_join_hardware_paths(&scopes, before_hardware, hardware_merged, else_hardware, true)
     if !complete -> return SemaStatementResult{value: [TStmt]{}, complete: false}
+    if readiness {
+        table_tir :: sema_readiness_tir(^readiness_table, ^branches, ^else_result, span) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
+        return SemaStatementResult{value: [TStmt]{table_tir}, complete: true}
+    }
     // Rust `check_switch` notes each all-pattern arm's coverage (E0365/L0301),
     // with or without an `else`, before the E0307 completeness proof.
     if !subjectless_guard {

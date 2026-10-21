@@ -124,11 +124,22 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
     true
 }
 
+// A callback slot whose result is open (`ret: None`: `para_map`'s mapper,
+// `para_fold`'s seed) adopts the callback's own result, as a collection
+// callback does; its parameters still have to fit.
 fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked :: sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, Val(false), &diagnostics) ?? return None
-    compatible :: sema_call_host_callback_assignable(required, checked.ty, environment, program) ?? return None
+    open_result := false
+    if required == .Fn(_, ret, _, _, _, _) && ret == None -> open_result = true
+    result :: if open_result -> sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
+    checked :: result ?? return None
+    contract := required
+    if open_result && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) && checked.ty == .Fn(_, adopted, _, _, _, _) {
+        // copy: the contract is a new owned Type built from the required slot and the callback's adopted result
+        contract = Type.Fn{params: params.copy(), ret: adopted.copy(), effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
+    }
+    compatible :: sema_call_host_callback_assignable(contract, checked.ty, environment, program) ?? return None
     if !compatible {
-        &diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+        &diagnostics.push(sema_type_mismatch(contract, checked.ty, argument.span))
         return None
     }
     Val(checked)

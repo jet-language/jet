@@ -363,7 +363,10 @@ fn sema_call_http_method_result(name: String, method: String, count: Int) -> Typ
         if (method == "param" || method == "header") && count == 1 -> return Val(Type.Option{inner: Type.String})
         if method == "header" && count == 2 -> return Val(Type.Named{name: "HTTPRequest"})
         if method == "body" && count == 1 -> return Val(Type.Named{name: "HTTPRequest"})
-        if (method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" || method == "redirects" || method == "proxy" || method == "cookie" || method == "form" || method == "multipart_text") && count == 1 -> return Val(Type.Named{name: "HTTPRequest"})
+        if (method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" || method == "redirects" || method == "proxy") && count == 1 -> return Val(Type.Named{name: "HTTPRequest"})
+        // Name/value builders take the pair after the receiver (Rust
+        // `http_type_method_return`, the `jet_http_client_request_{cookie,form,multipart_text}` rows).
+        if (method == "cookie" || method == "form" || method == "multipart_text") && count == 2 -> return Val(Type.Named{name: "HTTPRequest"})
         if method == "send" && count == 0 -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
         if method == "body_len" && count == 0 -> return Val(Type.Int)
         if method == "under_limit" && count == 1 -> return Val(Type.Bool)
@@ -427,6 +430,7 @@ fn sema_call_http_client_arg_types(method: String) -> [Type] Never! {
 
 fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] Never! {
     if method == "param" || method == "header" -> return if count == 2 -> [Type]{Type.String, Type.String} else -> [Type]{Type.String}
+    if method == "cookie" || method == "form" || method == "multipart_text" -> return [Type]{Type.String, Type.String}
     // Rust `http_type_method_return` leaves the `body(text)` builder's
     // argument to inference; its one lowering route
     // (`jet_http_client_request_body`) takes the request text, a `String`.
@@ -438,8 +442,6 @@ fn sema_call_http_request_arg_types(method: String, count: Int) -> [Type] Never!
     if method == "timeout" || method == "connect_timeout" || method == "read_timeout" || method == "total_timeout" || method == "dns_timeout" || method == "tls_timeout" || method == "write_timeout" || method == "first_byte_timeout" -> return [Type]{Type.Int}
     if method == "redirects" -> return [Type]{Type.Int}
     if method == "proxy" -> return [Type]{Type.String}
-    if method == "cookie" -> return [Type]{Type.Named{name: "HTTPCookieJar"}}
-    if method == "form" || method == "multipart_text" -> return [Type]{Type.Map{key: Type.String, key_span: None, value: Type.String}}
     if method == "under_limit" || method == "text" -> return [Type]{Type.Int}
     [Type]{}
 }

@@ -18,6 +18,7 @@ use jet_foundation.[
     THandleOp,
     TagMarker,
     Type,
+    expr_span,
     type_name,
     core_identity_is,
     tir_symbol_local,
@@ -198,9 +199,18 @@ fn sema_time_rng_generic_result(method: String, element: Type) -> Type Never! {
     }
 }
 
+// Rust `finish_rng_generic`: the receiver's root binding must be writable
+// (every draw advances the stream); the call site needs no `&` mark.
 fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if sema_expr_place_root_ident(receiver) == .Val(root) {
+        if sema_scope_resolve_index(scopes, root) == .Val(index) {
+            if !scopes.bindings[index].mutable && scopes.bindings[index].access != AccessConvention.Write {
+                &diagnostics.push(sema_error("E0202", expr_span(receiver), "cannot draw from `{root}` — it does not have the write-access marker `&`; required before calling `.{method}()`", "every `RNG` draw advances the stream, so the receiver needs the write-access marker `&`", "declare `{root} := ...`, or pass the rng with the write-access marker `&`: `&{root}`"))
+            }
+        }
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     required_arity :: sema_time_rng_generic_arity(method)
     if updated_args.len() != required_arity {
         &diagnostics.push(sema_error("E0104", span, "`.{method}()` takes {required_arity} argument(s), got {updated_args.len()}", "this `RNG` draw operates on a list and optional draw parameter", if {

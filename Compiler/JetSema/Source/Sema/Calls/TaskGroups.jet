@@ -14,9 +14,12 @@ use jet_foundation.[
     ParamZone,
     Span,
     Stmt,
+    SwitchArm,
     Symbol,
     SymbolID,
     SymbolKind,
+    TBinaryOp,
+    TBranchClass,
     TCallArg,
     TCapture,
     TCaptureFacts,
@@ -28,8 +31,14 @@ use jet_foundation.[
     TExprKind,
     TFailureCarrier,
     THandleOp,
+    THostCall,
     TLambda,
     TLambdaBody,
+    TLetTy,
+    TLetWrapper,
+    TLocal,
+    TMixedArm,
+    TOptionProbe,
     TStmt,
     Type,
     TypeTupleField,
@@ -37,8 +46,11 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     tir_symbol_local,
+    tir_user_local,
+    type_identity_equal,
     type_name,
 ]
+use jet_parser.[parser_select_after_field]
 
 enum SemaTaskGroupOrigin {
     Lexical
@@ -937,4 +949,181 @@ fn sema_call_check_channel(call: Call, expected: Type?, environment: SemaScopeEn
     record :: sema_call_core_record("core.tasks", member, values.len(), call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     value :: sema_call_core_tir(record, values, call.name_span, [Type]{element}, [Bool]{}, None, result_type, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: value}
+}
+
+// A readiness arm head (Rust `AST::readiness_head`): the parser carries
+// `value, receiver` and `after duration` in a one-field tuple whose `after`
+// field name no source can spell.
+enum SemaReadinessHead {
+    Receive(binding: String, source: Expr)
+    After(duration: Expr)
+}
+
+// One checked readiness arm. `ordinal` counts the arms of its own kind in
+// source order: the scheduler numbers receive arms first, then timer arms.
+enum SemaReadinessArm {
+    Receive(local: TLocal, receiver: TExpr, ordinal: Int)
+    After(duration: TExpr, ordinal: Int)
+}
+
+// The arms of one readiness table as they are checked; an arm whose head did
+// not check is None.
+struct SemaReadinessTable {
+    arms: [SemaReadinessArm?]
+    element: Type?
+    receivers: Int
+    timers: Int
+}
+
+fn sema_readiness_head(cond: Expr) -> SemaReadinessHead? Never! {
+    if cond == {
+        .TupleLit(fields, _, _) -> {
+            if fields.len() != 1 -> return None
+            if fields[0].name == parser_select_after_field() -> return Val(SemaReadinessHead.After{duration: fields[0].value})
+            Val(SemaReadinessHead.Receive{binding: fields[0].name, source: fields[0].value})
+        }
+        else -> None
+    }
+}
+
+// Rust `check_switch`: a subjectless table with any readiness arm is a
+// readiness table, not a table of Boolean guards.
+fn sema_readiness_is_table(arms: [SwitchArm]) -> Bool Never! {
+    index := 0
+    loop index < arms.len() {
+        if sema_readiness_head(arms[index].cond) != None -> return true
+        index += 1
+    }
+    false
+}
+
+fn sema_readiness_table_new() -> SemaReadinessTable Never! {
+    SemaReadinessTable{arms: [SemaReadinessArm?]{}, element: None, receivers: 0, timers: 0}
+}
+
+fn sema_readiness_receiver_payload(ty: Type) -> Type? Never! {
+    if ty == {
+        .Apply(name, args) -> if name == "Receiver" && args.len() == 1 -> Val(args[0]) else -> None
+        else -> None
+    }
+}
+
+// Rust `check_readiness_switch`, one arm head: a receive arm validates one
+// plain `Receiver<T>` and returns the payload binding its body declares; an
+// `after` arm validates one `Duration` and records the Time effect.
+fn sema_readiness_check_head(cond: Expr, table: &SemaReadinessTable, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionBinding? {
+    cond_span :: expr_span(cond)
+    head :: sema_readiness_head(cond) ?? {
+        &diagnostics.push(sema_error("E0112", cond_span, "a readiness table cannot mix channel arms with Boolean guards", "every arm in one readiness table waits on a Receiver<T> or a Duration", "write `value, receiver -> ...` or move the Boolean guard to a separate `if`"))
+        &table.arms.push(None)
+        return None
+    }
+    if head == {
+        .Receive(binding, source) -> {
+            source_span :: expr_span(source)
+            checked :: sema_check_expression(source, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            payload := Type.Named{name: "Unit"}
+            if checked == .Val(receiver) {
+                if sema_readiness_receiver_payload(receiver.ty) == .Val(element) {
+                    payload = element
+                } else {
+                    &diagnostics.push(sema_error("E0112", source_span, "a readiness receive arm needs Receiver<T>, not {sema_type_show(receiver.ty)}", "a receive arm waits on one plain channel endpoint", "use the receiver returned by `channel<T>()`"))
+                }
+            }
+            if table.element == .Val(previous) {
+                if !type_identity_equal(previous, payload) -> &diagnostics.push(sema_error("E0112", source_span, "readiness receive arms must share one element type, got {sema_type_show(previous)} and {sema_type_show(payload)}", "one readiness table returns one receive payload type", "use receivers with the same T, or split the table"))
+            } else {
+                table.element = Val(payload)
+            }
+            owner :: sema_scope_local_owner_key(scopes)
+            id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, binding)
+            symbol :: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_name: environment.module_identity, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
+            if checked == .Val(receiver) {
+                &table.arms.push(Val(SemaReadinessArm.Receive{local: tir_symbol_local(binding, cond_span, id), receiver: receiver, ordinal: table.receivers}))
+            } else {
+                &table.arms.push(None)
+            }
+            table.receivers += 1
+            return Val(SemaConditionBinding{symbol: symbol, window: false, sources: [Expr]{}})
+        }
+        .After(duration) -> {
+            checked :: sema_check_expression(duration, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            shown := "this value"
+            is_duration := false
+            if checked == .Val(value) {
+                is_duration = value.ty == (Type.Named{name: "Duration"})
+                shown = sema_type_show(value.ty)
+            }
+            if !is_duration -> &diagnostics.push(sema_error("E0112", expr_span(duration), "`after` needs a Duration, not {shown}", "a readiness timeout is one canonical Duration delta", "write `after 100ms` or pass a Duration binding"))
+            sema_taskgroup_note_time_effect(&context, cond_span)
+            if checked == .Val(value) {
+                &table.arms.push(Val(SemaReadinessArm.After{duration: value, ordinal: table.timers}))
+            } else {
+                &table.arms.push(None)
+            }
+            table.timers += 1
+            return None
+        }
+    }
+}
+
+fn sema_readiness_result_field(result: TLocal, result_ty: Type, index: Int, ty: Type, span: Span) -> TExpr Never! {
+    base :: sema_tir_node(result_ty, TExprKind.Local{local: result}, span)
+    sema_tir_node(ty, TExprKind.HostCall{call: THostCall.TupleIndex{base: base, index: index}}, span)
+}
+
+// Rust `lower_readiness_switch`: one scheduler wait over every arm in source
+// order, which yields `(arm, value: T?)`, then one dense integer dispatch on
+// the selected arm. A receive arm unwraps its payload only once it is
+// selected; a timer arm never reads it. An `else` makes the wait nonblocking.
+fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResult], else_result: ^[TStmt]?, span: Span) -> TStmt? {
+    owned_table := ^table
+    owned_branches := ^branches
+    if owned_branches.len() != owned_table.arms.len() -> return None
+    element :: owned_table.element ?? Type.Named{name: "Unit"}
+    builder_ty :: Type.Named{name: "__JetReadinessTable"}
+    payload_ty :: Type.Option{inner: element}
+    result_ty :: Type.Tuple{fields: [TypeTupleField]{
+        {name: "arm", ty: Type.Int},
+        {name: "value", ty: payload_ty},
+    }}
+    result_local :: tir_user_local("__select_result", span)
+    // The wait reads the builder chain from the outer node inward, so the
+    // chain is built from the last arm back to keep source order.
+    builder := sema_tir_node(builder_ty, TExprKind.SelectStart, span)
+    reversed := [TMixedArm]{}
+    loop owned_table.arms.len() > 0 {
+        row := &owned_table.arms.pop() ?? return None
+        arm := ^row ?? return None
+        branch := &owned_branches.pop() ?? return None
+        body := [TStmt]{}
+        selected := 0
+        if arm == {
+            .Receive(local, receiver, ordinal) -> {
+                selected = ordinal
+                payload :: sema_tir_node(element, TExprKind.HostCall{call: THostCall.OptionProbe{inner: sema_readiness_result_field(result_local, result_ty, 1, payload_ty, span), kind: TOptionProbe.Unwrap}}, span)
+                &body.push(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: element, wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local.span})
+                builder = sema_tir_node(builder_ty, TExprKind.SelectRecv{builder: ^builder, channel: receiver}, span)
+            }
+            .After(duration, ordinal) -> {
+                selected = owned_table.receivers + ordinal
+                builder = sema_tir_node(builder_ty, TExprKind.SelectAfter{builder: ^builder, duration: duration, value: None}, span)
+            }
+        }
+        loop statement in ^branch.value -> &body.push(^statement)
+        condition :: sema_tir_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tir_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
+        &reversed.push(TMixedArm{condition: condition, body: body})
+    }
+    dispatch := [TMixedArm]{}
+    loop reversed.len() > 0 {
+        dispatch_arm := &reversed.pop() ?? return None
+        &dispatch.push(^dispatch_arm)
+    }
+    nonblocking :: else_result != None
+    wait :: sema_tir_node(result_ty, TExprKind.SelectWait{builder: ^builder, nonblocking: nonblocking}, span)
+    subject :: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span)
+    Val(TStmt.Inline{body: [TStmt]{
+        TStmt.Let{local: result_local, let_ty: TLetTy.Inferred, init: wait, gc_promotion: None, gc_transferred: false, span: span},
+        TStmt.MixedSwitch{subject: subject, class: TBranchClass.DenseInt, arms: dispatch, else_body: ^else_result, span: span},
+    }, span: span})
 }

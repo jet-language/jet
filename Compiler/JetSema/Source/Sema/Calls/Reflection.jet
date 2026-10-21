@@ -83,7 +83,34 @@ fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnv
 fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     // S80 the Prelude-owned default error shows its message.
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
+    if sema_call_reflection_synthetic_printable(name) -> return true
     sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program)
+}
+
+// Rust `TraitRegistry::register_synthetic_display_debug`: the Core values the
+// trait registry admits as `Printable` with no source impl (their Prelude
+// `JetShow` hooks, every SIMD lane and the linear-algebra values), and the
+// Core types it registers a `Display` impl for.
+fn sema_call_reflection_synthetic_printable(name: String) -> Bool Never! {
+    leaf :: sema_call_reflection_leaf_name(name)
+    if sema_core_is_math_type(leaf) -> return true
+    if leaf == {
+        "ArgsSpec" | "AriaRole" | "Bits" | "BuildError" | "BrowserError" | "Bytes" | "Clock" | "DataError" |
+        "DataTracked" | "DataWatch" | "DataWatchStatus" | "Dyn" | "DBValue" | "DBLease" | "DBPoolReceipt" | "Date" |
+        "DateTime" | "Decimal" | "FieldError" | "DirEntry" | "DNSSRV" | "Duration" | "EncodingError" | "EmailError" |
+        "EnvError" | "EventResult" | "Field" | "FileLock" | "GameAssets" | "GameBackend" | "GameFrame" | "GameImage" |
+        "GameInputMap" | "GameInputSnapshot" | "GameReplay" | "GameScene" | "GameSound" | "HTTPError" | "HTTPHeaderName" |
+        "HTTPHeaderValue" | "HTTPMethod" | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPStatus" | "HTTPVersion" |
+        "ID" | "Instant" | "IOError" | "IPAddr" | "JSON" | "Key" | "LocalDate" | "LocalTime" | "Cache" | "Measurement" |
+        "MIME" | "NetError" | "ParsedArgs" | "Path" | "Period" | "Point" | "Pool" | "ProcessChild" | "ProcessReceipt" |
+        "ProcessResult" | "ProcessSpec" | "Quat" | "Range" | "RangeError" | "Rect" | "ReflectField" | "ReflectValue" |
+        "Regex" | "RegexFlags" | "RegexMatch" | "RNG" | "Size" | "SocketAddr" | "Solver" | "Stat" | "Stopwatch" | "Test" |
+        "TcpListener" | "TcpStream" | "TempDir" | "TempFile" | "TextError" | "PluginError" | "TLSStream" | "TLSVersion" |
+        "UDPPacket" | "UdpSocket" | "UnixListener" | "UnixStream" | "URL" | "UTF8Error" | "Value" | "Zone" | "ZonedDateTime" |
+        "ComputeDevice" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "ServiceRestart" | "ServiceDelivery" |
+        "ServiceRuntime" | "ServiceStateStore" -> true
+        else -> false
+    }
 }
 
 fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {

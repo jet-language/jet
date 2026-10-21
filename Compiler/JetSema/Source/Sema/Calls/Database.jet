@@ -102,8 +102,10 @@ fn sema_database_record_effect(effect_name: String, api: String, span: Span, env
     }, &diagnostics)
 }
 
-fn sema_database_check_argument(method: String, index: Int, argument: CallArg, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if argument.label != None {
+// `DBPool.acquire(deadline:)` carries its one labeled slot; every other
+// database handle argument is positional (Rust `check_db_pool_method`).
+fn sema_database_check_argument(method: String, index: Int, argument: CallArg, expected: Type, deadline_label: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if argument.label != None && !deadline_label {
         &diagnostics.push(sema_error("E0104", argument.span, "`{method}` arguments are positional", "database handle operations use a fixed Core argument order", "remove the argument label"))
     }
     if argument.convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", argument.span, "a value was passed with the move marker `^` to a parameter that does not consume", "database handle arguments are read-only", "remove the move marker `^` here"))
@@ -144,7 +146,7 @@ fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, method: 
     if contract.deadline_label && args.len() == 1 -> sema_database_check_deadline_label(args[0], &diagnostics)
     typed := [TExpr]{}
     loop (index, argument) in args {
-        value :: sema_database_check_argument(method, index, argument, contract.argument_types[index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value :: sema_database_check_argument(method, index, argument, contract.argument_types[index], contract.deadline_label, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         &typed.push(value)
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

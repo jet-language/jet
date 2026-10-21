@@ -32,25 +32,37 @@ use jet_foundation.[
     TUnaryOp,
 ]
 
-// Built-in methods are positional (Rust `check_builtin_method_labels`).
+// Built-in methods are positional (Rust `check_builtin_method_labels`). Zip
+// labels name output fields rather than parameters; `Map.merge`'s optional
+// conflict callback and `para_map`'s limit are the only labelled built-in
+// method parameters.
 fn sema_value_method_check_labels(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
+    if method == "zip" || method == "zip_short" || method == "zip_pad" -> return true
     valid := true
-    loop argument in args {
+    loop (index, argument) in args {
         if argument.label == .Val(label) {
-            &diagnostics.push(sema_error("E0764", label.span, "`{method}` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", "`{method}` takes no labelled arguments"))
+            if method == "merge" && index == 1 && label.name == "conflict" -> next
+            if method == "para_map" && index == 1 && label.name == "limit" -> next
+            fix :: if method == "merge" && args.len() == 2 -> "`{method}` accepts `conflict`" else -> "`{method}` takes no labelled arguments"
+            &diagnostics.push(sema_error("E0764", label.span, "`{method}` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", fix))
             valid = false
         }
     }
     valid
 }
 
+// Rust `check_builtin_method` infers each argument with its parameter type as
+// the expected type, so `&bytes.write([66, 67])` types the literal as [U8].
 fn sema_value_method_argument(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    reported :: diagnostics.len()
+    value :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_call_type_assignable(required, value.ty, environment, program) == (Val(true)) -> return Val(value)
     if sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
+    // The expected type already reported its own mismatch.
+    if sema_has_error_since(diagnostics, reported) -> return None
     &diagnostics.push(sema_error("E0108", expr_span(argument.expr), "argument {index + 1} to `.{method}()` should be {sema_type_show(required)}, not {sema_type_show(value.ty)}", "built-in methods need arguments of the right type", sema_type_fix_hint(required, value.ty)))
     None
 }

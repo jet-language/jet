@@ -385,10 +385,12 @@ fn sema_pattern_consumes_result_carrier(pattern: Pattern) -> Bool Never! {
 // `sema_expression_auto_propagate` then inserts the one `Try`.
 fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Rust `expr_definitely_diverges` / `infer_or_fallback`: a call whose
-    // checked result is plain `Never` diverges, and the slot type is only an
-    // inference hint for it; its consumer (`??`, a branch) accepts divergence.
-    // This is the fixed Core route of `x ?? core.math.__numeric_stop(...)`.
-    if sema_expr_unwrap_tag(value.ty) == (Type.Named{name: "Never"}) -> return Val(value)
+    // checked result has a `Never` success (`Never`, or `Never !E`) diverges,
+    // and the slot type is only an inference hint for it; its consumer (`??`,
+    // a branch) accepts divergence. This is `x ?? fail(...)` with
+    // `fn fail() -> Never Never!`, and the fixed Core route of
+    // `x ?? core.math.__numeric_stop(...)`.
+    if sema_expr_never_success(Val(sema_expr_unwrap_tag(value.ty))) -> return Val(value)
     if context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
             required := sema_expr_expected_type(expected, environment, program)
@@ -1152,14 +1154,19 @@ struct SemaOrFallbackRoute {
     ambient_err: TLocal?
 }
 
-// A call that returns nothing is a statement, not a fallback value. Name the
-// legal tails of this already-braced block rather than recommending braces.
-fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
+// A valueless builtin call (`print`, `assert`, `assert_eq`, `consume`,
+// `close`) is a statement, not a fallback value (Rust `infer_call_like`:
+// `check_call` hands back no type only for these unshadowed builtins; a
+// declared function without `->` hands back `Unit`). Name the legal tails of
+// this already-braced block rather than recommending braces.
+fn sema_fallback_unit_call_name(value: Expr, scopes: SemaScopeTable) -> String? Never! {
     if value == {
-        .Paren(inner, _) -> sema_fallback_unit_call_name(inner)
-        .Call(call) -> Val(call.name)
-        .MethodCall(_, method, _, _, _, _, _, _) -> Val(method)
-        .CallValue(_, _, _) -> Val("this call")
+        .Paren(inner, _) -> sema_fallback_unit_call_name(inner, scopes)
+        .Call(call) -> {
+            if call.name == "close" -> return Val(call.name)
+            valueless := call.name == "print" || call.name == "assert" || call.name == "assert_eq" || call.name == "consume"
+            if valueless && sema_call_gate_is_unshadowed(call.name, scopes) -> Val(call.name) else -> None
+        }
         else -> None
     }
 }
@@ -1247,7 +1254,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                     return None
                 }
                 checked_tail :: tail_value ?? return None
-                if sema_expr_unwrap_tag(checked_tail.ty) == (Type.Named{name: "Unit"}) && sema_fallback_unit_call_name(tail) == .Val(call_name) {
+                if sema_expr_unwrap_tag(checked_tail.ty) == (Type.Named{name: "Unit"}) && sema_fallback_unit_call_name(tail, scopes) == .Val(call_name) {
                     &diagnostics.push(sema_error("E0116", expr_span(tail), "`{call_name}` doesn't hand back a value", "a `??` fallback block ends with a value or leaves the enclosing function; a call that returns nothing is only a statement", "end the block with `()` after the call, or use `return` to leave the enclosing function"))
                     sema_scope_leave(&scopes, &fallback_state)
                     return None

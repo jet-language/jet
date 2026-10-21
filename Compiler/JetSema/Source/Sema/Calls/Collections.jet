@@ -28,24 +28,6 @@ use jet_foundation.[
     type_tuple_struct_name,
 ]
 
-fn sema_call_collections_label(argument: CallArg) -> String? {
-    return if argument.label == {
-        .Val(label) -> Val(label.name)
-        else -> None
-    }
-}
-
-fn sema_call_collections_check_labels(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
-    valid := true
-    loop argument in args {
-        label :: sema_call_collections_label(argument) ?? next
-        label_span := if argument.label == {.Val(value) -> value.span else -> argument.span}
-        &diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labelled `{label}`", "collection methods use positional arguments except for the separately checked zip family", "remove the label from this argument"))
-        valid = false
-    }
-    return valid
-}
-
 fn sema_call_collections_arity_error(method: String, expected: SemaCollectionMethodContract, actual: Int, span: Span) -> Diagnostic {
     sema_error("E0104", span, "`{method}` expects {if expected.minimum_arity == expected.maximum_arity -> "{expected.minimum_arity}" else -> "{expected.minimum_arity} to {expected.maximum_arity}"} arguments, got {actual}", "the collection contract fixes the callback and structural argument shape", "pass the arguments accepted by `.{method}`")
 }
@@ -173,15 +155,6 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
         &diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {type_name(callback_return)}", "a filter callback decides whether each item stays in the collection", "return a Bool, or a fallible Bool such as `check(item)`"))
         return true
     }
-    if method == "filter_map" {
-        accepted := if callback_return == {
-            .Result(_, _) -> true
-            else -> false
-        }
-        if accepted -> return false
-        &diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter_map()` should return Result<T, E>, not {type_name(callback_return)}", "filter_map retains successful callback values and drops failures", "return a Result from the callback"))
-        return true
-    }
     if method == "flat_map" {
         accepted := if callback_return == {
             .List(_) | .FixedList(_, _) -> true
@@ -236,7 +209,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     if contract.receiver_access == AccessConvention.Write && sema_expr_place_root_ident(receiver) == .Val(root) && context.iter_borrowed.contains(root) {
         &diagnostics.push(sema_collection_changed_in_loop(root, "`{root}.{method}()`", expr_span(receiver)))
     }
-    labels_valid := sema_call_collections_check_labels(method, updated_args, &diagnostics)
+    labels_valid := sema_value_method_check_labels(method, updated_args, &diagnostics)
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_collections_arity_error(method, contract, updated_args.len(), span))

@@ -102,6 +102,17 @@ fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaSco
     }
 }
 
+// Core's `StdinHandle` is a source-declared record whose only source method is
+// `read_line`; its `.lines()` stream stays the handle table's, as for the
+// canonical identity of every Core stream handle.
+fn sema_stream_handle_source_lines_owner(ty: Type, method: String) -> String? {
+    if method != "lines" -> return None
+    if ty == .Named(name) {
+        if name.ends_with("::StdinHandle") && core_source_owns_type(name) -> return Val("StdinHandle")
+    }
+    None
+}
+
 fn sema_stream_handle_result(ok: Type, error: Type) -> Type Never! {
     Type.Result{ok: ok, err: error}
 }
@@ -357,8 +368,12 @@ fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, ex
 
 // Called before ordinary method lookup for canonical Core handle types.
 fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    owner :: sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    source_lines :: sema_stream_handle_source_lines_owner(receiver_value.ty, method)
+    owner := source_lines ?? ""
+    if source_lines == None {
+        owner = sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+        if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    }
     source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else -> ""
     if source_member != "" {
         identity :: sema_call_core_module_identity(environment, program, "core.files") ?? {

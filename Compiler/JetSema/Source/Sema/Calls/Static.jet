@@ -772,12 +772,15 @@ fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environm
     right_value :: right ?? return failed
     left_payload :: left_inner ?? return failed
     right_payload :: right_inner ?? return failed
-    required :: Type.Fn{params: [Type]{left_payload, right_payload}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    function :: sema_check_expression(args[0].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    // copy: the payload types are also the callback's required parameters below
+    required :: Type.Fn{params: [Type]{left_payload.copy(), right_payload.copy()}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    // The open result adopts the callback's own return type.
+    function :: sema_expression_lambda_collection_callback(args[0].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
     result := Type?{None}
     if function.ty == .Fn(params, ret, _, _, _, _) && params.len() == 2 {
+        accepts :: sema_call_type_assignable(params[0], left_payload, environment, program) == (Val(true)) && sema_call_type_assignable(params[1], right_payload, environment, program) == (Val(true))
         // copy: `value` is a payload of the checked callable's type, which the callable keeps
-        if ret == .Val(value) -> result = Val(Type.Option{inner: value.copy()})
+        if accepts && ret == .Val(value) -> result = Val(Type.Option{inner: value.copy()})
     }
     result_ty :: result ?? {
         &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`Option.lift2`'s first argument must be a function, got {sema_type_show(function.ty)}", "`Option.lift2(f, a, b)` needs `f: fn(T, U) R`", "pass a two-argument function or lambda"))

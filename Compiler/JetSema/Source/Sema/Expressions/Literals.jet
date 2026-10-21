@@ -712,7 +712,13 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else -> None
         else -> None
     }
-    checked_index :: sema_check_expression(index, index_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
+    // named index keeps its own type when it is a stored `Range` (a window
+    // selection, classified below); any other named index meets `Int` as before.
+    named_position :: index == .Ident(_, _) && index_expected == (Val(Type.Int))
+    hint :: if named_position -> Type?{None} else -> index_expected
+    inferred_index :: sema_check_expression(index, hint, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_index :: if named_position && inferred_index.ty != (Type.Named{name: "Range"}) -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? return None else -> inferred_index
     // (Rust `infer` Index arm): `tree[key]` / `tree[i]` on a
     // `Dyn` reads an object member or array position as a checked Dyn.
     if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment, program)) {

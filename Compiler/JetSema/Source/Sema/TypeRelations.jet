@@ -1080,7 +1080,14 @@ fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual:
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     if generic_satisfied != None -> return generic_satisfied
-    if sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) == None && sema_type_builtin_trait_symbol(bound_name) != None {
+    // Rust `TraitRegistry::implements_trait`: a scalar satisfies the builtin
+    // trait family by name even where Core declares the trait (`Encode`); a
+    // scalar has no nominal row to carry an impl.
+    scalar :: if actual_resolved == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
+        else -> false
+    }
+    if sema_type_builtin_trait_symbol(bound_name) != None && (scalar || sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) == None) {
         return sema_type_builtin_bound_satisfied(graph, actual_resolved, bound_name, caller_module_identity, generic_params)
     }
     sema_type_bound_satisfied_resolved(graph, actual_resolved, bound_name, caller_module_identity, generic_params)

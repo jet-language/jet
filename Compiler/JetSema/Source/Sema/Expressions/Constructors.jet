@@ -596,6 +596,11 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         checked :: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return checked.value
     }
+    // A compiler-owned unit-only enum (`DurationUnit`) has neither a source
+    // declaration nor generated Core rows.
+    if sema_expression_compiler_unit_enum_variants(resolved_name) == .Val(compiler_variants) {
+        if sema_expression_type_symbol(&scopes, environment, program, resolved_name) == None -> return sema_expression_compiler_unit_enum_literal(resolved_name, compiler_variants, variant, args, variant_span, span, expected, environment, program, &diagnostics)
+    }
     // A Core enum with no source declaration (`IOError`, `ProcessStreamMode`)
     // builds its variant from the generated Core enum rows.
     owner_symbol :: sema_expression_type_symbol(&scopes, environment, program, resolved_name)
@@ -912,6 +917,26 @@ fn sema_expression_core_enum_named_literal(enum_name: String, display_name: Stri
     }
     if failed -> return None
     value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Named{fields: named_values}}, span)
+    sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Rust `core_duration_unit_variants`: the closed unit list `duration.in(unit)`
+// and the Duration constructors take.
+fn sema_expression_compiler_unit_enum_variants(name: String) -> [String]? Never! {
+    if name == "DurationUnit" -> return Val([String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"})
+    None
+}
+
+fn sema_expression_compiler_unit_enum_literal(enum_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !variants.contains(variant) {
+        &diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
+        return None
+    }
+    if args.len() != 0 {
+        &diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
+        return None
+    }
+    value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
