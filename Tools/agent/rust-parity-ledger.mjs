@@ -212,7 +212,7 @@ const TYPE_LIKE = new Set(['struct', 'enum', 'union', 'trait', 'type']);
 // column shape (every code line has the same length as its source line).
 // ---------------------------------------------------------------------------
 
-function lex(text, rust) {
+export function lex(text, rust) {
   const lines = text.split('\n');
   const n = lines.length;
   const code = new Array(n);
@@ -402,7 +402,7 @@ function braceDelta(s) {
 }
 
 // Last line (0-based) of the item whose keyword sits on `start`.
-function extentEnd(code, start) {
+export function extentEnd(code, start) {
   let paren = 0;
   let brack = 0;
   let brace = 0;
@@ -1774,4 +1774,5 @@ function main() {
   process.stdout.write(`rust-parity-ledger: wrote ${OUT_REL}/ for ${rev} (jet ${jetRev})\n`);
 }
 
-main();
+// Imported by the fingerprint verifier for its lexer; only a direct run regenerates the ledger.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
