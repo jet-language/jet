@@ -1,0 +1,185 @@
+// A script's built program, kept in the machine-wide artifact store (the
+// store `jet cache` manages) under the identity of everything its compile
+// read: this compiler, the Core sources and native runtime it compiled
+// against, the profile, the schema snapshots its checks read, and every file
+// of its authorized source snapshot. A rerun of an unchanged script runs the
+// kept program without compiling. A compile that read a comptime input
+// (`embed_file`, `embed_bytes`, `find`) keeps nothing: those files lie outside
+// the snapshot, so its identity would not name them.
+use core.crypto as script_crypto
+use core.files as cli_files
+use core.sys as cli_sys
+use jet_driver.[
+    JetDriverAuthorizedSourceSnapshot,
+    JetDriverComptimeInputLog,
+    JetDriverComptimeInputRecord,
+    JetDriverVerbOutput,
+    schema_cache_dir,
+]
+use jet_foundation.[CORE_SOURCE_OWNED_ROWS]
+use jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
+
+// Names the kept-program records; a new layout is a new name.
+JET_CLI_SCRIPT_RECORD :: "jet.script-run/v1"
+
+// A script compile whose program is kept when it finishes: the toolchain
+// identity it started from and the log of the comptime inputs it reads.
+struct JetCLIScriptKeep {
+    toolchain: String
+    release: Bool
+    input_log: Shared<JetDriverComptimeInputLog>
+}
+
+// The toolchain half of a kept program's identity, or None when this
+// compiler has no identity or its Core sources or runtime can't be read.
+// Core files and the runtime pack are named by their file identities (size,
+// modification time, inode), as `make` names its inputs, not hashed.
+fn jet_cli_script_toolchain(release: Bool) -> String? {
+    identity :: jet_cli_compiler_identity() ?? return None
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
+    runtime_dir :: jet_cli_runtime_dir()
+    runtime_key :: jet_cli_runtime_key(runtime_dir) ?? return None
+    pack :: "{runtime_dir}/{runtime_key}/{JET_CLI_RUNTIME_PACK_FILE}"
+    pack_stat :: cli_files.stat(pack) ?? return None
+    executable :: cli_sys.executable()
+    executable_stat :: cli_files.stat(executable) ?? return None
+    rows := [String]{
+        JET_CLI_SCRIPT_RECORD,
+        identity,
+        "{executable}\t{jet_cli_identity_key("file", executable_stat)}",
+        jet_cli_host_triple(cli_sys.arch(), cli_sys.name()),
+        if release -> "release" else -> "dev",
+        "{pack}\t{jet_cli_identity_key("file", pack_stat)}",
+        toolchain,
+    }
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        stat :: cli_files.stat(jet_cli_authority_path(toolchain, row.path)) ?? return None
+        &rows.push("{row.path}\t{jet_cli_identity_key("file", stat)}")
+    }
+    Val(rows.join("\n"))
+}
+
+// `text` appended to `framed` behind its byte length, so no two input lists
+// frame to the same bytes.
+fn jet_cli_script_frame(framed: &[U8], text: String) Never! {
+    &framed.extend("{text.count_bytes()}:".bytes())
+    &framed.extend(text.bytes())
+}
+
+// The schema snapshots a compile of the source root `root` reads, by file identity.
+fn jet_cli_script_schema_inputs(root: String) -> String {
+    directory :: schema_cache_dir(root)
+    listed :: cli_files.list_dir(directory) ?? return directory
+    names := [String]{}
+    loop entry in listed -> &names.push(entry.name)
+    &names.sort()
+    rows := [String]{directory}
+    loop name in names {
+        stat :: cli_files.stat("{directory}/{name}") ?? next
+        &rows.push("{name}\t{jet_cli_identity_key("file", stat)}")
+    }
+    rows.join("\n")
+}
+
+// The store key of the program `toolchain` builds from `snapshot`.
+fn jet_cli_script_key(toolchain: String, snapshot: JetDriverAuthorizedSourceSnapshot) -> String {
+    framed := [U8]{}
+    jet_cli_script_frame(&framed, toolchain)
+    jet_cli_script_frame(&framed, snapshot.entry_path)
+    jet_cli_script_frame(&framed, jet_cli_script_schema_inputs(snapshot.roots[0].canonical_path))
+    loop root in snapshot.roots {
+        jet_cli_script_frame(&framed, root.canonical_path)
+        loop file in root.files {
+            jet_cli_script_frame(&framed, file.path)
+            jet_cli_script_frame(&framed, file.source)
+        }
+        loop file in root.foreign_cache_files {
+            jet_cli_script_frame(&framed, file.path)
+            jet_cli_script_frame(&framed, file.source)
+        }
+        loop directory in root.directories {
+            jet_cli_script_frame(&framed, directory.path)
+            loop entry in directory.entries -> jet_cli_script_frame(&framed, if entry.is_directory -> "{entry.name}/" else -> entry.name)
+        }
+    }
+    loop dependency in snapshot.script_dependencies {
+        jet_cli_script_frame(&framed, "{dependency.name}@{dependency.resolved_version}#{dependency.content_hash}")
+    }
+    script_crypto.sha256(framed).hex()
+}
+
+fn jet_cli_script_record_name(key: String) -> String Never! {
+    "{JET_CLI_SCRIPT_RECORD}:{key}"
+}
+
+// A kept program's authority record: its required rights and its package
+// policy, one row each, so a rerun checks this invocation's rows as a
+// compile would.
+fn jet_cli_script_authority_encode(authority: JetCLIAuthority) -> String Never! {
+    "{authority.required.join(",")}\n{authority.granted.join(",")}\n{authority.denied.join(",")}\n{authority.authority}"
+}
+
+fn jet_cli_script_rights(row: String) -> [String] Never! {
+    if row == "" -> return [String]{}
+    row.split(",").to_list()
+}
+
+fn jet_cli_script_authority_decode(bytes: [U8]) -> JetCLIAuthority? Never! {
+    text :: String.from_bytes(bytes) ?? return None
+    rows :: text.split("\n").to_list()
+    if rows.len() != 4 -> return None
+    Val(JetCLIAuthority{required: jet_cli_script_rights(rows[0]), granted: jet_cli_script_rights(rows[1]), denied: jet_cli_script_rights(rows[2]), authority: rows[3]})
+}
+
+// Run the program kept for `snapshot` under `toolchain` with this
+// invocation's authority; None when no program is kept for it (or the store
+// can't be read), so the script compiles.
+fn jet_cli_script_kept_run(toolchain: String, snapshot: JetDriverAuthorizedSourceSnapshot, file: String, source: String, color: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
+    key :: jet_cli_script_key(toolchain, snapshot)
+    store :: ArtifactStore.from_env() ?? return None
+    bytes :: store.get_action(store.action(jet_cli_script_record_name(key))) ?? return None
+    authority := jet_cli_script_authority_decode(bytes) ?? return None
+    jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, invocation))
+    refused :: jet_cli_authority_report(file, source, color, "run", authority)
+    if refused != None -> return refused
+    build_dir :: "{snapshot.roots[0].canonical_path}/.jet/build"
+    cli_files.create_dir_all(build_dir) ?? return None
+    binary :: "{build_dir}/{jet_cli_stem(file)}"
+    restored :: store.restore_file(key, binary) ?? return None
+    if restored == .Hit(_, _) -> return Val(jet_cli_exec(binary, program_args, color))
+    None
+}
+
+// The keeper of a script compile under `toolchain`; None keeps nothing.
+fn jet_cli_script_keeper(toolchain: String?, release: Bool) -> JetCLIScriptKeep? Never! {
+    inputs :: toolchain ?? return None
+    // copy: the caller keeps the toolchain identity it looked the program up with.
+    Val(JetCLIScriptKeep{toolchain: inputs.copy(), release: release, input_log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}})
+}
+
+// The comptime input log a kept compile records into.
+fn jet_cli_script_input_log(keep: JetCLIScriptKeep?) -> Shared<JetDriverComptimeInputLog>? Never! {
+    kept :: keep ?? return None
+    // copy: the compile and the keeper share the one log.
+    Val(kept.input_log.copy())
+}
+
+fn jet_cli_script_inputs_read(log: Shared<JetDriverComptimeInputLog>) -> Int Never! {
+    permit :: log.guard_read()
+    permit.value.records.len()
+}
+
+// Keep the program `binary` that `keep`'s compile built from `snapshot`,
+// with its `authority` before any invocation rows. Nothing is kept when the
+// compile read a comptime input or the toolchain changed while it compiled;
+// a store that refuses the program leaves the next run to compile again.
+fn jet_cli_script_keep(keep: JetCLIScriptKeep, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, authority: JetCLIAuthority) {
+    if jet_cli_script_inputs_read(keep.input_log) > 0 -> return
+    current :: jet_cli_script_toolchain(keep.release) ?? return
+    if current != keep.toolchain -> return
+    key :: jet_cli_script_key(keep.toolchain, snapshot)
+    bytes :: cli_files.read_bytes(binary) ?? return
+    store :: ArtifactStore.from_env() ?? return
+    _ :: store.publish_bytes(key, bytes, true) ?? return
+    store.publish_action(store.action(jet_cli_script_record_name(key)), jet_cli_script_authority_encode(authority).bytes()).drop("a program the store refuses is compiled again on the next run")
+}

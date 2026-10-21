@@ -502,6 +502,29 @@ fn jet_cli_looks_like_source(argument: String) -[FS]> Bool Never! {
     cli_files.exists("{argument}.jet")
 }
 
+// The argv index of the file the `jet <file> [args...]` shorthand runs, when
+// the first command word is one. Every word after it is the program's, as a
+// shell hands a script its arguments, so a `#!/usr/bin/env jet` file runs
+// with exactly the arguments it was launched with.
+fn jet_cli_shorthand_file(argv: [String]) -[FS]> Int? Never! {
+    skip_next := false
+    loop (index, argument) in argv {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if argument == "--" -> return None
+        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) {
+            skip_next = true
+            next
+        }
+        if argument.starts_with("-") && argument != "-" -> next
+        if jet_cli_is_builtin(argument) || !jet_cli_looks_like_source(argument) || cli_files.is_dir(argument) -> return None
+        return Val(index)
+    }
+    None
+}
+
 // The commands that compile, and so take `--threads N`.
 JET_CLI_THREADS_COMMANDS :: [String]{"build", "run", "check", "test", "dev", "inspect"}
 
@@ -693,14 +716,20 @@ enum JetCLIAuthorityFlags {
 }
 
 // Source/main.rs `parse_authority_flags`: the `--allow`/`--deny` rows of a
-// build or run, canonical and deduplicated; a right both allowed and denied
-// is E2102.
+// build or run, canonical and deduplicated, and `-A` (`--allow-all`), which
+// allows every right; a right both allowed and denied is E2102.
 fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFlags Never! {
+    all := false
     allow := [String]{}
     deny := [String]{}
     index := 0
     loop index < jet_argv.len() {
         argument :: jet_argv[index]
+        if argument == "-A" || argument == "--allow-all" {
+            all = true
+            index += 1
+            next
+        }
         kind := ""
         inline := String?{None}
         if {
@@ -745,8 +774,8 @@ fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFl
     loop right in allow {
         if deny.contains(right) -> return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2102", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", color, JET_DRIVER_EXIT_USAGE)}
     }
-    if allow.len() == 0 && deny.len() == 0 -> return JetCLIAuthorityFlags.Rows{invocation: None}
-    JetCLIAuthorityFlags.Rows{invocation: Val(JetCLIInvocationAuthority{allow: allow, deny: deny})}
+    if !all && allow.len() == 0 && deny.len() == 0 -> return JetCLIAuthorityFlags.Rows{invocation: None}
+    JetCLIAuthorityFlags.Rows{invocation: Val(JetCLIInvocationAuthority{all: all, allow: allow, deny: deny})}
 }
 
 // `jet build <file>` through the backend `jet_cli_profile` selects, or as a
@@ -817,7 +846,7 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--deny", "-p", "--show-default"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default"}
 
 // `jet run [<file>]` (`args` = `run`, the target, then the positional
 // words), also the `jet <file>` shorthand (`shorthand`). The target resolves
@@ -1272,16 +1301,19 @@ fn jet_cli_fmt(argv: [String], jet_argv: [String], args: [String], color: Bool, 
     }}
 }
 
-// The jet-owned argv prefix before the first standalone `--`.
-fn jet_cli_owned_flags(raw: [String]) -> [String] Never! {
-    output_end := raw.len()
+// Where the jet-owned argv prefix ends: after the file of the `jet <file>`
+// shorthand, else at the first standalone `--`.
+fn jet_cli_owned_end(raw: [String]) -[FS]> Int Never! {
+    if jet_cli_shorthand_file(raw) == .Val(file) -> return file + 1
     loop (index, argument) in raw {
-        if argument == "--" {
-            output_end = index
-            break
-        }
+        if argument == "--" -> return index
     }
-    jet_cli_prefix(raw, output_end)
+    raw.len()
+}
+
+// The jet-owned argv prefix (`jet_cli_owned_end`).
+fn jet_cli_owned_flags(raw: [String]) -[FS]> [String] Never! {
+    jet_cli_prefix(raw, jet_cli_owned_end(raw))
 }
 
 // Source/main.rs `OutputMode::json`: `--json` before `--`, or the `compiler`
@@ -1386,17 +1418,13 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
     }
     if argv[0] == "perf" -> return jet_cli_not_ported(argv[0], color)
 
-    // Everything after the first standalone `--` belongs to the program.
-    separator := argv.len()
-    loop (index, argument) in argv {
-        if argument == "--" {
-            separator = index
-            break
-        }
-    }
+    // The program's words: everything after the first standalone `--`, or
+    // every word after the file of the `jet <file>` shorthand (a `--` right
+    // after that file still only separates).
+    separator :: jet_cli_owned_end(argv)
     jet_argv :: jet_cli_prefix(argv, separator)
     passthrough := [String]?{None}
-    if separator < argv.len() -> passthrough = Val(jet_cli_tail(argv, separator + 1))
+    if separator < argv.len() -> passthrough = Val(jet_cli_tail(argv, if argv[separator] == "--" -> separator + 1 else -> separator))
     loop (index, argument) in jet_argv {
         if argument != "--version" -> next
         builtin_before := false

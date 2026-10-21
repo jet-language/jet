@@ -23,7 +23,8 @@ fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuer
                 }
                 &diagnostics.push(diagnostic)
             }
-            authority :: jet_cli_application_authority(result, None)
+            // A script runs with every right, so it needs no authority block.
+            authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, None))
             if jet_cli_is_application_default(authority) && !jet_driver_inline_package(source).found && jet_cli_undecided(authority).len() > 0 {
                 if jet_cli_authority_refusal(authority, file, "run") == .Val(report) {
                     at :: jet_cli_fix_inline_insertion(source)

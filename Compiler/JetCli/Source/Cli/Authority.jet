@@ -4,8 +4,9 @@
 // jet-pkg-model EffectBudget.rs `project_application_effects` and
 // `application_policy_diagnostic`). The program's required effects are the
 // direct effects of every function the checked entry reaches; its policy is the beginner floor, the
-// entry package's `authority.holds`, and the `--allow`/`--deny` rows of this
-// invocation. A required right the policy denies, or one it leaves
+// entry package's `authority.holds`, and the `--allow`/`--deny`/`-A` rows of this
+// invocation. A script (a file whose first line is a `#!/...` launch line)
+// runs as `-A` runs a program. A required right the policy denies, or one it leaves
 // undecided, stops the command with E1803 before anything is built.
 use jet_driver.[
     JetDriverAuthorityPolicy,
@@ -37,11 +38,31 @@ struct JetCLIAuthority {
     authority: String
 }
 
-// The `--allow` and `--deny` rows of this invocation, canonical and in
-// argv order (Source/main.rs `parse_authority_flags`).
+// The `--allow`, `--deny` and `-A` (`--allow-all`) rows of this invocation,
+// canonical and in argv order (Source/main.rs `parse_authority_flags`).
+// `all` grants every grantable right; a denial still wins over it.
 struct JetCLIInvocationAuthority {
+    all: Bool
     allow: [String]
     deny: [String]
+}
+
+// A file whose first line is a `#!/...` launch line (`#!/usr/bin/env jet`)
+// is a script: it runs with the invoking user's authority, as a shell script
+// does. A byte-zero `#!Marker` refusal is not a launch line.
+fn jet_cli_is_script(source: String) -> Bool Never! {
+    source.starts_with("#!/")
+}
+
+// The invocation rows a build or run of `source` answers with: a script's
+// rows are the `-A` rows, so the launch line and the flag are one grant.
+fn jet_cli_source_invocation(source: String, invocation: JetCLIInvocationAuthority?) -> JetCLIInvocationAuthority? Never! {
+    // copy: `invocation` stays with the caller (a read parameter); the rows returned own their own.
+    rows := invocation.copy()
+    if !jet_cli_is_script(source) -> return rows
+    granted := rows ?? JetCLIInvocationAuthority{all: false, allow: [String]{}, deny: [String]{}}
+    granted.all = true
+    Val(granted)
 }
 
 enum JetCLIVerdict { Allowed Denied Missing }
@@ -157,8 +178,16 @@ fn jet_cli_application_authority(result: JetDriverCompileResult, invocation: Jet
     if result.mir == .Val(program) {
         if result.entry_function == .Val(entry) -> required = jet_cli_entry_required_effects(program, entry)
     }
+    authority := jet_cli_policy_authority(required, result.authority_policy)
+    jet_cli_with_invocation(&authority, invocation)
+    authority
+}
+
+// The authority of a program that requires `required` under its package
+// `policy`, before this invocation's rows.
+fn jet_cli_policy_authority(required: [String], authority_policy: JetDriverAuthorityPolicy?) -> JetCLIAuthority Never! {
     authority := JetCLIAuthority{required: jet_cli_sorted_set(required), granted: jet_cli_sorted_set(JET_CLI_AMBIENT_BASIC_EFFECTS), denied: [String]{}, authority: JET_CLI_APPLICATION_DEFAULT}
-    policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}
+    policy :: authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}
     if policy.manifest_path != None {
         if policy.allow == None && policy.deny == None {
             authority.authority = JET_CLI_PACKAGE_DEFAULT
@@ -168,16 +197,25 @@ fn jet_cli_application_authority(result: JetDriverCompileResult, invocation: Jet
             authority.authority = "package.jet authority.holds"
         }
     }
-    if invocation == .Val(rows) {
-        granted := authority.granted
-        loop right in rows.allow -> &granted.push(right)
-        denied := authority.denied
-        loop right in rows.deny -> &denied.push(right)
-        authority.granted = jet_cli_sorted_set(granted)
-        authority.denied = jet_cli_sorted_set(denied)
-        authority.authority = "{authority.authority} + CLI invocation"
-    }
     authority
+}
+
+// `authority` with this invocation's rows merged in: `-A` grants every
+// grantable right, `--allow` its rights, and `--deny` denies, which wins.
+fn jet_cli_with_invocation(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
+    rows :: invocation ?? return
+    // copy: the policy rows stay in `authority` until the merged rows replace them.
+    granted := authority.granted.copy()
+    if rows.all {
+        loop root in sema_effect_grantable_roots() -> &granted.push(root)
+    }
+    loop right in rows.allow -> &granted.push(right)
+    // copy: as `granted` above.
+    denied := authority.denied.copy()
+    loop right in rows.deny -> &denied.push(right)
+    authority.granted = jet_cli_sorted_set(granted)
+    authority.denied = jet_cli_sorted_set(denied)
+    authority.authority = "{authority.authority} + CLI invocation"
 }
 
 // Required rights with no policy verdict. Deny-only rights (the Panic and Mem
@@ -310,7 +348,7 @@ fn jet_cli_policy_facts(authority: JetCLIAuthority) -> String Never! {
 // E1803 when the policy denies or leaves undecided a required right
 // (Authority.rs `policy_refusal`; EffectBudget.rs
 // `application_policy_diagnostic`). A file with no package manifest leads its
-// Fix with the exact `--allow` invocation of `command`.
+// Fix with the exact `--allow` invocation of `command` and its `-A` form.
 fn jet_cli_authority_refusal(authority: JetCLIAuthority, file: String, command: String) -> Diagnostic? Never! {
     denied :: jet_cli_denied_required(authority)
     undecided :: jet_cli_undecided(authority)
@@ -320,7 +358,7 @@ fn jet_cli_authority_refusal(authority: JetCLIAuthority, file: String, command: 
     if denied.len() == 0 && jet_cli_is_application_default(authority) {
         fix :: diagnostic.fix
         rest :: if fix.len() == 0 -> "" else -> "{jet_cli_ascii_lower(fix.slice(0..<1))}{fix.slice(1..<fix.len())}"
-        diagnostic.fix = "run `jet {command} --allow={undecided.join(",")} {file}` to allow it for this run, or {rest}"
+        diagnostic.fix = "run `jet {command} --allow={undecided.join(",")} {file}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {rest}"
     }
     diagnostic.detail = Val(jet_cli_policy_facts(authority))
     diagnostic.denial_kind = Val("authority")

@@ -610,12 +610,18 @@ fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool
 
 // The application authority check of a build or run with no errors: E1803
 // (rendered as the Rust host reports it, exit 1) when the policy denies or
-// leaves undecided a right the program requires (Authority.jet).
+// leaves undecided a right the program requires (Authority.jet). A script
+// answers with the `-A` rows (`jet_cli_source_invocation`).
 // Traced as `cli.authority`.
 fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -> JetDriverVerbOutput? Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
-    authority :: jet_cli_application_authority(result, invocation)
+    authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, invocation))
     if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
+    jet_cli_authority_report(file, source, color, command, authority)
+}
+
+// The E1803 report of `authority`, or None when it allows the program.
+fn jet_cli_authority_report(file: String, source: String, color: Bool, command: String, authority: JetCLIAuthority) -> JetDriverVerbOutput? Never! {
     refusal :: jet_cli_authority_refusal(authority, file, command) ?? return None
     Val(JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{refusal}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR})
 }
@@ -736,7 +742,8 @@ fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagno
 
 // `jet run <file>`: build it as `jet build` does, then run it. Problems with
 // an error stop the run, and so does the application authority check;
-// `run` hides advisory lints unless `--verbose`.
+// `run` hides advisory lints unless `--verbose`. With `dev` the built
+// program is not run: its path is the output's stdout.
 fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, dev: Bool) -> JetDriverVerbOutput {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_cli_errors(result.diagnostics)
@@ -756,6 +763,9 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
 }
 
 fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    // A traced or verbose run reports its compile, so only a plain script run
+    // may reuse a kept program.
+    if jet_cli_is_script(source) && !verbose && trace_sink == None -> return jet_cli_compile_script(file, source, color, release, threads, program_args, invocation)
     output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // Matched in place, as jet_cli_compile_build does.
     compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
@@ -765,6 +775,40 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"), false))
     // Unreached, as in jet_cli_compile_build.
     output
+}
+
+// `jet run` of a script: run the program kept for exactly these inputs, or
+// compile it, keep it, and run it (ScriptCache.jet).
+fn jet_cli_compile_script(file: String, source: String, color: Bool, release: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput {
+    output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    held :: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
+    toolchain :: jet_cli_script_toolchain(release)
+    if held == .Held(snapshot) {
+        if toolchain == .Val(inputs) {
+            if jet_cli_script_kept_run(inputs, snapshot, file, source, color, program_args, invocation) == .Val(ran) -> return ran
+        }
+    }
+    prepared :: if ^held == {
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program)
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+    }
+    keep :: jet_cli_script_keeper(toolchain, release)
+    compiled := jet_cli_compile_prepared(^prepared, false, JetDriverCompileTarget.Native, release, jet_cli_script_input_log(keep), None)
+    // The snapshot is copied out before `compiled` is borrowed exclusively below.
+    authorized :: jet_cli_compiled_snapshot(compiled)
+    if compiled == .Refused(refusal) -> return ^refusal
+    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_script_build_and_run(file, source, color, release, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"), keep))
+    // Unreached, as in jet_cli_compile_build.
+    output
+}
+
+// Build a compiled script as `jet run` does, keep the program under `keep`
+// (ScriptCache.jet), then run it.
+fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetDriverVerbOutput {
+    built :: jet_cli_run_result(file, source, color, release, false, program_args, invocation, &result, snapshot, true)
+    if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, built.stdout, jet_cli_application_authority(result, None))
+    jet_cli_exec(built.stdout, program_args, color)
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
     row :: diagnostic_registry_row("E3015") ?? panic("native output-check failure is registered")

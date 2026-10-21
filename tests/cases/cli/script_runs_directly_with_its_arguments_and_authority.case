@@ -1,0 +1,30 @@
+# A file whose first line is `#!/usr/bin/env jet` is a script: `./script` runs
+# it with exactly the words after it and every effect, with no package block,
+# and a rerun reuses the kept build. The same program without the launch line
+# still stops with E1803 until `-A` grants every effect.
+env: NO_COLOR=1
+requires: os:unix
+fixture: fixtures/script_mode
+copy: {root}/Examples/features/cli/script_mode.jet script_mode.jet
+chmod: script_mode.jet 755
+mkdir: bin
+symlink: {jet} bin/jet
+step first: ./script_mode.jet alpha --beta -- gamma
+env: PATH={work}/bin:{env:PATH}
+env: JET_STORE_DIR={work}/store
+exit: 0
+stdout: = script_runs_directly_first.out
+step rerun: ./script_mode.jet again
+env: PATH={work}/bin:{env:PATH}
+env: JET_STORE_DIR={work}/store
+exit: 0
+stdout: = script_runs_directly_rerun.out
+step plain: jet plain.jet alpha
+env: JET_STORE_DIR={work}/store
+exit: 1
+stderr: ~ "Error [E1803]"
+stderr: ~ "(or `-A`/`--allow-all` for every effect)"
+step allow_all: jet -A plain.jet alpha
+env: JET_STORE_DIR={work}/store
+exit: 0
+stdout: = script_runs_directly_allow_all.out

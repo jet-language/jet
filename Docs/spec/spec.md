@@ -1646,8 +1646,17 @@ undecided ones. Rights widen only by a written word, so the edit is graded
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
 `--deny=<RIGHTS>`, where the value is a comma-separated list of canonical roots
 or leaves, such as `--allow=FS.Read,Time`. The spaced form is also accepted.
+`-A` (`--allow-all`) is `--allow` with every right; a deny still wins over it.
 The CLI has no per-effect flag family: all authority uses this one rights
 surface (D-RIGHTS-CLI1).
+
+A file whose first line is a `#!/...` launch line, such as
+`#!/usr/bin/env jet`, is a script. A script runs as `-A` runs a program, with
+the invoking user's authority as a shell script has it: it needs no package
+block and never stops with E1803 for an undecided right, and it is still
+fully checked. `jet <file> [args...]` runs a file, and every word after the
+file is the program's, so an executable script runs as `./tool.jet args`.
+An unchanged script reruns its kept build without compiling.
 
 ### Function and block ceilings
 

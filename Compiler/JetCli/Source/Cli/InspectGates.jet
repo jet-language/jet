@@ -46,7 +46,7 @@ fn jet_cli_gate_trust_entries(path: String, records: [TrustRecord]) -> [GateEntr
 
 fn jet_cli_gate_invocation_kind(argument: String) -> GateKind? Never! {
     if argument == "--force" -> return Val(GateKind.ForcePin)
-    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") -> return Val(GateKind.BuildFlag)
+    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") -> return Val(GateKind.BuildFlag)
     if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--interpret" || argument == "--offline" || argument == "--locked" -> return Val(GateKind.SessionFlag)
     None
 }
@@ -60,7 +60,7 @@ fn jet_cli_gate_append_invocation(ledger: &GateLedger, args: [String]) Never! {
         if separate && index + 1 < args.len() -> subject = "{argument} {args[index + 1]}"
         scope :: if kind == GateKind.SessionFlag -> "session" else -> "build"
         gate_ledger_push(&ledger, jet_cli_gate_external(kind, scope, "command line", subject, "written invocation choice", ["command line"]))
-        if argument == "--allow" || argument.starts_with("--allow=") -> gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
+        if argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" -> gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
     }
 }
 

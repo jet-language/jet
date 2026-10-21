@@ -503,7 +503,8 @@ The options below are intentionally named exactly as in `target/debug/jet help`:
 - `--target` selects a triple, `board.<name>`, or named database target;
   `--profile` selects `release`, `debug`, `ci`, `hardened`, or a named bundle.
 - `--allow=RIGHTS` and `--deny=RIGHTS` set effect roots or leaves for
-  `run`, `build`, `jobs`, `repl`, and `db`; `--offline` reuses only cached
+  `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows every
+  right on `run` and `build`; `--offline` reuses only cached
   signed toolchain and package data.
 - `--locked` requires locked dependency and provenance facts; `--fixtures`
   selects an explicit fixture bundle.
@@ -580,10 +581,19 @@ Other build flags and profiles are refused with E2104 until they are ported.
 with the same profile rules, then runs it on the caller's stdin, stdout, and
 stderr and exits with its status (1 when a signal ended it). The program's
 arguments are the words after the first standalone `--`, or else the
-positional words after the file. Advisory lints stay hidden unless `--verbose`
+positional words after the file; under the shorthand every word after the
+file is the program's (a `--` right after it only separates), so a
+`#!/usr/bin/env jet` file runs as `./file.jet args`. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
 starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, `--threads`, `--trace`, `--allow`, and `--deny` are refused with E2104 until they are ported.
+`--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
+
+A script's run keeps its built program in the machine-wide artifact store
+([`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)), keyed by
+the compiler identity, the Core and runtime file identities, the profile, and
+every file of the source snapshot; a rerun with the same key runs the kept
+program without compiling. A compile that read a comptime input file keeps
+nothing, and a `--verbose` or traced run always compiles.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
@@ -618,9 +628,11 @@ the checked entry's solved effect row against the beginner floor (`IO`,
 `Mem.Alloc`, `Exec.Args`), the entry package's `authority.holds` (from
 `package.jet` or the entry's leading inline `package { … }` block, which the
 Jet loader reads with the same field parser and masks before parsing), and the
-`--allow=`/`--deny=` rows of the invocation. A denied or undecided right is
+`--allow=`/`--deny=` rows of the invocation, where `-A` allows every right and
+a script (a file whose first line is a `#!/...` launch line) answers as `-A`
+does. A denied or undecided right is
 E1803, exit 1; a file with no package manifest leads the Fix with the exact
-`--allow` command. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
+`--allow` command and its `-A` form. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
 receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
 
