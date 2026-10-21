@@ -76,7 +76,7 @@ base-encoding-vectors	covered	Core/Encoding/Base32.jet:120 (base32 encoder vecto
 base64-decode	covered	Core/Encoding/Base64.jet:37 (decode)
 base64-tests	missing	absent: no Jet test for base64 URL typed signatures
 bench-defs	missing	absent: #Bench definitions
-binary-match-scan	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:2991 (lower_binary_match_scan)
+binary-match-scan	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:2999 (lower_binary_match_scan)
 binary-match-scan-missing	missing	absent: bit-width type for binary match scans
 binary-reader-methods	missing	absent: binary reader method return contracts
 bind-corpus-policy	missing	absent: semantic corpus policy run over bindgen outputs
@@ -142,6 +142,7 @@ build-metadata-compat	missing	absent: fail-closed read of previous tool-owned ar
 build-plan-query	obsolete	rust-host plumbing: Rust path-name helper for the Rust plan; Jet builds graphs in Jet source under Core/build
 build-plan-query-missing	missing	absent: BuildPlan query surface (explain target/action/file, why-rebuilt, file ownership, phony and target-kind queries, provider plan facts, affected-files graph)
 build-plugin-host	missing	absent: build plugin host process (spawn, IPC, sanitize, crash isolation)
+build-plugin-host-covered	covered	covered: Jet emits the same text `build-plugin request exceeds` at Jetpack/CLI/Source/Hosts/BuildPluginHost.jet:60
 build-plugins-wasm	missing	partial: Jet verifies packaged plugin bytes at Jetpack/CLI/Source/Hosts/BuildPluginPackage.jet:33 (load_packaged_bytes); lacks rollback of rejected contributions
 build-provenance-identity	missing	absent: SDK identity record and read-only build mount with identity
 build-rs-codegen-glue	obsolete	rust-host plumbing: build.rs codegen glue (MIR image seal, comment masking, use-tree parsing, codec emit) with no Jet meaning; Jet has no build.rs
@@ -188,6 +189,7 @@ cbor-errors	covered	Core/Encoding/CborParse.jet:42 (failure)
 cbor-float-narrowing	covered	Core/Encoding/CborParse.jet:11 (narrow_bits)
 cbor-host-marshalling	obsolete	rust-host plumbing: byte-list detection for Rust CBOR values; Jet CBOR takes bytes directly at Core/Encoding/Cbor.jet:87 (to_bytes)
 cbor-kernel-budget	missing	partial: Jet has AllocationBudget at Core/Encoding/Stream.jet:73; lacks the CBOR-specific limit error and reserve_vec
+cbor-kernel-budget-covered	covered	covered: Jet emits the same text `allocation exceeds max_bytes` at Core/Encoding/CborParse.jet:71
 cbor-limits	covered	Core/Encoding/Cbor.jet:42 (CBOROptions safe)
 cc-cli-drivers	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Tests/Integration/CcCli.jet:4
 cell-guard-projection-paths	missing	partial: Jet has cell-guard containment at Compiler/JetSema/Source/Sema/Ownership/CellGuards.jet:15 (sema_cell_guard_contained); lacks projection path tracking
@@ -222,9 +224,12 @@ checked-text-crossings	missing	absent: email HTML body rejecting plain string
 checked-text-tiers	missing	partial: Jet has ordinary checked text case at tests/cases/checked_text/ordinary_checked_text_source_compiles.case:1; lacks cross-tier acceptance matching
 checked-type-facts	missing	absent: bounded bootstrap helper family from checked type facts
 checker-control-flow	missing	absent: comptime block check
-checker-core-bindings	missing	absent: fragment nominal index and projection, bound-lambda escape, checked comptime nominals, destructuring bindings, meta attributes
+checker-core-bindings	missing	absent: fragment import signature table
+checker-core-bindings-covered	covered	Compiler/JetSema/Source/Sema/Expressions/Lambdas.jet:942 (sema_expression_lambda_bound_escapes)
 checker-helpers	missing	absent: layout-constraint fingerprint and type-hole diagnostic
+checker-helpers-covered	covered	covered: Jet emits the same text `a signature names every type; '_' is only a pattern wildcard` at Compiler/JetSema/Source/Sema/FailureLaw.jet:583
 checker-names	missing	absent: bound declaration, bool requirement and core-module alias uniqueness
+checker-names-covered	covered	covered: Jet emits the same text `the program needs a clear yes or no here` at Compiler/JetSema/Source/Sema/Contracts.jet:553
 checker-scopes	missing	absent: checker scope mechanics (push/declare/visible names, ct globals and mutations, explicit constants, interrupt sendability, loop vars)
 civil-time	covered	Compiler/JetSema/Source/Sema/Calls/TimeHandles.jet:287 (sema_time_civil_contract)
 civil-time-missing	missing	absent: temporal optional-argument check
@@ -240,6 +245,7 @@ cli-e2101-actions	missing	absent: moved bare action E2101 in human and JSON mode
 cli-flags-parse	covered	Jetpack/CLI/Source/Dispatch/Flags.jet:7 (CLIFlags)
 cli-help-man	missing	absent: group help and man inventory of nested descriptions
 cli-inspect-planes	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Source/Cli/Inspect/Planes.jet:205
+cli-inspect-planes-covered	covered	covered: Jet emits the same text `missing inspect plane; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates` at Compiler/JetCli/Source/Cli/Inspect.jet:102
 cli-isolated-cwd	missing	absent: isolated cwd child holding executable
 cli-main-entry	covered	Jetpack/CLI/Source/Dispatch/VerbDispatch.jet:104 (cli_main)
 cli-palette-routes	missing	absent: palette using canonical nested routes
@@ -298,6 +304,7 @@ compiler-api-queries	missing	absent: no Jet case for query precedence over sourc
 compiler-api-source-map	missing	absent: no Jet test for source-map generated markers API
 compiler-depth-limit	missing	absent: no Jet test for nesting depth 256 accepted and 257 reported
 compiler-extension-host	missing	absent: compiler-extension host process (spawn, IPC, sanitize, crash guest E1402, effect snapshot)
+compiler-extension-host-covered	covered	covered: Jet emits the same text `compiler-extension snapshot exceeds IPC limit (` at Jetpack/CLI/Source/Hosts/CompilerExtensionHost.jet:39
 compiler-extension-timeout	covered	Jetpack/CLI/Tests/CompilerExtensionHost.jet:194 (compiler extension wall clock timeout interrupt fails closed)
 compiler-hash-builder	missing	absent: compiler hash string builder return-slot reuse
 compiler-owned-rows	missing	absent: compiler-owned core UI registry nominal rows
@@ -326,6 +333,7 @@ comptime-solver-linalg	missing	absent: no Jet case for linalg overflow and expec
 comptime-testing-fakes	missing	absent: no Jet case for testing fake clock transcript
 comptime-ui-crypto-values	missing	absent: no Jet case for expert AEAD/sign/argon2 known answers in AOT stdout
 comptime-value-model	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Tests/Inspect/Projection.jet:277
+comptime-value-model-covered	covered	Compiler/JetFoundation/Source/AST/ComptimeJSON.jet:18 (ast_comptime_float_json)
 compute-autodiff-trace-eval	missing	absent: comptime autodiff transform/gradient/tape evaluation; Jet has autodiff typing only at Compiler/JetSema/Source/Sema/ComputeValidation.jet:184
 compute-cuda	missing	absent: no Jet CUDA f32 backend fail-closed test
 compute-extended	missing	absent: no Jet case for curried autodiff shapes sharing a prelude handle
@@ -346,6 +354,7 @@ copy-site-edits	covered	Compiler/JetSema/Source/Sema/Ownership/CopySites.jet:77 
 core-alias	missing	partial: Jet registers core aliases at Compiler/JetSema/Source/Sema/CoreUsage.jet:194 (sema_core_generated_register_core_alias); lacks core alias lookup helper
 core-args	missing	absent: no Jet test for args defaults not overriding named alias
 core-argument-expectations	missing	absent: core-argument borrow requirement
+core-argument-expectations-covered	covered	covered: Jet emits the same text `a value was passed with the move marker '^' to a parameter that does not consume` at Compiler/JetSema/Source/Sema/Calls/Checking.jet:294
 core-array	missing	absent: no Jet test for collection array algorithms across tiers
 core-call-dispatch	obsolete	Jet design: core calls dispatch via Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:124 (rows); no Rust method dispatch needed
 core-call-ownership	missing	partial: Jet has core call ownership at Compiler/JetSema/Source/Sema/Calls/Core.jet:141; lacks finish step as named here
@@ -371,6 +380,7 @@ core-files-read	missing	absent: no Jet test for read_bytes unsigned byte iterati
 core-files-walk	covered	Core/Files/Files.jet:2413 (copy directory preserves nested regular files and skips symlink entries)
 core-font	covered	Core/Font/Font.jet:158 (system font defaults)
 core-function-edges	missing	absent: private Core function edge requires checked local declaration
+core-identifier-demand-tests	missing	untested: behavior at Compiler/JetDriver/Source/Driver/Loader.jet:2917 (jet_driver_collect_core_identifier_demand); no Jet test
 core-math-crypto	missing	absent: no Jet case or port for this test
 core-math-fields	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Expressions.jet:3009 (lower_expr); no Jet test
 core-math-numeric	missing	absent: no Jet test for ambient transition and bit projection across tiers
@@ -453,6 +463,7 @@ csv-query	covered	Core/Encoding/Csv.jet:59 (rows)
 csv-render	covered	Core/Encoding/Csv.jet:284 (csv_cell)
 cursor-iteration	covered	Compiler/JetRuntime/Source/Iter.jet:1172 (jet_rt_native_iter_cursor_init)
 dart-binder	missing	absent: Dart binder (parse, render_dart_host, reserved_jet_*, run)
+dart-binder-covered	covered	covered: Jet emits the same text `a Dart '@pragma' annotation is not closed` at Jetpack/Integrations/Source/Foreign/Binders/Dart.jet:213
 dashboard-terminal-restore	missing	partial: Jet has terminal restore sequences test at Jetpack/CLI/Tests/Dashboard.jet:91; lacks panic-unwind restore
 data-chart-groups	missing	absent: data line-chart call dispatch
 data-describe	covered	Core/Data/Data.jet:801 (describe)
@@ -525,6 +536,7 @@ devservice-field-extraction-obsolete	obsolete	(c) Jet design: typed plan fields 
 devtools-bless	missing	absent: bless dry-run listing of known targets
 devtools-check-fixtures	missing	absent: devtools check-fixture-paths command
 devtools-command-api	covered	Compiler/JetDevserver/Source/Session.jet:431 (enqueue_devtools_command)
+devtools-command-api-covered	covered	covered: Jet emits the same text `jet.devtools.v1 command session identity mismatch` at Compiler/JetDevserver/Source/Session.jet:426
 devtools-command-api-missing	missing	partial: Jet devserver command queue at Compiler/JetDevserver/Source/Session.jet:431; lacks per-type request/receipt API and game-control, db-explain and rebuild request types
 devtools-command-text	covered	Compiler/JetDevserver/Source/Session02.jet:360 (validate_devtools_text)
 devtools-envelope	missing	untested: behavior at Core/Devtools/Devtools.jet:60 (envelope_fields); no Jet test
@@ -703,7 +715,8 @@ files-runtime-tests	missing	absent: no Jet test for files runtime effect budget
 files-symlink-reject	missing	untested: behavior at Core/Files/Files.jet:1407; no Jet test
 final-return-fix	missing	absent: redundant final-return keyword fix
 finish-cell-operations	missing	partial: Jet has cell-guard checks at Compiler/JetSema/Source/Sema/Ownership/CellGuards.jet:57 (sema_cell_guard_check_construct); lacks cell edit finish
-finish-shared-operations	missing	partial: Jet has sendability checks at Compiler/JetSema/Source/Sema/Ownership/Crossings.jet:309 (sema_ownership_crossing_problem); lacks sender-send finish step
+finish-shared-operations	missing	partial: Jet has shared closure checks at Compiler/JetSema/Source/Sema/Ownership/CellGuards.jet:63 (sema_cell_guard_check_capture); lacks shared closure finish
+finish-shared-operations-covered	covered	covered: Jet emits the same text `'send' expects 1 argument, got` at Compiler/JetSema/Source/Sema/Calls/Concurrency.jet:143
 fix-engine-edits	covered	Compiler/JetDriver/Tests/FixEngine.jet:8 (fix_require)
 fix-engine-edits-missing	missing	untested: behavior at Compiler/JetDriver/Source/FixEngine.jet:47; no Jet test
 fix-engine-noop	missing	absent: changes_text no-op detection over edits
@@ -725,12 +738,14 @@ flow-facts-store	obsolete	(c) flat per-state ownership record replaces the gener
 flow-facts-tiers	missing	absent: AOT and Jet run agree on flow facts
 flow-merge	missing	untested: behavior at Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3999 (sema_ownership_join_paths); no Jet test
 flow-merge-covered	covered	Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3999 (sema_ownership_join_paths)
-fmt-formatter-surface	missing	untested: behavior at Compiler/JetParser/Source/Formatter/Formatter.jet:1528 (jfmt_format_program_with_tokens); no per-row Jet test ported from tests/fmt.rs (only tests/cases/fmt/fmt_preserves_triple_quoted_strings.case:1 and fmt_scope_members_stability.case:1 are ports); per-row behavior not verified
+fmt-formatter-surface	missing	untested: behavior at Compiler/JetParser/Source/Formatter/Formatter.jet:1528 (jfmt_format_program_with_tokens); no Jet test
+fmt-formatter-surface-covered	covered	Compiler/JetParser/Tests/Formatter/Entry.jet:12 (trailing_transaction_comment_stays_inside_transaction_block)
 fmt-lossless	missing	absent: canonical rewrite rule set
 fmt-raw-c-imports	missing	absent: CLI formatting of raw-C imports and module bindings
 fn-body	covered	Compiler/JetParser/Source/Parser/Items.jet:1552 (parser_function_body_missing)
 fn-decl	covered	Compiler/JetParser/Source/Parser/Items.jet:969 (parser_parse_function)
-fn-decl-missing	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetParser/Source/Parser/Items.jet:954
+fn-decl-covered	covered	covered: Jet emits the same text `a function return type uses ':'` at Compiler/JetParser/Source/Parser/Items.jet:1031
+fn-decl-missing	missing	absent: retired signature-shape teach
 fn-params	covered	Compiler/JetParser/Source/Parser/Items.jet:716 (parser_parse_param_list)
 fn-values	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Expressions.jet:3009 (lower_expr); no Jet test
 footprint-inference	missing	partial: Jet states a stated receiver footprint is unsupported at Compiler/JetSema/Source/Sema/FunctionHeaders.jet:252; lacks body-use footprint inference (solve_owner, infer_module_footprints)
@@ -774,7 +789,9 @@ generic-methods	missing	absent: no Jet case or port for this test
 generic-module	covered	Compiler/JetParser/Source/Parser/Declarations/Modules.jet:471 (parser_parse_generic_module_after_name)
 generic-module-body	missing	untested: behavior at Compiler/JetSema/Source/Sema/CoreUsage.jet:194 (sema_core_generated_register_core_alias); no Jet test
 generic-modules-elaboration	covered	Compiler/JetSema/Source/Sema/GenericModules.jet:569 (sema_genmod_substitute_template)
-generic-modules-elaboration-missing	missing	absent: generic-module display paths, instance keys, module arg spans, alias resolution and cycle reporting by these names
+generic-modules-elaboration-missing	missing	partial: Jet has SemaGenericModuleExpansion at Compiler/JetSema/Source/Sema/GenericModules.jet:820 (SemaGenericModuleExpansion); lacks rule_facts
+generic-modules-elaboration-missing-covered	covered	Compiler/JetSema/Source/Sema/GenericModules.jet:388 (sema_genmod_arg_span)
+generic-modules-elaboration-missing-obsolete	obsolete	Compiler/JetSema/Source/Sema/GenericModules.jet:1048
 generic-template-snapshot	missing	absent: template snapshot keeps parser-admitted items
 generics-codegen	missing	absent: associated alias ABI in nested return types
 generics-depth	missing	absent: composite assignability and unification walker
@@ -952,13 +969,12 @@ layout-ctor	missing	partial: Jet has layout facts at Compiler/JetParser/Source/P
 layout-keyword	missing	absent on dev; cutover-ready port at cutover-ready:Compiler/JetParser/Source/Parser/Statements.jet:546
 layout-physical	missing	untested: behavior at Compiler/JetFoundation/Source/Target/Layout.jet:142; no Jet test
 legacy-build-import	covered	Jetpack/CLI/Source/Migration/Importers.jet:208 (cli_import_cargo)
+legacy-build-import-covered	covered	covered: Jet emits the same text `environment entries must use KEY=VALUE` at Compiler/JetBuildSession/Source/Declarations.jet:38
 legacy-build-import-missing	missing	absent: cmake/make/gradle legacy project importers and legacy-wrapper build policy gate (BuildPolicy, PolicyExplanation, LegacyWrapperSpec)
 legacy-project-import	missing	absent: canonical legacy project file import bridge
 let-type-inference	missing	absent: optional let type inference
-lexer-demand-tests	missing	absent: core-identifier demand scan ignoring literal and comment payloads
-lexer-escapes	missing	absent: invalid byte escape diagnostic
-lexer-fence-tests	missing	absent on dev; off-dev port at cutover-ready:Compiler/JetLexer/Tests/Entry.jet:290
-lexer-split-header	missing	absent: split-header diagnostic
+lexer-escapes-covered	covered	covered: Jet emits the same text `x' needs two hexadecimal digits` at Compiler/JetLexer/Source/Lexer/Payload.jet:576
+lexer-split-header-covered	covered	covered: Jet emits the same text `' must stay on the same line as the closing ')'` at Compiler/JetLexer/Source/Lexer/Terminators.jet:511
 lexer-strings	covered	Compiler/JetLexer/Source/Lexer/Scan.jet:443 (scan_plain_interpolation_end)
 lexer-terminators	obsolete	rust-host plumbing: thread-local driver guard for the Rust lexer; Jet passes facts and events explicitly
 lexer-terminators-covered	covered	Compiler/JetLexer/Source/Lexer/Terminators.jet:482 (lexed_with_terminators)
@@ -1000,19 +1016,20 @@ lowerenv-borrow-tracking	covered	Compiler/JetCodegen/Source/Codegen/Expressions.
 lowerenv-clone-counting	missing	absent: clone counting for lowering
 lowerenv-design	obsolete	jet design: no separate Rust lowering environment struct; Jet lowers each expression directly at Compiler/JetCodegen/Source/Codegen/Expressions.jet:3009 (lower_expr)
 lowerenv-dma-tracking	missing	absent: DMA transfer channel lookup
-lowerenv-gc-tracking	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3054 (gc_edit_route)
+lowerenv-gc-tracking	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3062 (gc_edit_route)
 lowerenv-misc	missing	absent: binder reference lookup
 lowerenv-resource-tracking	missing	absent: resource ownership query
 lowerenv-send-fn-tracking	missing	absent: send-function marking for task closures
 lowerenv-stack-sentry	missing	partial: Jet has lower_sentry_policy at Compiler/JetCodegen/Source/Codegen/Statements.jet:240; lacks stack-address noting
 lowerenv-uninit-tracking	missing	absent: uninitialized fixed-array query
-lowerenv-view-tracking	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3264 (lower_split_view)
+lowerenv-view-tracking	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3255 (lower_split_view)
 lowerenv-view-tracking-missing	missing	absent: clearing of view marks at scope exit
 lsp-cancellation	covered	Compiler/JetLSP/Tests/Integration/Lsp02Tests.jet:568 (lsp_cancelled_costly_request_returns_32800_and_never_publishes)
 lsp-panic-log	missing	absent: panic-log line written through a stderr byte sink; only a comment at Compiler/JetLSP/Tests/LSP/WorkspaceNavigation.jet:57
 lsp-socket-workspace	missing	absent: ShortTestDir reserve with bounded slot allocation and collision skip; only a comment at Compiler/JetLSP/Tests/LSP/WorkspaceNavigation.jet:33
 lsp-teaching-quickfix	missing	absent: test asserting no teaching edit for the old binding keyword
 lua-binder	missing	absent: Lua binder (reserved, run)
+lua-binder-covered	covered	covered: Jet emits the same text `the tool exceeded the 60 second limit` at Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet:13
 machine-edit-reports	missing	absent: E0102 and E0111 exact replacement reports carry machine edits
 machine-output-flag	missing	absent: always-machine commands on the shared reader
 machine-output-reader	missing	absent: machine-output reader with schema versions and registered report rows
@@ -1022,10 +1039,11 @@ mapped-path-registry	missing	untested: behavior at Compiler/JetRuntime/Source/Co
 marker-application-resolution	covered	Compiler/JetSema/Source/Sema/MarkerModules.jet:179 (sema_marker_module_resolve_application)
 marker-arg-validation	missing	partial: Jet has per-parameter kinds at Compiler/JetSema/Source/Sema/MarkerRules.jet:185 (sema_marker_rules_parameter_kind); lacks a validated-argument record
 marker-args	covered	Compiler/JetParser/Source/Parser/Declarations/Markers.jet:225 (parser_marker_body)
-marker-callable-policy	missing	partial: Jet scans allow rule facts at Compiler/JetSema/Source/Sema/CallablePolicies.jet:212; lacks callable policy value validation
+marker-callable-policy-covered	covered	covered: Jet emits the same text `unknown callable policy setting '` at Compiler/JetSema/Source/Sema/CallablePolicies.jet:76
 marker-declarations	missing	absent: Rust-side declaration-registry audits (one written declaration per row, parser/registry agreement, source rule facts and collisions, scheduler fact registration)
 marker-declared-rules	covered	Compiler/JetSema/Source/Sema/MarkerRules.jet:212 (sema_marker_rules_bool_fact)
-marker-declared-rules-missing	missing	partial: Jet builds applied rule rows at Compiler/JetSema/Source/Sema/MarkerRules.jet:313 (sema_marker_rules_applied_row); lacks checking facts against declarations
+marker-declared-rules-covered	covered	covered: Jet emits the same text `' cannot attach at this site` at Compiler/JetSema/Source/Sema/MarkerRules.jet:1045
+marker-declared-rules-missing	missing	partial: Jet builds applied rule rows at Compiler/JetSema/Source/Sema/MarkerRules.jet:313 (sema_marker_rules_applied_row); lacks argument matching
 marker-diagnostics	missing	absent: once-per-site marker diagnostic dedup
 marker-effect-row	missing	partial: Jet has arrow effect rows at Compiler/JetParser/Source/Parser/Types.jet:488 (parser_parse_effect_arrow_row); lacks marker effect-row label parsing
 marker-groups	covered	Compiler/JetDriver/Source/Driver/MarkerGroups.jet:218 (marker group expansion)
@@ -1035,6 +1053,7 @@ marker-lazy-memo	missing	absent: lazy memo iterator check
 marker-list	covered	Compiler/JetParser/Source/Parser/Declarations/Markers.jet:75 (parser_marker_decl_ahead)
 marker-registry-coverage	missing	absent: prover publishing read-only registry rows
 marker-resolution	missing	partial: Jet expands marker groups at Compiler/JetDriver/Source/Driver/MarkerGroups.jet:218; lacks marker binding record
+marker-resolution-covered	covered	covered: Jet emits the same text `' is private to its declaring module` at Compiler/JetSema/Source/Sema/MarkerModules.jet:411
 marker-rule-facts	missing	absent: marker collector over a program
 marker-rule-products	obsolete	rust-host plumbing and design: static marker key type; Jet uses no static product stage, per comment at Compiler/JetSema/Source/Sema/CheckProgram.jet:5762
 marker-rule-products-missing	missing	absent: static marker value application
@@ -1087,7 +1106,7 @@ mir-pattern-phi-lowering	missing	absent: borrowed trait coercion of prepared enu
 mir-place-capture-and-vectorization	missing	absent: stale MIR fact invalidation on change
 mir-prelude-stop-points	missing	absent: authority.with propagation before binding
 mir-typed-error-carriers	missing	absent: base64 typed error carrier across tiers
-mixed-switch-lowering	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3148 (lower_mixed_switch); no Jet test
+mixed-switch-lowering	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3156 (lower_mixed_switch); no Jet test
 mod-methods	missing	absent: mod method argument/receiver checks
 module-alias	covered	Compiler/JetParser/Source/Parser/Declarations/Modules.jet:537 (parser_parse_module_alias_after_name)
 module-call-identity	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/ModuleCalls.jet:15 (lower_module_call); no Jet test
@@ -1147,6 +1166,7 @@ nix-eval-derivation-render	missing	absent: derivation string rendering
 nix-eval-imports	missing	absent: imported-file parent path resolution
 nix-eval-integration	missing	partial: Jet has derivation parsing at Jetpack/Nix/Source/Derivation/ATerm.jet:33-130; lacks pinned materializer fixture and error test
 nix-eval-json-output	missing	absent: JSON string encoder
+nix-eval-json-output-covered	covered	covered: Jet emits the same text `JSON value is too deeply nested` at Jetpack/NixEval/Source/Evaluator/Builtins.jet:110
 nix-eval-lexer	covered	Jetpack/NixEval/Source/Evaluator/Lexer.jet:65 (NixEvalLexer)
 nix-eval-lexer-missing	missing	partial: Jet scans bytes with Jetpack/NixEval/Source/Evaluator/Lexer.jet:344 (nixeval_double_string_end); lacks a separate character-length helper
 nix-eval-parser	covered	Jetpack/NixEval/Source/Evaluator/Parser.jet:180 (application)
@@ -1167,7 +1187,9 @@ notebook-headless-kernel	covered	Compiler/JetRepl/Console/Notebook/Protocol.jet:
 notebook-http-loopback	missing	absent: notebook loopback HTTP server, bearer and bootstrap-nonce auth, browser launch, redirects, request parsing
 numeric-aliases	missing	absent: source-owned numeric aliases excluded from builtins
 numeric-bounds	missing	untested: behavior at Compiler/JetSema/Source/Sema/Expressions.jet:1939 (sema_expr_integer_range); no Jet test
-numeric-bridge-kernel	missing	partial: Jet has fixed-width trap lowering at Compiler/JetBackend/Source/Lower/Numeric.jet:33 (lower_fixed_trap_floor) and precise builtins at Compiler/JetCodegen/Source/Codegen/Expressions.jet:1080 (jet_codegen_lower_precise_builtin); lacks the Rust kernel dispatch and error-message marshalling
+numeric-bridge-kernel	obsolete	Compiler/JetBackend/Source/Lower/Lower.jet:146 (Exact Int is an inline number or a tagged, reference-counted BigInt); Rust conversion-result type probe has no Jet counterpart [INFERENCE]
+numeric-bridge-kernel-covered	covered	Compiler/JetEval/Source/Routes/Numeric.jet:264 (jet_eval_route_fixed_member)
+numeric-bridge-kernel-missing	missing	partial: Jet has precise Fraction symbol table at Compiler/JetEval/Source/Routes/Numeric.jet:219 (jet_eval_route_precise_symbol); lacks the Fraction argument parsing of NativeNumericBridge.rs:927-951
 numeric-bridge-tests	missing	absent: exact, fixed and precise kernel tests have no Jet test
 numeric-carriers	missing	absent: fraction, total, owned int carriers, sum/product and native ABI checks
 numeric-conversion	missing	absent: checked widening with rounding rejection
@@ -1254,6 +1276,7 @@ performance-budget	missing	absent on dev; off-dev port at origin/port/main:Compi
 performance-budget-providers	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Tests/Integration/PerformanceBudgetProviders.jet:15
 performance-budget-providers-obsolete	obsolete	rust-host plumbing: subprocess child harness for Rust-registered provider panics
 perl-binder	missing	absent: Perl binder (validate_perl_structure, run, snake, reserved)
+perl-binder-covered	covered	covered: Jet emits the same text `the tool exceeded the 60 second limit` at Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet:13
 persist-binding	missing	partial: Jet has persist flag and local #Persist refusal at Compiler/JetParser/Source/Parser/Statements.jet:1743 (E0145); lacks module-level persist binding parse
 persist-binding-hot-swap	missing	absent: persist binding survives hot swap and resets on shape change
 persist-store	missing	absent: persistent store with identity, entries, reject reasons, runtime shape checks and migrations
@@ -1284,7 +1307,7 @@ plugin-e2e-harness	obsolete	rust-host plumbing: Rust test-harness helpers for th
 plugin-error-context	missing	absent: original context kept for known host IO variants
 plugin-io-ownership-harness	obsolete	rust-host plumbing: Rust test-harness observation helpers for plugin IO error ownership; no Jet meaning
 plugin-methods	covered	Compiler/JetSema/Source/Sema/Calls/Plugin.jet:151 (sema_call_try_plugin_method)
-plugin-methods-missing	missing	partial: Jet has plugin method diagnostics at Compiler/JetSema/Source/Sema/Calls/Plugin.jet:121 (sema_plugin_method_diagnostic); lacks plugin export check
+plugin-methods-covered	covered	covered: Jet emits the same text `' uses unsupported Component value '` at Compiler/JetSema/Source/Sema/Calls/Plugin.jet:148
 plugin-transport-tests	obsolete	rust-host plumbing: Rust plugin failure transport and frame export for the retired host
 plugin-wire	missing	absent: plugin wire parameter lists and collection count bounds
 plugin-wit-tests	missing	absent: plugin host IO wit, decode/free and failure-rail tests have no Jet test
@@ -1302,6 +1325,7 @@ post-contract-parity	missing	absent: post-contract failure parity under quick ru
 postfix	covered	Compiler/JetParser/Source/Parser/Expressions.jet:1521 (parser_parse_postfix)
 power-and-exclusive-or	missing	absent: exact integer power parity across tiers
 powershell-binder	missing	absent: PowerShell binder (run, reserved_jet_function)
+powershell-binder-covered	covered	covered: Jet emits the same text `the tool exceeded the 60 second limit` at Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet:13
 prelude-bridge-sql	missing	absent on dev; off-dev port at origin/port/main origin/port/main:Compiler/JetCli/Source/Cli/Dev/DbRows02.jet:91
 prelude-epoch	missing	absent: ambient name epochs, migration lint and foundation epoch year
 prelude-error-conversions	missing	partial: Jet injects demand-driven error conversions at Compiler/JetSema/Source/Sema/FailureLaw.jet:352 (comment anchor); lacks the synthesized error prelude program
@@ -1339,8 +1363,9 @@ project-parts-scan	missing	absent: ProjectParts workspace part scanner; only con
 project-state-stamps	missing	absent on dev; off-dev port at origin/port/main:Jetpack/Store/Source/ArtifactStore/*.jet
 protocol-expansion	missing	absent: generated send/recv protocol source
 prove-pipeline	missing	absent: jet prove pipeline (run_prove, child supervision, .jetproof writer, claim grades, render_report, replay save/index), refused by Compiler/JetCli/Source/Cli/Front.jet:1543
+prove-pipeline-covered	covered	covered: Jet emits the same text `artifact parent is a symlink:` at Compiler/JetCli/Source/Cli/Inspect.jet:1450
 prove-replay	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Tests/Cli/Args02.jet:29
-prove-replay-artifacts	missing	partial: Jet has replay-path name check at Compiler/JetCli/Source/Cli/Inspect.jet:1401 (jet_cli_replay_path_problem); lacks Rust replay input validation for prove artifacts
+prove-replay-artifacts-covered	covered	covered: Jet emits the same text `replay artifact path is empty` at Compiler/JetCli/Source/Cli/Inspect.jet:1402
 prove-solver	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Source/Cli/Evidence/Solver.jet:2
 provider-cran-pipeline	missing	absent: CRAN install, lock, offline replay, changed-source rejection
 provider-fetch-authority	missing	absent: denied redirect and credential rejection at fetch
@@ -1369,8 +1394,8 @@ python-binder	covered	Jetpack/PackageModel/Source/Foreign/Binders/Python.jet:41 
 query-service-incremental	missing	absent: incremental query-service receipts, callable-contract collection, external-input fingerprinting, document removal and invalidation
 query-service-session	covered	Compiler/JetDriver/Source/Driver/CompilerQueries.jet:178 (_new)
 r-binder	missing	absent: R binder (run, reserved)
-range-switch-lowering	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3119 (lower_range_switch)
-range-switch-lowering-missing	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3119 (lower_range_switch); no Jet test
+range-switch-lowering	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3127 (lower_range_switch)
+range-switch-lowering-missing	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3127 (lower_range_switch); no Jet test
 range-types	missing	absent: no Jet case or port for this test
 raylib-ambient-registration	obsolete	rust-host plumbing: registers the Rust interpreter ambient table; Jet binds Raylib natively (Core/Game/Raylib.jet:8 RaylibWindow)
 raylib-tests	missing	absent: no Jet test for raylib skeleton signatures
@@ -1412,6 +1437,7 @@ recipe-plan-lowering	missing	absent on dev; off-dev port at origin/port/main:Jet
 recipe-run-execution	missing	absent on dev; off-dev port at origin/port/main:Jetpack/Recipe/Source/Build/RecipeRun.jet:12
 recipe-sandbox-report	missing	partial: Jet has RunReport struct with sandbox fields at Jetpack/Recipe/Source/Build/RecipeValidate.jet:23-34; lacks sandbox record producer (refusal at RecipeValidate.jet:37-44)
 recipe-staged-plan-action	missing	absent on dev; off-dev port at origin/port/main:Jetpack/Recipe/Source/Build/StagedPlanRun.jet:310
+recipe-staged-plan-action-covered	covered	covered: Jet emits the same text `staged plan action was cancelled` at Jetpack/Recipe/Source/Build/StagedPlanRun.jet:32
 recipe-staged-plan-artifact	missing	absent: staged plan artifact drop guard
 recipe-staged-plan-sandbox	missing	absent on dev; off-dev port at origin/port/main:Jetpack/Recipe/Source/Build/StagedPlanRun.jet:57
 recipe-step-markers	missing	absent on dev; off-dev port at origin/port/main:Jetpack/Recipe/Source/Build/RecipeValidate.jet:184
@@ -1476,6 +1502,7 @@ remote-build-scheduler	missing	absent: remote build scheduler (builder capabilit
 repl-approval	missing	absent: explicit deny precedence before any prompt
 repl-authorizer	covered	Compiler/JetRepl/Console/Repl/TurnFacts.jet:535 (authorizer)
 repl-executor	missing	partial: Jet has display_value at Compiler/JetRepl/Console/Repl/TurnFacts02.jet:295; lacks JSON renderer
+repl-executor-covered	covered	covered: Jet emits the same text `REPL child did not expose its source pipe` at Compiler/JetRepl/Console/Repl/TurnFacts.jet:918
 repl-executor-harness	obsolete	rust-host plumbing: Rust test-harness text helper in Executor tests; no Jet meaning
 repl-history-state	covered	Compiler/JetRepl/Console/Repl/History.jet:248 (state_root)
 repl-interrupt	missing	absent: REPL interrupt polling in comptime
@@ -1487,7 +1514,7 @@ repl-rooted-fs	covered	Compiler/JetRepl/Console/Repl/TurnFacts.jet:797 (repl_roo
 repl-session	covered	Compiler/JetRepl/Source/Session.jet:60 (repl_session_step)
 repl-terminal-signals	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Source/Cli/Host/TermKey.jet:47
 replacement-golden-fixtures	missing	absent: golden-fixture replacement selection
-replacement-resolution	missing	absent: replacement lock record
+replacement-resolution-covered	covered	covered: Jet emits the same text `native replacement overlay with passed compatibility proof` at Jetpack/Provider/Source/Replacement/Replacement.jet:74
 rerun-plan	missing	absent: rerun plan render shape
 resource-close	missing	absent: borrowed close owner diagnostic
 resource-schedule	missing	absent: resource read/write schedule, async completion and temporary reuse
@@ -1501,13 +1528,14 @@ retired-const	obsolete	Parser teaching for the retired `const` declaration spell
 retired-derive	obsolete	Parser teaching for the retired derive line; removed with every retired spelling.
 retired-effect-marker	obsolete	Test of the retired effect-marker diagnostic E0066; removed with every retired spelling.
 retired-effect-syntax	obsolete	Parser teaching for the retired effect syntax; removed with every retired spelling.
+retired-fence-teach	obsolete	retired surface: tests the E-FENCE-SPELLING teaching of the retired fence spelling; commit ba6124f2b (greenfield: remove every retired spelling and its teaching)
 retired-known-error	obsolete	Parser teaching for the retired known-error spelling; removed with every retired spelling.
 retired-routes	missing	untested: behavior at Compiler/JetCli/Source/Cli/Registry.jet:64; no Jet test
 retired-rust-emission	obsolete	retired surface: extracts function bodies from emitted Rust text; commit e0b4ab119 cli: retire emit --rust, the cargo bless and the rustc probe (D-RUST-EMIT1=A)
 retired-step-teach	obsolete	Parser teaching for the retired `step` and `shared new` spellings; removed with every retired spelling.
 retired-stmt-surface	obsolete	Parser teaching for statement keywords Jet no longer has (unsafe/impure/reactive/shield/region/live/nondeterministic/context/grant/transact blocks); the greenfield cutover removed every retired spelling and its teaching.
 retired-syntax-teach	covered	Compiler/JetParser/Source/Parser/Declarations/Migrations.jet:18 (parser_migration_arrow)
-retired-syntax-teach-missing	missing	partial: Jet teaches retired pub at Compiler/JetParser/Source/Parser/Items.jet:165 (E0411); lacks a reject_retired_pub check function
+retired-syntax-teach-covered	covered	covered: Jet emits the same text `' was removed: everything is public by default` at Compiler/JetParser/Source/Parser/Items.jet:165
 retired-typed-binding	obsolete	Parser teaching for the retired typed-binding spelling; removed with every retired spelling.
 retirement-ratchet	missing	absent: finished-retirement regression guard
 returned-view-parity	missing	absent: nested returned view field parity across AOT and dev
@@ -1521,6 +1549,7 @@ role-module	covered	Compiler/JetParser/Source/Parser/Declarations/Modules.jet:58
 rollback-snapshot	missing	absent: no rollback on success
 route-file-addresses	missing	absent: route file to lowercase hyphen address mapping
 ruby-binder	missing	absent: Ruby binder (run, reserved)
+ruby-binder-covered	covered	covered: Jet emits the same text `the tool exceeded the 60 second limit` at Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet:13
 run-entry	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCli/Tests/Integration/RunEntryTests.jet:196
 run-entry-covered	covered	tests/cases/run_entry/unhandled_crypto_error_exits_1_with_the_generic_entry_report.case:1 (unhandled_crypto_error_exits_1_with_the_generic_entry_report)
 run-prepare-refusal	missing	absent: run-prepare refusal registered surface
@@ -1560,6 +1589,7 @@ rust-source-decision-audit	obsolete	rust-host plumbing: audits adjacent decision
 rust-source-guards	obsolete	rust-host plumbing: scans Rust crate sources for capability markers; Jet has no Rust crates (Compiler/package.jet:1)
 rust-source-layout-audit	obsolete	rust-host plumbing: asserts Rust source file layout (single text renderer home in crates/); no Jet meaning
 rust-source-scan	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetFoundation/Source/RustSource/RustSource.jet:242
+rust-source-scan-covered	covered	covered: Jet emits the same text `Rust source mask preserves UTF-8 bytes` at Jetpack/Store/Source/ArtifactStore/RuntimeSourceExport.jet:384
 rust-test-harness	obsolete	(a) Rust test-harness helper (check, assert_no_errors) with no Jet meaning
 rust-test-harness-audit	obsolete	rust-host test-harness helper: audits Rust dev_parts test target wiring; no Jet meaning
 rust-test-harness-scanners	obsolete	rust-host plumbing: Rust test-harness source scanners and budget helpers in tests/common/mod.rs (Rust test-harness helper); Rust test sources deleted by cutover
@@ -1626,8 +1656,9 @@ services-handler-graph	missing	partial: Jet has service worker reachability at C
 services-handler-graph-covered	covered	Compiler/JetSema/Source/Sema/Calls/Services.jet:619 (sema_validate_service_handler_graph)
 services-host-marshalling	obsolete	rust-host plumbing: Rust value/handle marshalling, interning, std Display trait and interpreter method dispatch; Jet calls Core services directly (Core/Jobs/Jobs.jet:124 queue; Core/Service/Service.jet:272 set_delivery)
 services-jobs-queue	covered	Core/Jobs/Jobs.jet:252 (__delay)
-services-literals	missing	partial: Jet has service label binding at Compiler/JetSema/Source/Sema/Calls/Services.jet:131 (sema_services_bind_labels); lacks invalid-value diagnostic
-services-literals-covered	covered	Compiler/JetSema/Source/Sema/Calls/Services.jet:49 (sema_services_literal_string)
+services-literals	covered	Compiler/JetSema/Source/Sema/Calls/Services.jet:49 (sema_services_literal_string)
+services-literals-covered	covered	covered: Jet emits the same text `is outside the checked builder shape` at Compiler/JetSema/Source/Sema/Calls/Services.jet:348
+services-literals-missing	missing	partial: Jet has service label binding at Compiler/JetSema/Source/Sema/Calls/Services.jet:131 (sema_services_bind_labels); lacks service-name requirement
 services-methods	missing	partial: Jet has service result typing at Compiler/JetSema/Source/Sema/Calls/Services.jet:45 (sema_services_result_type); lacks method arity table
 services-result-types	covered	Compiler/JetSema/Source/Sema/Calls/Services.jet:45 (sema_services_result_type)
 services-runtime	missing	absent: forward-only migration refusal
@@ -1672,9 +1703,9 @@ source-entry-completion-plumbing	obsolete	rust-host plumbing: Rust source-execut
 source-entry-tests	obsolete	rust-host plumbing: Rust source-execution completion and retirement tests for the retired host (Compiler/JetRuntime/Source/ProcessExecutionCollect.jet:130 jet_rt_process_execution_worker)
 span-lookups	missing	absent: binding lookup by span
 split-owner-fields	missing	absent: no Jet case or port for this test
-split-views	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3264 (lower_split_view); no Jet test
+split-views	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3255 (lower_split_view); no Jet test
 statement	covered	Compiler/JetParser/Source/Parser/Statements.jet:286 (parser_parse_block)
-statement-switch	missing	partial: Jet has dispatch expression forms at Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:185 (parser_expression_form_dispatch_atom); lacks statement-switch lookahead
+statement-switch-covered	covered	covered: Jet emits the same text `only one switch-off attribute can be written on a statement` at Compiler/JetParser/Source/Parser/Statements.jet:1801
 statement-variant-bindings	missing	absent: variant binding type collection for enum match statements
 static-call-lowering	covered	Compiler/JetCodegen/Source/Codegen/StaticCalls.jet:31 (lower_static_call)
 static-calls	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/StaticCalls.jet:31 (lower_static_call); no Jet test
@@ -1691,14 +1722,15 @@ store-directory-handle	missing	untested: behavior at Jetpack/Store/Source/Lifecy
 store-ensure-dir	missing	untested: behavior at Jetpack/Store/Source/ArtifactStore/Codec.jet:254; no Jet test
 store-ingest-nofollow	missing	absent: nofollow flag matches target ABI
 store-module-structure	missing	absent on dev; off-dev port at origin/port/main:Jetpack/CLI/Tests/Store/Tests02.jet:269
-store-quota-footprint	missing	absent: store footprint accounting
+store-quota-footprint-covered	covered	covered: Jet emits the same text `Hangar footprint contains an unsupported node:` at Jetpack/Store/Source/Hangar/AdmissionQuota.jet:119
 store-seal	missing	absent: store seal verification
+store-seal-covered	covered	covered: Jet emits the same text `Hangar seal is not a regular file:` at Jetpack/Store/Source/Seal/SealRecord.jet:212
 store-seal-tests	missing	absent on dev; off-dev port at origin/port/main:Jetpack/CLI/Tests/Store/SealTests.jet:128
 stream-callback-sendability	covered	Compiler/JetSema/Source/Sema/Ownership/Crossings.jet:309 (sema_ownership_crossing_problem)
 stream-cancel-select	missing	untested: behavior at Compiler/JetRuntime/Source/Scheduler.jet:514; no Jet test
 stream-cursor	missing	absent: byte stream cursor reads, bounds and little-endian floats
 string-callbacks	missing	absent: no Jet case or port for this test
-string-match-scan	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:2973 (lower_string_match_scan)
+string-match-scan	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:2981 (lower_string_match_scan)
 string-source-ownership	missing	absent: string len source tier agreement
 string-view-boundary	covered	Compiler/JetSema/Source/Sema/Ownership/StringViews.jet:248 (sema_string_view_return_boundary)
 string-views	missing	absent on dev; off-dev port at origin/port/main:Compiler/JetCodegen/Source/Codegen/Statements.jet:1177
@@ -1717,8 +1749,8 @@ suite-membership	missing	absent: test target named-set membership check
 switch-exhaustive	missing	partial: Jet has switch exhaustiveness for taint only at Compiler/JetSema/Source/Sema/Taint.jet:1289 (sema_taint_switch_exhaustive); lacks ownership-flow switch proof
 switch-lowering	missing	absent: lowered switch-head enum
 switch-lowering-covered	covered	Compiler/JetCodegen/Source/Codegen/Builder.jet:1547 (switch_block)
-switch-subject-lowering	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3183 (lower_switch_subject)
-switch-subject-lowering-missing	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3183 (lower_switch_subject); no Jet test
+switch-subject-lowering	covered	Compiler/JetCodegen/Source/Codegen/Statements.jet:3191 (lower_switch_subject)
+switch-subject-lowering-missing	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Statements.jet:3191 (lower_switch_subject); no Jet test
 sync-ct-carrier-marshalling	obsolete	rust-host plumbing: Rust CT carrier marshalling, std Display trait and interpreter method dispatch for sync values; Jet sync values are native Core values (Core/Sync/Sync.jet:309 list_push)
 syntax-acronyms	missing	absent: acronym splitting, rename-all styles and lexicon respelling
 syntax-core-calls	missing	absent: core call surface (clock, rng, fs, http, process stdin) and capability contract
@@ -1753,6 +1785,7 @@ task-spawn	covered	tests/cases/tir_custom/task_spawn_join.case:1 (task_spawn_joi
 task-state	missing	absent: return inside task body declaration retention
 task-surface	covered	Compiler/JetParser/Source/Parser/Expressions.jet:1354 (parser_parse_task_surface)
 taskgroup-methods	missing	partial: Jet has task-group state at Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:90 (sema_taskgroup_state_init); lacks task spawn inference
+taskgroup-methods-covered	covered	covered: Jet emits the same text `readiness waits are subjectless 'if' tables on plain endpoints` at Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:809
 taskgroup-params	missing	absent: helper spawn join before outer exit
 taskgroup-results	missing	partial: Jet has task-group state at Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:90 (sema_taskgroup_state_init); lacks empty branch rejection
 taskgroup-spawns	missing	partial: Jet has task-group state at Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:90 (sema_taskgroup_state_init); lacks pending spawn record
@@ -1760,6 +1793,7 @@ taskgroup-state	covered	Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:90 (se
 taskgroup-state-missing	missing	partial: Jet has task-group state at Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:90 (sema_taskgroup_state_init); lacks active taskgroup lookup
 tcl-binder	covered	Jetpack/PackageModel/Source/Foreign/Binders/Tcl.jet:16 (pkg_tcl_bind)
 template-tir-rendering	missing	absent: format-TIR template body rendering
+template-tir-rendering-covered	covered	covered: Jet emits the same text `a 'prep loop' source is not a compile-time list` at Compiler/JetSema/Source/Sema/Registration/Derives.jet:1013
 terminal-color	missing	absent: color precedence rules
 terminal-default	missing	absent: PTY terminal default single home
 terminal-key-decode	missing	untested: behavior at Core/Term/Term.jet:250; no Jet test
@@ -1808,7 +1842,9 @@ time-deadline	covered	Core/Tasks/Tasks.jet:127 (timeout)
 time-format	missing	absent: local date display trait signature
 time-sleep	covered	Core/Time/Time.jet:51 (sleep)
 tir-builtin-resolution	missing	absent: Rust TIR builtin-op and closure-op resolver
-tir-call-args	missing	absent: template marker scan and call-argument union widening
+tir-call-args	missing	absent: AST named-fn-value argument predicate
+tir-call-args-covered	covered	Compiler/JetSema/Source/Sema/Expressions/Control.jet:124 (sema_expression_absent)
+tir-call-args-obsolete	obsolete	obsolete: text-scanner template marker struct; cutover-ready:Compiler/JetSema/Source/Sema/Calls/BuildContext.jet:118 ("source strings are retired"); Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:4-5 (no re-lexing)
 tir-canonicalization	missing	absent: invariant expression check
 tir-collections	missing	absent: bare member shorthand forced interpreter
 tir-constant-folding	missing	absent: integer type fit check for folding
@@ -1824,10 +1860,13 @@ toml-host-values	obsolete	rust-host plumbing: Rust TOML item enum for the Rust e
 toml-key-depth	missing	untested: behavior at Core/Encoding/Toml.jet:208; no Jet test
 toml-parse	covered	Core/Encoding/Toml.jet:14 (syntax_error)
 toml-render	covered	Core/Encoding/Toml.jet:661 (render_toml)
-toolchain-path-resolution	missing	absent: E1240 toolchain diagnostic
+toolchain-path-resolution	missing	absent: toolchain resolution on PATH
+toolchain-path-resolution-covered	covered	covered: Jet emits the same text `no Rust build toolchain is available to build this package` at Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet:109
 toolchain-update-env-inputs	missing	absent: env path input for toolchain update
+toolchain-update-env-inputs-covered	covered	covered: Jet emits the same text `Windows helper sequence is invalid` at Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet:495
 toolchain-update-errors	missing	absent: toolchain update error type
 toolchain-update-http	missing	absent: HTTP endpoint value for toolchain update
+toolchain-update-http-covered	covered	covered: Jet emits the same text `toolchain redirect changed scheme or origin` at Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet:192
 toolchain-update-manifest	missing	absent: canonical manifest rendering
 toolchain-update-run	missing	absent: toolchain update run entry
 toolchain-update-state	missing	absent: scheduled delete of replaced toolchain files
@@ -1843,7 +1882,8 @@ transact-undo	missing	absent: shared foreign undo rejects ambiguous owners
 transition-hosts-split	missing	absent on dev; off-dev port at origin/port/main:Jetpack/Environment/Tests/Transition/TransitionPlan02.jet:81
 trusted-core	missing	untested: behavior at Compiler/JetParser/Source/Parser/Entry.jet:217 (parser_parse_prepared); no Jet test
 tuple-literal	covered	Compiler/JetParser/Source/Parser/Expressions.jet:1080 (parser_parse_parenthesized)
-tuple-literal-missing	missing	partial: Jet has E0048 positional tuple teach at Compiler/JetParser/Source/Parser/Expressions.jet:1053; lacks numeric-field error
+tuple-literal-covered	covered	covered: Jet emits the same text `doesn't use numeric field access like '.0' (S73)` at Compiler/JetParser/Source/Parser/Expressions.jet:1722
+tuple-literal-missing	missing	absent: paren-run folding
 tuple-lowering	covered	Compiler/JetCodegen/Source/Codegen/Expressions.jet:1744 (lower_tuple)
 tuple-lowering-missing	missing	untested: behavior at Compiler/JetCodegen/Source/Codegen/Expressions.jet:1744 (lower_tuple); no Jet test
 tuple-shape-collection	covered	Compiler/JetCodegen/Source/Codegen/Functions.jet:1137 (append_tuple_field_rows)
@@ -1916,6 +1956,7 @@ view-field-paths	missing	absent: named view field path
 view-kinds	missing	partial: Jet has view fact snapshots at Compiler/JetSema/Source/Sema/Ownership/Checks.jet:397 (sema_ownership_view_snapshot); lacks view kind query
 view-provenance	missing	partial: Jet has view provenance at Compiler/JetSema/Source/Sema/Ownership/Checks.jet:1240; lacks conservative callback provenance
 view-returns	missing	partial: Jet has view return boundary diagnostics at Compiler/JetSema/Source/Sema/Ownership/StringViews.jet:248 (sema_string_view_return_boundary); lacks aggregate view return check
+view-returns-covered	covered	covered: Jet emits the same text `returned view paths disagree about read or write access` at Compiler/JetSema/Source/Sema/Ownership/Checks.jet:1742
 view-subranges	missing	absent: write into view subranges (AOT tier)
 view-type-windows	missing	partial: Jet has view boundary type checks at Compiler/JetSema/Source/Sema/Ownership/Checks.jet:1240; lacks containment walk
 visibility	covered	Compiler/JetParser/Source/Parser/Items.jet:194 (parser_parse_item_or_import)
@@ -1928,7 +1969,9 @@ web-artifact-writer	missing	absent: changed web build reusing identity path and 
 web-build-goldens	missing	absent: dyn exact-int and strict JSON web JS/wasm golden match
 web-decode-exact-integers	missing	absent: exact-integer web decode with fixed bounds
 web-dev-watch	missing	absent: dev web error overlay with last-good recovery lockstep
-web-emitter-unmatched	missing	absent: no same-stem Jet Web emitter function found for the remaining MIRWeb.rs functions (route, release, descriptor, json and other js_* helpers)
+web-emitter-unmatched	missing	absent: Rust web target selection struct
+web-emitter-unmatched-covered	covered	Compiler/JetCodegen/Source/Emit/Web/Context.jet:61 (jet_web_assets_with_default_shell)
+web-emitter-unmatched-obsolete	obsolete	Rust-host error enum; Jet reports via Compiler/JetCodegen/Source/Emit/Web/Context.jet:152 (jet_web_failure)
 web-examples-doc	missing	absent: semantic corpus policy run with site sources
 web-font-shaping	covered	Compiler/JetCodegen/Source/Emit/Web/Prelude.jet:19 (jet_web_core_is_font_shape)
 web-js-calls	covered	Compiler/JetCodegen/Source/Emit/Web/JavaScriptOps.jet:1192 (jet_web_js_call_values)
