@@ -555,16 +555,14 @@ an omitted argument can be inferred from the expected success value, including
 through the constructor's failure rail. Context never replaces an explicitly
 written element type.
 
-The compiler and runtime aggregates have separate explicit source inventories:
-[`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and
-[`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list).
-Compiler assembly excludes runtime-only units, while a source listed in both
-(for example `OS/Linux.jet` or `ErrLayout.jet`) is deliberately shared. An
-unlisted compiler source still fails assembly. Partial compiler trees must carry
-the runtime manifest and MIR observation generator metadata as well as their
-own source manifest. The
-[`bootstrap source inventory guard`](../../Tools/agent/bootstrap-source-inventory.test.mjs)
-checks that boundary; the
+The compiler is the package graph `jet build Compiler` builds: the CLI package
+and every package its `package.jet` path dependencies reach, each package's
+members found by the driver's source walk. The runtime aggregate keeps its own
+explicit inventory,
+[`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list):
+the compiler leaves runtime-only units out, while a source that is both a
+compiler package member and listed there (for example `OS/Linux.jet` or
+`ErrLayout.jet`) is deliberately shared. The
 [`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
 keeps observation aligned with public-by-default declarations and private fields.
 The compiler's private `Core/Build` kernel uses the same declared enum payload

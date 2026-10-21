@@ -1,31 +1,20 @@
 #!/usr/bin/env node
-// Assemble production sources with each executable fixture. The tuple registry
-// fixture needs Foundation and its authority closure; gate fixtures need the compiler.
+// Production sources with each executable fixture. The tuple registry fixture
+// needs the Foundation package; gate fixtures need the whole compiler (every
+// package the CLI depends on, without the CLI's own entry).
 // Usage: node Compiler/JetSema/Tests/run-gate-fixtures.mjs OUTDIR
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compilerFixtureUnit, compilerPackages } from "../../../Tools/agent/compiler-packages.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
-const manifest = readFileSync(join(repo, "Compiler/Bootstrap/sources.list"), "utf8");
-const sources = manifest.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#") && line !== "Compiler/Bootstrap/Host/Entry.jet");
-// The canonical assemble.mjs package-import rule; tests replace only the entry.
-const packageImport = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_repl|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
-const coreImport = /^use core\.[^\[\n]*$/gm;
-function assemble(paths) {
-    const seenCore = new Set();
-    return paths.map(path => readFileSync(join(repo, path), "utf8").replace(packageImport, blank).replace(coreImport, line => {
-        const key = line.trimEnd();
-        if (seenCore.has(key)) return blank(line);
-        seenCore.add(key);
-        return line;
-    })).join("\n");
-}
+// A fixture is part of the unit's namespace: its compiler package imports blank as production's do.
+const packageImport = new RegExp(`^use (?:${[...compilerPackages(repo).keys()].join("|")})\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)`, "gm");
 const blank = text => text.replace(/[^\n]/g, " ");
-const production = assemble(sources);
-const foundation = assemble(sources.filter(path =>
-    path.startsWith("Compiler/JetFoundation/")));
+const production = compilerFixtureUnit(repo);
+const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
 const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.fixture/GateLedger.jet"],

@@ -25,9 +25,9 @@ Keep the all-parts seed's public Core imports current, including `core.db.sql`;
 otherwise a newly exposed source-owned boundary is absent from the error census.
 
 The separate candidate build requires read-only generator checks and a frontend
-check of the complete compiler assembled by `Compiler/Bootstrap/assemble.mjs`,
+check of the complete compiler package graph (`jet check Compiler/JetCli`),
 using the fresh release verifier. A file-local parse receipt does not establish
-that the assembled compiler resolves its current APIs; inspect nested diagnostics,
+that the compiler packages resolve their current APIs; inspect nested diagnostics,
 not just the transport's top-level `ok` flag. Migrate callers to retained current
 APIs without restoring retired providers or aliases. Append the candidate entry
 only after its real CLI hello succeeds and its collect-all report contains no
@@ -170,11 +170,6 @@ after its formal closeout prefix, without adding a skip-closeout option.
 Report qualified formal proof composition and milestone closeout separately
 as `NOT MET — deferred per owner #59`; stage equivalence and passing suites
 cannot fabricate Lean discharge/standing-safety-net qualification.
-The Rust-hosted `native-compiler --seed-build` does not execute Jet Host/Entry
-and cannot produce that TSV. Its proof instead requires the real host build
-exit zero, a seed log with no error/ICE/panic rows, and verified seed JSON and
-executable ELF hashes. Preserve this hosted/native boundary in the receipt;
-never fabricate an empty keep-going report to pass a hosted seed.
 Before the RC seed build, assemble its exact CLI unit and emit the complete
 inline Rust monolith with the final debug snapshot. Capture that snapshot's
 small release build rustc argv, then type-check the monolith using

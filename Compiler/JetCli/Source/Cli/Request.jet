@@ -126,17 +126,14 @@ fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> J
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
 JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
-// This compiler's identity override (`name@version#<source id>`), for tests and
-// for compilers built before the identity was embedded; else the embedded one.
+// This compiler's identity (`name@version#<source id>`). The toolchain launcher and every
+// chain stage set it; a compiler built by `jet build Compiler` carries no identity of its own.
 JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
 
-// The running compiler's identity: JET_COMPILER_IDENTITY when set, else the
-// identity its assembly embedded (JET_CLI_BUILT_COMPILER_IDENTITY); None in an
-// unassembled tree with no override.
+// The running compiler's identity: JET_COMPILER_IDENTITY; None when it is unset.
 fn jet_cli_compiler_identity() -> String? Never! {
     if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
-    if JET_CLI_BUILT_COMPILER_IDENTITY == "" -> return None
-    Val(JET_CLI_BUILT_COMPILER_IDENTITY)
+    None
 }
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
@@ -1594,9 +1591,3 @@ fn jet_cli_trace_create(target: String, text: String) -> String? Never! {
     cli_files.write(target, text) ?? return Val("{err}")
     None
 }
-
-// The identity (`name@version#<compiler_source_id>`) of the source this compiler
-// was built from. The native assembler (Tools/agent/native-compiler.mjs) writes
-// it into the assembled unit; "" in a tree it did not assemble. It stays the
-// last line of this file, so that rewrite moves no other byte of this file.
-JET_CLI_BUILT_COMPILER_IDENTITY :: ""

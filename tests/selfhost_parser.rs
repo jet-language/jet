@@ -340,7 +340,7 @@ fn expected_tier_stdout() -> String {
 }
 
 /// #4555: the parity source is the jet_parser package plus every package its
-/// `package.jet` `deps` name, transitively, in `sources.list` order. A
+/// `package.jet` `deps` name, transitively, in path order. A
 /// hand-picked file slice drifted each time a parser input gained a
 /// dependency; the package graph is the closure the parser itself builds with.
 fn parser_packages(root: &Path) -> Vec<String> {

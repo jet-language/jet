@@ -280,12 +280,6 @@ journal. Rename provenance comes from uniquely matched checked before/after
 definition facts; when those checks cannot establish a rename, the receipt
 records the exact changed byte region instead.
 
-Focused compiler fixtures can be assembled with
-`node Compiler/Bootstrap/assemble.mjs --fixture Compiler/JetCli/Tests/FrontDoor.jet`
-under an isolated `HOME`. The fixture is appended to the full canonical unit
-using its ordinary import and source-provenance rules; this does not make a
-per-file compiler check valid or substitute for running the fixture.
-
 `fix memory` uses exercised runtime witnesses, not whole-program memory proof.
 It applies only a single repair whose original byte span still matches the
 source (or recognizes that the replacement is already present). Overlapping,

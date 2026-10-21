@@ -43,22 +43,24 @@ fn prepare_test_fixture_root(path: &Path) {
     }
 }
 
-/// One self-hosting parity unit: the `Compiler/` sources `include` selects,
-/// concatenated in `Compiler/Bootstrap/sources.list` order, each preceded by a
-/// `// [label: path]` marker line.
+/// One self-hosting parity unit: the `Compiler/` package sources `include` selects, byte-sorted,
+/// each preceded by a `// [label: path]` marker line.
 pub fn compiler_parity_source(label: &str, include: impl Fn(&str) -> bool) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = fs::read_to_string(root.join("Compiler/Bootstrap/sources.list"))
-        .expect("Compiler/Bootstrap/sources.list");
-    let mut core_imports = std::collections::HashSet::new();
-    let mut source = String::new();
-    for row in manifest.lines() {
-        let path = row.trim();
-        if path.is_empty() || path.starts_with('#') || !include(path) {
-            continue;
+    let (mut paths, mut dirs) = (std::collections::BTreeSet::new(), vec![root.join("Compiler")]);
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).unwrap_or_else(|error| panic!("read {dir:?}: {error}")) {
+            let path = entry.unwrap_or_else(|error| panic!("read {dir:?}: {error}")).path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "jet") {
+                paths.insert(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+            }
         }
-        let text = fs::read_to_string(root.join(path))
-            .unwrap_or_else(|error| panic!("read parity source `{path}`: {error}"));
+    }
+    let (mut core_imports, mut source) = (std::collections::HashSet::new(), String::new());
+    for path in paths.iter().filter(|path| include(path.as_str())) {
+        let text = fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("{path}: {error}"));
         source.push_str(&format!("// [{label}: {path}]\n"));
         source.push_str(&without_package_imports(&text, &mut core_imports));
         source.push('\n');
@@ -66,12 +68,10 @@ pub fn compiler_parity_source(label: &str, include: impl Fn(&str) -> bool) -> St
     source
 }
 
-/// D-MOD-CYCLE1=A: Compiler/ files import their dependency packages with
-/// `use jet_<package>.[names]`; a concatenated parity source is one
-/// namespace, so those import blocks are dropped. Files may also repeat one
-/// single-line Core import (`use core.text as unicode`); inside one unit the
-/// repeat is a duplicate import name (E0105), so only the first is kept, as
-/// Compiler/Bootstrap/assemble.mjs does.
+/// Compiler/ files import their dependency packages with `use jet_<package>.[names]`; a
+/// concatenated parity source is one namespace, so those import blocks are dropped. Files may
+/// also repeat one single-line Core import (`use core.text as unicode`); inside one unit the
+/// repeat is a duplicate import name (E0105), so only the first is kept.
 fn without_package_imports(text: &str, core_imports: &mut std::collections::HashSet<String>) -> String {
     let mut kept = String::with_capacity(text.len());
     let mut in_import = false;

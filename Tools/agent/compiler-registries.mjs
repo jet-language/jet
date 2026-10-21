@@ -5,7 +5,7 @@
 // run --jet JET --manifest JSON [--receipt JSON] executes every listed entry.
 // BLOCKED entries remain in the manifest and make the receipt fail. Supporting
 // files and non-registry test inputs remain visible in inventory, not counted
-// as executed registries. The authoritative source order is Bootstrap/sources.list.
+// as executed registries. A registry runs in place, in package form, inside its Tests package.
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -100,22 +100,6 @@ const stripImports = (text, seen) => text.replace(/^use (?:jet_\w+|compiler_boot
         if (seen.has(line.trimEnd())) return line.replace(/[^\n]/g, ' ');
         seen.add(line.trimEnd()); return line;
     });
-// Same report/run omissions as the existing run-lint-fixtures assembler;
-// only its MIR builders are support, never a second executable entry.
-function lintBuilderSupport(text) {
-    let skipping = false;
-    return text.split('\n').filter(line => {
-        if (skipping) {
-            if (line === '}') skipping = false;
-            return false;
-        }
-        if (/^(?:pub )?fn (?:fx_report\w*|run)\(/.test(line)) {
-            skipping = line.trimEnd().endsWith('{');
-            return false;
-        }
-        return true;
-    }).join('\n');
-}
 function inventory() {
     return readdirSync(join(repo, 'Compiler'), { withFileTypes: true }).filter(item => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name)).flatMap(item => {
         const directory = join(repo, 'Compiler', item.name, 'Tests');
@@ -197,19 +181,11 @@ function nativeRuntime(jet) {
 function generate() {
     if (options.head !== currentHead()) throw Error('manifest requires its pinned committed source SHA');
     const out = options.out ?? join(homedir(), '.cache/jet-dev/scratch/RegistryRunnerLead', options.head);
-    if (out === repo || out.startsWith(repo + '/')) throw Error('assembled registries belong outside the repository');
+    if (out === repo || out.startsWith(repo + '/')) throw Error('registry outputs belong outside the repository');
     if (existsSync(join(out, 'manifest.json'))) throw Error(`manifest output already sealed: ${out}; choose a fresh --out`);
     mkdirSync(out, { recursive: true });
-    const home = join(out, 'assembly-home'); mkdirSync(home, { recursive: true });
-    const assembled = spawnSync(process.execPath, [join(repo, 'Compiler/Bootstrap/assemble.mjs')],
-        { cwd: repo, env: { ...environment(), HOME: home, JET_BOOTSTRAP_SOURCE_ROOT: repo }, encoding: 'utf8', maxBuffer: 128 << 20 });
-    writeFileSync(join(out, 'assembly.log'), (assembled.stdout ?? '') + (assembled.stderr ?? ''));
     const census = inventory(), entries = [];
-    const assemblyError = assembled.error?.message ?? (assembled.status !== 0 ? `canonical assembler exited ${assembled.status}; see ${join(out, 'assembly.log')}` : null);
-    const base = assemblyError ? '' : readFileSync(join(home, '.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet'), 'utf8');
-    const baseNames = testsIn(base);
-    const manifests = ['Compiler/Bootstrap/sources.list', 'Compiler/JetRuntime/sources.list'].map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) }));
-    const sourceMap = assemblyError ? null : JSON.parse(readFileSync(join(home, '.cache/jet-luna/compiler-bootstrap/compiler.map.json'), 'utf8'));
+    const manifests = ['Compiler/JetRuntime/sources.list'].map(path => ({ path, sha256: hash(readFileSync(join(repo, path))) }));
     for (const row of registryRows(census)) {
         const standalone = row.package === 'JetRuntime' && row.mode === 'test';
         if (!standalone) {
@@ -217,34 +193,32 @@ function generate() {
             if (transport) { entries.push(transport); continue; }
         }
         const mode = row.mode;
-        let reason = assemblyError;
+        let reason = null;
         if (!row.entry && !row.names.length) reason = 'hand-ABI fixture has no run or Test entry; its exact native/C witness must be registered';
         if (row.package === 'JetRuntime' && !standalone) reason = 'runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness';
         if (row.package === 'JetBackend' && row.entry) reason = 'backend artifact/FFI registry needs its existing run-*.mjs source assembly plus native artifact execution/checker; a returned fn run is not its success verdict';
-        const sources = [row.source];
-        if (row.package === 'JetParser' && row.names.length) sources.unshift('Compiler/JetParser/Tests/Support.jet');
-        if (row.source === 'Compiler/JetParser/Tests/SelfHost.jet') sources.push('Compiler/JetParser/Tests/SelfHostProbe.jet');
-        if (['Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet', 'Compiler/JetOptimizer/Tests/LintFixtures.jet'].includes(row.source)) sources.unshift('Compiler/JetBackend/Tests/LowerFixtures.jet');
-        if (row.source === 'Compiler/JetFoundation/Tests/Trace/Validation.jet') sources.unshift('Compiler/JetFoundation/Tests/Trace/JetTrace.jet');
         const id = row.id;
-        const stdout = mode === 'test' ? 'jet.test.v1' : `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`;
-        const entry = { id, package: row.package, mode, path: join(out, id, 'registry.jet'), cwd: join(out, id),
-            sha256: row.sha256, stdout, testCount: mode === 'test' ? (standalone ? 0 : baseNames.length) + row.names.length : 1,
-            sources, sourceManifests: manifests.map(item => item.path) };
+        const cwd = join(out, id);
+        if (!standalone) {
+            // Package form: the registry is its own file inside its Tests package, which
+            // declares and imports the compiler packages it uses; it runs in place.
+            const path = join(repo, row.source);
+            const entry = { id, package: row.package, mode, kind: 'package', path, cwd, sha256: hash(readFileSync(path)),
+                stdout: mode === 'test' ? 'jet.test.v1' : null, testCount: mode === 'test' ? row.names.length : 1,
+                testNames: mode === 'test' ? row.names : [], sources: [row.source], sourceManifests: manifests.map(item => item.path) };
+            entry.environment = registryEnvironment(entry);
+            entries.push(reason ? { ...entry, status: 'BLOCKED', reason } : entry);
+            continue;
+        }
+        const stdout = 'jet.test.v1';
+        const entry = { id, package: row.package, mode, path: join(cwd, 'registry.jet'), cwd,
+            sha256: row.sha256, stdout, testCount: row.names.length, sources: [row.source], sourceManifests: manifests.map(item => item.path) };
         entry.environment = registryEnvironment(entry);
         if (reason) { entries.push({ ...entry, status: 'BLOCKED', reason }); continue; }
-        const seen = new Set([...(standalone ? '' : base).matchAll(/^use core\.[^\[\n]*$/gm)].map(match => match[0].trimEnd()));
-        let body = standalone ? '' : base;
-        for (const path of sources) {
-            let text = readFileSync(join(repo, path), 'utf8');
-            if (path === 'Compiler/JetBackend/Tests/LowerFixtures.jet') text = lintBuilderSupport(text);
-            if (path === row.source && mode === 'run') text = text.replace(/^fn run(?=\s*\()/m, 'fn compiler_registry_body');
-            body += `\n// [compiler registry source: ${path}]\n` + stripImports(text, seen) + '\n';
-        }
-        if (mode === 'run') body += `\nfn run() {\n    compiler_registry_body()\n    print(${JSON.stringify(stdout.trimEnd())})\n}\n`;
+        const body = `\n// [compiler registry source: ${row.source}]\n` + stripImports(readFileSync(join(repo, row.source), 'utf8'), new Set()) + '\n';
         entry.sha256 = hash(Buffer.from(body));
-        entry.testNames = mode === 'test' ? testsIn(body) : [];
-        if (mode === 'test') entry.testCount = entry.testNames.length;
+        entry.testNames = testsIn(body);
+        entry.testCount = entry.testNames.length;
         mkdirSync(entry.cwd, { recursive: true });
         writeFileSync(entry.path, body);
         writeFileSync(join(entry.cwd, 'package.jet'), 'name: "compiler_registry"\nversion: "0.0.1"\nedition: "2028"\n');
@@ -265,7 +239,7 @@ function generate() {
     if (options.head !== currentHead()) throw Error('pinned source changed during assembly');
     const sourceProof = { path: proofPath, sha256: hash(readFileSync(proofPath)), tree: JSON.parse(readFileSync(proofPath, 'utf8')).tree };
     const manifest = { head: options.head, completeCompilerRegistries: true, repo, sourceProof, sourceManifests: manifests,
-        compilerSources: (sourceMap?.files ?? []).map(({ path, sha256 }) => ({ path, sha256 })), inventory: census, testkit: kit, entries,
+        inventory: census, testkit: kit, entries,
         retiredWithRust: { testkitCases: kit.retiredCases,
             compilerRegistries: retirements().filter(row => row.path.startsWith('Compiler/')), bootstrapTests: retiredBootstrapTests() } };
     json(join(out, 'manifest.json'), manifest);
@@ -285,7 +259,6 @@ async function run() {
     if (JSON.stringify(current) !== JSON.stringify(manifest.inventory)) throw Error('registry source inventory changed since manifest');
     for (const source of manifest.sourceManifests) if (hash(readFileSync(join(repo, source.path))) !== source.sha256) throw Error(`source manifest changed: ${source.path}`);
     if (JSON.stringify(testkitInventory()) !== JSON.stringify(manifest.testkit)) throw Error('testkit sources/cases changed since manifest');
-    for (const source of manifest.compilerSources) if (hash(readFileSync(join(repo, source.path))) !== source.sha256) throw Error(`compiler source changed: ${source.path}`);
     // Partition only after all full-manifest integrity/completeness checks.
     const selected = partitionRegistries(manifest.entries, options.shard);
     const receiptPath = options.receipt ?? `${options.manifest}.receipt.json`;
@@ -358,9 +331,6 @@ async function run() {
                     if (report.tests.length !== entry.testCount || report.passed + report.expectedFailures !== entry.testCount) throw Error('executed test count does not match registry');
                     if (JSON.stringify(report.tests.map(test => test.name).sort()) !== JSON.stringify(entry.testNames.slice().sort())) throw Error('executed test names do not match complete registry');
                     result.report = report;
-                } else {
-                    const lines = (child.stdout ?? '').split('\n');
-                    if (lines.filter(line => line + '\n' === entry.stdout).length !== 1 || !(child.stdout ?? '').endsWith(entry.stdout)) throw Error('exact terminal registry success sentinel/count missing');
                 }
                 result.status = 'PASS'; receipt.passed++;
             } catch (error) { result.status = 'FAIL'; result.reason = error.message; receipt.failed++; }

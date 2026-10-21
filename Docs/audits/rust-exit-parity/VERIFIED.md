@@ -11,7 +11,7 @@ Method: each Rust item's fingerprint (diagnostic codes, message strings, enum va
 - `PORTED`: score >= 0.70 and every diagnostic code present; or, for a thin item (fingerprint weight < 2), the registry's body or a same-name item in the area's Jet directories (`basis` `thin:*`).
 - `PARTIAL`: the best Jet counterpart scores 0.30-0.70, misses a diagnostic code, or is the registry's body but scores lower; `missing` lists the absent codes, messages, variants, members, numbers and a branch collapse.
 - `PORTED-UNMERGED`: the best counterpart exists only on a secondary tree, in a file that tree compiled.
-- `DRAFT-ONLY`: the best counterpart exists only on a secondary tree, in a Compiler file outside that tree's compiler unit (`Compiler/Bootstrap/sources.list`) or a Jetpack CLI file: an uncompiled transliteration, not a port.
+- `DRAFT-ONLY`: the best counterpart exists only on a secondary tree, in a Compiler file outside that tree's compiler unit (the member files of its compiler packages; `Compiler/Bootstrap/sources.list` on a tree from before the package form) or a Jetpack CLI file: an uncompiled transliteration, not a port.
 - `ABSENT`: no Jet counterpart scores 0.30 (`missing` names the nearest miss); `basis` `route-census` marks a live Core route whose export no Jet runtime `#Export(c)` defines.
 - `OBSOLETE`: retired with Rust; `reason` is the ledger drop reason, the reviewed triage group rationale, or Rust std-trait glue.
 

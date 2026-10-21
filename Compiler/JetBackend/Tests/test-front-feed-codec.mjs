@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { Converter, encode, jetDecoder, loadMirSchema, parseJetSchema, parseRustDebug } from './mir-debug.mjs';
 import { decodeStream, jetWriter } from './front-feed-codec.mjs';
 import { nativeCommandProblem } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { selfInventory } from './run-self-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const schema = loadMirSchema(repo);
 // Native command status is strict: errors, signals, and nonzero exits never count as passes.
@@ -180,13 +179,4 @@ const observedOperations = decodeStream(allTokens.join('\n'), schema).program.fu
 assert.deepEqual(observedOperations, operations.map(operation => operation.name));
 const observedProgram = decodeStream(allTokens.join('\n'), schema).program;
 assert.equal(observedProgram.functions[0].blocks[0].instructions.find(instruction => instruction.operation.$variant === 'EnumIs').operation.variant, '');
-observedProgram.source_files = [{ id: { value: '0' }, path: '/unit/selfhost.jet', source: '' }];
-const inventoryMap = { source_segments: [{ generated: { start: 0, end: 100 }, source_file: 'Compiler/JetLexer/Source/Lexer.jet' }], mir_observer: { generated: { start: 100, end: 200 } } };
-assert.equal(selfInventory(observedProgram, inventoryMap, '/unit/selfhost.jet').packages.get('JetLexer').length, 1);
-observedProgram.functions[0].span.start = '100';
-assert.equal(selfInventory(observedProgram, inventoryMap, '/unit/selfhost.jet').packages.get('Bootstrap').length, 1);
-observedProgram.source_files[0].path = '/unit/external.jet';
-const externalInventory = selfInventory(observedProgram, inventoryMap, '/unit/selfhost.jet');
-assert.equal(externalInventory.packages.get('Unmapped').length, 1);
-assert.equal(externalInventory.operations.size, operations.length);
 console.log(`front-feed codec: checked schema mappings (including PtrFromAddr), ${operations.length} operation variants and strict observation passed`);

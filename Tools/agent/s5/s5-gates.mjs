@@ -20,7 +20,7 @@ cheap.push(start('check-jet-generators', [jet, 'test', 'Tools/testkit', 'check '
 for (const script of ['Tools/agent/RuntimeGenerators', 'Tools/agent/LexerKeywordRows.jet']) {
   cheap.push(start('test-' + script.split('/').pop().replace(/\.jet$/, ''), [jet, 'test', script]));
 }
-cheap.push(start('bootstrap-source-inventory', [node, '--test', 'Tools/agent/bootstrap-source-inventory.test.mjs']));
+cheap.push(start('compiler-packages', [node, '--test', 'Tools/agent/compiler-packages.test.mjs']));
 cheap.push(start('mir-schema-grammar', [node, '--test', 'Compiler/JetBackend/Tests/mir-schema.test.mjs']));
 cheap.push(start('proof-source-guard', [node, '--test', 'Tools/agent/proof-source.test.mjs']));
 cheap.push(start('core-type-references', [node, '--test', 'Tools/agent/core-type-references.test.mjs']));

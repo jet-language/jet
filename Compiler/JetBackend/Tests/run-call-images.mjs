@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compilerPackages, compilerSources } from '../../../Tools/agent/compiler-packages.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const out = process.argv[2];
 if (!out) throw new Error('usage: run-call-images.mjs <output directory>');
@@ -90,9 +91,8 @@ let parts = [
   ].map(body),
 ];
 if (process.argv.includes('--values') || process.argv.includes('--session')) {
-  const foundation = read('Compiler/Bootstrap/sources.list').split('# Sema:')[0]
-    .split('\n').map(line => line.trim()).filter(line => line.startsWith('Compiler/JetFoundation/')
-      && line !== 'Compiler/JetFoundation/Source/MIR/MIR.jet');
+  const foundation = compilerSources(repo, compilerPackages(repo, 'Compiler/JetFoundation'))[0].files
+    .filter(path => path !== 'Compiler/JetFoundation/Source/MIR/MIR.jet');
   parts = [
     ...parts.slice(0, -1),
     ...comptimeSchema(foundation),

@@ -10,7 +10,6 @@ Tools/agent/cache/laneS.sh node your-small-job.mjs
 Tools/agent/cache/laneB.sh 8 command args
 Tools/agent/cache/safe-jet.sh check path/to/program.jet
 Tools/agent/cache/safe-cargo.sh check -p jet
-Tools/agent/cache/isocheck.sh WorkerName Compiler/JetLexer/SomeFile.jet
 node Tools/agent/cache/cache-cutover.mjs
 node Tools/agent/cache/purge-bulk.mjs
 ```
@@ -20,10 +19,6 @@ node Tools/agent/cache/purge-bulk.mjs
   three serialized slots; `JET`, `SAFE_JET_MEM` and `SAFE_JET_TIMEOUT` override it.
   `safe-cargo.sh` serializes Cargo and sets disk-backed scratch and resource caps.
   These wrappers require Linux systemd user scopes and flock.
-- `isocheck*.sh` assemble a worker-specific source snapshot under `iso/` and
-  check it with the frozen compiler. The priority variant bypasses the shared
-  unitcheck lane and is Main-only. Both retain the old compiler-bootstrap path
-  **inside a private HOME** until the coordinated host rebuild.
 - `mem-guard.sh` is an opt-in long-running emergency guard: below 7 GiB available
   RAM it kills the largest eligible compiler/build process and logs the action.
   Only Main should start it; it is not a substitute for job memory caps.

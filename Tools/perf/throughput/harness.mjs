@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { generateMixed } from '../scaling/generate.mjs';
 import { countLines } from '../scaling/mixed.mjs';
 import { parseCounters, phaseTable, readTrace, runMeasured } from './measure.mjs';
+import { WORKSPACE_FILES, compilerInputs, compilerPackages, compilerSources } from '../../agent/compiler-packages.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '../../..');
@@ -31,24 +32,18 @@ export const QUICK_BASELINE_SCHEMA = 'jet.compile-throughput.quick-baseline/v1';
 export const QUICK_PHASE_FLOOR_NS = 100_000_000;
 export const QUICK_MEMORY_FLOOR_BYTES = 64 * 1024 * 1024;
 
-const USAGE = `Usage: node Tools/perf/throughput/harness.mjs --compiler KIND=PATH [options]
-  KIND is bootstrap (a generated Jet compiler: jetc0, jetc1, ...; driven by the
-  JET_BOOTSTRAP_* runner protocol) or jet (the \`jet build\` command).
+const USAGE = `Usage: node Tools/perf/throughput/harness.mjs --compiler jet=PATH [options]
+  PATH is a \`jet\` binary; each sample is one \`jet build\`.
   --lane quick|full        quick (default): bench30k, frontend only, 3 samples,
                            checked against --baseline with Tools/perf/baseline.json's
                            latency/memory regression budgets. full: the manifest cell.
   --programs a,b           bench300k, bench30k, selfhost (default: the lane's)
-  --selfhost-rung L1..L5   selfhost unit (default L5, the whole compiler); other
-                           rungs are recorded as selfhost-<rung>, never as selfhost
   --source-tree DIR        compiler sources for selfhost (default: this checkout)
   --samples N --warmups N  per arm (default: lane's samples, 1 warmup)
   --arms default,single    arms to run (default both)
   --single-control SPEC    how the single arm forces one job: env:NAME=VALUE or
                            arg:FLAG (none until D-JOBS1; the arm is then recorded
                            as uncontrolled and still checked for determinism)
-  --backend | --no-backend build and run the artifact (default: full on, quick off)
-  --keep DIR               retained stage-zero dir for bootstrap backend builds
-                           (default: the compiler's directory)
   --compiler-profile TEXT  build profile when it cannot be read from the build
   --memory-max SIZE        systemd scope cap per measured command (default 12G)
   --timeout SECONDS        per measured command (default 14400)
@@ -59,15 +54,14 @@ const USAGE = `Usage: node Tools/perf/throughput/harness.mjs --compiler KIND=PAT
 
 function options(args) {
   const config = {
-    lane: 'quick', compiler: null, programs: null, rung: 'L5', sourceTree: REPO, samples: null, warmups: 1,
-    arms: ['default', 'single'], singleControl: null, backend: null, keep: null, profile: null,
+    lane: 'quick', compiler: null, programs: null, sourceTree: REPO, samples: null, warmups: 1,
+    arms: ['default', 'single'], singleControl: null, profile: null,
     memoryMax: '12G', timeoutMs: 14400 * 1000, workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/throughput'),
     receipt: null, baseline: path.join(here, 'quick-baseline.json'), writeBaseline: null,
   };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--help') return null;
-    if (flag === '--backend' || flag === '--no-backend') { config.backend = flag === '--backend'; continue; }
     const value = args[++i];
     if (value === undefined) throw new Error(`Missing value for ${flag}`);
     switch (flag) {
@@ -78,13 +72,11 @@ function options(args) {
         break;
       }
       case '--programs': config.programs = value.split(','); break;
-      case '--selfhost-rung': config.rung = value; break;
       case '--source-tree': config.sourceTree = path.resolve(value); break;
       case '--samples': config.samples = Number(value); break;
       case '--warmups': config.warmups = Number(value); break;
       case '--arms': config.arms = value.split(','); break;
       case '--single-control': config.singleControl = value; break;
-      case '--keep': config.keep = path.resolve(value); break;
       case '--compiler-profile': config.profile = value; break;
       case '--memory-max': config.memoryMax = value; break;
       case '--timeout': config.timeoutMs = Number(value) * 1000; break;
@@ -96,13 +88,11 @@ function options(args) {
     }
   }
   if (!['quick', 'full'].includes(config.lane)) throw new Error('--lane must be quick or full');
-  if (!config.compiler || !['bootstrap', 'jet'].includes(config.compiler.kind)) throw new Error('--compiler must be bootstrap=PATH or jet=PATH');
+  if (!config.compiler || config.compiler.kind !== 'jet') throw new Error('--compiler must be jet=PATH');
   if (!fs.existsSync(config.compiler.path)) throw new Error(`No compiler at ${config.compiler.path}`);
   config.programs ??= config.lane === 'quick' ? ['bench30k'] : ['bench300k', 'selfhost'];
   for (const program of config.programs) if (!['bench300k', 'bench30k', 'selfhost'].includes(program)) throw new Error(`Unknown program: ${program}`);
-  if (!/^L[1-5]$/.test(config.rung)) throw new Error('--selfhost-rung must be L1..L5');
   config.samples ??= config.lane === 'quick' ? 3 : 5;
-  config.backend ??= config.lane === 'full';
   if (!Number.isSafeInteger(config.samples) || config.samples < 1) throw new Error('--samples must be a positive integer');
   if (!Number.isSafeInteger(config.warmups) || config.warmups < 0) throw new Error('--warmups must be a nonnegative integer');
   if (!config.arms.length || config.arms.some(arm => !['default', 'single'].includes(arm))) throw new Error('--arms takes default and/or single');
@@ -170,38 +160,11 @@ function commit() {
   return { head, dirty };
 }
 
-// The compiler's build profile, read from the build that produced it.
-// Generated compilers: the backend Cargo manifest beside the binary's build
-// (stage zero's for jetc0, the stage's backend project for jetc1+): every
-// [profile.*] and per-package opt-level row, summarized and digested.
+// The compiler's build profile: the cargo profile directory of a cargo-built
+// `jet`, else the operator's --compiler-profile.
 export function buildProfile(compiler, override) {
   if (override) return { source: 'operator', description: override };
-  const dir = path.dirname(compiler.path);
-  const candidates = compiler.kind === 'bootstrap'
-    ? [path.join(dir, 'stage-zero/Cargo.toml'), path.join(dir, '../backend-jetc1/Cargo.toml'), path.join(dir, `../backend-${path.basename(compiler.path)}/Cargo.toml`)]
-    : [];
-  for (const manifest of candidates) {
-    if (!fs.existsSync(manifest)) continue;
-    const text = fs.readFileSync(manifest, 'utf8');
-    const profiles = {};
-    let current = null;
-    for (const line of text.split('\n')) {
-      const header = /^\[profile\.([^.\]]+)(?:\.package\.([^\]]+))?\]/.exec(line);
-      if (header) { current = { profile: header[1], package: header[2] ?? '*' }; continue; }
-      if (/^\[/.test(line)) { current = null; continue; }
-      const opt = /^opt-level\s*=\s*("?)(\w+)\1/.exec(line);
-      if (current && opt) {
-        const row = (profiles[current.profile] ??= { default_opt_level: null, package_opt_levels: {} });
-        if (current.package === '*') row.default_opt_level = opt[2];
-        else row.package_opt_levels[opt[2]] = (row.package_opt_levels[opt[2]] ?? 0) + 1;
-      }
-    }
-    const envFile = path.join(dir, 'jetc0.env');
-    const pkg = fs.existsSync(envFile) ? /^package=(.*)$/m.exec(fs.readFileSync(envFile, 'utf8'))?.[1] ?? null : null;
-    const binaryDir = path.basename(path.dirname(compiler.path));
-    return { source: path.relative(dir, manifest), manifest_sha256: sha256(text), package: pkg, cargo_profile_dir: binaryDir, profiles };
-  }
-  if (compiler.kind === 'jet' && /\/release\/[^/]+$/.test(compiler.path)) {
+  if (/\/release\/[^/]+$/.test(compiler.path)) {
     return { source: 'cargo target directory', description: 'cargo --release (workspace Cargo.toml [profile.release])', cargo_profile_dir: 'release' };
   }
   throw new Error(`Cannot read the build profile of ${compiler.path}; pass --compiler-profile`);
@@ -222,58 +185,44 @@ function prepareBench(id, dir) {
   };
 }
 
+// The compiler in package form: the workspace files and every compiler package
+// of --source-tree, copied at their repository paths; the sample runs
+// `jet build Compiler` there with that tree's Core (JET_TOOLCHAIN_ROOT).
 function prepareSelfhost(config, dir) {
   fs.rmSync(dir, { recursive: true, force: true });
-  const rungs = path.join(dir, 'rungs');
-  const result = run(process.execPath, [path.join(REPO, 'Tools/agent/stage1/ladder.mjs'), 'rungs', config.sourceTree, rungs]);
-  if (result.status !== 0) throw new Error(`ladder.mjs rungs failed: ${result.stderr.trim().split('\n').slice(-3).join(' | ')}`);
-  const project = path.join(rungs, config.rung, 'project');
-  const unit = fs.readFileSync(path.join(project, 'src/compiler.jet'));
-  const lines = countLines(unit.toString('utf8'));
-  return {
-    failures: [], entry: 'src/compiler.jet', expected: null, project,
-    source: {
-      kind: 'assembled', rung: config.rung, source_tree: config.sourceTree, sha256: sha256(unit),
-      physical_lines: lines.physical, code_lines: lines.code, bytes: unit.length,
-      functions: (unit.toString('utf8').match(/^\s*(pub )?fn /gm) ?? []).length,
-    },
-  };
-}
-
-// Receipt and diagnostics of one bootstrap runner compile.
-function bootstrapOutcome(sample) {
-  const text = fs.existsSync(sample.receiptPath) ? fs.readFileSync(sample.receiptPath, 'utf8') : '';
-  const field = name => new RegExp(`^${name}=(.*)$`, 'm').exec(text)?.[1] ?? null;
-  const reports = text.split('\n').filter(line => line.startsWith('report_json=')).map(line => line.slice('report_json='.length));
-  const errors = reports.map(line => { try { return JSON.parse(line); } catch { return { severity: 'error', what: 'unparsable report' }; } })
-    .filter(report => report.severity === 'error');
-  const problems = [];
-  if (!text) problems.push('no compiler receipt');
-  else {
-    if (field('mode') !== 'runner') problems.push(`receipt mode ${field('mode')}`);
-    if (field('complete') !== 'true') problems.push('receipt complete=false');
-    if (!(Number(field('source_bytes')) > 0)) problems.push('receipt source_bytes=0');
-    if (!fs.existsSync(sample.outputPath)) problems.push('no emitted output');
+  const project = path.join(dir, 'project');
+  const roots = [...WORKSPACE_FILES, ...[...compilerPackages(config.sourceTree).values()].map(directory => path.relative(config.sourceTree, directory))];
+  for (const file of compilerInputs(config.sourceTree, roots)) {
+    fs.mkdirSync(path.dirname(path.join(project, file)), { recursive: true });
+    fs.copyFileSync(path.join(config.sourceTree, file), path.join(project, file));
   }
-  for (const error of errors.slice(0, 3)) problems.push(`${error.code ?? ''} ${error.what ?? ''} (${path.basename(error.file ?? '')}:${error.line ?? ''})`.trim());
+  const hash = crypto.createHash('sha256');
+  const shape = { physical_lines: 0, code_lines: 0, bytes: 0, functions: 0, files: 0 };
+  for (const file of compilerSources(config.sourceTree).flatMap(entry => entry.files)) {
+    const text = fs.readFileSync(path.join(config.sourceTree, file), 'utf8');
+    const lines = countLines(text);
+    hash.update(`${file}\0${text.length}\0`).update(text);
+    shape.physical_lines += lines.physical;
+    shape.code_lines += lines.code;
+    shape.bytes += Buffer.byteLength(text);
+    shape.functions += (text.match(/^\s*(pub )?fn /gm) ?? []).length;
+    shape.files += 1;
+  }
   return {
-    problems,
-    artifact: fs.existsSync(sample.outputPath) ? sample.outputPath : null,
-    diagnostics: reports.join('\n'),
-    compiler_identity: field('compiler_identity'),
-    report_count: Number(field('report_count') ?? 0),
+    failures: [], entry: 'Compiler', expected: null, project, buildDir: 'Compiler/JetCli/.jet/build', toolchainRoot: config.sourceTree,
+    source: { kind: 'packages', source_tree: config.sourceTree, sha256: hash.digest('hex'), ...shape },
   };
 }
 
-// `jet build` publishes no artifact path, so the fresh project's .jet/build
-// must hold exactly one executable.
-function jetOutcome(sample, status) {
+// `jet build` publishes no artifact path, so the fresh project's build
+// directory must hold exactly one executable.
+function jetOutcome(sample, status, buildDir) {
   const problems = [];
   if (status !== 0) problems.push(`jet build exited ${status}`);
-  const buildDir = path.join(sample.project, '.jet/build');
-  const executables = fs.existsSync(buildDir) ? fs.readdirSync(buildDir)
-    .map(name => path.join(buildDir, name)).filter(file => fs.statSync(file).isFile() && (fs.statSync(file).mode & 0o111) && !file.endsWith('.rs')) : [];
-  if (status === 0 && executables.length !== 1) problems.push(`.jet/build holds ${executables.length} executables, expected 1`);
+  const directory = path.join(sample.project, buildDir);
+  const executables = fs.existsSync(directory) ? fs.readdirSync(directory)
+    .map(name => path.join(directory, name)).filter(file => fs.statSync(file).isFile() && (fs.statSync(file).mode & 0o111)) : [];
+  if (status === 0 && executables.length !== 1) problems.push(`${buildDir} holds ${executables.length} executables, expected 1`);
   const stderr = fs.readFileSync(sample.stderrPath, 'utf8');
   return { problems, artifact: executables.length === 1 ? executables[0] : null, executable: executables[0] ?? null, diagnostics: stderr };
 }
@@ -293,7 +242,6 @@ function singleControl(config, arm) {
 async function compileSample(config, program, arm, dir) {
   const sample = {
     project: path.join(dir, 'project'), store: path.join(dir, 'store'), tracePath: path.join(dir, 'trace.json'),
-    outputPath: path.join(dir, 'out.rs'), receiptPath: path.join(dir, 'receipt'),
     stdoutPath: path.join(dir, 'compile.stdout'), stderrPath: path.join(dir, 'compile.stderr'),
   };
   // The clean lane: one fresh copy of the program at the same path for every
@@ -306,59 +254,20 @@ async function compileSample(config, program, arm, dir) {
   sample.project = fixed;
   fs.mkdirSync(sample.store, { recursive: true });
   const control = singleControl(config, arm);
-  let argv;
-  let env;
-  if (config.compiler.kind === 'bootstrap') {
-    env = { HOME: os.homedir(), PATH: process.env.PATH, TMPDIR: dir, LC_ALL: 'C',
-      JET_BOOTSTRAP_MODE: 'runner', JET_BOOTSTRAP_FACTORY_TIER: 'aot', JET_BOOTSTRAP_SOURCE_ROOT: sample.project,
-      JET_BOOTSTRAP_ENTRY: program.entry, JET_BOOTSTRAP_OUTPUT: sample.outputPath, JET_BOOTSTRAP_RECEIPT: sample.receiptPath,
-      JET_STORE_DIR: sample.store, RUST_MIN_STACK: '8388608', JET_TRACE_FILE: sample.tracePath, ...control.env };
-    argv = scoped(config, ['env', '-i', ...Object.entries(env).map(([key, value]) => `${key}=${value}`), config.compiler.path, ...control.args]);
-  } else {
-    env = { ...process.env, JET_STORE_DIR: sample.store, JET_TRACE_FILE: sample.tracePath, NO_COLOR: '1', TMPDIR: dir, ...control.env };
-    argv = scoped(config, [config.compiler.path, 'build', '--color=never', ...control.args, program.entry]);
-  }
-  // systemd-run reaches the user manager through the caller's environment;
-  // a bootstrap compiler sees only the explicit `env -i` list.
-  const spawnEnv = config.compiler.kind === 'bootstrap' ? process.env : env;
-  const measured = await runMeasured(argv, { cwd: sample.project, env: spawnEnv, stdoutPath: sample.stdoutPath, stderrPath: sample.stderrPath, timeoutMs: config.timeoutMs });
-  const outcome = config.compiler.kind === 'bootstrap' ? bootstrapOutcome(sample) : jetOutcome(sample, measured.code);
+  const env = { ...process.env, JET_STORE_DIR: sample.store, JET_TRACE_FILE: sample.tracePath, NO_COLOR: '1', TMPDIR: dir, ...(program.toolchainRoot ? { JET_TOOLCHAIN_ROOT: program.toolchainRoot } : {}), ...control.env };
+  const argv = scoped(config, [config.compiler.path, 'build', '--color=never', ...control.args, program.entry]);
+  const measured = await runMeasured(argv, { cwd: sample.project, env, stdoutPath: sample.stdoutPath, stderrPath: sample.stderrPath, timeoutMs: config.timeoutMs });
+  const outcome = jetOutcome(sample, measured.code, program.buildDir);
   if (measured.killed) outcome.problems.unshift(`timed out after ${config.timeoutMs / 1000}s`);
   else if (measured.code !== 0) outcome.problems.unshift(`compiler exited ${measured.code}${measured.signal ? ` (${measured.signal})` : ''}`);
   if (!measured.rusage) outcome.problems.push('no rusage from GNU time');
   return { sample, measured, outcome };
 }
 
-// Build (bootstrap) and run the artifact; validate stdout byte-exactly.
+// Run the built artifact; validate stdout byte-exactly.
 async function backendAndRun(config, program, arm, dir, compiled) {
   const result = { backend: null, run: null, problems: [] };
-  let binary = compiled.outcome.executable ?? null;
-  if (config.compiler.kind === 'bootstrap') {
-    const keep = config.keep ?? path.dirname(config.compiler.path);
-    const jobs = arm === 'single' ? 1 : os.cpus().length;
-    // A fresh package name per sample makes cargo rebuild the program crate
-    // while the shipped runtime crates stay built (toolchain contents).
-    const pkg = `throughput_${program.id.replace(/\W/g, '_')}_${path.basename(dir).replace(/\W/g, '_')}`;
-    const selfhost = program.id.startsWith('selfhost');
-    const script = [
-      'set -u', 'export JETC0_KEEP="$1"', '. "$2/Tools/agent/stage1/lib.sh"', 'load_keep >&2',
-      'source=$3', `if [ "${selfhost ? 1 : 0}" = 1 ]; then with_artifact_main "$3" "\${3%.rs}.main.rs"; source=\${3%.rs}.main.rs; fi`,
-      'bin=$(build_backend "$4" "$5" "$source" "$6") || exit 1', 'printf "%s\\n" "$bin" > "$7"',
-    ].join('\n');
-    const binFile = path.join(dir, 'backend.bin');
-    const env = { ...process.env, STAGE1_CARGO_JOBS: String(jobs), STAGE1_CARGO_MEM: config.memoryMax };
-    const measured = await runMeasured(['bash', '-c', script, 'backend', keep, REPO, compiled.outcome.artifact, path.join(dir, 'backend'), pkg, path.join(dir, 'backend.log'), binFile],
-      { cwd: dir, env, stdoutPath: path.join(dir, 'backend.stdout'), stderrPath: path.join(dir, 'backend.stderr'), timeoutMs: config.timeoutMs });
-    const log = fs.existsSync(path.join(dir, 'backend.log')) ? fs.readFileSync(path.join(dir, 'backend.log'), 'utf8') : '';
-    const cargo = /Finished `[^`]+` profile .* in (?:(\d+)m )?(\d+(?:\.\d+)?)s/.exec(log);
-    result.backend = {
-      wall_ns: measured.wallNs, cpu_user_ns: measured.rusage?.userNs ?? null, cpu_sys_ns: measured.rusage?.sysNs ?? null,
-      peak_rss_bytes: measured.peakRssBytes, threads_used: measured.threadsUsed, jobs,
-      cargo_reported_ns: cargo ? Math.round(((Number(cargo[1] ?? 0) * 60) + Number(cargo[2])) * 1e9) : null,
-    };
-    if (measured.code !== 0 || !fs.existsSync(binFile)) { result.problems.push(`backend build failed (exit ${measured.code}); see ${dir}/backend.stderr and backend.log`); return result; }
-    binary = fs.readFileSync(binFile, 'utf8').trim();
-  }
+  const binary = compiled.outcome.executable ?? null;
   if (program.expected === null) return result;
   if (!binary) { result.problems.push('no executable to run'); return result; }
   const ran = run(binary, [], { cwd: dir, timeout: 120_000, env: { ...process.env, NO_COLOR: '1' } });
@@ -394,8 +303,6 @@ function sampleRecord(compiled, backend, programRoot) {
     phase_counters: parseCounters(`${fs.readFileSync(sample.stdoutPath, 'utf8')}\n${fs.readFileSync(sample.stderrPath, 'utf8')}`),
     artifact_sha256: outcome.artifact ? fileSha256(outcome.artifact) : null,
     diagnostic_sha256: sha256(normalize(outcome.diagnostics)),
-    report_count: outcome.report_count ?? null,
-    compiler_identity: outcome.compiler_identity ?? null,
     run: backend?.run ? { exit: backend.run.exit, stdout_sha256: backend.run.stdout_sha256 } : null,
     problems,
   };
@@ -544,19 +451,18 @@ export async function measure(config) {
     schema: RECEIPT_SCHEMA, lane: config.lane, started_at: new Date().toISOString(), root,
     commit: commit(), machine: machine(), contention_start: contention(),
     compiler: { kind: config.compiler.kind, path: config.compiler.path, sha256: fileSha256(config.compiler.path), build_profile: buildProfile(config.compiler, config.profile) },
-    cache_lane: cell.cache_lane, samples: config.samples, warmups: config.warmups, backend: config.backend,
+    cache_lane: cell.cache_lane, samples: config.samples, warmups: config.warmups,
     jobs_control: config.singleControl ?? 'none: the compiler has no job-count control until D-JOBS1; the single arm is uncontrolled',
     programs: [], failures: [],
   };
   for (const id of config.programs) {
     const programDir = path.join(root, id);
     const prepared = id === 'selfhost' ? prepareSelfhost(config, path.join(programDir, 'prepare')) : prepareBench(id, path.join(programDir, 'prepare', 'project'));
-    const programId = id === 'selfhost' && config.rung !== 'L5' ? `selfhost-${config.rung}` : id;
-    const program = { id: programId, entry: prepared.entry, expected: prepared.expected, project: prepared.project ?? path.join(programDir, 'prepare', 'project'), source: prepared.source, arms: [] };
+    const programId = id;
+    const program = { id: programId, entry: prepared.entry, expected: prepared.expected, project: prepared.project ?? path.join(programDir, 'prepare', 'project'), buildDir: prepared.buildDir ?? '.jet/build', toolchainRoot: prepared.toolchainRoot ?? null, source: prepared.source, arms: [] };
     receipt.programs.push(program);
     receipt.failures.push(...prepared.failures);
     if (prepared.failures.length) continue;
-    const backendOn = config.backend && !(id === 'selfhost' && config.rung !== 'L5');
     for (const armId of config.arms) {
       const arm = { id: armId, jobs: armId === 'single' ? 1 : 'default', controlled: armId === 'default' || config.singleControl !== null, samples: [] };
       program.arms.push(arm);
@@ -567,8 +473,8 @@ export async function measure(config) {
         fs.mkdirSync(dir, { recursive: true });
         process.stderr.write(`throughput: ${programId}/${armId}/${label} ...\n`);
         const compiled = await compileSample(config, program, armId, dir);
-        // `jet build` already ran its backend; its artifact is always run.
-        const validate = !compiled.outcome.problems.length && (backendOn || (config.compiler.kind === 'jet' && program.expected !== null));
+        // `jet build` already built the artifact; it runs whenever the program has a golden.
+        const validate = !compiled.outcome.problems.length && program.expected !== null;
         const backend = validate ? await backendAndRun(config, program, armId, dir, compiled) : null;
         const record = sampleRecord(compiled, backend, compiled.sample.project);
         record.label = label;

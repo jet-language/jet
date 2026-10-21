@@ -26,6 +26,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, r
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectGoldenEntries, loadExampleStdin } from '../../../Tools/agent/compiler-diff.mjs';
+import { compilerPackages, compilerSources } from '../../../Tools/agent/compiler-packages.mjs';
 import { copyFeatureProject, featureProjectRoot } from '../../../Tools/agent/run-feature-examples.mjs';
 import { Converter, encode, jetDecoder, loadMirSchema, parseRustDebug } from './mir-debug.mjs';
 import { decodeStream, jetWriter } from './front-feed-codec.mjs';
@@ -147,10 +148,12 @@ if (options.bootstrap) {
     }
   }
   const probeDir = join(out, 'probe'); mkdirSync(probeDir, { recursive: true });
-  const imports = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
+  const packages = compilerPackages(repo);
+  const imports = new RegExp(`^use (?:${[...packages.keys()].join('|')})\\.\\[[^\\]]*\\]`, 'gm');
   const seenImports = new Set();
   const clean = text => text.replace(imports, block => block.replace(/[^\n]/g, ' ')).replace(/^use core\.[^\[\n]*$/gm, line => { if (seenImports.has(line)) return line.replace(/[^\n]/g, ' '); seenImports.add(line); return line; });
-  const sourcePaths = readFileSync(join(repo, 'Compiler/Bootstrap/sources.list'), 'utf8').split('\n').map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+  // The compiler's package sources without the CLI's own `fn run` entry.
+  const sourcePaths = compilerSources(repo, packages).flatMap(entry => entry.files.filter(path => path !== `${entry.directory}/run.jet`));
   const sources = sourcePaths.map(path => {
     const text = readFileSync(join(repo, path), 'utf8');
     if (!options.cleanupStop || path !== 'Compiler/JetCodegen/Source/Codegen/Functions.jet') return clean(text);

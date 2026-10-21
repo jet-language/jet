@@ -129,9 +129,10 @@ and serializes the resulting MIR through the canonical Jet MIR writer. The
 transport records the real driver outcome and requires a fresh output stream.
 `Tests/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
 unmet, nested, checked/unarmed R080 and deeper/own-close witnesses through the
-real Task transport. `run-expect-producer.mjs` appends a focused proof to the
-compiler aggregate: it reuses the CLI's authorized request, selects Test mode,
-checks real MIR branch/boundary/exit-poll edges, then emits and runs that checked
+real Task transport. `run-expect-producer.mjs` builds a focused proof as the
+compiler is built (`jet build Compiler` over a copy whose CLI entry is the
+producer): it reuses the CLI's authorized request, selects Test mode, checks
+real MIR branch/boundary/exit-poll edges, then emits and runs that checked
 test's object. `check-expect-mir-identity.mjs` compares a fixed non-test corpus
 through before/after checked-MIR drivers built from their respective pinned
 compiler sources. Both drivers use the same native transport and stop-point

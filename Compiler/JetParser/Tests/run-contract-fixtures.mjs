@@ -1,18 +1,15 @@
 #!/usr/bin/env node
-// Assemble parser contract fixtures with the same L2 sources as selfcheck.
+// Parser contract fixtures with the production Foundation, Lexer and Parser packages.
 // Usage: node Compiler/JetParser/Tests/run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]
-// Then compile OUTDIR/project/src/compiler.jet with a retained Jet compiler.
-import { spawnSync } from "node:child_process";
+// Then compile OUTDIR/project/src/compiler.jet with a Jet compiler.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compilerFixtureUnit } from "../../../Tools/agent/compiler-packages.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]");
-const rungs = join(out, "rungs");
-const assembled = spawnSync(process.execPath, [join(repo, "Tools/agent/stage1/ladder.mjs"), "rungs", repo, rungs], { encoding: "utf8" });
-if (assembled.status !== 0) throw new Error(assembled.stderr || assembled.stdout);
 // The marker declarations are the raw text of SEMA_PRELUDE_MARKER_SOURCE.
 const markerFile = readFileSync(join(repo, "Compiler/JetSema/Source/Sema/Registration/PreludeMarkers.jet"), "utf8");
 const source = markerFile.match(/^SEMA_PRELUDE_MARKER_SOURCE :: prep \{ ```([\s\S]*?)``` \}$/m)?.[1];
@@ -26,7 +23,7 @@ const rows = source.split("\n").filter((line) => line.startsWith("marker ")).map
   const replacement = retired ? JSON.parse(retired[1]).replaceAll("{{", "{").replaceAll("}}", "}") : "";
   return `${literal(name)}: ${literal(replacement)}`;
 });
-const unit = readFileSync(join(rungs, "L2/project/src/compiler.jet"), "utf8");
+const unit = compilerFixtureUnit(repo, ["Compiler/JetParser"]);
 const fixturePath = process.argv[3] ? resolve(repo, process.argv[3]) : join(repo, "Compiler/JetParser/Tests/ContractFixtures.fixture/ContractFixtures.jet");
 const fixtures = readFileSync(fixturePath, "utf8");
 const runtimeSource = readFileSync(join(repo, "tests/fixtures/fmt_import_c_bindings.jet"), "utf8");

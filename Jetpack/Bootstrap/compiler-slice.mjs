@@ -1,8 +1,8 @@
 // The Jetpack unit references a slice of the Jet compiler's sources (the
-// `Compiler hash` and `Compiler front end` sections of sources.list). That
-// slice must stay closed under the compiler's own manifest: every top-level
-// name the unit uses that only an unlisted Compiler/Bootstrap/sources.list
-// file of a slice package declares is drift, and that file must be listed.
+// `Compiler hash` and `Compiler front end` sections of Jetpack's sources.list).
+// That slice must stay closed under the compiler's packages: every top-level
+// name the unit uses that only an unlisted member file of a slice package
+// declares is drift, and that file must be listed.
 // A use whose only declaration lives in a compiler package outside the slice
 // is drift too: Jetpack must not reach past the front end.
 //
@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compilerSources } from "../../Tools/agent/compiler-packages.mjs";
 
 const DECLARATION = /^(?:pub\s+)?(fn|struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)|^([A-Z][A-Z0-9_]*)\s*::/gm;
 
@@ -41,12 +42,13 @@ function referenced(text) {
 
 export function compilerSliceDrift(root) {
   const read = (path) => readFileSync(resolve(root, path), "utf8");
-  const compilerList = listed(read("Compiler/Bootstrap/sources.list")).filter((path) => path.startsWith("Compiler/"));
+  // Library members only: a package's entry (its root run.jet) is not part of a slice.
+  const compilerList = compilerSources(root).flatMap((entry) => entry.files.filter((path) => path !== `${entry.directory}/run.jet`)).filter((path) => path.startsWith("Compiler/"));
   const jetpackList = [...listed(read("Jetpack/Bootstrap/sources.list")), ...listed(read("Jetpack/Bootstrap/tests.list"))];
   const slice = jetpackList.filter((path) => path.startsWith("Compiler/"));
   const problems = [];
   for (const path of slice) {
-    if (!compilerList.includes(path) && !path.includes("/Tests/")) problems.push(`${path} is not in Compiler/Bootstrap/sources.list`);
+    if (!compilerList.includes(path) && !path.includes("/Tests/")) problems.push(`${path} is not a member of the compiler's packages`);
   }
   const packageOf = (path) => path.split("/")[1];
   const slicePackages = new Set(slice.map(packageOf));
@@ -86,6 +88,6 @@ export function compilerSliceDrift(root) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const problems = compilerSliceDrift(resolve(dirname(fileURLToPath(import.meta.url)), "../.."));
   for (const problem of problems) console.error(`compiler-slice: ${problem}`);
-  if (problems.length === 0) console.log("compiler-slice: the Jetpack compiler slice is closed under Compiler/Bootstrap/sources.list");
+  if (problems.length === 0) console.log("compiler-slice: the Jetpack compiler slice is closed under the compiler's packages");
   process.exitCode = problems.length === 0 ? 0 : 1;
 }

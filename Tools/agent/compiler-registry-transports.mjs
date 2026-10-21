@@ -1,11 +1,11 @@
-// Registry transports use the existing assemblers and their real native/C verdicts.
+// Registry transports use the existing native fixture runners and their real native/C verdicts.
 // One counted test is one complete source-registry verdict, not each internal assert.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { assembleNativeCompiler, buildNativeCheckedMirDriver, runNativeCheckedMir, runNativeLibrary, runNativeProgram, stageNativeToolchain } from './compiler-native-transport.mjs';
+import { buildNativeCheckedMirDriver, runNativeCheckedMir, runNativeLibrary, runNativeProgram, stageNativeToolchain } from './compiler-native-transport.mjs';
 import { collectGoldenEntries } from './compiler-diff.mjs';
 import { copyFeatureProject, featureProjectRoot } from './run-feature-examples.mjs';
 
@@ -60,8 +60,6 @@ function specification(id) {
     if (name === 'LowerFixtures' || name === 'LoadImages') return { type: 'lower', runner: be + 'run-lower-fixtures.mjs', loader: name === 'LoadImages' };
     if (name === 'RuntimeLower') return { type: 'runtime-lower', runner: be + 'run-runtime.mjs' };
     if (name === 'GoldenLower') return { type: 'golden-lower', runner: be + 'run-goldens.mjs' };
-    if (name === 'ExpectProducer') return { type: 'producer', runner: be + 'run-expect-producer.mjs' };
-    if (name === 'SelfHost/SelfHostLower') return { type: 'selfhost', runner: be + 'SelfHost/assemble-lower.mjs' };
     return null;
 }
 // Exactly the committed oracle corpus used by run-goldens, without filters or
@@ -85,7 +83,7 @@ export function prepareTransport(row, { repo, out }) {
     if (!spec) return null;
     const entry = { id, package: row.package, mode: 'run', kind: 'transport', path: adapter,
         cwd: join(out, id), sha256: digest(readFileSync(adapter)), testCount: 1,
-        stdout: `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`, sources: [row.source], sourceManifests: ['Compiler/Bootstrap/sources.list', 'Compiler/JetRuntime/sources.list'] };
+        stdout: `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`, sources: [row.source], sourceManifests: ['Compiler/JetRuntime/sources.list'] };
     const witness = row.source.replace(/\.jet$/, '.c');
     if (spec.witness) entry.sources.push(spec.witness);
     if (spec.expectedFile) entry.sources.push(spec.expectedFile);
@@ -107,8 +105,8 @@ export function planTransport(entry, { jet, repo, runtimePack, runtimeDir = dirn
     const checkLibrary = (file, prefix, lifecycle, exports = null) => run(jet, ['check', file], null, { JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_LIFECYCLE: lifecycle, ...(exports ? { JET_FRONT_LIBRARY_EXPORTS: exports } : {}) });
     const cc = (source, object, binary) => run(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', source, object, '-lpthread', '-ldl', '-lm', '-o', binary]);
     const mir = (file, output) => {
-        steps.push({ action: 'assemble canonical compiler plus explicit checked-MIR Jet transport entry', source: join(out, 'mir-transport/transport.jet') });
-        build(join(out, 'mir-transport/transport.jet')); run(join(out, 'mir-transport/transport.exe'), [file, output], { code: 0, stdout: 'checked registry MIR: pass\n', stderr: '' });
+        steps.push({ action: 'write the checked-MIR driver package (the compiler packages as path dependencies)', source: join(out, 'mir-transport/run.jet') });
+        build(join(out, 'mir-transport/run.jet')); run(join(out, 'mir-transport/transport.exe'), [file, output], { code: 0, stdout: 'checked registry MIR: pass\n', stderr: '' });
     };
     if (spec.type === 'codec-fixture') {
         node(spec.runner, join(out, 'codec'), jet, runtimeDir, '--test', spec.name);
@@ -148,8 +146,8 @@ export function planTransport(entry, { jet, repo, runtimePack, runtimeDir = dirn
         build(join(out, 'unit.jet')); run(join(out, 'registry-native.exe'));
         node(rt + 'check-object.mjs', join(out, 'jet_runtime_jet.o'), join(out, 'object-check')); node(rt + 'run-cabi-driver.mjs', join(out, 'cabi'), join(out, 'jet_runtime_jet.o'));
     } else if (corpus) {
-        steps.push({ action: 'assemble canonical compiler plus explicit checked-MIR Jet transport entry', source: join(out, 'mir-transport/transport.jet') });
-        build(join(out, 'mir-transport/transport.jet'));
+        steps.push({ action: 'write the checked-MIR driver package (the compiler packages as path dependencies)', source: join(out, 'mir-transport/run.jet') });
+        build(join(out, 'mir-transport/run.jet'));
         for (const c of corpus.cases) {
             steps.push({ action: 'stage real feature source with copyFeatureProject and fixture-state semantics', source: c.path, output: c.file });
             run(join(out, 'mir-transport/transport.exe'), [c.file, c.mird], { code: 0, stdout: 'checked registry MIR: pass\n', stderr: '' });
@@ -166,15 +164,6 @@ export function planTransport(entry, { jet, repo, runtimePack, runtimeDir = dirn
             steps.at(-1).env = { JET_GOLDEN_FEATURES: join(repo, 'Examples/features'), JET_GOLDEN_NATIVE_MIR: '1', JET_RUNTIME_PACK: runtimePack };
             steps.push({ action: 'require complete results.tsv in corpus order, every committed golden output/status verdict pass', caseCount: corpus.caseCount, output: join(out, 'results.tsv') });
         }
-    } else if (spec.type === 'producer') {
-        steps.push({ action: 'assemble canonical compiler in external assembly-home', output: join(out, 'assembly-home/.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet') });
-        node(spec.runner, out, 'assemble', join(out, 'assembly-home/.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet'));
-        build(join(out, 'unit.jet')); node(spec.runner, out, 'produce', join(out, 'producer-unit.exe')); node(spec.runner, out, 'link'); node(spec.runner, out, 'run');
-    } else if (spec.type === 'selfhost') {
-        steps.push({ action: 'assemble full canonical compiler with production CLI entry', source: join(out, 'compiler/unit.jet') });
-        mir(join(out, 'compiler/unit.jet'), join(out, 'self.mird')); node(spec.runner, out, repo);
-        build(join(out, 'unit.jet')); run(join(out, 'self-lower.exe'), [], null, { SELFHOST_MIRD: join(out, 'self.mird'), SELFHOST_OUT: join(out, 'self'), SELFHOST_PACK: runtimePack });
-        run(jet, ['--version']); run(join(out, 'self.exe'), ['--version']);
     } else if (spec.type === 'roots' || spec.type === 'link') {
         node(be + 'run-runtime-pack-roots.mjs', out, '--prepare-only');
         if (spec.type === 'link') node(spec.runner, out);
@@ -254,9 +243,6 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
     }
     function link(source, object, binary, extra = []) {
         execute(process.env.CC ?? 'cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', source, object, ...extra, '-lpthread', '-ldl', '-lm', '-o', binary]);
-    }
-    async function aggregate() {
-        return assembleNativeCompiler({ repo, out, env, execute });
     }
     try {
         if (spec.type === 'codec-fixture') {
@@ -412,20 +398,6 @@ export async function runTransport(entry, { jet, repo, logDir, runtimePack, runt
                 writeFileSync(join(out, 'lint-summary.txt'), `cases: ${corpus.caseCount}\nclean: ${corpus.caseCount}\ngate: PASS\n`);
             }
             if (golden) exact(verdict, names.map(name => `${name}\tpack\n`).join(''));
-        } else if (spec.type === 'producer') {
-            node(spec.runner, out, 'assemble', await aggregate());
-            const binary = await compile(join(out, 'unit.jet'), out, join(out, 'producer-unit'));
-            node(spec.runner, out, 'produce', binary); node(spec.runner, out, 'link');
-            const result = node(spec.runner, out, 'run'); exact(result, 'compiled native expectation producer: CHECK OK\n');
-        } else if (spec.type === 'selfhost') {
-            const unitRoot = join(out, 'compiler'); mkdirSync(unitRoot, { recursive: true }); const file = join(unitRoot, 'unit.jet');
-            writeFileSync(file, readFileSync(await aggregate(), 'utf8') + '\nuse core.process as selfhost_process\nfn run() { selfhost_process.exit(jet_cli_main(selfhost_process.args())) }\n');
-            await compile(file, unitRoot, join(out, 'self-feed'), join(out, 'self.mird'));
-            node(spec.runner, out, repo);
-            const binary = await compile(join(out, 'unit.jet'), out, join(out, 'self-lower'));
-            exact(execute(binary, [], { env: { ...env, SELFHOST_MIRD: join(out, 'self.mird'), SELFHOST_OUT: join(out, 'self'), SELFHOST_PACK: runtimePack } }));
-            for (const suffix of ['.issues', '.prepare-issues', '.object-issues', '.link-issues']) if (existsSync(join(out, 'self' + suffix)) && readFileSync(join(out, 'self' + suffix), 'utf8').trim()) throw Error(`self-host verdict has ${suffix}`);
-            const reference = execute(nativeJet, ['--version']); exact(execute(join(out, 'self.exe'), ['--version']), reference.stdout, reference.stderr);
         } else throw Error(`unimplemented transport ${spec.type}`);
         return { code: 0, signal: null, stdout: entry.stdout, stderr: '', testCount: 1, evidence };
     } catch (error) {

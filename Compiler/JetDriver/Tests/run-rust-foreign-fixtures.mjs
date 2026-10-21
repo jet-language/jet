@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compilerSources } from '../../../Tools/agent/compiler-packages.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const out = process.argv[2];
 if (!out) throw new Error('usage: run-rust-foreign-fixtures.mjs <outdir>');
@@ -27,8 +28,10 @@ function body(text) {
   return kept.join('\n');
 }
 const declarations = new Map();
-for (const path of read('Compiler/Bootstrap/sources.list').split('\n').filter(line => line.trim() && !line.startsWith('#'))) {
-  if (!path.startsWith('Compiler/JetFoundation/') && path !== 'Compiler/JetCli/Source/Cli/RustForeign.jet') continue;
+// Declarations of the Foundation package and the CLI's Rust foreign host.
+const declaredIn = compilerSources(repo).flatMap(entry => entry.files)
+  .filter(path => path.startsWith('Compiler/JetFoundation/') || path === 'Compiler/JetCli/Source/Cli/RustForeign.jet');
+for (const path of declaredIn) {
   const lines = read(path).split('\n');
   for (let i = 0; i < lines.length; i++) {
     const match = /^(?:struct|enum|fn)\s+([A-Za-z_]\w*)\b|^([A-Z][A-Z_\d]*)\s*::/.exec(lines[i]);

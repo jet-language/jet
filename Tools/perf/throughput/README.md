@@ -7,27 +7,23 @@ Dependency-free Node; Linux `/proc`; GNU time for exact tree rusage.
 
 ```sh
 # quick lane: bench30k frontend, 3 samples, against quick-baseline.json
-node Tools/perf/throughput/harness.mjs --compiler bootstrap=~/.cache/jet-dev/cand40f/jetc0
-# full lane: bench300k + selfhost, 5 samples, backend build and golden run
-Tools/agent/jet-env node Tools/perf/throughput/harness.mjs --lane full --compiler jet=target/release/jet
-# selfhost on a smaller ladder rung (recorded as selfhost-L2, never as selfhost)
-node Tools/perf/throughput/harness.mjs --programs selfhost --selfhost-rung L2 --compiler bootstrap=PATH
+node Tools/perf/throughput/harness.mjs --compiler jet=PATH --compiler-profile TEXT
+# full lane: bench300k + selfhost, 5 samples, golden run
+Tools/agent/jet-env node Tools/perf/throughput/harness.mjs --lane full --compiler jet=PATH --compiler-profile TEXT
 node --test Tools/perf/throughput/throughput.test.mjs
 ```
 
-Compilers: `bootstrap=PATH` is a generated Jet compiler (jetc0, jetc1, ...)
-driven by the `JET_BOOTSTRAP_*` runner protocol; its emitted Rust is built by
-`Tools/agent/stage1/lib.sh build_backend` (the backend child, timed apart from
-the frontend) with `--backend`. `jet=PATH` is `jet build`, whose rustc child
-runs inside the measured process. Every measured command runs in its own
-`systemd-run` scope (`--memory-max`, no swap).
+Compilers: `jet=PATH` is a `jet` binary; every sample is one `jet build`, which
+builds the artifact inside the measured process. Every measured command runs in
+its own `systemd-run` scope (`--memory-max`, no swap).
 
 Programs: `bench300k` and `bench30k` come from
 `node Tools/perf/scaling/generate.mjs mixed --code-lines N --seed 1 DIR`
 (`Tools/perf/scaling/mixed.mjs`); `bench.json` pins their package digest,
 golden stdout and shape, and the harness fails closed when a regenerated
-program differs. `selfhost` is the assembled compiler unit of
-`--source-tree` (`Tools/agent/stage1/ladder.mjs rungs`).
+program differs. `selfhost` is `jet build Compiler` over a copy of the
+compiler's packages of `--source-tree` (`Tools/agent/compiler-packages.mjs`),
+with that tree's Core.
 
 Each sample: a fresh copy of the program at one fixed path, an empty
 `JET_STORE_DIR`, no `.jet` state, one unmeasured warmup per arm. Recorded

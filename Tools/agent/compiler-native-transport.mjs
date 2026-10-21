@@ -4,11 +4,17 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { compilerPackages } from './compiler-packages.mjs';
 import { parseRuntimeExports, runtimeLifecycleList } from './runtime-route-abi.mjs';
+import { jetWriter } from '../../Compiler/JetBackend/Tests/front-feed-codec.mjs';
+import { loadMirSchema } from '../../Compiler/JetBackend/Tests/mir-debug.mjs';
 
 export const nativeTransportPackage = 'name: "compiler_registry_transport"\nversion: "0.0.1"\nedition: "2028"\nauthority: { holds: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] } }\n';
-export const checkedMirTransportSource = `
+// The checked-MIR driver's entry: the production front end compiles one source,
+// and the schema's generated observation writer (front-feed-codec.mjs) streams
+// the checked MIR.
+const checkedMirDriverEntry = `
 fn run() {
     args :: cli_process.args()
     if args.len() != 2 { panic("expected source and checked MIR output") }
@@ -27,6 +33,20 @@ fn run() {
     }
 }
 `;
+// Write the checked-MIR driver package into `out`: package.jet (the compiler
+// packages as path dependencies, JetCli's authority) and run.jet.
+export function writeCheckedMirDriver({ repo, out }) {
+    mkdirSync(out, { recursive: true });
+    const packages = compilerPackages(repo);
+    const authority = /^authority:\s*\{[\s\S]*?^\}/m.exec(readFileSync(join(repo, 'Compiler/JetCli/package.jet'), 'utf8'))?.[0];
+    if (!authority) throw Error('Compiler/JetCli/package.jet declares no authority');
+    writeFileSync(join(out, 'package.jet'), `name: "checked_mir_driver"\nversion: "0.0.1"\nedition: "2026"\ndeps: {\n${[...packages].map(([name, directory]) => `    ${name}: ${relative(out, directory)},`).join('\n')}\n}\n${authority}\n`);
+    const schema = loadMirSchema(repo), writer = jetWriter(schema);
+    const types = [...new Set(['MIRFunctionID', ...[...schema.keys()].filter(type => new RegExp(`\\b${type}\\b`).test(writer))])];
+    const source = join(out, 'run.jet');
+    writeFileSync(source, `use jet_cli.[jet_cli_compile_file]\nuse jet_driver.[JetDriverCompileMode]\nuse jet_foundation.[${types.join(', ')}]\nuse core.files as cli_files\nuse core.math as math\nuse core.process as cli_process\n${checkedMirDriverEntry}\n${writer}`);
+    return source;
+}
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 export function nativeCommandProblem(run) {
@@ -89,21 +109,8 @@ export function runNativeProgram({ jet, file, root = dirname(file), prefix, env 
     return { run, problem: null, binary: prefix + '.exe' };
 }
 
-export function assembleNativeCompiler({ repo, out, env = process.env, execute, timeout }) {
-    const home = join(out, 'assembly-home'); mkdirSync(home, { recursive: true });
-    const run = command(process.execPath, [join(repo, 'Compiler/Bootstrap/assemble.mjs')], { prefix: join(out, 'assembly'), cwd: repo, env: { ...nativeTransportEnvironment(env), HOME: home, JET_BOOTSTRAP_SOURCE_ROOT: repo }, execute, timeout });
-    const problem = nativeCommandProblem(run);
-    if (problem) throw Error(problem.detail);
-    const source = join(home, '.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet');
-    if (!existsSync(source)) throw Error('canonical compiler assembler omitted compiler.jet');
-    return source;
-}
-
-export function buildNativeCheckedMirDriver({ jet, repo, out, env = process.env, execute, timeout, compilerSource = null }) {
-    mkdirSync(out, { recursive: true });
-    const source = join(out, 'transport.jet');
-    writeFileSync(source, readFileSync(compilerSource ?? assembleNativeCompiler({ repo, out, env, execute, timeout }), 'utf8') + '\n' + checkedMirTransportSource);
-    writeFileSync(join(out, 'package.jet'), nativeTransportPackage);
+export function buildNativeCheckedMirDriver({ jet, repo, out, env = process.env, execute, timeout }) {
+    const source = writeCheckedMirDriver({ repo, out });
     const result = runNativeProgram({ jet, file: source, root: out, prefix: join(out, 'transport'), env, execute, timeout });
     if (result.problem) throw Error(result.problem.detail);
     return result.binary;

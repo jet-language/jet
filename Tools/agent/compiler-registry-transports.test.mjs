@@ -26,7 +26,7 @@ for (const [source, packageName, mode] of [
     const mirRuns = plan.steps.filter(step => step.command?.endsWith('/mir-transport/transport.exe'));
     assert.equal(mirRuns.length, cases.length);
     assert.deepEqual(mirRuns.map(step => step.args[1]), plan.corpus.cases.map(c => c.mird));
-    assert.equal(plan.steps.filter(step => step.command === options.jet && step.args.includes(join(entry.cwd, 'mir-transport/transport.jet'))).length, 1);
+    assert.equal(plan.steps.filter(step => step.command === options.jet && step.args.includes(join(entry.cwd, 'mir-transport/run.jet'))).length, 1);
     assert.doesNotMatch(JSON.stringify(plan), /registry golden|golden-input|Tests\.rs|safe-jet|cargo|rustc|--front|--case-list/);
     if (mode === 'golden-lower') {
         assert.ok(plan.steps.some(step => step.env?.JET_LOWER_ASSEMBLE_ONLY === '1'));

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 const repo = JET_TOOL_REPO;
 const cache = path.join(process.env.HOME, '.cache/jet-dev');
 const apply = process.argv.includes('--apply');
-const coupled = new Set(['Compiler/Bootstrap/Tests.rs', 'Compiler/Bootstrap/assemble.mjs', 'Compiler/Bootstrap/check.sh']);
+const coupled = new Set(['Compiler/Bootstrap/Tests.rs']);
 const manual = [];
 const replacements = new Map([
   ['jet-luna', 'jet-dev'], ['jet-test-scratch', 'jet-dev/scratch'],

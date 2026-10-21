@@ -35,9 +35,11 @@
 //              area x class (at least 5% of every class), deterministic.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compilerSources } from './compiler-packages.mjs';
 import { extentEnd, lex } from './rust-parity-ledger.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -817,12 +819,24 @@ function main() {
   const registry = coreRegistry(jetFiles, idx);
   log(`Core registry: ${registry.link.size} linked symbols, ${registry.live.length} live routes without a Jet runtime export`);
   // A secondary-tree Compiler file outside that tree's compiler unit (or a
-  // Jetpack CLI file) was never compiled there: a draft, not a port.
+  // Jetpack CLI file) was never compiled there: a draft, not a port. The unit is
+  // the member files of the compiler packages (`jet build Compiler`) at that ref;
+  // a ref from before the package form names it in Compiler/Bootstrap/sources.list.
   const compiledOn = new Map();
   for (const r of refs) {
     const list = lsTree(r.sha, ['Compiler/Bootstrap/sources.list']);
-    const text = list.length ? readBlobs([list[0].sha]).get(list[0].sha) : '';
-    compiledOn.set(r.name, new Set(text.split('\n').map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))));
+    if (list.length) {
+      const text = readBlobs([list[0].sha]).get(list[0].sha);
+      compiledOn.set(r.name, new Set(text.split('\n').map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))));
+      continue;
+    }
+    const tree = mkdtempSync(join(tmpdir(), 'rust-parity-fingerprint-'));
+    try {
+      execFileSync('tar', ['-x', '-C', tree], { input: git(['archive', r.sha, 'Compiler', 'Jetpack']), maxBuffer: Infinity });
+      compiledOn.set(r.name, new Set(compilerSources(tree).flatMap((entry) => entry.files)));
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+    }
   }
   const isDraft = (it) => it.ref !== '' && ((it.file.startsWith('Compiler/') && !compiledOn.get(it.ref).has(it.file)) || it.file.startsWith('Jetpack/CLI/'));
 
@@ -1342,7 +1356,7 @@ function writeOutputs(outDir, out, packages, meta) {
   md += `Rust tree \`${meta.rustRev}\`; Jet tree \`${meta.jetRev}\`; secondary Jet trees ${meta.refs.map((r) => `\`${r.name}\` (\`${r.sha.slice(0, 12)}\`)`).join(', ')}.\n\n`;
   md += `Scope: every Rust item of the compiler (jet-lexer, jet-parser, jet-sema, jet-comptime, jet-evalhost, jet-codegen, jet-driver, jet-foundation, jet-cli, \`Source/\`), the Core library (\`crates/jet-codegen/src/Prelude/\`) and the runtime (jet-rt), test files excluded, plus every live Core runtime route whose C export no Jet runtime \`#Export(c)\` defines.\n\n`;
   md += `Method: each Rust item's fingerprint (diagnostic codes, message strings, enum variants constructed, numeric literals, callee names, branch count; fields, variants and methods for types) is scored against candidate Jet items (the Core call registry's body for a Prelude symbol, the name ledger's pointer, same-name and Prelude-spelling items, and a fingerprint search over the whole Jet tree), each taken together with the Jet items it calls in its own package. Score = matched weight / Rust weight (code 5, message 3, variant 1.5, number 1, member 1, callee 0.5, single word 0.5); a fingerprint-only hit outside the area's directories whose name shares no word with the Rust name loses 0.15.\n\n`;
-  md += `- \`PORTED\`: score >= 0.70 and every diagnostic code present; or, for a thin item (fingerprint weight < 2), the registry's body or a same-name item in the area's Jet directories (\`basis\` \`thin:*\`).\n- \`PARTIAL\`: the best Jet counterpart scores 0.30-0.70, misses a diagnostic code, or is the registry's body but scores lower; \`missing\` lists the absent codes, messages, variants, members, numbers and a branch collapse.\n- \`PORTED-UNMERGED\`: the best counterpart exists only on a secondary tree, in a file that tree compiled.\n- \`DRAFT-ONLY\`: the best counterpart exists only on a secondary tree, in a Compiler file outside that tree's compiler unit (\`Compiler/Bootstrap/sources.list\`) or a Jetpack CLI file: an uncompiled transliteration, not a port.\n- \`ABSENT\`: no Jet counterpart scores 0.30 (\`missing\` names the nearest miss); \`basis\` \`route-census\` marks a live Core route whose export no Jet runtime \`#Export(c)\` defines.\n- \`OBSOLETE\`: retired with Rust; \`reason\` is the ledger drop reason, the reviewed triage group rationale, or Rust std-trait glue.\n\n`;
+  md += `- \`PORTED\`: score >= 0.70 and every diagnostic code present; or, for a thin item (fingerprint weight < 2), the registry's body or a same-name item in the area's Jet directories (\`basis\` \`thin:*\`).\n- \`PARTIAL\`: the best Jet counterpart scores 0.30-0.70, misses a diagnostic code, or is the registry's body but scores lower; \`missing\` lists the absent codes, messages, variants, members, numbers and a branch collapse.\n- \`PORTED-UNMERGED\`: the best counterpart exists only on a secondary tree, in a file that tree compiled.\n- \`DRAFT-ONLY\`: the best counterpart exists only on a secondary tree, in a Compiler file outside that tree's compiler unit (the member files of its compiler packages; \`Compiler/Bootstrap/sources.list\` on a tree from before the package form) or a Jetpack CLI file: an uncompiled transliteration, not a port.\n- \`ABSENT\`: no Jet counterpart scores 0.30 (\`missing\` names the nearest miss); \`basis\` \`route-census\` marks a live Core route whose export no Jet runtime \`#Export(c)\` defines.\n- \`OBSOLETE\`: retired with Rust; \`reason\` is the ledger drop reason, the reviewed triage group rationale, or Rust std-trait glue.\n\n`;
 
   md += `## Counts per area\n\n| area | rows | ${CLASS_ORDER.join(' | ')} | absent Rust lines | partial Rust lines |\n|---|---|${CLASS_ORDER.map(() => '---').join('|')}|---|---|\n`;
   for (const a of [...areas, 'all']) {
