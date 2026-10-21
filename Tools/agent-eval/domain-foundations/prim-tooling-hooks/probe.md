@@ -1,14 +1,14 @@
 # Primitive probe: tooling hooks
 
 ## What I built
-I built a Jet build hook that calls `core.compiler.lex`, `parse`, and `check`, then emits a generated module containing the observed token, item, and function counts. I built a graph fixture with one declared action, a replay fixture, a lossless rename proof, and a four-request loopback HTTP threshold runner. Files: `pkg/run.jet`, `pkg/input.jet`, `pkg/renamed.jet`, `graph/graph.jet`, `replay/run.jet`, `load/run.jet`, and `Rename/run.jet`.
+I built a Jet build hook that calls `core.compiler.lex`, `parse`, and `check`, then emits a generated module containing the observed token, item, and function counts. I built a graph fixture with one declared action, a replay fixture, a lossless rename proof, and a four-request loopback HTTP threshold runner. Files: `pkg/run.jet`, `pkg/input.jet`, `pkg/renamed.jet`, `graph/graph.jet`, `replay/run.jet`, `load/run.jet`, and `rename.mjs`.
 
 ## What worked
 - `jet build .../pkg`: succeeded; generated `.jet/generated/prim_tooling_hooks/facts.jet` with `tokens={19}; items={2}; functions={2}`.
 - `jet inspect compiler lex pkg/input.jet | jq ...`: `status=ok`, schema 1, 39 tokens; two `old_name` identifier spans `{start:42,end:50}` and `{start:181,end:189}`.
 - `jet inspect compiler parse pkg/input.jet | jq ...`: `status=ok`; two function items (`old_name`, `run`); diagnostics empty.
 - `jet inspect compiler check pkg/input.jet | jq ...`: `status=ok`; two functions; diagnostics empty.
-- `JET=<jet> jet run Tools/agent-eval/domain-foundations/prim-tooling-hooks/Rename`: `renamed identifiers=2; preserved comment/literal=true`; the renamed file parsed with `status=ok` and `new_name` as the function item.
+- `node rename.mjs`: `renamed identifiers=2; preserved comment/literal=true`; the renamed file parsed with `status=ok` and `new_name` as the function item.
 - `jet inspect graph graph/graph.jet`: `target graph_probe Executable`; `action stamp stamp.txt`. `jet inspect explain-build stamp ...`: argv, one input, one output, `cache=Cached`.
 - `jet run run.jet --record=probe` from `replay/`: finalized exit 0 and wrote `.jet/replays/probe.jetproof-replay`. `jet debug run.jet --replay=probe`: breakpoint, `replay ok`, `program finished`. Altered source correctly failed E3621 identity mismatch.
 - `jet run --allow-net run.jet --watch=off` from `load/`: `threshold=4/4`.

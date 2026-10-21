@@ -1,5 +1,6 @@
+#!/usr/bin/env jet
 // Native test-suite inventory, sharded across CI jobs.
-// Usage: jet run Tools/ci/TestShards.jet -- SHARD_INDEX SHARD_COUNT
+// Usage: jet Tools/ci/TestShards.jet SHARD_INDEX SHARD_COUNT
 //
 // The complete native suite set is fixed here: golden, ui, cases, registries.
 // Each suite is one row of the inventory; the runner that executes a suite owns
@@ -13,17 +14,6 @@
 //
 // Output: the selected shard's suite IDs, one per line, sorted (a set, kept
 // diffable). Standard error reports the predicted load and spread.
-package {
-    name: "test-shards"
-    version: "0.1.0"
-    edition: "2026"
-    authority: {
-        holds: {
-            allow: [Exec, Exec.Args, IO, Mem]
-        }
-    }
-}
-
 use core.process as process
 use core.term as term
 
@@ -65,8 +55,9 @@ fn digits_value(text: String) -> Int Never! {
 
 fn two_digits(value: Int) -> String Never! { if value < 10 -> "0{value}" else -> "{value}" }
 
-// The items `shard_index` of `shard_count` receives, and the load summary.
-fn weighted_shards(items: [WeightedItem], shard_index: Int, shard_count: Int) -> ShardPlan Never! {
+// The items `shard_index` of `shard_count` receives, and the load summary
+// (which names the shard as its arguments spelled it).
+fn weighted_shards(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
     ordered := items
     &ordered.sort_by((left: WeightedItem, right: WeightedItem) -> (right.weight <=> left.weight).then(left.item <=> right.item))
     loads := [Int]{}
@@ -97,12 +88,12 @@ fn weighted_shards(items: [WeightedItem], shard_index: Int, shard_count: Int) ->
     }
     load_words := [String]{}
     loop load in loads -> &load_words.push("{load}")
-    summary :: "weighted-shards: shard {shard_index}/{shard_count} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
+    summary :: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
     ShardPlan{selected: selected, summary: summary}
 }
 
 fn shard_plan(args: [String]) -> ShardPlan ShardError! {
-    if args.len() != 2 -> return Err(ShardError{message: "usage: jet run Tools/ci/TestShards.jet -- SHARD_INDEX SHARD_COUNT", code: 64})
+    if args.len() != 2 -> return Err(ShardError{message: "usage: TestShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
     index_text :: args[0]
     count_text :: args[1]
     if !is_digits(count_text) -> return Err(ShardError{message: "error: SHARD_COUNT must be a positive integer, got '{count_text}'", code: 64})
@@ -113,7 +104,7 @@ fn shard_plan(args: [String]) -> ShardPlan ShardError! {
     if shard_index >= shard_count -> return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
     items := [WeightedItem]{}
     loop suite in SUITES -> &items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
-    plan :: weighted_shards(items, shard_index, shard_count)
+    plan :: weighted_shards(items, shard_index, shard_count, index_text, count_text)
     selected := plan.selected
     &selected.sort()
     Ok(ShardPlan{selected: selected, summary: plan.summary})
@@ -149,5 +140,6 @@ fn plan_text(args: [String]) -> String Never! {
     assert_eq(plan_text([String]{"2", "2"}), "64: error: SHARD_INDEX (2) must be < SHARD_COUNT (2)")
     assert_eq(plan_text([String]{"0", "0"}), "64: error: SHARD_COUNT must be >= 1, got '0'")
     assert_eq(plan_text([String]{"-1", "2"}), "64: error: SHARD_INDEX must be a non-negative integer, got '-1'")
-    assert_eq(plan_text([String]{"0"}), "64: usage: jet run Tools/ci/TestShards.jet -- SHARD_INDEX SHARD_COUNT")
+    assert_eq(plan_text([String]{"0"}), "64: usage: TestShards.jet SHARD_INDEX SHARD_COUNT")
+    assert_eq(plan_text([String]{"01", "02"}), "golden,ui | weighted-shards: shard 01/02 selected 2 of 4 items, predicted 60s (shard loads: 60 60; spread 60s/60s = 1.00x)")
 }

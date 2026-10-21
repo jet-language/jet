@@ -34,10 +34,12 @@ if [ "${1:-}" = "--runtime-generators" ]; then
     echo "usage: lane-check.sh --runtime-generators" >&2
     exit 64
   fi
-  Tools/agent/jet-env jet run Tools/agent/RuntimeGenerators -- --check
-  code=$?
+  code=0
+  for gen in trap-messages lifecycle stop-exports host-errors observe-messages scheduler-messages services-messages test-messages; do
+    Tools/agent/jet-env node "Tools/agent/gen-runtime-$gen.mjs" --check || code=1
+  done
   if [ "$code" -eq 0 ]; then echo "CHECK OK"
-  else echo "CHECK FAILED — runtime generators exited $code"
+  else echo "CHECK FAILED — a runtime generator reported stale output"
   fi
   exit "$code"
 fi

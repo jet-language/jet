@@ -1,0 +1,254 @@
+#!/usr/bin/env jet
+// Regenerate the ratified-decision index in Docs/spec/syntax-decisions.md.
+//
+// A decision is ratified in Tower, and only some ratifications get
+// hand-written prose in the spec. This writes a derived lookup of every
+// ratified decision so that reading the spec is enough to find the outcome
+// code depends on. The decision itself lives only in the Tower store; this
+// index is never a second source of truth.
+//
+// Usage: jet Tools/agent/DecisionIndex.jet [--check]
+use core.encoding.json as json
+use core.files as files
+use core.process as process
+use core.term as term
+
+SPEC_PATH :: "Docs/spec/syntax-decisions.md"
+TOWER_PATH :: "Tools/tower/tower.mjs"
+OPEN :: "<!-- BEGIN GENERATED RATIFIED INDEX -->"
+CLOSE :: "<!-- END GENERATED RATIFIED INDEX -->"
+CELL_LIMIT :: 96
+CELL_KEEP :: 93
+
+#Error
+struct IndexError {
+    message: String
+}
+
+struct RatifiedDecision {
+    id: String
+    outcome: String
+    card: String
+}
+
+fn index_fail(message: String) -> IndexError Never! { IndexError{message: message} }
+
+fn byte_slice(text: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
+
+fn byte_len(text: String) -> Int Never! { text.bytes().len() }
+
+// The text of field `key` of a JSON object's fields; "" when absent or not text.
+fn field_text(fields: [(key: String, value: Dyn)], key: String) -> String Never! {
+    loop field in fields {
+        if field.key != key -> next
+        if field.value == {
+            .Text(text) -> return text
+            else -> return ""
+        }
+    }
+    ""
+}
+
+// The byte length of the UTF-8 sequence led by `lead`.
+fn sequence_len(lead: Int) -> Int Never! {
+    if {
+        lead < 128 -> 1
+        lead >= 240 -> 4
+        lead >= 224 -> 3
+        lead >= 192 -> 2
+        else -> 1
+    }
+}
+
+// Whether the sequence at `at` is one of JavaScript's `\s` characters.
+fn is_js_space(bytes: [U8], at: Int, length: Int) -> Bool Never! {
+    first :: Int.from_u8(bytes[at])
+    if length == 1 -> return first == 32 || (first >= 9 && first <= 13)
+    second :: Int.from_u8(bytes[at + 1])
+    if length == 2 -> return first == 194 && second == 160
+    if length != 3 -> return false
+    third :: Int.from_u8(bytes[at + 2])
+    if {
+        first == 225 && second == 154 && third == 128 -> true
+        first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> true
+        first == 226 && second == 129 && third == 159 -> true
+        first == 227 && second == 128 && third == 128 -> true
+        first == 239 && second == 187 && third == 191 -> true
+        else -> false
+    }
+}
+
+// One table cell: whitespace runs collapsed to one space and trimmed, `|`
+// escaped, and anything past 96 UTF-16 units cut to 93 units and an ellipsis.
+fn cell(text: String) -> String Never! {
+    bytes :: text.bytes()
+    out := [U8]{}
+    units := [Int]{}
+    pending_space := false
+    at := 0
+    loop at < bytes.len() {
+        length := sequence_len(Int.from_u8(bytes[at]))
+        if at + length > bytes.len() -> length = bytes.len() - at
+        if is_js_space(bytes, at, length) {
+            pending_space = true
+            at += length
+            next
+        }
+        if pending_space && out.len() > 0 {
+            &out.push(U8{32})
+            &units.push(1)
+        }
+        pending_space = false
+        if length == 1 && Int.from_u8(bytes[at]) == 124 {
+            &out.push(U8{92})
+            &units.push(1)
+        }
+        loop index in at..<at + length -> &out.push(bytes[index])
+        &units.push(if length == 4 -> 2 else -> 1)
+        at += length
+    }
+    total := 0
+    loop unit in units -> total += unit
+    flat :: String.from_bytes_lossy(out)
+    if total <= CELL_LIMIT -> return flat
+    kept := [U8]{}
+    used := 0
+    byte_at := 0
+    unit_index := 0
+    loop used < CELL_KEEP {
+        count :: units[unit_index]
+        length := sequence_len(Int.from_u8(out[byte_at]))
+        if count == 2 && used + 2 > CELL_KEEP {
+            &kept.push(U8{239})
+            &kept.push(U8{191})
+            &kept.push(U8{189})
+            used += 1
+            next
+        }
+        loop index in byte_at..<byte_at + length -> &kept.push(out[index])
+        used += count
+        byte_at += length
+        unit_index += 1
+    }
+    "{String.from_bytes_lossy(kept)}…"
+}
+
+fn ratified_decisions(raw: String) -> [RatifiedDecision] IndexError! {
+    parsed :: json.parse(raw) ?? return Err(index_fail("tower decision list --json returned no decision array"))
+    items := [Dyn]{}
+    if parsed == {
+        .Array(rows) -> items = rows
+        .Object(fields) -> {
+            found := false
+            loop field in fields {
+                if field.key != "decisions" -> next
+                if field.value == {
+                    .Array(rows) -> {
+                        items = rows
+                        found = true
+                    }
+                    else -> {}
+                }
+            }
+            if !found -> return Err(index_fail("tower decision list --json returned no decision array"))
+        }
+        else -> return Err(index_fail("tower decision list --json returned no decision array"))
+    }
+    rows := [RatifiedDecision]{}
+    loop item in items {
+        if item == {
+            .Object(fields) -> {
+                if field_text(fields, "status") != "ratified" -> next
+                &rows.push(RatifiedDecision{id: field_text(fields, "id"), outcome: field_text(fields, "outcome"), card: field_text(fields, "cardId")})
+            }
+            else -> {}
+        }
+    }
+    &rows.sort_by((left: RatifiedDecision, right: RatifiedDecision) -> left.id <=> right.id)
+    Ok(rows)
+}
+
+fn index_body(rows: [RatifiedDecision]) -> String Never! {
+    lines := [String]{
+        OPEN,
+        "",
+        "Generated by `Tools/agent/DecisionIndex.jet` from the Tower store: {rows.len()} ratified decisions.",
+        "Do not hand-edit these rows. The decision lives in Tower; this is a lookup so that reading this",
+        "spec is enough to know the law. Sections above carry the teaching prose for decisions that changed",
+        "user-typeable syntax; a row here with no prose above it is still binding.",
+        "",
+        "| Decision | Outcome | Card |",
+        "| --- | --- | --- |",
+    }
+    loop row in rows {
+        outcome := cell(row.outcome)
+        if outcome == "" -> outcome = "—"
+        &lines.push("| `{row.id}` | {outcome} | `{row.card}` |")
+    }
+    &lines.push("")
+    &lines.push(CLOSE)
+    lines.join("\n")
+}
+
+// `spec` with its generated block replaced by `body`.
+fn replace_index(spec: String, body: String) -> String IndexError! {
+    start :: spec.find(OPEN)
+    end :: spec.find(CLOSE)
+    if start < 0 || end < 0 || end < start -> return Err(index_fail("{SPEC_PATH} has no generated ratified-index markers"))
+    Ok("{byte_slice(spec, 0, start)}{body}{byte_slice(spec, end + byte_len(CLOSE), byte_len(spec))}")
+}
+
+fn decision_index_main(args: [String]) -[Exec, Env, FS, Time.Wait]> String IndexError! {
+    check := false
+    loop arg in args {
+        if arg == "--check" -> check = true
+    }
+    raw :: process.check_output(process.cmd([String]{"node", TOWER_PATH, "decision", "list", "--json"})) ?? return Err(index_fail("tower decision list failed: {err}"))
+    rows :: ratified_decisions(raw) ?? return Err(err)
+    spec :: files.read(SPEC_PATH) ?? return Err(index_fail("cannot read {SPEC_PATH}: {err}"))
+    next_spec :: replace_index(spec, index_body(rows)) ?? return Err(err)
+    if next_spec == spec -> return Ok("decision index up to date ({rows.len()} ratified)")
+    if check -> return Err(index_fail("decision index is stale; run: jet Tools/agent/DecisionIndex.jet"))
+    files.write(SPEC_PATH, next_spec) ?? return Err(index_fail("cannot write {SPEC_PATH}: {err}"))
+    Ok("wrote decision index: {rows.len()} ratified decisions")
+}
+
+fn run() {
+    if decision_index_main(process.args()) == {
+        .Ok(message) -> print(message)
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+fn repeated(text: String, count: Int) -> String Never! {
+    parts := [String]{}
+    loop _ in 0..<count -> &parts.push(text)
+    parts.join("")
+}
+
+#Test("cells collapse whitespace, escape pipes and cut at 96 UTF-16 units") {
+    assert_eq(cell("  A\t\n  b | c  "), "A b \\| c")
+    x93 :: repeated("x", 93)
+    assert_eq(cell(repeated("x", 97)), "{x93}…")
+    assert_eq(cell(repeated("x", 96)), repeated("x", 96))
+    accent :: String.from_bytes_lossy([U8]{U8{195}, U8{169}})
+    e93 :: repeated(accent, 93)
+    assert_eq(cell(repeated(accent, 100)), "{e93}…")
+}
+
+#Test("ratified rows are filtered, sorted by id and read from either list shape") {
+    raw :: "[{{\"id\":\"B\",\"status\":\"ratified\",\"outcome\":\"two\",\"cardId\":\"c2\"}},{{\"id\":\"A\",\"status\":\"open\"}},{{\"id\":\"A1\",\"status\":\"ratified\",\"cardId\":\"c1\"}}]"
+    rows :: ratified_decisions(raw) ?? panic("rows: {err.message}")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].id, "A1")
+    assert_eq(rows[0].outcome, "")
+    wrapped :: ratified_decisions("{{\"decisions\":{raw}}}") ?? panic("wrapped: {err.message}")
+    assert_eq(wrapped.len(), 2)
+    body :: index_body(rows)
+    assert(body.contains("| `A1` | — | `c1` |\n| `B` | two | `c2` |"))
+}

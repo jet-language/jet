@@ -1,0 +1,97 @@
+#!/usr/bin/env jet
+// Tooling-hooks probe: rename the identifier `old_name` to `new_name` in
+// pkg/input.jet using only the compiler's lexer facts (`jet inspect compiler
+// lex`), leaving comments and string literals that mention it untouched, and
+// write the result to pkg/renamed.jet.
+// Usage (from the repository root, JET naming the jet binary to ask):
+//   jet Tools/agent-eval/domain-foundations/prim-tooling-hooks/Rename.jet
+use core.encoding.json as json
+use core.files as files
+use core.process as process
+use core.term as term
+
+PROBE :: "Tools/agent-eval/domain-foundations/prim-tooling-hooks"
+
+struct Span {
+    start: Int
+    end: Int
+}
+
+// The spans of the `old_name` identifier tokens in a lex report.
+fn identifier_spans(report: String) -> [Span] Err! {
+    facts :: json.parse(report) ?? return Err("lex report is not JSON: {err}")
+    compiler :: facts.get("compiler") ?? return Err("lex report has no compiler facts")
+    value :: compiler.get("value") ?? return Err("lex report has no value")
+    tokens :: value.get("tokens") ?? return Err("lex report has no tokens")
+    spans := [Span]{}
+    index := 0
+    loop {
+        token :: tokens.at(index) ?? break
+        index += 1
+        kind :: token.get("kind") ?? next
+        text :: token.get("text") ?? next
+        if (kind.text() ?? "") != "identifier" || (text.text() ?? "") != "old_name" -> next
+        span :: token.get("span") ?? return Err("token {index - 1} has no span")
+        start :: span.get("start") ?? return Err("token {index - 1} has no span start")
+        end :: span.get("end") ?? return Err("token {index - 1} has no span end")
+        &spans.push(Span{start: start.int() ?? 0, end: end.int() ?? 0})
+    }
+    Ok(spans)
+}
+
+fn occurrences(bytes: [U8], needle: String) -> Int Never! {
+    pattern :: needle.bytes()
+    count := 0
+    at := 0
+    loop at + pattern.len() <= bytes.len() {
+        matched := true
+        loop index in 0..<pattern.len() {
+            if bytes[at + index] != pattern[index] {
+                matched = false
+                break
+            }
+        }
+        if matched {
+            count += 1
+            at += pattern.len()
+        } else {
+            at += 1
+        }
+    }
+    count
+}
+
+fn rename_probe() -[Env, Exec, FS, Time.Wait]> String Err! {
+    root :: files.cwd() ?? return Err("cannot read the working directory: {err}")
+    jet :: process.env_get_or("JET", "")
+    if jet == "" -> return Err("JET must name the jet binary whose lexer facts drive the rename")
+    source_path :: "{root}/{PROBE}/pkg/input.jet"
+    raw :: files.read_bytes(source_path) ?? return Err("cannot read {source_path}: {err}")
+    lexed :: process.cmd([String]{jet.copy(), "inspect", "compiler", "lex", source_path.copy()}).cwd(root).run() ?? return Err("cannot start {jet}: {err}")
+    if lexed.code != 0 -> return Err(lexed.errors)
+    spans :: identifier_spans(lexed.output) ?? return Err(err)
+    out := [U8]{}
+    at := 0
+    loop span in spans {
+        if span.start < at || span.end > raw.len() || span.end < span.start -> return Err("token span {span.start}..{span.end} is outside the source")
+        loop byte in raw[at..<span.start] -> &out.push(byte)
+        loop byte in "new_name".bytes() -> &out.push(byte)
+        at = span.end
+    }
+    loop byte in raw[at..<raw.len()] -> &out.push(byte)
+    out_path :: "{root}/{PROBE}/pkg/renamed.jet"
+    files.write_bytes(out_path, out) ?? return Err("cannot write {out_path}: {err}")
+    if occurrences(out, "new_name") != 2 -> return Err("rename count")
+    if occurrences(out, "old_name text") == 0 || occurrences(out, "\"old_name literal\"") == 0 -> return Err("trivia changed")
+    Ok("renamed identifiers={spans.len()}; preserved comment/literal=true; output={out_path}")
+}
+
+fn run() {
+    if rename_probe() == {
+        .Ok(message) -> print(message)
+        .Err(error) -> {
+            term.eprint("rename: {error}")
+            process.exit(1)
+        }
+    }
+}

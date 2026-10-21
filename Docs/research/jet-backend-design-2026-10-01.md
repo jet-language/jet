@@ -751,7 +751,7 @@ function is the adapter: it takes raw fixed-width carriers and uses the
 canonical route C symbol. The runtime sources' `#Export(c)` declarations are
 the export set; `gen-c-abi-routes.mjs` keeps the shared lowering metadata but
 omits the Rust adapter body of every such declaration. The generators read the
-runtime-only `sources.list`; `Tools/agent/RuntimeGenerators` derives
+runtime-only `sources.list`; `gen-runtime-lifecycle.mjs` derives
 `lifecycle.list` from `// runtime-init|fini: N` comments. The route generator
 checks the Jet declaration against the derived C ABI, including every
 flattened list argument and result out-slot, and fails rather than silently

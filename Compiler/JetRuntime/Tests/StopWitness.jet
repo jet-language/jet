@@ -1,0 +1,205 @@
+#!/usr/bin/env jet
+// Runs a fatal-stop witness binary linked to the composed Jet objects and holds
+// every stop to exit 101 and its exact bytes. Each mode runs the binary with the
+// mode as its argument and writes <mode>.stdout, <mode>.stderr and
+// <mode>.status.json under OUT; the first departing mode ends the run with exit 1,
+// and a full pass writes the witness's result table. Each run is limited to 30
+// seconds.
+//   data-sequence   Dyn List/Entries bounds and capacity stops: empty stdout and
+//                   the DataSequence*.stderr golden on stderr
+//   scalar-reflect  scalar reflection bounds stops: the flushed "flushed" on
+//                   stdout and the foreign index-out-of-bounds body on stderr
+// Usage (from the repository root):
+//   jet Compiler/JetRuntime/Tests/StopWitness.jet WITNESS OUT BINARY
+use core.files as files
+use core.process as process
+use core.term as term
+
+GOLDENS :: "Compiler/JetRuntime/Tests"
+USAGE :: "usage: jet Compiler/JetRuntime/Tests/StopWitness.jet WITNESS OUT BINARY"
+
+// What one run of the binary left: `exited` is false when no exit status exists
+// (spawn failure, signal or timeout); `signal` and `error` are "" when absent.
+struct Outcome {
+    stdout: [U8]
+    stderr: [U8]
+    status: Int
+    exited: Bool
+    signal: String
+    error: String
+}
+
+fn fail(message: String) -[IO]> Int Never! {
+    term.eprint(message)
+    1
+}
+
+// An absolute path with `.`, `..` and empty segments folded, as path.resolve gives.
+fn resolve(cwd: String, path: String) -> String Never! {
+    full :: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
+    parts := [String]{}
+    loop part in full.split("/").to_list() {
+        if part == ".." {
+            if parts.len() > 0 {
+                kept := [String]{}
+                loop index in 0..<parts.len() - 1 {
+                    &kept.push(parts[index].copy())
+                }
+                parts = kept
+            }
+        } else if part != "" && part != "." {
+            &parts.push(part.copy())
+        }
+    }
+    "/{parts.join("/")}"
+}
+
+fn same_bytes(left: [U8], right: [U8]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        if left[index] != right[index] -> return false
+    }
+    true
+}
+
+fn json_text(text: String) -> String Never! {
+    out := ""
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 34 -> out = "{out}\\\""
+        else if code == 92 -> out = "{out}\\\\"
+        else -> out = "{out}{String.from_bytes_lossy([U8]{byte})}"
+    }
+    "\"{out}\""
+}
+
+fn signal_name(number: Int) -> String Never! {
+    names :: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM"}
+    if number > 0 && number < names.len() -> return names[number].copy()
+    "SIG{number}"
+}
+
+// Runs the binary (30 seconds at most), and reports the run the way node's
+// spawnSync does: no status after a signal, a timeout or a spawn failure, and
+// spawn failures and timeouts as an error message.
+fn run_binary(binary: String, mode: String) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
+    none :: [U8]{}
+    if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
+    if process.cmd([String]{binary.copy(), mode.copy()}).timeout(30s).run() == {
+        .Ok(receipt) -> {
+            stdout :: receipt.output.bytes()
+            if receipt.timed_out -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: "SIGTERM", error: "spawnSync {binary} ETIMEDOUT"}
+            if receipt.signal == .Val(number) -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: signal_name(number), error: ""}
+            Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: receipt.code, exited: true, signal: "", error: ""}
+        }
+        .Err(error) -> {
+            code :: if error == .PermissionDenied(_) -> "EACCES" else if error == .NotFound(_) -> "ENOENT" else -> "{error}"
+            Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} {code}"}
+        }
+    }
+}
+
+fn write_file(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
+    if files.write_bytes(path, bytes) == {
+        .Ok(_) -> true
+        .Err(error) -> {
+            term.eprint("cannot write {path}: {error}")
+            false
+        }
+    }
+}
+
+// Writes the three records of one run; false when a write failed.
+fn record(out: String, mode: String, outcome: Outcome) -[FS, IO]> Bool Never! {
+    status :: if outcome.exited -> "{outcome.status}" else -> "null"
+    signal :: if outcome.signal == "" -> "null" else -> json_text(outcome.signal)
+    error :: if outcome.error == "" -> "null" else -> json_text(outcome.error)
+    if !write_file("{out}/{mode}.stdout", outcome.stdout) -> return false
+    if !write_file("{out}/{mode}.stderr", outcome.stderr) -> return false
+    write_file("{out}/{mode}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes())
+}
+
+fn fatal(outcome: Outcome) -> Bool Never! { outcome.error == "" && outcome.signal == "" && outcome.exited && outcome.status == 101 }
+
+// "<status>/<signal>/<error>" as the exit messages show a run.
+fn shown(outcome: Outcome) -> String Never! {
+    status :: if outcome.exited -> "{outcome.status}" else -> "null"
+    signal :: if outcome.signal == "" -> "null" else -> outcome.signal
+    "{status}/{signal}/{outcome.error}"
+}
+
+fn data_sequence(cwd: String, out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
+    zero :: "DataSequenceIndexZero.stderr"
+    negative :: "DataSequenceIndexNegative.stderr"
+    capacity :: "DataSequenceCapacity.stderr"
+    modes :: [String]{"list-oob", "entries-oob", "list-negative", "entries-negative", "list-capacity-negative", "list-capacity-overflow", "entries-capacity-negative", "entries-capacity-overflow"}
+    goldens :: [String]{zero, zero, negative, negative, capacity, capacity, capacity, capacity}
+    rows := [String]{}
+    loop index in 0..<modes.len() {
+        mode :: modes[index]
+        golden :: goldens[index]
+        outcome :: run_binary(binary, mode)
+        if !record(out, mode, outcome) -> return 1
+        matched := fatal(outcome) && outcome.stdout.len() == 0
+        if matched {
+            golden_path :: "{cwd}/{GOLDENS}/{golden}"
+            expected :: if files.read_bytes(golden_path) == {
+                .Ok(value) -> value
+                .Err(_) -> { return fail("ENOENT: no such file or directory, open '{golden_path}'") }
+            }
+            matched = same_bytes(outcome.stderr, expected)
+        }
+        if !matched -> return fail("{mode}: expected exit 101, empty stdout and exact {golden}; got {shown(outcome)}")
+        &rows.push("{mode}\tpass\texit=101\tstderr-byte-identical=true")
+    }
+    if !write_file("{out}/data-sequence-results.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
+    print("8 Dyn List/Entries std Vec bounds/capacity process goldens passed")
+    0
+}
+
+fn scalar_reflect(out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
+    modes :: [String]{"bounds-equal", "bounds-negative"}
+    indexes :: [String]{"0", "18446744073709551615"}
+    rows := [String]{}
+    loop index in 0..<modes.len() {
+        mode :: modes[index]
+        outcome :: run_binary(binary, mode)
+        if !record(out, mode, outcome) -> return 1
+        if !fatal(outcome) -> return fail("{mode}: expected fatal exit 101, got {shown(outcome)}")
+        if !same_bytes(outcome.stdout, "flushed".bytes()) -> return fail("{mode}: pending runtime stdout was not flushed")
+        golden :: "index out of bounds: the len is 0 but the index is {indexes[index]}\n"
+        if !same_bytes(outcome.stderr, golden.bytes()) -> return fail("{mode}: stderr differs from exact foreign-panic body")
+        &rows.push("{mode}\tpass\texit=101\tstdout-flushed=true\tstderr-byte-identical=true")
+    }
+    if !write_file("{out}/scalar-reflect-stops.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
+    print("ScalarReflect bounds: exit 101, exact unsigned-index body and stdout flushed")
+    0
+}
+
+fn stop_witness(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    if args.len() == 0 -> return fail("{USAGE}\nWITNESS is one of: data-sequence, scalar-reflect")
+    key :: args[0]
+    operand :: if key == "data-sequence" -> "DATA_TREE_WITNESS" else if key == "scalar-reflect" -> "SCALAR_REFLECT_WITNESS" else -> ""
+    if operand == "" -> return fail("unknown witness: {key}\nWITNESS is one of: data-sequence, scalar-reflect")
+    if args.len() != 3 || args.contains("") -> return fail("usage: jet Compiler/JetRuntime/Tests/StopWitness.jet {key} OUT {operand}")
+    cwd :: files.cwd() ?? return fail("cannot read the working directory: {err}")
+    out :: resolve(cwd, args[1])
+    binary :: resolve(cwd, args[2])
+    if files.create_dir_all(out) == {
+        .Ok(_) -> {}
+        .Err(error) -> return fail("cannot create {out}: {error}")
+    }
+    if key == "data-sequence" -> return data_sequence(cwd, out, binary)
+    scalar_reflect(out, binary)
+}
+
+fn run() {
+    code :: stop_witness(process.args())
+    if code != 0 -> process.exit(code)
+}
+
+#Test("paths resolve and runs show like node's spawnSync") {
+    assert_eq(resolve("/a/b", "../c/./d//e"), "/a/c/d/e")
+    assert_eq(shown(Outcome{stdout: [U8]{}, stderr: [U8]{}, status: 0, exited: false, signal: "SIGKILL", error: ""}), "null/SIGKILL/")
+    assert_eq(json_text("a\"b"), "\"a\\\"b\"")
+}

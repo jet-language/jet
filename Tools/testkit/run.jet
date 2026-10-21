@@ -864,17 +864,8 @@ fn kit_gate_suite(suite: String) -> String {
     kit_execute_suites(options, root).failures.join("\n")
 }
 
-// One Jet generator's `--check` under the compiler under test: its report when stale or broken, or "".
-fn kit_gate_generator(path: String) -> String {
-    jet :: sys.get("JET") ?? return "JET must name the compiler under test"
-    root :: kit_gate_root() ?? return "{err}"
-    receipt :: process.cmd([jet, "run", path, "--", "--check"]).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return "{path}: {err}"
-    if receipt.success -> return ""
-    "{path} --check failed:\n{receipt.output}{receipt.errors}"
-}
-
-// `jet test Tools/testkit [<filter>]`: the repository's fixture gate. Each suite and each Jet
-// generator's `--check` is one test; a failing test lists every failing case.
+// `jet test Tools/testkit [<filter>]`: the repository's fixture gate. Each suite is one test;
+// a failing test lists every failing case.
 //   JET                  the compiler under test (required)
 //   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
 //                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --shard I/N, --scratch DIR,
@@ -897,14 +888,6 @@ fn test(t: Test) {
 
 #Test("suite cases") {
     assert_eq(kit_gate_suite("cases"), "")
-}
-
-#Test("check RuntimeGenerators") {
-    assert_eq(kit_gate_generator("Tools/agent/RuntimeGenerators"), "")
-}
-
-#Test("check LexerKeywordRows") {
-    assert_eq(kit_gate_generator("Tools/agent/LexerKeywordRows.jet"), "")
 }
 
 // The testkit binary (`jet build Tools/testkit/run.jet`) for census and registry tooling that

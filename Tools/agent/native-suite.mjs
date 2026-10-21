@@ -8,11 +8,11 @@ export const nativeSuiteNames = ['golden', 'ui', 'cases', 'registries'];
 export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node = process.execPath, suites = nativeSuiteNames }) {
     if (!suites.length || new Set(suites).size !== suites.length || suites.some(suite => !nativeSuiteNames.includes(suite))) throw Error('invalid or empty native suite selection');
     const definitions = [
-        ['unsafe-ratchet', node, [join(root, 'Tools/agent/check-unsafe-ratchet.mjs')]],
-        ['agent-doc-flags', jet, ['run', join(root, 'Tools/agent/AgentDocFlags')]],
-        ['decision-index', jet, ['run', join(root, 'Tools/agent/DecisionIndex'), '--', '--check']],
-        ['core-coverage', node, [join(root, 'Tools/agent/core-coverage-census.mjs'), '--check']],
-    ].map(([scope, command, args]) => ({ scope, command, args, cwd: root, kind: 'gate', documents: {} }));
+        ['unsafe-ratchet', 'check-unsafe-ratchet.mjs', []],
+        ['agent-doc-flags', 'check-agent-doc-flags.mjs', []],
+        ['decision-index', 'decision-index.mjs', ['--check']],
+        ['core-coverage', 'core-coverage-census.mjs', ['--check']],
+    ].map(([scope, file, args]) => ({ scope, command: node, args: [join(root, 'Tools/agent', file), ...args], cwd: root, kind: 'gate', documents: {} }));
     for (const suite of suites) {
         if (suite !== 'registries') {
             // The fixture gate is `jet test Tools/testkit`; its `suite <name>` test reads JET (the

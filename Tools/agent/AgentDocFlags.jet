@@ -1,0 +1,673 @@
+#!/usr/bin/env jet
+// Documented Tools/agent flags exist, and guidance documents keep plans and
+// work state in Tower.
+// Usage (from the repository root): jet Tools/agent/AgentDocFlags.jet [--policy-only]
+//   (default)       every `--flag` a document passes to a Tools/agent script
+//                   must be one the script's argv parsing accepts
+//   --policy-only   Docs/spec, Docs/proposals and README.md carry no plan or
+//                   status headings, no checklists, and no retired mirrors
+use core.files as files
+use core.process as process
+use core.term as term
+
+SCRIPT_ROOT :: "Tools/agent"
+SKIP_DIRECTORIES :: [String]{".agent-worktrees", ".cache", ".claude", ".git", ".tmp", ".tower", "build", "node_modules", "result", "target"}
+PASSTHROUGH_SCRIPTS :: [String]{"jet-env"}
+DOC_SUFFIXES :: [String]{".md", ".mdx", ".txt"}
+SCRIPT_SUFFIXES :: [String]{".mjs", ".js", ".sh", ".py", ".rb", ".exs"}
+ARGV_NAMES :: [String]{"arg", "args", "argv", "flag"}
+ARGV_TOKENS :: [String]{"arg", "args", "argv", "flag", "process.argv"}
+RETIRED_MIRRORS :: [String]{"Docs/spec/roadmap.md", "Docs/plans", "Docs/spec/reference/errors", "Docs/spec/diagnostic-rows.md", "Docs/spec/reference/core-surface-ledger.md", "Docs/spec/reference/core-backend-facts.md", "Docs/spec/reference/feature-claims.md"}
+OPERATIONAL_HEADINGS :: [String]{"implementation plans", "implementation plan", "plan of record", "derived plan", "roadmap", "milestones", "milestone", "status map", "status report", "status", "current status", "shipped status", "implementation status", "delivery status", "progress report", "progress", "staged implementation", "known drift", "known gaps", "next steps", "remaining work"}
+
+struct Finding {
+    doc: String
+    line: Int
+    script: String
+    flag: String
+    script_path: String
+}
+
+struct LogicalLine {
+    start_line: Int
+    value: String
+}
+
+// ---- byte helpers ----
+
+fn code_at(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int.from_u8(bytes[at])
+}
+
+fn is_alnum(code: Int) -> Bool Never! { (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) }
+
+fn is_alpha(code: Int) -> Bool Never! { (code >= 65 && code <= 90) || (code >= 97 && code <= 122) }
+
+fn is_word(code: Int) -> Bool Never! { is_alnum(code) || code == 95 }
+
+fn is_space(code: Int) -> Bool Never! { code == 32 || (code >= 9 && code <= 13) }
+
+// [A-Za-z0-9_.-]
+fn is_name(code: Int) -> Bool Never! { is_word(code) || code == 46 || code == 45 }
+
+fn slice_text(bytes: [U8], start: Int, end: Int) -> String Never! { String.from_bytes_lossy(bytes[start..<end]) }
+
+fn starts_at(bytes: [U8], at: Int, word: String) -> Bool Never! {
+    needle :: word.bytes()
+    if at < 0 || at + needle.len() > bytes.len() -> return false
+    loop index in 0..<needle.len() {
+        if bytes[at + index] != needle[index] -> return false
+    }
+    true
+}
+
+fn skip_spaces(bytes: [U8], at: Int) -> Int Never! {
+    position := at
+    loop position < bytes.len() && is_space(code_at(bytes, position)) -> position += 1
+    position
+}
+
+fn lower_ascii(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        &out.push(U8{if code >= 65 && code <= 90 -> code + 32 else -> code})
+    }
+    String.from_bytes_lossy(out)
+}
+
+// The lines of `text` split on `\n`, each without a trailing `\r`.
+fn text_lines(text: String) -> [String] Never! {
+    lines := [String]{}
+    loop piece in text.split("\n") {
+        if piece.bytes().len() > 0 && piece.bytes()[piece.bytes().len() - 1] == (U8{13}) {
+            &lines.push(slice_text(piece.bytes(), 0, piece.bytes().len() - 1))
+        } else {
+            &lines.push(piece)
+        }
+    }
+    lines
+}
+
+fn trim_end(text: String) -> String Never! {
+    bytes :: text.bytes()
+    end := bytes.len()
+    loop end > 0 && is_space(Int.from_u8(bytes[end - 1])) -> end -= 1
+    slice_text(bytes, 0, end)
+}
+
+// Every `--[A-Za-z][A-Za-z0-9-]*` in `bytes` from `from`, as (byte offset, flag).
+struct FlagHit {
+    at: Int
+    flag: String
+}
+
+fn flag_hits(bytes: [U8], from: Int) -> [FlagHit] Never! {
+    hits := [FlagHit]{}
+    position := from
+    loop position + 2 < bytes.len() {
+        if code_at(bytes, position) == 45 && code_at(bytes, position + 1) == 45 && is_alpha(code_at(bytes, position + 2)) {
+            end := position + 3
+            loop end < bytes.len() && (is_alnum(code_at(bytes, end)) || code_at(bytes, end) == 45) -> end += 1
+            &hits.push(FlagHit{at: position, flag: slice_text(bytes, position, end)})
+            position = end
+            next
+        }
+        position += 1
+    }
+    hits
+}
+
+// ---- documents ----
+
+fn is_doc(path: String) -> Bool Never! {
+    bytes :: path.bytes()
+    dot := -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{46}) -> dot = index
+    }
+    if dot >= 0 && DOC_SUFFIXES.contains(slice_text(bytes, dot, bytes.len())) -> return true
+    path.ends_with("/AGENTS.md") || path.ends_with("/CLAUDE.md") || path == "AGENTS.md" || path == "CLAUDE.md"
+}
+
+// Names in a directory, in the order `localeCompare` gives ASCII names: case
+// folded first, lowercase before uppercase on a tie.
+fn ordered_names(names: [String]) -> [String] Never! {
+    ordered := names
+    &ordered.sort_by((left: String, right: String) -> (lower_ascii(left) <=> lower_ascii(right)).then(right <=> left))
+    ordered
+}
+
+fn join_path(directory: String, name: String) -> String Never! {
+    if directory == "" || directory == "." -> return name.copy()
+    "{directory}/{name}"
+}
+
+// readdirSync's and readFileSync's uncaught failure: the message node reports
+// for the absolute path, then exit 1.
+fn node_fs_fail(syscall: String, path: String, error: IOError) -[Env, Exec, FS, IO]> Never Never! {
+    shown :: files.absolute(path) ?? path.copy()
+    reason :: if error == .NotFound(_) -> "ENOENT: no such file or directory" else if error == .PermissionDenied(_) -> "EACCES: permission denied" else -> "{error}"
+    term.eprint("{reason}, {syscall} '{shown}'")
+    process.exit(1)
+}
+
+fn read_doc(path: String) -[Env, Exec, FS, IO]> String Never! {
+    files.read(path) ?? {
+        node_fs_fail("open", path, err)
+        return ""
+    }
+}
+
+fn visit_docs(directory: String, found: &[String]) Never! -[Env, Exec, FS, IO]> {
+    names := [String]{}
+    shown :: if directory == "" -> "." else -> directory
+    if files.list_dir(shown) == {
+        .Ok(entries) -> {
+            loop entry in entries -> &names.push(entry.name.copy())
+        }
+        .Err(error) -> node_fs_fail("scandir", shown, error)
+    }
+    loop name in ordered_names(names) {
+        path :: join_path(directory, name)
+        if files.is_symlink(path) -> next
+        if files.is_dir(path) {
+            if !SKIP_DIRECTORIES.contains(name) -> visit_docs(path, &found)
+        } else if files.is_file(path) && is_doc(path) {
+            &found.push(path)
+        }
+    }
+}
+
+fn doc_files(base: String) -[Env, Exec, FS, IO]> [String] Never! {
+    found := [String]{}
+    visit_docs(base, &found)
+    found
+}
+
+fn logical_lines(text: String) -> [LogicalLine] Never! {
+    physical :: text_lines(text)
+    lines := [LogicalLine]{}
+    index := 0
+    loop index < physical.len() {
+        start_line :: index + 1
+        value := physical[index].copy()
+        loop trim_end(value).ends_with("\\") && index + 1 < physical.len() {
+            trimmed :: trim_end(value)
+            index += 1
+            value = "{slice_text(trimmed.bytes(), 0, trimmed.bytes().len() - 1)}\n{physical[index]}"
+        }
+        &lines.push(LogicalLine{start_line: start_line, value: value})
+        index += 1
+    }
+    lines
+}
+
+fn line_at(bytes: [U8], offset: Int, start_line: Int) -> Int Never! {
+    line := start_line
+    loop index in 0..<offset {
+        if bytes[index] == (U8{10}) -> line += 1
+    }
+    line
+}
+
+fn collect_flags(doc: String, line: LogicalLine, script: String, script_index: Int, findings: &[Finding], seen: &[String:Bool]) Never! -[FS]> {
+    if PASSTHROUGH_SCRIPTS.contains(script) -> return
+    script_path :: "{SCRIPT_ROOT}/{script}"
+    if !files.is_file(script_path) -> return
+    bytes :: line.value.bytes()
+    command_start :: script_index + script.bytes().len()
+    loop hit in flag_hits(bytes, command_start) {
+        number :: line_at(bytes, hit.at, line.start_line)
+        key :: "{doc}:{number}:{script}:{hit.flag}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &findings.push(Finding{doc: doc.copy(), line: number, script: script.copy(), flag: hit.flag.copy(), script_path: script_path.copy()})
+    }
+}
+
+// The name run `[A-Za-z0-9][A-Za-z0-9_.-]*` at `at`, or "" when none starts there.
+fn name_run(bytes: [U8], at: Int) -> String Never! {
+    if !is_alnum(code_at(bytes, at)) -> return ""
+    end := at + 1
+    loop end < bytes.len() && is_name(code_at(bytes, end)) -> end += 1
+    slice_text(bytes, at, end)
+}
+
+// A script name with a known extension followed by blanks and `--`.
+fn script_before_flag(bytes: [U8], at: Int) -> String Never! {
+    name :: name_run(bytes, at)
+    if name == "" -> return ""
+    known := false
+    loop suffix in SCRIPT_SUFFIXES {
+        if name.ends_with(suffix) && name.bytes().len() > suffix.bytes().len() -> known = true
+    }
+    if !known -> return ""
+    after :: at + name.bytes().len()
+    if !is_space(code_at(bytes, after)) -> return ""
+    flag_at :: skip_spaces(bytes, after)
+    if code_at(bytes, flag_at) != 45 || code_at(bytes, flag_at + 1) != 45 -> return ""
+    name
+}
+
+fn documented_flags(doc: String, text: String) -[FS]> [Finding] Never! {
+    findings := [Finding]{}
+    seen := [String:Bool]{}
+    loop line in logical_lines(text) {
+        bytes :: line.value.bytes()
+        position := 0
+        loop position < bytes.len() {
+            if starts_at(bytes, position, "Tools/agent/") {
+                script :: name_run(bytes, position + 12)
+                if script != "" {
+                    collect_flags(doc, line, script, position + 12, &findings, &seen)
+                    position = position + 12 + script.bytes().len()
+                    next
+                }
+            }
+            position += 1
+        }
+        position = 0
+        loop position < bytes.len() {
+            if position == 0 {
+                script :: script_before_flag(bytes, 0)
+                if script != "" {
+                    collect_flags(doc, line, script, 0, &findings, &seen)
+                    position = script.bytes().len()
+                    next
+                }
+            }
+            code :: code_at(bytes, position)
+            if is_space(code) || code == 96 || code == 34 || code == 39 || code == 40 {
+                script :: script_before_flag(bytes, position + 1)
+                if script != "" {
+                    collect_flags(doc, line, script, position + 1, &findings, &seen)
+                    position = position + 1 + script.bytes().len()
+                    next
+                }
+            }
+            position += 1
+        }
+    }
+    findings
+}
+
+// ---- script argv parsing ----
+
+fn strip_line_comments(source: String) -> String Never! {
+    bytes :: source.bytes()
+    out := [U8]{}
+    position := 0
+    loop position < bytes.len() {
+        if code_at(bytes, position) == 47 && code_at(bytes, position + 1) == 47 {
+            loop position < bytes.len() && code_at(bytes, position) != 10 -> position += 1
+            next
+        }
+        &out.push(bytes[position])
+        position += 1
+    }
+    String.from_bytes_lossy(out)
+}
+
+// A whole word `arg`, `args`, `argv` or `flag` in `bytes`.
+fn names_argv(bytes: [U8]) -> Bool Never! {
+    position := 0
+    loop position < bytes.len() {
+        if !is_word(code_at(bytes, position)) {
+            position += 1
+            next
+        }
+        end := position
+        loop end < bytes.len() && is_word(code_at(bytes, end)) -> end += 1
+        if ARGV_NAMES.contains(slice_text(bytes, position, end)) -> return true
+        position = end
+    }
+    false
+}
+
+fn call_after(bytes: [U8], word: String) -> Bool Never! {
+    loop position in 0..<bytes.len() {
+        if starts_at(bytes, position, word) && code_at(bytes, skip_spaces(bytes, position + word.bytes().len())) == 40 -> return true
+    }
+    false
+}
+
+fn compares_argv(line: String) -> Bool Never! {
+    bytes :: line.bytes()
+    line.contains("==") || line.contains("!=") || call_after(bytes, "includes") || call_after(bytes, "indexOf") || call_after(bytes, "has")
+}
+
+// The end of `{[^{}]*}` at `at`, or -1.
+fn brace_object_end(bytes: [U8], at: Int) -> Int Never! {
+    if code_at(bytes, at) != 123 -> return -1
+    position := at + 1
+    loop position < bytes.len() {
+        code :: code_at(bytes, position)
+        if code == 125 -> return position + 1
+        if code == 123 -> return -1
+        position += 1
+    }
+    -1
+}
+
+// `[` blanks argv-name blanks `]` at `at`: the end after `]`, or -1.
+fn argv_index_end(bytes: [U8], at: Int) -> Int Never! {
+    if code_at(bytes, at) != 91 -> return -1
+    inner :: skip_spaces(bytes, at + 1)
+    loop name in ARGV_TOKENS {
+        if !starts_at(bytes, inner, name) -> next
+        close :: skip_spaces(bytes, inner + name.bytes().len())
+        if code_at(bytes, close) == 93 -> return close + 1
+    }
+    -1
+}
+
+fn node_source_flags(source: String) -> [String] Never! {
+    code :: strip_line_comments(source)
+    flags := [String]{}
+    loop line in text_lines(code) {
+        bytes :: line.bytes()
+        if !names_argv(bytes) || !compares_argv(line) -> next
+        loop hit in flag_hits(bytes, 0) {
+            if !flags.contains(hit.flag) -> &flags.push(hit.flag.copy())
+        }
+    }
+    bytes :: code.bytes()
+    maps := [String:String]{}
+    position := 0
+    loop position < bytes.len() {
+        if starts_at(bytes, position, "const") && !is_word(code_at(bytes, position - 1)) && is_space(code_at(bytes, position + 5)) {
+            name_start :: skip_spaces(bytes, position + 5)
+            name_end := name_start
+            loop is_word(code_at(bytes, name_end)) -> name_end += 1
+            equals :: skip_spaces(bytes, name_end)
+            if name_end > name_start && code_at(bytes, equals) == 61 {
+                object_start :: skip_spaces(bytes, equals + 1)
+                object_end :: brace_object_end(bytes, object_start)
+                if object_end > 0 {
+                    maps[slice_text(bytes, name_start, name_end)] = slice_text(bytes, object_start, object_end)
+                    position = object_end
+                    next
+                }
+            }
+        }
+        position += 1
+    }
+    dispatch := [String]{}
+    position = 0
+    loop position < bytes.len() {
+        matched := false
+        loop name in ARGV_TOKENS {
+            if matched || !starts_at(bytes, position, name) -> next
+            after :: position + name.bytes().len()
+            if !is_space(code_at(bytes, after)) -> next
+            keyword :: skip_spaces(bytes, after)
+            if !starts_at(bytes, keyword, "in") || !is_space(code_at(bytes, keyword + 2)) -> next
+            word_start :: skip_spaces(bytes, keyword + 2)
+            word_end := word_start
+            loop is_word(code_at(bytes, word_end)) -> word_end += 1
+            if word_end == word_start -> next
+            &dispatch.push(maps.get(slice_text(bytes, word_start, word_end)) ?? "")
+            position = word_end
+            matched = true
+        }
+        if !matched -> position += 1
+    }
+    position = 0
+    loop position < bytes.len() {
+        object_end :: brace_object_end(bytes, position)
+        if object_end > 0 {
+            index_end :: argv_index_end(bytes, skip_spaces(bytes, object_end))
+            if index_end > 0 {
+                &dispatch.push(slice_text(bytes, position, object_end))
+                position = index_end
+                next
+            }
+        }
+        position += 1
+    }
+    position = 0
+    loop position < bytes.len() {
+        if !is_word(code_at(bytes, position)) || is_word(code_at(bytes, position - 1)) {
+            position += 1
+            next
+        }
+        word_end := position
+        loop is_word(code_at(bytes, word_end)) -> word_end += 1
+        index_end :: argv_index_end(bytes, skip_spaces(bytes, word_end))
+        if index_end > 0 {
+            &dispatch.push(maps.get(slice_text(bytes, position, word_end)) ?? "")
+            position = index_end
+            next
+        }
+        position = word_end
+    }
+    loop object in dispatch {
+        object_bytes :: object.bytes()
+        loop at in 0..<object_bytes.len() {
+            quote :: code_at(object_bytes, at)
+            if quote != 34 && quote != 39 -> next
+            hits :: flag_hits(object_bytes, at + 1)
+            if hits.len() == 0 || hits[0].at != at + 1 -> next
+            closing :: at + 1 + hits[0].flag.bytes().len()
+            closer :: code_at(object_bytes, closing)
+            if (closer == 34 || closer == 39) && code_at(object_bytes, skip_spaces(object_bytes, closing + 1)) == 58 {
+                if !flags.contains(hits[0].flag) -> &flags.push(hits[0].flag.copy())
+            }
+        }
+    }
+    flags
+}
+
+// `(^|\s)#.*` removed: the comment from the first `#` at the start or after a blank.
+fn strip_shell_comment(line: String) -> String Never! {
+    bytes :: line.bytes()
+    loop at in 0..<bytes.len() {
+        if code_at(bytes, at) == 35 && (at == 0 || is_space(code_at(bytes, at - 1))) -> return slice_text(bytes, 0, at)
+    }
+    line.copy()
+}
+
+// A line that parses argv: a shell keyword, a test bracket, or a `case` pattern.
+fn shell_parser_line(line: String) -> Bool Never! {
+    bytes :: line.bytes()
+    if line.contains("[") -> return true
+    position := 0
+    loop position < bytes.len() {
+        if !is_word(code_at(bytes, position)) {
+            position += 1
+            next
+        }
+        end := position
+        loop end < bytes.len() && is_word(code_at(bytes, end)) -> end += 1
+        word :: slice_text(bytes, position, end)
+        if word == "case" || word == "if" || word == "elif" || word == "while" || word == "until" || word == "getopts" -> return true
+        position = end
+    }
+    start :: skip_spaces(bytes, 0)
+    end := start
+    loop end < bytes.len() && (is_alnum(code_at(bytes, end)) || code_at(bytes, end) == 45 || code_at(bytes, end) == 124) -> end += 1
+    end > start && code_at(bytes, end) == 41
+}
+
+fn source_flags(script_path: String) -[Env, Exec, FS, IO]> [String] Never! {
+    source :: read_doc(script_path)
+    if script_path.ends_with(".js") || script_path.ends_with(".mjs") -> return node_source_flags(source)
+    flags := [String]{}
+    if !script_path.ends_with(".sh") && !source.starts_with("#!/usr/bin/env bash") -> return flags
+    loop raw in text_lines(source) {
+        line :: strip_shell_comment(raw)
+        if !shell_parser_line(line) -> next
+        loop hit in flag_hits(line.bytes(), 0) {
+            if !flags.contains(hit.flag) -> &flags.push(hit.flag.copy())
+        }
+    }
+    flags
+}
+
+// ---- documentation policy ----
+
+// The run of three or more backticks or tildes after at most three spaces.
+fn fence_marker(line: String) -> String Never! {
+    bytes :: line.bytes()
+    start := 0
+    loop start < 3 && code_at(bytes, start) == 32 -> start += 1
+    mark :: code_at(bytes, start)
+    if mark != 96 && mark != 126 -> return ""
+    end := start
+    loop code_at(bytes, end) == mark -> end += 1
+    if end - start < 3 -> return ""
+    slice_text(bytes, 0, end)
+}
+
+fn heading_text(line: String) -> String Never! {
+    bytes :: line.bytes()
+    start := 0
+    loop start < 3 && code_at(bytes, start) == 32 -> start += 1
+    hashes := start
+    loop code_at(bytes, hashes) == 35 -> hashes += 1
+    if hashes == start || hashes - start > 6 || !is_space(code_at(bytes, hashes)) -> return ""
+    text_start :: skip_spaces(bytes, hashes)
+    if text_start >= bytes.len() -> return ""
+    slice_text(bytes, text_start, bytes.len())
+}
+
+fn operational_heading(heading: String) -> Bool Never! {
+    lowered :: lower_ascii(heading)
+    bytes :: lowered.bytes()
+    starts := [Int]{0}
+    digits := 0
+    loop digits < bytes.len() && code_at(bytes, digits) >= 48 && code_at(bytes, digits) <= 57 -> digits += 1
+    if digits > 0 {
+        after := digits
+        if code_at(bytes, after) == 46 || code_at(bytes, after) == 41 -> after += 1
+        if is_space(code_at(bytes, after)) -> &starts.push(skip_spaces(bytes, after))
+    }
+    loop start in starts {
+        loop topic in OPERATIONAL_HEADINGS {
+            if starts_at(bytes, start, topic) && !is_word(code_at(bytes, start + topic.bytes().len())) -> return true
+        }
+    }
+    false
+}
+
+fn checklist_item(line: String) -> Bool Never! {
+    bytes :: line.bytes()
+    at :: skip_spaces(bytes, 0)
+    bullet :: code_at(bytes, at)
+    if bullet != 45 && bullet != 42 -> return false
+    if !is_space(code_at(bytes, at + 1)) -> return false
+    box :: skip_spaces(bytes, at + 1)
+    mark :: code_at(bytes, box + 1)
+    code_at(bytes, box) == 91 && (mark == 32 || mark == 120 || mark == 88) && code_at(bytes, box + 2) == 93
+}
+
+fn documentation_policy_errors(path: String, text: String) -> [String] Never! {
+    findings := [String]{}
+    fence := ""
+    loop (index, line) in text_lines(text) {
+        marker :: fence_marker(line)
+        if marker != "" {
+            run :: slice_text(marker.bytes(), skip_spaces(marker.bytes(), 0), marker.bytes().len())
+            if fence == "" {
+                fence = run
+            } else if run.bytes()[0] == fence.bytes()[0] && run.bytes().len() >= fence.bytes().len() && slice_text(line.bytes(), marker.bytes().len(), line.bytes().len()).trim() == "" {
+                fence = ""
+            }
+            next
+        }
+        if fence != "" -> next
+        heading :: heading_text(line)
+        if heading != "" && operational_heading(heading) -> &findings.push("{path}:{index + 1}: plans and development status belong in Tower")
+        if checklist_item(line) -> &findings.push("{path}:{index + 1}: work checklists belong on Tower cards")
+    }
+    findings
+}
+
+fn check_documentation_policy() -[Env, Exec, FS, IO]> Int Never! {
+    paths := doc_files("Docs/spec")
+    loop path in doc_files("Docs/proposals") -> &paths.push(path)
+    &paths.push("README.md")
+    failures := [String]{}
+    loop path in paths {
+        text :: read_doc(path)
+        loop failure in documentation_policy_errors(path, text) -> &failures.push(failure)
+    }
+    loop retired in RETIRED_MIRRORS {
+        if files.exists(retired) -> &failures.push("{retired}: use Tower or generate the reference from code on demand")
+    }
+    if failures.len() > 0 {
+        term.eprint(failures.join("\n"))
+        return 1
+    }
+    print("documentation-policy: ok ({paths.len()} guidance files; plans/status and retired mirrors checked)")
+    0
+}
+
+fn check_doc_flags() -[Env, Exec, FS, IO]> Int Never! {
+    findings := [Finding]{}
+    loop doc in doc_files("") {
+        text :: read_doc(doc)
+        loop finding in documented_flags(doc, text) -> &findings.push(finding)
+    }
+    accepted := [String:[String]]{}
+    errors := [String]{}
+    loop finding in findings {
+        if accepted.get(finding.script_path) == None -> accepted[finding.script_path.copy()] = source_flags(finding.script_path)
+        flags :: accepted.get(finding.script_path) ?? [String]{}
+        if flags.contains(finding.flag) -> next
+        sorted := flags
+        &sorted.sort()
+        known :: if sorted.len() == 0 -> "(none detected)" else -> sorted.join(", ")
+        &errors.push("{finding.doc}:{finding.line}: {finding.script} {finding.flag} is not accepted; accepted flags: {known}")
+    }
+    if errors.len() > 0 {
+        term.eprint("agent-doc-flags: {errors.len()} drift(s)")
+        loop error in errors -> term.eprint("- {error}")
+        return 1
+    }
+    print("agent-doc-flags: ok ({findings.len()} documented flag reference(s))")
+    0
+}
+
+fn run() {
+    args :: process.args()
+    code :: if args.contains("--policy-only") -> check_documentation_policy() else -> check_doc_flags()
+    if code != 0 -> process.exit(code)
+}
+
+fn error_lines(errors: [String]) -> String Never! {
+    lines := [String]{}
+    loop error in errors {
+        parts :: error.split(": ")
+        loop part in parts {
+            &lines.push(part)
+            break
+        }
+    }
+    lines.join(",")
+}
+
+#Test("operational headings and task state are rejected with source locations") {
+    errors :: documentation_policy_errors("Docs/spec/example.md", "# Example\n## 15. Implementation plan\n- [ ] Ship the change\n## Shipped status")
+    assert_eq(error_lines(errors), "Docs/spec/example.md:2,Docs/spec/example.md:3,Docs/spec/example.md:4")
+}
+
+#Test("domain plans and fenced sample documents are not work ledgers") {
+    text :: "## Query plans\nA query plan describes execution order.\n````markdown\n## Status\n```\n- [x] sample\n````\n~~~markdown\n## Milestones\n~~~\n## Contracts\nEach request has a status value."
+    assert_eq(documentation_policy_errors("Docs/spec/example.md", text).len(), 0)
+}
+
+#Test("an unrelated fence cannot hide subsequent operational content") {
+    errors :: documentation_policy_errors("Docs/spec/example.md", "```markdown\n~~~\n## Status\n```\n## Remaining work")
+    assert_eq(errors.len(), 1)
+    assert(errors[0].starts_with("Docs/spec/example.md:5:"))
+}
+
+#Test("argv dispatch maps and flag comparisons are accepted, unrelated strings are not") {
+    source :: "\n    const names = {{ '--subject': 'subject', '--root': 'root' }};\n    const help = {{ '--retired': 'old' }};\n    for (const arg of argv) {{\n      if (!(arg in names) && !['--format'].includes(arg)) throw Error('unknown');\n    }}\n    const flag = process.argv[i];\n    if (flag === '--dry-run') continue;\n    const key = {{ '--jet': 'jet', '--runtime-dir': 'runtime', '--out': 'out' }}[flag];\n    const command = ['--spawn-only'];\n    // if (arg === '--comment-only') {{}}\n  "
+    flags := node_source_flags(source)
+    &flags.sort()
+    assert_eq(flags.join(","), "--dry-run,--format,--jet,--out,--root,--runtime-dir,--subject")
+}

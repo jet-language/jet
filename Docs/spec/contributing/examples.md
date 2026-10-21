@@ -48,15 +48,14 @@ The testkit package's own `fn test` is the fixture gate. Run it from the
 repository root with the compiler under test in `JET`:
 
 ```sh
-JET=/path/to/jet jet test Tools/testkit                    # every suite and generator check
+JET=/path/to/jet jet test Tools/testkit                    # every suite
 JET=/path/to/jet jet test Tools/testkit "suite golden"     # one suite
 TESTKIT_ARGS="--filter basics/fizzbuzz --tier o0" JET=/path/to/jet jet test Tools/testkit "suite golden"
 JET_CI_EVIDENCE_DIR=/disk/scratch JET=/path/to/jet jet test Tools/testkit "suite golden"  # writes golden.json
 ```
 
-Each suite (`suite golden`, `suite ui`, `suite cases`) and each Jet-ported
-generator's `--check` (`check <generator>`) is one test; a failing test lists
-every failing case row. `TESTKIT_ARGS` carries the kit flags below, split like
+Each suite (`suite golden`, `suite ui`, `suite cases`) is one test; a failing
+test lists every failing case row. `TESTKIT_ARGS` carries the kit flags below, split like
 `.case` step words.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`

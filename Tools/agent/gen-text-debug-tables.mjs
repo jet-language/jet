@@ -112,7 +112,7 @@ if (process.argv[3]) {
   }
   console.log(`text-debug oracle comparisons: ${checked} non-ASCII scalars; 0 disagreements`);
 }
-// Keep the canonical table emitted by Tools/agent/RuntimeGenerators from
+// Keep the canonical table emitted by gen-runtime-trap-messages.mjs from
 // JetFoundation/Text/RustDebug.jet. Do not introduce a second runtime table.
 const canonicalSource = readFileSync('Compiler/JetRuntime/Source/TrapMessages.jet', 'utf8');
 const canonical = [...requiredMatch(canonicalSource,

@@ -111,10 +111,9 @@ const ui = {
   'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','shortcut-binding':'UiShortcutBindingWitness',
   'slice2':'UiCarriersSlice2Witness','slice3':'UiCarriersSlice3Witness','view-snapshots':'UiViewSnapshotsWitness',
 };
-// One Jet program runs every UI witness; each witness keeps its own runner row.
 for (const [name, witness] of Object.entries(ui)) {
-  const runner = `ui-witness-${name}`, args = name === 'key' ? [charOracle] : [];
-  registry.set(runner, {commands: [[jet, 'run', `${T}/UiWitness`, '--', name, out(runner), binary(witness), ...args]], needs: [jet, binary(witness), ...args], extra: {}});
+  const runner = `run-ui-${name}-witness`, args = name === 'key' ? [charOracle] : [];
+  add(runner, [r(runner, out(runner), binary(witness), ...args)], [binary(witness), ...args]);
 }
 for (const [runner,witness] of [['run-root-cleanup','RootCleanupWitness'],['run-data-sequence-stops','DataTreeWitness'],['run-scalar-reflect-stops','ScalarReflectWitness']]) add(runner,[r(runner,out(runner),binary(witness))],[binary(witness)]);
 add('run-record-variant-panic',[r('run-record-variant-panic',out('record-variant-panic'),...['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary))],['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary));

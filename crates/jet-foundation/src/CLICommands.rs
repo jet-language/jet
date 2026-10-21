@@ -19,7 +19,7 @@ pub struct CommandSpec {
     /// flags-only with no subcommand (bare `jet` starts the REPL instead).
     pub headline: bool,
     /// Position in `jet help`'s default order, 1 = most used. Measured and
-    /// written by `jet run Tools/cli-census/Census.jet`; never edit by hand.
+    /// written by `node Tools/cli-census/census.mjs`; never edit by hand.
     pub frequency_rank: u16,
     /// Nested actions when this is a namespaced group (`registry`, …); empty
     /// for a bare leaf command.
@@ -700,7 +700,7 @@ const PERF_ACTIONS: &[NestedCommandSpec] = &[
 ];
 /// Every built-in subcommand. Order here is the order shown in the man page and
 /// completions. `jet help` lists the rows by `frequency_rank` (1 = most used),
-/// which `jet run Tools/cli-census/Census.jet` measures and writes in place; run
+/// which `node Tools/cli-census/census.mjs` measures and writes in place; run
 /// it after adding a row, and `--check` proves the ranks are current. The
 /// greeting shows the `headline` rows in that same order.
 pub const COMMANDS: &[CommandSpec] = &[

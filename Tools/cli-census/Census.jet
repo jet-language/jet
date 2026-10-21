@@ -1,3 +1,4 @@
+#!/usr/bin/env jet
 // Command-frequency census for `jet help` (#3724).
 //
 // For every command row in Compiler/JetFoundation/Source/Registry/CLICommands.jet, counts the files in
@@ -9,22 +10,11 @@
 // `jet help` lists commands in that order; `jet help --sort az|za` lists them
 // alphabetically.
 //
-// usage: jet run Tools/cli-census/Census.jet [-- --check]   (from the repository root)
+// usage: jet Tools/cli-census/Census.jet [--check]   (from the repository root)
 //   (no flag) rewrite the ranks in the shared Jet and Rust command registries
 //   --check    print the ranking; exit 1 when either table holds different ranks
 //
 // Output is deterministic: the ranking is a pure function of the scanned text.
-package {
-    name: "cli-census"
-    version: "0.1.0"
-    edition: "2026"
-    authority: {
-        holds: {
-            allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem, Time.Wait]
-        }
-    }
-}
-
 use core.files as files
 use core.process as process
 use core.term as term
@@ -228,14 +218,29 @@ fn table_rows(body: String, source: String, row_openers: [String]) -> [CommandRo
     Ok(rows)
 }
 
-fn read_table(table: CommandTable) -[FS]> TableRead CensusError! {
-    source :: files.read(table.path) ?? return Err(census_fail("census: cannot read {table.path}: {err}"))
+// The repository-rooted absolute path node's messages name.
+fn absolute(path: String) -[Env, FS]> String Never! {
+    root :: files.cwd() ?? ""
+    "{root}/{path}"
+}
+
+// A node fs call's uncaught failure message.
+fn node_fs_message(error: IOError, syscall: String, path: String) -> String Never! {
+    if error == .NotFound(_) -> return "ENOENT: no such file or directory, {syscall} '{path}'"
+    if error == .PermissionDenied(_) -> return "EACCES: permission denied, {syscall} '{path}'"
+    "{error}, {syscall} '{path}'"
+}
+
+fn read_table(table: CommandTable) -[Env, FS]> TableRead CensusError! {
+    full :: absolute(table.path)
+    if files.is_dir(table.path) -> return Err(census_fail("EISDIR: illegal operation on a directory, read"))
+    source :: files.read(table.path) ?? return Err(census_fail(node_fs_message(err, "open", full)))
     open :: source.find(table.open)
-    if open < 0 -> return Err(census_fail("census: command table not found in {table.path}"))
+    if open < 0 -> return Err(census_fail("census: command table not found in {full}"))
     body_start :: open + byte_len(table.open)
     after :: byte_slice(source, body_start, byte_len(source))
     close :: after.find(table.close)
-    if close < 0 -> return Err(census_fail("census: command table in {table.path} has no end"))
+    if close < 0 -> return Err(census_fail("census: command table in {full} has no end"))
     body_end :: body_start + close
     rows :: table_rows(byte_slice(source, body_start, body_end), source, table.row_openers) ?? return Err(err)
     Ok(TableRead{table: table, source: source, body_start: body_start, body_end: body_end, rows: rows})
@@ -283,11 +288,17 @@ fn has_zero_byte(bytes: [U8]) -> Bool Never! {
     false
 }
 
-fn scanned_files() -[Exec, Time.Wait]> [String] CensusError! {
+fn scanned_files() -[Exec, IO, Time.Wait]> [String] CensusError! {
     argv := [String]{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}
     loop root in SCAN_ROOTS -> &argv.push(root)
-    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(census_fail("census: git ls-files failed: {err}"))
-    if receipt.code != 0 -> return Err(census_fail("census: git ls-files failed: {receipt.errors}"))
+    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(census_fail("spawnSync git ENOENT"))
+    // execFileSync: the child's stderr reaches ours, and a failure reports the
+    // command line followed by that stderr.
+    if receipt.errors != "" {
+        sink := term.stderr()
+        &sink.write(receipt.errors).drop("stderr write")
+    }
+    if receipt.code != 0 -> return Err(census_fail("Command failed: {argv.join(" ")}\n{receipt.errors}"))
     paths := [String]{}
     seen := [String:Bool]{}
     output :: receipt.output.bytes()
@@ -329,19 +340,26 @@ fn ranking_line(rank: Int, ranked: RankedCommand) -> String Never! {
     "{right_aligned(rank, 3)} {right_aligned(ranked.count, 6)} {ranked.name}"
 }
 
+// A row's census rank as node prints it; a row the Jet table lacks has none
+// (`undefined`).
+fn rank_text(rank_of: [String:Int], name: String) -> String Never! {
+    if rank_of.get(name) == .Val(rank) -> return "{rank}"
+    "undefined"
+}
+
 // The table source with every row's rank replaced by its census rank.
 fn rewritten_source(read: TableRead, rank_of: [String:Int]) -> String Never! {
     body :: byte_slice(read.source, read.body_start, read.body_end)
     out := byte_slice(read.source, 0, read.body_start)
     cursor := 0
     loop row in read.rows {
-        out = "{out}{byte_slice(body, cursor, row.rank_start)}{rank_of.get(row.name) ?? 0}"
+        out = "{out}{byte_slice(body, cursor, row.rank_start)}{rank_text(rank_of, row.name)}"
         cursor = row.rank_end
     }
     "{out}{byte_slice(body, cursor, byte_len(body))}{byte_slice(read.source, read.body_end, byte_len(read.source))}"
 }
 
-fn census_main(args: [String]) -[FS, IO, Exec, Time.Wait]> Int CensusError! {
+fn census_main(args: [String]) -[Env, FS, IO, Exec, Time.Wait]> Int CensusError! {
     check := false
     loop arg in args {
         if arg == "--check" {
@@ -384,22 +402,22 @@ fn census_main(args: [String]) -[FS, IO, Exec, Time.Wait]> Int CensusError! {
         stale := [String]{}
         loop read in reads {
             loop row in read.rows {
-                expected :: rank_of.get(row.name) ?? 0
-                if row.rank != expected -> &stale.push("census: {row.name} has frequency_rank {row.rank} in {read.table.path}, census says {expected}")
+                expected :: rank_text(rank_of, row.name)
+                if "{row.rank}" != expected -> &stale.push("census: {row.name} has frequency_rank {row.rank} in {read.table.path}, census says {expected}")
             }
         }
         if stale.len() == 0 -> return Ok(0)
         loop line in stale -> term.eprint(line)
-        term.eprint("census: run `jet run Tools/cli-census/Census.jet` to rewrite the ranks")
+        term.eprint("census: run `jet Tools/cli-census/Census.jet` to rewrite the ranks")
         return Ok(1)
     }
     loop read in reads {
         changed := false
         loop row in read.rows {
-            if row.rank != (rank_of.get(row.name) ?? 0) -> changed = true
+            if "{row.rank}" != rank_text(rank_of, row.name) -> changed = true
         }
         if !changed -> next
-        files.write(read.table.path, rewritten_source(read, rank_of)) ?? return Err(census_fail("census: cannot write {read.table.path}: {err}"))
+        files.write(read.table.path, rewritten_source(read, rank_of)) ?? return Err(census_fail(node_fs_message(err, "open", absolute(read.table.path))))
     }
     Ok(0)
 }

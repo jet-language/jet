@@ -1,17 +1,7 @@
+#!/usr/bin/env jet
 // Project the canonical Jet lexer keyword table into borrowed Jet byte checks.
 // Spellings remain Jet Syntax constants; Jet token tags own the kinds.
-// Usage: jet run Tools/agent/LexerKeywordRows.jet -- [--check|--write]
-package {
-    name: "lexer-keyword-rows"
-    version: "0.1.0"
-    edition: "2026"
-    authority: {
-        holds: {
-            allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem]
-        }
-    }
-}
-
+// Usage: jet Tools/agent/LexerKeywordRows.jet [--check|--write]
 use core.files as files
 use core.process as process
 use core.term as term
@@ -348,7 +338,7 @@ fn keyword_rows_main(args: [String]) -[FS]> String KeywordRowsError! {
         files.write(SCAN_PATH, next_source) ?? return Err(rows_fail("cannot write {SCAN_PATH}: {err}"))
         return Ok("lexer keyword rows written")
     }
-    if next_source != source -> return Err(rows_fail("{SCAN_PATH} is stale; run jet run Tools/agent/LexerKeywordRows.jet -- --write"))
+    if next_source != source -> return Err(rows_fail("{SCAN_PATH} is stale; run jet Tools/agent/LexerKeywordRows.jet --write"))
     Ok("lexer keyword rows check passed")
 }
 
