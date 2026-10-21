@@ -152,10 +152,10 @@ fn dns_u16(packet: I64, at: I64, what: I64, error: I64) -> I64 {
     (dns_u8(packet, at) << I64{8}).bit_or(dns_u8(packet, at + I64{1}))
 }
 
-fn dns_protocol(error: I64, message: String) -> I64 {
+fn dns_protocol(error: I64, message: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("network protocol error: "))
-    jet_rt_string_builder_push(text, rt_static_text(message))
+    jet_rt_string_builder_push(text, message)
     dns_fail(error, text)
 }
 
@@ -173,27 +173,27 @@ fn dns_read_name(packet: I64, position: I64, error: I64) -> I64 {
     failure := I64{0}
     loop {
         if (p >= size) {
-            failure = dns_protocol(error, "truncated DNS name") + I64{1}
+            failure = dns_protocol(error, rt_static_text("truncated DNS name")) + I64{1}
             break
         }
         if (rt_text_byte(seen + p) != I64{0}) {
-            failure = dns_protocol(error, "cyclic DNS compression pointer") + I64{1}
+            failure = dns_protocol(error, rt_static_text("cyclic DNS compression pointer")) + I64{1}
             break
         }
         rt_text_put(seen + p, I64{1})
         length :: dns_u8(packet, p)
         if (length.bit_and(I64{192}) == I64{192}) {
             if (p + I64{1} >= size) {
-                failure = dns_protocol(error, "truncated DNS compression pointer") + I64{1}
+                failure = dns_protocol(error, rt_static_text("truncated DNS compression pointer")) + I64{1}
                 break
             }
             pointer :: ((length.bit_and(I64{63})) << I64{8}).bit_or(dns_u8(packet, p + I64{1}))
             if (pointer >= size) {
-                failure = dns_protocol(error, "DNS compression pointer is out of bounds") + I64{1}
+                failure = dns_protocol(error, rt_static_text("DNS compression pointer is out of bounds")) + I64{1}
                 break
             }
             if (pointer >= p) {
-                failure = dns_protocol(error, "DNS compression pointer does not point backward") + I64{1}
+                failure = dns_protocol(error, rt_static_text("DNS compression pointer does not point backward")) + I64{1}
                 break
             }
             if !jumped -> trap_store(position, p + I64{2})
@@ -202,7 +202,7 @@ fn dns_read_name(packet: I64, position: I64, error: I64) -> I64 {
             next
         }
         if (length.bit_and(I64{192}) != I64{0}) {
-            failure = dns_protocol(error, "reserved DNS label encoding") + I64{1}
+            failure = dns_protocol(error, rt_static_text("reserved DNS label encoding")) + I64{1}
             break
         }
         p += I64{1}
@@ -211,21 +211,21 @@ fn dns_read_name(packet: I64, position: I64, error: I64) -> I64 {
             break
         }
         if (length > I64{63}) {
-            failure = dns_protocol(error, "DNS label exceeds 63 bytes") + I64{1}
+            failure = dns_protocol(error, rt_static_text("DNS label exceeds 63 bytes")) + I64{1}
             break
         }
         end :: p + length
         if (end > size) {
-            failure = dns_protocol(error, "truncated DNS label") + I64{1}
+            failure = dns_protocol(error, rt_static_text("truncated DNS label")) + I64{1}
             break
         }
         wire += length + I64{1}
         if (wire > I64{255}) {
-            failure = dns_protocol(error, "DNS name exceeds 255 bytes") + I64{1}
+            failure = dns_protocol(error, rt_static_text("DNS name exceeds 255 bytes")) + I64{1}
             break
         }
         if !env_utf8(rt_text_data(packet) + p, length) {
-            failure = dns_protocol(error, "DNS label is not valid UTF-8") + I64{1}
+            failure = dns_protocol(error, rt_static_text("DNS label is not valid UTF-8")) + I64{1}
             break
         }
         if (count > I64{0}) -> rt_text_append(labels, rt_text_data(rt_static_text(".")), I64{1})
@@ -258,12 +258,12 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
     trap_store(records_out, I64{0})
     trap_store(count_out, I64{0})
     size :: rt_text_len(packet)
-    if (size < I64{12}) -> return dns_protocol(error, "truncated DNS header")
-    if (dns_u16(packet, I64{0}, rt_static_text("transaction ID"), error) != txid) -> return dns_protocol(error, "DNS transaction ID mismatch")
+    if (size < I64{12}) -> return dns_protocol(error, rt_static_text("truncated DNS header"))
+    if (dns_u16(packet, I64{0}, rt_static_text("transaction ID"), error) != txid) -> return dns_protocol(error, rt_static_text("DNS transaction ID mismatch"))
     flags :: dns_u16(packet, I64{2}, rt_static_text("flags"), error)
-    if (flags.bit_and(I64{32768}) == I64{0}) -> return dns_protocol(error, "DNS packet is not a response")
-    if (flags.bit_and(I64{30720}) != I64{0}) -> return dns_protocol(error, "unsupported DNS opcode")
-    if (flags.bit_and(I64{64}) != I64{0}) -> return dns_protocol(error, "reserved DNS header bit is set")
+    if (flags.bit_and(I64{32768}) == I64{0}) -> return dns_protocol(error, rt_static_text("DNS packet is not a response"))
+    if (flags.bit_and(I64{30720}) != I64{0}) -> return dns_protocol(error, rt_static_text("unsupported DNS opcode"))
+    if (flags.bit_and(I64{64}) != I64{0}) -> return dns_protocol(error, rt_static_text("reserved DNS header bit is set"))
     rcode :: flags.bit_and(I64{15})
     if (rcode == I64{3}) -> return dns_fail(error, dns_named(rt_static_text("DNS name not found: `"), name, rt_static_text("`")))
     if (rcode != I64{0}) {
@@ -271,7 +271,7 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
         rt_text_push_number(text, rcode)
         return dns_fail(error, text)
     }
-    if (dns_u16(packet, I64{4}, rt_static_text("question count"), error) != I64{1}) -> return dns_protocol(error, "DNS response must echo one question")
+    if (dns_u16(packet, I64{4}, rt_static_text("question count"), error) != I64{1}) -> return dns_protocol(error, rt_static_text("DNS response must echo one question"))
     total :: dns_u16(packet, I64{6}, rt_static_text("answer count"), error) + dns_u16(packet, I64{8}, rt_static_text("authority count"), error) + dns_u16(packet, I64{10}, rt_static_text("additional count"), error)
     position :: jet_rt_alloc(I64{8}, I64{8})
     trap_store(position, I64{12})
@@ -298,7 +298,7 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
     jet_rt_string_drop(echoed)
     if (!same || echoed_type != qtype || echoed_class != I64{1}) {
         jet_rt_free(position, I64{8}, I64{8})
-        return dns_protocol(error, "DNS question echo mismatch")
+        return dns_protocol(error, rt_static_text("DNS question echo mismatch"))
     }
     if (flags.bit_and(I64{512}) != I64{0}) {
         jet_rt_free(position, I64{8}, I64{8})
@@ -306,7 +306,7 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
     }
     if (total * I64{11} > size - at) {
         jet_rt_free(position, I64{8}, I64{8})
-        return dns_protocol(error, "DNS record counts exceed packet bounds")
+        return dns_protocol(error, rt_static_text("DNS record counts exceed packet bounds"))
     }
     records :: if (total == I64{0}) -> I64{0} else -> jet_rt_alloc(total * DNS_RECORD_BYTES, I64{8})
     parsed := I64{0}
@@ -330,7 +330,7 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
         at += I64{10}
         if (at + length > size) {
             jet_rt_string_drop(owner)
-            _ := dns_protocol(error, "truncated DNS record data")
+            _ := dns_protocol(error, rt_static_text("truncated DNS record data"))
             failed = true
             break
         }
@@ -345,7 +345,7 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
     }
     jet_rt_free(position, I64{8}, I64{8})
     if (!failed && at != size) {
-        _ := dns_protocol(error, "trailing bytes after DNS records")
+        _ := dns_protocol(error, rt_static_text("trailing bytes after DNS records"))
         failed = true
     }
     if failed {
@@ -459,7 +459,7 @@ fn dns_tcp_exchange(server: I64, request: I64, deadline: I64, name: I64, error: 
     if (length > I64{65535}) {
         jet_fd_drop_raw(state)
         jet_rt_free(scratch, I64{32}, I64{8})
-        return dns_protocol(error, "DNS request exceeds TCP frame")
+        return dns_protocol(error, rt_static_text("DNS request exceeds TCP frame"))
     }
     framed :: jet_rt_string_builder_new()
     prefix :: jet_rt_alloc(I64{8}, I64{8})
@@ -480,7 +480,7 @@ fn dns_tcp_exchange(server: I64, request: I64, deadline: I64, name: I64, error: 
         if (ready <= I64{0}) -> next
         sent :: jet_socket_write_raw(state, rt_text_data(framed) + written, rt_text_len(framed) - written, scratch)
         if (sent == I64{0}) {
-            _ := dns_protocol(error, "DNS TCP connection closed while sending query")
+            _ := dns_protocol(error, rt_static_text("DNS TCP connection closed while sending query"))
             break
         }
         if (sent < I64{0}) {
@@ -502,7 +502,7 @@ fn dns_tcp_exchange(server: I64, request: I64, deadline: I64, name: I64, error: 
 }
 
 // Exactly `length` bytes into `target`, or false with the closed/failed text.
-fn dns_tcp_fill(state: I64, target: I64, length: I64, deadline: I64, name: I64, scratch: I64, closed: String, failed: I64, error: I64) -> Bool {
+fn dns_tcp_fill(state: I64, target: I64, length: I64, deadline: I64, name: I64, scratch: I64, closed: I64, failed: I64, error: I64) -> Bool {
     have := I64{0}
     loop have < length {
         slice :: dns_slice_ms(deadline, name, error)
@@ -530,11 +530,11 @@ fn dns_tcp_fill(state: I64, target: I64, length: I64, deadline: I64, name: I64, 
 }
 
 fn dns_tcp_read(state: I64, deadline: I64, name: I64, prefix: I64, scratch: I64, error: I64) -> I64 {
-    if !dns_tcp_fill(state, prefix, I64{2}, deadline, name, scratch, "DNS TCP connection closed before response length", rt_static_text("DNS TCP response length failed: "), error) -> return I64{0}
+    if !dns_tcp_fill(state, prefix, I64{2}, deadline, name, scratch, rt_static_text("DNS TCP connection closed before response length"), rt_static_text("DNS TCP response length failed: "), error) -> return I64{0}
     length :: (rt_text_byte(prefix) << I64{8}).bit_or(rt_text_byte(prefix + I64{1}))
-    if (length < I64{12}) -> return dns_protocol(error, "invalid DNS TCP response length")
+    if (length < I64{12}) -> return dns_protocol(error, rt_static_text("invalid DNS TCP response length"))
     buffer :: jet_rt_alloc(length, I64{8})
-    if !dns_tcp_fill(state, buffer, length, deadline, name, scratch, "DNS TCP response is truncated", rt_static_text("DNS TCP response truncated: "), error) {
+    if !dns_tcp_fill(state, buffer, length, deadline, name, scratch, rt_static_text("DNS TCP response is truncated"), rt_static_text("DNS TCP response truncated: "), error) {
         jet_rt_free(buffer, length, I64{8})
         return I64{0}
     }
@@ -644,7 +644,7 @@ fn dns_query(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out: 
             if (packet != I64{0}) {
                 status = dns_parse_response(packet, txid, name, qtype, records_out, count_out, error)
                 if (status < I64{0}) {
-                    status = dns_protocol(error, "DNS TCP response is truncated")
+                    status = dns_protocol(error, rt_static_text("DNS TCP response is truncated"))
                 }
             }
         }
@@ -671,7 +671,7 @@ fn dns_record_name(packet: I64, record: I64, error: I64) -> I64 {
     if (name == I64{0}) -> return I64{0}
     if (end != trap_word(record + I64{24}) + trap_word(record + I64{32})) {
         jet_rt_string_drop(name)
-        return dns_protocol(error, "DNS name record length mismatch")
+        return dns_protocol(error, rt_static_text("DNS name record length mismatch"))
     }
     name
 }
@@ -696,7 +696,7 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
             at += I64{1}
         }
         if seen {
-            _ := dns_protocol(error, "cyclic DNS CNAME chain")
+            _ := dns_protocol(error, rt_static_text("cyclic DNS CNAME chain"))
             break
         }
         trap_store(visited + visits * I64{8}, jet_rt_string_clone(current))
@@ -746,7 +746,7 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
         jet_rt_string_drop(target)
         hops += I64{1}
     }
-    if (hops == I64{16} && !result) -> _ := dns_protocol(error, "DNS CNAME chain exceeds 16 records")
+    if (hops == I64{16} && !result) -> _ := dns_protocol(error, rt_static_text("DNS CNAME chain exceeds 16 records"))
     loop visits > (I64{0}) {
         visits -= I64{1}
         jet_rt_string_drop(trap_word(visited + visits * I64{8}))
@@ -814,7 +814,7 @@ fn dns_ip_lookup(server: I64, name: I64, milliseconds: I64, qtype: I64, width: I
             }
             if (handles != I64{0}) -> jet_rt_free(handles, answer.matches * I64{8}, I64{8})
             dns_answer_drop(answer)
-            return if (width == I64{4}) -> dns_protocol(error, "DNS A record is not 4 bytes") else -> dns_protocol(error, "DNS AAAA record is not 16 bytes")
+            return if (width == I64{4}) -> dns_protocol(error, rt_static_text("DNS A record is not 4 bytes")) else -> dns_protocol(error, rt_static_text("DNS AAAA record is not 16 bytes"))
         }
         address :: jet_rt_alloc(I64{24}, I64{8})
         thread_zero(address, I64{24})
@@ -852,12 +852,12 @@ fn dns_txt_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
             part :: rt_text_byte(start + p)
             p += I64{1}
             if (p + part > length) {
-                _ := dns_protocol(error, "truncated DNS TXT record")
+                _ := dns_protocol(error, rt_static_text("truncated DNS TXT record"))
                 failed = true
                 break
             }
             if !env_utf8(start + p, part) {
-                _ := dns_protocol(error, "DNS TXT record is not valid UTF-8")
+                _ := dns_protocol(error, rt_static_text("DNS TXT record is not valid UTF-8"))
                 failed = true
                 break
             }
@@ -964,7 +964,7 @@ fn dns_srv_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
         start :: trap_word(row + I64{24})
         length :: trap_word(row + I64{32})
         if (length < I64{7}) {
-            _ := dns_protocol(error, "truncated DNS SRV record")
+            _ := dns_protocol(error, rt_static_text("truncated DNS SRV record"))
             break
         }
         priority :: (dns_u8(answer.packet, start) << I64{8}).bit_or(dns_u8(answer.packet, start + I64{1}))
@@ -975,7 +975,7 @@ fn dns_srv_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
         if (target == I64{0}) -> break
         if (trap_word(position) != start + length) {
             jet_rt_string_drop(target)
-            _ := dns_protocol(error, "DNS SRV record length mismatch")
+            _ := dns_protocol(error, rt_static_text("DNS SRV record length mismatch"))
             break
         }
         trap_store(handles + built * I64{8}, dns_srv_new(priority, weight, port, target))
