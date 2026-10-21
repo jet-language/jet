@@ -1210,12 +1210,18 @@ fn jet_eval_comptime_panic(machine: &JetEvalMachine, span: Span, message: String
 }
 
 fn jet_eval_source_fail(machine: &JetEvalMachine, span: Span, what: String) {
-    code := if machine.config.runtime_execution -> "E3010" else -> "E0956"
-    why := if machine.config.runtime_execution -> "the operands or position do not produce a valid runtime result" else -> "the canonical MIR evaluator reached the operation while computing a compile-time value"
-    fix := if machine.config.runtime_execution -> "check the operands or bounds before the operation" else -> "change the compile-time input or checked operation"
     if machine.failure == None {
-        machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)})
+        machine.failure = Val(jet_eval_source_error(machine.config.runtime_execution, span, what))
     }
+}
+
+// A source failure: a runtime stop when the machine runs a program, a
+// compile-time evaluation failure otherwise.
+fn jet_eval_source_error(runtime_execution: Bool, span: Span, what: String) -> JetEvalError Never! {
+    code := if runtime_execution -> "E3010" else -> "E0956"
+    why := if runtime_execution -> "the operands or position do not produce a valid runtime result" else -> "the canonical MIR evaluator reached the operation while computing a compile-time value"
+    fix := if runtime_execution -> "check the operands or bounds before the operation" else -> "change the compile-time input or checked operation"
+    JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)}
 }
 
 fn jet_eval_compiler_fail(machine: &JetEvalMachine, span: Span, what: String) Never! {

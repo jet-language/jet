@@ -1,0 +1,194 @@
+// The in-process host adapter. The compiler is itself a compiled Jet program
+// linked against the one shared runtime, so a host route is served by the
+// same Jet operation the compiled program performs: `left * right` below
+// lowers to the runtime's `jet_int_mul`, exactly like the user's `a * b`.
+// This adapter only marshals evaluator values into those operations and back;
+// a route it does not serve returns no reply, which the evaluator reports as
+// an unavailable host route.
+use jet_foundation.[
+    MIRCallFallibility,
+    MIRForeign,
+    MIRHandleID,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeFamily,
+    MIRSelectKind,
+    MIRTaskGroupKind,
+    Span,
+    TComptimeEnumArg,
+    TComptimeValue,
+    mir_symbol_name,
+]
+
+struct JetEvalCoreHost {}
+
+// The evaluator configuration of a compiler run: the default bounds with this
+// adapter serving host routes.
+fn jet_eval_host_config() -> JetEvalConfig Never! {
+    config := jet_eval_default_config()
+    config.host_adapter = Val(JetEvalCoreHost{})
+    config
+}
+
+fn jet_eval_core_host_reply(outcome: ^JetEvalHostOutcome) -> JetEvalHostResult Never! {
+    {transfers: [], callback_transfers: [], fixed_backing_transfers: [], writebacks: [], outcome: ^outcome}
+}
+
+fn jet_eval_core_host_value(value: ^TComptimeValue) -> JetEvalHostResult Never! {
+    jet_eval_core_host_reply(JetEvalHostOutcome.Value{value: JetEvalHostValue.Data{value: ^value}})
+}
+
+// A runtime stop the operation reports instead of a value, worded as the
+// evaluator words its own source failures.
+fn jet_eval_core_host_stop(runtime_execution: Bool, span: Span, what: String) -> JetEvalHostResult Never! {
+    error :: jet_eval_source_error(runtime_execution, span, what)
+    jet_eval_core_host_reply(JetEvalHostOutcome.Failure{kind: error.kind, diagnostic: error.diagnostic})
+}
+
+fn jet_eval_core_host_int(argument: JetEvalHostArgument) -> Int? {
+    if argument.host == .Data(value) {
+        if value == {
+            .Int(number) -> return Val(number)
+            .BigInt(decimal) -> {
+                parsed :: Int.parse(decimal) ?? return None
+                return Val(parsed)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+fn jet_eval_core_host_bool(argument: JetEvalHostArgument) -> Bool? {
+    if argument.host == .Data(value) {
+        if value == .Bool(flag) -> return Val(flag)
+    }
+    None
+}
+
+fn jet_eval_core_host_signature(row: MIRPreludeCall, args: [JetEvalHostArgument], borrow_mask: [Bool]) -> Bool Never! {
+    if row.signature.arity != args.len() || row.signature.max_arity != args.len() || row.signature.borrow_mask.len() != borrow_mask.len() -> return false
+    loop index in 0..<borrow_mask.len() {
+        if row.signature.borrow_mask[index] != borrow_mask[index] -> return false
+    }
+    true
+}
+
+// `core.numeric` exact Int rows (`jet_std::jet_int_<member>`). The two-operand
+// rows take the operands; the four-operand rows that can stop add the
+// caller's file and line.
+fn jet_eval_core_host_exact_int(runtime_execution: Bool, row: MIRPreludeCall, member: String, args: [JetEvalHostArgument], span: Span) -> JetEvalHostResult? {
+    if row.family != MIRPreludeFamily.Overflow || row.module_name != "core.numeric" || row.member != member || row.abi != MIRPreludeABI.Value || row.fallibility != MIRCallFallibility.Infallible -> return None
+    if member == "neg" || member == "not" {
+        if !jet_eval_core_host_signature(row, args, [Bool]{false}) -> return None
+        value :: jet_eval_core_host_int(args[0]) ?? return None
+        result :: if member == "neg" -> -value else -> value.bit_not()
+        return Val(jet_eval_core_host_value(jet_eval_decimal_value("{result}")))
+    }
+    stops :: if member == {
+        "floor_div" | "mod" | "div_euclid" | "rem_euclid" | "pow" | "shl" | "shr" -> true
+        else -> false
+    }
+    mask :: if stops -> [Bool]{false, false, false, false} else -> [Bool]{false, false}
+    if !jet_eval_core_host_signature(row, args, mask) -> return None
+    left :: jet_eval_core_host_int(args[0]) ?? return None
+    right :: jet_eval_core_host_int(args[1]) ?? return None
+    if {
+        (member == "floor_div" || member == "mod" || member == "div_euclid" || member == "rem_euclid") && right == 0 -> return Val(jet_eval_core_host_stop(runtime_execution, span, "divided by zero"))
+        member == "pow" && right < 0 -> return Val(jet_eval_core_host_stop(runtime_execution, span, "Negative default Int exponent"))
+        (member == "shl" || member == "shr") && (right < 0 || right > 9223372036854775807) -> return Val(jet_eval_core_host_stop(runtime_execution, span, "Invalid shift count"))
+        else -> {}
+    }
+    result :: if member == {
+        "add" -> left + right
+        "sub" -> left - right
+        "mul" -> left * right
+        "floor_div" -> left /% right
+        "mod" -> left % right
+        "div_euclid" -> left.div_euclid(right)
+        "rem_euclid" -> left.rem_euclid(right)
+        "pow" -> left.pow(right)
+        "shl" -> left << right
+        "shr" -> left >> right
+        "bit_and" -> left.bit_and(right)
+        "bit_or" -> left.bit_or(right)
+        "bit_xor" -> left.bit_xor(right)
+        else -> { return None }
+    }
+    Val(jet_eval_core_host_value(jet_eval_decimal_value("{result}")))
+}
+
+// `core.compare` exact Int rows (`jet_int_compare`).
+fn jet_eval_core_host_int_compare(row: MIRPreludeCall, args: [JetEvalHostArgument]) -> JetEvalHostResult? {
+    if row.module_name != "core.compare" || row.family == MIRPreludeFamily.Overflow || row.abi != MIRPreludeABI.Value || row.fallibility != MIRCallFallibility.Infallible -> return None
+    if !jet_eval_core_host_signature(row, args, [Bool]{true, true}) -> return None
+    left :: jet_eval_core_host_int(args[0]) ?? return None
+    right :: jet_eval_core_host_int(args[1]) ?? return None
+    if row.member == {
+        "eq" -> Val(jet_eval_core_host_value(TComptimeValue.Bool{value: left == right}))
+        "ne" -> Val(jet_eval_core_host_value(TComptimeValue.Bool{value: left != right}))
+        "lt" -> Val(jet_eval_core_host_value(TComptimeValue.Bool{value: left < right}))
+        "gt" -> Val(jet_eval_core_host_value(TComptimeValue.Bool{value: left > right}))
+        "le" -> Val(jet_eval_core_host_value(TComptimeValue.Bool{value: left <= right}))
+        "ge" -> Val(jet_eval_core_host_value(TComptimeValue.Bool{value: left >= right}))
+        "compare" -> {
+            variant :: if {
+                left < right -> "Less"
+                left > right -> "Greater"
+                else -> "Equal"
+            }
+            Val(jet_eval_core_host_value(TComptimeValue.Enum{type_name: "Ordering", variant: variant, args: [TComptimeEnumArg]{}}))
+        }
+        else -> None
+    }
+}
+
+// `core.require` rows: a holding condition continues with Unit. A failing one
+// never reaches the host at compile time (the evaluator stops it first), and
+// its rendered runtime report is not served here.
+fn jet_eval_core_host_require(row: MIRPreludeCall, args: [JetEvalHostArgument]) -> JetEvalHostResult? {
+    if row.module_name != "core.require" || row.family != MIRPreludeFamily.StaticPrelude || row.abi != MIRPreludeABI.Control || args.len() == 0 -> return None
+    holds :: jet_eval_core_host_bool(args[0]) ?? return None
+    if !holds -> return None
+    Val(jet_eval_core_host_value(TComptimeValue.Unit))
+}
+
+fn jet_eval_core_host_prelude(runtime_execution: Bool, row: MIRPreludeCall, args: [JetEvalHostArgument], span: Span) -> JetEvalHostResult? {
+    symbol :: mir_symbol_name(row.symbol)
+    if symbol.starts_with("jet_std::jet_int_") {
+        member :: symbol.slice("jet_std::jet_int_".len(), symbol.len())
+        return jet_eval_core_host_exact_int(runtime_execution, row, member, args, span)
+    }
+    if symbol == {
+        "jet_int_compare" -> jet_eval_core_host_int_compare(row, args)
+        "jet_require" | "jet_require_eq" -> jet_eval_core_host_require(row, args)
+        else -> None
+    }
+}
+
+impl JetEvalCoreHost.JetEvalHostAdapter {
+    fn new_session(self) -[]> JetEvalHostAdapter { JetEvalCoreHost{} }
+    fn clone_adapter(self) -[]> JetEvalHostAdapter { JetEvalCoreHost{} }
+    // The adapter runs every route to completion inside the call: no callback
+    // is ever pending.
+    fn poll_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool { true }
+    fn drain_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool { true }
+    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -[FS.Read]> JetEvalHostResult? {
+        if static_operand != None -> return None
+        if target == .Prelude(row) -> return jet_eval_core_host_prelude(machine.config.runtime_execution, row, args, span)
+        None
+    }
+    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult? { None }
+    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -[FS.Read]> JetEvalHostResult? { None }
+    fn string_home(self, machine: &JetEvalMachine, request: JetEvalStringHomeRequest, span: Span) -[]> JetEvalStringHome? { None }
+    fn bytes_pack(self, machine: &JetEvalMachine, bytes: [U8], span: Span) -[]> U64? { None }
+    fn bytes_free(self, machine: &JetEvalMachine, pointer: U64, length: Int, span: Span) -[]> Bool { false }
+    fn bytes_unpack(self, machine: &JetEvalMachine, pointer: U64, length: Int, span: Span) -[]> [U8]? { None }
+    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -[]> JetEvalHostResult? { None }
+    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -[]> JetEvalHostFixedBackingAccessResult? { None }
+    fn physical_binding(self) -[]> JetEvalHostValue { JetEvalHostValue.Data{value: TComptimeValue.Unit} }
+    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[FS.Read]> JetEvalHostResult? { None }
+    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { None }
+    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { None }
+    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { None }
+}

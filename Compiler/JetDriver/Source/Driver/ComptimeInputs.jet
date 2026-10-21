@@ -86,13 +86,15 @@ fn jet_driver_comptime_find(adapter: JetDriverComptimeInputs, glob: String, span
     Ok(TComptimeValue.List{values: strings})
 }
 
-// The comptime input host for an item in `source_file`: rooted at that file's
-// directory, over the request's build-input transport. A request without one
-// (a host that reads no files) has no comptime input host.
+// The comptime input host for an item in `source_file` (its display path):
+// rooted at that file's physical directory, over the request's build-input
+// transport. A request without one (a host that reads no files) has no
+// comptime input host.
 fn jet_driver_comptime_inputs_for(request: JetDriverCompileRequest, source_file: String) -> JetEvalComptimeInputAdapter? {
     inputs :: request.build_inputs ?? return None
+    physical :: jet_driver_physical_path(jet_driver_entry_root_path(request.authorized_sources), source_file)
     // copy: the adapter shares the request's transport handle; the request keeps its own.
-    Val(JetDriverComptimeInputs{inputs: inputs.copy(), base_dir: jet_driver_parent_path(source_file), log: request.comptime_input_log.copy()})
+    Val(JetDriverComptimeInputs{inputs: inputs.copy(), base_dir: jet_driver_parent_path(physical), log: request.comptime_input_log.copy()})
 }
 
 // Whether a checked comptime value is exactly one comptime input.

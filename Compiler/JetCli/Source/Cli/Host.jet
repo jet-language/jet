@@ -40,8 +40,8 @@ use jet_driver.[
 ]
 use jet_eval.[
     jet_eval_comptime_value,
-    jet_eval_default_config,
     jet_eval_function,
+    jet_eval_host_config,
     jet_eval_retire_result,
 ]
 use jet_foundation.[
@@ -243,7 +243,7 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
     program :: ^result.mir ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without a MIR program"))
     entry :: result.entry_function ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
-    config :: jet_eval_default_config()
+    config :: jet_eval_host_config()
     span :: Span{start: 0, end: 0}
     evaluated := jet_eval_function(^program, entry, [TComptimeValue]{}, ^config)
     data := TComptimeValue?{None}
