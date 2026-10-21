@@ -1188,6 +1188,12 @@ fn sema_stmt_for_in_source(expression: Expr, collection: TExpr, method_kind: TFo
                         .BuiltinMethod(receiver, operation, _) -> {
                             if operation == .Chars -> return receiver
                         }
+                        // `child.stdout.lines()` checks as the process
+                        // stream's handle method; the loop reads the stream,
+                        // as Rust lower_forin_collection sources it.
+                        .HandleMethod(receiver, _, _) -> {
+                            if method_kind == (Val(TForInMethod.LinesProcessStream)) -> return receiver.copy()
+                        }
                         else -> {}
                     }
                 }
