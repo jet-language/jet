@@ -279,9 +279,78 @@ fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], constants: ^[TC
         &failures.push(IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
         return IRBuildResult{program: m, failures: failures}
     }
-    m.entry = entry
-    ir_build_queue(&m, &p, &failures)
+    built :: ir_build_queue(&m, &p, &failures, 0)
+    m.entry = ir_entry_function(&m, &p, entry, &failures)
+    // The functions the entry's error report reached (a Printable impl).
+    _ :: ir_build_queue(&m, &p, &failures, built)
     IRBuildResult{program: m, failures: failures}
+}
+
+// The function the executable starts: `entry` itself when it takes nothing
+// and returns nothing, otherwise a generated `entry` function that calls it
+// and handles its failure carrier as Lower's entry helper does
+// (Lower/Entry.jet lower_entry_function): an `Err` ends the process with the
+// error's report and exit status 1 (the default `Err` through
+// jet_rt_entry_error_exit_err, any other error through its Printable text
+// and jet_rt_entry_error_exit), a `None` with "entry returned no value";
+// success drops the result and returns.
+fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
+    row :: m.functions[entry].result
+    if row < 0 || m.functions[entry].param_count > 0 -> return entry
+    ty :: m.types[row].ty.copy()
+    key :: "{m.functions[entry].key}#entry"
+    id :: m.functions.len()
+    &m.functions.push(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", m.functions[entry].source_file, m.functions[entry].line))
+    m.function_rows[key] = id
+    b := ir_builder_new(m.functions[id].copy())
+    b.line = m.functions[entry].line
+    span :: Span{start: 0, end: 0}
+    result :: ir_fresh_temp(&m, &b, row)
+    operands :: ir_args(&b.f, [Int]{})
+    ir_emit(&b.f, IROp.Call, result, entry, operands, 0, b.line)
+    if ir_untag(ty) == {
+        .Result(_, err_ty) -> {
+            // A kept `T Never!` carrier never holds an Err.
+            if !ir_never_type(err_ty) {
+                verdict :: ir_load_word(&m, &b, result, 0)
+                zero :: ir_word_const(&m, &b, 0)
+                failed :: ir_bool_op(&m, &b, IROp.Eq, verdict, zero)
+                ir_open_if(&b.f, failed, b.line)
+                err_row :: ir_value_type(&m, p, err_ty) ?? ir_pointer_row(&m)
+                error :: ir_load_at(&m, &b, result, 8, err_row)
+                if ir_default_err(p, err_ty) {
+                    _ :: ir_runtime(&m, &b, "jet_rt_entry_error_exit_err", [Int]{error}, -1)
+                } else {
+                    text :: ir_render(&m, p, &b, err_ty, error, IRRender.Show, span)
+                    _ :: ir_runtime(&m, &b, "jet_rt_entry_error_exit", [Int]{text}, -1)
+                }
+                ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+                ir_end(&b.f, b.line)
+            }
+        }
+        .Option(_) -> {
+            if m.types[row].kind != .Pointer -> ir_fail(&b, span, "an entry returning {ir_type_name(ty)}")
+            null :: ir_temp_like(&m, &b, result)
+            ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
+            absent :: ir_bool_op(&m, &b, IROp.Eq, result, null)
+            ir_open_if(&b.f, absent, b.line)
+            message :: ir_static_text(&m, &b, "entry returned no value")
+            string_row :: ir_string_row(&m)
+            text :: ir_runtime(&m, &b, "jet_rt_string_from_static", message, string_row)
+            _ :: ir_runtime(&m, &b, "jet_rt_entry_error_exit", [Int]{text}, -1)
+            ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+        else -> {}
+    }
+    ir_release(&m, &b, result)
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    if b.error != "" {
+        &failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: m.functions[entry].source_file, span: b.error_span})
+    }
+    ir_resolve_deferred(&m, &p, &b)
+    m.functions[id] = ^b.f
+    id
 }
 
 // Builds every checked non-generic function (a library or a coverage
@@ -295,15 +364,16 @@ fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], constants: ^[TConst
         key :: p.functions[row].key
         _ :: ir_function_id(&m, &p, key, [Type]{})
     }
-    ir_build_queue(&m, &p, &failures)
+    _ :: ir_build_queue(&m, &p, &failures, 0)
     IRBuildResult{program: m, failures: failures}
 }
 
-fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) Never! {
-    next := 0
-    loop next < p.queue.len() {
-        queued :: p.queue[next].copy()
-        next += 1
+// Builds the queued functions from queue row `from` on; returns the queue's end.
+fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure], from: Int) -> Int Never! {
+    cursor := from
+    loop cursor < p.queue.len() {
+        queued :: p.queue[cursor].copy()
+        cursor += 1
         b := ir_builder_new(m.functions[queued.id].copy())
         if queued.lambda >= 0 {
             job :: p.lambdas[queued.lambda].copy()
@@ -330,6 +400,7 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure]) Neve
     }
     p.subst_names = [String]{}
     p.subst_types = [Type]{}
+    cursor
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
