@@ -1,0 +1,207 @@
+// Persisted Receipt records (Rust crates/jet-store/src/receipt.rs).
+//
+// A Receipt is keyed on the invocation closure digest: the verb, the options
+// that change what the verb checks, the compiler identity, and the digest of
+// every leaf the check read. Its payload is typed: diagnostics keep their
+// code, severity, spans, origins, fixes, and causes so each invocation
+// renders them for its own terminal mode (color, width, `--json`) instead of
+// replaying bytes captured from an earlier terminal.
+//
+// The record uses the one compiler record codec and lives in the machine
+// store as an immutable blob. A small mutable pointer per closure key, kept
+// in the workspace-root `.jet/receipts/`, names the newest record, because
+// inputs discovered while checking (compile-time reads) are verified at use
+// time rather than known before the lookup.
+use jet_foundation.[
+    Diagnostic, RecordField, RecordReader, RecordSection, RecordValue, record_element, record_elements,
+    record_encode, record_open_schema, record_value_as_str, record_value_field,
+]
+use core.files as files
+
+STORE_RECEIPT_SCHEMA :: "jet.receipt/v1"
+STORE_RECEIPT_SECTION_HEADER :: 1
+STORE_RECEIPT_SECTION_MODULES :: 2
+STORE_RECEIPT_SECTION_INPUTS :: 3
+STORE_RECEIPT_SECTION_ORIGINS :: 4
+STORE_RECEIPT_SECTION_DIAGNOSTICS :: 5
+STORE_RECEIPT_SECTION_FACTS :: 6
+
+// One leaf read by a recorded check: a project-relative path (or a stable
+// label such as `<corelib>/…`) and the SHA-256 of its exact bytes
+// (Rust receipt.rs:35).
+struct ReceiptInput {
+    path: String
+    digest: String
+}
+
+// One verb-owned typed projection of the checked program.
+struct ReceiptFact {
+    name: String
+    value: String
+}
+
+// The typed result of one recorded invocation (Rust receipt.rs:42).
+struct ReceiptRecord {
+    schema: String
+    verb: String
+    // The closure digest the record answers.
+    closure: String
+    // Module sources in the closure. Each is one `Check` node.
+    modules: [ReceiptInput]
+    // Inputs discovered while checking (for example compile-time file reads).
+    // A hit requires every one to still hash to the recorded digest.
+    inputs: [ReceiptInput]
+    diagnostics: [Diagnostic]
+    // Verb-owned typed projections of the checked program, ordered by name
+    // (Rust `BTreeMap<String, String>`).
+    facts: [ReceiptFact]
+
+    // Rust receipt.rs:60 `ReceiptRecord::new`: inputs sorted and deduplicated,
+    // facts keyed by name in name order (a later fact replaces an earlier one).
+    fn new(verb: String, closure: String, modules: [ReceiptInput], inputs: [ReceiptInput], diagnostics: [Diagnostic], facts: [ReceiptFact]) -> ReceiptRecord Never! {
+        ReceiptRecord{schema: STORE_RECEIPT_SCHEMA, verb: verb, closure: closure, modules: store_receipt_sorted_inputs(modules), inputs: store_receipt_sorted_inputs(inputs), diagnostics: diagnostics, facts: store_receipt_sorted_facts(facts)}
+    }
+
+    // Encode the record. Diagnostic origins whose source is one of the
+    // recorded modules are stored by revision only; the reader supplies the
+    // bytes from the same closure. Any other origin source is embedded. A
+    // diagnostic payload the codec does not carry is an error; the caller then
+    // leaves the invocation unrecorded so the next one checks fresh
+    // (Rust receipt.rs:90 `to_bytes`).
+    fn to_bytes(self) -> [U8] StoreDiagnosticRecordError! {
+        revisions := [String]{}
+        loop recorded in self.modules {
+            if !revisions.contains(recorded.digest) -> &revisions.push(recorded.digest)
+        }
+        diagnostics :: store_encode_diagnostics(self.diagnostics, revisions)
+        facts := [RecordValue]{}
+        loop fact in self.facts {
+            &facts.push(RecordValue.Map{fields: [RecordField]{
+                {name: "name", value: RecordValue.Str{value: fact.name}},
+                {name: "value", value: RecordValue.Str{value: fact.value}},
+            }})
+        }
+        header :: RecordValue.Map{fields: [RecordField]{
+            {name: "verb", value: RecordValue.Str{value: self.verb}},
+            {name: "closure", value: RecordValue.Str{value: self.closure}},
+        }}
+        encoded :: record_encode(STORE_RECEIPT_SCHEMA, [RecordSection]{
+            RecordSection{id: STORE_RECEIPT_SECTION_HEADER, elements: [RecordValue]{header}},
+            RecordSection{id: STORE_RECEIPT_SECTION_MODULES, elements: store_receipt_encode_inputs(self.modules)},
+            RecordSection{id: STORE_RECEIPT_SECTION_INPUTS, elements: store_receipt_encode_inputs(self.inputs)},
+            RecordSection{id: STORE_RECEIPT_SECTION_ORIGINS, elements: diagnostics.origins},
+            RecordSection{id: STORE_RECEIPT_SECTION_DIAGNOSTICS, elements: diagnostics.diagnostics},
+            RecordSection{id: STORE_RECEIPT_SECTION_FACTS, elements: facts},
+        })
+        Ok(encoded.bytes ?? return Err(store_diagnostic_error(encoded.problem ?? "receipt encoding failed")))
+    }
+
+    // Decode a record. `source_for_revision` returns the exact source text for
+    // a module revision in the caller's current closure
+    // (Rust receipt.rs:127 `from_bytes`).
+    fn from_bytes(bytes: [U8], source_for_revision: fn(String) -> String?) -> ReceiptRecord StoreDiagnosticRecordError! {
+        opened :: record_open_schema(bytes, STORE_RECEIPT_SCHEMA)
+        reader :: opened.reader ?? return Err(store_diagnostic_error(opened.problem ?? "receipt is not a record"))
+        decoded_header :: record_element(reader, STORE_RECEIPT_SECTION_HEADER, 0)
+        header :: decoded_header.value ?? return Err(store_diagnostic_error(decoded_header.problem ?? "receipt header is missing"))
+        verb :: store_receipt_text(header, "verb")
+        closure :: store_receipt_text(header, "closure")
+        modules :: store_receipt_decode_inputs(store_receipt_elements(reader, STORE_RECEIPT_SECTION_MODULES))
+        inputs :: store_receipt_decode_inputs(store_receipt_elements(reader, STORE_RECEIPT_SECTION_INPUTS))
+        diagnostics :: store_decode_diagnostics(store_receipt_elements(reader, STORE_RECEIPT_SECTION_ORIGINS), store_receipt_elements(reader, STORE_RECEIPT_SECTION_DIAGNOSTICS), source_for_revision)
+        facts := [ReceiptFact]{}
+        loop fact in store_receipt_elements(reader, STORE_RECEIPT_SECTION_FACTS) {
+            &facts.push(ReceiptFact{name: store_receipt_text(fact, "name"), value: store_receipt_text(fact, "value")})
+        }
+        Ok(ReceiptRecord{schema: STORE_RECEIPT_SCHEMA, verb: verb, closure: closure, modules: modules, inputs: inputs, diagnostics: diagnostics, facts: store_receipt_sorted_facts(facts)})
+    }
+}
+
+// Rust `Vec::sort` then `dedup` over `(path, digest)`.
+fn store_receipt_sorted_inputs(inputs: [ReceiptInput]) -> [ReceiptInput] Never! {
+    sorted := inputs
+    &sorted.sort_by((left: ReceiptInput, right: ReceiptInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+    unique := [ReceiptInput]{}
+    loop input in sorted {
+        if unique.len() == 0 || unique[unique.len() - 1] != input -> &unique.push(input)
+    }
+    unique
+}
+
+// Rust `BTreeMap` insertion: name order, the last value for a name wins.
+fn store_receipt_sorted_facts(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
+    by_name := [String: String]{}
+    loop fact in facts -> by_name[fact.name] = fact.value
+    names := by_name.keys().to_list()
+    &names.sort()
+    sorted := [ReceiptFact]{}
+    loop name in names -> &sorted.push(ReceiptFact{name: name, value: by_name[name]})
+    sorted
+}
+
+// Rust receipt.rs:164 `encode_inputs`.
+fn store_receipt_encode_inputs(inputs: [ReceiptInput]) -> [RecordValue] Never! {
+    values := [RecordValue]{}
+    loop input in inputs {
+        &values.push(RecordValue.Map{fields: [RecordField]{
+            {name: "path", value: RecordValue.Str{value: input.path}},
+            {name: "digest", value: RecordValue.Str{value: input.digest}},
+        }})
+    }
+    values
+}
+
+fn store_receipt_text(value: RecordValue, name: String) -> String StoreDiagnosticRecordError! {
+    field :: record_value_field(value, name)
+    payload :: field.value ?? return Err(store_diagnostic_error(field.problem ?? "record field `{name}` is missing"))
+    text :: record_value_as_str(payload)
+    Ok(text.value ?? return Err(store_diagnostic_error(text.problem ?? "record field `{name}` is not a string")))
+}
+
+// Rust receipt.rs:176 `decode_inputs`.
+fn store_receipt_decode_inputs(values: [RecordValue]) -> [ReceiptInput] StoreDiagnosticRecordError! {
+    inputs := [ReceiptInput]{}
+    loop value in values -> &inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
+    Ok(inputs)
+}
+
+fn store_receipt_elements(reader: RecordReader, id: Int) -> [RecordValue] StoreDiagnosticRecordError! {
+    decoded :: record_elements(reader, id)
+    Ok(decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "record section {id} is missing")))
+}
+
+// `.jet/receipts/<sha256 of the closure>` (Rust receipt.rs:243).
+fn store_receipt_pointer_path(workspace_root: String, closure: String) -> String Never! {
+    files.join(files.join(store_project_state_dir(workspace_root), "receipts"), ArtifactDigest.hash(closure.bytes()).to_hex())
+}
+
+impl ArtifactStore {
+    // Publish the typed record for `closure` and point the closure at it. The
+    // record blob is immutable; only the per-closure pointer moves
+    // (Rust receipt.rs:197 `publish_receipt`).
+    fn publish_receipt(self, workspace_root: String, record: ReceiptRecord) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        payload :: record.to_bytes() ?? return Err(ArtifactStoreError.Config("receipt is not recordable: {err.message}"))
+        object :: self.publish_blob(payload)
+        store_project_write_atomic(store_receipt_pointer_path(workspace_root, record.closure), object.text().bytes())
+    }
+
+    // Load the newest record for `closure`. A missing pointer or blob is a
+    // miss; a record that fails to decode is removed from the pointer so the
+    // next invocation checks fresh and republishes (Rust receipt.rs:214).
+    fn receipt(self, workspace_root: String, closure: String, source_for_revision: fn(String) -> String?) -[FS, Env, Exec, Time, Rand]> ReceiptRecord? ArtifactStoreError! {
+        pointer :: store_receipt_pointer_path(workspace_root, closure)
+        object :: if self.read_build_pointer(pointer) == {
+            .Ok(found) -> found ?? return Ok(None)
+            .Err(_) -> {
+                files.remove(pointer).drop("an unreadable pointer is a miss; removing it is best effort")
+                return Ok(None)
+            }
+        }
+        bytes :: self.get_blob(object) ?? return Ok(None)
+        if ReceiptRecord.from_bytes(bytes, source_for_revision) == .Ok(record) {
+            if record.closure == closure -> return Ok(Val(record))
+        }
+        files.remove(pointer).drop("an undecodable or foreign record is a miss; removing its pointer is best effort")
+        Ok(None)
+    }
+}
