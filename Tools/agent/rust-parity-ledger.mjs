@@ -12,7 +12,9 @@
 // offdev.tsv.
 //
 // Writes Docs/audits/rust-exit-parity/{items.tsv,tests.tsv,cli.tsv,offdev.tsv,
-// summary.json,SUMMARY.md}; SUMMARY.md is the owner summary.
+// summary.json,SUMMARY.md}; SUMMARY.md is the owner summary. It also reports the
+// hand-checked matcher samples listed in Docs/audits/rust-exit-parity/samples/rounds.tsv
+// (read from the working tree).
 //
 // Usage: node Tools/agent/rust-parity-ledger.mjs --rev <commit> [--jet-rev <commit>]
 //          [--jet-refs <ref,ref>] [--check]
@@ -23,7 +25,7 @@
 //               mismatch to stderr and exit 1 if committed outputs differ.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -211,7 +213,9 @@ function lex(text, rust) {
   const comments = new Array(n).fill(null);
   const starts = new Array(n);
   const lits = [];
-  let mode = 'code'; // code | block | str | raw
+  let mode = 'code'; // code | block | str | raw | triple
+  // Jet `"..{expr}.."` interpolations: one frame per open `{`, holding its nested brace depth.
+  const interp = [];
   let quote = '"';
   let escapes = true;
   let blockDepth = 0;
@@ -244,12 +248,36 @@ function lex(text, rust) {
         }
         continue;
       }
+      if (mode === 'triple') {
+        if (s.startsWith('"""', i)) {
+          mode = 'code';
+          out += '"  ';
+          i += 3;
+        } else {
+          out += ' ';
+          i++;
+        }
+        continue;
+      }
       if (mode === 'str' || mode === 'raw') {
         if (mode === 'str' && escapes && c === '\\') {
           const pair = s.slice(i, i + 2);
           if (lit !== null) lit += pair;
           out += ' '.repeat(pair.length);
           i += pair.length;
+          continue;
+        }
+        if (!rust && mode === 'str' && quote === '"' && c === '{') {
+          if (s[i + 1] === '{') {
+            if (lit !== null) lit += '{{';
+            out += '  ';
+            i += 2;
+          } else {
+            interp.push(0);
+            mode = 'code';
+            out += ' ';
+            i++;
+          }
           continue;
         }
         const closes = mode === 'raw' ? c === '"' && s.startsWith('#'.repeat(rawHashes), i + 1) : c === quote;
@@ -268,6 +296,25 @@ function lex(text, rust) {
         continue;
       }
       // code
+      if (interp.length > 0 && (c === '{' || c === '}')) {
+        const top = interp.length - 1;
+        if (c === '{') {
+          interp[top]++;
+        } else if (interp[top] === 0) {
+          interp.pop();
+          mode = 'str';
+          quote = '"';
+          escapes = true;
+          out += ' ';
+          i++;
+          continue;
+        } else {
+          interp[top]--;
+        }
+        out += ' ';
+        i++;
+        continue;
+      }
       if (c === '/' && s[i + 1] === '/') {
         comments[ln] = s.slice(i + 2);
         out += ' '.repeat(len - i);
@@ -279,6 +326,12 @@ function lex(text, rust) {
         blockDepth = 1;
         out += '  ';
         i += 2;
+        continue;
+      }
+      if (!rust && s.startsWith('"""', i)) {
+        mode = 'triple';
+        out += '"  ';
+        i += 3;
         continue;
       }
       if (c === '"' || (!rust && c === '`')) {
@@ -309,7 +362,7 @@ function lex(text, rust) {
           continue;
         }
       }
-      if (rust && c === "'") {
+      if (c === "'") {
         if (s[i + 1] === '\\') {
           const j = s.indexOf("'", i + 3);
           if (j !== -1) {
@@ -580,6 +633,18 @@ function newJetIndex(ref) {
     types: new Map(),
     suffixFns: new Map(),
     suffixTypes: new Map(),
+    // `Owner::method` -> loc, for fns declared directly in an impl/struct/enum body.
+    methods: new Map(),
+    // `alias A :: B` -> B
+    aliases: new Map(),
+    // lowercased type name with underscores removed -> files defining it
+    typeFiles: new Map(),
+    // file -> Map(fn name -> loc)
+    fileFns: new Map(),
+    // Rust names cited in backticks by a comment that says `Rust` (no file path needed).
+    rustNames: new Map(),
+    // String literals that are exactly one compound identifier (registry/generated tables).
+    strNames: new Map(),
     testDescs: new Map(),
     testFns: new Map(),
     portRefs: new Map(),
@@ -624,7 +689,12 @@ function firstLiteralArg(s, from) {
 
 // `primary` marks the Jet tree under classification; only it contributes CLI census rows.
 function scanJet(file, text, idx, primary) {
-  const { code, comments, starts } = lex(text, false);
+  const { code, comments, starts, lits } = lex(text, false);
+  for (const l of lits) {
+    if (/^[A-Za-z_]\w*$/.test(l.text) && isCompound(l.text) && !idx.strNames.has(l.text)) {
+      idx.strNames.set(l.text, `${file}:${l.line}`);
+    }
+  }
   const rawLines = text.split('\n');
   const census = primary && (file.startsWith('Compiler/') || file.startsWith('Jetpack/'));
   const testsDir = /(^|\/)[Tt]ests?\//.test(file);
@@ -634,17 +704,31 @@ function scanJet(file, text, idx, primary) {
   let depth = 0;
   const fnStack = [];
   let pendingFn = null;
+  // impl/struct/enum bodies whose direct fns are methods of `name`.
+  const ownerStack = [];
+  let pendingOwner = null;
+  const fileFns = new Map();
+  idx.fileFns.set(file, fileFns);
 
   for (let ln = 0; ln < n; ln++) {
     const c = code[ln];
     const line = ln + 1;
     const enclosingFn = fnStack.length ? fnStack[fnStack.length - 1].name : null;
 
+    const om = /^\s*(?:pub\s+)?(?:impl|struct|enum|interface|trait)\s+([A-Za-z_]\w*)/.exec(c);
+    if (om) pendingOwner = om[1];
+    const am = /^\s*(?:pub\s+)?alias\s+([A-Za-z_]\w*)\s*::\s*([A-Za-z_]\w*)/.exec(c);
+    if (am && !idx.aliases.has(am[1])) idx.aliases.set(am[1], am[2]);
+    const top = ownerStack.length ? ownerStack[ownerStack.length - 1] : null;
+    const owner = om ? om[1] : top && top.depth === depth ? top.name : null;
+
     for (const m of c.matchAll(/\bfn\s+([A-Za-z_]\w*)/g)) {
       const name = m[1];
       pendingFn = name;
       idx.defs.push({ kind: 'fn', name, file, line });
       if (!idx.fns.has(name)) idx.fns.set(name, `${file}:${line}`);
+      if (!fileFns.has(name)) fileFns.set(name, `${file}:${line}`);
+      if (owner !== null && !idx.methods.has(`${owner}::${name}`)) idx.methods.set(`${owner}::${name}`, `${file}:${line}`);
       if (name.includes('_') && name.length > 1) {
         for (let p = 1; p < name.length; p++) {
           if (name[p] !== '_' || p + 1 >= name.length) continue;
@@ -663,6 +747,9 @@ function scanJet(file, text, idx, primary) {
       const name = tm[2];
       idx.defs.push({ kind: tm[1], name, file, line });
       if (!idx.types.has(name)) idx.types.set(name, `${file}:${line}`);
+      const flat = name.toLowerCase().replace(/_/g, '');
+      if (!idx.typeFiles.has(flat)) idx.typeFiles.set(flat, []);
+      if (!idx.typeFiles.get(flat).includes(file)) idx.typeFiles.get(flat).push(file);
       for (let p = 1; p < name.length; p++) {
         if (name.length - p < 8) break;
         const key = name.slice(p);
@@ -683,19 +770,34 @@ function scanJet(file, text, idx, primary) {
       const ch = c[i];
       if (ch === '{') {
         depth++;
-        if (pendingFn !== null) {
+        if (pendingOwner !== null) {
+          ownerStack.push({ name: pendingOwner, depth });
+          pendingOwner = null;
+        } else if (pendingFn !== null) {
           fnStack.push({ name: pendingFn, depth });
           pendingFn = null;
         }
       } else if (ch === '}') {
         if (fnStack.length && fnStack[fnStack.length - 1].depth === depth) fnStack.pop();
+        else if (ownerStack.length && ownerStack[ownerStack.length - 1].depth === depth) ownerStack.pop();
         depth--;
       } else if (ch === ';' && pendingFn !== null) {
         pendingFn = null; // bodiless declaration
       }
     }
+    if (pendingOwner !== null && !om) pendingOwner = null; // header without a body on its own line
 
     const comment = comments[ln];
+    if (comment !== null && /\bRust\b/.test(comment)) {
+      for (const bm of comment.matchAll(/`([^`]*)`/g)) {
+        const t = /^\s*([A-Za-z_][\w:.]*)\s*(?:\(\s*\))?\s*$/.exec(bm[1]);
+        if (!t) continue;
+        const segs = t[1].split(/::|\./).filter(Boolean);
+        const last = segs[segs.length - 1];
+        if (last && !idx.rustNames.has(last)) idx.rustNames.set(last, `${file}:${line}`);
+      }
+    }
+
     if (comment !== null && comment.includes('.rs')) {
       const lineNames = new Set();
       for (const bm of comment.matchAll(/`([^`]*)`/g)) {
@@ -758,6 +860,18 @@ function dropReason(it) {
   return null;
 }
 
+// Multi-word identifiers (`snake_case`, `PascalCase`); single words are too generic to match loosely.
+const isCompound = (name) => /[A-Za-z0-9]_[A-Za-z0-9]/.test(name) || /[A-Z][a-z0-9]+[A-Z]/.test(name);
+
+// PascalCase words of a Rust file stem: `CppBind.rs` -> Cpp, Bind; `call_args.rs` -> Call, Args.
+function stemWords(file) {
+  const stem = basename(file).replace(/\.rs$/, '');
+  return snake(stem)
+    .split('_')
+    .filter((w) => w.length >= 2 && w !== 'mod' && w !== 'lib')
+    .map((w) => w[0].toUpperCase() + w.slice(1));
+}
+
 // Classifies against one Jet index. Returns null when nothing matches.
 function matchItem(it, jet) {
   const refs = jet.portRefs.get(basename(it.file)) ?? [];
@@ -788,6 +902,50 @@ function matchItem(it, jet) {
       return { evidence: 'name-prefixed', jet: jet.suffixTypes.get(it.name) };
     }
   }
+
+  // A Jet comment that names the Rust item (`Rust \`name\``) without a file path;
+  // single-word names are too generic to count.
+  const compound = isCompound(it.name);
+  if (compound && !STOPLIST.has(it.name) && jet.rustNames.has(it.name)) {
+    return { evidence: 'rust-name-comment', jet: jet.rustNames.get(it.name) };
+  }
+
+  if (FN_LIKE.has(it.kind)) {
+    // `Owner::name` -> a Jet method `name` on Owner (or the type Owner aliases).
+    if (it.kind === 'method' && /^\w+$/.test(it.owner ?? '')) {
+      for (const o of [it.owner, jet.aliases.get(it.owner)]) {
+        const loc = o ? jet.methods.get(`${o}::${it.name}`) : undefined;
+        if (loc) return { evidence: 'jet-method', jet: loc };
+      }
+    }
+    // `<type>_<rest>` -> fn `rest` in the file that defines the Jet type spelled `<type>`.
+    const parts = it.name.split('_').filter(Boolean);
+    for (let k = 1; k < parts.length; k++) {
+      const rest = parts.slice(k).join('_');
+      if (STOPLIST.has(rest) || rest.length < 4) continue;
+      for (const f of jet.typeFiles.get(parts.slice(0, k).join('')) ?? []) {
+        const loc = jet.fileFns.get(f)?.get(rest);
+        if (loc) return { evidence: 'type-prefixed', jet: loc };
+      }
+    }
+    // fn `<stem word>_<name>` named after the Rust file.
+    if (!STOPLIST.has(it.name)) {
+      for (const w of stemWords(it.file)) {
+        const loc = jet.fns.get(`${w.toLowerCase()}_${it.name}`);
+        if (loc) return { evidence: 'stem-prefixed', jet: loc };
+      }
+    }
+  } else if (TYPE_LIKE.has(it.kind)) {
+    // type `<Stem word><Name>` named after the Rust file (`CppBind.rs` Scalar -> CppScalar).
+    for (const w of stemWords(it.file)) {
+      const loc = jet.types.get(`${w}${it.name}`);
+      if (loc) return { evidence: 'stem-prefixed', jet: loc };
+    }
+  }
+  // A Jet table row naming the item as a string (`{name: "ProcessChild", ...}`).
+  if (compound && jet.strNames.has(it.name)) {
+    return { evidence: 'jet-string-table', jet: jet.strNames.get(it.name) };
+  }
   return null;
 }
 
@@ -808,7 +966,8 @@ function classifyItem(it, primary, offs, relocate) {
   if (reason) return { status: 'dropped', evidence: reason, jet: '-' };
 
   const own = matchItem(it, primary);
-  if (own) return { status: 'ported', evidence: own.evidence, jet: own.jet };
+  // A string-table row is a representation of the item, not its implementation.
+  if (own) return { status: own.evidence === 'jet-string-table' ? 'ported-differs' : 'ported', evidence: own.evidence, jet: own.jet };
 
   const ownFile = fileLevel(it, primary);
   if (ownFile) return { status: 'ported-differs', evidence: 'file-level', jet: ownFile };
@@ -842,6 +1001,76 @@ function caseFor(t, cases) {
   return list.find((p) => p.split('/').includes(stem)) ?? list[0];
 }
 
+const TEST_STOPWORDS = new Set(['a', 'an', 'the', 'is', 'are', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'it', 'its', 'be', 'test']);
+const testTokens = (key) => key.split('_').filter((w) => w && !TEST_STOPWORDS.has(w));
+
+// Jet test names (#Test descriptions, test fns, case and tests/ui stems) as token lists,
+// with a token -> entry posting list, and every word-boundary suffix of each name with
+// separators removed (`publication sign hex roundtrips` -> `hexroundtrips`, ...).
+function testNameIndex(jet, extra) {
+  const entries = [];
+  const postings = new Map();
+  const suffixes = new Map();
+  const add = (key, loc) => {
+    const words = key.split('_').filter(Boolean);
+    for (let k = 0; k < words.length; k++) {
+      const joined = words.slice(k).join('');
+      if (!suffixes.has(joined)) suffixes.set(joined, loc);
+    }
+    const toks = testTokens(key);
+    if (toks.length === 0) return;
+    const i = entries.length;
+    entries.push({ toks, set: new Set(toks), loc });
+    for (const w of new Set(toks)) {
+      if (!postings.has(w)) postings.set(w, []);
+      postings.get(w).push(i);
+    }
+  };
+  for (const [k, loc] of jet.testDescs) add(k, loc);
+  for (const [k, loc] of jet.testFns) add(k, loc);
+  for (const [k, loc] of extra) add(normName(k), loc);
+  return { entries, postings, suffixes };
+}
+
+// A Jet test name ending with the Rust name once separators are dropped: a prefixed
+// description, or words split or joined differently (`roundtrippable` / `round trippable`).
+function suffixTestMatch(key, names) {
+  const joined = key.replace(/_/g, '');
+  if (!key.includes('_') || joined.length < 12) return null;
+  const loc = names.suffixes.get(joined);
+  return loc ? { evidence: 'jet-test-suffix', jet: loc } : null;
+}
+
+const isSubsequence = (short, long) => {
+  let j = 0;
+  for (const w of long) if (j < short.length && w === short[j]) j++;
+  return j === short.length;
+};
+
+// A Jet test whose name carries every Rust word in order and little else (prefixed or
+// lightly reworded descriptions), else one sharing most words both ways.
+function tokenTestMatch(key, names) {
+  const rt = testTokens(key);
+  if (rt.length < 3) return null;
+  let rarest = null;
+  for (const w of new Set(rt)) {
+    const p = names.postings.get(w);
+    if (!p) continue;
+    if (rarest === null || p.length < rarest.length) rarest = p;
+  }
+  if (rarest === null) return null;
+  let overlap = null;
+  for (const i of rarest) {
+    const e = names.entries[i];
+    if (rt.length >= 0.6 * e.toks.length && isSubsequence(rt, e.toks)) return { evidence: 'jet-test-words', jet: e.loc };
+    if (overlap === null) {
+      const shared = new Set(rt.filter((w) => e.set.has(w))).size;
+      if (shared >= 4 && shared >= 0.8 * new Set(rt).size && shared >= 0.5 * e.set.size) overlap = e.loc;
+    }
+  }
+  return overlap === null ? null : { evidence: 'jet-test-overlap', jet: overlap };
+}
+
 function classifyTest(t, ctx) {
   const mapped = ctx.mapping.get(`${t.file}\t${t.name}`);
   if (mapped) return { status: 'mapped', evidence: 'mapping-tsv', jet: mapped };
@@ -850,11 +1079,24 @@ function classifyTest(t, ctx) {
   if (ctx.jet.testDescs.has(key)) return { status: 'mapped', evidence: 'jet-test-name', jet: ctx.jet.testDescs.get(key) };
   if (ctx.jet.testFns.has(key)) return { status: 'mapped', evidence: 'jet-test-name', jet: ctx.jet.testFns.get(key) };
 
+  // A Jet port comment (`Rust: tests/x.rs:123`) whose cited range starts inside the test or
+  // on the line above it (`#[test]`), or naming it; a file header citing a range that spans
+  // many tests does not count.
+  for (const r of ctx.jet.portRefs.get(basename(t.file)) ?? []) {
+    if (!pathMatches(t.file, r.path)) continue;
+    if (r.lines.some(([a]) => a >= t.start && a <= t.end + 1) || r.names.has(t.name)) {
+      return { status: 'mapped', evidence: 'port-comment', jet: `${r.jetFile}:${r.jetLine}` };
+    }
+  }
+
   const caseRel = caseFor(t, ctx.cases);
   if (caseRel) {
     if (ctx.retiredIds.has(caseRel)) return { status: 'retired', evidence: 'retired-with-rust', jet: caseRel };
     return { status: 'mapped', evidence: 'testkit-case', jet: caseRel };
   }
+
+  const ui = ctx.uiStems.get(t.name);
+  if (ui) return { status: 'mapped', evidence: 'ui-fixture', jet: ui };
 
   for (const lit of t.lits) {
     const rel = isFixture(lit, ctx.jetFiles);
@@ -868,6 +1110,9 @@ function classifyTest(t, ctx) {
   if (rustEmitPath(t.file) || /rust_emit|emit_rust|rustc/.test(t.name)) {
     return { status: 'dropped', evidence: 'rust-emit-backend', jet: '-' };
   }
+
+  const near = suffixTestMatch(key, ctx.testNames) ?? tokenTestMatch(key, ctx.testNames);
+  if (near) return { status: 'mapped', ...near };
 
   for (const off of ctx.offs) {
     const loc = off.testDescs.get(key) ?? off.testFns.get(key);
@@ -957,6 +1202,14 @@ function generate({ rev, jetRev, refs }) {
     cases.get(base).push(p);
   }
 
+  // tests/ui fixtures by file stem (`<rust test name>.stderr` and siblings).
+  const uiStems = new Map();
+  for (const p of jetFileList) {
+    if (!p.startsWith('tests/ui/')) continue;
+    const stem = basename(p).replace(/\.[^.]+$/, '');
+    if (!uiStems.has(stem)) uiStems.set(stem, p);
+  }
+
   // Tests whose Rust file stem names a case directory.
   const caseDirs = new Set();
   for (const p of jetFileList) {
@@ -1020,7 +1273,9 @@ function generate({ rev, jetRev, refs }) {
       .join('');
 
   // Tests.
-  const ctx = { mapping, jet, offs, cases, caseDirs, jetFiles, retired, retiredIds };
+  const caseNames = [...cases].map(([name, list]) => [name, list[0]]);
+  const testNames = testNameIndex(jet, [...caseNames, ...uiStems]);
+  const ctx = { mapping, jet, offs, cases, caseDirs, uiStems, testNames, jetFiles, retired, retiredIds };
   const testRows = rustTests
     .map((t) => ({ ...t, ...classifyTest(t, ctx) }))
     .sort((a, b) => cmp(a.file, b.file) || a.line - b.line || cmp(a.name, b.name));
@@ -1117,7 +1372,7 @@ function generate({ rev, jetRev, refs }) {
     'cli.tsv': cliTsv,
     'offdev.tsv': offdevTsv,
     'summary.json': JSON.stringify(summary, null, 2) + '\n',
-    'SUMMARY.md': ownerSummary(summary),
+    'SUMMARY.md': ownerSummary(summary, currentRows(itemRows, testRows)),
   };
 }
 
@@ -1135,9 +1390,67 @@ const table = (head, rows) =>
   `| ${head.join(' | ')} |\n|${head.map(() => '---').join('|')}|\n` + rows.map((r) => `| ${r.join(' | ')} |\n`).join('');
 const byCount = (obj) => Object.entries(obj ?? {}).sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]));
 
-// The owner summary: every count, every not-ported and dropped Rust file, every
-// not-mapped test file, every CLI refusal and every kept Rust directory.
-function ownerSummary(s) {
+// Current classification of every Rust item and test, keyed the way sample files name
+// them: Rust file basename, 1-based line, last name segment (`Owner::name`, `Owner.name`).
+const sampleKey = (file, line, name) => `${basename(file)}\t${line}\t${name.split(/::|\./).pop()}`;
+function currentRows(itemRows, testRows) {
+  const m = new Map();
+  for (const r of itemRows) m.set(sampleKey(r.file, r.start + 1, r.name), { status: r.status, evidence: r.evidence });
+  for (const t of testRows) m.set(sampleKey(t.file, t.line, t.name), { status: t.status, evidence: t.evidence });
+  return m;
+}
+
+// Hand-checked samples of the matcher's output, listed by samples/rounds.tsv
+// (round, kind, matcher, pool, file); each file is a TSV with rust_file, line, name and
+// verdict columns. Rates count only rows the current ledger still classifies as sampled:
+// kind `items`/`tests`: rows still unmatched (found|partial|obsolete|absent);
+// kind `fp-items`/`fp-tests`: rows still matched by the sampled evidence (correct|related|wrong).
+function residualSample(current) {
+  const dir = join(ROOT, OUT_REL, 'samples');
+  const index = join(dir, 'rounds.tsv');
+  if (!existsSync(index)) return '';
+  const out = ['## Matcher residual (hand-checked samples)\n'];
+  out.push(
+    'Random rows hand-checked against the Jet tree; every row with its exact Jet location or the searches run is in `samples/`. ' +
+      '`now` counts the sampled rows the current ledger still classifies the sampled way (still unmatched, or still matched by the same evidence); verdicts and rates are over those rows. ' +
+      'For unmatched rows, `found` is a matcher false negative (a Jet counterpart exists) and `partial` is related Jet code covering part of the job. ' +
+      'For loosely matched rows, `wrong` is a matcher false positive.\n',
+  );
+  const rows = [];
+  for (const line of readFileSync(index, 'utf8').split('\n').slice(1)) {
+    if (!line.trim()) continue;
+    const [round, kind, matcher, pool, file] = line.split('\t');
+    const lines = readFileSync(join(dir, file), 'utf8').split('\n').filter((l) => l.trim());
+    const head = lines[0].split('\t');
+    const at = (cols, name) => cols[head.indexOf(name)];
+    const fp = kind.startsWith('fp-');
+    const counts = {};
+    let now = 0;
+    for (const l of lines.slice(1)) {
+      const cols = l.split('\t');
+      const cur = current.get(sampleKey(at(cols, 'rust_file'), at(cols, 'line'), at(cols, 'name')));
+      const still = fp
+        ? cur !== undefined && cur.evidence === at(cols, 'evidence') && (cur.status === 'ported' || cur.status === 'mapped')
+        : cur !== undefined && (cur.status === 'not-ported' || cur.status === 'not-mapped');
+      if (!still) continue;
+      now++;
+      bump(counts, at(cols, 'verdict'));
+    }
+    const pct = (k) => (now === 0 ? '-' : `${Math.round((100 * (counts[k] ?? 0)) / now)}%`);
+    const verdicts = Object.entries(counts).sort((a, b) => cmp(a[0], b[0])).map(([k, v]) => `${k} ${v}`).join(', ') || '-';
+    const fpart = now === 0 ? '-' : `${Math.round((100 * ((counts.found ?? 0) + (counts.partial ?? 0))) / now)}%`;
+    const rate = fp ? `wrong ${pct('wrong')}, related ${pct('related')}` : `found ${pct('found')}, found+partial ${fpart}`;
+    rows.push([round, kind, matcher, pool, String(lines.length - 1), String(now), verdicts, rate, `\`samples/${file}\``]);
+  }
+  out.push(table(['round', 'kind', 'matcher', 'pool', 'rows', 'now', 'verdicts', 'rate', 'evidence'], rows));
+  return out.join('\n');
+}
+
+// The owner summary: every count, the matcher's hand-checked residual, every
+// not-ported area and file, every dropped Rust file, every not-mapped test file,
+// every CLI refusal and every kept Rust directory. `current` keys the ledger rows
+// for the sample files.
+function ownerSummary(s, current) {
   const it = s.items;
   const ts = s.tests;
   const out = [];
@@ -1146,12 +1459,12 @@ function ownerSummary(s) {
   out.push(`Rust tree: \`${s.refs.rev}\`. Jet tree: \`${s.refs.jet_rev}\`. Secondary Jet trees: ${s.refs.jet_refs.map((r) => `\`${r.name}\` (\`${r.sha}\`)`).join(', ') || 'none'}.\n`);
   out.push('Rows: `items.tsv` (one per Rust fn, method, type, trait, macro), `tests.tsv` (one per Rust `#[test]`), `cli.tsv` (Jet CLI refusals), `offdev.tsv` (Jet definitions that exist only on a secondary tree). Statuses:\n');
   out.push([
-    '- `ported`: a Jet item cites the Rust item (`// Rust: path:line`) or carries its exact or prefixed name.',
-    '- `ported-differs` (`file-level`): a Jet file cites the Rust file, but no Jet item matches this item by name or line.',
+    '- `ported`: a Jet item cites the Rust item (`port-comment`: `// Rust: path:line`; `rust-name-comment`: a comment naming Rust `name`), carries its exact or prefixed name (`name-exact`, `name-prefixed`), is a method of the same type (`jet-method`), is `<rest>` in the file defining the Jet type spelled by the name\'s leading words (`type-prefixed`), or is prefixed by a word of the Rust file name (`stem-prefixed`).',
+    '- `ported-differs`: `file-level` (a Jet file cites the Rust file, but no Jet item matches this item by name or line) or `jet-string-table` (a Jet string literal names the item, as a generated or registry table row, but no Jet definition does).',
     '- `kept`: the Rust file survives the cutover at a new path (FFI bridge runtime and support crates).',
     '- `not-ported`: no Jet counterpart on the Jet tree; `only-on:<ref>` means the port exists only on that secondary tree.',
     '- `dropped`: retired with Rust: `rust-emit-backend` (the Rust-emitting backend and its runtime prelude), `rust-only-glue` (build scripts, the Rust bootstrap host, stage0 repack, std trait impls), `rust-test-harness` (non-test helpers of the Rust integration tests), `vendored-upstream`.',
-    '- tests: `mapped` (Jet test, testkit case, golden or fixture), `retired` (listed in `Tools/testkit/retired-with-rust.tsv`), `dropped` (tests of the Rust-emit backend), `not-mapped` (`case-dir:` names the testkit directory of the same Rust file).',
+    '- tests: `mapped` (`mapping-tsv`; `jet-test-name`: same #Test description or test fn; `port-comment`: a Jet comment cites a line of the test; `testkit-case`; `ui-fixture`: `tests/ui/<name>.*`; `fixture`; `jet-test-suffix`: a Jet test name ends with the Rust name once separators are dropped; `jet-test-words`: a Jet test name holds every Rust word in order plus at most 40% more; `jet-test-overlap`: at least 4 shared words, 80% of the Rust words and half of the Jet words), `retired` (listed in `Tools/testkit/retired-with-rust.tsv`), `dropped` (tests of the Rust-emit backend), `not-mapped` (`case-dir:` names the testkit directory of the same Rust file).',
   ].join('\n') + '\n');
   out.push('## Items\n');
   out.push(table(['status', 'rows'], byCount(it.by_status).map(([k, v]) => [k, count(v)])));
@@ -1159,6 +1472,10 @@ function ownerSummary(s) {
   out.push('## Tests\n');
   out.push(table(['status', 'rows'], byCount(ts.by_status).map(([k, v]) => [k, count(v)])));
   out.push(table(['evidence', 'rows'], byCount(ts.by_evidence).map(([k, v]) => [`\`${k}\``, count(v)])));
+  out.push(residualSample(current));
+  out.push('## Not-ported items by area\n');
+  out.push('Area = first two path segments of the Rust file; every row: `items.tsv` where status is `not-ported`.\n');
+  out.push(table(['area', 'not-ported items'], byCount(it.not_ported_by_area).map(([a, n]) => [`\`${a}\``, count(n)])));
   out.push('## CLI refusals\n');
   out.push(`${s.cli.total} call sites refuse a surface as not yet ported (\`cli.tsv\`). Surfaces:\n`);
   out.push(s.cli.surfaces.map((x) => `- \`${x}\``).join('\n') + '\n');

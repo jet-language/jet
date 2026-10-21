@@ -17,10 +17,12 @@
 //   7. missing                      otherwise; evidence = the def's first line.
 //
 // Area view (reintegrate-areas.tsv): for every ref file holding an off-dev def, the dev owner is
-//   the same path; else the same path with each segment lowercased and `_`/`-` removed (renamed-file);
-//   else the same directory, normalised the same way; else the same package (first two directory
-//   segments, normalised). status: same-file | renamed-file | superseded (dir/package owner with
-//   dev_lines >= ref_lines) | partial (dir/package owner smaller) | absent (dev has nothing there).
+//   the same path; else the same path after package moves (PACKAGE_MOVES) with each segment
+//   lowercased and `_`/`-` removed (renamed-file); else the same directory, normalised the same way;
+//   else the same package (first two directory segments, normalised). status: same-file |
+//   renamed-file | superseded (dir/package owner with dev_lines >= ref_lines) | partial
+//   (dir/package owner smaller) | absent (dev has nothing there).
+// Every dev-side path lookup (same-body files, deletions, area owners) applies PACKAGE_MOVES first.
 //
 // Reads git objects only (ls-tree, one cat-file --batch per tree, one git log for deletions).
 // Writes Docs/audits/rust-exit-parity/{reintegrate.tsv,reintegrate-areas.tsv,reintegrate-summary.md}.
@@ -65,6 +67,16 @@ const linesOf = (text) => {
 };
 const table = (head, rows) =>
   `| ${head.join(' | ')} |\n|${head.map(() => '---').join('|')}|\n` + rows.map((r) => `| ${r.join(' | ')} |\n`).join('');
+
+// Packages that moved between the secondary refs and dev: ref path prefix -> dev path prefix.
+const PACKAGE_MOVES = [
+  ['Compiler/JetPkgModel/', 'Jetpack/PackageModel/'],
+  ['Compiler/JetStore/', 'Jetpack/Store/'],
+];
+function devPath(p) {
+  for (const [from, to] of PACKAGE_MOVES) if (p.startsWith(from)) return to + p.slice(from.length);
+  return p;
+}
 
 // PascalCase variant of a path: each `_`-separated segment capitalised, `_` removed.
 function pascalPath(p) {
@@ -467,9 +479,10 @@ function generate({ jetRev, refs }) {
   // Deletions on the dev tree: one git log for every dev-absent path (and its PascalCase variant).
   const absentPaths = new Set();
   for (const r of offRows) {
-    if (!devByPathKey.has(pathKey(r.file))) {
-      absentPaths.add(r.file);
-      absentPaths.add(pascalPath(r.file));
+    const p = devPath(r.file);
+    if (!devByPathKey.has(pathKey(p))) {
+      absentPaths.add(p);
+      absentPaths.add(pascalPath(p));
     }
   }
   const deletions = new Map(); // path -> `${hash} ${subject}`
@@ -544,7 +557,8 @@ function generate({ jetRev, refs }) {
     }
 
     // 5. same file (same path, or path-normalised) with an 80%-similar body
-    const candPaths = devByPathKey.get(pathKey(r.file)) ?? [];
+    const movedFile = devPath(r.file);
+    const candPaths = devByPathKey.get(pathKey(movedFile)) ?? [];
     let sameBody = null;
     if (refDef && candPaths.length) {
       const rt = tokenIds(refDef.bodyText);
@@ -577,7 +591,7 @@ function generate({ jetRev, refs }) {
 
     // 6. file deliberately deleted on dev
     if (candPaths.length === 0) {
-      const del = deletions.get(r.file) ?? deletions.get(pascalPath(r.file));
+      const del = deletions.get(movedFile) ?? deletions.get(pascalPath(movedFile));
       if (del) {
         Object.assign(out, { verdict: 'retired-on-dev', dev: '-', evidence: del });
         results.push(out);
@@ -630,16 +644,17 @@ function generate({ jetRev, refs }) {
       let owners = [];
       let scope = 'none';
       let status;
-      if (devSet.has(g.file)) {
-        owners = [g.file];
+      const file = devPath(g.file);
+      if (devSet.has(file)) {
+        owners = [file];
         scope = 'file';
-        status = 'same-file';
-      } else if (devByNormPath.has(normPath(g.file))) {
-        owners = devByNormPath.get(normPath(g.file));
+        status = file === g.file ? 'same-file' : 'renamed-file';
+      } else if (devByNormPath.has(normPath(file))) {
+        owners = devByNormPath.get(normPath(file));
         scope = 'file';
         status = 'renamed-file';
       } else {
-        const dir = dirOf(g.file);
+        const dir = dirOf(file);
         if (devByDir.has(normPath(dir))) {
           owners = devByDir.get(normPath(dir));
           scope = 'dir';
@@ -750,7 +765,8 @@ function generate({ jetRev, refs }) {
   md.push(
     [
       'Verdicts, first match wins: `name-case`, `test-desc` (name or #Test description on dev), `test-desc-prefix` (off-dev #Test name equals a dev #Test description minus 1-2 leading words), `name-prefix-strip` / `name-prefix-add` (1-2 leading `word_` segments, remainder >= 3 segments and >= 5 chars), `same-body` (token LCS similarity >= 0.80 with a same-file dev def), `retired-on-dev` (file deleted on dev), `missing`.\n',
-      'Area status: `same-file`; `renamed-file` (same path after lowercasing segments and removing `_`/`-`); `superseded` (dev owner in the same directory, or else the same package, has at least the ref file\'s lines); `partial` (owner smaller); `absent` (dev has nothing in that directory or package). `covered_defs` counts `covered` verdicts only; `retired-on-dev` defs appear in neither count.\n',
+      `Package moves applied to every dev-side path lookup: ${PACKAGE_MOVES.map(([a, b]) => `\`${a}\` -> \`${b}\``).join(', ')}.\n`,
+      'Area status: `same-file`; `renamed-file` (same path after package moves, lowercasing segments and removing `_`/`-`); `superseded` (dev owner in the same directory, or else the same package, has at least the ref file\'s lines); `partial` (owner smaller); `absent` (dev has nothing in that directory or package). `covered_defs` counts `covered` verdicts only; `retired-on-dev` defs appear in neither count.\n',
     ].join('\n'),
   );
 
