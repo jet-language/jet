@@ -12,6 +12,7 @@ use core as core
 use core.files as files
 use core.sys as sys
 use core.math.random as random
+use core.time.[Clock]
 use core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot, __histories_with_provenance]
 
 // A second spelling, never a second owner.
@@ -305,9 +306,9 @@ fn histories<T>(
     seed: Int,
     cases: Int,
     strategy: HistoryStrategy<T>?{None},
-    model: fn([T]) -> Dyn,
-    actual: fn([T]) -> Dyn,
-    observe: fn(Dyn) -> Dyn,
+    model: ^fn([T]) -> Dyn,
+    actual: ^fn([T]) -> Dyn,
+    observe: ^fn(Dyn) -> Dyn,
 ) -> TestComparison Err! {
     // Fresh command/observation copies precede callbacks. Host validation
     // messages enter the default typed Err rail, never a String failure domain.

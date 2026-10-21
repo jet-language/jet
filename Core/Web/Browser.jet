@@ -201,7 +201,7 @@ fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     Ok(BrowserTimeout{milliseconds: ms})
 }
 
-fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
+fn locked(engine: String) -[FS, IO, Env]> BrowserLocked BrowserError! {
     if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
     env :: core.sys.__startup_env()
     root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
@@ -220,8 +220,8 @@ fn connect(endpoint: String) -[Net]> Browser BrowserError! {
 
 fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
     conn :: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
-    core.web.browser.__ws_set_timeout(conn, t.milliseconds) ? unit -> unit ! error -> return Err(browser_ws_error(error))
-    browser :: core.web.browser.__from_connection(^conn, p, t)
+    core.web.browser.__ws_set_timeout(conn, t.milliseconds) ?? return Err(browser_ws_error(err))
+    browser :: core.web.browser.__from_connection(^conn, p, t.copy())
     empty :: tree.object_from_entries(^[(key: String, value: Dyn)]{})
     status :: core.web.browser.__command(browser, "session.status", ^empty) ? value -> value ! error -> return Err(error)
     if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
@@ -249,7 +249,7 @@ fn browser_ws_error(error: WsError) -> BrowserError Never! {
 }
 
 fn browser_true_field(value: Dyn, key: String) -> Bool Never! {
-    if value != .Object(_) -> return false
+    if !(value == .Object(_)) -> return false
     loop entry in tree.object_entries(value) {
         if entry.key == key {
             if entry.value == .Bool(flag) -> return flag
@@ -260,7 +260,7 @@ fn browser_true_field(value: Dyn, key: String) -> Bool Never! {
 }
 
 fn browser_text_field(value: Dyn, key: String) -> Bool Never! {
-    if value != .Object(_) -> return false
+    if !(value == .Object(_)) -> return false
     loop entry in tree.object_entries(value) {
         if entry.key == key -> return entry.value == .Text(_)
     }
@@ -271,7 +271,7 @@ fn browser_session_cdp(session: Dyn) -> Bool BrowserError! {
     if !browser_text_field(session, "sessionId") -> return Err(BrowserError{kind: "protocol"})
     loop entry in tree.object_entries(session) {
         if entry.key == "capabilities" {
-            if entry.value != .Object(_) -> return Err(BrowserError{kind: "protocol"})
+            if !(entry.value == .Object(_)) -> return Err(BrowserError{kind: "protocol"})
             return Ok(browser_true_field(entry.value, "goog:cdp"))
         }
     }
@@ -387,13 +387,14 @@ fn server_start(config: BrowserTestConfig) -[Net]> BrowserTestServer BrowserErro
 }
 
 fn watch_changed(path: String, last_modified_ms: Int) -[FS, Net]> Bool BrowserError! {
-    fact :: core.web.browser.__modified_ms(path)
-    if fact == None -> return Ok(last_modified_ms >= 0)
-    Ok((fact ?? 0) > last_modified_ms)
+    if core.web.browser.__modified_ms(path) == .Val(fact) -> return Ok(fact > last_modified_ms)
+    Ok(last_modified_ms >= 0)
 }
 
 fn server_stop(server: BrowserTestServer) Never! {
-    core.web.browser.__server_stop(&server)
+    // The handle copy shares the one host server; stopping it stops that server.
+    shared := server.copy()
+    core.web.browser.__server_stop(&shared)
 }
 
 fn server_url(server: BrowserTestServer) -> String Never! { server.url() }
@@ -583,7 +584,10 @@ fn config_value(root: String, key: String) -[FS]> String? Never! {
 fn env_value(env: [(name: [U8], value: [U8])], variable: String) -> String? Never! {
     key :: variable.bytes()
     loop entry in env {
-        if entry.name == key -> return String.from_bytes(entry.value)
+        if entry.name == key {
+            text :: String.from_bytes(entry.value) ?? return None
+            return Val(text)
+        }
     }
     None
 }
@@ -688,7 +692,7 @@ fn config_from_snapshot(root: String, env: [(name: [U8], value: [U8])]) -[FS]> B
 fn parse_locked(raw: String, engine: String) -> BrowserLocked BrowserError! {
     current := BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}
     in_browser := false
-    found := None
+    found := BrowserLocked?{None}
     loop raw_line in parse.split(raw, "\n") {
         line :: text.trim(raw_line)
         bytes :: line.bytes()

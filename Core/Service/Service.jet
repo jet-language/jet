@@ -12,6 +12,7 @@ package {
 use core as core
 use core.sys as service_sys
 use core.encoding as service_encoding
+use core.crypto as service_crypto
 
 // Ordinary source values: construction, matching, equality and ownership use
 // the compiler's existing record/enum rails, not service-specific handles.
@@ -281,7 +282,9 @@ fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
         if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
         core.service.__tree_write_restart(&tree, restart.copy())
         count :: core.service.__tree_group_count(tree)
-        loop i in 0..<count -> core.service.__group_write_restart(&tree, i)
+        loop i in 0..<count {
+            core.service.__group_write_restart(&tree, i)
+        }
     }
 }
 
@@ -1520,9 +1523,9 @@ fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
                     .Err(error) -> { return Err(error) }
                 }
                 signed_fields :: [String]{"jet-service-delivery-acceptance-v2", fields[0], fields[1], fields[2], fields[3], fields[4], "{generation}", fields[6], "{timestamp}", "{expires}"}
-                expected :: core.crypto.hmac_sha256(key, delivery_signature_payload(signed_fields))
+                expected :: service_crypto.hmac_sha256(key, delivery_signature_payload(signed_fields))
                 supplied :: service_encoding.hex_to_bytes(fields[9]) ?? return Err(ServiceError.Unavailable("delivery acceptance signature is malformed"))
-                if !core.crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery acceptance history signature does not validate"))
+                if !service_crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery acceptance history signature does not validate"))
             } else if record.op == 69 && fields.len() == 6 && fields[0] == facts.id {
                 sequence :: workflow_i64(fields[1]) ?? return Err(ServiceError.Unavailable("delivery event sequence is malformed"))
                 state :: delivery_parse_state(fields[2]) ?? return Err(ServiceError.Unavailable("service delivery lifecycle state is malformed"))
@@ -1539,7 +1542,7 @@ fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
                     .Err(error) -> { return Err(error) }
                 }
                 supplied :: service_encoding.hex_to_bytes(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event signature is malformed"))
-                if !core.crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery event signature does not validate"))
+                if !service_crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery event signature does not validate"))
                 &events.push(DeliveryEvent{sequence: sequence, state: state, attempts: attempts, timestamp: timestamp, signature: fields[5]})
             }
         }
@@ -1586,7 +1589,7 @@ fn delivery_receipt_signature(facts: __DeliveryFacts) -> String ServiceError! {
         .Err(error) -> { return Err(error) }
     }
     fields :: [String]{"jet-service-delivery-receipt-v1", facts.id, facts.key, "{facts.duplicate}", facts.tree, facts.worker, facts.message, delivery_state_show(facts.state), "{facts.attempts}", "{facts.deadline}", "{facts.retention_until}", "{facts.generation}"}
-    Ok(service_encoding.bytes_to_hex(core.crypto.hmac_sha256(key, delivery_signature_payload(fields))))
+    Ok(service_encoding.bytes_to_hex(service_crypto.hmac_sha256(key, delivery_signature_payload(fields))))
 }
 
 fn delivery_event_signature(authority: String, generation: Int, id: String, sequence: Int, state: DeliveryState, attempts: Int, timestamp: Int) -> [U8] ServiceError! {
@@ -1595,7 +1598,7 @@ fn delivery_event_signature(authority: String, generation: Int, id: String, sequ
         .Err(error) -> { return Err(error) }
     }
     fields :: [String]{"jet-service-delivery-event-v1", id, "{sequence}", delivery_state_show(state), "{attempts}", "{timestamp}"}
-    Ok(core.crypto.hmac_sha256(key, delivery_signature_payload(fields)))
+    Ok(service_crypto.hmac_sha256(key, delivery_signature_payload(fields)))
 }
 
 fn delivery_generation_key(authority: String, generation: Int) -> [U8] ServiceError! {
@@ -1604,7 +1607,7 @@ fn delivery_generation_key(authority: String, generation: Int) -> [U8] ServiceEr
         .Err(error) -> { return Err(error) }
     }
     fields :: [String]{"jet-service-delivery-generation-v1", "{generation}"}
-    Ok(core.crypto.hmac_sha256(key, delivery_signature_payload(fields)))
+    Ok(service_crypto.hmac_sha256(key, delivery_signature_payload(fields)))
 }
 
 fn delivery_signature_payload(fields: [String]) -> [U8] Never! {
@@ -2133,7 +2136,7 @@ fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
             replacement :: core.service.__worker_mailbox_new(facts.workers[index].endpoint.copy(), I64{mailbox.capacity}, ^messages) ?? panic("validated service mailbox must restart with its bounded queue")
             core.service.__worker_write_mailbox(&tree, index, ^replacement) // MOVE, native2001-2006
             // Native2007-2012 ignores both Results; clamp its u64 time identically.
-            at :: U64{if now < 0 -> 0 else -> now}
+            at :: U64{if now < 0 -> 0 else -> Int{now}}
             _ :: core.service.__record_topology_restart(facts.workers[index].task, at, __WorkerRestartReason.Failed)
             _ :: core.service.__task_restart(facts.workers[index].task)
         }
