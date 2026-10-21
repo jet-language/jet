@@ -384,6 +384,92 @@ fn ir_task_group(m: &IRModule, p: &IRProgram, b: &IRBuilder, group: TLocal, limi
     ir_scope_close(&m, &b)
 }
 
+// `task.all(tasks)` (codegen jet_codegen_lower_task_group_value, Lower
+// Tasks.jet:188 lower_task_group): the runtime takes the owned List of Task
+// handles (leaving an empty header) and joins them into the Result box's
+// List payload, failing fast with a TaskFailure; a named tuple of Tasks
+// joins into the tuple of their results (Lower lower_task_tuple_all).
+fn ir_task_all(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, tasks: TExpr, span: Span) -> Int Never! {
+    result_ty :: ir_subst(p, ty)
+    ok_ty := Type.Int
+    err_ty := Type.Int
+    if ir_untag(result_ty) == .Result(success, failure) {
+        ok_ty = success
+        err_ty = failure
+    } else {
+        return ir_fail_slot(&b, span, "task.all result {ir_type_name(ty)}")
+    }
+    tasks_ty :: ir_untag(ir_subst(p, tasks.ty))
+    value :: ir_expr(&m, &p, &b, tasks)
+    if ir_failed(b) || value < 0 -> return -1
+    if tasks_ty == .Tuple(fields) {
+        if !b.fresh[value] -> return ir_fail_slot(&b, span, "task.all over a borrowed tuple")
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_fail_slot(&b, span, "task.all tuple {ir_type_name(tasks.ty)} has no layout")
+        outputs := [IRMember]{}
+        if ir_untag(ok_ty) == .Tuple(results) {
+            outputs = ir_tuple_members(&m, p, results) ?? return ir_fail_slot(&b, span, "task.all tuple result {ir_type_name(ok_ty)} has no layout")
+        }
+        if outputs.len() != members.len() -> return ir_fail_slot(&b, span, "task.all tuple success arity does not match its handles")
+        handles :: ir_out_slot(&m, &b, members.len())
+        offsets :: ir_out_slot(&m, &b, members.len())
+        loop (index, member) in members {
+            target := -1
+            loop output in outputs {
+                if output.name == member.name -> target = output.offset
+            }
+            if target < 0 -> return ir_fail_slot(&b, span, "task.all tuple result has no member {member.name}")
+            handle :: ir_load_word(&m, &b, value, member.offset)
+            ir_emit(&b.f, IROp.Store, -1, handles, index * 8, handle, b.line)
+            offset_word :: ir_word_const(&m, &b, target)
+            ir_emit(&b.f, IROp.Store, -1, offsets, index * 8, offset_word, b.line)
+        }
+        b.fresh[value] = false
+        count :: ir_word_const(&m, &b, members.len())
+        mode :: ir_word_const(&m, &b, 0)
+        return ir_task_outcome(&m, p, &b, "jet_rt_native_task_all_tuple", [Int]{handles, count, mode, offsets}, result_ty, err_ty, span)
+    }
+    element := Type.Int
+    if tasks_ty == .List(inner) {
+        element = inner
+    } else {
+        return ir_fail_slot(&b, span, "task.all over {ir_type_name(tasks.ty)}")
+    }
+    body :: ir_task_element(element) ?? return ir_fail_slot(&b, span, "task.all over task bodies {ir_type_name(element)}")
+    body_meta :: ir_lazy_meta(&m, p, &b, body, span)
+    if body_meta < 0 -> return -1
+    ok_meta :: ir_lazy_meta(&m, p, &b, ok_ty, span)
+    if ok_meta < 0 -> return -1
+    kind :: ir_word_const(&m, &b, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    boxed :: ir_task_outcome(&m, p, &b, "jet_rt_native_task_group", [Int]{kind, zero, value, zero, body_meta, zero, zero, ok_meta}, result_ty, err_ty, span)
+    ir_release(&m, &b, value)
+    boxed
+}
+
+// A runtime task outcome `export(args..., out) -> verdict` as a Result box
+// whose payload `out` addresses (Lower Tasks.jet:264 lower_task_outcome): a
+// failure's runtime record (TaskFailure) is rebuilt in its declared layout;
+// a handle error stays the handle.
+fn ir_task_outcome(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], result_ty: Type, err_ty: Type, span: Span) -> Int Never! {
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    boxed :: ir_result_box(&m, p, &b, result_ty, true, -1)
+    out :: ir_address_at(&m, &b, boxed, 8)
+    call_args := args
+    &call_args.push(out)
+    word_row :: ir_word_row(&m)
+    verdict :: ir_runtime(&m, &b, export, call_args, word_row)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, verdict, b.line)
+    if !ir_is_handle(m, err_row) {
+        zero :: ir_word_const(&m, &b, 0)
+        failed :: ir_bool_op(&m, &b, IROp.Eq, verdict, zero)
+        ir_open_if(&b.f, failed, b.line)
+        ir_route_record_in(&m, p, &b, boxed, 8, err_ty, out, span)
+        ir_end(&b.f, b.line)
+    }
+    b.fresh[boxed] = true
+    boxed
+}
+
 // `name := T{ uninit }` (codegen InitializeUninit): the variable's storage
 // without a value; checking proves every read follows a write. A scalar
 // starts as zero; a fixed list `[T#N]{ uninit }` is the List of its N
@@ -916,6 +1002,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
         .NumericBinaryMethod(receiver, operation, argument) -> return ir_numeric_euclid(&m, &p, &b, expression.ty, receiver, operation, argument, span)
         .HandleMethod(receiver, operation, args) -> return ir_handle_method(&m, &p, &b, expression.ty, receiver, operation, args, span)
         .CoreClosureCall(kind) -> return ir_core_closure_call(&m, &p, &b, expression.ty, kind, span)
+        .TaskGroupAll(tasks) -> return ir_task_all(&m, &p, &b, expression.ty, tasks, span)
         else -> return ir_fail_slot(&b, span, "expression {ir_expr_kind_name(expression.kind)}")
     }
 }
