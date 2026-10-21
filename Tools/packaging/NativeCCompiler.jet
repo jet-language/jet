@@ -80,9 +80,18 @@ fn parse_rules(text: String) -> Rules {
     Rules{flags: flags, hardening_removed: removed}
 }
 
+// readFileSync's failure as node reports it.
+fn read_failure(path: String, error: IOError) -> String {
+    if files.is_dir(path) -> return "EISDIR: illegal operation on a directory, read"
+    if error == .PermissionDenied(_) -> return "EACCES: permission denied, open '{path}'"
+    if error == .NotFound(_) -> return "ENOENT: no such file or directory, open '{path}'"
+    "{error_code("{error}")}: {error}, open '{path}'"
+}
+
 fn read_rules(root: String) -> Rules {
     path :: "{root}/{POLICY}"
-    text :: files.read(path) ?? fail("{error_code("{err}")}: no such file or directory, open '{path}'")
+    if files.is_dir(path) -> fail("EISDIR: illegal operation on a directory, read")
+    text :: files.read(path) ?? fail(read_failure(path, err))
     parse_rules(text)
 }
 
@@ -100,6 +109,7 @@ fn run() {
     root :: files.cwd() ?? fail("cannot read the working directory: {err}")
     rules :: read_rules(root)
     compiler :: process.env_get_or("CC", "cc")
+    if compiler == "" -> fail("The argument 'file' cannot be empty. Received ''")
     spec := process.cmd([compiler.copy()]).args_extend(process.args()).args_extend(rules.flags)
         .stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) -> spec = spec.env("NIX_HARDENING_ENABLE", child_hardening(enabled, rules.hardening_removed))

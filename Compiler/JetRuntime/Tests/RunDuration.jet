@@ -40,7 +40,7 @@ fn resolve(cwd: String, path: String) -> String {
 }
 
 fn signal_name(number: Int) -> String {
-    names :: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM"}
+    names :: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"}
     if number > 0 && number < names.len() -> return names[number].copy()
     "SIG{number}"
 }
@@ -68,8 +68,25 @@ fn spawn(argv: [String]) -> Ran {
 // Compiler/JetCli/Source/Cli/native-c-policy.tsv, NIX_HARDENING_ENABLE without the
 // policy's removed features. An unreadable or malformed policy is a failed
 // compiler run (exit 1, the reason on stderr), as the node driver's was.
-fn native_cc(root: String, args: [String]) -> Ran {
-    text :: files.read("{root}/{POLICY}") ?? return Ran{stdout: "", stderr: "ENOENT: no such file or directory, open '{root}/{POLICY}'\n", status: Val(1), signal: "", error: ""}
+struct Policy {
+    flags: [String]
+    removed: [String]
+}
+
+// readFileSync's failure as node reports it.
+fn read_failure(path: String, error: IOError) -> String {
+    if files.is_dir(path) -> return "EISDIR: illegal operation on a directory, read"
+    if error == .PermissionDenied(_) -> return "EACCES: permission denied, open '{path}'"
+    if error == .NotFound(_) -> return "ENOENT: no such file or directory, open '{path}'"
+    "{error_code("{error}")}: {error}, open '{path}'"
+}
+
+// The policy rows, read and checked first as the node runner's driver import
+// did: a bad policy stops the runner before it touches anything.
+fn load_policy(root: String) -> Policy {
+    path :: "{root}/{POLICY}"
+    if files.is_dir(path) -> fail("EISDIR: illegal operation on a directory, read")
+    text :: files.read(path) ?? fail(read_failure(path, err))
     flags := [String]{}
     removed := [String]{}
     lines :: text.split("\n").to_list()
@@ -77,15 +94,21 @@ fn native_cc(root: String, args: [String]) -> Ran {
         line :: lines[index]
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
-        if fields.len() != 2 || fields[1] == "" -> return Ran{stdout: "", stderr: "native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"\n", status: Val(1), signal: "", error: ""}
+        if fields.len() != 2 || fields[1] == "" -> fail("native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
         if fields[0] == "flag" {
             &flags.push(fields[1])
         } else if fields[0] == "hardening-remove" {
             &removed.push(fields[1])
         } else {
-            return Ran{stdout: "", stderr: "native-c-policy.tsv:{index + 1}: unknown policy kind \"{fields[0]}\"\n", status: Val(1), signal: "", error: ""}
+            fail("native-c-policy.tsv:{index + 1}: unknown policy kind {json_string(fields[0])}")
         }
     }
+    Policy{flags: flags, removed: removed}
+}
+
+fn native_cc(policy: Policy, args: [String]) -> Ran {
+    flags :: policy.flags
+    removed :: policy.removed
     compiler :: process.env_get_or("CC", "cc")
     spec := process.cmd([compiler.copy()]).args_extend(args).args_extend(flags)
     if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
@@ -140,23 +163,33 @@ fn why(ran: Ran) -> String {
     ran.stderr.copy()
 }
 
+// writeFileSync's failure as node reports it.
+fn write_failure(path: String, error: IOError) -> String {
+    if files.is_dir(path) -> return "EISDIR: illegal operation on a directory, open '{path}'"
+    if error == .PermissionDenied(_) -> return "EACCES: permission denied, open '{path}'"
+    if error == .NotFound(_) -> return "ENOENT: no such file or directory, open '{path}'"
+    "{error_code("{error}")}: {error}, open '{path}'"
+}
+
 fn write(path: String, text: String) {
-    files.write(path, text) ?? fail("{error_code("{err}")}: cannot write '{path}'")
+    files.write(path, text) ?? fail(write_failure(path, err))
 }
 
 fn run() {
+    root :: files.cwd() ?? fail("cannot read the working directory: {err}")
+    policy :: load_policy(root)
     args :: process.args()
     if args.len() < 2 || args[0] == "" -> fail("usage: RunDuration.jet OUT JET_ONLY_OBJECT_OR_ARCHIVE... [LINK_ARG...]")
-    root :: files.cwd() ?? fail("cannot read the working directory: {err}")
     out :: resolve(root, args[0])
-    files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
+    if files.exists(out) && !files.is_dir(out) -> fail("EEXIST: file already exists, mkdir '{out}'")
+    files.create_dir_all(out) ?? fail("{error_code("{err}")}: {err}, mkdir '{out}'")
     binary :: "{out}/duration-fixture"
     inputs :: loop input in args[1..<args.len()] -> if input.starts_with("-") -> input.copy() else -> resolve(root, input)
     cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "{root}/Compiler/JetRuntime/Tests/duration-fixture.c"}
     loop input in inputs -> &cc_args.push(input)
     &cc_args.push("-o")
     &cc_args.push(binary.copy())
-    built :: native_cc(root, cc_args)
+    built :: native_cc(policy, cc_args)
     write("{out}/build.log", "{built.stdout}{built.stderr}")
     write("{out}/build.status.json", status_json(built))
     if built.error != "" || built.signal != "" || built.status != .Val(0) -> fail("Duration fixture link failed: {why(built)}")

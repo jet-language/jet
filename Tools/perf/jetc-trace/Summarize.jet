@@ -1,0 +1,817 @@
+#!/usr/bin/env jet
+// Summarize a compiler trace written with JET_TRACE_FILE=<path> (jetc or the
+// Rust `jet`; JET_TRACE_DETAIL=functions adds per-function spans).
+//
+//   jet Tools/perf/jetc-trace/Summarize.jet <trace.json> [--watch[=seconds]]
+//
+// Prints one row per span kind (count, total and longest wall time, items,
+// peak RSS at its ends) and the spans still open with the latest progress
+// counter, so a live, still-growing (unterminated) trace shows the current
+// phase and how far along it is. --watch re-reads the file every 2 s (or the
+// given seconds). The same file also loads in https://ui.perfetto.dev.
+// Numbers print as the trace's JSON doubles print in JavaScript.
+use core.encoding.json as json
+use core.files as files
+use core.math as math
+use core.process as process
+use core.sys as sys
+use core.term as term
+use core.time as time
+
+ZERO :: Float{0.0}
+HALF :: Float{0.5}
+ONE :: Float{1.0}
+THOUSAND :: Float{1000.0}
+MILLION :: Float{1000000.0}
+TEN_MILLION :: Float{10000000.0}
+HUNDRED_MILLION :: Float{100000000.0}
+
+// ---- JavaScript number semantics -------------------------------------------
+
+fn nan() -> Float Never! { math.nan() }
+
+fn finite(value: Float) -> Bool Never! { math.is_finite(value) }
+
+fn pow_int(base: Int, exponent: Int) -> Int Never! {
+    out := 1
+    loop _ in 0..<exponent -> out = out * base
+    out
+}
+
+// The exact value of a finite non-negative double: mantissa * 2^exponent.
+struct Exact {
+    mantissa: Int
+    exponent: Int
+}
+
+fn exact(value: Float) -> Exact Never! {
+    bits :: math.to_bits(value)
+    raw :: if bits < 0 -> bits + pow_int(2, 64) else -> bits
+    field :: (raw /% pow_int(2, 52)) % 2048
+    fraction :: raw % pow_int(2, 52)
+    if field == 0 -> return Exact{mantissa: fraction, exponent: -1074}
+    Exact{mantissa: fraction + pow_int(2, 52), exponent: field - 1075}
+}
+
+// The integer a finite integral double holds, exactly.
+fn integral(value: Float) -> Int Never! {
+    if value < ZERO -> return -integral(-value)
+    parts :: exact(value)
+    if parts.exponent >= 0 -> return parts.mantissa * pow_int(2, parts.exponent)
+    parts.mantissa /% pow_int(2, -parts.exponent)
+}
+
+struct Shortest {
+    digits: String
+    point: Int
+}
+
+// The shortest round-trip digits of a finite positive double and the position
+// of the decimal point (value = 0.digits * 10^point).
+fn shortest(value: Float) -> Shortest Never! {
+    text :: "{value:Debug}"
+    bytes :: text.bytes()
+    mantissa := [U8]{}
+    exponent := 0
+    exponent_sign := 1
+    in_exponent := false
+    point_at := -1
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if in_exponent {
+            if code == 45 -> exponent_sign = -1
+            else if code >= 48 && code <= 57 -> exponent = exponent * 10 + code - 48
+            next
+        }
+        if code == 101 || code == 69 {
+            in_exponent = true
+            next
+        }
+        if code == 46 {
+            point_at = mantissa.len()
+            next
+        }
+        if code >= 48 && code <= 57 -> &mantissa.push(byte)
+    }
+    if point_at < 0 -> point_at = mantissa.len()
+    point := point_at + exponent_sign * exponent
+    start := 0
+    loop start < mantissa.len() && Int.from_u8(mantissa[start]) == 48 {
+        start += 1
+        point -= 1
+    }
+    end := mantissa.len()
+    loop end > start && Int.from_u8(mantissa[end - 1]) == 48 -> end -= 1
+    Shortest{digits: String.from_bytes_lossy(mantissa[start..<end]), point: point}
+}
+
+fn zeros(count: Int) -> String Never! {
+    out := ""
+    loop _ in 0..<count -> out = "{out}0"
+    out
+}
+
+// Number.prototype.toString().
+fn js_number(value: Float) -> String Never! {
+    if math.is_nan(value) -> return "NaN"
+    if value == ZERO -> return "0"
+    if !finite(value) -> return if value > ZERO -> "Infinity" else -> "-Infinity"
+    if value < ZERO -> return "-{js_number(-value)}"
+    parts :: shortest(value)
+    k :: parts.digits.bytes().len()
+    n :: parts.point
+    if k <= n && n <= 21 -> return "{parts.digits}{zeros(n - k)}"
+    if 0 < n && n <= 21 {
+        bytes :: parts.digits.bytes()
+        return "{String.from_bytes_lossy(bytes[0..<n])}.{String.from_bytes_lossy(bytes[n..<k])}"
+    }
+    if -6 < n && n <= 0 -> return "0.{zeros(-n)}{parts.digits}"
+    bytes :: parts.digits.bytes()
+    head :: String.from_bytes_lossy(bytes[0..<1])
+    tail :: if k > 1 -> ".{String.from_bytes_lossy(bytes[1..<k])}" else -> ""
+    sign :: if n - 1 >= 0 -> "+" else -> "-"
+    magnitude :: if n - 1 >= 0 -> n - 1 else -> 1 - n
+    "{head}{tail}e{sign}{magnitude}"
+}
+
+// Number.prototype.toFixed(digits) of a finite value: the exact double rounded
+// half up (away from zero) at `digits` decimals.
+fn to_fixed(value: Float, digits: Int) -> String Never! {
+    if value < ZERO -> return "-{to_fixed(-value, digits)}"
+    limit :: Float.parse("1e21") ?? ZERO
+    if value >= limit -> return js_number(value)
+    parts :: exact(value)
+    scaled := 0
+    if parts.exponent >= 0 {
+        scaled = parts.mantissa * pow_int(2, parts.exponent) * pow_int(10, digits)
+    } else {
+        numerator :: parts.mantissa * pow_int(10, digits)
+        denominator :: pow_int(2, -parts.exponent)
+        scaled = (2 * numerator + denominator) /% (2 * denominator)
+    }
+    text := "{scaled}"
+    if digits == 0 -> return text
+    if text.bytes().len() <= digits -> text = "{zeros(digits + 1 - text.bytes().len())}{text}"
+    bytes :: text.bytes()
+    cut :: bytes.len() - digits
+    "{String.from_bytes_lossy(bytes[0..<cut])}.{String.from_bytes_lossy(bytes[cut..<bytes.len()])}"
+}
+
+fn fixed(value: Float, digits: Int) -> String Never! {
+    if !finite(value) -> return "-"
+    to_fixed(value, digits)
+}
+
+// Math.round(value).toLocaleString("en-US"): half up, `,` thousands groups,
+// a negative value that rounds to zero prints -0.
+fn grouped(value: Float) -> String Never! {
+    if !finite(value) -> return "-"
+    floor :: math.floor(value)
+    rounded :: if value - floor >= HALF -> floor + ONE else -> floor
+    negative :: value < ZERO || math.to_bits(value) == math.to_bits(-ZERO)
+    whole :: integral(rounded)
+    magnitude :: if whole < 0 -> -whole else -> whole
+    digits :: "{magnitude}".bytes()
+    out := ""
+    loop index in 0..<digits.len() {
+        if index > 0 && (digits.len() - index) % 3 == 0 -> out = "{out},"
+        out = "{out}{String.from_bytes_lossy(digits[index..<index + 1])}"
+    }
+    if negative && (whole < 0 || whole == 0) -> return "-{out}"
+    out
+}
+
+// Number(text): JavaScript's StringToNumber.
+fn js_space_len(bytes: [U8], at: Int) -> Int Never! {
+    first :: Int.from_u8(bytes[at])
+    if first == 32 || (first >= 9 && first <= 13) -> return 1
+    if first == 194 && at + 1 < bytes.len() && Int.from_u8(bytes[at + 1]) == 160 -> return 2
+    if at + 2 >= bytes.len() -> return 0
+    second :: Int.from_u8(bytes[at + 1])
+    third :: Int.from_u8(bytes[at + 2])
+    if {
+        first == 225 && second == 154 && third == 128 -> 3
+        first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> 3
+        first == 226 && second == 129 && third == 159 -> 3
+        first == 227 && second == 128 && third == 128 -> 3
+        first == 239 && second == 187 && third == 191 -> 3
+        else -> 0
+    }
+}
+
+fn js_trim(text: String) -> String Never! {
+    bytes :: text.bytes()
+    start := 0
+    loop start < bytes.len() {
+        width :: js_space_len(bytes, start)
+        if width == 0 -> break
+        start += width
+    }
+    end := bytes.len()
+    loop end > start {
+        // Find the sequence that ends at `end`.
+        lead := end - 1
+        loop lead > start && Int.from_u8(bytes[lead]) >= 128 && Int.from_u8(bytes[lead]) < 192 -> lead -= 1
+        width :: js_space_len(bytes, lead)
+        if width == 0 || lead + width != end -> break
+        end = lead
+    }
+    String.from_bytes_lossy(bytes[start..<end])
+}
+
+fn digit_value(code: Int, radix: Int) -> Int Never! {
+    value :: if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 97 && code <= 122 -> code - 87
+        code >= 65 && code <= 90 -> code - 55
+        else -> 99
+    }
+    if value < radix -> value else -> -1
+}
+
+fn number_from_text(raw: String) -> Float Never! {
+    text :: js_trim(raw)
+    if text == "" -> return ZERO
+    if text == "Infinity" || text == "+Infinity" -> return math.infinity()
+    if text == "-Infinity" -> return -math.infinity()
+    bytes :: text.bytes()
+    if bytes.len() > 2 && Int.from_u8(bytes[0]) == 48 {
+        marker :: Int.from_u8(bytes[1])
+        radix :: if {
+            marker == 120 || marker == 88 -> 16
+            marker == 111 || marker == 79 -> 8
+            marker == 98 || marker == 66 -> 2
+            else -> 0
+        }
+        if radix > 0 {
+            value := 0
+            loop at in 2..<bytes.len() {
+                digit :: digit_value(Int.from_u8(bytes[at]), radix)
+                if digit < 0 -> return nan()
+                value = value * radix + digit
+            }
+            return Float.parse("{value}") ?? nan()
+        }
+    }
+    // [+-] (digits [. digits?] | . digits) ([eE] [+-] digits)?
+    at := 0
+    sign := ""
+    if Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45 {
+        if Int.from_u8(bytes[0]) == 45 -> sign = "-"
+        at = 1
+    }
+    whole := ""
+    loop at < bytes.len() && Int.from_u8(bytes[at]) >= 48 && Int.from_u8(bytes[at]) <= 57 {
+        whole = "{whole}{String.from_bytes_lossy(bytes[at..<at + 1])}"
+        at += 1
+    }
+    fraction := ""
+    if at < bytes.len() && Int.from_u8(bytes[at]) == 46 {
+        at += 1
+        loop at < bytes.len() && Int.from_u8(bytes[at]) >= 48 && Int.from_u8(bytes[at]) <= 57 {
+            fraction = "{fraction}{String.from_bytes_lossy(bytes[at..<at + 1])}"
+            at += 1
+        }
+    }
+    if whole == "" && fraction == "" -> return nan()
+    exponent := "0"
+    if at < bytes.len() && (Int.from_u8(bytes[at]) == 101 || Int.from_u8(bytes[at]) == 69) {
+        at += 1
+        exponent_sign := ""
+        if at < bytes.len() && (Int.from_u8(bytes[at]) == 43 || Int.from_u8(bytes[at]) == 45) {
+            if Int.from_u8(bytes[at]) == 45 -> exponent_sign = "-"
+            at += 1
+        }
+        digits := ""
+        loop at < bytes.len() && Int.from_u8(bytes[at]) >= 48 && Int.from_u8(bytes[at]) <= 57 {
+            digits = "{digits}{String.from_bytes_lossy(bytes[at..<at + 1])}"
+            at += 1
+        }
+        if digits == "" -> return nan()
+        exponent = "{exponent_sign}{digits}"
+    }
+    if at != bytes.len() -> return nan()
+    canonical :: "{sign}{if whole == "" -> "0" else -> whole}.{if fraction == "" -> "0" else -> fraction}e{exponent}"
+    Float.parse(canonical) ?? nan()
+}
+
+// ---- Dyn access with JavaScript reads ---------------------------------------
+
+// A JSON value's field, None when the value is not an object or lacks it.
+fn field(value: Dyn, key: String) -> Dyn? Never! {
+    if value == {
+        .Object(fields) -> {
+            found := Dyn.Null
+            seen := false
+            loop entry in fields {
+                if entry.key == key {
+                    found = entry.value
+                    seen = true
+                }
+            }
+            if seen -> return Val(found)
+            None
+        }
+        else -> None
+    }
+}
+
+// `typeof value === "number"`: the value as a double.
+fn number(value: Dyn?) -> Float? Never! {
+    if value == {
+        .Val(inner) -> {
+            if inner == {
+                .Int(whole) -> Val(Float.parse("{whole}") ?? nan())
+                .Float(real) -> Val(real)
+                else -> None
+            }
+        }
+        .None -> None
+    }
+}
+
+fn number_field(value: Dyn, key: String) -> Float? Never! { number(field(value, key)) }
+
+// A JSON value's field as a number; NaN when absent or not a number
+// (JavaScript arithmetic on `undefined`).
+fn number_or_nan(value: Dyn, key: String) -> Float Never! { number_field(value, key) ?? nan() }
+
+// String(value) for a JSON value (`undefined` when absent).
+fn js_string(value: Dyn?) -> String Never! {
+    if value == {
+        .Val(inner) -> {
+            if inner == {
+                .Text(text) -> text
+                .Int(_) -> js_number(number(value) ?? nan())
+                .Float(real) -> js_number(real)
+                .Bool(flag) -> if flag -> "true" else -> "false"
+                .Null -> "null"
+                .Array(items) -> {
+                    words := [String]{}
+                    loop item in items {
+                        if item == .Null -> &words.push("") else -> &words.push(js_string(Val(item)))
+                    }
+                    words.join(",")
+                }
+                else -> "[object Object]"
+            }
+        }
+        .None -> "undefined"
+    }
+}
+
+// Present and not null (`??` keeps the value).
+fn present(value: Dyn?) -> Bool Never! {
+    if value == .Val(inner) {
+        if inner == .Null -> return false
+        return true
+    }
+    false
+}
+
+fn text_of(value: Dyn?) -> String? Never! {
+    if value == .Val(inner) {
+        if inner == .Text(text) -> return Val(text)
+    }
+    None
+}
+
+fn truthy(value: Dyn?) -> Bool Never! {
+    if value == {
+        .Val(inner) -> {
+            if inner == {
+                .Bool(flag) -> flag
+                .Null -> false
+                .Text(text) -> text != ""
+                .Int(whole) -> whole != 0
+                .Float(real) -> real != ZERO && !math.is_nan(real)
+                else -> true
+            }
+        }
+        .None -> false
+    }
+}
+
+fn texts(value: Dyn?) -> [String] Never! {
+    out := [String]{}
+    if value == .Val(inner) {
+        if inner == .Array(items) {
+            loop item in items -> &out.push(js_string(Val(item)))
+        }
+    }
+    out
+}
+
+// A JavaScript Map key for a JSON value (SameValueZero over primitives).
+fn map_key(value: Dyn?, unique: Int) -> String Never! {
+    if value == {
+        .Val(inner) -> {
+            if inner == {
+                .Text(text) -> "s:{text}"
+                .Int(_) -> "n:{js_number(number(value) ?? nan())}"
+                .Float(real) -> "n:{js_number(real)}"
+                .Bool(flag) -> "b:{flag}"
+                .Null -> "null"
+                else -> "o:{unique}"
+            }
+        }
+        .None -> "undefined"
+    }
+}
+
+// String.length: UTF-16 code units.
+fn utf16_len(text: String) -> Int Never! {
+    count := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 128 || code >= 192 -> count += 1
+        if code >= 240 -> count += 1
+    }
+    count
+}
+
+
+fn pad(text: String, width: Int, end: Bool) -> String Never! {
+    gap := width - utf16_len(text)
+    spaces := ""
+    loop gap > 0 {
+        spaces = "{spaces} "
+        gap -= 1
+    }
+    if end -> "{text}{spaces}" else -> "{spaces}{text}"
+}
+
+// ---- Trace ------------------------------------------------------------------
+
+// One event per line; the array may be unterminated and its last line may be
+// half written by a running compiler.
+fn read_events(text: String) -> [Dyn] Never! {
+    events := [Dyn]{}
+    loop raw in text.split("\n") {
+        trimmed :: js_trim(raw)
+        line :: if trimmed.ends_with(",") -> String.from_bytes_lossy(trimmed.bytes()[0..<trimmed.bytes().len() - 1]) else -> trimmed
+        if line == "" || line == "[" || line == "]" -> next
+        if json.parse(line) == .Ok(event) -> &events.push(event)
+    }
+    events
+}
+
+struct OpenSpan {
+    kind: String
+    kind_key: String
+    label: String
+    label_key: String
+    ts: Float
+    args: Dyn
+}
+
+struct KindRow {
+    key: String
+    kind: String
+    first: Float
+    count: Int
+    open: Int
+    total_us: Float
+    max_us: Float
+    items: Float
+    has_items: Bool
+    peak_kb: Float
+}
+
+struct Progress {
+    key: String
+    done: Float
+    total: Float
+    ts: Float
+    first_done: Float
+    first_ts: Float
+}
+
+struct Thread {
+    key: String
+    shown: String
+    stack: [OpenSpan]
+}
+
+struct Summary {
+    kinds: [KindRow]
+    threads: [Thread]
+    progress: [Progress]
+    start_unix_ms: Float?
+    last_ts: Float
+    rss_kb: Float?
+    peak_kb: Float?
+}
+
+// Math.max: NaN wins.
+fn js_max(left: Float, right: Float) -> Float Never! {
+    if math.is_nan(left) || math.is_nan(right) -> return nan()
+    if right > left -> right else -> left
+}
+
+// The sign of a comparator's difference; NaN compares equal.
+fn float_sign(value: Float) -> Int Never! {
+    if value < ZERO -> return -1
+    if value > ZERO -> return 1
+    0
+}
+
+fn kind_row(kinds: &[KindRow], key: String, kind: String, ts: Float) -> Int Never! {
+    loop index in 0..<kinds.len() {
+        if kinds[index].key == key -> return index
+    }
+    &kinds.push(KindRow{key: key, kind: kind, first: ts, count: 0, open: 0, total_us: ZERO, max_us: ZERO, items: ZERO, has_items: false, peak_kb: ZERO})
+    kinds.len() - 1
+}
+
+fn progress_index(progress: [Progress], key: String) -> Int Never! {
+    loop index in 0..<progress.len() {
+        if progress[index].key == key -> return index
+    }
+    -1
+}
+
+// `value ?? fallback` as a number: absent or null take the fallback; any other
+// non-number reads as NaN.
+fn number_or(value: Dyn?, fallback: Float) -> Float Never! {
+    if !present(value) -> return fallback
+    number(value) ?? nan()
+}
+
+fn summarize(events: [Dyn]) -> Summary Never! {
+    kinds := [KindRow]{}
+    threads := [Thread]{}
+    progress := [Progress]{}
+    start_unix_ms := Float?{None}
+    last_ts := ZERO
+    rss_kb := Float?{None}
+    peak_kb := Float?{None}
+    loop position in 0..<events.len() {
+        event :: events[position]
+        ts_value :: number_field(event, "ts")
+        if ts_value == .Val(time) -> last_ts = js_max(last_ts, time)
+        if text_of(field(event, "name")) == .Val(name) {
+            if name == "trace.start" {
+                unix :: field(field(event, "args") ?? Dyn.Null, "unix_ms")
+                start_unix_ms = if present(unix) -> Val(number(unix) ?? nan()) else -> None
+            }
+        }
+        tid :: field(event, "tid")
+        tid_key :: map_key(tid, position)
+        at := -1
+        loop index in 0..<threads.len() {
+            if threads[index].key == tid_key -> at = index
+        }
+        if at < 0 {
+            &threads.push(Thread{key: tid_key, shown: js_string(tid), stack: [OpenSpan]{}})
+            at = threads.len() - 1
+        }
+        phase :: text_of(field(event, "ph")) ?? ""
+        ts :: ts_value ?? nan()
+        args :: field(event, "args")
+        if phase == "B" {
+            category :: field(event, "cat")
+            kind_value :: if present(category) -> category else -> field(event, "name")
+            name_value :: field(event, "name")
+            kind_key :: map_key(kind_value, position)
+            &threads[at].stack.push(OpenSpan{
+                kind: js_string(kind_value),
+                kind_key: kind_key,
+                label: js_string(name_value),
+                label_key: map_key(name_value, position),
+                ts: ts,
+                args: if present(args) -> args ?? Dyn.Null else -> Dyn.Object([String:Dyn]{}),
+            })
+            _ := kind_row(&kinds, kind_key, js_string(kind_value), ts)
+        } else if phase == "E" {
+            if threads[at].stack.len() == 0 -> next
+            open :: &threads[at].stack.pop() ?? next
+            row :: kind_row(&kinds, open.kind_key, open.kind, open.ts)
+            duration :: ts - open.ts
+            kinds[row].count += 1
+            kinds[row].total_us = kinds[row].total_us + duration
+            kinds[row].max_us = js_max(kinds[row].max_us, duration)
+            event_args :: args ?? Dyn.Null
+            if number_field(event_args, "items") == .Val(items) {
+                kinds[row].items = kinds[row].items + items
+                kinds[row].has_items = true
+            }
+            if number_field(event_args, "peak_rss_kb") == .Val(peak) {
+                kinds[row].peak_kb = js_max(kinds[row].peak_kb, peak)
+                peak_kb = Val(js_max(peak_kb ?? ZERO, peak))
+                rss :: field(event_args, "rss_kb")
+                rss_kb = if present(rss) -> Val(number(rss) ?? nan()) else -> None
+            }
+        } else if phase == "C" {
+            name_value :: field(event, "name")
+            if (text_of(name_value) ?? "") == "memory" && text_of(name_value) != None -> next
+            key :: map_key(name_value, position)
+            event_args :: args ?? Dyn.Null
+            done :: number_or(field(event_args, "done"), ZERO)
+            total :: number_or(field(event_args, "total"), ZERO)
+            previous :: progress_index(progress, key)
+            first_done := done
+            first_ts := ts
+            if previous >= 0 && done >= progress[previous].done {
+                first_done = progress[previous].first_done
+                first_ts = progress[previous].first_ts
+            }
+            entry :: Progress{key: key, done: done, total: total, ts: ts, first_done: first_done, first_ts: first_ts}
+            if previous >= 0 -> progress[previous] = entry else -> &progress.push(entry)
+        }
+    }
+    // Spans still open count with their running time so far.
+    loop thread in threads {
+        loop open in thread.stack {
+            row :: kind_row(&kinds, open.kind_key, open.kind, open.ts)
+            kinds[row].open += 1
+            kinds[row].total_us = kinds[row].total_us + (last_ts - open.ts)
+            kinds[row].max_us = js_max(kinds[row].max_us, last_ts - open.ts)
+        }
+    }
+    Summary{kinds: kinds, threads: threads, progress: progress, start_unix_ms: start_unix_ms, last_ts: last_ts, rss_kb: rss_kb, peak_kb: peak_kb}
+}
+
+// Number.prototype.toFixed: non-finite values print as their String().
+fn js_fixed(value: Float, digits: Int) -> String Never! {
+    if !finite(value) -> return js_number(value)
+    to_fixed(value, digits)
+}
+
+fn seconds(us: Float) -> String Never! {
+    digits :: if us >= HUNDRED_MILLION -> 0 else if us >= TEN_MILLION -> 1 else -> 2
+    js_fixed(us / MILLION, digits)
+}
+
+// Math.round as printed: half up; negative zero prints 0.
+fn js_round(value: Float) -> String Never! {
+    if !finite(value) -> return js_number(value)
+    floor :: math.floor(value)
+    rounded :: if value - floor >= HALF -> floor + ONE else -> floor
+    js_number(rounded)
+}
+
+fn mb(kb: Float?) -> String Never! {
+    if kb == .Val(value) -> return js_round(value / Float{1024.0})
+    "-"
+}
+
+fn pad_end(text: String, width: Int) -> String Never! { pad(text, width, true) }
+
+fn pad_start(text: String, width: Int) -> String Never! { pad(text, width, false) }
+
+fn render(text: String, now_ms: Int) -> String Never! {
+    summary :: summarize(read_events(text))
+    lines := [String]{}
+    width := 14
+    loop row in summary.kinds {
+        if utf16_len(row.kind) > width -> width = utf16_len(row.kind)
+    }
+    &lines.push("{pad_end("span", width)} {pad_start("count", 7)} {pad_start("total s", 9)} {pad_start("max s", 8)} {pad_start("items", 9)} {pad_start("peak MB", 8)}")
+    // Array.prototype.sort is stable: equal first times keep first-seen order.
+    rows := [KindRow]{}
+    loop row in summary.kinds {
+        at := rows.len()
+        loop at > 0 && float_sign(rows[at - 1].first - row.first) > 0 -> at -= 1
+        &rows.insert(at, row)
+    }
+    loop row in rows {
+        // `+N`: N spans of this kind are still open; their time so far is included.
+        count :: if row.open > 0 -> "{row.count}+{row.open}" else -> "{row.count}"
+        items :: if row.has_items -> js_number(row.items) else -> "-"
+        peak :: if row.peak_kb != ZERO && !math.is_nan(row.peak_kb) -> mb(Val(row.peak_kb)) else -> "-"
+        &lines.push("{pad_end(row.kind, width)} {pad_start(count, 7)} {pad_start(seconds(row.total_us), 9)} {pad_start(seconds(row.max_us), 8)} {pad_start(items, 9)} {pad_start(peak, 8)}")
+    }
+    &lines.push("")
+    stale_text := ""
+    if summary.start_unix_ms == .Val(start) {
+        now :: Float.parse("{now_ms}") ?? nan()
+        stale :: (now - (start + summary.last_ts / THOUSAND)) / THOUSAND
+        stale_text = ", last event {js_fixed(stale, 0)} s ago"
+    }
+    &lines.push("trace time {seconds(summary.last_ts)} s{stale_text}, rss {mb(summary.rss_kb)} MB, peak {mb(summary.peak_kb)} MB")
+    any_open := false
+    loop thread in summary.threads {
+        if thread.stack.len() == 0 -> next
+        any_open = true
+        &lines.push("open on thread {thread.shown}:")
+        loop depth in 0..<thread.stack.len() {
+            span :: thread.stack[depth]
+            index :: number_field(span.args, "index")
+            place := ""
+            if index == .Val(at) {
+                if at >= ZERO -> place = " [{js_number(at + ONE)}/{js_string(field(span.args, "total"))}]"
+            }
+            label :: if span.label_key == span.kind_key -> span.kind else -> "{span.kind} {span.label}"
+            indent := ""
+            loop _ in 0..<depth + 1 -> indent = "{indent}  "
+            line := "{indent}{label}{place} running {seconds(summary.last_ts - span.ts)} s"
+            counter_at :: progress_index(summary.progress, span.kind_key)
+            if counter_at >= 0 {
+                counter :: summary.progress[counter_at]
+                if counter.ts >= span.ts && counter.total > ZERO {
+                    percent :: js_fixed(Float{100.0} * counter.done / counter.total, 1)
+                    line = "{line}, {js_number(counter.done)}/{js_number(counter.total)} ({percent}%)"
+                    done_since :: counter.done - counter.first_done
+                    elapsed :: counter.ts - counter.first_ts
+                    if done_since > ZERO && elapsed > ZERO {
+                        remaining_us :: (counter.total - counter.done) * elapsed / done_since
+                        line = "{line}, ~{seconds(remaining_us)} s left at the current rate"
+                    }
+                }
+            }
+            &lines.push(line)
+        }
+    }
+    if !any_open -> &lines.push("no open spans (compile finished or not started)")
+    lines.join("\n")
+}
+
+// ---- Command ----------------------------------------------------------------
+
+// readFileSync's failure message (the path as given).
+fn read_failure(path: String, error: IOError) -> String Never! {
+    if files.is_dir(path) -> return "EISDIR: illegal operation on a directory, read"
+    reason :: if error == .NotFound(_) -> "ENOENT: no such file or directory" else if error == .PermissionDenied(_) -> "EACCES: permission denied" else -> "{error}"
+    "{reason}, open '{path}'"
+}
+
+#Error
+struct ReadError {
+    message: String
+}
+
+fn read_trace(path: String) -> String ReadError! {
+    if files.is_dir(path) -> return Err(ReadError{message: "EISDIR: illegal operation on a directory, read"})
+    files.read(path) ?? return Err(ReadError{message: read_failure(path, err)})
+}
+
+fn now_ms() -[Time]> Int Never! { time.now().to_unix_ms() }
+
+fn two(value: Int) -> String Never! { if value < 10 -> "0{value}" else -> "{value}" }
+
+// Date.prototype.toLocaleTimeString() in en-US for the host's zone: TZ, else
+// the zone /etc/localtime links to, else UTC.
+fn local_clock() -[Env, FS.Read, Time]> String Never! {
+    name := sys.get("TZ") ?? ""
+    if name.starts_with(":") -> name = String.from_bytes_lossy(name.bytes()[1..<name.bytes().len()])
+    if name == "" {
+        target :: files.read_link("/etc/localtime") ?? ""
+        marker :: "zoneinfo/"
+        at :: target.find(marker)
+        if at >= 0 -> name = String.from_bytes_lossy(target.bytes()[at + marker.bytes().len()..<target.bytes().len()])
+    }
+    if name == "" -> name = "UTC"
+    zone :: time.zone(name) ?? time.utc()
+    local :: time.now().in_zone(zone).time()
+    hour :: local.hour()
+    shown :: if hour % 12 == 0 -> 12 else -> hour % 12
+    "{shown}:{two(local.minute())}:{two(local.second())} {if hour < 12 -> "AM" else -> "PM"}"
+}
+
+fn run() {
+    args :: process.args()
+    path := ""
+    path_given := false
+    watch_arg := ""
+    watch_given := false
+    loop arg in args {
+        if !path_given && !arg.starts_with("--") {
+            path = arg
+            path_given = true
+        }
+        if !watch_given && (arg == "--watch" || arg.starts_with("--watch=")) {
+            watch_arg = arg
+            watch_given = true
+        }
+    }
+    if !path_given {
+        term.eprint("usage: Summarize.jet <trace.json> [--watch[=seconds]]")
+        process.exit(64)
+        return
+    }
+    watch_seconds := ZERO
+    if watch_given {
+        parts :: watch_arg.split("=").to_list()
+        value :: if parts.len() > 1 -> number_from_text(parts[1]) else -> Float{2.0}
+        watch_seconds = if value == ZERO || math.is_nan(value) -> Float{2.0} else -> value
+    }
+    if watch_seconds > ZERO {
+        loop {
+            shown := ""
+            if read_trace(path) == {
+                .Ok(text) -> shown = render(text, now_ms())
+                .Err(failure) -> shown = "cannot read {path}: {failure.message}"
+            }
+            esc :: String.from_bytes_lossy([U8]{U8{27}})
+            print("{esc}[2J{esc}[H{local_clock()}  {path}\n\n{shown}")
+            time.sleep(time.duration_ns(integral(math.floor(watch_seconds * MILLION * THOUSAND))))
+        }
+    }
+    text :: read_trace(path) ?? {
+        term.eprint(err.message)
+        process.exit(1)
+        return
+    }
+    print(render(text, now_ms()))
+}
