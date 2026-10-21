@@ -11,6 +11,7 @@ package {
 
 use core as core
 use core.http.client as provider
+use core.http.server as http_server
 use core.net.url as http_url
 C_MAX_BODY_BYTES :: 1048576
 C_MAX_HEADER_BYTES :: 32768
@@ -506,7 +507,7 @@ fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
     if response_forbids_body(parsed.status.code) && body_raw.len() > 0 -> return Err(.InvalidFraming)
     body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
-    parsed_response := core.http.server.response(parsed.status.code, body_text)
+    parsed_response := http_server.response(parsed.status.code, body_text)
     loop line in hdr_lines {
         col := index_byte(line.bytes(), 58)
         name :: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
@@ -870,7 +871,7 @@ fn request_with(method: Method, url: String, h: Headers, body: Body) -> HTTPRequ
 }
 
 fn response_ok(body: Body) -> HTTPResponse Never! {
-    core.http.server.response(200, body_as_text(body))
+    http_server.response(200, body_as_text(body))
 }
 
 fn response_json_headers() -> Headers Never! { headers_set(headers(), "content-type", "application/json; charset=utf-8") }

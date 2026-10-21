@@ -1,6 +1,7 @@
 use core as core
 use core.http.[Body, Headers, HTTPError, HTTPRequest, HTTPResponse]
 use core.http.server as provider
+use core.encoding.json as json_codec
 
 // core.http.server — source policy over native HTTP transport carriers.
 //
@@ -91,7 +92,7 @@ fn response_body(status: Int, body: ^Body, headers: ^Headers) -> HTTPResponse Ne
 }
 
 fn json<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
-    text :: core.encoding.json.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
+    text :: json_codec.to_string(body.encode()) ?? return Err(HTTPError.InvalidFraming)
     fields :: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
     payload :: core.http.body_text(text)
     response_body(status, ^payload, ^fields)
