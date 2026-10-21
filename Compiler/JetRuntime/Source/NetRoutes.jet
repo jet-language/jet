@@ -285,12 +285,13 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     net_put(output, I64{0}, jet_socket_listener_from_fd_raw(state))
     I64{1}
 }
-#Export(c) fn jet_net_tcp_accept(listener: I64, output: I64, error: I64) -> I64 {
+// TCP and Unix listeners share the reference accept loop; only the operation
+// name differs (NetHTTP.rs jet_net_tcp_accept / jet_net_unix_accept).
+fn net_route_accept(listener: I64, operation: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
-    operation :: rt_static_text("tcp accept")
     state := I64{0}
     loop {
         state = jet_socket_accept_raw(jet_socket_listener_fd_raw(listener), I64{0}, scratch)
@@ -311,6 +312,7 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     net_put(output, I64{0}, jet_socket_stream_from_fd_raw(state))
     I64{1}
 }
+#Export(c) fn jet_net_tcp_accept(listener: I64, output: I64, error: I64) -> I64 { net_route_accept(listener, rt_static_text("tcp accept"), output, error) }
 fn net_route_connect_start(address: I64, scratch: I64) -> I64 {
     state :: jet_socket_create_raw(net_word(address, I64{0}), I64{1}, I64{0}, scratch)
     if (state == I64{0}) -> return I64{0}

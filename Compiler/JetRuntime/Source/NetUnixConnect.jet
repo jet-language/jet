@@ -41,15 +41,10 @@ fn net_unix_connect_job_drop(job: I64) {
     net_unix_connect_job_drop(job)
     I64{0}
 }
-#Export(c) fn jet_net_unix_connect_deadline(path: I64, deadline: I64, output: I64, error: I64) -> I64 {
+// NetHTTP.rs jet_net_unix_connect: the worker result is polled each 5ms park;
+// an ambient or explicit deadline/cancellation stops the wait, never the worker.
+fn net_unix_connect_run(path: I64, output: I64, error: I64) -> I64 {
     operation :: rt_static_text("unix connect")
-    // Duration's provider word is untagged nanoseconds (not an exact Int).
-    milliseconds :: deadline / I64{1000000}
-    if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
-    jet_rt_world_reject_uncontrolled(I64{1})
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    save :: jet_rt_alloc(I64{16}, I64{8})
-    net_route_deadline_push(milliseconds, save)
     job :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(job, I64{48})
     net_put(job, I64{0}, I64{2})
@@ -73,8 +68,7 @@ fn net_unix_connect_job_drop(job: I64) {
                     net_put(job, I64{24}, I64{0})
                     result = I64{1}
                 } else if (status == HOST_UNIX_PATH_NUL || status == HOST_UNIX_PATH_TOO_LONG) {
-                    message :: if (status == HOST_UNIX_PATH_NUL) -> rt_static_text(" failed: paths must not contain interior null bytes") else -> rt_static_text(" failed: path must be shorter than SUN_LEN")
-                    _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, path, net_route_message(operation, message), I64{0}, error)
+                    _ := net_unix_path_refused(status, operation, path, error)
                 } else { _ := net_route_errno(operation, path, -status, error) }
                 break
             }
@@ -86,6 +80,23 @@ fn net_unix_connect_job_drop(job: I64) {
         jet_rt_string_drop(wait_kind)
     }
     net_unix_connect_job_drop(job)
+    result
+}
+#Export(c) fn jet_net_unix_connect(path: I64, output: I64, error: I64) -> I64 {
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    net_unix_connect_run(path, output, error)
+}
+#Export(c) fn jet_net_unix_connect_deadline(path: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("unix connect")
+    // Duration's provider word is untagged nanoseconds (not an exact Int).
+    milliseconds :: deadline / I64{1000000}
+    if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    result :: net_unix_connect_run(path, output, error)
     jet_ctx_pop_deadline(save)
     jet_rt_free(save, I64{16}, I64{8})
     result
