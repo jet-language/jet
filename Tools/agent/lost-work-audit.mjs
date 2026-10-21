@@ -22,40 +22,50 @@
 //                   (tests only, unless the file is also revert-like). Moves
 //                   inside one commit cancel out.
 //
-// Each finding records whether HEAD (the --rev tip) still lacks it: the share of
-// the lost lines present in HEAD's version of the path (case- and
+// Each sweep finding records whether the --rev tip still lacks it: the share of
+// the lost lines present in the tip's version of the path (case- and
 // separator-insensitive path match, which follows the PascalCase Core move) and
-// whether HEAD defines each dropped symbol anywhere.
+// whether the tip defines each dropped symbol anywhere.
 //
 // Usage:
-//   lost-work-audit.mjs [--rev REV] [--since REV] [--min-lines N] [--out DIR]
+//   lost-work-audit.mjs --check [--baseline PATH]
+//   lost-work-audit.mjs --sweep [--rev REV] [--since REV] [--min-lines N] [--out DIR]
 //                       [--history FILE] [--jobs N] [--shard-heap-mb MB]
-//   lost-work-audit.mjs --check [--since REV] [--baseline PATH]
-//   lost-work-audit.mjs --write-baseline [--baseline PATH]
-// --check fails (exit 1) listing every commit finding whose key has no
-// disposition in the baseline; it reports all of them in one pass. --since
-// limits the analysed commits to REV..--rev (history is still read in full for
-// ancestry). --history FILE caches the history scan (one `git log --raw
+//                       [--write-baseline] [--baseline PATH]
+// --check verifies the committed baseline in seconds, from git objects only: its
+// pinned revision, a known disposition for every reviewed finding, and every
+// evidence assertion the review recorded (an object's blob or absence, a
+// rev-list count, a tree's file count, all at full SHAs). It reports every
+// failure in one pass and passes until the baseline is deliberately re-pinned.
+// --sweep runs the full history sweep (minutes) and fails (exit 1) listing every
+// commit finding whose key has no disposition in the baseline; --write-baseline
+// adds those keys as `unreviewed`, which --check rejects until they are reviewed.
+// --since limits the analysed commits to REV..--rev (history is still read in
+// full for ancestry). --history FILE caches the history scan (one `git log --raw
 // --numstat` pass, a few minutes on the full repo): read when present, written
 // otherwise. --jobs N splits the commits over N shard processes (default 1).
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const DEFAULT_BASELINE = join(REPO_ROOT, "Tools/agent/lost-work-baseline.json");
+const DEFAULT_BASELINE = join(REPO_ROOT, "Docs/audits/lost-work-2026-10-21.json");
+const FULL_SHA = /^[0-9a-f]{40}$/;
+// Reviewed outcomes a baseline finding may carry; `unreviewed` (what --write-baseline adds) is not one.
+const DISPOSITIONS = ["restored", "lost", "candidate", "census", "superseded", "intended", "false-positive"];
 const ZERO = "0000000000000000000000000000000000000000";
 const MAX_BLOB = 2 * 1024 * 1024;
 const OLDER_VERSIONS = 8;
 
 function usage() {
   return [
-    "usage: lost-work-audit.mjs [--rev REV] [--since REV] [--min-lines N] [--out DIR]",
+    "usage: lost-work-audit.mjs --check [--baseline PATH]",
+    "       lost-work-audit.mjs --sweep [--rev REV] [--since REV] [--min-lines N] [--out DIR]",
     "                           [--history FILE] [--jobs N] [--shard-heap-mb MB]",
-    "                           [--check | --write-baseline] [--baseline PATH]",
+    "                           [--write-baseline] [--baseline PATH]",
   ].join("\n");
 }
 
@@ -68,6 +78,7 @@ function parseArgs(argv) {
     revertMin: 5,
     out: null,
     check: false,
+    sweep: false,
     writeBaseline: false,
     baseline: DEFAULT_BASELINE,
     history: null,
@@ -89,6 +100,7 @@ function parseArgs(argv) {
     else if (arg === "--revert-min") opts.revertMin = Number(value());
     else if (arg === "--out") opts.out = resolve(value());
     else if (arg === "--check") opts.check = true;
+    else if (arg === "--sweep") opts.sweep = true;
     else if (arg === "--write-baseline") opts.writeBaseline = true;
     else if (arg === "--baseline") opts.baseline = resolve(value());
     else if (arg === "--history") opts.history = resolve(value());
@@ -102,6 +114,12 @@ function parseArgs(argv) {
       console.log(usage());
       process.exit(0);
     } else throw new Error(`unknown argument ${arg}\n${usage()}`);
+  }
+  if (opts.shard) return opts;
+  if (opts.check === opts.sweep) throw new Error(`choose --check or --sweep\n${usage()}`);
+  if (opts.writeBaseline && !opts.sweep) throw new Error(`--write-baseline needs --sweep\n${usage()}`);
+  if (opts.check && argv.some((a) => a.startsWith("--") && !["--check", "--baseline"].includes(a))) {
+    throw new Error(`--check takes only --baseline; sweep options need --sweep\n${usage()}`);
   }
   return opts;
 }
@@ -872,10 +890,90 @@ function tsvRow(f) {
   return cols.join("\t");
 }
 
+// --check: the baseline's pinned revision, dispositions and evidence, from git objects only.
+function checkBaseline(path) {
+  if (!existsSync(path)) throw new Error(`no baseline at ${path}`);
+  const base = JSON.parse(readFileSync(path, "utf8"));
+  const problems = [];
+  const pinned = (spec) => FULL_SHA.test(spec.slice(0, 40)) && spec[40] === ":";
+  if (!FULL_SHA.test(base.rev ?? "")) problems.push(`rev ${base.rev ?? "(none)"} is not a full commit SHA`);
+  if (!base.doc || !existsSync(join(REPO_ROOT, base.doc))) problems.push(`doc ${base.doc ?? "(none)"} is not in the tree`);
+  const objects = [];
+  let assertions = 0;
+  if (FULL_SHA.test(base.rev ?? "")) objects.push({ key: "rev", spec: `${base.rev}^{commit}`, want: "commit" });
+  const findings = Object.entries(base.findings ?? {});
+  for (const [key, f] of findings) {
+    if (!DISPOSITIONS.includes(f.disposition)) {
+      problems.push(`${key}: disposition ${f.disposition ?? "(none)"} is not one of ${DISPOSITIONS.join(", ")}`);
+    }
+    for (const e of f.evidence ?? []) {
+      assertions++;
+      if (e.object !== undefined) {
+        if (!pinned(e.object) || (e.blob !== null && !FULL_SHA.test(e.blob ?? ""))) {
+          problems.push(`${key}: object assertion needs <full sha>:<path> and a full blob SHA or null: ${JSON.stringify(e)}`);
+        } else objects.push({ key, spec: e.object, want: e.blob });
+      } else if (e.revList !== undefined) {
+        const args = e.revList;
+        const ok = Array.isArray(args) && args.length > 0 && args.every((a) => a.startsWith("--") || /^[0-9a-f]{40}(\.\.[0-9a-f]{40})?$/.test(a));
+        if (!ok || !Number.isInteger(e.count)) {
+          problems.push(`${key}: rev-list assertion needs options and full SHAs only, and a count: ${JSON.stringify(e)}`);
+          continue;
+        }
+        let got;
+        try {
+          got = Number(git(["rev-list", "--count", ...args]).trim());
+        } catch {
+          got = "an error";
+        }
+        if (got !== e.count) problems.push(`${key}: git rev-list --count ${args.join(" ")} is ${got}, baseline says ${e.count}`);
+      } else if (e.tree !== undefined) {
+        if (!pinned(e.tree) || !Number.isInteger(e.files)) {
+          problems.push(`${key}: tree assertion needs <full sha>:<dir> and a file count: ${JSON.stringify(e)}`);
+          continue;
+        }
+        let got;
+        try {
+          got = git(["ls-tree", "-r", "-z", "--name-only", e.tree]).split("\0").filter(Boolean).length;
+        } catch {
+          got = "missing";
+        }
+        if (got !== e.files) problems.push(`${key}: ${e.tree} holds ${got} files, baseline says ${e.files}`);
+      } else problems.push(`${key}: unknown evidence assertion ${JSON.stringify(e)}`);
+    }
+  }
+  // An absence assertion only means something when its commit exists: every pinned commit is checked too.
+  const commits = new Set([...objects.map((o) => o.spec.slice(0, 40))]);
+  for (const [, f] of findings) for (const e of f.evidence ?? []) if (e.tree && pinned(e.tree)) commits.add(e.tree.slice(0, 40));
+  commits.delete(base.rev);
+  for (const sha of [...commits].sort()) objects.push({ key: "commit", spec: `${sha}^{commit}`, want: "commit" });
+  if (objects.length) {
+    const lines = git(["cat-file", "--batch-check=%(objectname) %(objecttype)"], objects.map((o) => o.spec).join("\n") + "\n").split("\n");
+    objects.forEach((o, n) => {
+      const cut = lines[n].lastIndexOf(" ");
+      const name = lines[n].slice(0, cut);
+      const type = lines[n].slice(cut + 1);
+      const got = type === "missing" || type === "ambiguous" ? null : o.want === "commit" ? type : name;
+      if (got !== o.want) problems.push(`${o.key}: ${o.spec} is ${got ?? "absent"}, baseline says ${o.want ?? "absent"}`);
+    });
+  }
+  return { rev: base.rev ?? "", findings: findings.length, assertions, problems };
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.shard) {
     writeFileSync(opts.part, JSON.stringify(analyseScope(opts)));
+    return;
+  }
+  const where = opts.baseline.startsWith(REPO_ROOT + "/") ? relative(REPO_ROOT, opts.baseline) : opts.baseline;
+  if (opts.check) {
+    const { rev, findings, assertions, problems } = checkBaseline(opts.baseline);
+    for (const p of problems) console.log(`FAIL\t${p}`);
+    if (problems.length) {
+      console.log(`lost-work-audit --check: FAIL ${problems.length} problem(s) in ${where}`);
+      process.exit(1);
+    }
+    console.log(`lost-work-audit --check: OK (${rev.slice(0, 12)}; ${findings} findings, ${assertions} evidence assertions in ${where})`);
     return;
   }
   const report = await run(opts);
@@ -898,31 +996,25 @@ async function main() {
     if (!byKey.has(f.key)) byKey.set(f.key, []);
     byKey.get(f.key).push(f);
   }
+  const old = existsSync(opts.baseline) ? JSON.parse(readFileSync(opts.baseline, "utf8")) : { findings: {} };
   if (opts.writeBaseline) {
-    const old = existsSync(opts.baseline) ? JSON.parse(readFileSync(opts.baseline, "utf8")) : { findings: {} };
     const next = { ...old.findings };
     for (const [key, list] of byKey) {
       next[key] = old.findings?.[key] ?? { disposition: "unreviewed", files: list.length, subject: list[0].subject, note: "" };
     }
-    writeFileSync(opts.baseline, JSON.stringify({ rev: report.rev, findings: next }, null, 1) + "\n");
-    console.log(`baseline: ${Object.keys(next).length} commit findings in ${opts.baseline}`);
+    writeFileSync(opts.baseline, JSON.stringify({ ...old, rev: report.rev, findings: next }, null, 1) + "\n");
+    console.log(`baseline: ${Object.keys(next).length} findings in ${where}`);
   }
-  if (opts.check) {
-    const base = existsSync(opts.baseline) ? JSON.parse(readFileSync(opts.baseline, "utf8")) : { findings: {} };
-    const open = [...byKey].filter(([key]) => {
-      const d = base.findings?.[key]?.disposition;
-      return !d || d === "unreviewed";
-    });
-    for (const [key, list] of open) {
-      console.log(`UNREVIEWED\t${key}\t${list.length} file(s)\t${list[0].subject.slice(0, 100)}`);
-      for (const f of list.slice(0, 5)) console.log(`\t${tsvRow(f)}`);
-    }
-    if (open.length) {
-      console.log(`lost-work-audit --check: FAIL ${open.length} commit finding(s) without a disposition in ${opts.baseline}`);
-      process.exit(1);
-    }
-    console.log("lost-work-audit --check: OK");
+  const open = [...byKey].filter(([key]) => !DISPOSITIONS.includes(old.findings?.[key]?.disposition));
+  for (const [key, list] of open) {
+    console.log(`UNREVIEWED\t${key}\t${list.length} file(s)\t${list[0].subject.slice(0, 100)}`);
+    for (const f of list.slice(0, 5)) console.log(`\t${tsvRow(f)}`);
   }
+  if (open.length) {
+    console.log(`lost-work-audit --sweep: FAIL ${open.length} commit finding(s) without a disposition in ${where}`);
+    process.exit(1);
+  }
+  console.log("lost-work-audit --sweep: OK");
 }
 
 main().catch((err) => {

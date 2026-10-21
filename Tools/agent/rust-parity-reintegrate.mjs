@@ -24,14 +24,17 @@
 //   (dir/package owner smaller) | absent (dev has nothing there).
 // Every dev-side path lookup (same-body files, deletions, area owners) applies PACKAGE_MOVES first.
 //
-// Reads git objects only (ls-tree, one cat-file --batch per tree, one git log for deletions).
-// Writes Docs/audits/rust-exit-parity/{reintegrate.tsv,reintegrate-areas.tsv,reintegrate-summary.md}.
+// Reads git objects only (ls-tree, one cat-file --batch per tree, one git log for deletions), so the
+// result depends on the audited commits alone, never on the worktree or the live dev tip.
+// Writes Docs/audits/rust-exit-parity/{reintegrate.tsv,reintegrate-areas.tsv,reintegrate-summary.md,
+// reintegrate-refs.json}; reintegrate-refs.json pins the audited commits.
 //
 // Usage: node Tools/agent/rust-parity-reintegrate.mjs [--jet-rev <commit>] [--jet-refs <ref,ref>] [--check]
-//   --jet-rev   dev tree (default: refs.jet_rev in summary.json).
+//   --jet-rev   dev tree (default: refs.jet_rev in summary.json, the parity ledger's pin).
 //   --jet-refs  secondary refs, resolved to commits (default: refs.jet_refs in summary.json, by recorded SHA).
-//   --check     regenerate in memory at the recorded commits; print `differs: <path>` per mismatch to
-//               stderr and exit 1 if committed outputs differ.
+//   --check     regenerate in memory at the commits pinned in reintegrate-refs.json (the flags override
+//               them); print `differs: <path>` per mismatch to stderr and exit 1 if committed outputs differ.
+//               Passes until the outputs are deliberately regenerated at new commits.
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +44,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OUT_REL = 'Docs/audits/rust-exit-parity';
 const SUMMARY_REL = `${OUT_REL}/summary.json`;
-const OUTPUTS = ['reintegrate.tsv', 'reintegrate-areas.tsv', 'reintegrate-summary.md'];
+const PINS = 'reintegrate-refs.json';
+const PINS_REL = `${OUT_REL}/${PINS}`;
+const OUTPUTS = ['reintegrate.tsv', 'reintegrate-areas.tsv', 'reintegrate-summary.md', PINS];
 const JET_DIRS = ['Compiler/', 'Jetpack/', 'Core/', 'Tools/', 'Examples/', 'tests/'];
 const isJetScope = (p) => p.endsWith('.jet') && JET_DIRS.some((d) => p.startsWith(d));
 const SIM = 0.8;
@@ -493,6 +498,7 @@ function generate({ jetRev, refs }) {
       '--no-renames',
       '--diff-filter=D',
       '--name-only',
+      '--abbrev=12',
       '--format=@@%h%x09%s',
       jetRev,
       '--',
@@ -745,7 +751,7 @@ function generate({ jetRev, refs }) {
       merged = false;
     }
     const log = base
-      ? git(['log', '--oneline', `${PORT_BASE}..${portSha}`]).toString('utf8').trimEnd()
+      ? git(['log', '--oneline', '--no-decorate', '--abbrev=12', `${PORT_BASE}..${portSha}`]).toString('utf8').trimEnd()
       : `(${PORT_BASE} is not in this repository)`;
     portNote =
       `\`${PORT_MAIN}\` (\`${portSha}\`) is ${merged ? '' : 'not '}an ancestor of the dev tree \`${jetRev}\`. ` +
@@ -835,6 +841,7 @@ function generate({ jetRev, refs }) {
     'reintegrate.tsv': tsv,
     'reintegrate-areas.tsv': areasTsv,
     'reintegrate-summary.md': md.join('\n'),
+    [PINS]: JSON.stringify({ jet_rev: jetRev, jet_refs: refs.map((r) => ({ name: r.name, sha: r.sha })) }, null, 2) + '\n',
   };
 }
 
@@ -849,9 +856,9 @@ function refList(opts, recorded) {
   return (recorded?.jet_refs ?? []).map((r) => ({ name: r.name, sha: resolveCommit(r.sha) }));
 }
 
-function committedSummary() {
+function readJson(rel) {
   try {
-    return JSON.parse(readFileSync(join(ROOT, SUMMARY_REL), 'utf8'));
+    return JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
   } catch {
     return null;
   }
@@ -859,11 +866,14 @@ function committedSummary() {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const recorded = committedSummary()?.refs ?? null;
-  if (opts.jetRev === null && !recorded?.jet_rev) fail(`no recorded refs.jet_rev in ${SUMMARY_REL}; pass --jet-rev`);
-  if (opts.jetRefs === null && !recorded?.jet_refs) fail(`no recorded refs.jet_refs in ${SUMMARY_REL}; pass --jet-refs`);
+  // --check recomputes at the commits these outputs pinned; a regeneration starts from the ledger's pins.
+  const source = opts.check ? PINS_REL : SUMMARY_REL;
+  const recorded = opts.check ? readJson(PINS_REL) : (readJson(SUMMARY_REL)?.refs ?? null);
+  if (opts.jetRev === null && !recorded?.jet_rev) fail(`no recorded jet_rev in ${source}; pass --jet-rev`);
+  if (opts.jetRefs === null && !recorded?.jet_refs) fail(`no recorded jet_refs in ${source}; pass --jet-refs`);
   const jetRev = resolveCommit(opts.jetRev ?? recorded.jet_rev);
   const refs = refList(opts, recorded);
+  const pinned = `jet ${jetRev}; ${refs.map((r) => `${r.name} ${r.sha}`).join(', ') || 'no secondary refs'}`;
 
   const outputs = generate({ jetRev, refs });
   const outDir = join(ROOT, OUT_REL);
@@ -884,13 +894,13 @@ function main() {
       process.stderr.write('rust-parity-reintegrate: committed outputs are stale; rerun without --check\n');
       process.exit(1);
     }
-    process.stdout.write(`rust-parity-reintegrate: up to date (jet ${jetRev})\n`);
+    process.stdout.write(`rust-parity-reintegrate: up to date (${pinned})\n`);
     return;
   }
 
   mkdirSync(outDir, { recursive: true });
   for (const name of OUTPUTS) writeFileSync(join(outDir, name), outputs[name]);
-  process.stdout.write(`rust-parity-reintegrate: wrote ${OUT_REL}/ for jet ${jetRev}\n`);
+  process.stdout.write(`rust-parity-reintegrate: wrote ${OUT_REL}/ (${pinned})\n`);
 }
 
 main();
