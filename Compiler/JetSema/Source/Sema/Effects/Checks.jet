@@ -43,6 +43,7 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_partition,
     compiler_transfer_rows,
+    CoreCallRecord,
     diagnostic_with_rights,
     diagnostic_with_source_derived_suggestion,
     sema_effect_covers,
@@ -1159,6 +1160,22 @@ fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffec
     }
 }
 
+// A Core call's declared effects from its record: the root of its effect
+// kind (unless its leaf refines that root) and its leaf, as
+// sema_call_core_record_effects records them on a call-site fact.
+fn sema_effect_record_core_row(nodes: &[SemaEffectNode], node_index: Int, record: CoreCallRecord, span: Span) Never! {
+    leaf_name :: record.effect_leaf ?? ""
+    if record.effect_kind == .Val(effect_kind) {
+        root_name :: sema_call_core_effect_name(effect_kind)
+        if leaf_name == "" || !sema_effect_covers(root_name, leaf_name) {
+            if sema_effect_parse_name(root_name) == .Val(root) -> sema_effect_node_add_direct(&nodes, node_index, root, span)
+        }
+    }
+    if leaf_name != "" {
+        if sema_effect_parse_name(leaf_name) == .Val(leaf) -> sema_effect_node_add_direct(&nodes, node_index, leaf, span)
+    }
+}
+
 // `close(^value)`: an edge to the value type's own `close` method, the
 // function codegen calls for it. Methods are indexed by their owner type's
 // name, so a same-named type in another module adds its method too: the row
@@ -1202,7 +1219,14 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
                     }
                 }
                 .None -> {
-                    if !sema_effect_is_compiler_intrinsic(expression) -> sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, expression)
+                    // A Core call checked without a call-site fact still
+                    // carries its record: its declared root and leaf are its
+                    // effects, never an unknown callee's maximal row.
+                    if expression.kind == .CoreCall(record, _, _, _, _, _, _) {
+                        sema_effect_record_core_row(&nodes, node_index, record, expression.span)
+                    } else if !sema_effect_is_compiler_intrinsic(expression) {
+                        sema_effect_record_unresolved_call(&nodes, facts.node_by_key, node_index, expression)
+                    }
                 }
             }
         }
