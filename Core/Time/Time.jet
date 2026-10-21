@@ -1590,6 +1590,93 @@ impl DateTime.Decode {
         }
     }
 }
+// The Dyn.DateTime payload decodes as itself; RFC 3339 text decodes as
+// Dyn.parse_datetime reads it (Foundation Dyn.rs DynDateTime.parse_rfc3339):
+// the instant at its fixed offset, in the zone that offset names.
+impl ZonedDateTime.Decode {
+    fn decode(tree: Dyn) -> ZonedDateTime [FieldError]! {
+        if tree == {
+            .DateTime(value) -> Ok(value.copy())
+            .Text(text) -> {
+                value :: civil_dyn_datetime(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected RFC 3339 date-time with a minute-aligned offset"}})
+                Ok(value)
+            }
+            else -> Err([FieldError]{FieldError{path: "", reason: "expected ZonedDateTime, found {civil_dyn_kind(tree)}"}})
+        }
+    }
+}
+// The decode diagnostic's name for a Dyn variant (DynKind.rs dyn_kind).
+fn civil_dyn_kind(tree: Dyn) -> String Never! {
+    if tree == {
+        .Null -> "null"
+        .Bool(_) -> "Bool"
+        .Int(_) -> "Int"
+        .Float(_) -> "Float"
+        .Number(_) -> "number"
+        .Text(_) -> "Text"
+        .Bytes(_) -> "Bytes"
+        .DateTime(_) -> "DateTime"
+        .Array(_) -> "a list"
+        .Object(_) -> "an object"
+    }
+}
+// The decimal value of the ASCII digits raw[start..<end], None past a non-digit.
+fn civil_dyn_number(raw: [U8], start: Int, end: Int) -> Int? Never! {
+    value := 0
+    loop i in start..<end {
+        if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> return None
+        value = value * 10 + Int{raw[i]} - 48
+    }
+    Val(value)
+}
+// `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`; a fixed offset names its zone
+// "±HH:MM" and a zero offset is UTC.
+fn civil_dyn_datetime(text: String) -> ZonedDateTime? Never! {
+    raw :: text.bytes()
+    if raw.len() < 20 || !civil_ascii(text) -> return None
+    separator :: raw[10]
+    if raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return None
+    if separator != (U8{84}) && separator != (U8{116}) && separator != (U8{32}) -> return None
+    year :: civil_dyn_number(raw, 0, 4) ?? return None
+    month :: civil_dyn_number(raw, 5, 7) ?? return None
+    day :: civil_dyn_number(raw, 8, 10) ?? return None
+    hour :: civil_dyn_number(raw, 11, 13) ?? return None
+    minute :: civil_dyn_number(raw, 14, 16) ?? return None
+    second :: civil_dyn_number(raw, 17, 19) ?? return None
+    if month < 1 || month > 12 -> return None
+    if day < 1 || day > days_in_month(year, month) || hour > 23 || minute > 59 || second > 60 -> return None
+    at := 19
+    nanos := 0
+    if raw[19] == (U8{46}) {
+        at = 20
+        loop at < raw.len() && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) -> at = at + 1
+        count :: at - 20
+        if count == 0 || count > 9 -> return None
+        nanos = civil_dyn_number(raw, 20, at) ?? return None
+        scaled := count
+        loop scaled < 9 {
+            nanos = nanos * 10
+            scaled = scaled + 1
+        }
+    }
+    offset := 0
+    rest :: raw.len() - at
+    if rest == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
+        hours :: civil_dyn_number(raw, at + 1, at + 3) ?? return None
+        minutes :: civil_dyn_number(raw, at + 4, at + 6) ?? return None
+        if hours > 23 || minutes > 59 -> return None
+        offset = hours * 3600 + minutes * 60
+        if raw[at] == (U8{45}) -> offset = -offset
+    } else if rest != 1 || (raw[at] != (U8{90}) && raw[at] != (U8{122})) {
+        return None
+    }
+    seconds :: civil_utc(new(year, month, day), civil_time(hour, minute, second, 0)) - offset
+    zone := utc()
+    if offset != 0 {
+        zone = Zone{name_value: civil_offset(offset), data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: offset, is_dst: false}}}}
+    }
+    Val(zoned(civil_timestamp(seconds, nanos, second == 60), zone))
+}
 
 impl DateTime {
     // Sema has already validated the complete literal. Ordinary source dispatch

@@ -8,14 +8,13 @@
 typedef struct { unsigned char *data; int64_t len, capacity; } Text;
 typedef struct { int64_t len, capacity; Text **data; } List;
 typedef struct { int64_t cols, rows, mode; } Policy;
-typedef struct { int64_t ns; } Duration;
 typedef struct {
     List *cmd; Text *cwd; int64_t env_clear; List *env_set, *env_remove;
     int64_t *in; int64_t out, err; int64_t *timeout, *output, *cpu, *memory, *files;
     int64_t detached; Policy *terminal; Text *wire; List *directories;
 } Spec;
 _Static_assert(sizeof(Spec)==136 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128, "native Spec136");
-_Static_assert(sizeof(List)==24 && sizeof(Policy)==24 && sizeof(Duration)==8, "canonical nested carriers");
+_Static_assert(sizeof(List)==24 && sizeof(Policy)==24, "canonical nested carriers");
 extern void jet_rt_alloc_init(void);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
@@ -44,8 +43,8 @@ extern Spec *jet_process_spec_stderr(const Spec *,int64_t);
 extern Spec *jet_process_spec_output_limit(const Spec *,int64_t);
 extern Spec *jet_process_spec_memory_limit(const Spec *,int64_t);
 extern Spec *jet_process_spec_open_file_limit(const Spec *,int64_t);
-extern Spec *jet_process_spec_timeout(const Spec *,const Duration *);
-extern Spec *jet_process_spec_cpu_time_limit(const Spec *,const Duration *);
+extern Spec *jet_process_spec_timeout(const Spec *,int64_t);
+extern Spec *jet_process_spec_cpu_time_limit(const Spec *,int64_t);
 extern Spec *jet_process_spec_terminal(const Spec *);
 extern Spec *jet_process_spec_terminal_with_policy(const Spec *,const Policy *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[256];
@@ -100,9 +99,10 @@ static void clone_cases(void) {
     replace(&b,jet_process_spec_env(b,name,arg)); assert(b->env_set->len==2); // duplicates preserve insertion order
     replace(&b,jet_process_spec_env_remove(b,name)); replace(&b,jet_process_spec_env_clear(b)); replace(&b,jet_process_spec_detached(b));
     replace(&b,jet_process_spec_stdin(b,0)); replace(&b,jet_process_spec_stdout(b,1)); replace(&b,jet_process_spec_stderr(b,0));
-    Duration timeout={1999999}, cpu={-1999999};
-    replace(&b,jet_process_spec_timeout(b,&timeout)); assert(*b->timeout==1);
-    replace(&b,jet_process_spec_cpu_time_limit(b,&cpu)); assert(*b->cpu==0);
+    int64_t timeout=jet_int_owned_from_i64(1999999), cpu=jet_int_owned_from_i64(-1999999);
+    replace(&b,jet_process_spec_timeout(b,timeout)); assert(*b->timeout==1);
+    replace(&b,jet_process_spec_cpu_time_limit(b,cpu)); assert(*b->cpu==0);
+    jet_rt_int_drop(timeout); jet_rt_int_drop(cpu);
     replace(&b,jet_process_spec_output_limit(b,0)); replace(&b,jet_process_spec_memory_limit(b,42)); replace(&b,jet_process_spec_open_file_limit(b,17));
     replace(&b,jet_process_spec_terminal(b)); assert(b->terminal->cols==80 && b->terminal->rows==24 && b->terminal->mode==1);
     Policy policy={100,40,0}; replace(&b,jet_process_spec_terminal_with_policy(b,&policy)); assert(b->terminal!=&policy && b->terminal->cols==100);
@@ -150,9 +150,9 @@ static void limits(void) {
     }
     int64_t nanos[]={INT64_MIN,-1000001,-1,0,999999,1000000,1999999,INT64_MAX};
     for(size_t i=0;i<8;++i) {
-        Duration d={nanos[i]}; int64_t ms=nanos[i]/1000000; if(ms<0) ms=0;
-        Spec *b=jet_process_spec_timeout(a,&d); assert(*b->timeout==ms); jet_rt_handle_drop_process_spec(b);
-        b=jet_process_spec_cpu_time_limit(a,&d); assert(*b->cpu==ms); jet_rt_handle_drop_process_spec(b); assert(d.ns==nanos[i]);
+        int64_t d=jet_int_owned_from_i64(nanos[i]); int64_t ms=nanos[i]/1000000; if(ms<0) ms=0;
+        Spec *b=jet_process_spec_timeout(a,d); assert(*b->timeout==ms); jet_rt_handle_drop_process_spec(b);
+        b=jet_process_spec_cpu_time_limit(a,d); assert(*b->cpu==ms); jet_rt_handle_drop_process_spec(b); jet_rt_int_drop(d);
     }
     jet_rt_int_drop(hi); jet_rt_int_drop(lo); jet_rt_int_drop(above); jet_rt_int_drop(below); jet_rt_handle_drop_process_spec(a);
 }

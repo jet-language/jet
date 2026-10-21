@@ -93,10 +93,11 @@ fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
     if lower_codec_method(p, target, false) == .Val(method) {
         // Callers take the decoded value out of this Result by bytes and free
         // its shell: a user method's Result may be shared (lower_box_owned).
+        // The owning `dst` takes the plain unshared box (lower_each_result).
         called :: lower_pointer(&f)
         lower_codec_method_call(p, &m, &f, method, source, called)
         owned :: lower_box_owned(p, &m, &f, called, result)
-        return lower_emit(&f, LIRInst.Move{dst: dst, src: owned})
+        return lower_each_result(&f, dst, owned)
     }
     if lower_codec_container(p, target) -> return lower_call_helper(&m, &f, "codec.decode", result, [LIRValueID]{source}, Val(dst))
     scalar :: lower_codec_scalar(target) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(target)}> has no reachable selected method or canonical scalar carrier")

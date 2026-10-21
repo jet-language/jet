@@ -50,7 +50,8 @@ extern void jet_rt_int_drop(int64_t);
 extern Spec *jet_std_process_cmd(Text *const *, int64_t);
 extern Spec *jet_process_spec_stdout(const Spec *, int64_t);
 extern Spec *jet_process_spec_stderr(const Spec *, int64_t);
-extern Spec *jet_process_spec_timeout(const Spec *, const int64_t *);
+extern Spec *jet_process_spec_timeout(const Spec *, int64_t);
+extern int64_t jet_int_owned_from_i64(int64_t);
 extern Spec *jet_process_spec_output_limit(const Spec *, int64_t);
 extern Spec *jet_process_spec_env(const Spec *, const Text *, const Text *);
 extern Spec *jet_process_spec_terminal(const Spec *);
@@ -260,8 +261,9 @@ int main(int argc, char **argv, char **envp) {
     // 7. Timeout kills the child process group and reports timed_out with SIGKILL.
     {
         Spec *s = SPEC("/bin/sh", "-c", "sleep 5");
-        const int64_t timeout_ns = INT64_C(100000000);
-        s = replace(s, jet_process_spec_timeout(s, &timeout_ns));
+        const int64_t timeout_ns = jet_int_owned_from_i64(INT64_C(100000000));
+        s = replace(s, jet_process_spec_timeout(s, timeout_ns));
+        jet_rt_int_drop(timeout_ns);
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         check(jet_process_spec_run(s, &r, &e) == 1 && e == NULL, "timeout run returns receipt");

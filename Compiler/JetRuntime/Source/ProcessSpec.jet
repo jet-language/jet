@@ -311,11 +311,12 @@ fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
     encoding_store(result + PROCESS_SPEC_TERMINAL, jet_rt_handle_clone_terminal_policy(policy))
     result
 }
-// Canonical TimeGlueABI borrowed Duration8; no second Duration codec/owner.
-fn duration_ns(value: I64) -> I64 { time_glue_word(value + TIME_DURATION_NS) }
-fn process_duration_millis(value: I64) -> I64 {
+// A Duration crosses its Word route as the borrowed exact-Int carrier of its
+// ns (Routes.jet lower_route_word_getter, CAbiRoutes `Duration { ns:
+// native(word) }`); a Duration always fits i64.
+fn process_duration_millis(nanos: I64) -> I64 {
     // CommonTypes.rs:2847-2848 truncates towards zero before Process.rs max(0).
-    millis :: duration_ns(value) /% I64{1000000}
+    millis :: host_native_int(nanos) /% I64{1000000}
     if (millis < I64{0}) -> I64{0} else -> millis
 }
 #Export(c) fn jet_process_spec_timeout(value: I64, timeout: I64) -> I64 {

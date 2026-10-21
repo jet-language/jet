@@ -1525,11 +1525,12 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if p.native_pack && runtime == .Val(handle) {
                 if handle.runtime == "JetErr" && schema != None -> return LowerRepr.Handle{drop: "jet_rt_handle_drop_jet_err", clone: "jet_rt_handle_clone_jet_err"}
             }
-            // Compiler-owned process records (JetCodegen Types.jet: bare
-            // canonical keys) are the Jet runtime's process carriers in every
-            // native lowering; their routes and Places.jet fields are handles.
+            // Compiler-owned process records and the suite snapshot `Test`
+            // (JetCodegen Types.jet: bare canonical keys) are the Jet
+            // runtime's carriers in every native lowering; their routes and
+            // Places.jet fields are handles.
             if runtime == .Val(handle) {
-                if lower_native_process_carrier(handle, name.name) {
+                if lower_native_runtime_carrier(handle, name.name) {
                     clone :: if handle.clone -> "jet_rt_handle_clone_{runtime_abi_atom(handle.runtime)}" else -> ""
                     return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", clone: clone}
                 }

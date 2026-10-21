@@ -319,10 +319,12 @@ fn lower_slot_root_for_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
 
 // ProcessReceipt144/ProcessPlan72 are Jet-owned carriers, never hosted Rust
 // records, in pack and program lowering alike (lower_repr makes the
-// compiler-owned process records handles). Validate canonical identity and
-// actual member types before lending their storage to the typed read/clone glue.
-fn lower_native_process_carrier(handle: LowerRuntimeHandle, name: String) -> Bool Never! {
-    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild") && name == handle.jet_name
+// compiler-owned process records handles), and the compiler-owned `Test` is
+// the runtime's JetTestSuite snapshot (TestSuite.jet). Validate canonical
+// identity and actual member types before lending their storage to the typed
+// read/clone glue.
+fn lower_native_runtime_carrier(handle: LowerRuntimeHandle, name: String) -> Bool Never! {
+    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild" || handle.runtime == "JetTestSuite") && name == handle.jet_name
 }
 
 fn lower_native_process_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
