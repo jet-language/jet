@@ -1335,8 +1335,12 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
     route_value := jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier)
     if route_value == None -> panic("checked THandleOp requires a dedicated lowering body or an unregistered closed route")
     route :: route_value ?? panic("checked general handle route disappeared")
+    // Static reserved constructors (`Path.from`, `Path.home`, `Reader.over`,
+    // `Cursor.over`) arrive with a Unit receiver and their operands as args;
+    // Rust's TIR puts the one operand in the receiver slot (method_calls.rs:11738).
+    // Both name the same closed route over exactly these operands.
     static_call := if operation == {
-        .TLSClientConfigDefault | .TLSRootCertificatesFromPEM | .TLSClientIdentityFromPEM | .HTTPClientNew -> {
+        .TLSClientConfigDefault | .TLSRootCertificatesFromPEM | .TLSClientIdentityFromPEM | .HTTPClientNew | .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) -> {
             true
         }
         else -> {
