@@ -588,12 +588,42 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
+// The compiler-owned receiver key of the checked-SQL list door (Rust
+// package_files.rs `INTERNAL_LIST_QUERY_HANDLE`); it has no source spelling.
+fn sema_data_list_query_handle() -> String Never! {
+    String.from_bytes([U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{113}, U8{117}, U8{101}, U8{114}, U8{121}, U8{46}, U8{108}, U8{105}, U8{115}, U8{116}}) ?? ""
+}
+
+// Rust method_calls.rs (`[T].query(sql)`): an in-memory row list runs one
+// checked SQL query into the deferred `Query<T>` carrier. The call lowers onto
+// the list-query receiver row with the list as its first argument.
+fn sema_data_check_list_query(receiver: Expr, receiver_value: TExpr, row: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if args.len() != 1 {
+        &diagnostics.push(sema_wrong_core_arity("query", 1, args.len(), span))
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    sema_data_check_analytics_sql_schema(row, args[0].expr, expr_span(args[0].expr), environment, program, &diagnostics)
+    sql :: Type.Named{name: "SQL"}
+    query :: sema_data_expect_core_arg("query", 0, sql, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    record :: core_receiver_method(sema_data_list_query_handle(), "query") ?? {
+        &diagnostics.push(sema_error("E0003", span, "checked query method `query` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    loop argument in args -> &source_args.push(argument)
+    result_type :: Type.Result{ok: Type.Apply{name: "Query", args: [Type]{row}}, err: sema_data_decode_error()}
+    value :: sema_data_core_emit(record, "query", source_args, [Type]{receiver_value.ty, sql}, [TExpr]{receiver_value, query}, [Type]{row}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
 fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     resolved_ty := sema_call_resolved_type(receiver_value.ty, environment, program)
     if resolved_ty == .Apply(name, parameters) {
         query :: sema_data_try_query_method(receiver, receiver_value, name, parameters, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if query.handled -> return query
     }
+    if method == "query" && resolved_ty == .List(row) -> return sema_data_check_list_query(receiver, receiver_value, row, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if method == "encode" -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if resolved_ty == {
         .Named(name) -> {
@@ -978,24 +1008,42 @@ fn sema_data_core_param_access(record: CoreCallRecord, index: Int, span: Span, d
 }
 
 fn sema_data_core_emit(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    accesses := [AccessConvention]{}
+    loop index in 0..<typed_args.len() {
+        access :: sema_data_core_param_access(record, index, span, &diagnostics) ?? return None
+        &accesses.push(access)
+    }
+    sema_data_core_emit_with_accesses(record, call_name, source_args, argument_types, typed_args, accesses, type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+}
+
+// One checked CoreCall over explicit parameter accesses: a `&` slot lends the
+// caller's place for the call (the registry row only says it is borrowed).
+fn sema_data_core_emit_with_accesses(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], accesses: [AccessConvention], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     updated_source_args := source_args
-    if argument_types.len() != typed_args.len() || updated_source_args.len() != typed_args.len() {
+    if argument_types.len() != typed_args.len() || updated_source_args.len() != typed_args.len() || accesses.len() != typed_args.len() {
         &diagnostics.push(sema_error("E0003", span, "`{call_name}` has an incomplete checked argument list", "CoreCall TIR stores every checked argument in the registry ABI order", "repair the Core call body"))
         return None
     }
     params := [SemaCallParam]{}
     arguments := [TExpr]{}
     loop (index, value) in typed_args {
-        access :: sema_data_core_param_access(record, index, span, &diagnostics) ?? return None
+        access :: accesses[index]
         &params.push(sema_data_core_param("arg{index}", argument_types[index], access, ParamZone.PositionalOnly, None))
-        &arguments.push(sema_services_apply_access(value, access))
+        if access == AccessConvention.Write {
+            &arguments.push(sema_tir_node(value.ty, TExprKind.Borrow{place: value, access: AccessConvention.Write}, value.span))
+        } else {
+            &arguments.push(sema_services_apply_access(value, access))
+        }
     }
     ownership := sema_ownership_check_call_arguments(&state, call_name, params, &updated_source_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     fallibility := sema_call_failure_carrier(Val(result_type))
     if !sema_call_core_record_effects(record, span, type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     widen_to_vec := (loop _ in arguments -> false)
-    sema_call_core_tir(record, arguments, span, type_args, widen_to_vec, None, result_type, fallibility, expected, environment, program, &diagnostics)
+    // A checked call finishes like the fixed Core route: inside a fallible
+    // body's success view a Result call is compared by its success side.
+    value :: sema_call_core_tir(record, arguments, span, type_args, widen_to_vec, None, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
+    sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)
 }
 
 // Rust core_call.rs `exactly_one_type_arg`: a typed decode/query call names one
@@ -1352,12 +1400,141 @@ fn sema_data_check_analytics_sql_schema(row: Type, query: Expr, span: Span, envi
     }
 }
 
+// Rust core_call.rs `infer_core_call`, the typed `core.data` arms: the loader
+// declarations and `snapshot`, `plot` and its renderers, the beginner `csv` /
+// `json` facade and the bounded `csv_reader` / `json_reader` streams. Each
+// names its row type with one explicit `<T>`; without one the call stays on
+// its ordinary route.
+fn sema_data_core_plot_view(member: String) -> Bool Never! {
+    member == "inspect" || member == "inspect_json" || member == "text" || member == "svg" || member == "show" || member == "render"
+}
+
+fn sema_data_core_typed_member(module_name: String, member: String) -> Bool Never! {
+    if module_name == "core.data.plot" -> return member == "plot" || sema_data_core_plot_view(member)
+    if module_name != "core.data" -> return false
+    if member == {
+        "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" | "snapshot" -> true
+        "plot" | "csv" | "json" | "csv_reader" | "json_reader" -> true
+        else -> sema_data_core_plot_view(member)
+    }
+}
+
+fn sema_data_core_declaration(member: String) -> Bool Never! {
+    member == "load" || member == "load_default" || member == "file" || member == "file_member" || member == "url" || member == "database" || member == "value" || member == "snapshot"
+}
+
+// The parameter types of one typed arm once its row type is known.
+fn sema_data_core_typed_params(member: String, row: Type) -> [Type] Never! {
+    limits :: Type.Named{name: "DataLimits"}
+    plot :: Type.Apply{name: "JetDataPlot", args: [Type]{row}}
+    if member == {
+        "load" -> [Type]{Type.String, limits}
+        "load_default" | "csv" | "json" -> [Type]{Type.String}
+        "file" -> [Type]{Type.String, Type.String, limits}
+        "file_member" | "url" -> [Type]{Type.String, Type.String, Type.String, limits}
+        "database" -> [Type]{Type.String, Type.List{element: Type.String}, Type.String, limits}
+        "value" -> [Type]{row, limits}
+        "snapshot" -> [Type]{Type.Apply{name: "DataLoader", args: [Type]{row}}}
+        "plot" -> [Type]{Type.List{element: row}}
+        "render" -> [Type]{plot, Type.Named{name: "JetDataPlotBackend"}}
+        "csv_reader" | "json_reader" -> [Type]{Type.Named{name: "FileReader"}, limits}
+        else -> [Type]{plot}
+    }
+}
+
+fn sema_data_core_typed_result(member: String, row: Type) -> Type Never! {
+    data_error :: Type.Named{name: "DataError"}
+    if member == {
+        "snapshot" -> sema_data_result(Type.Apply{name: "DataSnapshot", args: [Type]{row}}, data_error)
+        "plot" -> sema_data_result(Type.Apply{name: "JetDataPlot", args: [Type]{row}}, data_error)
+        "inspect" -> sema_data_result(Type.Named{name: "JetDataPlotInspection"}, data_error)
+        "inspect_json" | "text" | "svg" -> sema_data_result(Type.String, data_error)
+        "show" | "render" -> sema_data_result(Type.Named{name: "JetDataPlotRender"}, data_error)
+        "csv" | "json" -> sema_data_result(Type.List{element: row}, sema_data_decode_error())
+        "csv_reader" | "json_reader" -> sema_data_result(Type.Apply{name: "DataStream", args: [Type]{row}}, data_error)
+        else -> sema_data_result(Type.Apply{name: "DataLoader", args: [Type]{row}}, data_error)
+    }
+}
+
+// Rust arg_expect.rs `expect_core_arg_moving`: the owning reader slot takes
+// an explicit `^`; a mismatch the checker did not already report is E0112.
+fn sema_data_expect_core_arg_moving(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    value :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_call_host_callback_assignable(required, value.ty, environment, program) == (.Val(false)) {
+        &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{name}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, value.ty)))
+        return None
+    }
+    Val(value)
+}
+
+fn sema_data_core_check_typed(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    // As in the reference, the declarations and the plot renderers name their
+    // row before their arity, `plot` right after it, and the facade and the
+    // readers (whose parameters do not depend on the row) after their arguments.
+    row := Type?{None}
+    if sema_data_core_declaration(member) || sema_data_core_plot_view(member) {
+        row = sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics)
+        if row == None -> return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    want :: if member == {
+        "render" | "load" | "value" | "csv_reader" | "json_reader" -> 2
+        "file" -> 3
+        "file_member" | "url" | "database" -> 4
+        else -> 1
+    }
+    if args.len() != want {
+        &diagnostics.push(sema_wrong_core_arity(member, want, args.len(), span))
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if member == "plot" {
+        row = sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics)
+        if row == None {
+            sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaDirectSpecialCheck{handled: true, value: None}
+        }
+    }
+    params :: sema_data_core_typed_params(member, row ?? Type.Named{name: "Unit"})
+    record :: sema_call_core_record(module_name, member, args.len(), span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    accesses := [AccessConvention]{}
+    typed := [TExpr]{}
+    complete := true
+    loop (index, argument) in args {
+        // As Rust `expect_core_arg`, every slot reads its argument except the
+        // readers' owning `^reader` (`expect_core_arg_moving`, which records the
+        // move) and the snapshot's `&loader`.
+        reader_slot :: (member == "csv_reader" || member == "json_reader") && index == 0
+        if member == "snapshot" {
+            if argument.convention != AccessConvention.Write {
+                &diagnostics.push(sema_error("E0202", argument.span, "`snapshot` requires the write-access marker `&`", "taking a snapshot refreshes loader state in place", "write the write-access marker `&`: `&loader`"))
+            }
+            &accesses.push(AccessConvention.Write)
+        } else {
+            &accesses.push(if reader_slot -> AccessConvention.Move else -> AccessConvention.Read)
+        }
+        value :: if reader_slot -> sema_data_expect_core_arg_moving(member, index, params[index], argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_data_expect_core_arg(member, index, params[index], argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if value == .Val(checked) {
+            &typed.push(checked)
+        } else {
+            complete = false
+        }
+    }
+    if row == None -> row = sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics)
+    target :: row ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if member == "snapshot" || member == "csv" || member == "json" || member == "csv_reader" || member == "json_reader" -> sema_call_http_check_serde(SemaSerdeDirection.Decode, target, span, environment, program, &diagnostics)
+    if member == "value" || member == "snapshot" || member == "plot" -> sema_call_http_check_serde(SemaSerdeDirection.Encode, target, span, environment, program, &diagnostics)
+    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result :: sema_data_core_emit_with_accesses(record, "{module_name}.{member}", args, params, typed, accesses, [Type]{target}, sema_data_core_typed_result(member, target), span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(result)}
+}
+
 fn sema_call_try_data_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name == "core.data.stream" -> return sema_call_try_data_stream_core_call(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     reader_writer :: sema_data_core_try_reader_writer(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reader_writer == .Val(result) -> return result
     decoder :: sema_data_core_try_decode(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if decoder == .Val(result) -> return result
+    if type_args.len() != 0 && sema_data_core_typed_member(module_name, member) -> return sema_data_core_check_typed(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if module_name == "core.encoding.csv" && member == "query" {
         row :: sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         if args.len() != 2 {

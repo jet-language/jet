@@ -57,7 +57,6 @@ use jet_foundation.[
     ast_comptime_value_type,
     ast_empty_call_arg_flags,
     compute_shape_dimensions,
-    core_call_typed_signature,
     core_module_export,
     core_source_owns_type,
     core_source_receiver_method,
@@ -2886,13 +2885,8 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
     }
-    expected_type_arg_count := 0
-    if core_call_typed_signature(module_name, method, args.len()) == {
-        .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
-        .None -> {}
-    }
     diagnostics_before := diagnostics.len()
-    route := if nested -> sema_call_core_resolve_import_path_route(environment, program, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, program, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
+    route := if nested -> sema_call_core_resolve_import_path_route(environment, program, scopes, alias, module_name, method, type_args, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, program, scopes, alias, method, type_args, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: false, value: None}

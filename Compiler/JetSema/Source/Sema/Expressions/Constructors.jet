@@ -1480,7 +1480,7 @@ fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?,
         &diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {error.offset}", error.reason, "fix the pattern at the reported position"))
         return None
     }
-    route :: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 0, false, 1, false, span, &diagnostics) ?? return None
+    route :: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 1, false, span, &diagnostics) ?? return None
     if route == {
         .Source(target) -> {
             argument :: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}

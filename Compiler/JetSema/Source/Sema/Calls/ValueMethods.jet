@@ -157,7 +157,7 @@ fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner:
     ownership := sema_ownership_check_method_call(&state, "Option.or_err", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Option.or_err", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    route :: sema_call_core_resolve_route(environment, program, "core.prelude", "option_or_err", [Type]{inner}, 1, false, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    route :: sema_call_core_resolve_route(environment, program, "core.prelude", "option_or_err", [Type]{inner}, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target :: if route == {
         .Source(source) -> source
         .Core(_) | .SharedSite(_) -> panic("Option.or_err must resolve its canonical Jet source body")

@@ -448,8 +448,12 @@ fn sema_call_core_no_os_hint(module_name: String) -> String? Never! {
 }
 
 // Compiler-owned query contracts resolve before source facades. Other source
-// exports remain ordinary functions ahead of static Core records.
-fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+// exports remain ordinary functions ahead of static Core records. A Core record
+// route checks no type-argument count: as in Rust `infer_core_call`, the
+// bespoke Core arms take their own `<T>` and only the fixed-signature fallback
+// (`sema_call_core_check_fixed_record`, Rust `resolved_core_fixed_sig`) checks
+// the count against the typed row.
+fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
     if sema_scope_environment_no_os(environment) && sema_call_core_no_os_hint(module_name) == .Val(hint) {
         short_name :: module_name.slice(module_name.rfind(".") + 1, module_name.len())
@@ -467,12 +471,11 @@ fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, program: Sema
         .None -> {}
     }
     if diagnostics.len() != diagnostic_count -> return None
-    if !sema_call_core_check_type_args(module_name, member, expected_type_arg_count, infer_when_omitted, type_args, span, &diagnostics) -> return None
     record :: sema_call_core_record(module_name, member, actual_arity, span, &diagnostics) ?? return None
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
-fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, program, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, imported) -> return None
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
@@ -490,7 +493,6 @@ fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, progra
         .None -> {}
     }
     if diagnostics.len() != diagnostic_count -> return None
-    if !sema_call_core_check_type_args(imported.module_name, member, expected_type_arg_count, infer_when_omitted, type_args, span, &diagnostics) -> return None
     record :: sema_call_core_record(imported.module_name, member, actual_arity, span, &diagnostics) ?? return None
     Val(SemaCoreCallRoute.Core{record: record})
 }
@@ -499,11 +501,11 @@ fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, progra
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
 // submodule itself would.
-fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, program, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return None
-    sema_call_core_resolve_route(environment, program, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, first_is_move, span, &diagnostics)
+    sema_call_core_resolve_route(environment, program, module_name, member, type_args, actual_arity, first_is_move, span, &diagnostics)
 }
 
 // (Rust core_call.rs `("core.term", "print")`): an imported
@@ -529,8 +531,6 @@ fn sema_call_core_access(record: CoreCallRecord, index: Int) -> AccessConvention
 }
 
 fn sema_call_core_check_type_args(module_name: String, member: String, expected_count: Int, infer_when_omitted: Bool, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    // Typed decodes report their own target-type count (Rust `exactly_one_type_arg`).
-    if sema_data_core_decode_member(module_name, member) -> return true
     if infer_when_omitted && type_args.len() == 0 && expected_count > 0 -> return true
     if type_args.len() == expected_count -> return true
     &diagnostics.push(sema_call_generic_count_diagnostic("{module_name}.{member}", expected_count, type_args.len(), span))
@@ -642,7 +642,10 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         }
     }
     normalized :: sema_call_core_normalized_source_record(record, args)
-    if core_call_source_member(normalized) == .Val(member) {
+    // Typed JSON stays the compiler-owned Decode projection, never the
+    // untyped source `decode` (Rust TIR/lower/method_calls.rs:1734).
+    typed_json_decode :: record.module_name == "core.encoding.json" && record.member == "decode" && type_args.len() != 0
+    if !typed_json_decode && core_call_source_member(normalized) == .Val(member) {
         source_module := record.module_name
         source_member := member
         if member.starts_with("core.") {
@@ -1044,12 +1047,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
 // Resolve source exports before building a fixed Core call. The callee's
 // canonical typed contract is discovered here; callers never supply its Type.
 fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    expected_type_arg_count := 0
-    if core_call_typed_signature(module_name, member, args.len()) == {
-        .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
-        .None -> {}
-    }
-    route :: sema_call_core_resolve_route(environment, program, module_name, member, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), span, &diagnostics) ?? return None
+    route :: sema_call_core_resolve_route(environment, program, module_name, member, type_args, args.len(), sema_call_core_first_is_move(args), span, &diagnostics) ?? return None
     if route == {
         .SharedSite(lifetime) -> { return sema_call_core_global_shared(lifetime, member, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) }
         .Source(target) -> { return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) }
