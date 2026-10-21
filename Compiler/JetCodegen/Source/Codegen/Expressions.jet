@@ -5380,14 +5380,15 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
 }
 
 // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`) inside
-// evaluated comptime code: one `core.host` `Comptime.<builtin>` route the
-// evaluator's comptime input host answers with the read value. Sema accepts the
+// evaluated comptime code: a call of the `core.host` `Comptime.<builtin>`
+// Prelude route, which the evaluator's comptime input host answers with the
+// read value. Sema accepts the
 // call only in comptime code, so it never reaches a runtime program.
 fn jet_codegen_lower_comptime_input(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, builtin: String, path: String) -> MIRValueID Never! {
     path_value :: jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: path}})
-    call :: jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.host", "Comptime.{builtin}", "jet_comptime_host_method", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
-    args := [MIRCallArg]{jet_codegen_numeric_call_arg(path_value, expression.span)}
-    jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false})
+    route :: jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.host", "Comptime.{builtin}", "jet_comptime_host_method", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
+    args :: [MIRCallArg]{jet_codegen_host_call_value_arg(path_value, expression.span, MIRAccess.Read, None)}
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: args, type_args: [MIRType]{}})
 }
 
 fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: String) -> MIRValueID Never! {

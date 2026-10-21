@@ -3811,6 +3811,29 @@ fn jet_driver_comptime_run(
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
+                // A comptime input that is the item's whole value (`TEXT :: prep {
+                // embed_file("x") }`) is read here, as Rust's
+                // `try_eval_build_time_io` did, with no evaluation.
+                if jet_driver_comptime_input_expression(comptime_request.expression) {
+                    if jet_driver_comptime_read_input(request, source.source_file, comptime_request.expression) == {
+                        .Ok(value) -> {
+                            if batch.entries.len() > 0 {
+                                no_functions := [TFunc]{}
+                                jet_driver_comptime_batch_add(&batch, source, comptime_request, &no_functions, Val(value))
+                                next
+                            }
+                            &values.push(jet_driver_comptime_item_value(source, value, comptime_request.expression.ty))
+                            made_progress = true
+                            next
+                        }
+                        .Err(error) -> {
+                            &diagnostics.push(jet_driver_attach_program_source_location(error.diagnostic, programs[0], source.module_identity))
+                            if keep_going -> next
+                            sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                            return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                        }
+                    }
+                }
                 if source.kind != SemaComptimeItemKind.CheckedText && comptime_request.calls.len() == 0 {
                     if jet_driver_comptime_fold(comptime_request.expression, values) == .Val(plain) {
                         // Behind a batch, the literal's value lands in its turn.

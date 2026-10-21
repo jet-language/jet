@@ -2110,22 +2110,56 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
     sema_expr_expected(bounded, expected, environment, program, &diagnostics)
 }
 
-fn sema_expr_format_supported(ty: Type, format: StrFormat) -> Bool Never! {
+// Rust CheckerInfer/expr.rs interpolation check: each numeric or text
+// selector names the one value family its Core/text/fmt.jet formatter takes,
+// and any other value is E0112 at the interpolated value.
+fn sema_expr_check_format_selector(checked: TExpr, format: StrFormat, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+    ty :: checked.ty
+    shown :: sema_type_show(ty)
     if format == {
-        .Fixed(_) -> sema_expr_is_numeric(ty)
-        .Grouped(_) -> sema_expr_is_numeric(ty)
-        .Hex(_) -> sema_expr_is_integer(ty)
-        .Pad(_, _) -> sema_expr_is_numeric(ty) || ty == Type.String || ty == Type.Bool || ty == Type.Char
-        .PadLeft(_, _) -> sema_expr_is_numeric(ty) || ty == Type.String || ty == Type.Bool || ty == Type.Char
-        .Sci(_) -> sema_expr_is_numeric(ty)
-        .Percent(_) -> sema_expr_is_numeric(ty)
-        .Bin -> sema_expr_is_integer(ty)
-        .Oct -> sema_expr_is_integer(ty)
-        .Unit(_) -> false
-        .Display -> sema_expr_is_numeric(ty) || ty == Type.String || ty == Type.Bool || ty == Type.Char
-        .Debug -> sema_expr_is_numeric(ty) || ty == Type.String || ty == Type.Bool || ty == Type.Char
-        .Pretty -> sema_expr_is_numeric(ty) || ty == Type.String || ty == Type.Bool || ty == Type.Char
+        .Fixed(_) -> {
+            if ty == Type.Float || ty == Type.Int -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Fixed(n)`", "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or exact `Int` values", "pass a `Float` or exact `Int`, or use bare interpolation for this value"))
+        }
+        .Grouped(_) -> {
+            if ty == Type.Float || ty == Type.Int -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Grouped(n)`", "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or exact `Int` values", "pass a `Float` or exact `Int`, or use bare interpolation for this value"))
+        }
+        .Hex(_) -> {
+            if ty == Type.Int -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Hex(n)`", "hex interpolation uses `core.text.fmt.hex`, which formats `Int` values", "pass an `Int`, or use bare interpolation for this value"))
+        }
+        .Sci(_) -> {
+            if ty == Type.Float -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Sci(n)`", "scientific interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value"))
+        }
+        .Percent(_) -> {
+            if ty == Type.Float -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Percent(n)`", "percent interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value"))
+        }
+        .Bin -> {
+            if ty == Type.Int -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Bin`", "binary interpolation formats exact Int values", "pass an exact `Int`, or use bare interpolation for this value"))
+        }
+        .Oct -> {
+            if ty == Type.Int -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Oct`", "octal interpolation formats exact Int values", "pass an exact `Int`, or use bare interpolation for this value"))
+        }
+        .Pad(_, _) | .PadLeft(_, _) -> {
+            if ty == Type.String -> return true
+            selector :: if format == {
+                .Pad(_, _) -> "Pad"
+                else -> "PadLeft"
+            }
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:{selector}(n)`", "padding interpolation formats String values", "pass a `String`, or use bare interpolation for this value"))
+        }
+        .Unit(_) -> {
+            if sema_expr_scalable_unit_type(ty, environment, program) -> return true
+            &diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
+        }
+        .Display | .Debug | .Pretty -> return true
     }
+    false
 }
 
 fn sema_expr_call_callee(value: TExpr) -> SymbolID? {
@@ -3334,7 +3368,7 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                     if sema_call_reflection_secret_bearing(checked.ty) -> &diagnostics.push(sema_error("E0112", checked.span, "secret-bearing `{type_name(checked.ty)}` cannot use `:{selector}`", "Debug output could copy cryptographic secret material into logs or diagnostics", "remove the interpolation; log a public operation label or key identifier instead")) else -> &diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't be shown with :{selector} yet", "debug interpolation needs a debuggable value", "implement `Debug` or use a debuggable part"))
                     return None
                 }
-                if !debug_family && format != StrFormat.Display && !sema_expr_format_supported(checked.ty, format) -> return None
+                if !debug_family && format != StrFormat.Display && !sema_expr_check_format_selector(checked, format, environment, program, &diagnostics) -> return None
                 formatted :: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return None else -> checked
                 &tir_parts.push(TStrPart.Interpolation{value: formatted, format: sema_expr_string_format(format)})
             }

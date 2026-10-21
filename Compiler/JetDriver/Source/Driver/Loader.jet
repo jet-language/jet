@@ -2864,6 +2864,9 @@ struct JetDriverCoreIdentifierDemand {
     math_abs_receiver: Bool
     // A `Regex{…}` checked literal: its producer is `core.regex.compile`.
     regex_literal: Bool
+    // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
+    // `Core/text/fmt.jet` formatter, so that source module loads.
+    format_selector: Bool{false}
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
@@ -2944,9 +2947,29 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
         }
         if tokens[index].literal < 0 -> next
         loop part in token_string_parts(tables, tokens[index]) {
-            if part.kind == STRING_PART_INTERPOLATION -> jet_driver_collect_core_identifier_demand_ids(part.tokens, tables, names, 0, part.tokens.len(), &demand, collect_bare)
+            if part.kind != STRING_PART_INTERPOLATION -> next
+            if jet_driver_interpolation_has_selector(part.tokens, tables) -> demand.format_selector = true
+            jet_driver_collect_core_identifier_demand_ids(part.tokens, tables, names, 0, part.tokens.len(), &demand, collect_bare)
         }
     }
+}
+
+// Whether an interpolation's tokens end in a selector: a `:` outside every
+// bracket followed by a selector name other than `Debug` (which renders
+// through the typed route, with no Core/text/fmt.jet formatter).
+fn jet_driver_interpolation_has_selector(tokens: [Token], tables: TokenTables) -> Bool Never! {
+    depth := 0
+    loop index in 0..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE {
+            depth += 1
+        } else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            depth -= 1
+        } else if kind == TOKEN_COLON && depth == 0 && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT {
+            return token_decoded(tables, tokens[index + 1]) != "Debug"
+        }
+    }
+    false
 }
 
 // What every demand scan thread reads: the lexed unit (moved in, moved
@@ -3000,6 +3023,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.option_or_err -> demand.option_or_err = true
         if output.math_abs_receiver -> demand.math_abs_receiver = true
         if output.regex_literal -> demand.regex_literal = true
+        if output.format_selector -> demand.format_selector = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
         }
@@ -3836,6 +3860,18 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
             if !bare_modules.contains("core.regex") -> &bare_modules.push("core.regex")
             regex_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.regex", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if regex_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
+        // An interpolation selector lowers to its `Core/text/fmt.jet`
+        // formatter, even when the caller has no explicit core.text.fmt import.
+        if demand.format_selector {
+            if !bare_modules.contains("core.text.fmt") -> &bare_modules.push("core.text.fmt")
+            fmt_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.text.fmt", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            if fmt_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     &pending.push(index)
