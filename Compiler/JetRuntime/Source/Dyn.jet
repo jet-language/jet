@@ -527,6 +527,108 @@ fn data_tree_push_count(target: I64, count: I64) {
     data_tree_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
+// DynRuntime.rs jet_dyn_remove: an Object's first entry named `key` leaves
+// the tree in place; Some(that value), else None for a miss or a non-Object.
+#Export(c) fn jet_dyn_remove(tree: I64, key: I64, some: I64) -> I64 {
+    if (data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_OBJECT) -> return I64{0}
+    sequence :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        entry :: data + at * DATA_TREE_ENTRY_BYTES
+        if (jet_rt_string_eq(data_tree_word(entry + DATA_TREE_ENTRY_KEY), key)) {
+            data_tree_store(some, data_tree_word(entry + DATA_TREE_ENTRY_VALUE))
+            jet_rt_string_drop(data_tree_word(entry + DATA_TREE_ENTRY_KEY))
+            later := at + I64{1}
+            loop later < length {
+                from :: data + later * DATA_TREE_ENTRY_BYTES
+                data_tree_store(from - DATA_TREE_ENTRY_BYTES + DATA_TREE_ENTRY_KEY, data_tree_word(from + DATA_TREE_ENTRY_KEY))
+                data_tree_store(from - DATA_TREE_ENTRY_BYTES + DATA_TREE_ENTRY_VALUE, data_tree_word(from + DATA_TREE_ENTRY_VALUE))
+                later += I64{1}
+            }
+            data_tree_store(sequence + DATA_SEQUENCE_LENGTH, length - I64{1})
+            return I64{1}
+        }
+        at += I64{1}
+    }
+    I64{0}
+}
+// A refused set_path step: the owned `value` is dropped and err takes the
+// "{site}: ..." stop text; the builder already holds the step detail.
+fn data_tree_set_refused(target: I64, value: I64, err: I64) -> I64 {
+    jet_rt_handle_drop_dyn(value)
+    data_tree_store(err, jet_rt_string_builder_finish(target))
+    I64{0}
+}
+// DynRuntime.rs jet_dyn_set_path over `steps`, a runtime Array of Text (key)
+// and Int (index) trees. A key missing at the last step is appended; the
+// reached node takes the owned `value` (their contents swap, and the value's
+// shell drops the replaced contents). Every refusal names its step as Rust does.
+#Export(c) fn jet_dyn_set_path(tree: I64, steps: I64, value: I64, site: I64, err: I64) -> I64 {
+    sequence :: data_tree_word(steps + DATA_TREE_PAYLOAD)
+    count :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    node := tree
+    at := I64{0}
+    loop at < count {
+        step :: data_tree_word(data + at * DATA_TREE_ELEMENT_BYTES)
+        kind :: data_tree_word(node + DATA_TREE_TAG)
+        if (data_tree_word(step + DATA_TREE_TAG) == DATA_TREE_TEXT) {
+            key :: data_tree_word(step + DATA_TREE_PAYLOAD)
+            if (kind != DATA_TREE_OBJECT) {
+                target :: data_tree_stop_begin(site)
+                jet_rt_string_builder_push(target, rt_static_text("expected an object, found "))
+                jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+                return data_tree_set_refused(target, value, err)
+            }
+            found :: data_tree_object_find(node, key)
+            if (found == I64{0}) {
+                if (at + I64{1} == count) {
+                    data_sequence_push(data_tree_word(node + DATA_TREE_PAYLOAD), key, value, true)
+                    return I64{1}
+                }
+                target :: data_tree_stop_begin(site)
+                jet_rt_string_builder_push(target, rt_static_text("no key "))
+                rt_text_push_rust_debug_str(target, key)
+                return data_tree_set_refused(target, value, err)
+            }
+            node = found
+        } else {
+            position :: jet_int_owned_to_i64(data_tree_word(step + DATA_TREE_PAYLOAD))
+            if (jet_scheduler_native_propagate() != I64{0}) {
+                jet_rt_handle_drop_dyn(value)
+                return I64{0}
+            }
+            if (kind != DATA_TREE_ARRAY) {
+                target :: data_tree_stop_begin(site)
+                jet_rt_string_builder_push(target, rt_static_text("expected an array, found "))
+                jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+                return data_tree_set_refused(target, value, err)
+            }
+            found :: data_tree_array_item(node, position)
+            if (found == I64{0}) {
+                target :: data_tree_stop_begin(site)
+                jet_rt_string_builder_push(target, rt_static_text("index "))
+                data_tree_push_count(target, position)
+                jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
+                data_tree_push_count(target, data_tree_word(data_tree_word(node + DATA_TREE_PAYLOAD) + DATA_SEQUENCE_LENGTH))
+                jet_rt_string_builder_push(target, rt_static_text(")"))
+                return data_tree_set_refused(target, value, err)
+            }
+            node = found
+        }
+        at += I64{1}
+    }
+    replaced_kind :: data_tree_word(node + DATA_TREE_TAG)
+    replaced_payload :: data_tree_word(node + DATA_TREE_PAYLOAD)
+    data_tree_store(node + DATA_TREE_TAG, data_tree_word(value + DATA_TREE_TAG))
+    data_tree_store(node + DATA_TREE_PAYLOAD, data_tree_word(value + DATA_TREE_PAYLOAD))
+    data_tree_store(value + DATA_TREE_TAG, replaced_kind)
+    data_tree_store(value + DATA_TREE_PAYLOAD, replaced_payload)
+    jet_rt_handle_drop_dyn(value)
+    I64{1}
+}
 // Outcome.rs jet_dyn_stop_message: "{site}: {detail}". Native Dyn lowering
 // (Lower/Dyn.jet) lends the borrowed site text and a static detail span.
 #Export(c) fn jet_rt_dyn_stop_message(site: I64, detail: I64, length: I64) -> I64 {
