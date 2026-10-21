@@ -117,12 +117,12 @@ struct RNG {
 
     fn split(&self) -> RNG Never! { RNG{state: seeded_next(&self.state)} }
 
-    fn pick<T: Clone>(&self, items: [T]) -> T? Never! {
+    fn pick<T>(&self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
         Val(items[&self.int(0, items.len() - 1)].copy())
     }
 
-    fn weighted_pick<T: Clone>(&self, items: [T], weights: [Float]) -> T? Never! {
+    fn weighted_pick<T>(&self, items: [T], weights: [Float]) -> T? Never! {
         if items.len() == 0 || items.len() != weights.len() -> return None
         total := Float{0.0}
         loop weight in weights {
@@ -139,7 +139,7 @@ struct RNG {
         Val(items[items.len() - 1].copy())
     }
 
-    fn sample<T: Clone>(&self, items: [T], count: Int) -> [T] Never! {
+    fn sample<T>(&self, items: [T], count: Int) -> [T] Never! {
         want := Int{I64{count}}
         if want < 0 -> want = 0
         if want > items.len() -> want = items.len()

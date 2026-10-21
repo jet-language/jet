@@ -311,7 +311,7 @@ fn replace_row<T>(table: &WebTable<T>, key: String, row: T) WebTableError! {
     return Err(WebTableError.NotFound)
 }
 
-fn update_row<T: Clone>(table: &WebTable<T>, key: String, transform: fn(T) -> T) WebTableError! {
+fn update_row<T>(table: &WebTable<T>, key: String, transform: fn(T) -> T) WebTableError! {
     loop i in 0..<table.rows.len() {
         if table.rows[i].key == key {
             updated :: transform(table.rows[i].value.copy()) ?? table.rows[i].value.copy()
