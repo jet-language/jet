@@ -1,0 +1,36 @@
+package {
+    name: "process_pass_directory"
+    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Exec, Env, Mem.Alloc] } }
+}
+
+// Directory.pass_to(spec, at:) hands a held directory to the child at a fixed
+// descriptor slot (the Rust reference clears CLOEXEC on the held handle). The
+// child gets a duplicate: renaming the directory or closing it here afterwards
+// does not change what the child reads through the slot.
+
+use core.files as files
+use core.process as process
+
+fn run() {
+    scratch :: files.temp_dir("pass-directory")
+    held_path :: files.join(scratch.path, "held")
+    files.create_dir(held_path)
+    files.write(files.join(held_path, "marker.txt"), "held directory\n")
+    directory :: files.open_directory(held_path)
+    spec :: process.cmd(["sh", "-c", "cat /proc/self/fd/9/marker.txt"])
+    passed :: directory.pass_to(spec, at: 9)
+    if directory.pass_to(passed, at: 9) == {
+        .Ok(_) -> print("same slot twice: accepted")
+        .Err(error) -> print("same slot twice: {error == .InvalidInput(_)}")
+    }
+    if directory.pass_to(spec, at: 2) == {
+        .Ok(_) -> print("stdio slot: accepted")
+        .Err(error) -> print("stdio slot: {error == .InvalidInput(_)}")
+    }
+    close(^directory)
+    files.rename(held_path, files.join(scratch.path, "moved"))
+    files.create_dir(held_path)
+    files.write(files.join(held_path, "marker.txt"), "replacement\n")
+    receipt :: passed.run()
+    print("child read: {receipt.output.trim()}")
+}

@@ -442,6 +442,14 @@ struct Directory {
             }
         }
     }
+
+    /// Pass this directory to the process `spec` starts, open at descriptor
+    /// `at` (3 or more): the child inherits a duplicate, so renaming or
+    /// closing the directory here afterwards does not change what it sees.
+    /// A slot `spec` already passes is `IOError.InvalidInput`.
+    fn pass_to(self, spec: ProcessSpec, at: Int) -[FS, Exec, Env]> ProcessSpec IOError! {
+        process_directory(spec, self, at, false)
+    }
 }
 
 // Compiler-private store bridge, not a public filesystem API. The store
@@ -453,6 +461,13 @@ struct Directory {
 // Compiler-private process bridge. The borrowed Directory stays live through
 // the raw fd duplication; only the duplicate enters the ProcessSpec carrier.
 #Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") fn compiler_with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+    process_directory(spec, directory, child_fd, as_cwd)
+}
+
+// Duplicate the held directory into `spec` at `child_fd`, optionally as the
+// child's working directory. The Directory is borrowed through the
+// duplication, so a later rename or close here never changes the child's view.
+fn process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
     context :: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
     if child_fd < 3 || child_fd > 2147483646 {
         return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
