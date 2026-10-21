@@ -1,0 +1,298 @@
+// `jet import --update` acceptance (Source/CmdImport.rs
+// `accept_update_replacement`, `indexed_import_evidence`,
+// `indexed_comparison`, `accepted_receipt_json`, `persist_accepted_receipt`):
+// a generated candidate replaces the foreign source only against indexed,
+// current import evidence and a matched comparison bound to the same
+// boundary, tool, target, coverage, and assumptions.
+use core.crypto as import_update_crypto
+use core.files as import_update_files
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_bytes, canonical_json_parse]
+use jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
+
+fn jet_cli_import_update_error(message: String) -> JetCLIImportPlanError Never! { JetCLIImportPlanError{message: message} }
+
+// Rust `indexed_artifact_path`.
+fn jet_cli_import_indexed_artifact_path(root: String, entry: JetCLIRecordIndexEntry, cwd: String) -> String Never! {
+    if import_update_files.is_abs(entry.path) -> return entry.path.copy()
+    if entry.path == ".jet" || entry.path.starts_with(".jet/") -> return import_update_files.join(cwd, entry.path)
+    import_update_files.join(root, entry.path)
+}
+
+// Rust `receipt_store_for_artifact`: `<root>/.jet/receipts/objects/<key>`
+// names the project root whose store holds the receipt.
+fn jet_cli_import_receipt_project_for_artifact(path: String) -> String JetCLIImportPlanError! {
+    objects :: import_update_files.dirname(path)
+    if objects == "" || objects == path -> return Err(jet_cli_import_update_error("receipt artifact has no parent: {path}"))
+    if import_update_files.basename(objects) != "objects" -> return Err(jet_cli_import_update_error("indexed comparison path is not a receipt object: {path}"))
+    receipts :: import_update_files.dirname(objects)
+    if receipts == "" || receipts == objects -> return Err(jet_cli_import_update_error("receipt object has no store root: {path}"))
+    Ok(import_update_files.dirname(import_update_files.dirname(receipts)))
+}
+
+// Rust `attachment_values` / `require_attachment` / `require_attachment_set`.
+fn jet_cli_import_attachment_values(record: EvidenceRecord, name: String) -> [String] Never! {
+    loop attachment in record.attachments if attachment.name == name -> attachment.value.copy()
+}
+fn jet_cli_import_require_attachment(record: EvidenceRecord, name: String, expected: String) JetCLIImportPlanError! {
+    values :: jet_cli_import_attachment_values(record, name)
+    if values.len() != 1 || values[0] != expected -> return Err(jet_cli_import_update_error("indexed evidence attachment `{name}` does not match the current import"))
+}
+fn jet_cli_import_require_attachment_set(record: EvidenceRecord, name: String, expected: [String]) JetCLIImportPlanError! {
+    values := jet_cli_import_attachment_values(record, name)
+    &values.sort()
+    if values != expected -> return Err(jet_cli_import_update_error("indexed evidence attachments `{name}` do not match the current import"))
+}
+
+// Rust `validate_import_binding`.
+fn jet_cli_import_validate_import_binding(record: EvidenceRecord, boundary: ForeignBoundaryContract, boundary_digest: String, source_digest: String, replacement_digest: String) JetCLIImportPlanError! {
+    jet_cli_import_require_attachment(record, "boundary", boundary_digest) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "source-digest", source_digest) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "replacement-digest", replacement_digest) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "source-identity", boundary.identity.source) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "replacement-identity", boundary.identity.overlay) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "tool-identity", boundary.identity.toolchain) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "target-identity", boundary.identity.target) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "coverage", boundary.artifact_coverage.digest()) ?? return Err(err)
+    jet_cli_import_require_attachment_set(record, "assumption", boundary.assumptions) ?? return Err(err)
+    identity :: boundary.identity.derivation_identity()
+    if record.build.toolchain != identity.build || record.build.target != identity.target || record.build.profile != "source-import" -> return Err(jet_cli_import_update_error("indexed import evidence build identity is stale"))
+    if record.revision.source != identity.source || record.revision.build != identity.build || record.revision.revision != identity.run -> return Err(jet_cli_import_update_error("indexed import evidence revision identity is stale"))
+}
+
+// `EvidenceReport::read`.
+fn jet_cli_import_read_evidence(path: String) -[FS.Read]> EvidenceReport JetCLIImportPlanError! {
+    bytes :: import_update_files.read_bytes(path) ?? return Err(jet_cli_import_update_error(jet_cli_io_error_text(err)))
+    evidence_report_from_bytes(bytes, U64.from_int(9223372036854775807) ?? U64{0}) ?? return Err(jet_cli_import_update_error(err.message))
+}
+
+struct JetCLIImportIndexedEvidence { record: EvidenceRecord, derivation: DerivationRecord }
+
+// Rust `indexed_import_evidence`.
+fn jet_cli_import_indexed_import_evidence(index: JetCLIRecordIndex, root: String, cwd: String, boundary: ForeignBoundaryContract, boundary_digest: String, source_digest: String, replacement_digest: String) -[FS.Read]> JetCLIImportIndexedEvidence JetCLIImportPlanError! {
+    report_id :: "source-import-{boundary_digest}"
+    entry :: jet_cli_record_index_find(index, "evidence", report_id, true) ?? return Err(jet_cli_import_update_error("source import update requires prior indexed import evidence for the current source"))
+    if entry.identity.target_inputs_sha256 != source_digest || entry.identity.engine != evidence_producer_name(EvidenceProducerKind.Compile) -> return Err(jet_cli_import_update_error("indexed import evidence is stale against the current source digest"))
+    report :: jet_cli_import_read_evidence(jet_cli_import_indexed_artifact_path(root, entry, cwd)) ?? return Err(jet_cli_import_update_error("cannot read indexed import evidence: {err.message}"))
+    if !evidence_report_is_complete(report) -> return Err(jet_cli_import_update_error("indexed import evidence is incomplete"))
+    found := EvidenceRecord?{None}
+    loop candidate in report.records {
+        if candidate.identity.report_id == report_id && candidate.identity.claim_id == "source-import" {
+            found = Val(candidate.copy())
+            break
+        }
+    }
+    record :: found ?? return Err(jet_cli_import_update_error("indexed import evidence has no source-import record"))
+    evidence_record_validate(record) ?? return Err(jet_cli_import_update_error("indexed import evidence is invalid: {evidence_expectation_error_text(err)}"))
+    if record.outcome != EvidenceOutcome.Generated -> return Err(jet_cli_import_update_error("indexed import evidence is not a complete generated candidate: {evidence_outcome_name(record.outcome)}"))
+    jet_cli_import_validate_import_binding(record, boundary, boundary_digest, source_digest, replacement_digest) ?? return Err(err)
+    reference :: record.derivation ?? return Err(jet_cli_import_update_error("indexed import evidence has no derivation reference"))
+    derivation :: evidence_report_derivation(report, reference) ?? return Err(jet_cli_import_update_error("indexed import evidence has no derivation payload"))
+    if !derivation_record_validate(derivation) -> return Err(jet_cli_import_update_error("derivation {derivation.id} has a non-canonical identity"))
+    if derivation.identity != boundary.identity.derivation_identity() -> return Err(jet_cli_import_update_error("indexed import derivation identity is stale"))
+    if derivation.method != MIRDerivationMethod.StaticDerivation || derivation.rule != "foreign-source-import" || derivation.disposition != MIRDerivationDisposition.Current -> return Err(jet_cli_import_update_error("indexed import derivation is not current"))
+    premises := [String]{boundary_digest.copy(), boundary.artifact_coverage.digest(), source_digest.copy(), replacement_digest.copy()}
+    &premises.sort()
+    unique := [String]{}
+    loop premise in premises {
+        if unique.len() == 0 || unique[unique.len() - 1] != premise -> &unique.push(premise.copy())
+    }
+    if derivation.premises != unique -> return Err(jet_cli_import_update_error("indexed import derivation premises are stale"))
+    Ok(JetCLIImportIndexedEvidence{record: record, derivation: derivation})
+}
+
+// Rust `validate_comparison_binding`.
+fn jet_cli_import_validate_comparison_binding(record: EvidenceRecord, comparison: ComparisonRecord, artifact_id: String, boundary: ForeignBoundaryContract, boundary_digest: String) JetCLIImportPlanError! {
+    jet_cli_import_require_attachment(record, "comparison-artifact", artifact_id) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "boundary", boundary_digest) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "source-identity", boundary.identity.source) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "replacement-identity", boundary.identity.overlay) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "tool-identity", boundary.identity.toolchain) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "target-identity", boundary.identity.target) ?? return Err(err)
+    jet_cli_import_require_attachment(record, "coverage", boundary.artifact_coverage.digest()) ?? return Err(err)
+    jet_cli_import_require_attachment_set(record, "assumption", boundary.assumptions) ?? return Err(err)
+    if record.build.toolchain != boundary.identity.toolchain || record.build.target != boundary.identity.target || record.build.profile != "comparison" || record.revision.source != artifact_id || record.revision.build != "jet-comparison-v1" || record.revision.revision != artifact_id -> return Err(jet_cli_import_update_error("indexed comparison evidence build identity is stale"))
+    loop sample in comparison.samples {
+        if sample.identity.source != boundary.identity.source || sample.identity.tool != boundary.identity.toolchain || sample.identity.target != boundary.identity.target -> return Err(jet_cli_import_update_error("indexed comparison samples are not bound to the current foreign tool and target"))
+    }
+}
+
+// Rust `indexed_comparison`: newest matched comparison bound to this boundary.
+fn jet_cli_import_indexed_comparison(index: JetCLIRecordIndex, root: String, cwd: String, boundary: ForeignBoundaryContract, boundary_digest: String) -[FS, Time.Wait]> ComparisonRecord JetCLIImportPlanError! {
+    entries := jet_cli_record_index_query_kind(index, "comparison", true)
+    &entries.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> {
+        if left.recorded_sequence != right.recorded_sequence -> return right.recorded_sequence <=> left.recorded_sequence
+        left.artifact_id <=> right.artifact_id
+    })
+    stale_reason := String?{None}
+    loop entry in entries {
+        path :: jet_cli_import_indexed_artifact_path(root, entry, cwd)
+        raw_bytes :: import_update_files.read_bytes(path) ?? {
+            stale_reason = Val("indexed comparison receipt `{entry.artifact_id}` could not be authenticated: {jet_cli_io_error_text(err)}")
+            next
+        }
+        raw_receipt :: jet_cli_receipt_decode(raw_bytes) ?? {
+            stale_reason = Val("indexed comparison receipt `{entry.artifact_id}` could not be authenticated: {err.message}")
+            next
+        }
+        store_root :: jet_cli_import_receipt_project_for_artifact(path) ?? return Err(err)
+        receipt :: if jet_cli_receipt_lookup(store_root, raw_receipt.claim) == {
+            .Val(current) -> current
+            .None -> {
+                stale_reason = Val("indexed comparison `{entry.artifact_id}` is stale against its current corpus inputs")
+                next
+            }
+            .Err(error) -> { return Err(jet_cli_import_update_error(error.message)) }
+        }
+        found := JetCLIReceiptSection?{None}
+        loop section in receipt.sections {
+            if section.name == "comparison" && section.type_name == "ComparisonRecord" {
+                found = Val(section.copy())
+                break
+            }
+        }
+        section :: found ?? next
+        payload :: canonical_json_parse(section.bytes) ?? return Err(jet_cli_import_update_error(err.message))
+        comparison :: comparison_record_from_json(payload) ?? return Err(jet_cli_import_update_error(err.message))
+        artifact_id :: comparison_record_artifact_id(comparison) ?? return Err(jet_cli_import_update_error(err.message))
+        if section.payload_digest != artifact_id || artifact_id != entry.artifact_id -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has a non-canonical artifact digest"))
+        bound := false
+        bound_error := String?{None}
+        loop link in receipt.consumed {
+            if link.kind != "evidence" -> next
+            evidence_entry :: jet_cli_record_index_find(index, "evidence", link.artifact_id, true) ?? {
+                bound_error = Val("comparison `{entry.artifact_id}` links to missing evidence `{link.artifact_id}`")
+                next
+            }
+            evidence_report :: jet_cli_import_read_evidence(jet_cli_import_indexed_artifact_path(root, evidence_entry, cwd)) ?? return Err(jet_cli_import_update_error("cannot read comparison evidence `{link.artifact_id}`: {err.message}"))
+            if !evidence_report_is_complete(evidence_report) {
+                bound_error = Val("comparison evidence `{link.artifact_id}` is incomplete")
+                next
+            }
+            loop evidence in evidence_report.records {
+                if evidence.identity.report_id != link.artifact_id || evidence.identity.claim_id != "comparison" -> next
+                if jet_cli_import_validate_comparison_binding(evidence, comparison, artifact_id, boundary, boundary_digest) == .Err(_) -> next
+                bound = true
+                evidence_record_validate(evidence) ?? return Err(jet_cli_import_update_error("indexed comparison evidence is invalid: {evidence_expectation_error_text(err)}"))
+                if evidence.outcome != EvidenceOutcome.Passed -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` is not accepted: evidence outcome is {evidence_outcome_name(evidence.outcome)}"))
+                reference :: evidence.derivation ?? return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has no checked derivation"))
+                derivation :: evidence_report_derivation(evidence_report, reference) ?? return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has a missing derivation payload"))
+                if derivation.disposition != MIRDerivationDisposition.Current -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` has stale derivation evidence"))
+                if derivation != evidence_record_checked_derivation(evidence) -> return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` derivation does not match its evidence"))
+            }
+        }
+        if !bound {
+            if bound_error == .Val(error) -> stale_reason = Val(error)
+            next
+        }
+        comparison_record_assert_equal(comparison) ?? return Err(jet_cli_import_update_error("indexed comparison `{entry.artifact_id}` was not matched: {comparison_assertion_error_text(err)}"))
+        return Ok(comparison)
+    }
+    Err(jet_cli_import_update_error(stale_reason ?? "source import update requires an indexed matched comparison bound to the current source, generated candidate, tool, target, coverage, and assumptions"))
+}
+
+// Rust `accept_update_replacement`.
+fn jet_cli_import_accept_update_replacement(plan: &JetCLIImportPlan, cwd: String) -[FS, Time.Wait, Env]> ForeignSourceReceipt JetCLIImportPlanError! {
+    boundary :: plan.boundary.copy()
+    if !boundary.has_complete_artifact_coverage() -> return Err(jet_cli_import_update_error("source import replacement coverage is incomplete"))
+    files := [String]{}
+    jet_cli_import_collect_sources(plan.source, plan.source, plan.language, &files) ?? return Err(err)
+    &files.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    current_source_digest :: jet_cli_import_tree_identity(plan.source, files, "jet-source-import-input-v1") ?? return Err(err)
+    if current_source_digest != plan.source_digest -> return Err(jet_cli_import_update_error("source import update source changed after planning"))
+    index :: jet_cli_record_index_load(cwd) ?? return Err(jet_cli_import_update_error("cannot load indexed reasoning records: {err.message}"))
+    prior :: jet_cli_import_indexed_import_evidence(index, cwd, cwd, boundary, plan.boundary_digest, plan.source_digest, plan.replacement_digest) ?? return Err(err)
+    comparison :: jet_cli_import_indexed_comparison(index, cwd, cwd, boundary, plan.boundary_digest) ?? return Err(err)
+    accepted := boundary.copy()
+    current_identity :: accepted.identity.copy()
+    current_coverage :: accepted.artifact_coverage.copy()
+    replacement_identity :: current_identity.overlay.copy()
+    receipt :: &accepted.accept_reasoned_replacement(current_identity, current_coverage, prior.derivation, prior.record, comparison, replacement_identity) ?? return Err(jet_cli_import_update_error(err.message))
+    plan.boundary = ^accepted
+    Ok(receipt)
+}
+
+fn jet_cli_import_json_text(value: String) -> CanonicalJSON Never! { CanonicalJSON.String(value.copy()) }
+
+// Rust `accepted_receipt_json`.
+fn jet_cli_import_accepted_receipt_json(receipt: ForeignSourceReceipt, assumptions: [String]) -> CanonicalJSON JetCLIImportPlanError! {
+    identity :: canonical_json_object([CanonicalJSONField]{
+        {key: "generator", value: jet_cli_import_json_text(receipt.boundary_identity.generator)},
+        {key: "implementation", value: jet_cli_import_json_text(receipt.boundary_identity.implementation)},
+        {key: "overlay", value: jet_cli_import_json_text(receipt.boundary_identity.overlay)},
+        {key: "source", value: jet_cli_import_json_text(receipt.boundary_identity.source)},
+        {key: "target", value: jet_cli_import_json_text(receipt.boundary_identity.target)},
+        {key: "toolchain", value: jet_cli_import_json_text(receipt.boundary_identity.toolchain)},
+    }) ?? return Err(jet_cli_import_update_error(err.message))
+    evidence := [CanonicalJSON]{}
+    loop item in receipt.evidence {
+        value :: canonical_json_object([CanonicalJSONField]{
+            {key: "claim_id", value: jet_cli_import_json_text(item.claim_id)},
+            {key: "evidence_id", value: jet_cli_import_json_text(item.evidence_id)},
+            {key: "report_id", value: jet_cli_import_json_text(item.report_id)},
+        }) ?? return Err(jet_cli_import_update_error(err.message))
+        &evidence.push(value)
+    }
+    derivation :: canonical_json_object([CanonicalJSONField]{{key: "id", value: jet_cli_import_json_text(receipt.derivation.id)}}) ?? return Err(jet_cli_import_update_error(err.message))
+    assumption_values :: loop assumption in assumptions -> jet_cli_import_json_text(assumption)
+    reason :: if receipt.comparison_reason == .Val(text) -> jet_cli_import_json_text(text) else -> CanonicalJSON.Null
+    difference :: if receipt.first_difference == .Val(number) -> CanonicalJSON.Integer("{number}") else -> CanonicalJSON.Null
+    value :: canonical_json_object([CanonicalJSONField]{
+        {key: "artifact_coverage_digest", value: jet_cli_import_json_text(receipt.artifact_coverage_digest)},
+        {key: "assumptions", value: CanonicalJSON.Array(assumption_values)},
+        {key: "boundary_digest", value: jet_cli_import_json_text(receipt.boundary_digest)},
+        {key: "boundary_identity", value: identity},
+        {key: "comparison_artifact_id", value: jet_cli_import_json_text(receipt.comparison_artifact_id)},
+        {key: "comparison_reason", value: reason},
+        {key: "comparison_relation", value: jet_cli_import_json_text(receipt.comparison_relation)},
+        {key: "comparison_schema_version", value: CanonicalJSON.Integer("{receipt.comparison_schema_version}")},
+        {key: "comparison_status", value: jet_cli_import_json_text(receipt.comparison_status)},
+        {key: "compared_samples", value: CanonicalJSON.Integer("{receipt.compared_samples}")},
+        {key: "derivation", value: derivation},
+        {key: "discarded_cases", value: CanonicalJSON.Integer("{receipt.discarded_cases}")},
+        {key: "evidence", value: CanonicalJSON.Array(evidence)},
+        {key: "first_difference", value: difference},
+        {key: "replacement_identity", value: jet_cli_import_json_text(receipt.replacement_identity)},
+        {key: "schema", value: jet_cli_import_json_text(receipt.schema)},
+        {key: "source_authority", value: jet_cli_import_json_text(receipt.source_authority.as_str())},
+        {key: "source_identity", value: jet_cli_import_json_text(receipt.source_identity)},
+    }) ?? return Err(jet_cli_import_update_error(err.message))
+    Ok(value)
+}
+
+// Rust `persist_accepted_receipt` (ReceiptStore `record_with_sections_and_links`
+// plus `index_published_receipt`).
+fn jet_cli_import_persist_accepted_receipt(plan: JetCLIImportPlan, receipt: ForeignSourceReceipt, cwd: String) JetCLIImportPlanError! -[FS, Env, Time, IO]> {
+    receipt.validate() ?? return Err(jet_cli_import_update_error(err.message))
+    files := [String]{}
+    jet_cli_import_collect_sources(plan.source, plan.source, plan.language, &files) ?? return Err(err)
+    &files.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    if files.len() == 0 -> return Err(jet_cli_import_update_error("accepted source import has no source inputs"))
+    argv :: [String]{"import", plan.source.copy(), "--update"}
+    paths :: loop file in files -> file.copy()
+    payload :: jet_cli_import_accepted_receipt_json(receipt, plan.boundary.assumptions) ?? return Err(err)
+    section :: jet_cli_receipt_section_new("foreign-source-replacement", "ForeignSourceReceipt", canonical_json_bytes(payload)) ?? return Err(jet_cli_import_update_error(err.message))
+    consumed := [JetCLIRecordLink]{}
+    loop evidence in receipt.evidence {
+        link :: JetCLIRecordLink{kind: "evidence", artifact_id: evidence.report_id.copy()}
+        if !consumed.contains(link) -> &consumed.push(link)
+    }
+    comparison_link :: JetCLIRecordLink{kind: "comparison", artifact_id: receipt.comparison_artifact_id.copy()}
+    if !consumed.contains(comparison_link) -> &consumed.push(comparison_link)
+    claim :: jet_cli_receipt_claim("import", paths, argv, jet_cli_terminal_bits()) ?? return Err(jet_cli_import_update_error(err.message))
+    cache := WorkspaceDeclarationCache.new()
+    start :: AuthorityResolver.authority_walk_root(plan.source) ?? return Err(jet_cli_import_update_error("could not resolve the import source directory"))
+    receipt_root :: jet_cli_receipt_project_root(&cache, start)
+    prepared :: jet_cli_receipt_prepare(claim, 0, [U8]{}, [U8]{}, [JetCLIReceiptSection]{section}, consumed, [JetCLIRecordLink]{}, [String]{}) ?? return Err(jet_cli_import_update_error(err.message))
+    _ :: jet_cli_receipt_publish(receipt_root, prepared) ?? return Err(jet_cli_import_update_error(err.message))
+    published :: if jet_cli_receipt_lookup(receipt_root, claim) == {
+        .Val(current) -> current
+        .None -> { return Err(jet_cli_import_update_error("receipt was not current after publication")) }
+        .Err(error) -> { return Err(jet_cli_import_update_error(error.message)) }
+    }
+    target :: jet_cli_receipt_target_identity(&cache, plan.source, claim.inputs) ?? return Err(jet_cli_import_update_error(err.message))
+    index := jet_cli_record_index_load(receipt_root) ?? return Err(jet_cli_import_update_error(err.message))
+    receipt_bytes :: jet_cli_receipt_encode(published) ?? return Err(jet_cli_import_update_error(err.message))
+    identity :: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-receipt-v2"}
+    entry :: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", receipt_bytes.len(), published.consumed, published.produced, false) ?? return Err(jet_cli_import_update_error(err.message))
+    jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{^entry}) ?? return Err(jet_cli_import_update_error(err.message))
+}

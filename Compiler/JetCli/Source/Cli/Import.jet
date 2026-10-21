@@ -1,0 +1,264 @@
+// `jet import <lang> <dir> [--dry-run|--update]` (Source/CmdImport.rs `run`,
+// `apply_plan`, `report`, `report_value`, `usage_error`, `operation_error`):
+// narrow source conversion into editable Jet under `jet/<name>`, a stored
+// baseline for three-way `--update` merges, the import report, and the
+// generated-candidate evidence record.
+use core.crypto as import_crypto
+use core.files as import_out_files
+use core.sys as import_out_sys
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[Diagnostic, DiagnosticMoment, diagnostic_from_registry, diagnostic_registry_row]
+use jet_pkg_model.[WorkspaceDeclarationCache]
+
+JET_CLI_IMPORT_TODO_CODE :: "JT0101"
+
+// Rust `Todo::diagnostic`: the registry row with its holes filled.
+fn jet_cli_import_todo_diagnostic(todo: JetCLIImportTodo) -> Diagnostic Never! {
+    row :: diagnostic_registry_row(JET_CLI_IMPORT_TODO_CODE) ?? panic("JT0101 is not registered")
+    what :: row.what.replace("{{construct}}", todo.what).replace("{{source}}", todo.source)
+    why :: row.why.replace("{{reason}}", todo.why)
+    fix :: row.fix.replace("{{fix}}", todo.fix).replace("{{target}}", todo.target)
+    diagnostic_from_registry(JET_CLI_IMPORT_TODO_CODE, None, what, why, fix)
+}
+
+// One `ReportEnvelope::new("tool", "error", code, what, why, fix)` child.
+fn jet_cli_import_tool_report(code: String, what: String, why: String, fix: String) -> String Never! {
+    jet_cli_report_json(Diagnostic{moment: DiagnosticMoment.Tool, severity: 1, code: code, what: what, why: why, fix: fix}, None, "", "", 0)
+}
+
+fn jet_cli_import_output(stdout: String, stderr: String, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
+}
+
+// Rust `usage_error`.
+fn jet_cli_import_usage_error(what: String, fix: String, json: Bool) -> JetDriverVerbOutput Never! {
+    why :: "D-MIGRATE-SRC1 keeps source import arguments explicit"
+    if json -> return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report("E2102", what, why, fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USAGE)
+    jet_cli_import_output("", jet_cli_report("E2102", what, why, fix, false), JET_DRIVER_EXIT_USAGE)
+}
+
+// Rust `operation_error` (JT0198).
+fn jet_cli_import_operation_error(what: String, why: String, json: Bool) -> JetDriverVerbOutput Never! {
+    row :: diagnostic_registry_row("JT0198") ?? panic("JT0198 is not registered")
+    diagnostic :: diagnostic_from_registry("JT0198", None, row.what.replace("{{operation}}", what), row.why.replace("{{reason}}", why), row.fix)
+    if json -> return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_import_output("", "error[{diagnostic.code}]: {diagnostic.what}\n  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// Rust `migration_source_conversion` / `migration_mode`.
+fn jet_cli_import_migration_source_conversion(boundary: ForeignBoundaryContract) -> String Never! {
+    if boundary.source_import -> "narrow-checked-subset" else -> "unavailable"
+}
+fn jet_cli_import_migration_mode(boundary: ForeignBoundaryContract) -> String Never! {
+    if {
+        boundary.disposition == ForeignBoundaryDisposition.BinderOnly -> "manual"
+        boundary.source_import -> "conversion"
+        else -> "binder"
+    }
+}
+
+// Rust `migration_projection_value`.
+fn jet_cli_import_migration_value(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("disposition", jet_cli_status_text(plan.boundary.disposition.as_str())),
+        jet_cli_status_field("source_conversion", jet_cli_status_text(jet_cli_import_migration_source_conversion(plan.boundary))),
+        jet_cli_status_field("mode", jet_cli_status_text(jet_cli_import_migration_mode(plan.boundary))),
+        jet_cli_status_field("source_authority", jet_cli_status_text(plan.boundary.source_authority.as_str())),
+    })
+}
+
+// Rust `boundary_projection_value`: the canonical provenance rows.
+fn jet_cli_import_boundary_value(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
+    rows :: loop field in plan.boundary.provenance_fields() -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(field.name)), jet_cli_status_field("value", jet_cli_status_text(field.value))})
+    jet_cli_status_array(rows)
+}
+
+// Rust `report_value`; `report` is the same ordered value as one JSON line.
+fn jet_cli_import_report_value(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
+    omissions := [JetCLIStatusValue]{}
+    loop todo in plan.todos {
+        diagnostic :: jet_cli_import_todo_diagnostic(todo)
+        &omissions.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
+            jet_cli_status_field("what", jet_cli_status_text(diagnostic.what)),
+            jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
+            jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
+            jet_cli_status_field("source", jet_cli_status_text(todo.source)),
+            jet_cli_status_field("source_span", jet_cli_status_text(todo.source)),
+            jet_cli_status_field("generated_target", jet_cli_status_text(todo.target)),
+            jet_cli_status_field("provenance", jet_cli_status_text("D-MIGRATE-SRC1")),
+            jet_cli_status_field("migration_status", jet_cli_status_text(todo.status)),
+        }))
+    }
+    provenance :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("source_root", jet_cli_status_text(plan.source)),
+        jet_cli_status_field("generated_root", jet_cli_status_text(plan.target)),
+        jet_cli_status_field("boundary", jet_cli_import_boundary_value(plan)),
+    })
+    summary :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("files", jet_cli_status_int(plan.generated.len())),
+        jet_cli_status_field("translated_functions", jet_cli_status_int(plan.functions)),
+        jet_cli_status_field("carried_tests", jet_cli_status_int(plan.tests)),
+        jet_cli_status_field("omissions", jet_cli_status_int(plan.todos.len())),
+    })
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("schema", jet_cli_status_text("jet.source-import.v1")),
+        jet_cli_status_field("law", jet_cli_status_text("D-MIGRATE-SRC1")),
+        jet_cli_status_field("language", jet_cli_status_text(plan.language)),
+        jet_cli_status_field("source", jet_cli_status_text(plan.source)),
+        jet_cli_status_field("target", jet_cli_status_text(plan.target)),
+        jet_cli_status_field("migration", jet_cli_import_migration_value(plan)),
+        jet_cli_status_field("provenance", provenance),
+        jet_cli_status_field("summary", summary),
+        jet_cli_status_field("omissions", jet_cli_status_array(omissions)),
+    })
+}
+
+fn jet_cli_import_report(plan: JetCLIImportPlan) -> String Never! { "{jet_cli_status_json(jet_cli_import_report_value(plan))}\n" }
+
+// Rust `attach_import_evidence`: the boundary carries its derivation and record.
+fn jet_cli_import_attach_evidence(plan: &JetCLIImportPlan) JetCLIImportPlanError! {
+    if plan.evidence.derivations.len() == 0 -> return Err(jet_cli_import_plan_error("source import evidence has no derivation"))
+    if plan.evidence.records.len() == 0 -> return Err(jet_cli_import_plan_error("source import evidence has no record"))
+    derivation :: plan.evidence.derivations[0].copy()
+    record :: plan.evidence.records[0].copy()
+    boundary := plan.boundary.copy()
+    boundary = ^boundary.attach_derivation(derivation) ?? return Err(jet_cli_import_plan_error(err.message))
+    boundary = ^boundary.attach_evidence(record) ?? return Err(jet_cli_import_plan_error(err.message))
+    boundary.validate() ?? return Err(jet_cli_import_plan_error(err.message))
+    plan.boundary = ^boundary
+}
+
+// Rust `persist_evidence_report_for_inputs` (CmdCompile.rs): the encoded
+// report under `.jet/evidence/<sha256>.json` of the selected project root,
+// indexed as protected evidence for the source digest.
+fn jet_cli_import_persist_evidence(report: EvidenceReport, target_inputs_sha256: String) JetCLIReadError! -[FS, Env, Time]> {
+    report_id :: report.identity.report_id
+    if report_id == "" || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{report_id}`"))
+    cwd :: import_out_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
+    cache := WorkspaceDeclarationCache.new()
+    root :: jet_cli_selected_project_root(&cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
+    bytes :: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
+    artifact_id :: import_crypto.sha256(bytes).hex()
+    held :: JetCLIRootedDirectory.open(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
+    _ :: held.publish_immutable("{artifact_id}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
+    index := jet_cli_record_index_load(root)
+    identity :: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: report.build.toolchain, engine: evidence_producer_name(report.producer)}
+    entry :: jet_cli_comparison_index_entry(index, identity, "evidence", artifact_id, ".jet/evidence/{artifact_id}.json", bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true)
+    jet_cli_record_index_publish_and_store(&index, root, ^entry)
+}
+
+// `fs::read_to_string(path).ok()`.
+fn jet_cli_import_existing(path: String) -[FS.Read]> String? Never! {
+    text :: import_out_files.read(path) ?? return None
+    Val(text)
+}
+
+struct JetCLIImportWrite { path: String, contents: String }
+
+// One generated file (or the report) against the editable target and the
+// stored baseline (Rust `apply_plan`'s write/conflict table).
+fn jet_cli_import_stage(mode: JetCLIImportMode, target: String, baseline: String, contents: String, writes: &[JetCLIImportWrite], conflicts: &[String]) Never! -[FS.Read]> {
+    existing :: jet_cli_import_existing(target)
+    prior :: jet_cli_import_existing(baseline)
+    if mode != JetCLIImportMode.DryRun {
+        if existing == {
+            .None -> &writes.push(JetCLIImportWrite{path: target, contents: contents})
+            .Val(current) -> {
+                if current != contents {
+                    if mode == JetCLIImportMode.Create {
+                        &conflicts.push(target)
+                    } else if prior == .Val(old) {
+                        if current == old {
+                            &writes.push(JetCLIImportWrite{path: target, contents: contents})
+                        } else if contents != old {
+                            &conflicts.push(target)
+                        }
+                    } else {
+                        &conflicts.push(target)
+                    }
+                }
+            }
+        }
+        if prior != .Val(contents) -> &writes.push(JetCLIImportWrite{path: baseline, contents: contents})
+    }
+}
+
+// Rust `apply_plan`.
+fn jet_cli_import_apply(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
+    current := plan
+    if mode != JetCLIImportMode.DryRun {
+        jet_cli_import_attach_evidence(&current) ?? return jet_cli_import_operation_error("attach import evidence", err.message, json)
+    }
+    accepted := ForeignSourceReceipt?{None}
+    if mode == JetCLIImportMode.Update {
+        cwd :: import_out_sys.current_dir() ?? return jet_cli_import_operation_error("read current directory", jet_cli_io_error_text(err), json)
+        receipt :: jet_cli_import_accept_update_replacement(&current, cwd) ?? return jet_cli_import_operation_error("accept source replacement", err.message, json)
+        accepted = Val(receipt)
+    }
+    report :: jet_cli_import_report(current)
+    baseline_root :: import_out_files.join(current.target, ".jet-import/baseline")
+    writes := [JetCLIImportWrite]{}
+    conflicts := [String]{}
+    loop generated in current.generated {
+        jet_cli_import_stage(mode, import_out_files.join(current.target, generated.relative), import_out_files.join(baseline_root, generated.relative), generated.contents, &writes, &conflicts)
+    }
+    jet_cli_import_stage(mode, import_out_files.join(current.target, "import-report.json"), import_out_files.join(baseline_root, "import-report.json"), report, &writes, &conflicts)
+    if conflicts.len() > 0 {
+        shown :: conflicts
+        row :: diagnostic_registry_row("JT0199") ?? panic("JT0199 is not registered")
+        diagnostic :: diagnostic_from_registry("JT0199", None, row.what.replace("{{paths}}", shown.join(", ")), row.why, row.fix)
+        if json {
+            paths :: jet_cli_status_texts(shown)
+            return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)}, [JetCLIStatusField]{jet_cli_status_field("paths", paths)})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
+        }
+        stderr := "error[{diagnostic.code}]: {diagnostic.what}\n"
+        loop path in shown -> stderr = "{stderr}  {path}\n"
+        return jet_cli_import_output("", "{stderr}  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
+    }
+    loop write in writes {
+        parent :: import_out_files.dirname(write.path)
+        if parent != "" {
+            import_out_files.create_dir_all(parent) ?? return jet_cli_import_operation_error("create import output", jet_cli_io_error_text(err), json)
+        }
+        import_out_files.write(write.path, write.contents) ?? return jet_cli_import_operation_error("write import output", jet_cli_io_error_text(err), json)
+    }
+    if mode != JetCLIImportMode.DryRun {
+        jet_cli_import_persist_evidence(current.evidence, current.source_digest) ?? return jet_cli_import_operation_error("persist import evidence", err.message, json)
+    }
+    if accepted == .Val(receipt) {
+        cwd :: import_out_sys.current_dir() ?? return jet_cli_import_operation_error("read current directory", jet_cli_io_error_text(err), json)
+        jet_cli_import_persist_accepted_receipt(current, receipt, cwd) ?? return jet_cli_import_operation_error("persist accepted source receipt", err.message, json)
+    }
+    if json -> return jet_cli_import_output("{jet_cli_status_render("import", true, [JetCLIStatusField]{jet_cli_status_field("import", jet_cli_import_report_value(current))})}\n", "", JET_DRIVER_EXIT_OK)
+    verb :: if mode == JetCLIImportMode.DryRun -> "would import" else -> "imported"
+    boundary :: current.boundary
+    out := "{verb} {current.source} -> {current.target}\n  {current.functions} functions, {current.tests} carried tests, {current.todos.len()} TODO diagnostics\n  migration: {boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(boundary)}; source conversion: {jet_cli_import_migration_source_conversion(boundary)}; source authority: {boundary.source_authority.as_str()})\n"
+    loop todo in current.todos {
+        diagnostic :: jet_cli_import_todo_diagnostic(todo)
+        out = "{out}  {diagnostic.code} {diagnostic.what}\n    why: {diagnostic.why}\n    fix: {diagnostic.fix}\n    target: {todo.target}  status: {todo.status}\n"
+    }
+    jet_cli_import_output(out, "", JET_DRIVER_EXIT_OK)
+}
+
+// Rust `run`: `raw` starts at the `import` word.
+fn jet_cli_import_run(raw: [String], json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
+    args :: jet_cli_import_parse_args(raw) ?? return jet_cli_import_usage_error(err.what, err.fix, json)
+    language :: jet_cli_import_canonical_language(args.language)
+    if language == "c" || language == "cpp" {
+        foreign :: jet_cli_import_foreign_language(language) ?? panic("C/C++ importer language is mapped")
+        capability :: pkg_foreign_boundary_capability(foreign)
+        return jet_cli_import_usage_error("source conversion for '{language}' is unavailable", "{capability.reason}; use {language}.<lib> for call-in-place binding and a checked #Extern overlay", json)
+    }
+    installed :: [String]{"py", "pascal", "ada", "java", "csharp", "ts", "js", "go"}
+    if !installed.contains(language) -> return jet_cli_import_usage_error("source importer '{language}' is not installed", "use jet import py|java|csharp|ts|js|go <dir> for narrow conversion; Ada/Pascal are binder-only/manual; C/C++ use their binder plus checked overlays", json)
+    cwd :: import_out_sys.current_dir() ?? return jet_cli_import_operation_error("read current directory", jet_cli_io_error_text(err), json)
+    absolute :: if import_out_files.is_absolute(args.source) -> args.source else -> import_out_files.join(cwd, args.source)
+    source :: import_out_files.canonicalize(absolute) ?? return jet_cli_import_operation_error("import {language} source", jet_cli_io_error_text(err), json)
+    if !import_out_files.is_dir(source) -> return jet_cli_import_operation_error("import {language} source", "source is not a directory", json)
+    leaf :: import_out_files.basename(source)
+    name :: if leaf == "" || leaf == "/" -> "imported" else -> leaf
+    target :: import_out_files.join(import_out_files.join(cwd, "jet"), name)
+    plan :: jet_cli_import_build_plan(source, target, language) ?? return jet_cli_import_operation_error("import {language} source", err.message, json)
+    jet_cli_import_apply(plan, args.mode, json)
+}
