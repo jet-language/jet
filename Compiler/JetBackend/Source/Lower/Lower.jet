@@ -7063,9 +7063,11 @@ fn lower_float32_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     lower_emit(&f, LIRInst.Bitcast{dst: dst, src: result})
 }
 
-// Float and F32 arithmetic: SSE2 for `+ - * /`; `%` (truncated remainder) and
-// `**` are the C library's fmod/fmodf and pow/powf, which the compiled runtime
-// links (-lm).
+// Float and F32 arithmetic: SSE2 for `+ - * /`; floor division's floor, `%`
+// (truncated remainder) and Float `**` call the runtime's libm exports, never a
+// libm symbol (the runtime pack's platform libc is private to the pack). F32
+// floor and remainder widen exactly to Float and narrow back exactly: the
+// floor of an F32 and an F32 remainder are F32 values.
 fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, ty: MIRType, single: Bool, left: LIRValueID, right: LIRValueID) Never! {
     if op == {
         .Add -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Add, left: left, right: right})
@@ -7075,12 +7077,31 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
         .FloorDiv -> {
             quotient :: lower_new_value(&f, if single -> lir_layout_float32() else -> lir_layout_float(), LIRDrop.Trivial, None)
             lower_emit(&f, LIRInst.Binary{dst: quotient, op: LIRBinaryOp.Div, left: left, right: right})
-            lower_call_runtime(&m, &f, if single -> "floorf" else -> "floor", [LIRValueID]{quotient}, Val(dst))
+            lower_float_libm(&m, &f, "jet_std_math_floor", single, [LIRValueID]{quotient}, dst)
         }
-        .Rem -> lower_call_runtime(&m, &f, if single -> "fmodf" else -> "fmod", [LIRValueID]{left, right}, Val(dst))
-        .Pow -> lower_call_runtime(&m, &f, if single -> "powf" else -> "pow", [LIRValueID]{left, right}, Val(dst))
+        .Rem -> lower_float_libm(&m, &f, "jet_std_math_fmod", single, [LIRValueID]{left, right}, dst)
+        .Pow -> {
+            if single -> return lower_call_runtime(&m, &f, "powf", [LIRValueID]{left, right}, Val(dst))
+            lower_call_runtime(&m, &f, "jet_std_math_pow", [LIRValueID]{left, right}, Val(dst))
+        }
         else -> lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(ty)} is not lowered at O0 yet")
     }
+}
+
+// A Float runtime math export on Float operands, or on F32 operands widened
+// to Float with the result narrowed back (callers pass only operations whose
+// F32 result the narrowing reproduces exactly).
+fn lower_float_libm(m: &LowerModule, f: &LowerFunction, symbol: String, single: Bool, args: [LIRValueID], dst: LIRValueID) Never! {
+    if !single -> return lower_call_runtime(&m, &f, symbol, args, Val(dst))
+    wide := [LIRValueID]{}
+    loop arg in args {
+        widened :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Convert{dst: widened, src: arg})
+        &wide.push(widened)
+    }
+    result :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_call_runtime(&m, &f, symbol, wide, Val(result))
+    lower_emit(&f, LIRInst.Convert{dst: dst, src: result})
 }
 
 fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRUnaryOp, value: MIRValueID) Never! {

@@ -24,6 +24,7 @@
 #Import(c) fn compiler_math_ln_1p(x: Float) -> Float = "log1p"
 #Import(c) fn compiler_math_log10(x: Float) -> Float = "log10"
 #Import(c) fn compiler_math_log2(x: Float) -> Float = "log2"
+#Import(c) fn compiler_math_pow(x: Float, y: Float) -> Float = "pow"
 #Import(c) fn compiler_math_sin(x: Float) -> Float = "sin"
 #Import(c) fn compiler_math_sinh(x: Float) -> Float = "sinh"
 #Import(c) fn compiler_math_sqrt(x: Float) -> Float = "sqrt"
@@ -53,6 +54,9 @@
 #Export(c) fn jet_std_math_ln_1p(x: Float) -> Float { compiler_math_ln_1p(x) }
 #Export(c) fn jet_std_math_log10(x: Float) -> Float { compiler_math_log10(x) }
 #Export(c) fn jet_std_math_log2(x: Float) -> Float { compiler_math_log2(x) }
+// Float `**` (Power.rs jet_pow: f64::powf). Native programs call this export:
+// the runtime pack's platform libm is private to the pack.
+#Export(c) fn jet_std_math_pow(x: Float, y: Float) -> Float { compiler_math_pow(x, y) }
 #Export(c) fn jet_std_math_sin(x: Float) -> Float { compiler_math_sin(x) }
 #Export(c) fn jet_std_math_sinh(x: Float) -> Float { compiler_math_sinh(x) }
 #Export(c) fn jet_std_math_sqrt(x: Float) -> Float { compiler_math_sqrt(x) }
