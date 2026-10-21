@@ -2,8 +2,9 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, Span, Type, TBinaryOp, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeValue, TDestructureBinding, TEnumPayload, TExpr, TExprKind, TFunc, TFuncKind, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TTryConvert, tir_each_expr_child, tir_each_stmt_list_child, type_carrier_identity]
+use jet_foundation.[AccessConvention, Span, Type, TBinaryOp, TBuiltinOp, TCallArg, TComptimeEnumArg, TComptimeField, TComptimeValue, TDestructureBinding, TEnumArg, TEnumPayload, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TLambda, TListSpreadPart, TLocal, TMatchArm, TMethodRef, TMixedArm, TNestedPattern, TNumericOp, TOrFallback, TPanicLoc, TPattern, TPatternBinding, TPatternShape, TRangeArm, TRequireKind, TStaticOwner, TStmt, TStrPart, TTryConvert, tir_each_expr_child, tir_each_stmt_list_child, type_carrier_identity]
 use jet_backend.[lower_float_constant_bits]
+use jet_codegen.[jet_codegen_failure_carrier_for_type, jet_codegen_general_handle_route, jet_codegen_handle_receiver_is_mutating]
 
 fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc) Never! {
     b.line = function.line
@@ -140,11 +141,13 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
     if statement == {
         .LineMarker(line) -> b.line = line
         .SourceSpan(_) -> {}
-        .Let(local, let_ty, init, gc, _, span) -> {
-            if gc != None -> return ir_fail(&b, span, "GC-promoted binding")
+        .Let(local, let_ty, init, _, _, span) -> {
             if local.deref || local.address_lifetime != None || local.persist_key != None -> return ir_fail(&b, span, "addressed or persistent binding")
+            // A GC-promoted or automatic-root binding binds as a plain local
+            // (codegen only marks the root, which Lower never reads); codegen
+            // rejects a Resource wrapper outright.
             if let_ty == .Annotated(_, wrapper) {
-                if wrapper != .Plain -> return ir_fail(&b, span, "wrapped binding")
+                if wrapper == .Resource -> return ir_fail(&b, span, "resource binding")
             }
             if init.kind == .Uninit -> return ir_bind_uninit(&m, &p, &b, local, init.ty, span)
             value :: ir_expr(&m, &p, &b, init)
@@ -278,7 +281,17 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         }
         .TaskGroup(_, _, _, span) -> ir_fail(&b, span, "statement TaskGroup")
         .DeferClose(_, _, _, span) -> ir_fail(&b, span, "statement DeferClose")
-        .BreakValue(_, _, span) -> ir_fail(&b, span, "statement BreakValue")
+        .BreakValue(label, value, span) -> {
+            frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
+            if frame.value < 0 -> return ir_fail(&b, span, "break with a value out of a statement loop")
+            target_row :: b.f.slot_type[frame.value]
+            slot :: ir_value_as(&m, &p, &b, value, target_row, span)
+            if ir_failed(b) -> return
+            if slot >= 0 -> ir_store(&m, &b, frame.value, slot)
+            ir_drop_bindings(&m, &b, frame.mark)
+            depth :: ir_depth(b.f, frame.exit)
+            ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
+        }
         .Match(subject, arms, _, span) -> ir_match(&m, &p, &b, subject, arms, None, span)
         .EnumMatch(subject, arms, else_body, _, span) -> ir_match(&m, &p, &b, subject, arms, else_body, span)
         .RangeSwitch(subject, arms, else_body, span) -> ir_range_switch(&m, &p, &b, subject, arms, else_body, span)
@@ -556,6 +569,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             slot :: ir_expr(&m, &p, &b, value)
             return slot
         }
+        .Drop(value) -> return ir_drop_value(&m, &p, &b, value, span)
         .Print(value) -> {
             ir_print(&m, &p, &b, value, span)
             return -1
@@ -639,6 +653,8 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
                 // The value outlives the block's variables.
                 tail_value :: ir_expr(&m, &p, &b, tail)
                 value = ir_own(&m, &b, tail_value)
+            } else if body[body.len() - 1] == .Loop(label, loop_body, _) {
+                value = ir_loop_value(&m, &p, &b, expression.ty, label, loop_body, span)
             } else {
                 ir_stmt(&m, &p, &b, body[body.len() - 1])
             }
@@ -708,6 +724,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
         }
         .EnumLit(enum_type, variant, payload) -> return ir_enum_value(&m, &p, &b, expression.ty, enum_type, variant, payload, span)
         .EnumCtor(owner, variant, payload) -> return ir_enum_value(&m, &p, &b, expression.ty, owner.key, variant.key, payload, span)
+        .JSONLit(variant, argument, _) -> return ir_json_literal(&m, &p, &b, expression.ty, variant, argument, span)
         .Present(value) -> return ir_present(&m, &p, &b, expression.ty, value, span)
         .Absent -> {
             row :: ir_value_type(&m, p, expression.ty) ?? return ir_type_fail(&b, span, expression.ty)
@@ -792,8 +809,386 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
         .Slice(base, start, end, range, location) -> return ir_slice(&m, &p, &b, expression.ty, base, start, end, range, location, span)
         .Range(start, end, exclusive) -> return ir_range_value(&m, &p, &b, expression.ty, start, end, exclusive, span)
         .Borrow(value, access) -> return ir_borrow(&m, &p, &b, expression.ty, value, access, span)
+        .OverflowOpt(prefix, operation, line, _, lhs, rhs) -> return ir_overflow_opt(&m, &p, &b, expression.ty, prefix, operation, line, lhs, rhs, span)
+        .NumericBinaryMethod(receiver, operation, argument) -> return ir_numeric_euclid(&m, &p, &b, expression.ty, receiver, operation, argument, span)
+        .HandleMethod(receiver, operation, args) -> return ir_handle_method(&m, &p, &b, expression.ty, receiver, operation, args, span)
         else -> return ir_fail_slot(&b, span, "expression {ir_expr_kind_name(expression.kind)}")
     }
+}
+
+// `consume(x)` (codegen: a Drop of `^x`, a move to nowhere): the value's
+// cleanup runs now. An owned variable's binding stops owning it, so its
+// scope-end drop does not run a second time; a fresh value drops in place.
+fn ir_drop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span: Span) -> Int Never! {
+    if value.kind == .Local(local) {
+        binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "drop of unknown local {local.name}")
+        if !ir_has_drop(m, b, binding.slot) && binding.indirect < 0 -> return -1
+        if !binding.owned || binding.indirect >= 0 -> return ir_fail_slot(&b, span, "drop of {local.name}, which the function does not own")
+        ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
+        loop index in 0..<b.bindings.len() {
+            if b.bindings[index].slot == binding.slot {
+                b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol.copy()}
+            }
+        }
+        return -1
+    }
+    slot :: ir_expr(&m, &p, &b, value)
+    if ir_failed(b) || slot < 0 || !ir_has_drop(m, b, slot) -> return -1
+    if !b.fresh[slot] -> return ir_fail_slot(&b, span, "drop of a held {ir_type_name(value.ty)}")
+    ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
+    b.fresh[slot] = false
+    return -1
+}
+
+// A runtime-handle method (codegen jet_codegen_lower_general_handle_method,
+// Lower's HandleMethod route call): the receiver then the arguments cross
+// the operation's closed Prelude route; a static constructor (`Path.from`)
+// passes its arguments only. Forms codegen or Lower lower specially (Task,
+// channel and Transaction handles, the native Dyn tree, HTTP, Serde, DB,
+// ...) and closure, mutating or frame-scheduled forms are not built here.
+fn ir_handle_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: THandleOp, args: [TExpr], span: Span) -> Int Never! {
+    dedicated :: if operation == {
+        .SerdeEncode | .Hardware(_) | .ReceiptAttach | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
+        .HTTPReqField(_) | .HTTPRespField(_) | .HTTPRespHeader | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
+        .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered -> true
+        .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> true
+        .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> true
+        .DurationNew(_, _) | .GameSceneOnFrame(_, _) | .TaskJoin | .TaskDetach -> true
+        else -> false
+    }
+    if dedicated -> return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)}")
+    carrier :: jet_codegen_failure_carrier_for_type(ty)
+    route :: jet_codegen_general_handle_route(operation, receiver.ty, args.len(), carrier) ?? return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
+    if route.family == .ClosureMethod || jet_codegen_handle_receiver_is_mutating(operation) -> return ir_fail_slot(&b, span, "handle method {route.member} with a closure or mutated receiver")
+    if route.symbol == "jet_dyn_len" || route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" -> return ir_fail_slot(&b, span, "handle method {route.symbol}")
+    special :: ir_nominal_name(ir_untag(ir_subst(p, receiver.ty))) ?? ""
+    if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" -> return ir_fail_slot(&b, span, "{special} handle method {route.member}")
+    static_call :: if operation == {
+        .TLSClientConfigDefault | .TLSRootCertificatesFromPEM | .TLSClientIdentityFromPEM | .HTTPClientNew | .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) -> true
+        else -> false
+    }
+    inputs := [Int]{}
+    if !static_call {
+        slot :: ir_expr(&m, &p, &b, receiver)
+        if ir_failed(b) -> return -1
+        &inputs.push(slot)
+    }
+    loop arg in args {
+        slot :: ir_expr(&m, &p, &b, arg)
+        if ir_failed(b) -> return -1
+        &inputs.push(slot)
+    }
+    if inputs.len() != route.borrow_mask.len() -> return ir_fail_slot(&b, span, "handle method {route.member} with {inputs.len()} of {route.borrow_mask.len()} operands")
+    result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
+    ir_route(&m, &p, &b, route.symbol, inputs, route.borrow_mask, result, span)
+}
+
+fn ir_handle_op_name(operation: THandleOp) -> String Never! {
+    text := "{operation}"
+    separators :: [String]{"(", "{{", " "}
+    loop separator in separators {
+        parts :: text.split(separator).to_list()
+        text = parts[0]
+    }
+    text
+}
+
+// `a.div_euclid(b)` / `a.rem_euclid(b)` on exact Ints (codegen
+// jet_codegen_lower_numeric_binary_method, Lower lower_numeric_euclid): the
+// located runtime route jet_int_{div,rem}_euclid (Lower's inline fast path
+// computes the same value).
+fn ir_numeric_euclid(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TNumericOp, argument: TExpr, span: Span) -> Int Never! {
+    remainder :: if operation == {
+        .EuclideanDiv(_) -> false
+        .EuclideanRem(_) -> true
+        else -> { return ir_fail_slot(&b, span, "binary numeric operation other than div_euclid/rem_euclid") }
+    }
+    left :: ir_expr(&m, &p, &b, receiver)
+    right :: ir_expr(&m, &p, &b, argument)
+    if ir_failed(b) -> return -1
+    if left < 0 || right < 0 || ir_kind_of(m, b, left) != .Int || ir_kind_of(m, b, right) != .Int -> return ir_fail_slot(&b, span, "Euclidean arithmetic on {ir_type_name(receiver.ty)}")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if m.types[row].kind != .Int -> return ir_fail_slot(&b, span, "Euclidean arithmetic producing {ir_type_name(ty)}")
+    args := [Int]{left, right}
+    site :: b.line
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    result :: ir_runtime(&m, &b, if remainder -> "jet_int_rem_euclid" else -> "jet_int_div_euclid", args, row)
+    ir_release(&m, &b, left)
+    ir_release(&m, &b, right)
+    result
+}
+
+// `a.wrapping_add(b)` and the other overflow policies (codegen
+// jet_codegen_lower_overflow_opt; Lower lower_numeric_overflow and
+// lower_narrow_overflow), inline at the word's own width. An unbounded Int's
+// wrapping or saturating form is its exact operator; a checked form is an
+// Option box (None on overflow); a policy form stops as the trapping operator
+// does, at the call's line.
+fn ir_overflow_opt(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr, span: Span) -> Int Never! {
+    if line > 0 -> b.line = line
+    left :: ir_expr(&m, &p, &b, lhs)
+    right :: ir_expr(&m, &p, &b, rhs)
+    if ir_failed(b) -> return -1
+    name :: "{prefix}_{operation}"
+    if left < 0 || right < 0 -> return ir_fail_slot(&b, span, "overflow policy {name} on Unit")
+    if ir_kind_of(m, b, left) == .Int {
+        if prefix != "wrapping" && prefix != "saturating" -> return ir_fail_slot(&b, span, "overflow policy {name} on Int")
+        op :: if operation == {
+            "add" -> TBinaryOp.Add
+            "sub" -> TBinaryOp.Sub
+            "mul" -> TBinaryOp.Mul
+            "div" -> TBinaryOp.Div
+            "rem" -> TBinaryOp.Rem
+            else -> { return ir_fail_slot(&b, span, "overflow policy {name} on Int") }
+        }
+        result :: ir_binary(&m, &p, &b, op, false, line, lhs.ty, left, right, rhs.ty, span)
+        ir_release(&m, &b, left)
+        ir_release(&m, &b, right)
+        return result
+    }
+    if ir_kind_of(m, b, left) != .Word || b.f.slot_type[right] != b.f.slot_type[left] -> return ir_fail_slot(&b, span, "overflow policy {name} on {ir_type_name(lhs.ty)}")
+    signed :: m.types[b.f.slot_type[left]].signed
+    bits :: m.types[b.f.slot_type[left]].bits
+    if prefix == "rotate_left" || prefix == "rotate_right" {
+        if operation != "rotate" -> return ir_fail_slot(&b, span, "overflow policy {name}")
+        if signed && bits < 64 -> return ir_fail_slot(&b, span, "overflow policy {prefix} on {ir_type_name(lhs.ty)}")
+        return ir_rotate(&m, &b, prefix == "rotate_left", left, right, signed, bits)
+    }
+    op :: if operation == {
+        "add" -> IROp.Add
+        "sub" -> IROp.Sub
+        "mul" -> IROp.Mul
+        "div" -> IROp.Div
+        "rem" -> IROp.Rem
+        else -> { return ir_fail_slot(&b, span, "overflow policy {name} on {ir_type_name(lhs.ty)}") }
+    }
+    if prefix == "wrapping" || prefix == "checked_policy" {
+        // Division by zero stops under either policy; a policy's overflow
+        // stops with the trapping operator's message.
+        dst :: ir_temp_like(&m, &b, left)
+        ir_emit(&b.f, op, dst, left, right, if prefix == "wrapping" -> IR_OVERFLOW_WRAP else -> IR_OVERFLOW_TRAP, b.line)
+        return dst
+    }
+    checked :: prefix == "checked"
+    if !checked && prefix != "saturating" -> return ir_fail_slot(&b, span, "overflow policy {name}")
+    if op == .Div || op == .Rem -> return ir_overflow_division(&m, p, &b, ty, checked, op, left, right, signed, bits, span)
+    value :: ir_temp_like(&m, &b, left)
+    ir_emit(&b.f, op, value, left, right, IR_OVERFLOW_WRAP, b.line)
+    overflowed :: ir_overflowed(&m, &b, op, left, right, value, signed, bits)
+    if checked {
+        result :: ir_checked_open(&m, p, &b, ty, overflowed, span)
+        if result < 0 -> return -1
+        return ir_checked_close(&m, &b, result, value)
+    }
+    limit :: ir_saturation_limit(&m, &b, op, left, right, signed, bits)
+    result :: ir_temp_like(&m, &b, left)
+    ir_open_if(&b.f, overflowed, b.line)
+    ir_emit(&b.f, IROp.Copy, result, limit, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// A constant of `like`'s type.
+fn ir_const_like(m: &IRModule, b: &IRBuilder, like: Int, value: Int) -> Int Never! {
+    slot :: ir_temp_like(&m, &b, like)
+    ir_emit(&b.f, IROp.Const, slot, value, -1, -1, b.line)
+    slot
+}
+
+// The range of a fixed-width word of `bits` (a 64-bit unsigned maximum is
+// the all-ones word).
+fn ir_word_min(signed: Bool, bits: Int) -> Int Never! {
+    if !signed -> return 0
+    if bits >= 64 -> return -9223372036854775807 - 1
+    0 - (1 << (bits - 1))
+}
+
+fn ir_word_max(signed: Bool, bits: Int) -> Int Never! {
+    if bits >= 64 -> return if signed -> 9223372036854775807 else -> -1
+    if signed -> return (1 << (bits - 1)) - 1
+    (1 << bits) - 1
+}
+
+// Whether `left op right` (Add, Sub, Mul) left the word's range, given its
+// wrapped `value`: unsigned add wraps below `left`, unsigned sub borrows when
+// `left < right`, signed add/sub overflow when the operands agree in sign
+// against the result, and a product overflowed unless it divides back.
+fn ir_overflowed(m: &IRModule, b: &IRBuilder, op: IROp, left: Int, right: Int, value: Int, signed: Bool, bits: Int) -> Int Never! {
+    if op == .Add || op == .Sub {
+        if !signed {
+            if op == .Add -> return ir_bool_op(&m, &b, IROp.Lt, value, left)
+            return ir_bool_op(&m, &b, IROp.Lt, left, right)
+        }
+        first :: ir_temp_like(&m, &b, left)
+        ir_emit(&b.f, IROp.BitXor, first, if op == .Add -> right else -> left, if op == .Add -> value else -> right, IR_OVERFLOW_WRAP, b.line)
+        second :: ir_temp_like(&m, &b, left)
+        ir_emit(&b.f, IROp.BitXor, second, left, value, IR_OVERFLOW_WRAP, b.line)
+        both :: ir_temp_like(&m, &b, left)
+        ir_emit(&b.f, IROp.BitAnd, both, first, second, IR_OVERFLOW_WRAP, b.line)
+        zero :: ir_const_like(&m, &b, left, 0)
+        return ir_bool_op(&m, &b, IROp.Lt, both, zero)
+    }
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    flag :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, flag, 0, -1, -1, b.line)
+    zero :: ir_const_like(&m, &b, left, 0)
+    nonzero :: ir_bool_op(&m, &b, IROp.Ne, left, zero)
+    ir_open_if(&b.f, nonzero, b.line)
+    if signed {
+        // MIN * -1 is the one product a -1 divisor cannot divide back.
+        minus_one :: ir_const_like(&m, &b, left, -1)
+        negates :: ir_bool_op(&m, &b, IROp.Eq, left, minus_one)
+        ir_open_if(&b.f, negates, b.line)
+        minimum :: ir_const_like(&m, &b, left, ir_word_min(true, bits))
+        ir_emit(&b.f, IROp.Eq, flag, right, minimum, -1, b.line)
+        ir_else(&b.f, b.line)
+        ir_product_check(&m, &b, flag, left, right, value)
+        ir_end(&b.f, b.line)
+    } else {
+        ir_product_check(&m, &b, flag, left, right, value)
+    }
+    ir_end(&b.f, b.line)
+    flag
+}
+
+// flag = value / left != right (left is neither 0 nor -1).
+fn ir_product_check(m: &IRModule, b: &IRBuilder, flag: Int, left: Int, right: Int, value: Int) Never! {
+    quotient :: ir_temp_like(&m, &b, left)
+    ir_emit(&b.f, IROp.Div, quotient, value, left, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Ne, flag, quotient, right, -1, b.line)
+}
+
+// A saturating result's bound: an unsigned difference floors at 0, any
+// other unsigned result caps at the maximum; a signed one goes to MIN when
+// the exact result is negative (`left < 0`, or the operands' signs differ
+// for a product), else to MAX.
+fn ir_saturation_limit(m: &IRModule, b: &IRBuilder, op: IROp, left: Int, right: Int, signed: Bool, bits: Int) -> Int Never! {
+    if !signed -> return ir_const_like(&m, &b, left, if op == .Sub -> 0 else -> ir_word_max(false, bits))
+    zero :: ir_const_like(&m, &b, left, 0)
+    negative := ir_bool_op(&m, &b, IROp.Lt, left, zero)
+    if op == .Mul {
+        right_negative :: ir_bool_op(&m, &b, IROp.Lt, right, zero)
+        negative = ir_bool_op(&m, &b, IROp.Ne, negative, right_negative)
+    }
+    limit :: ir_temp_like(&m, &b, left)
+    ir_open_if(&b.f, negative, b.line)
+    ir_emit(&b.f, IROp.Const, limit, ir_word_min(true, bits), -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    ir_emit(&b.f, IROp.Const, limit, ir_word_max(true, bits), -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    limit
+}
+
+// Checked and saturating Div/Rem: a zero divisor is None (checked) or
+// stops (saturating, as the wrapping operator does); signed MIN / -1 is None
+// (checked) or MAX (saturating), and its remainder is 0.
+fn ir_overflow_division(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, checked: Bool, op: IROp, left: Int, right: Int, signed: Bool, bits: Int, span: Span) -> Int Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    special :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, special, 0, -1, -1, b.line)
+    if signed && op == .Div {
+        minimum :: ir_const_like(&m, &b, left, ir_word_min(true, bits))
+        at_minimum :: ir_bool_op(&m, &b, IROp.Eq, left, minimum)
+        ir_open_if(&b.f, at_minimum, b.line)
+        minus_one :: ir_const_like(&m, &b, left, -1)
+        ir_emit(&b.f, IROp.Eq, special, right, minus_one, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    if !checked {
+        value :: ir_temp_like(&m, &b, left)
+        ir_open_if(&b.f, special, b.line)
+        ir_emit(&b.f, IROp.Const, value, ir_word_max(true, bits), -1, -1, b.line)
+        ir_else(&b.f, b.line)
+        ir_emit(&b.f, op, value, left, right, IR_OVERFLOW_WRAP, b.line)
+        ir_end(&b.f, b.line)
+        return value
+    }
+    zero :: ir_const_like(&m, &b, left, 0)
+    is_zero :: ir_bool_op(&m, &b, IROp.Eq, right, zero)
+    ir_open_if(&b.f, is_zero, b.line)
+    ir_emit(&b.f, IROp.Const, special, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result :: ir_checked_open(&m, p, &b, ty, special, span)
+    if result < 0 -> return -1
+    value :: ir_temp_like(&m, &b, left)
+    ir_emit(&b.f, op, value, left, right, IR_OVERFLOW_WRAP, b.line)
+    ir_checked_close(&m, &b, result, value)
+}
+
+// A checked result of Option type `ty`: None when `failed`; the caller
+// computes the value in the open Else and ir_checked_close boxes it
+// (Lower lower_numeric_finish: an 8-byte box, null for None).
+fn ir_checked_open(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, failed: Int, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if m.types[row].kind != .Pointer -> return ir_fail_slot(&b, span, "checked overflow result {ir_type_name(ty)}")
+    result :: ir_temp(&m, &b, row)
+    ir_open_if(&b.f, failed, b.line)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    result
+}
+
+fn ir_checked_close(m: &IRModule, b: &IRBuilder, result: Int, value: Int) -> Int Never! {
+    row :: b.f.slot_type[result]
+    boxed :: ir_box_alloc(&m, &b, 8, row)
+    ir_store_at(&m, &b, boxed, 0, value)
+    ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    b.fresh[result] = ir_has_drop(m, b, result)
+    result
+}
+
+// rotate_left / rotate_right (Lower lower_numeric_overflow's rotate and
+// lower_narrow_rotate): the count modulo the width, the two shifted halves
+// or-ed (a zero count shifts the other half by the full width, which the
+// machine shift masks to the value itself or a narrow word cuts to 0). A
+// signed 64-bit count must not be negative; its halves shift as U64.
+fn ir_rotate(m: &IRModule, b: &IRBuilder, left_rotate: Bool, value: Int, count: Int, signed: Bool, bits: Int) -> Int Never! {
+    if signed {
+        zero :: ir_const_like(&m, &b, count, 0)
+        negative :: ir_bool_op(&m, &b, IROp.Lt, count, zero)
+        ir_open_if(&b.f, negative, b.line)
+        site :: b.line
+        args := ir_location(&m, &b, site)
+        loop arg in ir_static_text(&m, &b, "A rotation count cannot be negative") -> &args.push(arg)
+        _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", args, -1)
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    // The halves shift logically: a signed word shifts as its U64 bits.
+    unsigned_row :: ir_type_row(&m, Type.IntN{signed: false, bits: 64}) ?? 0
+    word := value
+    if signed {
+        word = ir_temp(&m, &b, unsigned_row)
+        ir_emit(&b.f, IROp.Copy, word, value, -1, -1, b.line)
+    }
+    mask :: ir_const_like(&m, &b, word, bits - 1)
+    amount :: ir_temp_like(&m, &b, word)
+    counted :: if signed -> ir_copy_word(&m, &b, count, unsigned_row) else -> count
+    ir_emit(&b.f, IROp.BitAnd, amount, counted, mask, IR_OVERFLOW_WRAP, b.line)
+    width :: ir_const_like(&m, &b, word, bits)
+    reverse :: ir_temp_like(&m, &b, word)
+    ir_emit(&b.f, IROp.Sub, reverse, width, amount, IR_OVERFLOW_WRAP, b.line)
+    first :: ir_temp_like(&m, &b, word)
+    ir_emit(&b.f, if left_rotate -> IROp.Shl else -> IROp.Shr, first, word, amount, IR_OVERFLOW_WRAP, b.line)
+    second :: ir_temp_like(&m, &b, word)
+    ir_emit(&b.f, if left_rotate -> IROp.Shr else -> IROp.Shl, second, word, reverse, IR_OVERFLOW_WRAP, b.line)
+    rotated :: ir_temp_like(&m, &b, word)
+    ir_emit(&b.f, IROp.BitOr, rotated, first, second, IR_OVERFLOW_WRAP, b.line)
+    if !signed -> return rotated
+    result :: ir_temp_like(&m, &b, value)
+    ir_emit(&b.f, IROp.Copy, result, rotated, -1, -1, b.line)
+    result
+}
+
+// `slot`'s word bits as a word of type row `row`.
+fn ir_copy_word(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! {
+    bits :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Copy, bits, slot, -1, -1, b.line)
+    bits
 }
 
 // An owner-qualified call (codegen StaticCalls.jet): a user type's static
@@ -849,6 +1244,23 @@ fn ir_branch_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, body: [TStmt], va
     if !ir_failed(b) && result >= 0 && slot >= 0 -> ir_store(&m, &b, result, slot)
     if !ir_failed(b) && result < 0 -> ir_release(&m, &b, slot)
     ir_scope_close(&m, &b)
+}
+
+// A loop ending a valued block (codegen jet_codegen_lower_loop_value): each
+// `break v` writes `v` into the result and leaves the loop.
+fn ir_loop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, label: String?, body: [TStmt], span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_temp(&m, &b, row)
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    top :: ir_open(&b.f, IROp.Loop, b.line)
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), value: result})
+    ir_stmts(&m, &p, &b, body)
+    _ :: &b.loops.pop()
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    b.fresh[result] = ir_has_drop(m, b, result)
+    result
 }
 
 // `a && b` / `a || b`: `b` runs only when `a` does not decide.
@@ -1382,6 +1794,17 @@ fn ir_enum_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, owner: St
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, discriminant, b.line)
     loop (position, value) in values -> ir_member_store(&m, &b, boxed, targets[position], value)
     boxed
+}
+
+// `Dyn.Null`, `Dyn.Array(items)`, ... (codegen jet_codegen_lower_json_literal):
+// the native Dyn enum's variant over its payload, which the box stores as
+// its own (a borrowed payload is cloned, as codegen's `clone_arg` copy). An
+// Object from a map literal or another container encodes and is not built.
+fn ir_json_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, variant: String, argument: TExpr?, span: Span) -> Int Never! {
+    if argument == None -> return ir_enum_value(&m, &p, &b, ty, "Dyn", variant, TEnumPayload.Unit, span)
+    value :: argument
+    if variant == "Object" && !(value.ty == .List(_)) -> return ir_fail_slot(&b, span, "Dyn.Object over {ir_type_name(value.ty)}")
+    ir_enum_value(&m, &p, &b, ty, "Dyn", variant, TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: value}}}, span)
 }
 
 fn ir_present(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TExpr, span: Span) -> Int Never! {
@@ -2280,6 +2703,22 @@ fn ir_comptime(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TCom
         .Struct(_, fields) -> return ir_comptime_struct(&m, &p, &b, ty, row, fields, span)
         .Enum(_, variant, args) -> return ir_comptime_enum(&m, &p, &b, ty, row, variant, args, span)
         .Bytes(bytes) -> return ir_comptime_bytes(&m, p, &b, ty, row, bytes, span)
+        .Failed(report) -> {
+            // Lower lower_constant_tree_value: a told failure is an Err box,
+            // a clean failure of an Option is None.
+            if report == .Told(told) {
+                if ir_untag(ty) == .Result(_, err_ty) {
+                    payload :: ir_comptime(&m, &p, &b, err_ty, told, span)
+                    if ir_failed(b) -> return -1
+                    return ir_result_box(&m, p, &b, ty, false, payload)
+                }
+            } else if m.types[row].kind == .Pointer && ir_untag(ty) == .Option(_) {
+                slot :: ir_temp(&m, &b, row)
+                ir_emit(&b.f, IROp.Const, slot, 0, -1, -1, b.line)
+                return slot
+            }
+            return ir_fail_slot(&b, span, "failed constant of {ir_type_name(ty)}")
+        }
         else -> return ir_fail_slot(&b, span, "constant value {ir_comptime_name(value)}")
     }
 }

@@ -36,7 +36,9 @@ struct IRWriteBack { cell: Int, slot: Int }
 // An open loop: `exit` is the Block that `break` leaves, `next` the
 // construct that `next` (continue) leaves or restarts; `mark` the bindings
 // visible when it opened (leaving it drops the owned ones declared since).
-struct IRLoopFrame { label: String?, exit: Int, next: Int, mark: Int }
+// A valued loop (`x :: loop { ... break v }`) writes its break value into
+// `value` (-1: a statement loop).
+struct IRLoopFrame { label: String?, exit: Int, next: Int, mark: Int, value: Int{-1} }
 
 // Per-function build state. `fresh[slot]` marks a temporary that holds a
 // value nobody else owns yet (a call result, a built String): a borrowing
