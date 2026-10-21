@@ -13,6 +13,7 @@ use jet_foundation.[
     NamedSpan,
     Span,
     Stmt,
+    TextEdit,
     UnOp,
     ast_empty_lambda_meta,
     expr_span,
@@ -220,39 +221,73 @@ fn parser_expression_form_arm_atom(state: &JetParserState, subject: Expr, op: Bi
     Expr.Binary{op: op, left: subject, right: raw.expr, span: parser_cover(expr_span(subject), raw.span)}
 }
 
-fn parser_expression_form_arm_alternates(state: &JetParserState, subject: Expr, op: BinOp, prefer_predicate: Bool, depth: Int) -> Expr {
-    first :: parser_expression_form_arm_atom(&state, subject, op, prefer_predicate, depth + 1)
-    result := first
+// One `atom | atom …` group: its condition, its atom count and its source span.
+struct ParserExpressionFormAlternates {
+    cond: Expr
+    count: Int
+    span: Span
+}
+
+// A distributed `|` group next to a Boolean operator needs parentheses; the
+// fix wraps exactly the group's source text.
+fn parser_expression_form_distributed_group(state: &JetParserState, span: Span) {
+    what :: "a bare distributed atom group cannot be a direct operand of `&&` or `||`"
+    why :: "distributed atom groups need parentheses before a Boolean operator"
+    fix :: "write `(atom | atom) && guard` or `(atom | atom) || guard`"
+    if state.sources.len() > 0 && span.start >= 0 && span.start < span.end && span.end <= state.sources[0].len() {
+        group :: parser_source_slice(state, span.start, span.end)
+        parser_add_error_code_edit(&state, "E0386", span, what, why, fix, TextEdit{span: span, new_text: "({group})"})
+        return
+    }
+    parser_expression_form_error(&state, "E0386", span, what, why, fix)
+}
+
+fn parser_expression_form_arm_alternates(state: &JetParserState, subject: Expr, op: BinOp, prefer_predicate: Bool, depth: Int) -> ParserExpressionFormAlternates {
+    group_start :: parser_current(&state).span.start
+    result := parser_expression_form_arm_atom(&state, subject, op, prefer_predicate, depth + 1)
+    group_end := parser_previous_end(state)
     count := 1
     loop parser_current_kind(&state) == TOKEN_PIPE && parser_kind_at(&state, 1) != TOKEN_PIPE {
         parser_bump(&state)
         next :: parser_expression_form_arm_atom(&state, subject, op, false, depth + 1)
         result = parser_expression_form_combine(result, next, BinOp.Or)
+        group_end = parser_previous_end(state)
         count += 1
     }
-    if count > 1 && (parser_current_kind(&state) == TOKEN_AND_AND || parser_current_kind(&state) == TOKEN_OR_OR) {
-        parser_expression_form_error(&state, "E0386", parser_cover(expr_span(first), expr_span(result)), "a bare distributed atom group cannot be a direct operand of `&&` or `||`", "distributed atom groups need parentheses before a Boolean operator", "write `(atom | atom) && guard` or `(atom | atom) || guard`")
+    ParserExpressionFormAlternates{cond: result, count: count, span: Span{start: group_start, end: group_end}}
+}
+
+// The operand after `&&` / `||`: a parenthesized arm head, or a `|` group
+// that still distributes (and needs parentheses when it has several atoms).
+fn parser_expression_form_arm_bool_operand(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        inner :: parser_expression_form_dispatch_condition(&state, subject, op, depth + 1)
+        parser_expect(&state, TOKEN_RPAREN, "to close the arm head group")
+        return inner
     }
-    result
+    group :: parser_expression_form_arm_alternates(&state, subject, op, true, depth + 1)
+    if group.count > 1 -> parser_expression_form_distributed_group(&state, group.span)
+    group.cond
 }
 
 fn parser_expression_form_arm_and(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
     first :: parser_expression_form_arm_alternates(&state, subject, op, false, depth + 1)
-    result := first
+    if first.count > 1 && (parser_current_kind(&state) == TOKEN_AND_AND || parser_current_kind(&state) == TOKEN_OR_OR) -> parser_expression_form_distributed_group(&state, first.span)
+    result := first.cond
     loop parser_current_kind(&state) == TOKEN_AND_AND {
         parser_bump(&state)
-        next :: parser_expression_form_arm_alternates(&state, subject, op, true, depth + 1)
+        next :: parser_expression_form_arm_bool_operand(&state, subject, op, depth + 1)
         result = parser_expression_form_combine(result, next, BinOp.And)
     }
     result
 }
 
 fn parser_expression_form_dispatch_condition(state: &JetParserState, subject: Expr, op: BinOp, depth: Int) -> Expr {
-    first :: parser_expression_form_arm_and(&state, subject, op, depth + 1)
-    result := first
+    result := parser_expression_form_arm_and(&state, subject, op, depth + 1)
     loop parser_current_kind(&state) == TOKEN_OR_OR {
         parser_bump(&state)
-        next :: parser_expression_form_arm_and(&state, subject, op, depth + 1)
+        next :: parser_expression_form_arm_bool_operand(&state, subject, op, depth + 1)
         result = parser_expression_form_combine(result, next, BinOp.Or)
     }
     result

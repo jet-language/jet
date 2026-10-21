@@ -166,14 +166,17 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
         else -> false
     }, "expected run function")
 }
-// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2326
+// An authored `;` after nested control in a fallback block is not a synthetic
+// terminator: it is reported as the explicit-semicolon diagnostic E0373 at
+// exactly that `;` (Rust `report_explicit_semicolon`,
+// crates/jet-parser/src/Parser/mod.rs:850).
 #Test("fallback_block_rejects_authored_semicolon_after_nested_control") {
     source :: "\nfn run(value: Int?) {{\n    result :: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
     diagnostics :: value_block_rejected(source)
     semicolon :: parser_test_find(source, "}};")
     found := false
     loop diagnostic in diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.span == (Val(Span{start: semicolon + 1, end: semicolon + 2})) && diagnostic.what.contains("found `;`") -> found = true
+        if diagnostic.code == "E0373" && diagnostic.span == (Val(Span{start: semicolon + 1, end: semicolon + 2})) -> found = true
     }
     assert(found, "authored semicolon must not be treated as a synthetic terminator")
 }

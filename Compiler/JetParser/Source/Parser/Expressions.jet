@@ -854,7 +854,10 @@ fn parser_parse_marker_value(state: &JetParserState, depth: Int, allow_struct_li
         kind_name := ""
         if parser_current_kind(&state) == TOKEN_LPAREN {
             parser_bump(&state)
-            if parser_current_kind(&state) == TOKEN_IDENT -> kind_name = parser_value(state, parser_bump(&state))
+            if parser_current_kind(&state) == TOKEN_IDENT {
+                kind_token :: parser_bump(&state)
+                kind_name = parser_value(state, kind_token)
+            }
             if parser_current_kind(&state) == TOKEN_RPAREN -> parser_bump(&state)
         }
         applied = if kind_name.len() == 0 -> "Input" else -> kind_name
@@ -1260,10 +1263,14 @@ fn parser_parse_lambda_arrow_body(state: &JetParserState, depth: Int, fallback_e
     error_suffix :: parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_BANG
     if typed_body && (parser_kind_at(&state, 1) == TOKEN_BANG || error_suffix) -> parser_lambda_interface_error(&state, body_start.span)
     saved_diagnostics :: state.diagnostics.len()
+    body_start_position :: state.position
     value :: parser_parse_expression(&state, 1, depth + 1)
     if struct_body && parser_aborting(&state) && state.abort_mark > saved_diagnostics {
         loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         state.abort_mark = 0
+        // `Type { statements }` is a return type before a block body: resume
+        // statement recovery at the type so it skips the whole braced body.
+        state.position = body_start_position
         parser_lambda_interface_error(&state, body_start.span)
     }
     if parser_is_assignment_operator(parser_current_kind(&state)) {

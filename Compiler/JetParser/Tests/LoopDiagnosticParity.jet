@@ -12,25 +12,11 @@ fn loop_diagnostic_expect(source: String, code: String, wanted_span: String) -> 
     parsed
 }
 
+// Retired loop-label spellings (`outer := loop`, `@outer`, `outer@`) carry no
+// recovery or teaching any more; only the live loop diagnostics remain here.
 #Test("loop_diagnostic_parity") {
     _ := loop_diagnostic_expect("fn run() {{\nvalues :: loop -> 1\n}}", "E0072", "loop")
     _ := loop_diagnostic_expect("fn run() {{\nvalues :: loop i < 4 -> i\n}}", "E0072", "loop")
-    _ := loop_diagnostic_expect("fn run() {{\nouter := loop {{}}\n}}", "E0988", "outer := loop")
-    prefix :: loop_diagnostic_expect("fn run() {{\n@outer loop {{ break(outer) }}\n}}", "E0988", "@outer")
-    suffix :: loop_diagnostic_expect("fn run() {{\nouter@ loop {{ break(outer) }}\n}}", "E0988", "outer@")
-    loop parsed in ([ParseResult]{prefix, suffix}) {
-        if parsed.program.items[0] == .Func(function) {
-            if function.body[0] == .Loop(_, _, _, label) {
-                if label == .Val(name) {
-                    if name.name != "outer" -> panic("retired loop declaration lost its label")
-                } else { panic("retired loop declaration became unlabelled") }
-            } else { panic("retired loop declaration lost its loop AST") }
-        } else { panic("loop recovery lost its enclosing function") }
-    }
-    loop control in ([String]{"break @outer", "break outer@", "next @outer", "next outer@"}) {
-        marked :: if control.ends_with("@") -> "outer@" else -> "@outer"
-        _ := loop_diagnostic_expect("fn run() {{\nouter :: loop {{\n{control}\n}}\n}}", "E0988", marked)
-    }
     canonical :: parse_source("fn run() {{\nouter :: loop {{\nnext(outer)\nbreak(outer)\n}}\nvalues :: loop i in 0..<3 -> i\n}}".bytes())
     if canonical.diagnostics.len() != 0 -> panic("canonical named or collecting loops changed")
     print("loop diagnostic parity: passed")

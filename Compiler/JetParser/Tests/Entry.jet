@@ -29,26 +29,14 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     }
 }
 
-// Rust: crates/jet-parser/src/lib.rs:54
-#Test("generic_module_retired_mixed_angle_value_slot_teaches_parentheses") {
-    result :: parser_test_result("module cache<K, capacity: Int> {{ fn size() Int :: capacity }}")
-    assert(!result.diagnostics.is_empty(), "retired mixed parameter spelling")
-    found := false
-    loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.what.contains("parentheses") && diagnostic.fix.contains("capacity: Int") -> found = true
-    }
-    assert(found, "{result.diagnostics:Debug}")
-}
-
-// Rust: crates/jet-parser/src/lib.rs:70
-#Test("generic_module_retired_equals_alias_teaches_coloncolon") {
-    result :: parser_test_result("module cache<K>(capacity: Int) {{ fn size() Int :: capacity }}\nmodule old = cache<Int>(64)")
-    assert(!result.diagnostics.is_empty(), "retired equals alias spelling")
-    found := false
-    loop diagnostic in result.diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.what.contains("::") && diagnostic.fix.contains("module old :: Target") -> found = true
-    }
-    assert(found, "{result.diagnostics:Debug}")
+// Rust: crates/jet-parser/src/lib.rs:70. The Rust parser also teaches the
+// `::` respelling; retired spellings carry no teaching any more, so only the
+// rejection remains. Rust lib.rs:54 (teaching for a `<K, capacity: Int>`
+// value slot) has no parser claim left: a bounded type parameter is valid
+// syntax and sema judges the bound.
+#Test("generic_module_equals_alias_is_rejected") {
+    result :: parser_test_result("module cache<K>(capacity: Int) {{ fn size() -> Int {{ return capacity }} }}\nmodule old = cache<Int>(64)")
+    assert(!result.diagnostics.is_empty(), "equals alias spelling")
 }
 
 // Rust: crates/jet-parser/src/lib.rs:86

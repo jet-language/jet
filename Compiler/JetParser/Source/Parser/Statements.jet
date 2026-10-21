@@ -482,7 +482,9 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             parser_finish_statement(&state)
             Stmt.Yield{value: value.expr, span: parser_cover(start.span, value.span)}
         }
-        TOKEN_HASH -> parser_parse_marked_statement(&state)
+        // `#Todo`, the one marker allowed only as an expression, starts an
+        // ordinary expression statement, not a statement marker.
+        TOKEN_HASH -> if parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "Todo" -> parser_parse_assignment_or_expression(&state) else -> parser_parse_marked_statement(&state)
         TOKEN_IDENT -> {
             if parser_next_statement_ahead(&state) -> return parser_parse_next_statement(&state)
             word :: parser_value(state, token)
@@ -507,9 +509,25 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
     }
 }
 
+// `.name { … }` / `.name(args) { … }` is a scope-member statement; `.Ok(1)`
+// with no block after its parentheses is a leading-dot enum value, so a
+// braced body may end in one.
 fn parser_scope_member_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT
-        && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_LBRACE)
+    if parser_current_kind(&state) != TOKEN_DOT || parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
+    if parser_kind_at(&state, 2) == TOKEN_LBRACE -> return true
+    if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
+    offset := 2
+    depth := 0
+    loop {
+        kind :: parser_kind_at(&state, offset)
+        if kind == TOKEN_EOF -> return false
+        if kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RPAREN {
+            depth -= 1
+            if depth == 0 -> return parser_kind_at(&state, offset + 1) == TOKEN_LBRACE
+        }
+        offset += 1
+    }
 }
 
 // Rust `stmt` `task.group g { … }` or
@@ -931,14 +949,14 @@ fn parser_parse_if_arm_head(state: &JetParserState, subject: Expr, pattern_subje
             // `&&` binds tighter than `||`, with the pattern as the first operand.
             loop parser_current_kind(&state) == TOKEN_AND_AND {
                 parser_bump(&state)
-                result = parser_expression_form_combine(result, parser_parse_arm_bool_operand(&state, subject, op), BinOp.And)
+                result = parser_expression_form_combine(result, parser_expression_form_arm_bool_operand(&state, subject, op, 0), BinOp.And)
             }
             loop parser_current_kind(&state) == TOKEN_OR_OR {
                 parser_bump(&state)
-                group := parser_parse_arm_bool_operand(&state, subject, op)
+                group := parser_expression_form_arm_bool_operand(&state, subject, op, 0)
                 loop parser_current_kind(&state) == TOKEN_AND_AND {
                     parser_bump(&state)
-                    group = parser_expression_form_combine(group, parser_parse_arm_bool_operand(&state, subject, op), BinOp.And)
+                    group = parser_expression_form_combine(group, parser_expression_form_arm_bool_operand(&state, subject, op, 0), BinOp.And)
                 }
                 result = parser_expression_form_combine(result, group, BinOp.Or)
             }
@@ -948,18 +966,6 @@ fn parser_parse_if_arm_head(state: &JetParserState, subject: Expr, pattern_subje
     }
     parser_expression_form_redundant_dispatch(&state, subject, op)
     parser_expression_form_dispatch_condition(&state, subject, op, 1)
-}
-
-// The operand after `&&` / `||` in an arm head: a parenthesized group or a
-// `|` union, where a lone predicate stays a Boolean expression.
-fn parser_parse_arm_bool_operand(state: &JetParserState, subject: Expr, op: BinOp) -> Expr {
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        parser_bump(&state)
-        inner :: parser_expression_form_dispatch_condition(&state, subject, op, 1)
-        parser_expect(&state, TOKEN_RPAREN, "`)` to close the arm head group")
-        return inner
-    }
-    parser_expression_form_arm_alternates(&state, subject, op, true, 1)
 }
 
 // C25: a `lo..hi` range arm head. Rust's inclusive `..=` (E0318) and
