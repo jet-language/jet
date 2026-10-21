@@ -5506,6 +5506,35 @@ struct JetDriverCheckedProjectionCapture {
     source_modules: [Int]{[Int]{}}
     entry_module: Int?{None}
     schema_ingress: JetDriverSchemaIngress?{None}
+    // `jet_driver_lowering_inputs`: stop right before MIR lowering and keep its inputs.
+    stop_before_lowering: Bool{false}
+    lowering_inputs: JetDriverLoweringInputs?{None}
+}
+
+// What MIR lowering reads (Pipeline `jet_driver_lower_releasing`): the
+// checked functions it lowers, after Core pruning and keep-going traps; the
+// checked modules (declarations, names) beside them; the entry module.
+struct JetDriverLoweringInputs {
+    functions: [TFunc]
+    modules: [SemaGraphModuleResult]
+    entry_module_identity: String
+}
+
+struct JetDriverLoweringInputsResult {
+    compile: JetDriverCompileResult
+    inputs: JetDriverLoweringInputs?
+}
+
+// The slot IR route's front: the ordinary checked compile of `request`,
+// stopped right before MIR lowering, with the lowering inputs (None when the
+// compile stopped earlier; its result carries the diagnostics).
+fn jet_driver_lowering_inputs(request: ^JetDriverCompileRequest) -> JetDriverLoweringInputsResult {
+    kg := jet_driver_keep_going_log(None)
+    capture := JetDriverCheckedProjectionCapture{stop_before_lowering: true}
+    journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
+    compile := jet_driver_compile_stages(request, &kg, false, false, &capture, &journal)
+    compile.canonical_routes = canonical_pass_take(&journal)
+    JetDriverLoweringInputsResult{compile: ^compile, inputs: ^capture.lowering_inputs}
 }
 
 // One source-unit classifier for ordinary compilation and retained services.
@@ -6326,6 +6355,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         // Only a failed check can leave a callee without a checked function.
         if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(&kg, &sema_functions, runtime_semantic_modules)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
+    }
+    // The slot IR route reads what lowering would read and lowers nothing.
+    if capture.stop_before_lowering {
+        if request.trace_sink == .Val(sink) -> sink.end("lower", sema_functions.len())
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, entry_module_identity: load.entry_module_identity})
+        return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
     }
 
     lowered := jet_driver_lower_releasing(^prelower_released, &sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load), kg.enabled)
