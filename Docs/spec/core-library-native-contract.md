@@ -127,7 +127,7 @@ records its raw fault detail before dropping it, never its rendered report.
 The native checked-MIR transport calls the CLI's authorized compiler request
 and serializes the resulting MIR through the canonical Jet MIR writer. The
 transport records the real driver outcome and requires a fresh output stream.
-`Tests/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
+`Tests/Fragments.fixture/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
 unmet, nested, checked/unarmed R080 and deeper/own-close witnesses through the
 real Task transport. `run-expect-producer.mjs` builds a focused proof as the
 compiler is built (`jet build Compiler` over a copy whose CLI entry is the

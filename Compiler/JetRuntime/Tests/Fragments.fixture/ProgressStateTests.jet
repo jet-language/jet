@@ -1,0 +1,64 @@
+// Link beside real runtime; stderr must be redirected or machine output=1.
+fn progress_fixture_render(description: I64, template: I64, count: I64, total: I64, elapsed: Float, color: Bool, expected: I64) -> Bool {
+    text :: progress_render(description, template, count, total, elapsed, color)
+    same :: jet_rt_string_eq(text, expected)
+    jet_rt_string_drop(text)
+    same
+}
+
+#Export(c) fn jet_rt_progress_state_fixture() -> I64 {
+    if progress_enabled() -> return I64{1}
+    if !progress_fixture_render(rt_static_text("work"), rt_static_text(""), I64{1}, I64{2}, Float{0.25}, false,
+        rt_static_text("work 50% 1/2 elapsed 0.25s remaining 0.25s rate 4.00/s")) -> return I64{2}
+    if !progress_fixture_render(rt_static_text("x"), rt_static_text("{{count}}/{{total}}:{{percent}}:{{remaining}}:{{rate}}"), I64{-1}, I64{-1}, Float{0.0}, false,
+        rt_static_text("18446744073709551615/?:?:?:?/s")) -> return I64{3}
+    if !progress_fixture_render(rt_static_text("{{count}}"), rt_static_text("{{description}}|{{percent}}|{{remaining}}"), I64{0}, I64{0}, Float{1.0}, false,
+        rt_static_text("0|100|0.00s")) -> return I64{4}
+    // Exact binary ties-to-even: 0.125 => .12, 0.375 => .38.
+    first :: progress_fixed2(Float{0.125}, rt_static_text("s"))
+    second :: progress_fixed2(Float{0.375}, rt_static_text("s"))
+    correct :: jet_rt_string_eq(first, rt_static_text("0.12s")) && jet_rt_string_eq(second, rt_static_text("0.38s"))
+    jet_rt_string_drop(first)
+    jet_rt_string_drop(second)
+    if !correct -> return I64{5}
+    description :: jet_rt_string_clone(rt_static_text("work"))
+    template :: jet_rt_string_clone(rt_static_text("{{count}}"))
+    state :: jet_rt_progress_state_new(description, template, I64{2})
+    jet_rt_string_drop(description)
+    jet_rt_string_drop(template)
+    jet_rt_progress_state_advance(state)
+    if (rt_text_word(state + I64{40}) != I64{1} || rt_text_word(state + I64{48}) != I64{1} || rt_text_word(state + I64{56}) != I64{0}) -> return I64{6}
+    jet_rt_progress_state_advance(state)
+    jet_rt_progress_state_advance(state)
+    if (rt_text_word(state + I64{40}) != I64{2} || rt_text_word(state + I64{56}) != I64{1}) -> return I64{7}
+    jet_rt_progress_state_finish(state)
+    jet_rt_progress_state_drop(state)
+    unknown :: jet_rt_progress_state_new(rt_static_text(""), rt_static_text(""), I64{-1})
+    rt_text_store(unknown + I64{40}, I64{-1})
+    jet_rt_progress_state_advance(unknown)
+    if (rt_text_word(unknown + I64{40}) != I64{-1}) -> return I64{8}
+    jet_rt_progress_state_drop(unknown)
+    never_displayed :: jet_rt_progress_state_new(rt_static_text(""), rt_static_text(""), I64{0})
+    jet_rt_progress_state_finish(never_displayed)
+    if (rt_text_word(never_displayed + I64{48}) != I64{0}) -> return I64{9}
+    jet_rt_progress_state_drop(never_displayed)
+    ansi :: jet_rt_string_builder_new()
+    rt_text_push_word(ansi, I64{27}, I64{1})
+    rt_text_append(ansi, rt_text_data(rt_static_text("[31mx")), I64{5})
+    rt_text_push_word(ansi, I64{27}, I64{1})
+    rt_text_append(ansi, rt_text_data(rt_static_text("[0m")), I64{3})
+    if !progress_fixture_render(ansi, rt_static_text("{{description}}"), I64{1}, I64{-1}, Float{0.0}, false, rt_static_text("x")) -> return I64{10}
+    if !progress_fixture_render(ansi, rt_static_text("{{description}}"), I64{1}, I64{-1}, Float{0.0}, true, ansi) -> return I64{11}
+    jet_rt_string_drop(ansi)
+    long :: jet_rt_string_builder_new()
+    at := I64{0}
+    loop at < (I64{257}) {
+        rt_text_push_word(long, I64{43459}, I64{2}) // UTF-8 e-acute, one scalar.
+        at += I64{1}
+    }
+    bounded :: progress_bound(long)
+    if (rt_text_len(bounded) != I64{512}) -> return I64{12}
+    jet_rt_string_drop(bounded)
+    jet_rt_string_drop(long)
+    I64{0}
+}

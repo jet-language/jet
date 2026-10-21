@@ -13,7 +13,7 @@ if (!out) { console.error("usage: run-x64-fixtures.mjs <scratch-outdir>"); proce
 const read = (path) => readFileSync(resolve(repo, path), "utf8");
 const type = read("Compiler/JetFoundation/Source/MIR/MIR.jet").split("\n").find((line) => /^(pub )?struct MIRTypeID /.test(line));
 if (!type) throw new Error("missing MIRTypeID");
-const paths = ["Source/LIR/LIR.jet", "Source/LIR/Lint.jet", "Source/X64/Encoder.jet", "Source/X64/RegAlloc.jet", "Source/X64/Select.jet", "Tests/X64Fixtures.jet"];
+const paths = ["Source/LIR/LIR.jet", "Source/LIR/Lint.jet", "Source/X64/Encoder.jet", "Source/X64/RegAlloc.jet", "Source/X64/Select.jet", "Tests/Fragments.fixture/X64Fixtures.jet"];
 const bodies = paths.map((path) => read(`Compiler/JetBackend/${path}`).replace(/^use jet_\w+.*\n/gm, ""));
 // Reuse the canonical Jet ELF writer; omit only its module-linking entrypoint.
 const elf = read("Compiler/JetBackend/Source/Image/ELF.jet");

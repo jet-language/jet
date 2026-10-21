@@ -126,7 +126,7 @@ assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn j
     "jet_rt_codec_parse_yaml", "jet_rt_codec_under", "jet_std_fs_list_dir_raw", "jet_text_pattern_match",
   ].filter((symbol) => routeText.includes(`LowerRoute{symbol: "${symbol}"`));
   assert.deepEqual([...recordLists].sort(), reviewed.sort(), "a route carrying a List of schema records must be reviewed against the handle-buffer contract");
-  const fixture = readFileSync(join(root, "Compiler/JetBackend/Tests/Fixtures/Values.jet"), "utf8");
+  const fixture = readFileSync(join(root, "Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Values.jet"), "utf8");
   assert.match(fixture, /expect-requires-route qualified-dir-entries jet_std_fs_list_dir_raw/, "the native list_dir witness must read a DirEntry field");
 }
 console.log("runtime route ABI: CHECK OK");

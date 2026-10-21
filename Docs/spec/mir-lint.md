@@ -5,7 +5,7 @@ canonical MIR program. It is a second checker. It does not reuse the semantic
 checker or the optimizer's legality verifier, so a lowering or optimization bug
 is caught before an engine generates code from the wrong program. The Jet
 compiler implements it in `Compiler/JetOptimizer/Source/Verification/Lint.jet`;
-its rule-by-rule fixtures are `Compiler/JetOptimizer/Tests/LintFixtures.jet`
+its rule-by-rule fixtures are `Compiler/JetOptimizer/Tests/Fragments.fixture/LintFixtures.jet`
 (assembled by `Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs`). The
 archived Rust bootstrap compiler does not carry the lint.
 

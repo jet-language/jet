@@ -25,7 +25,7 @@ function command(name, args, options = {}) {
 }
 if (mode === 'assemble') {
     mkdirSync(join(out, 'Source'), {recursive: true});
-    writeFileSync(join(out, 'Source/Fixture.jet'), read('Compiler/JetRuntime/Tests/ClosureRefsShared.jet'));
+    writeFileSync(join(out, 'Source/Fixture.jet'), read('Compiler/JetRuntime/Tests/Fragments.fixture/ClosureRefsShared.jet'));
     writeFileSync(join(out, 'package.jet'), 'name: "closure_refs_shared"\nversion: "0.0.1"\nedition: "2028"\noutputs: { runtime: .Library{ name: "closure_refs_shared", native: true } }\n');
     writeFileSync(join(out, 'exports.list'), 'jet_closure_ref_test_run\n');
 } else {

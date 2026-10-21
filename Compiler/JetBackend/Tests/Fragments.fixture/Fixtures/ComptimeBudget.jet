@@ -1,0 +1,71 @@
+// Comptime budget hooks: only a compiler callable (lir_lower_callables)
+// enters jet_rt_comptime_enter/step/leave. The runtime library implements
+// those hooks, so a runtime callable never calls them, and
+// jet_rt_comptime_enter never calls itself.
+use jet_backend.[LIRLowering, lir_lower_callables, lir_lower_runtime_callables]
+
+fn fx_comptime_budget_program() -> MIRProgram Never! {
+    h := fx_builder()
+    fx_block(&h, 0, MIRTerminator.Return{value: None})
+    helper := fx_function("comptime_budget_helper", h, fx_unit())
+    e := fx_builder()
+    _ := fx_param(&e, "owner", fx_i64(), fx_borrow())
+    _ := fx_param(&e, "start", fx_i64(), fx_borrow())
+    _ := fx_param(&e, "end", fx_i64(), fx_borrow())
+    fx_do(&e, MIROperation.Call{callee: MIRCallee.User{function: helper.id}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&e, 0, MIRTerminator.Return{value: None})
+    enter := fx_function("jet_rt_comptime_enter", e, fx_unit())
+    fx_program([MIRFunction]{enter, helper}, [MIRTypeDef]{})
+}
+
+fn fx_comptime_budget_hook(symbol: String) -> Bool Never! {
+    hooks :: [String]{"jet_rt_comptime_enter", "jet_rt_comptime_step", "jet_rt_comptime_leave"}
+    loop hook in hooks {
+        if symbol == hook || symbol.ends_with("::{hook}") -> return true
+    }
+    false
+}
+
+// How many calls in `lowered` reach a budget hook, by runtime symbol or by
+// the lowered row of the function named `jet_rt_comptime_enter`.
+fn fx_comptime_budget_calls(lowered: LIRLowering) -> Int Never! {
+    calls := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) && fx_comptime_budget_hook(symbol) -> calls += 1
+                    if callee == .Function(id) {
+                        loop row in lowered.lir.functions {
+                            if row.id == id && fx_comptime_budget_hook(row.name) -> calls += 1
+                        }
+                    }
+                }
+            }
+        }
+    }
+    calls
+}
+
+fn fx_comptime_budget_checks() -> Bool Never! {
+    p :: fx_comptime_budget_program()
+    roots :: [MIRFunctionID]{p.functions[0].id}
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    runtime :: lir_lower_runtime_callables(p, roots, ^intrinsics)
+    loop issue in runtime.issues -> print("comptime-budget runtime: {issue.function}: {issue.message}")
+    if runtime.issues.len() != 0 -> return false
+    runtime_calls :: fx_comptime_budget_calls(runtime)
+    if runtime_calls != 0 {
+        print("comptime-budget: a runtime callable calls a budget hook {runtime_calls} time(s)")
+        return false
+    }
+    // The compiler callable lowering still spends fuel through the hooks.
+    callable :: lir_lower_callables(p, roots)
+    loop issue in callable.issues -> print("comptime-budget callable: {issue.function}: {issue.message}")
+    if callable.issues.len() != 0 -> return false
+    if fx_comptime_budget_calls(callable) == 0 {
+        print("comptime-budget: a compiler callable lost its budget hooks")
+        return false
+    }
+    true
+}

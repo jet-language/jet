@@ -26,7 +26,7 @@ if (mode === 'assemble') {
     .filter(x => x && !x.startsWith('#')).map(x => [x.split(/\s+/)[0], x]));
   // Scratch-only export admission for the held witness; never edit the frozen
   // runtime manifest. Once regenerated, the same rows are merely reused.
-  for (const path of ['Source/TestSuite.jet', 'Tests/TestSuiteTests.jet']) {
+  for (const path of ['Source/TestSuite.jet', 'Tests/Fragments.fixture/TestSuiteTests.jet']) {
     const source = readFileSync(join(root, 'Compiler/JetRuntime', path), 'utf8');
     for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
       const name = match[1];

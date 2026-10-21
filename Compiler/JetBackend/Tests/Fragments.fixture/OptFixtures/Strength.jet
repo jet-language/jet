@@ -1,0 +1,143 @@
+// P2: literal shape witnesses plus an independent 64-bit LIR evaluator.
+// Jet Int is exact; the evaluator explicitly wraps words and interprets the
+// sign bit, rather than mistaking Jet's exact arithmetic for machine LIR.
+fn sfx_word(value: Int) -> Int Never! {
+    modulus :: 18446744073709551616
+    bits :: ((value % modulus) + modulus) % modulus
+    if bits >= 9223372036854775808 -> bits - modulus else -> bits
+}
+
+fn sfx_unsigned(value: Int) -> Int Never! {
+    if value < 0 -> value + 18446744073709551616 else -> value
+}
+
+fn sfx_div(left: Int, right: Int) -> Int Never! {
+    magnitude :: (if left < 0 -> -left else -> left) /% right
+    if left < 0 -> -magnitude else -> magnitude
+}
+
+fn sfx_eval(function: LIRFunction, argument: Int) -> Int? {
+    values := [Int]{}
+    loop _ in function.values -> &values.push(0)
+    values[function.blocks[0].params[0].value] = argument
+    loop inst in function.blocks[0].insts {
+        if inst == {
+            .Const(dst, value) -> values[dst.value] = sfx_word(value)
+            .Binary(dst, op, left, right) -> {
+                x :: values[left.value]
+                y :: values[right.value]
+                result :: if op == {
+                    .Add | .UAdd -> x + y
+                    .Sub | .USub -> x - y
+                    .Mul | .UMul -> x * y
+                    .Div -> sfx_div(x, y)
+                    .Rem -> x - sfx_div(x, y) * y
+                    .UDiv -> sfx_unsigned(x) /% y
+                    .URem -> sfx_unsigned(x) % y
+                    .Shl -> x << y
+                    .Shr -> x >> y
+                    .UShr -> sfx_unsigned(x) >> y
+                    .And -> x.bit_and(y)
+                    .Or -> x.bit_or(y)
+                    .Xor -> x.bit_xor(y)
+                }
+                values[dst.value] = sfx_word(result)
+            }
+            else -> return None
+        }
+    }
+    if function.blocks[0].terminator == .Return(.Val(id)) -> return Val(values[id.value])
+    None
+}
+
+fn sfx_function(name: String, op: LIRBinaryOp, divisor: Int, reverse: Bool) -> LIRFunction Never! {
+    b := ofx_builder(name)
+    x :: lir_builder_word(&b)
+    c :: ofx_const(&b, divisor)
+    result :: if reverse -> ofx_binary(&b, op, c, x) else -> ofx_binary(&b, op, x, c)
+    ofx_finish(&b, [LIRValueID]{x}, result)
+}
+
+fn sfx_body(op: LIRBinaryOp, k: Int) -> String Never! {
+    divisor :: 1 << k
+    head :: "  b0(v0: i64):\n    v1: i64 = const {divisor}\n"
+    if op == .Mul || op == .UMul -> return "{head}    v3: i64 = const {k}\n    v2: i64 = shl v0, v3\n    ret v2"
+    if op == .UDiv -> return "{head}    v3: i64 = const {k}\n    v2: i64 = ushr v0, v3\n    ret v2"
+    if op == .URem -> return "{head}    v3: i64 = const {divisor - 1}\n    v2: i64 = and v0, v3\n    ret v2"
+    bias :: 64 - k
+    signed :: "{head}    v3: i64 = const 63\n    v4: i64 = const {bias}\n    v5: i64 = const {k}\n    v6: i64 = shr v0, v3\n    v7: i64 = ushr v6, v4\n    v8: i64 = add v0, v7\n"
+    if op == .Div -> return "{signed}    v2: i64 = shr v8, v5\n    ret v2"
+    "{signed}    v9: i64 = shr v8, v5\n    v10: i64 = shl v9, v5\n    v2: i64 = sub v0, v10\n    ret v2"
+}
+
+fn sfx_case(op: LIRBinaryOp, k: Int, reverse: Bool) -> Bool Never! {
+    before :: sfx_function("strength-{op}-{k}-{reverse}", op, 1 << k, reverse)
+    after :: lir_strength_function(before.copy())
+    passed := true
+    if k == 1 || k == 2 || k == 62 || reverse {
+        if !ofx_check(before, after, ofx_expected(before, sfx_body(op, k))) -> passed = false
+    } else {
+        loop issue in lir_lint_module(ofx_module(after)) {
+            print("FAIL {before.name} lint: {issue.message}")
+            passed = false
+        }
+    }
+    samples :: [Int]{-9223372036854775808, -9223372036854775807, -1025, -8, -7, -5, -4, -3, -1, 0, 1, 3, 4, 5, 7, 8, 1025, 9223372036854775806, 9223372036854775807}
+    loop x in samples {
+        original :: sfx_eval(before, x)
+        reduced :: sfx_eval(after, x)
+        if original == None || reduced == None || original != reduced {
+            print("FAIL {before.name} at {x}: {original} != {reduced}")
+            passed = false
+        }
+        if k == 2 && x == -7 && op == .Div && reduced != Val(-1) -> passed = false
+        if k == 2 && x == -7 && op == .Rem && reduced != Val(-3) -> passed = false
+    }
+    passed
+}
+fn sfx_refuse(op: LIRBinaryOp, divisor: Int) -> Bool Never! {
+    before :: sfx_function("strength-refuse-{op}-{divisor}", op, divisor, false)
+    ofx_check(before, lir_strength_function(before.copy()), lir_print_module(ofx_module(before)))
+}
+
+fn sfx_float() -> Bool Never! {
+    b := ofx_builder("strength-float-refused")
+    x :: lir_builder_value(&b, lir_layout_float(), LIRDrop.Trivial, None)
+    c :: lir_builder_value(&b, lir_layout_float(), LIRDrop.Trivial, None)
+    result :: lir_builder_value(&b, lir_layout_float(), LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Const{dst: c, value: 4})
+    lir_builder_push(&b, LIRInst.Binary{dst: result, op: LIRBinaryOp.Mul, left: x, right: c})
+    before :: ofx_finish(&b, [LIRValueID]{x}, result)
+    ofx_check(before, lir_strength_function(before.copy()), lir_print_module(ofx_module(before)))
+}
+
+fn sfx_copy() -> Bool Never! {
+    b := ofx_builder("strength-const-only")
+    x :: lir_builder_word(&b)
+    c :: ofx_const(&b, 4)
+    copied :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Copy{dst: copied, src: c})
+    result :: ofx_binary(&b, LIRBinaryOp.Div, x, copied)
+    before :: ofx_finish(&b, [LIRValueID]{x}, result)
+    ofx_check(before, lir_strength_function(before.copy()), lir_print_module(ofx_module(before)))
+}
+
+fn opt_fixtures_strength() -> Bool Never! {
+    passed := true
+    ops :: [LIRBinaryOp]{LIRBinaryOp.Mul, LIRBinaryOp.UMul, LIRBinaryOp.Div, LIRBinaryOp.Rem, LIRBinaryOp.UDiv, LIRBinaryOp.URem}
+    refused :: [Int]{-4, 0, 1, 3, 6}
+    loop op in ops {
+        loop k in 1..<63 {
+            if !sfx_case(op, k, false) -> passed = false
+        }
+        loop divisor in refused {
+            if !sfx_refuse(op, divisor) -> passed = false
+        }
+    }
+    if !sfx_case(LIRBinaryOp.Mul, 2, true) -> passed = false
+    if !sfx_case(LIRBinaryOp.UMul, 62, true) -> passed = false
+    if !sfx_float() -> passed = false
+    if !sfx_copy() -> passed = false
+    if passed -> print("PASS strength semantics: all k=1..62, six operators, 19 signed-word samples")
+    passed
+}

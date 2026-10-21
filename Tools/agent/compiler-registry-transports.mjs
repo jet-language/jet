@@ -78,13 +78,16 @@ function nativeCorpus(repo, out) {
 }
 
 export function prepareTransport(row, { repo, out }) {
-    const id = row.source.replace(/^Compiler\//, '').replace(/\.jet$/, '');
+    // A registry fragment lives in its Tests package's fixture directory; its identity and C witness are
+    // named from the Tests package itself.
+    const home = row.source.replace(/\/[A-Za-z0-9]+\.fixture\//, '/');
+    const id = home.replace(/^Compiler\//, '').replace(/\.jet$/, '');
     const spec = specification(id);
     if (!spec) return null;
     const entry = { id, package: row.package, mode: 'run', kind: 'transport', path: adapter,
         cwd: join(out, id), sha256: digest(readFileSync(adapter)), testCount: 1,
         stdout: `JET_COMPILER_REGISTRY PASS ${id} tests=1\n`, sources: [row.source], sourceManifests: ['Compiler/JetRuntime/sources.list'] };
-    const witness = row.source.replace(/\.jet$/, '.c');
+    const witness = home.replace(/\.jet$/, '.c');
     if (spec.witness) entry.sources.push(spec.witness);
     if (spec.expectedFile) entry.sources.push(spec.expectedFile);
     if (spec.type === 'c' && existsSync(join(repo, witness))) entry.sources.push(witness);

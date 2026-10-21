@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Assemble the MIR Lint fixture unit (Tests/LintFixtures.jet) with the sources
+// Assemble the MIR Lint fixture unit (Tests/Fragments.fixture/LintFixtures.jet) with the sources
 // it needs, as one package-free Jet file.
 //
 // usage: node Compiler/JetOptimizer/Tests/run-lint-fixtures.mjs <outdir> [--canonical-order] [checker]
@@ -9,7 +9,7 @@
 // <outdir>/receipt.json binding the fixture count to the read sources.
 //
 // The fixtures reuse the MIR builders and example programs of the lowering
-// fixtures (Compiler/JetBackend/Tests/LowerFixtures.jet) without their
+// fixtures (Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet) without their
 // lowering report and entry point. MIR.jet also names Foundation span, call
 // registry and parameter-zone items whose files pull in the whole diagnostics
 // registry; their exact definitions are copied out of those files.
@@ -115,7 +115,7 @@ const parts = [
   body("Compiler/JetOptimizer/Source/Verification/Lint.jet"),
   // Only the MIR builders and example programs: these items lower, link or
   // report native images, or name lowering-only fixtures (Tests/Fixtures).
-  body("Compiler/JetBackend/Tests/LowerFixtures.jet", [
+  body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet", [
     "fn fx_generic_runtime_rejection_checks(",
     "fn fx_report(",
     "fn fx_report_runtime(",
@@ -136,8 +136,8 @@ const parts = [
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sort_functions("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_sorted_order("),
     item("Compiler/JetCodegen/Source/Codegen/Functions.jet", "fn jet_codegen_order_before("),
-    body("Compiler/JetOptimizer/Tests/CanonicalOrderingFixtures.jet"),
-  ] : [body("Compiler/JetOptimizer/Tests/LintFixtures.jet")]),
+    body("Compiler/JetOptimizer/Tests/Fragments.fixture/CanonicalOrderingFixtures.jet"),
+  ] : [body("Compiler/JetOptimizer/Tests/Fragments.fixture/LintFixtures.jet")]),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, parts.join("\n"));

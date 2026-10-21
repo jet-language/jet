@@ -1,0 +1,34 @@
+// Exercise the real bounded registry/report and final-writer kernels.
+#Export(c) fn jet_rt_sync_fixture_observe_reset() { sync_store(observe_root + I64{64}, I64{0}) }
+#Export(c) fn jet_rt_sync_fixture_observe_park(control: I64, site: I64, label: I64, wait: I64) -> I64 {
+    id :: jet_rt_observe_task_register(control, site, label)
+    jet_rt_observe_task_enter(id)
+    jet_rt_observe_task_wait(I64{2}, wait, I64{0}, I64{0})
+    id
+}
+#Export(c) fn jet_rt_observe_fixture_start(identity: I64, directory: I64) -> I64 { observe_live_start(identity, directory) }
+#Export(c) fn jet_rt_observe_fixture_publish(writer: I64, exit: I64) { observe_publish(writer, exit) }
+// Read-only observations of the production start path, never a fake writer
+// or thread controller. Writers and detached threads live for the process.
+#Export(c) fn jet_rt_observe_fixture_writer() -> I64 {
+    sync_mutex_lock(observe_root)
+    writer :: sync_load(observe_root + I64{72})
+    sync_mutex_unlock(observe_root)
+    writer
+}
+#Export(c) fn jet_rt_observe_fixture_periodic_started(writer: I64) -> I64 { sync_load(writer + I64{112}) }
+#Export(c) fn jet_rt_observe_fixture_sequence(writer: I64) -> I64 {
+    sync_mutex_lock(writer)
+    sequence :: sync_load(writer + I64{16})
+    sync_mutex_unlock(writer)
+    sequence
+}
+#Export(c) fn jet_rt_observe_fixture_snapshot(writer: I64) -> I64 {
+    sync_mutex_lock(writer)
+    result :: observe_snapshot(writer, I64{1})
+    sync_mutex_unlock(writer)
+    result
+}
+#Export(c) fn jet_rt_observe_fixture_value(source: I64) { jet_observe_record_live_value(source) }
+#Export(c) fn jet_rt_observe_fixture_event(source: I64) { jet_observe_event(source) }
+#Export(c) fn jet_rt_observe_fixture_ledger(source: I64) { observe_record_ledger(source) }

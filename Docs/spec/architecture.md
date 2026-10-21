@@ -293,7 +293,7 @@ runtime-owned statics before the loader unmaps code and data. Initialization
 and finalization share a live flag, so repeated calls reuse the same statics
 without duplicating owners. Calls through the x86-64 assembly host boundary
 declare all System V caller-saved vector registers as clobbered.
-The callable lifetime witness in `Compiler/JetBackend/Tests/CallableStatics.jet`
+The callable lifetime witness in `Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet`
 starts with MIR and uses the admitted runtime's actual constructors and drops,
 observing reuse, live-flag clearing, and reinitialization before loader unload.
 
@@ -487,7 +487,7 @@ unspecified upper register or stack-slot bits must not change Jet truth.
 Image origins preserve the linker's relative alignment: relocatable read-only
 sections advertise and use their maximum datum alignment, and static ELF text
 starts after header padding to the maximum function/data alignment.
-The [ABI fixtures](../../Compiler/JetBackend/Tests/AbiFixtures.jet) exercise
+The [ABI fixtures](../../Compiler/JetBackend/Tests/Fragments.fixture/AbiFixtures.jet) exercise
 dirty upper bits and aligned data addresses, including a system-linked object.
 
 Hosted program and runtime objects share the [section-table writer](../../Compiler/JetBackend/Source/Image/Object.jet).

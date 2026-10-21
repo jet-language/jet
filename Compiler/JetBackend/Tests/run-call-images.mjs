@@ -87,7 +87,7 @@ let parts = [
     'Compiler/JetBackend/Source/OS/Linux.jet',
     'Compiler/JetBackend/Source/Image/Loader.jet',
     'Compiler/JetBackend/Source/Image/Calls.jet',
-    'Compiler/JetBackend/Tests/CallImages.jet',
+    'Compiler/JetBackend/Tests/Fragments.fixture/CallImages.jet',
   ].map(body),
 ];
 if (process.argv.includes('--values') || process.argv.includes('--session')) {
@@ -97,8 +97,8 @@ if (process.argv.includes('--values') || process.argv.includes('--session')) {
     ...parts.slice(0, -1),
     ...comptimeSchema(foundation),
     body('Compiler/JetBackend/Source/Image/ComptimeValues.jet'),
-    body('Compiler/JetBackend/Tests/CallImages.jet').replace('fn run() {', 'fn ci_calls() {'),
-    body('Compiler/JetBackend/Tests/ComptimeScalars.jet'),
+    body('Compiler/JetBackend/Tests/Fragments.fixture/CallImages.jet').replace('fn run() {', 'fn ci_calls() {'),
+    body('Compiler/JetBackend/Tests/Fragments.fixture/ComptimeScalars.jet'),
     'fn run() {\n    ci_calls()\n    ci_comptime_scalars()\n}',
   ];
 }
@@ -121,7 +121,7 @@ if (process.argv.includes('--session')) {
     item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'struct JetCLINativeClosureSources {'),
     item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'struct JetCLINativeExecutor {'),
     item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'impl JetCLINativeExecutor.JetDriverExecutionHost {'),
-    body('Compiler/JetBackend/Tests/SessionHostFixtures.jet'),
+    body('Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet'),
   ];
 }
 mkdirSync(out, { recursive: true });

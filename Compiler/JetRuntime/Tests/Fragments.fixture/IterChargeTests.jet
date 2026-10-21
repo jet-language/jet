@@ -1,0 +1,20 @@
+// Link beside the real runtime unit; runtime initializers attach the thread.
+#Export(c) fn jet_rt_iter_charge_fixture() -> I64 {
+    if (jet_rt_iter_charge() != I64{0}) -> return I64{1}
+    if !jet_rt_comptime_begin(I64{1}, I64{8}) -> return I64{2}
+    if (jet_rt_iter_charge() != I64{0}) -> return I64{3}
+    if (sync_load(comptime_root + I64{16}) != I64{0}) -> return I64{4}
+    if (jet_rt_iter_charge() != I64{1} || jet_scheduler_native_status() != I64{2}) -> return I64{5}
+    jet_rt_comptime_end()
+    if !jet_rt_comptime_begin(I64{0}, I64{8}) -> return I64{6}
+    shield :: thread_base() + I64{24}
+    sync_store(shield, sync_load(shield) + I64{1})
+    charged :: jet_rt_iter_charge()
+    sync_store(shield, sync_load(shield) - I64{1})
+    if (charged != I64{0} || jet_scheduler_native_status() != I64{2}) -> return I64{7}
+    jet_rt_comptime_end()
+    if !jet_rt_comptime_begin(I64{-1}, I64{8}) -> return I64{8}
+    if (jet_rt_iter_charge() != I64{0} || sync_load(comptime_root + I64{16}) != I64{-2}) -> return I64{9}
+    jet_rt_comptime_end()
+    I64{0}
+}

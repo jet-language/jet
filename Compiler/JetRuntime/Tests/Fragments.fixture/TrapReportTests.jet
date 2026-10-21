@@ -1,0 +1,25 @@
+// Compare the real process-edge writes with the exact report a Root control
+// captures for simple/rich/require stops. Task bodies carry only the raw
+// message (TaskVariantPanicWitness). C supplies callbacks, never providers.
+#Export(c) fn jet_rt_trap_report_fixture(callback: I64, environment: I64, captured: Bool) -> I64 {
+    if !captured {
+        _ := coll_call1(callback, environment)
+        jet_rt_unreachable(I64{0}, I64{0})
+        return I64{101}
+    }
+    save :: jet_rt_alloc(I64{40}, I64{8})
+    control :: jet_rt_root_begin(save)
+    _ := coll_call1(callback, environment)
+    code_out :: save + I64{32}
+    record :: jet_rt_root_take_stop(control, code_out)
+    if (record == I64{0} || trap_word(record + I64{48}) != I64{1}) -> jet_rt_unreachable(I64{0}, I64{0})
+    code :: trap_word(code_out)
+    report :: scheduler_stop_take_message(record)
+    jet_rt_root_leave(control, save)
+    jet_rt_stdout_flush()
+    trap_write_handle(report)
+    jet_rt_string_drop(report)
+    scheduler_stop_drop(record)
+    jet_rt_free(save, I64{40}, I64{8})
+    code
+}

@@ -22,7 +22,7 @@ function command(bin, args, options = {}) {
 if (mode === 'assemble') {
   command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only']);
   mkdirSync(join(dir, 'Source'), { recursive: true });
-  const fixture = readFileSync(join(root, 'Compiler/JetRuntime/Tests/HostSpawnTests.jet'), 'utf8');
+  const fixture = readFileSync(join(root, 'Compiler/JetRuntime/Tests/Fragments.fixture/HostSpawnTests.jet'), 'utf8');
   const source = readFileSync(join(dir, 'unit.jet'), 'utf8') + '\n' + fixture;
   writeFileSync(join(dir, 'Source/Fixture.jet'), source);
   writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(source, 'Source/Fixture.jet')));

@@ -107,7 +107,7 @@ function inventory() {
             const source = relative(repo, path), text = readFileSync(path, 'utf8'), masked = codeMask(text);
             const names = testsIn(text), entry = /^fn run\s*\(/m.test(masked);
             const abiRegistry = /Tests\.jet$/.test(source) && /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked);
-            const nestedInput = /\/Tests\/(?:fixtures|Fixtures)\//.test(source);
+            const nestedInput = /\/Tests\/(?:[A-Za-z0-9]+\.fixture\/)?(?:fixtures|Fixtures)\//.test(source);
             return { package: item.name, source, sha256: hash(Buffer.from(text)), names, entry,
                 role: !nestedInput && (names.length || entry || abiRegistry) ? 'registry' : 'support-or-fixture' };
         }) : [];

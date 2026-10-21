@@ -13,8 +13,8 @@ const cases = collectGoldenEntries(features).filter(entry => ['.out', '.err.out'
 const options = { repo, jet: '/native/jet', runtimePack: '/native/jet-runtime/lib/jet_runtime.pack.o', runtimeDir: '/native/jet-runtime' };
 
 for (const [source, packageName, mode] of [
-    ['Compiler/JetBackend/Tests/GoldenLower.jet', 'JetBackend', 'golden-lower'],
-    ['Compiler/JetOptimizer/Tests/LintCorpus.jet', 'JetOptimizer', 'corpus'],
+    ['Compiler/JetBackend/Tests/Fragments.fixture/GoldenLower.jet', 'JetBackend', 'golden-lower'],
+    ['Compiler/JetOptimizer/Tests/Fragments.fixture/LintCorpus.jet', 'JetOptimizer', 'corpus'],
 ]) test(`${packageName} native corpus plan includes every committed golden, with no manufactured cases`, () => {
     const entry = prepareTransport({ source, package: packageName }, { repo, out: '/native/registries' });
     assert.equal(entry.transport.type, mode);
@@ -63,7 +63,7 @@ test('native corpus assemblers retain the real registry and complete MIR decoder
 
 test('compiler runtime route plans run the complete C witness variants', () => {
     for (const name of ['CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText', 'DynNative']) {
-        const source = `Compiler/JetRuntime/Tests/${name}Tests.jet`;
+        const source = `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`;
         const entry = prepareTransport({ source, package: 'JetRuntime' }, { repo, out: '/native/registries' });
         assert.equal(entry.transport.type, 'c');
         assert.equal(entry.transport.name, name);
@@ -73,13 +73,13 @@ test('compiler runtime route plans run the complete C witness variants', () => {
         const runs = plan.steps.filter(step => step.command === join(entry.cwd, 'driver'));
         assert.deepEqual(runs.map(step => step.args), name === 'CompilerEnv' ? [[], ['empty']] : name === 'CompilerRoutes' ? [[entry.cwd]] : name === 'DynNative' ? [[], ['datetime']] : [[]]);
         if (name === 'DynNative') assert.equal(runs[1].expected.code, 70);
-        if (name === 'CompilerEnv' || name === 'CompilerRoutes') assert.ok(entry.sources.includes(source.replace(/\.jet$/, '.c')));
+        if (name === 'CompilerEnv' || name === 'CompilerRoutes') assert.ok(entry.sources.includes(`Compiler/JetRuntime/Tests/${name}Tests.c`));
     }
 });
 
 test('codec and compiler-file plans execute the selected real Jet export', () => {
     for (const name of ['CodecCSV', 'CodecEnv', 'DynCodec', 'CompilerFileLeaves']) {
-        const source = `Compiler/JetRuntime/Tests/${name}Tests.jet`;
+        const source = `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`;
         const entry = prepareTransport({ source, package: 'JetRuntime' }, { repo, out: '/native/registries' });
         assert.equal(entry.transport.type, 'codec-fixture');
         assert.equal(entry.testCount, 1);
@@ -91,7 +91,7 @@ test('codec and compiler-file plans execute the selected real Jet export', () =>
 
 test('files-walk and host-parallelism plans include lowering, ABI audit and actual witness execution', () => {
     for (const name of ['FilesWalk', 'HostParallelism']) {
-        const source = `Compiler/JetRuntime/Tests/${name}Tests.jet`;
+        const source = `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`;
         const entry = prepareTransport({ source, package: 'JetRuntime' }, { repo, out: '/native/registries' });
         assert.equal(entry.transport.type, 'native-suite');
         assert.ok(entry.sources.includes(`Compiler/JetRuntime/Tests/${name}Witness.c`));
@@ -103,7 +103,7 @@ test('files-walk and host-parallelism plans include lowering, ABI audit and actu
 
 test('process plans call exported Jet fixtures instead of witness-local replacements', () => {
     for (const name of ['ProcessExecution', 'TerminalProcess']) {
-        const source = `Compiler/JetRuntime/Tests/${name}Tests.jet`;
+        const source = `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`;
         const entry = prepareTransport({ source, package: 'JetRuntime' }, { repo, out: '/native/registries' });
         assert.equal(entry.transport.type, 'process-fixture');
         assert.ok(entry.sources.includes(`Compiler/JetRuntime/Tests/${name}Witness.c`));

@@ -1,0 +1,101 @@
+// Runtime-only StaticText: actual checked literal call (a folded Constant and
+// the BuildString codegen emits for a checked literal), native header
+// relocation, raw I64 with trivial drop, and a named refusal for a
+// non-literal argument.
+use jet_backend.[lir_lower_runtime_callables, lir_print_module, x64_runtime_library]
+
+fn fx_static_text_program(dynamic: Bool, built: Bool) -> MIRProgram Never! {
+    a := fx_builder()
+    _ := fx_param(&a, "literal", fx_string(), fx_borrow())
+    fx_block(&a, 0, MIRTerminator.Unreachable{reason: "runtime literal-only intrinsic"})
+    intrinsic := fx_function("rt_static_text", a, fx_i64())
+    b := fx_builder()
+    literal :: if built -> fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Literal{text: "héllo\n"}}}}) else -> fx_strings_literal(&b, "héllo\n")
+    argument :: if dynamic -> fx_owned(&b, fx_string(), MIROperation.Move{value: literal}) else -> literal
+    address :: fx_copy(&b, fx_i64(), MIROperation.Call{callee: MIRCallee.User{function: intrinsic.id}, args: [MIRCallArg]{fx_arg(argument, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(address)})
+    root := fx_function("static_text_root", b, fx_i64())
+    root_source :: "#Export(c) fn static_text_root() -> I64 {{ rt_static_text(\"héllo\\n\") }}\n"
+    intrinsic_source :: "fn rt_static_text(literal: String) -> I64 {{ loop {{}} }}\n"
+    root.span = Span{start: 0, end: root_source.bytes().len()}
+    intrinsic.span = Span{start: root_source.bytes().len(), end: root_source.bytes().len() + intrinsic_source.bytes().len()}
+    p := fx_program([MIRFunction]{root, intrinsic}, [MIRTypeDef]{})
+    p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "static-text.jet", source: "{root_source}{intrinsic_source}"}}
+    p
+}
+
+fn fx_static_text_checks() -> Bool Never! {
+    rejected :: x64_runtime_library(fx_static_text_program(true, false), [String]{"static_text_root"})
+    named := false
+    loop error in rejected.object.errors {
+        if error.contains("rt_static_text requires a literal String argument") -> named = true
+    }
+    if !named || rejected.object.bytes.len() != 0 -> return false
+    built :: x64_runtime_library(fx_static_text_program(false, true), [String]{"static_text_root"})
+    loop error in built.object.errors -> print("static-text built: {error}")
+    if built.object.errors.len() != 0 || built.object.bytes.len() == 0 -> return false
+    library :: x64_runtime_library(fx_static_text_program(false, false), [String]{"static_text_root"})
+    loop error in library.object.errors -> print("static-text: {error}")
+    if library.object.errors.len() != 0 || library.object.bytes.len() == 0 -> return false
+    files.write_bytes("static-text-library.o", library.object.bytes) ?? panic("cannot write static-text object witness")
+    true
+}
+
+// expect-stdout static-text: "héllo\n"
+fn fx_static_text_module() -> LIRModule Never! {
+    p :: fx_static_text_program(false, false)
+    roots :: [MIRFunctionID]{p.functions[0].id}
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    &intrinsics.add(p.functions[1].id.value, LowerRuntimeIntrinsic.StaticText).drop("one checked runtime intrinsic")
+    lowered :: lir_lower_runtime_callables(p, roots, ^intrinsics)
+    loop issue in lowered.issues -> print("static-text: {issue.function}: {issue.message}")
+    if lowered.issues.len() != 0 -> panic("literal StaticText lowering refused")
+    lir := lowered.lir.copy()
+    root :: lowered.callables.get(roots[0].value) ?? panic("missing static-text root")
+    loop function in lir.functions {
+        loop value in function.values { if value.drop != .Trivial -> panic("StaticText has a drop action") }
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) && symbol == "jet_rt_string_from_static" -> panic("StaticText allocated a String")
+                }
+                if inst == .Drop(_) -> panic("StaticText emitted a drop")
+            }
+        }
+    }
+    headers := 0
+    loop data in lir.data {
+        if data.relocs.len() == 1 {
+            if data.bytes.len() != 24 || data.align != 8 || data.relocs[0].offset != 0 || data.relocs[0].addend != 0 -> panic("invalid E4 static header relocation")
+            if (data.bytes[8] != U8{7}) -> panic("static header has wrong UTF8 length")
+            loop byte in data.bytes.slice(9, 24) { if (byte != U8{0}) -> panic("static header length/cap is not canonical") }
+            headers += 1
+        }
+    }
+    if headers != 1 -> panic("missing static E4 header relocation")
+    files.write("static-text.lir", lir_print_module(lir)) ?? panic("cannot write StaticText LIR witness")
+    // A native consumer reads data and length through the produced header and
+    // writes those bytes via the canonical audited OS templates. No runtime
+    // imports or C provider shim participate in this memory-image witness.
+    signature :: LIRSignatureID{value: lir.signatures.len()}
+    &lir.signatures.push(LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None})
+    b := lir_builder(LIRFunctionID{value: lir.functions.len()}, "run", signature)
+    header :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Call{dst: Val(header), signature: lir.functions[root.value].signature, callee: LIRCallee.Function{id: root}, args: [LIRValueID]{}})
+    if !fx_runtime_o1_asm(&b, "os_load_i64", [String]{"address"}, [LIRValueID]{header}, true) -> panic("cannot assemble header data load")
+    data :: LIRValueID{value: b.values.len() - 1}
+    offset :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: offset, value: 8})
+    length_address :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Binary{dst: length_address, op: LIRBinaryOp.Add, left: header, right: offset})
+    if !fx_runtime_o1_asm(&b, "os_load_i64", [String]{"address"}, [LIRValueID]{length_address}, true) -> panic("cannot assemble header length load")
+    length :: LIRValueID{value: b.values.len() - 1}
+    one :: lir_builder_word(&b)
+    zero :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: one, value: 1})
+    lir_builder_push(&b, LIRInst.Const{dst: zero, value: 0})
+    if !fx_runtime_o1_asm(&b, "os_syscall_i64", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, [LIRValueID]{one, one, data, length, zero, zero, zero}, true) -> panic("cannot assemble native static-text write")
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &lir.functions.push(lir_builder_finish(b))
+    lir
+}

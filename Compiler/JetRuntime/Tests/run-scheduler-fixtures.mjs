@@ -23,7 +23,7 @@ function command(bin, args, options = {}) {
 if (mode === 'assemble') {
   mkdirSync(join(dir, 'Source'), { recursive: true });
   const paths = readFileSync(join(root, 'Compiler/JetRuntime/sources.list'), 'utf8').split('\n').map(x => x.trim()).filter(x => x && !x.startsWith('#'));
-  paths.push('Compiler/JetRuntime/Tests/SchedulerTests.jet');
+  paths.push('Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet');
   const complete = paths.map(path => readFileSync(join(root, path), 'utf8')).join('\n');
   writeFileSync(join(dir, 'Source/Fixture.jet'), complete);
   writeFileSync(join(dir, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));

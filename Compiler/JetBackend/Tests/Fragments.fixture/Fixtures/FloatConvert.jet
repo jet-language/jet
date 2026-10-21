@@ -1,0 +1,292 @@
+// Compiler use sites: Bootstrap/Host/EntryCodec.jet:612 emits F32.from_float;
+// :628 emits Float.from_f32. JetCodegen/Source/Codegen/Expressions.jet:3067-68
+// emits the checked float_to_int / float_narrow Prelude operations.
+use jet_foundation.[
+    MIRCallFallibility, MIRConstant, MIRConversion, MIRDropKind,
+    MIRFailureCarrier, MIRFunction, MIROperation, MIRPanicLoc, MIRPreludeABI,
+    MIRPreludeFamily, MIRProgram, MIRTerminator, MIRType, MIRTypeDef,
+    MIRTypeKind, MIRValueID, mir_type_from_kind,
+]
+
+fn fx_float_convert_f32() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.Float32) }
+
+fn fx_float_convert_constant(b: &FxBuilder, value: Float, single: Bool) -> MIRValueID Never! {
+    fx_copy(&b, if single -> fx_float_convert_f32() else -> fx_convert_float_type(), MIROperation.Constant{value: MIRConstant.Float{value: value, f32: single, spelling: None}})
+}
+
+fn fx_float_convert_checked(b: &FxBuilder, value: MIRValueID, ty: MIRType, narrow: Bool) -> MIRValueID Never! {
+    target :: mir_type_from_kind(MIRTypeKind.Result{ok: ty, err: fx_string()})
+    parameters := [MIRValueID]{}
+    if !narrow {
+        kind :: if ty.kind == .IntN(signed, bits) -> (if signed -> 0 else -> 4) + (if bits == 8 -> 0 else -> if bits == 16 -> 1 else -> if bits == 32 -> 2 else -> 3) else -> 3
+        &parameters.push(fx_int_const(&b, kind))
+    }
+    fx_owned(&b, target, MIROperation.Convert{value: value, parameters: parameters, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", if narrow -> "float_narrow" else -> "float_to_int"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0},
+        fallibility: MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: ty, error: fx_string()}},
+    }})
+}
+
+fn fx_float_convert_status(b: &FxBuilder, converted: MIRValueID, expected: Bool) Never! {
+    ok :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: converted})
+    wanted :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: expected}})
+    equal :: fx_compare(&b, .Eq, ok, wanted)
+    fx_print(&b, equal)
+}
+
+fn fx_float_convert_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    loop member in ([String]{"float_to_int", "float_narrow"}) {
+        route := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", member, "jet_numeric_{member}", if member == "float_to_int" -> 2 else -> 1, MIRPreludeABI.Value)
+        route.fallibility = MIRCallFallibility.Failure{failure: MIRFailureCarrier.Result{success: fx_i64(), error: fx_string()}}
+        &p.prelude_calls.push(route)
+    }
+    p
+}
+
+// Numeric casts exercise the raw-binary32 boundary, integer rounding and
+// exact-Int's existing f64 adapter. Print comparisons, not Float formatting.
+// expect-stdout float-convert: "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+fn fx_float_convert() -> MIRProgram Never! {
+    b := fx_builder()
+    single :: fx_float_convert_constant(&b, 1.5, true)
+    wide :: fx_convert_cast(&b, single, fx_convert_float_type())
+    fx_convert_float_equal(&b, wide, 1.5)
+    identity :: fx_convert_cast(&b, single, fx_float_convert_f32())
+    transparent :: fx_copy(&b, fx_float_convert_f32(), MIROperation.Convert{value: identity, parameters: [MIRValueID]{}, target: fx_float_convert_f32(), conversion: MIRConversion.Transparent})
+    transparent_wide :: fx_convert_cast(&b, transparent, fx_convert_float_type())
+    fx_convert_float_equal(&b, transparent_wide, 1.5)
+    loop fixed in ([Bool]{false, true}) {
+        source :: if fixed -> fx_i64_const(&b, 16777217) else -> fx_int_const(&b, 16777217)
+        rounded :: fx_convert_cast(&b, source, fx_float_convert_f32())
+        rounded_wide :: fx_convert_cast(&b, rounded, fx_convert_float_type())
+        fx_convert_float_equal_exact(&b, rounded_wide, 16777216)
+    }
+    unsigned :: fx_u64_const(&b, 18446744073709551615)
+    rounded :: fx_convert_cast(&b, unsigned, fx_float_convert_f32())
+    half_integer :: fx_i64_const(&b, 4611686018427387904)
+    expected_half :: fx_convert_cast(&b, half_integer, fx_convert_float_type())
+    expected :: fx_numeric_float_binary(&b, .Add, expected_half, expected_half)
+    expected_full :: fx_numeric_float_binary(&b, .Add, expected, expected)
+    unsigned_wide :: fx_convert_cast(&b, rounded, fx_convert_float_type())
+    fx_convert_float_compare(&b, unsigned_wide, expected_full)
+    i8 :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 8})
+    narrow_integer :: fx_narrow_const(&b, true, 8, -37)
+    widened :: fx_convert_cast(&b, narrow_integer, fx_float_convert_f32())
+    widened_wide :: fx_convert_cast(&b, widened, fx_convert_float_type())
+    fx_convert_float_equal_exact(&b, widened_wide, -37)
+    checked_source :: fx_float_convert_constant(&b, 127.5, true)
+    checked :: fx_float_convert_checked(&b, checked_source, i8, false)
+    fx_float_convert_status(&b, checked, true)
+    payload :: fx_copy(&b, i8, MIROperation.ResultValue{subject: checked, ok: true})
+    wanted_payload :: fx_narrow_const(&b, true, 8, 127)
+    payload_equal :: fx_compare(&b, .Eq, payload, wanted_payload)
+    fx_print(&b, payload_equal)
+    fx_do(&b, MIROperation.Drop{value: checked, kind: MIRDropKind.Value})
+    loop value in ([Float]{128.0, -128.5}) {
+        failed_source :: fx_float_convert_constant(&b, value, true)
+        failed :: fx_float_convert_checked(&b, failed_source, i8, false)
+        fx_float_convert_status(&b, failed, false)
+        fx_do(&b, MIROperation.Drop{value: failed, kind: MIRDropKind.Value})
+    }
+    exact_source :: fx_float_convert_constant(&b, -37.75, true)
+    exact :: fx_float_convert_checked(&b, exact_source, fx_int(), false)
+    fx_float_convert_status(&b, exact, true)
+    exact_value :: fx_owned(&b, fx_int(), MIROperation.ResultValue{subject: exact, ok: true})
+    wanted_exact :: fx_int_const(&b, -37)
+    exact_equal :: fx_compare(&b, .Eq, exact_value, wanted_exact)
+    fx_print(&b, exact_equal)
+    fx_do(&b, MIROperation.Drop{value: exact_value, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: exact, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_float_convert_program(b)
+}
+
+// Checked narrowing rejects NaN, infinity and values outside +/-F32.MAX;
+// checked integer conversions reject the exclusive signed/unsigned bounds.
+// expect-stdout float-convert-checked: "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+fn fx_float_convert_checked_edges() -> MIRProgram Never! {
+    b := fx_builder()
+    zero :: fx_numeric_float(&b, 0.0)
+    one :: fx_numeric_float(&b, 1.0)
+    infinity :: fx_numeric_float_binary(&b, .Div, one, zero)
+    nan :: fx_numeric_float_binary(&b, .Div, zero, zero)
+    integer62 :: fx_i64_const(&b, 4611686018427387904)
+    power62 :: fx_convert_cast(&b, integer62, fx_convert_float_type())
+    power124 :: fx_numeric_float_binary(&b, .Mul, power62, power62)
+    integer16 :: fx_i64_const(&b, 16)
+    sixteen :: fx_convert_cast(&b, integer16, fx_convert_float_type())
+    outside :: fx_numeric_float_binary(&b, .Mul, power124, sixteen)
+    loop invalid in ([MIRValueID]{infinity, nan, outside}) {
+        failed :: fx_float_convert_checked(&b, invalid, fx_float_convert_f32(), true)
+        fx_float_convert_status(&b, failed, false)
+        fx_do(&b, MIROperation.Drop{value: failed, kind: MIRDropKind.Value})
+        invalid32 :: fx_convert_cast(&b, invalid, fx_float_convert_f32())
+        integer :: fx_float_convert_checked(&b, invalid32, fx_i64(), false)
+        fx_float_convert_status(&b, integer, false)
+        fx_do(&b, MIROperation.Drop{value: integer, kind: MIRDropKind.Value})
+    }
+    finite_source :: fx_numeric_float(&b, 1.5)
+    finite :: fx_float_convert_checked(&b, finite_source, fx_float_convert_f32(), true)
+    fx_float_convert_status(&b, finite, true)
+    payload :: fx_copy(&b, fx_float_convert_f32(), MIROperation.ResultValue{subject: finite, ok: true})
+    finite_wide :: fx_convert_cast(&b, payload, fx_convert_float_type())
+    fx_convert_float_equal(&b, finite_wide, 1.5)
+    fx_do(&b, MIROperation.Drop{value: finite, kind: MIRDropKind.Value})
+    half_integer :: fx_i64_const(&b, 4611686018427387904)
+    half :: fx_convert_cast(&b, half_integer, fx_convert_float_type())
+    signed_bound :: fx_numeric_float_binary(&b, .Add, half, half)
+    unsigned_bound :: fx_numeric_float_binary(&b, .Add, signed_bound, signed_bound)
+    loop ty in ([MIRType]{fx_i64(), fx_u64()}) {
+        bound :: if ty == fx_i64() -> signed_bound else -> unsigned_bound
+        narrow_bound :: fx_convert_cast(&b, bound, fx_float_convert_f32())
+        invalid :: fx_float_convert_checked(&b, narrow_bound, ty, false)
+        fx_float_convert_status(&b, invalid, false)
+        fx_do(&b, MIROperation.Drop{value: invalid, kind: MIRDropKind.Value})
+    }
+    signed_bound32 :: fx_convert_cast(&b, signed_bound, fx_float_convert_f32())
+    u64 :: fx_float_convert_checked(&b, signed_bound32, fx_u64(), false)
+    fx_float_convert_status(&b, u64, true)
+    raw :: fx_copy(&b, fx_u64(), MIROperation.ResultValue{subject: u64, ok: true})
+    wanted_raw :: fx_u64_const(&b, 9223372036854775808)
+    raw_equal :: fx_compare(&b, .Eq, raw, wanted_raw)
+    fx_print(&b, raw_equal)
+    fx_do(&b, MIROperation.Drop{value: u64, kind: MIRDropKind.Value})
+    negative_source :: fx_float_convert_constant(&b, -0.5, true)
+    negative :: fx_float_convert_checked(&b, negative_source, fx_u64(), false)
+    fx_float_convert_status(&b, negative, false)
+    error :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: negative, ok: false})
+    wanted :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "value doesn't fit in destination type"}})
+    error_equal :: fx_compare(&b, .Eq, error, wanted)
+    fx_print(&b, error_equal)
+    fx_do(&b, MIROperation.Drop{value: error, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: wanted, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: negative, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_float_convert_program(b)
+}
+
+// Deliberately dirty raw-word upper halves cross into binary32, through a
+// System V call and a caller-live spill. A movq/reinterpreted-double cast
+// fails either the 1.5 comparison or the zero-extended low32 roundtrip.
+// expect-stdout float-convert-carriers: "true\ntrue\ntrue\ntrue\ntrue\n"
+fn fx_float_convert_carriers() -> LIRModule Never! {
+    entry_sig :: LIRSignatureID{value: 0}
+    hold_sig :: LIRSignatureID{value: 1}
+    print_sig :: LIRSignatureID{value: 2}
+    line_sig :: LIRSignatureID{value: 3}
+    hold := lir_builder(LIRFunctionID{value: 1}, "hold_binary32", hold_sig)
+    param :: lir_builder_value(&hold, lir_layout_float32(), LIRDrop.Trivial, None)
+    flag :: lir_builder_value(&hold, lir_layout_bool(), LIRDrop.Trivial, None)
+    lir_builder_push(&hold, LIRInst.Const{dst: flag, value: 1})
+    text :: lir_builder_value(&hold, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    lir_builder_push(&hold, LIRInst.Call{dst: Val(text), signature: print_sig, callee: .Runtime{symbol: "jet_rt_bool_to_string"}, args: [LIRValueID]{flag}})
+    lir_builder_push(&hold, LIRInst.Drop{value: text})
+    lir_builder_seal(&hold, LIRBlockID{value: 0}, [LIRValueID]{param}, LIRTerminator.Return{value: Val(param)})
+    entry := lir_builder(LIRFunctionID{value: 0}, "run", entry_sig)
+    patterns :: [Int]{0x3fc00000, 0x80000000, 1, 0x7fc00042}
+    loop (index, bits) in patterns {
+        dirty :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Const{dst: dirty, value: bits.bit_or((-4294967296))})
+        single :: lir_builder_value(&entry, lir_layout_float32(), LIRDrop.Trivial, None)
+        lir_builder_push(&entry, LIRInst.Bitcast{dst: single, src: dirty})
+        carried :: lir_builder_value(&entry, lir_layout_float32(), LIRDrop.Trivial, None)
+        lir_builder_push(&entry, LIRInst.Call{dst: Val(carried), signature: hold_sig, callee: .Function{id: LIRFunctionID{value: 1}}, args: [LIRValueID]{single}})
+        raw :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Bitcast{dst: raw, src: carried})
+        expected :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Const{dst: expected, value: bits})
+        equal :: lir_builder_value(&entry, lir_layout_bool(), LIRDrop.Trivial, None)
+        lir_builder_push(&entry, LIRInst.Compare{dst: equal, condition: .Eq, left: raw, right: expected})
+        fx_float_convert_lir_print(&entry, equal, print_sig, line_sig)
+        if index == 0 {
+            wide :: lir_builder_value(&entry, lir_layout_float(), LIRDrop.Trivial, None)
+            lir_builder_push(&entry, LIRInst.Convert{dst: wide, src: carried})
+            narrowed :: lir_builder_value(&entry, lir_layout_float32(), LIRDrop.Trivial, None)
+            lir_builder_push(&entry, LIRInst.Convert{dst: narrowed, src: wide})
+            roundtrip :: lir_builder_word(&entry)
+            lir_builder_push(&entry, LIRInst.Bitcast{dst: roundtrip, src: narrowed})
+            wide_bits :: lir_builder_word(&entry)
+            lir_builder_push(&entry, LIRInst.Bitcast{dst: wide_bits, src: wide})
+            correct_wide :: lir_builder_word(&entry)
+            lir_builder_push(&entry, LIRInst.Const{dst: correct_wide, value: 0x3ff8000000000000})
+            wide_equal :: lir_builder_value(&entry, lir_layout_bool(), LIRDrop.Trivial, None)
+            lir_builder_push(&entry, LIRInst.Compare{dst: wide_equal, condition: .Eq, left: wide_bits, right: correct_wide})
+            roundtrip_equal :: lir_builder_value(&entry, lir_layout_bool(), LIRDrop.Trivial, None)
+            lir_builder_push(&entry, LIRInst.Compare{dst: roundtrip_equal, condition: .Eq, left: roundtrip, right: expected})
+            // Flags are byte layouts, so combine via a branch-free word cast.
+            a :: lir_builder_word(&entry)
+            c :: lir_builder_word(&entry)
+            both :: lir_builder_word(&entry)
+            lir_builder_push(&entry, LIRInst.Convert{dst: a, src: wide_equal})
+            lir_builder_push(&entry, LIRInst.Convert{dst: c, src: roundtrip_equal})
+            lir_builder_push(&entry, LIRInst.Binary{dst: both, op: .And, left: a, right: c})
+            clean :: lir_builder_value(&entry, lir_layout_bool(), LIRDrop.Trivial, None)
+            one :: lir_builder_word(&entry)
+            lir_builder_push(&entry, LIRInst.Const{dst: one, value: 1})
+            lir_builder_push(&entry, LIRInst.Compare{dst: clean, condition: .Eq, left: both, right: one})
+            fx_float_convert_lir_print(&entry, clean, print_sig, line_sig)
+        }
+    }
+    lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    LIRModule{signatures: [LIRSignature]{
+        {id: entry_sig, convention: .SystemV, params: [LIRLayout]{}, result: None},
+        {id: hold_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_float32()}, result: Val(lir_layout_float32())},
+        {id: print_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_bool()}, result: Val(lir_layout_pointer())},
+        {id: line_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None},
+    }, functions: [LIRFunction]{lir_builder_finish(entry), lir_builder_finish(hold)}, data: [LIRData]{}, debug: lir_module_debug_none()}
+}
+
+fn fx_float_convert_lir_print(b: &LIRFunctionBuilder, flag: LIRValueID, print_sig: LIRSignatureID, line_sig: LIRSignatureID) Never! {
+    text :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    lir_builder_push(&b, LIRInst.Call{dst: Val(text), signature: print_sig, callee: .Runtime{symbol: "jet_rt_bool_to_string"}, args: [LIRValueID]{flag}})
+    zero :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: zero, value: 0})
+    lir_builder_push(&b, LIRInst.Call{dst: None, signature: line_sig, callee: .Runtime{symbol: "jet_term_write_stdout_line"}, args: [LIRValueID]{text, zero}})
+    lir_builder_push(&b, LIRInst.Drop{value: text})
+}
+
+fn fx_float_convert_widen(b: &FxBuilder, value: Int) -> MIRValueID Never! {
+    raw :: fx_i64_const(&b, value)
+    signed :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    single :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    ty :: fx_float_convert_f32()
+    fx_copy(&b, ty, MIROperation.Convert{value: raw, parameters: [MIRValueID]{signed, single}, target: ty, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "checked_widen"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 27, column: 0},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+fn fx_float_convert_widen_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_numeric_checked_widen_at", 5, MIRPreludeABI.Value))
+    p
+}
+
+// Precision24 accepts exact integers, not just integers within 24 bits.
+// expect-stdout float-convert-widen: "true\ntrue\n"
+// expect-runtime-only float-convert-widen
+fn fx_float_convert_widen_exact() -> MIRProgram Never! {
+    b := fx_builder()
+    loop value in ([Int]{16777216, 16777218}) {
+        single :: fx_float_convert_widen(&b, value)
+        wide :: fx_convert_cast(&b, single, fx_convert_float_type())
+        fx_convert_float_equal_exact(&b, wide, value)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_float_convert_widen_program(b)
+}
+
+// expect-stdout float-convert-widen-inexact: ""
+// expect-exit float-convert-widen-inexact: 70
+// expect-runtime-only float-convert-widen-inexact
+fn fx_float_convert_widen_inexact() -> MIRProgram Never! {
+    b := fx_builder()
+    value :: fx_float_convert_widen(&b, 16777217)
+    wide :: fx_convert_cast(&b, value, fx_convert_float_type())
+    fx_convert_float_equal_exact(&b, wide, 16777216)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_float_convert_widen_program(b)
+}

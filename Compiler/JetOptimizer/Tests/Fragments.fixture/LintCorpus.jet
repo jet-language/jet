@@ -1,0 +1,36 @@
+// MIR Lint corpus driver (#4619): runs every MIR Lint rule over real checked
+// MIR, converted from the Rust compiler's MIR by
+// Compiler/JetBackend/Tests/mir-debug.mjs (run-goldens.mjs writes one
+// `<case>.mird` per golden). For every case named in `cases.txt` it decodes
+// the program, collects every lint failure (`mir_lint_program_scan` with
+// `all`), writes them to `<case>.lint` (one `<rule>\t<function>\t<detail>` row
+// per failure; an empty file means clean), and prints `<case>\t<count>` as
+// soon as the case is done, so run-lint-corpus.mjs can restart after a crash.
+// The unit is assembled by run-lint-corpus.mjs, which also copies the
+// `.mird` line reader (MIRDReader, mird_*) out of
+// Compiler/JetBackend/Tests/Fragments.fixture/GoldenLower.jet.
+use core.files as files
+
+fn lc_case(name: String) -> String {
+    text :: files.read("{name}.mird") ?? return "missing"
+    r := MIRDReader{lines: text.split("\n").to_list(), at: 0}
+    // The entry function id leads the stream; the lint scans every function.
+    if mird_int(&r) < 0 -> return "no-entry"
+    program :: mird_mir_program(&r)
+    failures :: mir_lint_program_scan(program, true)
+    rows := ""
+    loop failure in failures {
+        detail :: failure.detail.replace("\n", " ").replace("\t", " ")
+        rows = "{rows}{mir_lint_rule_name(failure.rule)}\t{failure.function_key}\t{detail}\n"
+    }
+    files.write("{name}.lint", rows) ?? panic("cannot write {name}.lint")
+    "{failures.len()}"
+}
+
+fn run() {
+    list :: files.read("cases.txt") ?? panic("cannot read cases.txt")
+    loop name in list.split("\n").to_list() {
+        if name == "" -> next
+        print("{name}\t{lc_case(name)}")
+    }
+}

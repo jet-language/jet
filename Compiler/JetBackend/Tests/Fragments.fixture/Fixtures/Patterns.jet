@@ -1,0 +1,417 @@
+// Direct MIR witnesses for the shared typed scan ABI. Source-tier witnesses
+// live in Examples/Parsing/typed_scan_atomic.jet; expected bytes never vary by tier.
+use jet_foundation.[
+    MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBinaryPatternPart, MIRCallArg, MIRConstant, MIRConversion, MIRCopyFact, MIRDropKind, MIRFunction, MIROperation,
+    MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRPreludeTypeArg, MIRProgram, MIRSemanticOp, MIRStringFormat, MIRTerminator, MIRUnaryOp,
+    MIRTextHoleKind, MIRTextPatternPart, MIRTupleField, MIRType, MIRTypeDef,
+    MIRTypeKind, MIRValueID, mir_copy_ownership, mir_owned_ownership, mir_type_from_kind, mir_type_id,
+]
+
+fn fx_scan_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_list_program(b)
+    loop entry in ([(member: String, symbol: String)]{(member: "text_match", symbol: "jet_text_pattern_match"), (member: "binary_match", symbol: "jet_binary_pattern_match")}) {
+        row := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.pattern", entry.member, entry.symbol, 2, MIRPreludeABI.Value)
+        row.signature.borrow_mask = [Bool]{true, false}
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+fn fx_scan_option(tuple: MIRType) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Option{inner: tuple})
+}
+
+fn fx_scan_binary(b: &FxBuilder, subject: MIRValueID, tuple: MIRType, parts: [MIRBinaryPatternPart]) -> MIRValueID Never! {
+    fx_owned(&b, fx_scan_option(tuple), MIROperation.Semantic{operation: MIRSemanticOp.BinaryPatternMatch{call: fx_prelude_id("core.pattern", "binary_match"), subject: subject, parts: parts}})
+}
+
+fn fx_scan_text(b: &FxBuilder, subject: MIRValueID, tuple: MIRType, parts: [MIRTextPatternPart]) -> MIRValueID Never! {
+    fx_owned(&b, fx_scan_option(tuple), MIROperation.Semantic{operation: MIRSemanticOp.TextPatternMatch{call: fx_prelude_id("core.pattern", "text_match"), subject: subject, parts: parts}})
+}
+
+fn fx_scan_test(b: &FxBuilder, matched: MIRValueID) Never! {
+    tested :: fx_copy(&b, fx_bool(), MIROperation.PatternMatched{matched: matched})
+    fx_print(&b, tested)
+}
+
+fn fx_scan_drop(b: &FxBuilder, value: MIRValueID) Never! {
+    fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+}
+
+// Packed U8 input; adjacent narrow capture widths; both endian bit orders;
+// rest header transfer followed by deep PatternCapture clone and owner drop.
+// expect-stdout scan-binary: "true\n18\n13398\n30874\n[188, 222]\nfalse\ntrue\n"
+// expect-runtime-only scan-binary
+fn fx_scan_binary_captures() -> MIRProgram Never! {
+    b := fx_builder()
+    u8 :: fx_narrow(false, 8)
+    u16 :: fx_narrow(false, 16)
+    bytes :: fx_list_type(u8)
+    values := [MIRValueID]{}
+    loop byte in ([Int]{18, 52, 86, 154, 120, 188, 222}) -> &values.push(fx_narrow_const(&b, false, 8, byte))
+    input :: fx_owned(&b, bytes, MIROperation.BuildList{values: values, trait_coercion: None})
+    tuple :: fx_tuple_type("ScanBinary", [MIRTupleField]{MIRTupleField{name: "0", ty: u8}, MIRTupleField{name: "1", ty: u16}, MIRTupleField{name: "2", ty: u16}, MIRTupleField{name: "3", ty: bytes}})
+    parts :: [MIRBinaryPatternPart]{
+        MIRBinaryPatternPart.Bits{width: U8{8}, ty: mir_type_id("U8"), little: false, span: fx_span()},
+        MIRBinaryPatternPart.Bits{width: U8{16}, ty: mir_type_id("U16"), little: false, span: fx_span()},
+        MIRBinaryPatternPart.Bits{width: U8{16}, ty: mir_type_id("U16"), little: true, span: fx_span()},
+        MIRBinaryPatternPart.Rest{ty: mir_type_id("ListU8"), span: fx_span()},
+    }
+    matched :: fx_scan_binary(&b, input, tuple, parts)
+    fx_scan_test(&b, matched)
+    loop (index, ty) in ([MIRType]{u8, u16, u16}) {
+        captured :: fx_copy(&b, ty, MIROperation.PatternCapture{matched: matched, index: index})
+        fx_print(&b, captured)
+    }
+    rest :: fx_owned(&b, bytes, MIROperation.PatternCapture{matched: matched, index: 3})
+    fx_scan_drop(&b, matched)
+    fx_print(&b, rest)
+    fx_scan_drop(&b, rest)
+    empty :: fx_tuple_type("ScanDiscard", [MIRTupleField]{})
+    missed :: fx_scan_binary(&b, input, empty, [MIRBinaryPatternPart]{MIRBinaryPatternPart.Literal{bytes: [U8]{U8{255}}}})
+    fx_scan_test(&b, missed)
+    fx_scan_drop(&b, missed)
+    discarded :: fx_scan_binary(&b, input, empty, parts)
+    fx_scan_test(&b, discarded)
+    fx_scan_drop(&b, discarded)
+    fx_scan_drop(&b, input)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_scan_program(b)
+}
+
+// UTF-8 text, exact Int boundary, Float/Bool/range, delimiter-bounded Text.
+// Capture String remains usable after the match box (and original input) dies.
+// expect-stdout scan-text: "true\n9223372036854775807\n1.5\ntrue\n7\né🙂\nfalse\nfalse\ntrue\n"
+// expect-runtime-only scan-text
+fn fx_scan_text_captures() -> MIRProgram Never! {
+    b := fx_builder()
+    float :: mir_type_from_kind(MIRTypeKind.Float)
+    range :: mir_type_from_kind(MIRTypeKind.InlineRange{base: fx_int(), lo: 0, hi: 9})
+    tuple :: fx_tuple_type("ScanText", [MIRTupleField]{
+        MIRTupleField{name: "0", ty: fx_int()}, MIRTupleField{name: "1", ty: float},
+        MIRTupleField{name: "2", ty: fx_bool()}, MIRTupleField{name: "3", ty: range},
+        MIRTupleField{name: "4", ty: fx_string()},
+    })
+    parts :: [MIRTextPatternPart]{
+        MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Int, ty: mir_type_id("Int"), span: fx_span()}, MIRTextPatternPart.Literal{value: ","},
+        MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Float, ty: mir_type_id("Float"), span: fx_span()}, MIRTextPatternPart.Literal{value: ","},
+        MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Bool, ty: mir_type_id("Bool"), span: fx_span()}, MIRTextPatternPart.Literal{value: ","},
+        MIRTextPatternPart.Hole{kind: MIRTextHoleKind.InlineRange{lo: 0, hi: 9}, ty: mir_type_id("Range"), span: fx_span()}, MIRTextPatternPart.Literal{value: ","},
+        MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Text, ty: mir_type_id("String"), span: fx_span()}, MIRTextPatternPart.Literal{value: "!"},
+    }
+    input :: fx_strings_literal(&b, "9223372036854775807,1.5,true,7,é🙂!")
+    matched :: fx_scan_text(&b, input, tuple, parts)
+    fx_scan_test(&b, matched)
+    loop (index, ty) in ([MIRType]{fx_int(), float, fx_bool(), range}) {
+        captured :: fx_owned(&b, ty, MIROperation.PatternCapture{matched: matched, index: index})
+        fx_print(&b, captured)
+        fx_scan_drop(&b, captured)
+    }
+    kept :: fx_owned(&b, fx_string(), MIROperation.PatternCapture{matched: matched, index: 4})
+    fx_scan_drop(&b, matched)
+    fx_scan_drop(&b, input)
+    fx_print(&b, kept)
+    fx_scan_drop(&b, kept)
+    empty :: fx_tuple_type("ScanTextDiscard", [MIRTupleField]{})
+    overflow :: fx_strings_literal(&b, "9223372036854775808,1.5,true,7,x!")
+    bad :: fx_scan_text(&b, overflow, empty, parts)
+    fx_scan_test(&b, bad)
+    fx_scan_drop(&b, bad)
+    fx_scan_drop(&b, overflow)
+    outside :: fx_strings_literal(&b, "1,1.5,true,10,x!")
+    invalid :: fx_scan_text(&b, outside, empty, parts)
+    fx_scan_test(&b, invalid)
+    fx_scan_drop(&b, invalid)
+    fx_scan_drop(&b, outside)
+    valid :: fx_strings_literal(&b, "-1,1.5,false,0,é!")
+    discarded :: fx_scan_text(&b, valid, empty, parts)
+    fx_scan_test(&b, discarded)
+    fx_scan_drop(&b, discarded)
+    fx_scan_drop(&b, valid)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_scan_program(b)
+}
+
+fn fx_scan_result(payload: MIRType) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Result{ok: payload, err: fx_string()})
+}
+
+fn fx_scan_cursor_take(b: &FxBuilder, receiver: MIRValueID, place: MIRPlaceID, payload: MIRType, parts: [MIRTextPatternPart]) -> MIRValueID Never! {
+    fx_owned(&b, fx_scan_result(payload), MIROperation.Semantic{operation: MIRSemanticOp.CursorTakePattern{receiver: receiver, receiver_place: place, parts: parts}})
+}
+
+fn fx_scan_reader_take(b: &FxBuilder, receiver: MIRValueID, place: MIRPlaceID, payload: MIRType, parts: [MIRBinaryPatternPart]) -> MIRValueID Never! {
+    fx_owned(&b, fx_scan_result(payload), MIROperation.Semantic{operation: MIRSemanticOp.ReaderTakePattern{receiver: receiver, receiver_place: place, parts: parts}})
+}
+
+fn fx_scan_handle(b: &FxBuilder, receiver: MIRValueID, symbol: String, ty: MIRType) -> MIRValueID Never! {
+    fx_copy(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("scan.fixture", symbol), receiver: receiver, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
+}
+
+fn fx_scan_print_handle(b: &FxBuilder, receiver: MIRValueID, symbol: String, ty: MIRType) Never! {
+    value :: fx_scan_handle(&b, receiver, symbol, ty)
+    fx_print(&b, value)
+}
+
+// Failed typed scan leaves the Cursor at byte 0; a later Unicode scan succeeds
+// from that same point. Hole-free success produces Unit, not a guessed tuple.
+// expect-stdout scan-cursor: "false\npattern did not match at cursor position 0\ntrue\né🙂\nfalse\npattern did not match at cursor position 9\n"
+// expect-runtime-only scan-cursor
+fn fx_scan_cursor_atomic() -> MIRProgram Never! {
+    b := fx_builder()
+    cursor_ty :: fx_named("Cursor")
+    place :: fx_local(&b, "cursor", cursor_ty, mir_owned_ownership())
+    input :: fx_strings_literal(&b, "é🙂,x!")
+    cursor :: fx_owned(&b, cursor_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("scan.fixture", "jet_cursor_over"), args: [MIRCallArg]{fx_arg(input, MIRAccess.Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    fx_do(&b, MIROperation.WritePlace{place: place, value: cursor})
+    receiver :: fx_value(&b, cursor_ty, fx_borrow(), MIROperation.ReadPlace{place: place})
+    integer :: fx_tuple_type("ScanCursorInt", [MIRTupleField]{MIRTupleField{name: "0", ty: fx_int()}})
+    missed :: fx_scan_cursor_take(&b, receiver, place, integer, [MIRTextPatternPart]{MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Int, ty: mir_type_id("Int"), span: fx_span()}, MIRTextPatternPart.Literal{value: ","}})
+    fx_scan_test(&b, missed)
+    message :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: missed, ok: false})
+    fx_print(&b, message)
+    fx_scan_drop(&b, message)
+    fx_scan_drop(&b, missed)
+    tuple :: fx_tuple_type("ScanCursorText", [MIRTupleField]{MIRTupleField{name: "0", ty: fx_string()}})
+    matched :: fx_scan_cursor_take(&b, receiver, place, tuple, [MIRTextPatternPart]{MIRTextPatternPart.Hole{kind: MIRTextHoleKind.Text, ty: mir_type_id("String"), span: fx_span()}, MIRTextPatternPart.Literal{value: ","}})
+    fx_scan_test(&b, matched)
+    kept :: fx_owned(&b, fx_string(), MIROperation.PatternCapture{matched: matched, index: 0})
+    fx_scan_drop(&b, matched)
+    fx_print(&b, kept)
+    fx_scan_drop(&b, kept)
+    unit :: fx_scan_cursor_take(&b, receiver, place, fx_unit(), [MIRTextPatternPart]{MIRTextPatternPart.Literal{value: "x!"}})
+    fx_scan_drop(&b, unit)
+    ended :: fx_scan_cursor_take(&b, receiver, place, fx_unit(), [MIRTextPatternPart]{MIRTextPatternPart.Literal{value: "x!"}})
+    fx_scan_test(&b, ended)
+    end_message :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: ended, ok: false})
+    fx_print(&b, end_message)
+    fx_scan_drop(&b, end_message)
+    fx_scan_drop(&b, ended)
+    held :: fx_owned(&b, cursor_ty, MIROperation.MovePlace{place: place})
+    fx_scan_drop(&b, held)
+    fx_scan_drop(&b, input)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_scan_program(b)
+    row := fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_cursor_over", "jet_cursor_over", 1, MIRPreludeABI.Value)
+    row.signature.borrow_mask = [Bool]{true}
+    &p.prelude_calls.push(row)
+    p
+}
+
+// A failed 32-bit pattern consumes no bytes. The succeeding 8-bit capture
+// leaves two bytes; Rest then owns exactly those bytes after the Reader dies.
+// expect-stdout scan-reader: "false\npattern did not match at reader position 0\n3\ntrue\n18\n2\n[52, 86]\n0\ntrue\n"
+// expect-runtime-only scan-reader
+fn fx_scan_reader_atomic() -> MIRProgram Never! {
+    b := fx_builder()
+    u8 :: fx_narrow(false, 8)
+    bytes :: fx_list_type(u8)
+    reader_ty :: fx_named("Reader")
+    place :: fx_local(&b, "reader", reader_ty, mir_owned_ownership())
+    values := [MIRValueID]{}
+    loop byte in ([Int]{18, 52, 86}) -> &values.push(fx_narrow_const(&b, false, 8, byte))
+    input :: fx_owned(&b, bytes, MIROperation.BuildList{values: values, trait_coercion: None})
+    reader :: fx_owned(&b, reader_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("scan.fixture", "jet_reader_over"), args: [MIRCallArg]{fx_arg(input, MIRAccess.Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    fx_do(&b, MIROperation.WritePlace{place: place, value: reader})
+    receiver :: fx_value(&b, reader_ty, fx_borrow(), MIROperation.ReadPlace{place: place})
+    wide :: fx_tuple_type("ScanReaderWide", [MIRTupleField]{MIRTupleField{name: "0", ty: fx_narrow(false, 32)}})
+    missed :: fx_scan_reader_take(&b, receiver, place, wide, [MIRBinaryPatternPart]{MIRBinaryPatternPart.Bits{width: U8{32}, ty: mir_type_id("U32"), little: false, span: fx_span()}})
+    fx_scan_test(&b, missed)
+    message :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: missed, ok: false})
+    fx_print(&b, message)
+    fx_scan_drop(&b, message)
+    fx_scan_drop(&b, missed)
+    fx_scan_print_handle(&b, receiver, "jet_reader_remaining", fx_int())
+    one :: fx_tuple_type("ScanReaderByte", [MIRTupleField]{MIRTupleField{name: "0", ty: u8}})
+    matched :: fx_scan_reader_take(&b, receiver, place, one, [MIRBinaryPatternPart]{MIRBinaryPatternPart.Bits{width: U8{8}, ty: mir_type_id("U8"), little: false, span: fx_span()}})
+    fx_scan_test(&b, matched)
+    captured :: fx_copy(&b, u8, MIROperation.PatternCapture{matched: matched, index: 0})
+    fx_print(&b, captured)
+    fx_scan_drop(&b, matched)
+    fx_scan_print_handle(&b, receiver, "jet_reader_remaining", fx_int())
+    rest_tuple :: fx_tuple_type("ScanReaderRest", [MIRTupleField]{MIRTupleField{name: "0", ty: bytes}})
+    rest_match :: fx_scan_reader_take(&b, receiver, place, rest_tuple, [MIRBinaryPatternPart]{MIRBinaryPatternPart.Rest{ty: mir_type_id("ListU8"), span: fx_span()}})
+    kept :: fx_owned(&b, bytes, MIROperation.PatternCapture{matched: rest_match, index: 0})
+    fx_scan_drop(&b, rest_match)
+    fx_print(&b, kept)
+    fx_scan_drop(&b, kept)
+    fx_scan_print_handle(&b, receiver, "jet_reader_remaining", fx_int())
+    fx_scan_print_handle(&b, receiver, "jet_reader_at_end", fx_bool())
+    held :: fx_owned(&b, reader_ty, MIROperation.MovePlace{place: place})
+    fx_scan_drop(&b, held)
+    fx_scan_drop(&b, input)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_scan_program(b)
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_reader_over", "jet_reader_over", 1, MIRPreludeABI.Value))
+    loop symbol in ([String]{"jet_reader_remaining", "jet_reader_at_end"}) {
+        row := fx_prelude(MIRPreludeFamily.HandleMethod, "scan.fixture", symbol, symbol, 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask = [Bool]{true}
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+// Reader F32 out slots contain raw binary32, never a widened f64. Unwrap,
+// copy through a four-byte Option payload, and retain it after both boxes
+// are dropped. Display and Debug deliberately have different zero/.0 text.
+// expect-stdout scan-reader-f32: "1.5\n1.5\n-0\n-0.0\n16777216\n16777216.0\n1.5\n1.5\n-0\n-0.0\n16777216\n16777216.0\n"
+// expect-runtime-only scan-reader-f32
+fn fx_scan_reader_float32() -> MIRProgram Never! {
+    b := fx_builder()
+    f32 :: mir_type_from_kind(MIRTypeKind.Float32)
+    result_ty :: fx_scan_result(f32)
+    option_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: f32})
+    reader_ty :: fx_named("Reader")
+    loop little in ([Bool]{true, false}) {
+        values := [MIRValueID]{}
+        patterns :: if little -> [Int]{0, 0, 192, 63, 0, 0, 0, 128, 0, 0, 128, 75} else -> [Int]{63, 192, 0, 0, 128, 0, 0, 0, 75, 128, 0, 0}
+        loop byte in patterns -> &values.push(fx_narrow_const(&b, false, 8, byte))
+        input :: fx_owned(&b, fx_list_type(fx_narrow(false, 8)), MIROperation.BuildList{values: values, trait_coercion: None})
+        reader :: fx_owned(&b, reader_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("scan.fixture", "jet_reader_over"), args: [MIRCallArg]{fx_arg(input, MIRAccess.Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+        symbol :: if little -> "jet_reader_read_f32_le" else -> "jet_reader_read_f32_be"
+        loop _ in 0..<3 {
+            result :: fx_owned(&b, result_ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("scan.fixture", symbol), receiver: reader, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
+            value :: fx_copy(&b, f32, MIROperation.ResultValue{subject: result, ok: true})
+            boxed :: fx_owned(&b, option_ty, MIROperation.Present{value: value})
+            cloned :: fx_owned(&b, option_ty, MIROperation.Copy{value: boxed, fact: MIRCopyFact.Explicit})
+            fx_scan_drop(&b, result)
+            fx_scan_drop(&b, boxed)
+            retained :: fx_copy(&b, f32, MIROperation.OptionValue{subject: cloned})
+            fx_scan_drop(&b, cloned)
+            fx_print(&b, retained)
+            fx_render_interpolation(&b, retained, MIRStringFormat.Debug)
+        }
+        fx_scan_drop(&b, reader)
+        fx_scan_drop(&b, input)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_scan_program(b)
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_reader_over", "jet_reader_over", 1, MIRPreludeABI.Value))
+    loop symbol in ([String]{"jet_reader_read_f32_le", "jet_reader_read_f32_be"}) {
+        row := fx_prelude(MIRPreludeFamily.HandleMethod, "scan.fixture", symbol, symbol, 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask = [Bool]{true}
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+fn fx_scan_float32_rejected(kind: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    ty :: mir_type_from_kind(MIRTypeKind.Float32)
+    value :: fx_param(&b, "value", ty, mir_copy_ownership())
+    if kind == 0 {
+        _ :: fx_copy(&b, ty, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: value, right: value})
+    } else if kind == 1 {
+        _ :: fx_copy(&b, fx_bool(), MIROperation.Binary{op: MIRBinaryOp.Eq, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: value, right: value})
+    } else if kind == 2 {
+        _ :: fx_copy(&b, ty, MIROperation.Unary{op: MIRUnaryOp.Neg, value: value})
+    } else {
+        _ :: fx_copy(&b, mir_type_from_kind(MIRTypeKind.Float), MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: mir_type_from_kind(MIRTypeKind.Float), conversion: MIRConversion.NumericCast})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+fn fx_scan_float32_rejection_checks() -> Bool Never! {
+    loop kind in 0..<4 {
+        program :: fx_scan_float32_rejected(kind)
+        if kind == 0 {
+            if lower_scan_storage(program, fx_narrow(true, 64)) != 0 -> return false
+            if lower_scan_storage(program, fx_narrow(false, 32)) != 0 -> return false
+            if lower_scan_storage(program, mir_type_from_kind(MIRTypeKind.Float32)) != (-1) -> return false
+        }
+        message :: if kind == 3 -> "Float32 conversions are not lowered at O0 yet" else -> "Float32 operations are not lowered at O0 yet"
+        if !fx_convert_has_issue(program, message) -> return false
+    }
+    true
+}
+
+fn fx_scan_reader_count_call(b: &FxBuilder, reader: MIRValueID, symbol: String, count: MIRValueID) -> MIRValueID Never! {
+    payload :: if symbol == "jet_reader_take" -> fx_list_type(fx_narrow(false, 8)) else -> fx_unit()
+    fx_owned(&b, fx_scan_result(payload), MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("scan.fixture", symbol), receiver: reader, args: [MIRValueID]{count}, frame_schedule: None, frame_schedule_derivation: None}})
+}
+
+fn fx_scan_reader_count_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_scan_program(b)
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_reader_over", "jet_reader_over", 1, MIRPreludeABI.Value))
+    loop symbol in ([String]{"jet_reader_take", "jet_reader_skip", "jet_reader_seek", "jet_reader_remaining"}) {
+        row := fx_prelude(MIRPreludeFamily.HandleMethod, "scan.fixture", symbol, symbol, if symbol == "jet_reader_remaining" -> 1 else -> 2, MIRPreludeABI.Value)
+        row.signature.borrow_mask = if symbol == "jet_reader_remaining" -> [Bool]{true} else -> [Bool]{true, true}
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+fn fx_scan_reader_count_input(b: &FxBuilder) -> MIRValueID Never! {
+    values := [MIRValueID]{}
+    loop byte in ([Int]{17, 34, 51}) -> &values.push(fx_narrow_const(&b, false, 8, byte))
+    fx_owned(&b, fx_list_type(fx_narrow(false, 8)), MIROperation.BuildList{values: values, trait_coercion: None})
+}
+
+fn fx_scan_reader_over(b: &FxBuilder, input: MIRValueID) -> MIRValueID Never! {
+    fx_owned(&b, fx_named("Reader"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("scan.fixture", "jet_reader_over"), args: [MIRCallArg]{fx_arg(input, MIRAccess.Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+}
+
+// Negative in-range counts reach Reader, preserving its ordinary Err text
+// and position. Positive in-range take/skip/seek keep their exact counts.
+// expect-stdout scan-reader-counts: "Reader.take: length must not be negative, got -1\nReader.skip: length must not be negative, got -1\nReader.seek: position must not be negative, got -1\n3\n[17]\n2\n1\n3\n"
+// expect-runtime-only scan-reader-counts
+fn fx_scan_reader_counts() -> MIRProgram Never! {
+    b := fx_builder()
+    input :: fx_scan_reader_count_input(&b)
+    reader :: fx_scan_reader_over(&b, input)
+    negative :: fx_int_const(&b, -1)
+    loop symbol in ([String]{"jet_reader_take", "jet_reader_skip", "jet_reader_seek"}) {
+        result :: fx_scan_reader_count_call(&b, reader, symbol, negative)
+        error :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: result, ok: false})
+        fx_print(&b, error)
+        fx_scan_drop(&b, error)
+        fx_scan_drop(&b, result)
+    }
+    fx_scan_print_handle(&b, reader, "jet_reader_remaining", fx_int())
+    one :: fx_int_const(&b, 1)
+    taken :: fx_scan_reader_count_call(&b, reader, "jet_reader_take", one)
+    bytes :: fx_owned(&b, fx_list_type(fx_narrow(false, 8)), MIROperation.ResultValue{subject: taken, ok: true})
+    fx_scan_drop(&b, taken)
+    fx_print(&b, bytes)
+    fx_scan_drop(&b, bytes)
+    fx_scan_print_handle(&b, reader, "jet_reader_remaining", fx_int())
+    skipped :: fx_scan_reader_count_call(&b, reader, "jet_reader_skip", one)
+    fx_scan_drop(&b, skipped)
+    fx_scan_print_handle(&b, reader, "jet_reader_remaining", fx_int())
+    zero :: fx_int_const(&b, 0)
+    sought :: fx_scan_reader_count_call(&b, reader, "jet_reader_seek", zero)
+    fx_scan_drop(&b, sought)
+    fx_scan_print_handle(&b, reader, "jet_reader_remaining", fx_int())
+    fx_scan_drop(&b, reader)
+    fx_scan_drop(&b, input)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_scan_reader_count_program(b)
+}
+
+// Exact 2^64 cannot be an I64 count. It must stop in the existing checked
+// adapter before Reader receives a tagged integer carrier as a raw count.
+// expect-stdout scan-reader-take-range-stop: ""
+// expect-exit scan-reader-take-range-stop: 70
+// expect-runtime-only scan-reader-take-range-stop
+// expect-stderr scan-reader-take-range-stop: "Stop [E3010]: `native Int argument exceeds host range`\n  --> <core.prelude>:0\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+// expect-stdout scan-reader-skip-range-stop: ""
+// expect-exit scan-reader-skip-range-stop: 70
+// expect-runtime-only scan-reader-skip-range-stop
+// expect-stderr scan-reader-skip-range-stop: "Stop [E3010]: `native Int argument exceeds host range`\n  --> <core.prelude>:0\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+// expect-stdout scan-reader-seek-range-stop: ""
+// expect-exit scan-reader-seek-range-stop: 70
+// expect-runtime-only scan-reader-seek-range-stop
+// expect-stderr scan-reader-seek-range-stop: "Stop [E3010]: `native Int argument exceeds host range`\n  --> <core.prelude>:0\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_scan_reader_range_stop(symbol: String) -> MIRProgram Never! {
+    b := fx_builder()
+    input :: fx_scan_reader_count_input(&b)
+    reader :: fx_scan_reader_over(&b, input)
+    wide :: fx_copy(&b, fx_int(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "18446744073709551616"}})
+    result :: fx_scan_reader_count_call(&b, reader, symbol, wide)
+    fx_scan_drop(&b, result)
+    fx_scan_drop(&b, reader)
+    fx_scan_drop(&b, input)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_scan_reader_count_program(b)
+}

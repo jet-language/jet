@@ -1,0 +1,94 @@
+// Audited Bytes projection: the view is [len, 0, data] of the native owner.
+// Drop the view before reading a second view and dropping the owner once.
+use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRDropKind,
+    MIREnumArg,
+    MIRFunctionID,
+    MIROperation,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRPreludeTypeArg,
+    MIRProgram,
+    MIRSemanticOp,
+    MIRTerminator,
+    MIRTupleField,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    mir_nominal_ref,
+    mir_type_from_kind,
+    mir_type_id,
+]
+
+fn fx_bytes_tree_definition() -> MIRTypeDef Never! {
+    tree :: fx_named("Dyn")
+    bytes :: fx_list_type(fx_narrow(false, 8))
+    entry :: fx_tuple_type("DataEntryPair", [MIRTupleField]{MIRTupleField{name: "key", ty: fx_string()}, MIRTupleField{name: "value", ty: tree}})
+    definition := fx_type_def("Dyn", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("Null", MIRVariantPayload.Unit),
+        fx_variant("Bool", MIRVariantPayload.Single{value: fx_bool()}),
+        fx_variant("Int", MIRVariantPayload.Single{value: fx_int()}),
+        fx_variant("Float", MIRVariantPayload.Single{value: mir_type_from_kind(MIRTypeKind.Float)}),
+        fx_variant("Number", MIRVariantPayload.Single{value: fx_string()}),
+        fx_variant("Text", MIRVariantPayload.Single{value: fx_string()}),
+        fx_variant("Bytes", MIRVariantPayload.Single{value: bytes}),
+        fx_variant("Array", MIRVariantPayload.Single{value: fx_list_type(tree)}),
+        fx_variant("Object", MIRVariantPayload.Single{value: fx_list_type(entry)}),
+    }, methods: [MIRFunctionID]{}})
+    definition.key = "<corelib>/native-bytes-fixture::Dyn"
+    definition
+}
+
+fn fx_bytes_borrow(b: &FxBuilder, owner: MIRValueID, view_ty: MIRType) -> MIRValueID Never! {
+    fx_value(&b, view_ty, fx_borrow(), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{
+        call: fx_prelude_id("core.encoding", "__bytes_view"), args: [MIRCallArg]{fx_arg(owner, MIRAccess.Read)},
+        owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{},
+    }})
+}
+
+// Empty data pointer and non-empty word-stride bytes both keep the owner's
+// allocation. Native fixture harness can run the linked object under ASan.
+// expect-stdout bytes-view: "0\n3\n255\n255\n"
+fn fx_bytes_view() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: fx_narrow(false, 8)
+    bytes :: fx_list_type(byte)
+    tree :: fx_named("Dyn")
+    view_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("View"), args: [MIRType]{byte}})
+    loop count in ([Int]{0, 3}) {
+        elements := [MIRValueID]{}
+        loop index in 0..<count -> &elements.push(fx_narrow_const(&b, false, 8, if index == 2 -> 255 else -> index))
+        payload :: fx_owned(&b, bytes, MIROperation.BuildList{values: elements, trait_coercion: None})
+        owner :: fx_owned(&b, tree, MIROperation.Enum{type_id: mir_type_id("Dyn"), variant: "Bytes", args: [MIREnumArg]{MIREnumArg{field: None, value: payload, boxed: false}}})
+        first :: fx_bytes_borrow(&b, owner, view_ty)
+        length :: fx_list_method(&b, "len", first, None, [MIRValueID]{}, fx_int(), false)
+        fx_print(&b, length)
+        if count > 0 {
+            index :: fx_int_const(&b, 2)
+            last :: fx_list_index(&b, first, index, byte, false)
+            fx_print(&b, last)
+        }
+        fx_do(&b, MIROperation.Drop{value: first, kind: MIRDropKind.Value})
+        second :: fx_bytes_borrow(&b, owner, view_ty)
+        if count > 0 {
+            index :: fx_int_const(&b, 2)
+            last :: fx_list_index(&b, second, index, byte, false)
+            fx_print(&b, last)
+        }
+        fx_do(&b, MIROperation.Drop{value: second, kind: MIRDropKind.Value})
+        fx_do(&b, MIROperation.Drop{value: owner, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    &p.types.push(fx_bytes_tree_definition())
+    row := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.encoding", "__bytes_view", "jet_raw_bytes_view", 1, MIRPreludeABI.Value)
+    row.signature.borrow_mask[0] = true
+    &p.prelude_calls.push(row)
+    p
+}

@@ -20,7 +20,7 @@ function run(command, args, cwd = out) {
   if (result.status !== 0) throw new Error(`${command} failed: status=${result.status}, signal=${result.signal}`);
 }
 run(process.execPath, [join(repo, "Compiler/JetBackend/Tests/run-link.mjs"), out, "--pack-roots"], repo);
-const fixtures = join(repo, "Compiler/JetBackend/Tests/Fixtures");
+const fixtures = join(repo, "Compiler/JetBackend/Tests/Fragments.fixture/Fixtures");
 for (const [source, object] of [
   ["object", "runtime.o"], ["archive", "archive.o"],
   ["consumer", "consumer.o"], ["missing", "missing.o"],

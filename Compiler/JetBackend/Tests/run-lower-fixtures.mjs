@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Assemble the MIR -> LIR -> x86-64 fixture unit (Tests/LowerFixtures.jet)
+// Assemble the MIR -> LIR -> x86-64 fixture unit (Tests/Fragments.fixture/LowerFixtures.jet)
 // with the sources it needs, as one package-free Jet file, and the in-process
-// loader unit (Tests/LoadImages.jet) beside it.
+// loader unit (Tests/Fragments.fixture/LoadImages.jet) beside it.
 //
 // usage: JET_RUNTIME_PACK=<admitted fresh Jet pack> node Compiler/JetBackend/Tests/run-lower-fixtures.mjs <outdir>
 // Append --abi to assemble just the ABI/alignment witnesses, or --sanitize
-// for just the sanitize-mode witnesses (Tests/SanitizeFixtures.jet).
+// for just the sanitize-mode witnesses (Tests/Fragments.fixture/SanitizeFixtures.jet).
 // --callable-statics assembles the production callable lifetime witness:
 // jet run unit.jet <admitted libjet_runtime_c.so> (three "héllo" lines + pass).
 // --foreign-descriptors runs descriptor lowering/lint/object witnesses only;
@@ -14,7 +14,7 @@
 // without linking; native execution still requires the admitted runtime pack.
 // --tls-refusal checks the canonical TLS transport refusal without a pack.
 // --route-carriers lowers/lints the exact-Int and Dyn route carrier witnesses
-// (Tests/Fixtures/RouteCarriers.jet) without a pack.
+// (Tests/Fragments.fixture/Fixtures/RouteCarriers.jet) without a pack.
 // --list-routes lowers/lints the four stage1-required canonical List witnesses
 // without a pack; the ordinary fixture run executes their native images.
 // --assemble-only emits the complete unit for a frontend check without a pack.
@@ -70,7 +70,7 @@ function body(path) {
   const kept = [];
   let skipping = false;
   for (const line of read(path).split("\n")) {
-    if (callableStatics && path === "Compiler/JetBackend/Tests/LowerFixtures.jet" && line.startsWith("fn run() {")) break;
+    if (callableStatics && path === "Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet" && line.startsWith("fn run() {")) break;
     if (skipping) {
       if (line.startsWith("]") || line === "}") skipping = false;
       continue;
@@ -98,7 +98,7 @@ function body(path) {
 }
 
 // Every lowering file (Lower.jet and its sibling family files) and every
-// fixture file under Tests/Fixtures, in name order.
+// fixture file under Tests/Fragments.fixture/Fixtures, in name order.
 const sorted = (dir) => existsSync(`${repo}/${dir}`) ? readdirSync(`${repo}/${dir}`).filter((name) => name.endsWith(".jet") && !excluded.has(name)).sort().map((name) => `${dir}/${name}`) : [];
 // Feed the exact audited OS templates into the hand-MIR witnesses; do not
 // maintain a second copy that could diverge from the OS layer.
@@ -205,47 +205,47 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
   ] : []),
   ...(foreignDescriptors || disjointLowering || tlsRefusal || routeCarriers || listRoutes ? [] : [
-    body("Compiler/JetBackend/Tests/TestPack.jet"),
-    ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/TestPack.jet"),
+    ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/Fragments.fixture/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/Fragments.fixture/AbiFixtures.jet")]),
   ]),
   ...(listRoutes || disjointLowering ? [
-    ...["fn fx_capacity_raw_type(", "fn fx_capacity_raw(", "fn fx_capacity_foreign(", "fn fx_capacity_provider_call("].map((head) => item("Compiler/JetBackend/Tests/Fixtures/Builtins.jet", head)),
+    ...["fn fx_capacity_raw_type(", "fn fx_capacity_raw(", "fn fx_capacity_foreign(", "fn fx_capacity_provider_call("].map((head) => item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Builtins.jet", head)),
   ] : []),
   ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : listRoutes ? [
-    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
-    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
-    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),
-    body("Compiler/JetBackend/Tests/Fixtures/Lists.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet").split("fn fx_hello(")[0],
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Tuple.jet", "fn fx_tuple_type("),
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Lists.jet"),
     'fn run() {\n    assert(fx_generic_runtime_rejection_checks())\n    assert(fx_list_routes_lowering_checks())\n    print("List route lowering fixtures passed")\n}',
   ] : disjointLowering ? [
-    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
-    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
-    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),
-    item("Compiler/JetBackend/Tests/Fixtures/Closures.jet", "fn fx_capture_facts("),
-    item("Compiler/JetBackend/Tests/Fixtures/Closures.jet", "fn fx_capture_place("),
-    body("Compiler/JetBackend/Tests/Fixtures/Lists.jet"),
-    body("Compiler/JetBackend/Tests/Fixtures/Disjoint.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet").split("fn fx_hello(")[0],
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Tuple.jet", "fn fx_tuple_type("),
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Tuple.jet", "fn fx_tuple_field_id("),
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Closures.jet", "fn fx_capture_facts("),
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Closures.jet", "fn fx_capture_place("),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Lists.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Disjoint.jet"),
     'fn run() { assert(fx_disjoint_lowering_checks()); print("disjoint lowering fixtures passed") }',
   ] : tlsRefusal ? [
-    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
-    body("Compiler/JetBackend/Tests/Fixtures/TLSRefusal.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet").split("fn fx_hello(")[0],
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/TLSRefusal.jet"),
     'fn run() { assert(fx_report_tls_refusals("tls-refusal")); print("TLS refusal fixtures passed") }',
   ] : routeCarriers ? [
-    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
-    item("Compiler/JetBackend/Tests/Fixtures/Tuple.jet", "fn fx_tuple_type("),
-    body("Compiler/JetBackend/Tests/Fixtures/RouteCarriers.jet"),
-    body("Compiler/JetBackend/Tests/Fixtures/NativeValues.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet").split("fn fx_hello(")[0],
+    item("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Tuple.jet", "fn fx_tuple_type("),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/RouteCarriers.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/NativeValues.jet"),
     'fn run() { assert(fx_route_carrier_checks()); assert(fx_route_native_values_checks()); print("route carrier fixtures passed") }',
   ] : foreignDescriptors ? [
-    body("Compiler/JetBackend/Tests/LowerFixtures.jet").split("fn fx_hello(")[0],
-    body("Compiler/JetBackend/Tests/Fixtures/Foreign.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet").split("fn fx_hello(")[0],
+    body("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/Foreign.jet"),
     'fn run() { assert(fx_foreign_descriptor_checks()); print("foreign descriptor fixtures passed") }',
-  ] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
+  ] : [body("Compiler/JetBackend/Tests/Fragments.fixture/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fragments.fixture/Fixtures").map(body)]),
   ...(callableStatics ? [
     body("Compiler/JetBackend/Source/OS/Linux.jet"),
     body("Compiler/JetBackend/Source/Image/Loader.jet"),
     body("Compiler/JetBackend/Source/Image/Calls.jet"),
-    body("Compiler/JetBackend/Tests/CallableStatics.jet"),
+    body("Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet"),
     "fn run() { callable_statics() }",
   ] : []),
 ];
@@ -265,7 +265,7 @@ const loadParts = [
   "",
   body("Compiler/JetBackend/Source/OS/Linux.jet"),
   body("Compiler/JetBackend/Source/Image/Loader.jet"),
-  body("Compiler/JetBackend/Tests/LoadImages.jet"),
+  body("Compiler/JetBackend/Tests/Fragments.fixture/LoadImages.jet"),
 ];
 const packageSource = (name) => `name: "${name}"\nversion: "0.1.0"\nauthority: { holds: { allow: [Exec, Exec.Args, FFI, FS.Read, FS.Write, IO, Mem.Alloc] } }\n`;
 writeFileSync(`${outDir}/package.jet`, packageSource("jet_backend_lower_fixtures"));

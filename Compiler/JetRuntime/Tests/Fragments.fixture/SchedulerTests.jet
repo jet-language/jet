@@ -1,0 +1,287 @@
+// C supplies code addresses only. Assertions, callbacks and all concurrency
+// behavior run in the real Jet scheduler; no fake observer or stop rail.
+fn scheduler_test_require(ok: Bool) {
+    if ok -> return
+    #Unsafe("an isolated failed scheduler witness exits with no further runtime cleanup") {
+        _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    loop {}
+}
+fn scheduler_test_env(log: I64, mode: I64, value: I64) -> I64 {
+    env :: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(env, I64{32})
+    sync_store(env, log)
+    sync_store(env + I64{8}, mode)
+    sync_store(env + I64{16}, value)
+    env
+}
+#Export(c) fn jet_rt_scheduler_fixture_clone(source: I64, target: I64) {
+    sync_store(target, sync_load(source))
+}
+#Export(c) fn jet_rt_scheduler_fixture_release(env: I64) {
+    _ := sync_add(sync_load(env), I64{1})
+    jet_rt_free(env, I64{32}, I64{8})
+}
+#Export(c) fn jet_rt_scheduler_fixture_exit_body(_closure: I64) {
+    scheduler_test_require(false)
+}
+#Export(c) fn jet_rt_scheduler_fixture_exit_release(closure: I64) {
+    _ := sync_add(sync_load(closure + I64{24}), I64{1})
+    jet_rt_free(closure, I64{32}, I64{8})
+}
+#Export(c) fn jet_rt_scheduler_fixture_exit_worker(arguments: I64) -> I64 {
+    closure :: jet_rt_alloc(I64{32}, I64{8})
+    sync_store(closure, I64{1})
+    sync_store(closure + I64{8}, sync_load(arguments))
+    sync_store(closure + I64{16}, sync_load(arguments + I64{8}))
+    sync_store(closure + I64{24}, sync_load(arguments + I64{16}))
+    jet_rt_native_atexit(closure)
+    I64{0}
+}
+#Export(c) fn jet_rt_scheduler_fixture_body(env: I64, out: I64) -> I64 {
+    mode :: sync_load(env + I64{8})
+    log :: sync_load(env)
+    _ := sync_add(log + I64{8}, I64{1})
+    if {
+        (mode == I64{1}) -> {
+            slot :: sync_park_new()
+            kind :: scheduler_msg_join()
+            _ := scheduler_yield(kind, slot, I64{-1})
+            sync_park_drop(slot)
+            jet_rt_string_drop(kind)
+            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        }
+        (mode == I64{2}) -> {
+            message :: scheduler_msg_cancelled()
+            jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
+            jet_rt_string_drop(message)
+            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        }
+        (mode == I64{3}) -> {
+            jet_task_sleep_duration_ns_defaulted(I64{1000000})
+            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        }
+    }
+    sync_store(out, sync_load(env + I64{16}))
+    I64{0}
+}
+
+fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I64) -> I64 {
+    label :: scheduler_text_new(I64{0})
+    child :: jet_rt_native_task_spawn(I64{17}, label, scheduler_test_env(log, mode, value), sync_load(callbacks), sync_load(callbacks + I64{8}), meta)
+    jet_rt_string_drop(label)
+    child
+}
+#Export(c) fn jet_rt_scheduler_fixture_run(callbacks: I64) -> I64 {
+    meta :: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(meta, I64{72})
+    sync_store(meta, I64{8})
+    sync_store(meta + I64{8}, sync_load(callbacks + I64{16}))
+    sync_store(meta + I64{48}, I64{274877906946})
+    log :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(log, I64{24})
+    // An OS worker exits without the process exit edge: drop, never run, its
+    // queued closure via the real dynamic TLS destructor and free queue storage.
+    exit_args :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(exit_args, sync_load(callbacks + I64{32}))
+    sync_store(exit_args + I64{8}, sync_load(callbacks + I64{40}))
+    sync_store(exit_args + I64{16}, log + I64{16})
+    exit_thread :: thread_spawn(sync_load(callbacks + I64{24}), exit_args)
+    scheduler_test_require(exit_thread > I64{0} && thread_join(exit_thread, I64{0}) == I64{0})
+    scheduler_test_require(sync_load(log + I64{16}) == I64{1})
+    jet_rt_free(exit_args, I64{24}, I64{8})
+    out :: jet_rt_alloc(I64{32}, I64{8})
+    root :: scheduler_control_new()
+    save :: jet_rt_alloc(I64{32}, I64{8})
+    scheduler_control_enter(root, save)
+    // 10k spawn/join, exact outputs and exactly-once environment release.
+    at := I64{0}
+    loop at < (I64{10000}) {
+        child :: scheduler_test_spawn(callbacks, meta, log, I64{0}, at)
+        scheduler_test_require(jet_rt_native_task_join(child, I64{0}, out) == I64{1})
+        scheduler_test_require(sync_load(out) == at)
+        at += I64{1}
+    }
+    scheduler_test_require(sync_load(log) == I64{10000} && sync_load(log + I64{8}) == I64{10000})
+    // An ordinary cancel is a request; neither poll nor propagate delivers it.
+    scheduler_control_cancel(root)
+    scheduler_test_require(jet_scheduler_native_poll() == I64{0} && jet_rt_session_propagate() == I64{0})
+    sync_store(root + I64{16}, I64{0})
+    // An explicit session interrupt is Check-delivered, never Propagate-delivered.
+    scheduler_control_interrupt(root)
+    scheduler_test_require(jet_rt_session_propagate() == I64{0})
+    scheduler_test_require(jet_rt_session_poll() == I64{1})
+    scheduler_control_discard_stop(root)
+    sync_store(root + I64{16}, I64{0})
+    // First stop wins; deadline supersedes cancellation and preserves its text.
+    _ := scheduler_control_publish(root, scheduler_stop_new(I64{1}, scheduler_text_new(I64{0})))
+    deadline_text :: scheduler_msg_deadline_head()
+    _ := scheduler_control_publish(root, scheduler_stop_new(I64{2}, deadline_text))
+    _ := scheduler_control_publish(root, scheduler_stop_new(I64{3}, scheduler_text_new(I64{0})))
+    scheduler_test_require(jet_scheduler_native_status() == I64{2})
+    record :: scheduler_control_take_stop(root)
+    scheduler_test_require(sync_load(record) == I64{2} && sync_load(record + I64{40}) == deadline_text)
+    scheduler_stop_drop(record)
+    // Nested shields mask a delivered rail but raw status remains observable.
+    jet_scheduler_shield_enter()
+    jet_scheduler_shield_enter()
+    scheduler_control_interrupt(root)
+    scheduler_test_require(jet_rt_session_poll() == I64{0})
+    jet_scheduler_shield_leave()
+    scheduler_test_require(jet_rt_session_propagate() == I64{0})
+    jet_scheduler_shield_leave()
+    scheduler_test_require(jet_rt_session_status() == I64{1})
+    scheduler_control_discard_stop(root)
+    // Panics and R08 faults cross shields immediately; cancellation waits
+    // for the outer shield exit, and is then visible on the same rail.
+    kind := I64{3}
+    loop kind <= (I64{5}) {
+        jet_scheduler_shield_enter()
+        _ := scheduler_control_publish(root, scheduler_stop_new(kind, scheduler_text_new(I64{0})))
+        scheduler_test_require(jet_rt_session_poll() == kind)
+        scheduler_test_require(jet_rt_session_propagate() == kind)
+        jet_scheduler_shield_leave()
+        scheduler_control_discard_stop(root)
+        kind += I64{1}
+    }
+    jet_scheduler_shield_enter()
+    scheduler_control_cancel(root)
+    scheduler_test_require(jet_rt_session_poll() == I64{0})
+    scheduler_test_require(jet_rt_session_propagate() == I64{0})
+    jet_scheduler_shield_leave()
+    scheduler_test_require(jet_rt_session_propagate() == I64{1})
+    scheduler_control_discard_stop(root)
+    sync_store(root + I64{16}, I64{0})
+    sync_store(root + I64{48}, I64{0})
+    // Cancel wakes a task parked on a non-arriving event; child failure is typed.
+    child :: scheduler_test_spawn(callbacks, meta, log, I64{1}, I64{0})
+    slot :: sync_park_new()
+    loop sync_load(log + I64{8}) != (I64{10001}) -> sync_park(slot, I64{1000000})
+    jet_rt_native_task_cancel(child)
+    scheduler_test_require(jet_rt_native_task_join(child, I64{0}, out) == I64{0})
+    failure :: sync_load(out)
+    scheduler_test_require(jet_rt_record_tag_jet_task_failure(failure) == I64{0})
+    jet_rt_handle_drop_jet_task_failure(failure)
+    // Intentional task panic produces an owned failure with no stderr report.
+    panicked :: scheduler_test_spawn(callbacks, meta, log, I64{2}, I64{0})
+    scheduler_test_require(jet_rt_native_task_join(panicked, I64{0}, out) == I64{0})
+    panic_failure :: sync_load(out)
+    scheduler_test_require(jet_rt_record_tag_jet_task_failure(panic_failure) == I64{2})
+    reason :: jet_rt_record_get_jet_task_failure_panicked(panic_failure)
+    scheduler_test_require(sync_load(reason + I64{8}) > I64{0})
+    jet_rt_string_drop(reason)
+    jet_rt_handle_drop_jet_task_failure(panic_failure)
+    // Save/restore two nested deadlines, including exact i64 minimum parsing.
+    deadline_save :: jet_rt_alloc(I64{32}, I64{8})
+    jet_ctx_push_deadline(deadline_wall_now_ms() + I64{10000}, deadline_save)
+    first :: jet_ctx_deadline_ms()
+    jet_ctx_push_deadline(first + I64{1000}, deadline_save + I64{16})
+    jet_ctx_pop_deadline(deadline_save + I64{16})
+    scheduler_test_require(jet_ctx_deadline_ms() == first)
+    jet_ctx_pop_deadline(deadline_save)
+    scheduler_test_require(!jet_ctx_deadline_present())
+    minimum :: scheduler_text_new(I64{20})
+    sync_store(sync_load(minimum), I64{3618417120593983789})
+    sync_store(sync_load(minimum) + I64{8}, I64{3978706198986109744})
+    sync_store(sync_load(minimum) + I64{16}, I64{942684213})
+    scheduler_test_require(deadline_parse_i64(minimum, out) && sync_load(out) == I64{-9223372036854775808})
+    maximum :: scheduler_text_new(I64{19})
+    coll_copy(sync_load(minimum) + I64{1}, sync_load(maximum), I64{19})
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(maximum) + I64{18}, I64{55})
+    }
+    scheduler_test_require(deadline_parse_i64(maximum, out) && sync_load(out) == I64{9223372036854775807})
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(maximum) + I64{18}, I64{56})
+    }
+    scheduler_test_require(!deadline_parse_i64(maximum, out))
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(minimum) + I64{19}, I64{57})
+    }
+    scheduler_test_require(!deadline_parse_i64(minimum, out))
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(maximum) + I64{17}, I64{49})
+        os_store_u8(sync_load(maximum) + I64{18}, I64{48})
+        os_store_u8(sync_load(minimum) + I64{18}, I64{49})
+        os_store_u8(sync_load(minimum) + I64{19}, I64{48})
+    }
+    scheduler_test_require(!deadline_parse_i64(maximum, out) && !deadline_parse_i64(minimum, out))
+    jet_rt_string_drop(maximum)
+    sign_only :: scheduler_text_new(I64{1})
+    #Unsafe("fixture byte writes stay within an owned one-byte text buffer") {
+        os_store_u8(sync_load(sign_only), I64{43})
+    }
+    scheduler_test_require(!deadline_parse_i64(sign_only, out))
+    #Unsafe("fixture byte writes stay within an owned one-byte text buffer") {
+        os_store_u8(sync_load(sign_only), I64{45})
+    }
+    scheduler_test_require(!deadline_parse_i64(sign_only, out))
+    sync_store(sign_only + I64{8}, I64{0})
+    scheduler_test_require(!deadline_parse_i64(sign_only, out))
+    jet_rt_string_drop(sign_only)
+    jet_rt_string_drop(minimum)
+    // Real wheel timer wakes, cancellation synchronizes with freeing the slot.
+    start :: sync_now_ns()
+    timer :: scheduler_timer_schedule(start + I64{10000000}, slot)
+    sync_park(slot, I64{100000000})
+    scheduler_timer_cancel(timer)
+    scheduler_test_require(sync_now_ns() - start >= I64{9000000})
+    // A detached task still releases its environment and completes before drain.
+    detached :: scheduler_test_spawn(callbacks, meta, log, I64{3}, I64{55})
+    jet_rt_native_task_detach(detached)
+    jet_scheduler_drain_after_exit()
+    // Bounded admission can park without starving a one-worker pool. A cloned
+    // group handle is non-owning and must not close the lexical owner.
+    group :: jet_rt_native_task_group_with_limit(I64{1})
+    // Admission can claim a permit after a stop was published. Rejected spawn
+    // must return that permit/ref and release the callback without registering.
+    stopped_state :: sync_load(group)
+    label_stopped :: scheduler_text_new(I64{0})
+    released_before :: sync_load(log)
+    _ := scheduler_control_publish(root, scheduler_stop_new(I64{1}, scheduler_text_new(I64{0})))
+    rejected :: jet_rt_native_group_spawn(group, I64{3}, label_stopped, scheduler_test_env(log, I64{0}, I64{0}), sync_load(callbacks), sync_load(callbacks + I64{8}), meta)
+    scheduler_test_require(rejected == I64{0} && sync_load(stopped_state + I64{32}) == I64{0})
+    scheduler_test_require(sync_load(stopped_state) == I64{1} && sync_load(stopped_state + I64{48}) == I64{0})
+    scheduler_test_require(sync_load(log) == released_before + I64{1})
+    scheduler_control_discard_stop(root)
+    jet_rt_string_drop(label_stopped)
+    group_clone :: jet_rt_handle_clone_jet_task_group(group)
+    jet_rt_handle_drop_jet_task_group(group_clone)
+    label :: scheduler_text_new(I64{0})
+    first_task :: jet_rt_native_group_spawn(group, I64{1}, label, scheduler_test_env(log, I64{3}, I64{91}), sync_load(callbacks), sync_load(callbacks + I64{8}), meta)
+    second_task :: jet_rt_native_group_spawn(group, I64{2}, label, scheduler_test_env(log, I64{0}, I64{92}), sync_load(callbacks), sync_load(callbacks + I64{8}), meta)
+    jet_rt_string_drop(label)
+    jet_rt_handle_drop_jet_task_group(group)
+    handles :: jet_rt_alloc(I64{16}, I64{8})
+    offsets :: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(handles, first_task)
+    sync_store(handles + I64{8}, second_task)
+    sync_store(offsets, I64{0})
+    sync_store(offsets + I64{8}, I64{8})
+    // `_result` must tolerate non-Result tuple children instead of dereferencing
+    // an ordinary machine result as though it were a boxed Result.
+    scheduler_test_require(jet_rt_native_task_all_tuple(handles, I64{2}, I64{1}, offsets, out) == I64{1})
+    scheduler_test_require(sync_load(out) == I64{91} && sync_load(out + I64{8}) == I64{92})
+    jet_rt_free(handles, I64{16}, I64{8})
+    jet_rt_free(offsets, I64{16}, I64{8})
+    scheduler_test_require(sync_load(log) == I64{10007})
+    stats :: jet_rt_alloc(I64{24}, I64{8})
+    jet_scheduler_blocking_wait_stats(stats)
+    scheduler_test_require(sync_load(stats) == I64{0} && sync_load(stats + I64{16}) <= I64{9})
+    jet_rt_free(stats, I64{24}, I64{8})
+    sync_park_drop(slot)
+    jet_rt_free(deadline_save, I64{32}, I64{8})
+    scheduler_control_leave(save)
+    scheduler_control_drop(root)
+    jet_rt_free(save, I64{32}, I64{8})
+    jet_rt_free(out, I64{32}, I64{8})
+    jet_rt_free(log, I64{24}, I64{8})
+    coll_meta_drop(meta)
+    I64{0}
+}
+
+#Export(c) fn jet_rt_scheduler_fixture_root_panic() -> I64 {
+    message :: scheduler_msg_cancelled()
+    jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
+    I64{1}
+}

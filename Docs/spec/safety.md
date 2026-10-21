@@ -1044,28 +1044,28 @@ example retains the negative unsafe-outside-vetted scan.
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/CallImages.jet",
+      "file": "Compiler/JetBackend/Tests/Fragments.fixture/CallImages.jet",
       "line": 139,
       "column": 5,
       "reason": "the separate observer mapping remains owned, readable and writable until the final assertion"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/CallableStatics.jet",
+      "file": "Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet",
       "line": 77,
       "column": 5,
       "reason": "the loaded image owns both observer pointers and their writable static cells through unload; fini is the checked zero-argument Unit function"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/SessionHostFixtures.jet",
+      "file": "Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet",
       "line": 151,
       "column": 9,
       "reason": "half-close only this owned socket's write side; leave read open for HostError"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetBackend/Tests/SessionHostFixtures.jet",
+      "file": "Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet",
       "line": 291,
       "column": 5,
       "reason": "the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call"
@@ -3473,322 +3473,322 @@ example retains the negative unsafe-outside-vetted scan.
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 11,
       "column": 5,
       "reason": "a failed allocator witness terminates this isolated test process"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 27,
       "column": 5,
       "reason": "both allocations own count bytes; touching their endpoints must not alias each other or their metadata"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 67,
       "column": 5,
       "reason": "first's private header names its live slab, whose arena word is fixed"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 84,
       "column": 5,
       "reason": "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 94,
       "column": 9,
       "reason": "pointer's private header identifies its still-live slab, which must be the same mapping"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 99,
       "column": 9,
       "reason": "no other thread touches the slab or its class list"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 113,
       "column": 5,
       "reason": "first's private header holds its mapping base and length"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 137,
       "column": 9,
       "reason": "the test owns the full payload and can read its allocator header"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 154,
       "column": 9,
       "reason": "the chain word remains readable until its payload is freed"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 161,
       "column": 5,
       "reason": "after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 191,
       "column": 5,
       "reason": "the test owns this fresh align-8 block and its count word"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 226,
       "column": 9,
       "reason": "the test owns the payload and keeps its chain word there"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 235,
       "column": 5,
       "reason": "row is this thread's own cache row"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 239,
       "column": 9,
       "reason": "the chain word remains readable until its payload is freed"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 245,
       "column": 9,
       "reason": "row is this thread's own cache row"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 252,
       "column": 5,
       "reason": "after the flush the row is empty"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
       "line": 288,
       "column": 5,
       "reason": "the exact success line is two bounded stack words written to stdout"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/AllocationPolicyTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet",
       "line": 4,
       "column": 5,
       "reason": "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/EnvOverlayKernel.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/EnvOverlayKernel.jet",
       "line": 6,
       "column": 5,
       "reason": "failed witness terminates its isolated real-runtime process"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 5,
       "column": 5,
       "reason": "an isolated failed scheduler witness exits with no further runtime cleanup"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 190,
       "column": 5,
       "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 194,
       "column": 5,
       "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 198,
       "column": 5,
       "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 202,
       "column": 5,
       "reason": "fixture byte writes stay within owned 19/20-byte text buffers"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 211,
       "column": 5,
       "reason": "fixture byte writes stay within an owned one-byte text buffer"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SchedulerTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet",
       "line": 215,
       "column": 5,
       "reason": "fixture byte writes stay within an owned one-byte text buffer"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 6,
       "column": 5,
       "reason": "a failed isolated Secret witness terminates this test process"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 14,
       "column": 5,
       "reason": "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 23,
       "column": 5,
       "reason": "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its retained slab metadata"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 36,
       "column": 5,
       "reason": "input and secret are distinct live headers; adoption leaves one live buffer owner and borrowed bytes alias only that parent's header"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 57,
       "column": 5,
       "reason": "the test owns data and checks the initialized U8 slots, including epoch padding, before any release"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 68,
       "column": 5,
       "reason": "secret still owns its live24B header after Close; the buffer was released, and no pointer into it is used"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 80,
       "column": 5,
       "reason": "reused is newly allocated live32B storage exclusively owned by this witness, not a read of freed storage"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 112,
       "column": 5,
       "reason": "data is this test's live List allocation; every capacity byte is dirtied before the wipe"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 120,
       "column": 5,
       "reason": "the same live allocation remains exclusively owned while this test checks all wiped bytes"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SecretTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
       "line": 138,
       "column": 5,
       "reason": "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SentryInlineTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet",
       "line": 8,
       "column": 1,
       "reason": "the raw pointer deliberately escapes its frame for the sentry witness"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SentryInlineTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet",
       "line": 14,
       "column": 1,
       "reason": "an expired inline raw read must stop before any pointee byte is loaded"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/SentryTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SentryTests.jet",
       "line": 206,
       "column": 5,
       "reason": "the checked Source callback uses the exact two-word native ABI"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/TextTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/TextTests.jet",
       "line": 6,
       "column": 5,
       "reason": "a failed text runtime witness terminates only its isolated process"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/ThreadTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
       "line": 8,
       "column": 5,
       "reason": "a failed isolated runtime witness ends the process without allocation or libc"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/ThreadTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
       "line": 36,
       "column": 5,
       "reason": "gettid verifies identity without trusting the TCB under test"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/ThreadTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
       "line": 45,
       "column": 5,
       "reason": "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/ThreadTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
       "line": 204,
       "column": 13,
       "reason": "sched_yield widens both sides of the check-to-wait race without timing assumptions"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/ThreadTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
       "line": 284,
       "column": 5,
       "reason": "heap-free fixture success line is one eight-byte write"
     },
     {
       "package": "Compiler",
-      "file": "Compiler/JetRuntime/Tests/UnicodeTests.jet",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/UnicodeTests.jet",
       "line": 8,
       "column": 5,
       "reason": "a failed Unicode runtime witness ends only its isolated test process"
@@ -8248,10 +8248,10 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetBackend/Source/OS/SessionTransport.jet | 165:5 | "the newline follows at most5 digits in32 writable header bytes" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionTransport.jet | 213:9 | "one byte was read into this owned mapping" |
 | Compiler | Compiler/JetBackend/Source/OS/SessionTransport.jet | 235:13 | "index is within the bytes just read into this mapping" |
-| Compiler | Compiler/JetBackend/Tests/CallImages.jet | 139:5 | "the separate observer mapping remains owned, readable and writable until the final assertion" |
-| Compiler | Compiler/JetBackend/Tests/CallableStatics.jet | 77:5 | "the loaded image owns both observer pointers and their writable static cells through unload; fini is the checked zero-argument Unit function" |
-| Compiler | Compiler/JetBackend/Tests/SessionHostFixtures.jet | 151:9 | "half-close only this owned socket's write side; leave read open for HostError" |
-| Compiler | Compiler/JetBackend/Tests/SessionHostFixtures.jet | 291:5 | "the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call" |
+| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/CallImages.jet | 139:5 | "the separate observer mapping remains owned, readable and writable until the final assertion" |
+| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/CallableStatics.jet | 77:5 | "the loaded image owns both observer pointers and their writable static cells through unload; fini is the checked zero-argument Unit function" |
+| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet | 151:9 | "half-close only this owned socket's write side; leave read open for HostError" |
+| Compiler | Compiler/JetBackend/Tests/Fragments.fixture/SessionHostFixtures.jet | 291:5 | "the checked fixture is a no-argument System V function returning the word 7; its mapping is retained through the call" |
 | Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 112:19 | "rename within the retained parent descriptor; C names remain live" |
 | Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 142:35 | "mkdir relative to retained directory with live encoded name" |
 | Compiler | Compiler/JetDevserver/Source/Canvas/SourceModel.jet | 216:11 | "openat borrows live retained parent and terminated encoded name" |
@@ -8595,52 +8595,52 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Source/World.jet | 76:5 | "registered provider code remains live at this world/lease boundary; output lends one writable word" |
 | Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 5:5 | "borrows an initialized aligned word in a live XML carrier or optional input" |
 | Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 8:5 | "owns a writable aligned word in a fresh XML carrier or caller output" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 11:5 | "a failed allocator witness terminates this isolated test process" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 27:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 67:5 | "first's private header names its live slab, whose arena word is fixed" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 84:5 | "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 94:9 | "pointer's private header identifies its still-live slab, which must be the same mapping" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 99:9 | "no other thread touches the slab or its class list" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 113:5 | "first's private header holds its mapping base and length" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 137:9 | "the test owns the full payload and can read its allocator header" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 154:9 | "the chain word remains readable until its payload is freed" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 161:5 | "after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 191:5 | "the test owns this fresh align-8 block and its count word" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 226:9 | "the test owns the payload and keeps its chain word there" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 235:5 | "row is this thread's own cache row" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 239:9 | "the chain word remains readable until its payload is freed" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 245:9 | "row is this thread's own cache row" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 252:5 | "after the flush the row is empty" |
-| Compiler | Compiler/JetRuntime/Tests/AllocTests.jet | 288:5 | "the exact success line is two bounded stack words written to stdout" |
-| Compiler | Compiler/JetRuntime/Tests/AllocationPolicyTests.jet | 4:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
-| Compiler | Compiler/JetRuntime/Tests/EnvOverlayKernel.jet | 6:5 | "failed witness terminates its isolated real-runtime process" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 5:5 | "an isolated failed scheduler witness exits with no further runtime cleanup" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 190:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 194:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 198:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 202:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 211:5 | "fixture byte writes stay within an owned one-byte text buffer" |
-| Compiler | Compiler/JetRuntime/Tests/SchedulerTests.jet | 215:5 | "fixture byte writes stay within an owned one-byte text buffer" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 6:5 | "a failed isolated Secret witness terminates this test process" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 14:5 | "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 23:5 | "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its retained slab metadata" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 36:5 | "input and secret are distinct live headers; adoption leaves one live buffer owner and borrowed bytes alias only that parent's header" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 57:5 | "the test owns data and checks the initialized U8 slots, including epoch padding, before any release" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 68:5 | "secret still owns its live24B header after Close; the buffer was released, and no pointer into it is used" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 80:5 | "reused is newly allocated live32B storage exclusively owned by this witness, not a read of freed storage" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 112:5 | "data is this test's live List allocation; every capacity byte is dirtied before the wipe" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 120:5 | "the same live allocation remains exclusively owned while this test checks all wiped bytes" |
-| Compiler | Compiler/JetRuntime/Tests/SecretTests.jet | 138:5 | "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency" |
-| Compiler | Compiler/JetRuntime/Tests/SentryInlineTests.jet | 8:1 | "the raw pointer deliberately escapes its frame for the sentry witness" |
-| Compiler | Compiler/JetRuntime/Tests/SentryInlineTests.jet | 14:1 | "an expired inline raw read must stop before any pointee byte is loaded" |
-| Compiler | Compiler/JetRuntime/Tests/SentryTests.jet | 206:5 | "the checked Source callback uses the exact two-word native ABI" |
-| Compiler | Compiler/JetRuntime/Tests/TextTests.jet | 6:5 | "a failed text runtime witness terminates only its isolated process" |
-| Compiler | Compiler/JetRuntime/Tests/ThreadTests.jet | 8:5 | "a failed isolated runtime witness ends the process without allocation or libc" |
-| Compiler | Compiler/JetRuntime/Tests/ThreadTests.jet | 36:5 | "gettid verifies identity without trusting the TCB under test" |
-| Compiler | Compiler/JetRuntime/Tests/ThreadTests.jet | 45:5 | "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced" |
-| Compiler | Compiler/JetRuntime/Tests/ThreadTests.jet | 204:13 | "sched_yield widens both sides of the check-to-wait race without timing assumptions" |
-| Compiler | Compiler/JetRuntime/Tests/ThreadTests.jet | 284:5 | "heap-free fixture success line is one eight-byte write" |
-| Compiler | Compiler/JetRuntime/Tests/UnicodeTests.jet | 8:5 | "a failed Unicode runtime witness ends only its isolated test process" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 11:5 | "a failed allocator witness terminates this isolated test process" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 27:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 67:5 | "first's private header names its live slab, whose arena word is fixed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 84:5 | "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 94:9 | "pointer's private header identifies its still-live slab, which must be the same mapping" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 99:9 | "no other thread touches the slab or its class list" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 113:5 | "first's private header holds its mapping base and length" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 137:9 | "the test owns the full payload and can read its allocator header" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 154:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 161:5 | "after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 191:5 | "the test owns this fresh align-8 block and its count word" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 226:9 | "the test owns the payload and keeps its chain word there" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 235:5 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 239:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 245:9 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 252:5 | "after the flush the row is empty" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 288:5 | "the exact success line is two bounded stack words written to stdout" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet | 4:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/EnvOverlayKernel.jet | 6:5 | "failed witness terminates its isolated real-runtime process" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 5:5 | "an isolated failed scheduler witness exits with no further runtime cleanup" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 190:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 194:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 198:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 202:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 211:5 | "fixture byte writes stay within an owned one-byte text buffer" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 215:5 | "fixture byte writes stay within an owned one-byte text buffer" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 6:5 | "a failed isolated Secret witness terminates this test process" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 14:5 | "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 23:5 | "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its retained slab metadata" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 36:5 | "input and secret are distinct live headers; adoption leaves one live buffer owner and borrowed bytes alias only that parent's header" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 57:5 | "the test owns data and checks the initialized U8 slots, including epoch padding, before any release" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 68:5 | "secret still owns its live24B header after Close; the buffer was released, and no pointer into it is used" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 80:5 | "reused is newly allocated live32B storage exclusively owned by this witness, not a read of freed storage" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 112:5 | "data is this test's live List allocation; every capacity byte is dirtied before the wipe" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 120:5 | "the same live allocation remains exclusively owned while this test checks all wiped bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 138:5 | "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet | 8:1 | "the raw pointer deliberately escapes its frame for the sentry witness" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryInlineTests.jet | 14:1 | "an expired inline raw read must stop before any pointee byte is loaded" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SentryTests.jet | 206:5 | "the checked Source callback uses the exact two-word native ABI" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/TextTests.jet | 6:5 | "a failed text runtime witness terminates only its isolated process" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 8:5 | "a failed isolated runtime witness ends the process without allocation or libc" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 36:5 | "gettid verifies identity without trusting the TCB under test" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 45:5 | "ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 204:13 | "sched_yield widens both sides of the check-to-wait race without timing assumptions" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 284:5 | "heap-free fixture success line is one eight-byte write" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/UnicodeTests.jet | 8:5 | "a failed Unicode runtime witness ends only its isolated test process" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
 | Core | Core/Auth/Auth.jet | 112:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |

@@ -66,22 +66,22 @@ const bridge = `
 if (mode === 'assemble' || mode.startsWith('assemble-')) {
   mkdirSync(join(fixture, 'Source'), {recursive:true});
   const paths = read('Compiler/JetRuntime/sources.list').split('\n').map(s=>s.trim()).filter(s=>s&&!s.startsWith('#'));
-  paths.push('Compiler/JetRuntime/Tests/ChannelTests.jet');
+  paths.push('Compiler/JetRuntime/Tests/Fragments.fixture/ChannelTests.jet');
   function include(path) { if (!paths.includes(path)) paths.push(path); }
-  if (mode === 'assemble-publication') include('Compiler/JetRuntime/Tests/SharedPublicationTests.jet');
+  if (mode === 'assemble-publication') include('Compiler/JetRuntime/Tests/Fragments.fixture/SharedPublicationTests.jet');
   if (mode !== 'assemble' && mode !== 'assemble-publication') {
     include('Compiler/JetRuntime/Source/SharedTransactions.jet');
-    include('Compiler/JetRuntime/Tests/StmTests.jet');
+    include('Compiler/JetRuntime/Tests/Fragments.fixture/StmTests.jet');
   }
   if (mode === 'assemble-sync' || mode === 'assemble-observe') {
     include('Compiler/JetRuntime/Source/Condition.jet');
-    include('Compiler/JetRuntime/Tests/SyncTests.jet');
+    include('Compiler/JetRuntime/Tests/Fragments.fixture/SyncTests.jet');
   }
   if (mode === 'assemble-observe') {
     include('Compiler/JetRuntime/Source/ObserveMessages.jet');
     include('Compiler/JetRuntime/Source/Observe.jet');
     include('Compiler/JetRuntime/Source/ObserveLive.jet');
-    include('Compiler/JetRuntime/Tests/ObserveTests.jet');
+    include('Compiler/JetRuntime/Tests/Fragments.fixture/ObserveTests.jet');
   }
   const unit = paths.map(read).join('\n');
   const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(m=>m[1]);

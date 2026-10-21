@@ -1,0 +1,151 @@
+// List union/intersection/difference/random/replace/counts and Map
+// to_list/top_n (Lists.jet lower_list_method_surface, Maps.jet
+// lower_map_entry_list) with the Collections.rs meaning (I9):
+//
+// fn run() {
+//     xs :: [1, 2, 3, 4, 5]
+//     print(xs.union([4, 5, 6]))
+//     print(xs.intersection([0, 2, 4]))
+//     print(xs.difference([2, 4]))
+//     print(xs.random() ?? -1)               // the fixed-seed draw: index 4
+//     print([Int]{}.random().is_some())
+//     ys :: [1, 2, 1]
+//     print(ys.replace(1, 9))
+//     print(ys.replace(7, 9))                // outside: an unchanged copy
+//     print(ys)                              // the shared buffer is untouched
+//     left :: ["a", "b", "b"]
+//     right :: ["b", "c", "c"]
+//     print(left.union(right))               // left's duplicates stay
+//     print(left.intersection(right))
+//     print(left.difference(right))
+//     counts :: ["b", "a", "b", "c", "a", "b"].counts()
+//     print(counts.to_list())
+//     print(counts.top_n(2))                 // descending value
+//     print(counts.top_n(-1))
+//     print(counts.top_n(10))                // every entry, ranked
+// }
+use jet_foundation.[
+    MIRDropKind,
+    MIRFieldID,
+    MIRFunction,
+    MIROperation,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRSemanticOp,
+    MIRTerminator,
+    MIRTupleField,
+    MIRTypeDef,
+    MIRTypeKind,
+    MIRValueID,
+    mir_type_from_kind,
+]
+
+fn fx_list_surface_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    members :: [String]{"union", "intersection", "difference", "random", "list_replace", "list_counts", "map_top_n"}
+    symbols :: [String]{"jet_list_union", "jet_list_intersection", "jet_list_difference", "jet_list_random", "jet_list_replace", "jet_list_counts", "jet_map_top_n"}
+    arities :: [Int]{2, 2, 2, 1, 3, 1, 2}
+    loop (index, member) in members {
+        row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], arities[index], MIRPreludeABI.Value)
+        // counts consumes its receiver; every other receiver is lent, and
+        // union/intersection/difference lend their argument too.
+        if member != "list_counts" -> row.signature.borrow_mask[0] = true
+        if index < 3 -> row.signature.borrow_mask[1] = true
+        &p.prelude_calls.push(row)
+    }
+    entries := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.map", "to_list", "jet_map_to_list", 1, MIRPreludeABI.Aggregate)
+    entries.signature.borrow_mask[0] = true
+    &p.prelude_calls.push(entries)
+    p
+}
+
+fn fx_list_surface_ints(b: &FxBuilder, values: [Int]) -> MIRValueID Never! {
+    items := [MIRValueID]{}
+    loop value in values -> &items.push(fx_int_const(&b, value))
+    fx_owned(&b, fx_list_type(fx_int()), MIROperation.BuildList{values: items, trait_coercion: None})
+}
+
+fn fx_list_surface_strings(b: &FxBuilder, values: [String]) -> MIRValueID Never! {
+    items := [MIRValueID]{}
+    loop value in values -> &items.push(fx_owned(&b, fx_string(), MIROperation.Constant{value: .String{value: value}}))
+    fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: items, trait_coercion: None})
+}
+
+// expect-stdout list-surface: "[1, 2, 3, 4, 5, 6]\n[2, 4]\n[1, 3, 5]\n5\nfalse\n[1, 9, 1]\n[1, 2, 1]\n[1, 2, 1]\n[a, b, b, c]\n[b]\n[a]\n"
+fn fx_list_surface() -> MIRProgram Never! {
+    b := fx_builder()
+    ints :: fx_list_type(fx_int())
+    owners := [MIRValueID]{}
+    xs :: fx_list_surface_ints(&b, [Int]{1, 2, 3, 4, 5})
+    &owners.push(xs)
+    loop (index, member) in ([String]{"union", "intersection", "difference"}) {
+        values :: if index == 0 -> [Int]{4, 5, 6} else if index == 1 -> [Int]{0, 2, 4} else -> [Int]{2, 4}
+        other :: fx_list_surface_ints(&b, values)
+        combined :: fx_list_method(&b, member, xs, None, [MIRValueID]{other}, ints, true)
+        fx_print(&b, combined)
+        &owners.push(other)
+        &owners.push(combined)
+    }
+    optional :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    drawn :: fx_list_method(&b, "random", xs, None, [MIRValueID]{}, optional, true)
+    picked :: fx_value(&b, fx_int(), fx_borrow(), MIROperation.OptionValue{subject: drawn})
+    fx_print(&b, picked)
+    &owners.push(drawn)
+    empty :: fx_list_surface_ints(&b, [Int]{})
+    nothing :: fx_list_method(&b, "random", empty, None, [MIRValueID]{}, optional, true)
+    some :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: nothing})
+    fx_print(&b, some)
+    &owners.push(empty)
+    &owners.push(nothing)
+    ys :: fx_list_surface_ints(&b, [Int]{1, 2, 1})
+    &owners.push(ys)
+    loop at in ([Int]{1, 7}) {
+        index :: fx_int_const(&b, at)
+        nine :: fx_int_const(&b, 9)
+        replaced :: fx_list_method(&b, "list_replace", ys, None, [MIRValueID]{index, nine}, ints, true)
+        fx_print(&b, replaced)
+        &owners.push(replaced)
+    }
+    fx_print(&b, ys)
+    strings :: fx_list_type(fx_string())
+    left :: fx_list_surface_strings(&b, [String]{"a", "b", "b"})
+    right :: fx_list_surface_strings(&b, [String]{"b", "c", "c"})
+    &owners.push(left)
+    &owners.push(right)
+    loop member in ([String]{"union", "intersection", "difference"}) {
+        combined :: fx_list_method(&b, member, left, None, [MIRValueID]{right}, strings, true)
+        fx_print(&b, combined)
+        &owners.push(combined)
+    }
+    loop owner in owners -> fx_do(&b, MIROperation.Drop{value: owner, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_surface_program(b)
+}
+
+// expect-stdout map-entries: "[(key: a, value: 2), (key: b, value: 3), (key: c, value: 1)]\n[(key: b, value: 3), (key: a, value: 2)]\n[]\n[(key: b, value: 3), (key: a, value: 2), (key: c, value: 1)]\n"
+fn fx_map_entries() -> MIRProgram Never! {
+    b := fx_builder()
+    words :: fx_list_surface_strings(&b, [String]{"b", "a", "b", "c", "a", "b"})
+    map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_string(), value: fx_int()})
+    // Consumed by counts: no drop of `words` follows.
+    counts :: fx_list_method(&b, "list_counts", words, None, [MIRValueID]{}, map_ty, true)
+    entry :: mir_type_from_kind(MIRTypeKind.Tuple{fields: [MIRTupleField]{MIRTupleField{name: "key", ty: fx_string()}, MIRTupleField{name: "value", ty: fx_int()}}})
+    entries_ty :: fx_list_type(entry)
+    owners := [MIRValueID]{counts}
+    listed :: fx_owned(&b, entries_ty, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{
+        call: fx_prelude_id("core.map", "to_list"), receiver: counts,
+        receiver_place: None, args: [MIRValueID]{}, aggregate_fields: Val([MIRFieldID]{}),
+    }})
+    fx_print(&b, listed)
+    &owners.push(listed)
+    loop limit in ([Int]{2, -1, 10}) {
+        n :: fx_int_const(&b, limit)
+        ranked :: fx_list_method(&b, "map_top_n", counts, None, [MIRValueID]{n}, entries_ty, true)
+        fx_print(&b, ranked)
+        &owners.push(ranked)
+    }
+    loop owner in owners -> fx_do(&b, MIROperation.Drop{value: owner, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_surface_program(b)
+}

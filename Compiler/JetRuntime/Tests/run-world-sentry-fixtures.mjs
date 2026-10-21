@@ -17,7 +17,7 @@ if (mode === 'reference') {
 }
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run', 'render'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run|render');
 const out = resolve(output), unit = join(out, 'unit');
-const fixturePaths = ['WorldTests.jet', 'SentryTests.jet', 'SentryInlineTests.jet', 'TestScopeTests.jet', 'AllocationPolicyTests.jet'].map(name => 'Compiler/JetRuntime/Tests/' + name);
+const fixturePaths = ['WorldTests.jet', 'SentryTests.jet', 'SentryInlineTests.jet', 'TestScopeTests.jet', 'AllocationPolicyTests.jet'].map(name => 'Compiler/JetRuntime/Tests/Fragments.fixture/' + name);
 function command(name, binary, args, options = {}) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options });
   writeFileSync(join(out, name + '.receipt.json'), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');

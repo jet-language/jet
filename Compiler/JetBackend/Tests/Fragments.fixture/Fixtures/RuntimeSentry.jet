@@ -1,0 +1,87 @@
+// Memory sentry hooks: Jet-compiled code enters the sentries around its
+// #Unsafe/#Policy regions, its unsafe gate and its raw stack addresses
+// (Pointers.jet). The runtime library implements those hooks, so a runtime
+// callable is never instrumented: jet_rt_sentry_scope_enter -> sentry_save ->
+// thread_base (#Unsafe) must not re-enter jet_rt_sentry_scope_enter.
+use jet_foundation.[MIRScope, MIRScopeFact, MIRScopeID, MIRScopeKind, MIRUnsafeGate]
+use jet_backend.[LIRLowering, lir_lint_module, lir_lower_callables, lir_lower_runtime_callables]
+
+// A gated function with an #Unsafe region holding a #Policy region, a raw
+// address of a local cell and a read through it.
+fn fx_runtime_sentry_program() -> MIRProgram Never! {
+    ptr_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
+    unsafe_scope :: MIRScopeID{value: U64{800}}
+    policy :: MIRScopeID{value: U64{801}}
+    b := fx_builder()
+    cell :: fx_local(&b, "cell", fx_i64(), mir_copy_ownership())
+    value :: fx_i64_const(&b, 1337)
+    fx_do(&b, MIROperation.WritePlace{place: cell, value: value})
+    fx_do(&b, MIROperation.ScopeEnter{scope: unsafe_scope, test_member: None})
+    fx_do(&b, MIROperation.ScopeEnter{scope: policy, test_member: None})
+    pointer :: fx_copy(&b, ptr_ty, MIROperation.RawAddressOf{place: cell})
+    _ := fx_copy(&b, fx_i64(), MIROperation.Deref{value: pointer})
+    fx_do(&b, MIROperation.ScopeExit{scope: policy})
+    fx_do(&b, MIROperation.ScopeExit{scope: unsafe_scope})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    gated := fx_function("jet_rt_sentry_fixture", b, fx_unit())
+    gated.unsafe_gate = Val(MIRUnsafeGate{file: "fixture.jet", line: 3, reason: "function gate", enabled: true, fenced: false})
+    gated.scopes = [MIRScope]{
+        {id: unsafe_scope, kind: MIRScopeKind.Unsafe, span: fx_span(), name: Val("raw cell"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "true"}}},
+        {id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("policy"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "true"}}},
+    }
+    fx_program([MIRFunction]{gated}, [MIRTypeDef]{})
+}
+
+// How many runtime calls in `lowered` reach the memory sentry hook `symbol`,
+// or any sentry hook when `symbol` is "".
+fn fx_runtime_sentry_calls(lowered: LIRLowering, symbol: String) -> Int Never! {
+    calls := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Runtime(name) && name.starts_with("jet_rt_sentry_") && (symbol == "" || name == symbol) -> calls += 1
+                }
+            }
+        }
+    }
+    calls
+}
+
+fn fx_runtime_sentry_checks() -> Bool Never! {
+    p :: fx_runtime_sentry_program()
+    roots :: [MIRFunctionID]{p.functions[0].id}
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    runtime :: lir_lower_runtime_callables(p, roots, ^intrinsics)
+    loop issue in runtime.issues -> print("runtime-sentry runtime: {issue.function}: {issue.message}")
+    if runtime.issues.len() != 0 -> return false
+    lint :: lir_lint_module(runtime.lir)
+    loop message in lint -> print("runtime-sentry runtime lint: {message}")
+    if lint.len() != 0 -> return false
+    runtime_calls :: fx_runtime_sentry_calls(runtime, "")
+    if runtime_calls != 0 {
+        print("runtime-sentry: a runtime callable calls a sentry hook {runtime_calls} time(s)")
+        return false
+    }
+    // User code keeps every hook: the gate and both regions enter and leave,
+    // the raw address registers in a stack frame, and the read is checked.
+    callable :: lir_lower_callables(p, roots)
+    loop issue in callable.issues -> print("runtime-sentry callable: {issue.function}: {issue.message}")
+    if callable.issues.len() != 0 -> return false
+    clean := true
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_scope_enter", 2) -> clean = false
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_policy_enter", 1) -> clean = false
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_scope_leave", 3) -> clean = false
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_frame_enter", 1) -> clean = false
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_frame_leave", 1) -> clean = false
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_stack_address_of", 1) -> clean = false
+    if !fx_runtime_sentry_expect(callable, "jet_rt_sentry_read", 1) -> clean = false
+    clean
+}
+
+fn fx_runtime_sentry_expect(lowered: LIRLowering, symbol: String, minimum: Int) -> Bool Never! {
+    found :: fx_runtime_sentry_calls(lowered, symbol)
+    if found >= minimum -> return true
+    print("runtime-sentry: a user #Unsafe region calls {symbol} {found} time(s), expected at least {minimum}")
+    false
+}

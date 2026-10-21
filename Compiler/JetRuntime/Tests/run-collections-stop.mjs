@@ -33,7 +33,7 @@ if (mode === '--assemble') {
     const iter = assembled.slice(iterStart, iterEnd).replaceAll('jet_rt_free(', 'coll_stop_free(')
         .replace('= "jet_rt_progress_state_advance"', '= "coll_stop_progress_advance"');
     writeFileSync(unit, assembled.slice(0, iterStart) + iter + assembled.slice(iterEnd));
-    appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CollectionsStopTests.jet'), 'utf8'));
+    appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet'), 'utf8'));
     writeFileSync(join(out, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(readFileSync(unit, 'utf8'), 'Source/Fixture.jet')));
 } else if (mode === '--lower') {
     const prefix = join(out, 'fixture');

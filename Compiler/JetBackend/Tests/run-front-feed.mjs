@@ -165,13 +165,13 @@ if (options.bootstrap) {
     writeFileSync(join(out, 'cleanup-host-assembly.json'), JSON.stringify({ source: path, sha256: createHash('sha256').update(text).digest('hex'), matches }, null, 2) + '\n');
     return clean(text.replace(anchor, anchor.replace('\n', '\n    program.stop_points = true\n')));
   });
-  const golden = readFileSync(join(repo, 'Compiler/JetBackend/Tests/GoldenLower.jet'), 'utf8')
+  const golden = readFileSync(join(repo, 'Compiler/JetBackend/Tests/Fragments.fixture/GoldenLower.jet'), 'utf8')
     .replace(/\nfn run\(\) \{[\s\S]*$/, '\n')
     .replace('use core.files as files', 'use core.files as gl_files')
     .replace(/\bfiles\./g, 'gl_files.')
     .replace('use core.time as time', 'use core.time as gl_time')
     .replace(/\btime\./g, 'gl_time.');
-  sources.push(clean(golden), jetDecoder(schema), jetWriter(schema), clean(readFileSync(join(repo, 'Compiler/JetBackend/Tests/FrontFeed.jet'), 'utf8')));
+  sources.push(clean(golden), jetDecoder(schema), jetWriter(schema), clean(readFileSync(join(repo, 'Compiler/JetBackend/Tests/Fragments.fixture/FrontFeed.jet'), 'utf8')));
   writeFileSync(join(probeDir, 'unit.jet'), sources.join('\n\n'));
   writeFileSync(join(probeDir, 'package.jet'), 'name: "native_front_feed"\nversion: "0.0.1"\nedition: "2028"\n');
   writeFileSync(join(probeDir, 'front-cases.txt'), cases.map(c => `${c.file}\t${c.prefix}`).join('\n') + '\n');

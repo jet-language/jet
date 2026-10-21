@@ -49,7 +49,8 @@ function step(name, command, args, cwd, mandatory = true) {
   return r;
 }
 const tests = 'Compiler/JetBackend/Tests';
-const oldCallers = ['GoldenLower.jet', 'LowerFixtures.jet', 'AbiFixtures.jet', 'Fixtures/Unsigned.jet', 'run-goldens.mjs', 'run-lower-fixtures.mjs', 'check-native-fixtures.mjs'];
+// [path at the base commit, path in the current tree]
+const oldCallers = [...['GoldenLower.jet', 'LowerFixtures.jet', 'AbiFixtures.jet', 'Fixtures/Unsigned.jet'].map(file => [file, `Fragments.fixture/${file}`]), ...['run-goldens.mjs', 'run-lower-fixtures.mjs', 'check-native-fixtures.mjs'].map(file => [file, file])];
 function snapshot(arm) {
   const dir = join(out, arm);
   mkdirSync(dir, { recursive: true });
@@ -58,8 +59,8 @@ function snapshot(arm) {
   const extracted = spawnSync('tar', ['-x', '-C', dir], { input: archive.stdout, maxBuffer: 1 << 20 });
   if (extracted.status !== 0) throw new Error('source snapshot extraction failed');
   if (arm === 'before') {
-    for (const file of oldCallers) writeFileSync(join(dir, tests, file), git('show', `${base}:${tests}/${file}`));
-    for (const file of ['TestPack.jet', 'Fixtures/ImageOverflow.jet']) rmSync(join(dir, tests, file));
+    for (const [then, now] of oldCallers) writeFileSync(join(dir, tests, now), git('show', `${base}:${tests}/${then}`));
+    for (const file of ['Fragments.fixture/TestPack.jet', 'Fragments.fixture/Fixtures/ImageOverflow.jet']) rmSync(join(dir, tests, file));
   }
   return dir;
 }

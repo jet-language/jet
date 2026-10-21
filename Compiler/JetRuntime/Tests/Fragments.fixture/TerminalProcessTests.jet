@@ -1,0 +1,25 @@
+// Witness transfers a real OS descriptor into the existing native Child72.
+// No replacement syscall, fake File, or Rust owner layout is involved.
+#Export(c) fn fixture_terminal_process_child(master: I64) -> I64 {
+    child :: spawn_child_new()
+    fd_put(child, I64{56}, master)
+    child
+}
+
+#Export(c) fn fixture_terminal_process_refs(child: I64) -> I64 {
+    sync_mutex_lock(child)
+    refs :: fd_word(child, I64{64})
+    sync_mutex_unlock(child)
+    refs
+}
+
+#Export(c) fn fixture_terminal_process_world_resize(session: I64, size: I64, error: I64) -> I64 {
+    world :: jet_rt_world_new()
+    base :: thread_base()
+    previous :: sync_load(base + I64{104})
+    sync_store(base + I64{104}, world)
+    result :: jet_terminal_session_resize(session, size, error)
+    sync_store(base + I64{104}, previous)
+    jet_rt_world_drop(world)
+    result
+}

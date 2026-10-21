@@ -1,0 +1,97 @@
+// Compiler uses: JetCli/Source/Cli/AdaptiveTable.jet:13-14,81-82,
+// 146-147,155-156,164-170. These witnesses exercise two-word constants,
+// canonical Show, and the same enum payload copy/normalization transport.
+use jet_foundation.[
+    MIRCallFallibility, MIRConstant, MIRConstEnumArg, MIRConversion, MIRDropKind,
+    MIREnumArg, MIRField, MIRFunction, MIRFunctionID, MIRIntegerWidth,
+    MIROperation, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily, MIRProgram,
+    MIRStringFormat, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind,
+    MIRTypeKind, MIRValueID, MIRVariant, MIRVariantPayload,
+    mir_type_from_kind, mir_type_id,
+]
+
+fn fx_wide_type(signed: Bool) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.IntN{signed: signed, bits: 128})
+}
+
+fn fx_wide_int(b: &FxBuilder, signed: Bool, number: Int) -> MIRValueID Never! {
+    fx_copy(&b, fx_wide_type(signed), MIROperation.Constant{value: MIRConstant.Int{value: number, width: Val(MIRIntegerWidth{signed: signed, bits: 128}), spelling: None}})
+}
+
+fn fx_wide_decimal(b: &FxBuilder, signed: Bool, decimal: String) -> MIRValueID Never! {
+    fx_copy(&b, fx_wide_type(signed), MIROperation.Constant{value: MIRConstant.BigInt{decimal: decimal}})
+}
+
+// expect-stdout wide-show: "0\n7\n-2\n-1\n18446744073709551616\n-18446744073709551616\n-170141183460469231731687303715884105728\n170141183460469231731687303715884105727\n340282366920938463463374607431768211455\n340282366920938463463374607431768211455\n340282366920938463463374607431768211455\n0\n"
+fn fx_wide_show() -> MIRProgram Never! {
+    b := fx_builder()
+    zero :: fx_wide_int(&b, true, 0)
+    seven :: fx_wide_int(&b, true, 7)
+    minus_two :: fx_wide_int(&b, true, -2)
+    minus_one :: fx_wide_int(&b, true, -1)
+    positive_high :: fx_wide_decimal(&b, true, "18446744073709551616")
+    negative_high :: fx_wide_decimal(&b, true, "-18446744073709551616")
+    minimum :: fx_wide_decimal(&b, true, "-170141183460469231731687303715884105728")
+    maximum :: fx_wide_decimal(&b, true, "170141183460469231731687303715884105727")
+    unsigned_maximum :: fx_wide_decimal(&b, false, "340282366920938463463374607431768211455")
+    loop value in ([MIRValueID]{zero, seven, minus_two, minus_one, positive_high, negative_high, minimum, maximum}) -> fx_render_interpolation(&b, value, MIRStringFormat.Display)
+    fx_print(&b, unsigned_maximum)
+    loop format in ([MIRStringFormat]{MIRStringFormat.Display, MIRStringFormat.Debug}) -> fx_render_interpolation(&b, unsigned_maximum, format)
+    unsigned_zero :: fx_wide_int(&b, false, 0)
+    fx_render_interpolation(&b, unsigned_zero, MIRStringFormat.Display)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+// expect-stdout wide-payload: "-170141183460469231731687303715884105728\n-170141183460469231731687303715884105728\n340282366920938463463374607431768211455\n340282366920938463463374607431768211455\n"
+fn fx_wide_payload() -> MIRProgram Never! {
+    cell :: fx_named("WideCell")
+    types :: [MIRTypeDef]{fx_type_def("WideCell", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("Integer", MIRVariantPayload.Named{fields: [MIRField]{fx_field("WideCell.Integer", "value", fx_wide_type(true))}}),
+        fx_variant("Unsigned", MIRVariantPayload.Named{fields: [MIRField]{fx_field("WideCell.Unsigned", "value", fx_wide_type(false))}}),
+    }, methods: [MIRFunctionID]{}})}
+    b := fx_builder()
+    minimum :: fx_wide_decimal(&b, true, "-170141183460469231731687303715884105728")
+    constructed :: fx_owned(&b, cell, MIROperation.Enum{type_id: mir_type_id("WideCell"), variant: "Integer", args: [MIREnumArg]{MIREnumArg{field: None, value: minimum, boxed: false}}})
+    extracted :: fx_value(&b, fx_wide_type(true), fx_borrow(), MIROperation.EnumPayload{subject: constructed, owner: mir_type_id("WideCell"), variant: "Integer", index: 0})
+    copied :: fx_mono_copy(&b, fx_wide_type(true), extracted)
+    fx_render_interpolation(&b, extracted, MIRStringFormat.Display)
+    fx_do(&b, MIROperation.Drop{value: constructed, kind: MIRDropKind.Value})
+    fx_render_interpolation(&b, copied, MIRStringFormat.Display)
+    frozen_tree :: fx_owned(&b, cell, MIROperation.Constant{value: MIRConstant.Enum{type_name: "WideCell", variant: "Unsigned", args: [MIRConstEnumArg]{MIRConstEnumArg{name: Val("value"), value: MIRConstant.BigInt{decimal: "340282366920938463463374607431768211455"}}}}})
+    unsigned :: fx_value(&b, fx_wide_type(false), fx_borrow(), MIROperation.EnumPayload{subject: frozen_tree, owner: mir_type_id("WideCell"), variant: "Unsigned", index: 0})
+    unsigned_copy :: fx_mono_copy(&b, fx_wide_type(false), unsigned)
+    fx_render_interpolation(&b, unsigned, MIRStringFormat.Display)
+    fx_do(&b, MIROperation.Drop{value: frozen_tree, kind: MIRDropKind.Value})
+    fx_render_interpolation(&b, unsigned_copy, MIRStringFormat.Display)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, types)
+}
+
+fn fx_wide_construct_value(b: &FxBuilder, signed: Bool, decimal: String) -> MIRValueID Never! {
+    number :: fx_copy(&b, fx_int(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: decimal}})
+    kind :: fx_int_const(&b, if signed -> 4 else -> 9)
+    target :: fx_wide_type(signed)
+    fx_copy(&b, target, MIROperation.Convert{value: number, parameters: [MIRValueID]{kind}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "int_checked_fixed"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 1},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+// SharedOutput.jet:227-231 requires the complete signed/unsigned domains.
+// expect-stdout wide-construct: "-170141183460469231731687303715884105728\n170141183460469231731687303715884105727\n340282366920938463463374607431768211455\n7\n-2\n0\n"
+fn fx_wide_construct() -> MIRProgram Never! {
+    b := fx_builder()
+    minimum :: fx_wide_construct_value(&b, true, "-170141183460469231731687303715884105728")
+    maximum :: fx_wide_construct_value(&b, true, "170141183460469231731687303715884105727")
+    unsigned_maximum :: fx_wide_construct_value(&b, false, "340282366920938463463374607431768211455")
+    seven :: fx_wide_construct_value(&b, true, "7")
+    minus_two :: fx_wide_construct_value(&b, true, "-2")
+    zero :: fx_wide_construct_value(&b, false, "0")
+    loop value in ([MIRValueID]{minimum, maximum, unsigned_maximum, seven, minus_two, zero}) -> fx_render_interpolation(&b, value, MIRStringFormat.Display)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, MIRPreludeABI.Value))
+    p
+}

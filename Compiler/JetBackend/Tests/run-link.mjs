@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Assemble the in-process linker unit (Tests/LinkRuntime.jet with
+// Assemble the in-process linker unit (Tests/Fragments.fixture/LinkRuntime.jet with
 // Image/Archive.jet, Image/StaticLink.jet, Image/RuntimePack.jet and the ELF
 // writer helpers they share with ELF.jet and Object.jet) as one
 // package-free Jet file.

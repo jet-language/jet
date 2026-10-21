@@ -22,7 +22,7 @@ const out = resolve(output);
 const paths = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8").split("\n")
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
 if (!paths.length || new Set(paths).size !== paths.length) throw new Error("empty or duplicate runtime source manifest");
-if (test !== null) paths.push(`Compiler/JetRuntime/Tests/${test}Tests.jet`);
+if (test !== null) paths.push(`Compiler/JetRuntime/Tests/Fragments.fixture/${test}Tests.jet`);
 const uses = new Set();
 const bodies = paths.map((path) => {
   const lines = readFileSync(join(root, path), "utf8").split("\n");

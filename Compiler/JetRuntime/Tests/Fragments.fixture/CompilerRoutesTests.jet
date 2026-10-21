@@ -1,0 +1,152 @@
+// Link with the composed Jet-only runtime and CompilerRoutesTests.c. The C
+// caller supplies one disk-backed temporary root and real forked child pids.
+fn compiler_routes_path(root: I64, suffix: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, root)
+    jet_rt_string_builder_push(text, suffix)
+    jet_rt_string_builder_finish(text)
+}
+fn compiler_routes_bytes_drop(data: I64, length: I64) {
+    if (length != I64{0}) -> jet_rt_free(data, length * RT_HOST_U8_STRIDE, I64{8})
+}
+#Export(c) fn jet_rt_compiler_fs_fixture(root: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    output :: scratch
+    len :: scratch + I64{8}
+    error :: scratch + I64{16}
+    os_error :: scratch + I64{16}
+    nested :: compiler_routes_path(root, rt_static_text("/one/two"))
+    if (jet_files_create_dirs_os(nested, error) != I64{1}) -> return I64{1}
+    if (jet_files_create_dirs_os(nested, error) != I64{1}) -> return I64{2}
+    path :: compiler_routes_path(nested, rt_static_text("/bytes"))
+    missing :: compiler_routes_path(root, rt_static_text("/absent"))
+    rt_text_store(output, I64{723})
+    rt_text_store(len, I64{724})
+    if (jet_files_read_bytes_os(missing, output, len, error) != I64{0}) -> return I64{3}
+    if (rt_text_word(output) != I64{723} || rt_text_word(len) != I64{724}) -> return I64{4}
+    fault :: rt_text_word(error)
+    if (rt_text_word(fault) != HOST_IO_KIND_NOT_FOUND || rt_text_word(fault + I64{8}) != HOST_IO_OP_READ || rt_text_word(fault + I64{32}) != I64{2}) -> return I64{5}
+    jet_rt_handle_drop_io_error(fault)
+    bytes :: jet_rt_alloc(I64{3} * RT_HOST_U8_STRIDE, I64{8})
+    host_u8_put(bytes, I64{0}, I64{0})
+    host_u8_put(bytes, I64{1}, I64{255})
+    host_u8_put(bytes, I64{2}, I64{10})
+    if (jet_files_write_bytes_os(path, bytes, I64{3}, error) != I64{1}) -> return I64{6}
+    if (jet_files_read_bytes_os(path, output, len, error) != I64{1} || rt_text_word(len) != I64{3}) -> return I64{7}
+    data := rt_text_word(output)
+    if (host_u8_get(data, I64{0}) != I64{0} || host_u8_get(data, I64{1}) != I64{255} || host_u8_get(data, I64{2}) != I64{10}) -> return I64{8}
+    compiler_routes_bytes_drop(data, I64{3})
+    if (jet_std_files_open_reader_nonblocking(path, output, error) != I64{1}) -> return I64{9}
+    reader := rt_text_word(output)
+    if (jet_std_file_reader_stat(reader, output, len, error) != I64{1} || rt_text_word(len) != I64{13}) -> return I64{10}
+    row := rt_text_word(output)
+    if (rt_text_word(row) != I64{0} || rt_text_word(row + I64{8}) != I64{3}) -> return I64{11}
+    jet_rt_free(row, I64{104}, I64{8})
+    jet_fs_unlink_raw(path, false, os_error)
+    if (jet_std_file_reader_read(reader, I64{1}, output, len, error) != I64{1} || rt_text_word(len) != I64{1}) -> return I64{12}
+    data = rt_text_word(output)
+    if (host_u8_get(data, I64{0}) != I64{0}) -> return I64{13}
+    compiler_routes_bytes_drop(data, I64{1})
+    if (jet_std_file_reader_read(reader, I64{16777217}, output, len, error) != I64{1} || rt_text_word(len) != I64{2}) -> return I64{14}
+    compiler_routes_bytes_drop(rt_text_word(output), I64{2})
+    if (jet_std_file_reader_read(reader, I64{1}, output, len, error) != I64{1} || rt_text_word(len) != I64{0}) -> return I64{15}
+    jet_rt_handle_drop_jet_file_reader(reader)
+    fifo :: compiler_routes_path(root, rt_static_text("/fifo"))
+    name :: fd_c_path(fifo)
+    made :: host_call(I64{133}, name, I64{4480}, I64{0})
+    fd_c_path_drop(name, fifo)
+    if (made != I64{0}) -> return I64{16}
+    if (jet_std_files_open_reader_nonblocking(fifo, output, error) != I64{1}) -> return I64{17}
+    reader = rt_text_word(output)
+    if (jet_std_file_reader_stat(reader, output, len, error) != I64{1}) -> return I64{18}
+    row = rt_text_word(output)
+    if (rt_text_word(row) != I64{3}) -> return I64{19}
+    jet_rt_free(row, I64{104}, I64{8})
+    jet_rt_handle_drop_jet_file_reader(reader)
+    jet_fs_unlink_raw(fifo, false, os_error)
+    alias :: compiler_routes_path(root, rt_static_text("/alias"))
+    if (jet_files_write_bytes_os(path, bytes, I64{3}, error) != I64{1}) -> return I64{20}
+    jet_fs_link_raw(path, alias, true, os_error)
+    if (rt_text_word(os_error) != I64{0}) -> return I64{21}
+    if (jet_files_read_link_os(alias, output, error) != I64{1}) -> return I64{22}
+    target :: rt_text_word(output)
+    if !jet_rt_string_eq(target, path) -> return I64{23}
+    jet_rt_string_drop(target)
+    if (jet_std_files_map(path, output, error) != I64{1}) -> return I64{24}
+    first :: rt_text_word(output)
+    if (jet_std_files_map(alias, output, error) != I64{1}) -> return I64{25}
+    second :: rt_text_word(output)
+    if (jet_std_files_writer_refusal(alias, output) != I64{1}) -> return I64{26}
+    refusal :: rt_text_word(output)
+    if (rt_text_word(refusal) != HOST_IO_KIND_OTHER || rt_text_word(refusal + I64{8}) != HOST_IO_OP_WRITE || !jet_rt_string_eq(rt_text_word(refusal + I64{16}), alias) || !jet_rt_string_eq(rt_text_word(refusal + I64{40}), rt_static_text("file is mapped read-only"))) -> return I64{27}
+    jet_rt_handle_drop_io_error(refusal)
+    jet_rt_handle_drop_jet_mapped_file(first)
+    if (jet_std_files_writer_refusal(path, output) != I64{1}) -> return I64{28}
+    jet_rt_handle_drop_io_error(rt_text_word(output))
+    jet_rt_handle_drop_jet_mapped_file(second)
+    rt_text_store(output, I64{725})
+    if (jet_std_files_writer_refusal(alias, output) != I64{0} || rt_text_word(output) != I64{725}) -> return I64{29}
+    if (jet_files_write_bytes_os(path, bytes, I64{0}, error) != I64{1}) -> return I64{30}
+    if (jet_std_files_map(path, output, error) != I64{1}) -> return I64{31}
+    empty :: rt_text_word(output)
+    if !jet_std_fs_map_is_empty(empty) -> return I64{32}
+    if (jet_std_files_writer_refusal(path, output) != I64{1}) -> return I64{33}
+    jet_rt_handle_drop_io_error(rt_text_word(output))
+    jet_rt_handle_drop_jet_mapped_file(empty)
+    if (jet_std_files_writer_refusal(path, output) != I64{0}) -> return I64{34}
+    jet_fs_unlink_raw(alias, false, os_error)
+    jet_fs_unlink_raw(path, false, os_error)
+    jet_fs_unlink_raw(nested, true, os_error)
+    parent :: compiler_routes_path(root, rt_static_text("/one"))
+    jet_fs_unlink_raw(parent, true, os_error)
+    jet_rt_string_drop(parent)
+    compiler_routes_bytes_drop(bytes, I64{3})
+    jet_rt_string_drop(alias)
+    jet_rt_string_drop(fifo)
+    jet_rt_string_drop(path)
+    jet_rt_string_drop(missing)
+    jet_rt_string_drop(nested)
+    jet_rt_free(scratch, I64{48}, I64{8})
+    I64{0}
+}
+#Export(c) fn jet_rt_compiler_wait_fixture(pid: I64, expected: I64) -> I64 {
+    slots :: jet_rt_alloc(I64{48}, I64{8})
+    rt_text_store(slots, I64{731})
+    if (jet_process_exit_status_raw(pid, slots) != I64{0} || rt_text_word(slots) != I64{731}) -> return I64{1}
+    child :: spawn_child_new()
+    fd_put(child, I64{8}, pid)
+    if (jet_process_wait_raw(child, false, slots + I64{8}, slots + I64{16}) != pid) -> return I64{2}
+    jet_process_drop_raw(child)
+    if (jet_process_exit_status_raw(pid, slots) != I64{1}) -> return I64{3}
+    value :: rt_text_word(slots)
+    if !jet_rt_string_eq(value, expected) -> return I64{4}
+    jet_rt_string_drop(value)
+    jet_rt_free(slots, I64{48}, I64{8})
+    I64{0}
+}
+#Export(c) fn jet_rt_compiler_status_history_fixture() -> I64 {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    compiler_process_record_exit_status(I64{10000001}, I64{15})
+    compiler_process_record_exit_status(I64{10000001}, I64{1792})
+    if (jet_process_exit_status_raw(I64{10000001}, slot) != I64{1}) -> return I64{1}
+    value := rt_text_word(slot)
+    if !jet_rt_string_eq(value, rt_static_text("exit status: 7")) -> return I64{2}
+    jet_rt_string_drop(value)
+    at := I64{0}
+    loop at < (I64{64}) {
+        compiler_process_record_exit_status(I64{20000000} + at, I64{0})
+        at += I64{1}
+    }
+    rt_text_store(slot, I64{732})
+    if (jet_process_exit_status_raw(I64{10000001}, slot) != I64{0} || rt_text_word(slot) != I64{732}) -> return I64{3}
+    value = compiler_process_status_text(I64{139})
+    if !jet_rt_string_eq(value, rt_static_text("signal: 11 (SIGSEGV) (core dumped)")) -> return I64{4}
+    jet_rt_string_drop(value)
+    name :: jet_std_os_name()
+    arch :: jet_std_os_arch()
+    if !jet_rt_string_eq(name, rt_static_text("linux")) || !jet_rt_string_eq(arch, rt_static_text("x86_64")) -> return I64{5}
+    jet_rt_string_drop(name)
+    jet_rt_string_drop(arch)
+    jet_rt_free(slot, I64{8}, I64{8})
+    I64{0}
+}

@@ -1,0 +1,121 @@
+// Separate fixture against the actual Jet Shared provider. All assertions Jet.
+#Import(c) fn thread_test_shared_new(slot: I64, meta: I64, drop_code: I64) -> I64 = "jet_rt_native_shared_new"
+#Import(c) fn thread_test_shared_clone(shared: I64) -> I64 = "jet_rt_native_shared_clone"
+
+#Export(c) fn jet_rt_shared_tls_fixture_payload_drop(slot: I64) {
+    counter :: sync_load(slot)
+    sync_store(counter, sync_load(counter) + I64{1})
+    // reset cleared the owning TLS slot before invoking Shared drop, so a
+    // payload destructor reentering attempt cleanup cannot drop it twice.
+    jet_rt_tls_reset_attempt()
+}
+
+#Export(c) fn jet_rt_shared_tls_fixture_site_worker(site: I64) -> I64 {
+    loop sync_load(site + I64{8}) == (I64{0}) -> _ := sync_wait(site + I64{8}, I64{0}, I64{-1})
+    jet_rt_tls_shared_key(site, I64{1})
+}
+
+#Export(c) fn jet_rt_shared_tls_fixture_scope_worker(state: I64) -> I64 {
+    key :: jet_rt_tls_shared_key(sync_load(state), I64{0})
+    shared :: sync_load(state + I64{8})
+    thread_test_require(jet_rt_tls_get(key) == I64{0})
+    jet_rt_tls_set(key, shared)
+    jet_rt_tls_reset_attempt()
+    thread_test_require(jet_rt_tls_get(key) == shared)
+    I64{0}
+}
+
+#Export(c) fn jet_rt_shared_tls_fixture_run(drop_code: I64, site_worker: I64, scope_worker: I64) -> I64 {
+    site :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(site, I64{16})
+    before :: sync_load(thread_tls_registry + I64{8})
+    handles :: jet_rt_alloc(I64{512}, I64{8})
+    worker := I64{0}
+    loop worker < (I64{64}) {
+        handle :: thread_spawn(site_worker, site)
+        thread_test_require(handle > I64{0})
+        sync_store(handles + worker * I64{8}, handle)
+        worker += I64{1}
+    }
+    sync_store(site + I64{8}, I64{1})
+    sync_wake(site + I64{8}, I64{64})
+    result :: jet_rt_alloc(I64{8}, I64{8})
+    worker = I64{0}
+    loop worker < (I64{64}) {
+        thread_test_require(thread_join(sync_load(handles + worker * I64{8}), result) == I64{0})
+        thread_test_require(sync_load(result) == before + I64{1})
+        worker += I64{1}
+    }
+    jet_rt_free(result, I64{8}, I64{8})
+    jet_rt_free(handles, I64{512}, I64{8})
+    key :: jet_rt_tls_shared_key(site, I64{1})
+    thread_test_require(key == before + I64{1})
+    repeat := I64{0}
+    loop repeat < (I64{10000}) {
+        thread_test_require(jet_rt_tls_shared_key(site, I64{1}) == key)
+        repeat += I64{1}
+    }
+    thread_test_require(sync_load(thread_tls_registry + I64{8}) == key)
+    thread_key :: jet_rt_tls_key_new(I64{0})
+    jet_rt_tls_set(thread_key, I64{73})
+    counter :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(counter, I64{0})
+    payload :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(payload, counter)
+    // Canonical NativeMeta: stride,clone,drop,show,equal,compare,kind,child0,child1.
+    meta :: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(meta, I64{72})
+    sync_store(meta, I64{8})
+    sync_store(meta + I64{16}, drop_code)
+    shared :: thread_test_shared_new(payload, meta, drop_code)
+    kept :: thread_test_shared_clone(shared)
+    jet_rt_tls_set(key, shared)
+    jet_rt_tls_reset_attempt()
+    thread_test_require(jet_rt_tls_get(key) == I64{0} && sync_load(counter) == I64{0})
+    thread_test_require(jet_rt_tls_get(thread_key) == I64{73})
+    jet_rt_tls_set(key, kept)
+    jet_rt_tls_reset_attempt()
+    thread_test_require(jet_rt_tls_get(key) == I64{0} && sync_load(counter) == I64{1})
+    jet_rt_tls_reset_attempt()
+    thread_test_require(sync_load(counter) == I64{1} && jet_rt_tls_get(thread_key) == I64{73})
+    // The same process key serves the next attempt, with no previous value.
+    next :: thread_test_shared_new(payload, meta, drop_code)
+    jet_rt_tls_set(key, next)
+    jet_rt_tls_reset_attempt()
+    thread_test_require(sync_load(counter) == I64{2} && jet_rt_tls_get(key) == I64{0})
+    repeat = I64{0}
+    loop repeat < (I64{10000}) {
+        thread_test_require(jet_rt_tls_shared_key(site, I64{1}) == key && jet_rt_tls_get(key) == I64{0})
+        attempt :: thread_test_shared_new(payload, meta, drop_code)
+        jet_rt_tls_set(key, attempt)
+        jet_rt_tls_reset_attempt()
+        thread_test_require(sync_load(counter) == repeat + I64{3} && jet_rt_tls_get(key) == I64{0})
+        repeat += I64{1}
+    }
+    thread_test_require(sync_load(thread_tls_registry + I64{8}) == thread_key)
+    jet_rt_tls_set(thread_key, I64{0})
+    // Thread-scoped Shared survives attempt reset, then its pthread
+    // trampoline detaches and invokes the same real Shared destructor.
+    thread_site :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(thread_site, I64{0})
+    scoped_count :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(scoped_count, I64{0})
+    scoped_payload :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(scoped_payload, scoped_count)
+    state :: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(state, thread_site)
+    sync_store(state + I64{8}, thread_test_shared_new(scoped_payload, meta, drop_code))
+    handle :: thread_spawn(scope_worker, state)
+    thread_test_require(handle > I64{0})
+    thread_test_require(thread_join(handle, I64{0}) == I64{0})
+    thread_test_require(sync_load(scoped_count) == I64{1})
+    jet_rt_free(state, I64{16}, I64{8})
+    jet_rt_free(scoped_payload, I64{8}, I64{8})
+    jet_rt_free(scoped_count, I64{8}, I64{8})
+    jet_rt_free(thread_site, I64{8}, I64{8})
+    jet_rt_free(meta, I64{72}, I64{8})
+    jet_rt_free(payload, I64{8}, I64{8})
+    jet_rt_free(counter, I64{8}, I64{8})
+    jet_rt_free(site, I64{16}, I64{8})
+    I64{0}
+}

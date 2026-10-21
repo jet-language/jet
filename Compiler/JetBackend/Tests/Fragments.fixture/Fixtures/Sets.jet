@@ -1,0 +1,126 @@
+use jet_foundation.[
+    MIRAccess,
+    MIRConstant,
+    MIRCopyFact,
+    MIRDropKind,
+    MIRFunction,
+    MIROperation,
+    MIRPlaceID,
+    MIRPreludeABI,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRStringPart,
+    MIRStringPartKind,
+    MIRTerminator,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeKind,
+    MIRValueID,
+    mir_nominal_ref,
+    mir_owned_ownership,
+    mir_ownership_from_access,
+    mir_type_from_kind,
+]
+
+fn fx_set_type(elem: MIRType) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Set"), args: [MIRType]{elem}})
+}
+
+fn fx_set_method(b: &FxBuilder, member: String, receiver: MIRValueID, place: MIRPlaceID?, args: [MIRValueID], result: MIRType, owned: Bool) -> MIRValueID Never! {
+    fx_list_method(&b, member, receiver, place, args, result, owned)
+}
+
+fn fx_set_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    members :: [String]{"set_from", "set_len", "set_insert", "set_has", "set_remove", "set_to_list", "set_equal", "set_union", "set_replace", "set_values", "iter_to_list"}
+    symbols :: [String]{"jet_set_from", "jet_set_len", "jet_set_insert", "jet_set_has", "jet_set_remove", "jet_set_to_list", "jet_set_equal", "jet_set_union", "jet_set_replace_kernel", "jet_set_values", "jet_iter_to_list"}
+    loop (index, member) in members {
+        unary :: index == 2 || index == 3 || index == 4 || index == 6 || index == 7 || index == 8
+        row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if unary -> 2 else -> 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask[0] = index != 0 && index != 10
+        if unary -> row.signature.borrow_mask[1] = index == 3 || index == 6 || index == 7
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+// Integer render order is lexical, not key order. Copies survive source
+// mutation/drop; duplicate construction, insertion, union and replace own
+// exactly one stored key. The values iterator is an independent snapshot.
+// expect-stdout sets: "[10, 2]\n[10, 2]\ntrue\nfalse\ntrue\nfalse\ntrue\n[2, 3]\n[10, 2, 3]\n2\n[2, 3]\n[2, 3]\n[blue, red]\nfalse\n[1, 128, 255]\n"
+// expect-runtime-only sets: native Set ownership and canonical text/Iter exports
+fn fx_sets() -> MIRProgram Never! {
+    b := fx_builder()
+    ty :: fx_set_type(fx_int())
+    list_ty :: fx_list_type(fx_int())
+    root :: fx_local(&b, "set", ty, mir_owned_ownership())
+    two :: fx_int_const(&b, 2)
+    ten :: fx_int_const(&b, 10)
+    three :: fx_int_const(&b, 3)
+    source :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{two, ten, two}, trait_coercion: None})
+    set :: fx_set_method(&b, "set_from", source, None, [MIRValueID]{}, ty, true)
+    fx_do(&b, MIROperation.WritePlace{place: root, value: set})
+    fx_print(&b, set)
+    debug :: fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: set, format: .Debug}}}})
+    fx_print(&b, debug)
+    original :: fx_owned(&b, ty, MIROperation.Copy{value: set, fact: MIRCopyFact.Explicit})
+    lent :: fx_value(&b, ty, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    added :: fx_set_method(&b, "set_insert", lent, Val(root), [MIRValueID]{three}, fx_bool(), false)
+    fx_print(&b, added)
+    duplicate :: fx_set_method(&b, "set_insert", lent, Val(root), [MIRValueID]{two}, fx_bool(), false)
+    fx_print(&b, duplicate)
+    has :: fx_set_method(&b, "set_has", set, None, [MIRValueID]{ten}, fx_bool(), false)
+    fx_print(&b, has)
+    _ := fx_set_method(&b, "set_remove", lent, Val(root), [MIRValueID]{ten}, fx_unit(), false)
+    gone :: fx_set_method(&b, "set_has", set, None, [MIRValueID]{ten}, fx_bool(), false)
+    fx_print(&b, gone)
+    same :: fx_set_method(&b, "set_equal", set, None, [MIRValueID]{set}, fx_bool(), false)
+    fx_print(&b, same)
+    items :: fx_set_method(&b, "set_to_list", set, None, [MIRValueID]{}, list_ty, true)
+    fx_print(&b, items)
+    union :: fx_set_method(&b, "set_union", set, None, [MIRValueID]{original}, ty, true)
+    fx_print(&b, union)
+    replaced :: fx_set_method(&b, "set_replace", lent, Val(root), [MIRValueID]{two}, mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()}), true)
+    fx_print(&b, replaced)
+    iter_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Iter"), args: [MIRType]{fx_int()}})
+    snapshot :: fx_set_method(&b, "set_values", set, None, [MIRValueID]{}, iter_ty, true)
+    discarded :: fx_owned(&b, ty, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: discarded, kind: MIRDropKind.Value})
+    fx_print(&b, items)
+    snapshot_list :: fx_set_method(&b, "iter_to_list", snapshot, None, [MIRValueID]{}, list_ty, true)
+    fx_print(&b, snapshot_list)
+
+    texts :: fx_list_type(fx_string())
+    strings_ty :: fx_set_type(fx_string())
+    string_root :: fx_local(&b, "strings", strings_ty, mir_owned_ownership())
+    red :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "red"}})
+    blue :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "blue"}})
+    red_again :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "red"}})
+    text_input :: fx_owned(&b, texts, MIROperation.BuildList{values: [MIRValueID]{red, blue, red_again}, trait_coercion: None})
+    strings :: fx_set_method(&b, "set_from", text_input, None, [MIRValueID]{}, strings_ty, true)
+    fx_do(&b, MIROperation.WritePlace{place: string_root, value: strings})
+    cloned :: fx_owned(&b, strings_ty, MIROperation.Copy{value: strings, fact: MIRCopyFact.Explicit})
+    lost :: fx_owned(&b, strings_ty, MIROperation.MovePlace{place: string_root})
+    fx_do(&b, MIROperation.Drop{value: lost, kind: MIRDropKind.Value})
+    fx_print(&b, cloned)
+    empty_list :: fx_owned(&b, texts, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    empty_set :: fx_set_method(&b, "set_from", empty_list, None, [MIRValueID]{}, strings_ty, true)
+    missing :: fx_set_method(&b, "set_equal", cloned, None, [MIRValueID]{empty_set}, fx_bool(), false)
+    fx_print(&b, missing)
+
+    u8_ty :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    bytes_ty :: fx_list_type(u8_ty)
+    byte_set_ty :: fx_set_type(u8_ty)
+    one_byte :: fx_narrow_const(&b, false, 8, 1)
+    high_byte :: fx_narrow_const(&b, false, 8, 128)
+    max_byte :: fx_narrow_const(&b, false, 8, 255)
+    byte_input :: fx_owned(&b, bytes_ty, MIROperation.BuildList{values: [MIRValueID]{max_byte, high_byte, one_byte, max_byte}, trait_coercion: None})
+    byte_set :: fx_set_method(&b, "set_from", byte_input, None, [MIRValueID]{}, byte_set_ty, true)
+    byte_output :: fx_set_method(&b, "set_to_list", byte_set, None, [MIRValueID]{}, bytes_ty, true)
+    fx_print(&b, byte_output)
+
+    retired :: [MIRValueID]{source, original, items, union, replaced, snapshot_list, text_input, cloned, empty_list, empty_set, byte_input, byte_set, byte_output}
+    loop value in retired -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_set_program(b)
+}

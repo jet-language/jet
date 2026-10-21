@@ -1,0 +1,203 @@
+// Raw route fixture; no host JSON codec or boxed Source types. Expectations
+// transcribed from canonical exact-number Rust parser and EncodingError adapter.
+// Export returns the first case number that fails; zero means every case ran.
+fn compiler_json_fixture_error(text: I64, reason: I64, line: I64) -> Bool {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(slots, I64{723})
+    rt_text_store(slots + I64{8}, I64{724})
+    status :: jet_std_json_parse(text, slots, slots + I64{8})
+    result := false
+    if (status == I64{0}) {
+        error :: rt_text_word(slots + I64{8})
+        result = rt_text_word(slots) == I64{723} &&
+            encoding_word(error + ENCODING_ERROR_FORMAT) == I64{0} &&
+            encoding_word(error + ENCODING_ERROR_KIND) == I64{0} &&
+            encoding_word(error + ENCODING_ERROR_OFFSET) == I64{0} &&
+            encoding_word(error + ENCODING_ERROR_LINE_PRESENT) == I64{1} &&
+            encoding_word(error + ENCODING_ERROR_LINE) == line &&
+            encoding_word(error + ENCODING_ERROR_COLUMN_PRESENT) == I64{0} &&
+            rt_text_len(encoding_word(error + ENCODING_ERROR_PATH)) == I64{0} &&
+            jet_rt_string_eq(encoding_word(error + ENCODING_ERROR_REASON), reason) &&
+            encoding_word(error + ENCODING_ERROR_CAUSE) == I64{0}
+        jet_rt_handle_drop_encoding_error(error)
+    } else { jet_rt_handle_drop_dyn(rt_text_word(slots)) }
+    jet_rt_free(slots, I64{16}, I64{8})
+    result
+}
+fn compiler_json_fixture_value(text: I64, kind: I64, payload: I64, rendered: I64) -> Bool {
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(slots, I64{723})
+    rt_text_store(slots + I64{8}, I64{724})
+    status :: jet_std_json_parse(text, slots, slots + I64{8})
+    result := false
+    if (status == I64{1}) {
+        tree :: rt_text_word(slots)
+        show :: jet_rt_handle_debug_dyn(tree)
+        result = rt_text_word(slots + I64{8}) == I64{724} && data_tree_word(tree + DATA_TREE_TAG) == kind &&
+            (kind > DATA_TREE_FLOAT || data_tree_word(tree + DATA_TREE_PAYLOAD) == payload) && jet_rt_string_eq(show, rendered)
+        jet_rt_string_drop(show)
+        jet_rt_handle_drop_dyn(tree)
+    } else { jet_rt_handle_drop_encoding_error(rt_text_word(slots + I64{8})) }
+    jet_rt_free(slots, I64{16}, I64{8})
+    result
+}
+#Export(c) fn jet_rt_compiler_needed_json_fixture() -> I64 {
+    structural :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(structural, rt_static_text(" \t"))
+    rt_text_push_scalar(structural, I64{13})
+    jet_rt_string_builder_push(structural, rt_static_text("\nnull\n"))
+    whitespace_ok :: compiler_json_fixture_value(structural, DATA_TREE_NULL, I64{0}, rt_static_text("null"))
+    jet_rt_string_drop(structural)
+    if !whitespace_ok -> return I64{1}
+    if !compiler_json_fixture_value(rt_static_text("true"), DATA_TREE_BOOL, I64{1}, rt_static_text("true")) -> return I64{2}
+    if !compiler_json_fixture_value(rt_static_text("false"), DATA_TREE_BOOL, I64{0}, rt_static_text("false")) -> return I64{3}
+    if !compiler_json_fixture_value(rt_static_text("-9223372036854775808"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-9223372036854775808")) -> return I64{4}
+    if !compiler_json_fixture_value(rt_static_text("9223372036854775807"), DATA_TREE_NUMBER, I64{0}, rt_static_text("9223372036854775807")) -> return I64{5}
+    if !compiler_json_fixture_value(rt_static_text("9223372036854775808"), DATA_TREE_NUMBER, I64{0}, rt_static_text("9223372036854775808")) -> return I64{6}
+    if !compiler_json_fixture_value(rt_static_text("-9223372036854775809"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-9223372036854775809")) -> return I64{7}
+    if !compiler_json_fixture_value(rt_static_text("-0"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-0")) -> return I64{8}
+    if !compiler_json_fixture_value(rt_static_text("1.50"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1.50")) -> return I64{9}
+    if !compiler_json_fixture_value(rt_static_text("-0.0"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-0.0")) -> return I64{10}
+    if !compiler_json_fixture_value(rt_static_text("1e-400"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e-400")) -> return I64{11}
+    if !compiler_json_fixture_value(rt_static_text("{{\"z\":1,\"a\":[false,\"123\"]}}"), DATA_TREE_OBJECT, I64{0}, rt_static_text("{{\"z\":1,\"a\":[false,\"123\"]}}")) -> return I64{12}
+    if !compiler_json_fixture_value(rt_static_text("\"\\uD83D\\uDE00é\\/\\t\\b\\f\\r\\n\\\"\\\\\""), DATA_TREE_TEXT, I64{0}, rt_static_text("\"😀é/\\t\\b\\f\\r\\n\\\"\\\\\"")) -> return I64{13}
+    if !compiler_json_fixture_error(rt_static_text(""), rt_static_text("expected a JSON value"), I64{1}) -> return I64{14}
+    if !compiler_json_fixture_error(rt_static_text("\nNaN"), rt_static_text("expected a JSON value"), I64{2}) -> return I64{15}
+    if !compiler_json_fixture_error(rt_static_text("tru\n"), rt_static_text("expected a JSON word"), I64{1}) -> return I64{16}
+    if !compiler_json_fixture_error(rt_static_text("{{a:1}}"), rt_static_text("expected quoted text"), I64{1}) -> return I64{17}
+    if !compiler_json_fixture_error(rt_static_text("\"\\"), rt_static_text("unfinished escape"), I64{1}) -> return I64{18}
+    if !compiler_json_fixture_error(rt_static_text("\"\\x\""), rt_static_text("invalid escape in string"), I64{1}) -> return I64{19}
+    if !compiler_json_fixture_error(rt_static_text("\"a\nb\""), rt_static_text("control character in string"), I64{2}) -> return I64{20}
+    if !compiler_json_fixture_error(rt_static_text("\"é"), rt_static_text("missing closing quote"), I64{1}) -> return I64{21}
+    if !compiler_json_fixture_error(rt_static_text("\"\\u12"), rt_static_text("truncated unicode escape"), I64{1}) -> return I64{22}
+    if !compiler_json_fixture_error(rt_static_text("\"\\u12\n0\""), rt_static_text("invalid unicode escape"), I64{1}) -> return I64{23}
+    if !compiler_json_fixture_error(rt_static_text("\"\\uD800x\""), rt_static_text("unpaired surrogate in string"), I64{1}) -> return I64{24}
+    if !compiler_json_fixture_error(rt_static_text("\"\\uD800\\n\""), rt_static_text("unpaired surrogate in string"), I64{1}) -> return I64{25}
+    if !compiler_json_fixture_error(rt_static_text("\"\\uDC00\""), rt_static_text("unpaired surrogate in string"), I64{1}) -> return I64{26}
+    if !compiler_json_fixture_error(rt_static_text("\"\\uD800\\u0041\""), rt_static_text("unpaired surrogate in string"), I64{1}) -> return I64{27}
+    if !compiler_json_fixture_error(rt_static_text("-"), rt_static_text("bad number"), I64{1}) -> return I64{28}
+    if !compiler_json_fixture_error(rt_static_text("1."), rt_static_text("bad number"), I64{1}) -> return I64{29}
+    if !compiler_json_fixture_error(rt_static_text("1e+"), rt_static_text("bad number"), I64{1}) -> return I64{30}
+    if !compiler_json_fixture_value(rt_static_text("1e400"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e400")) -> return I64{31}
+    if !compiler_json_fixture_value(rt_static_text("-1e400"), DATA_TREE_NUMBER, I64{0}, rt_static_text("-1e400")) -> return I64{32}
+    if !compiler_json_fixture_error(rt_static_text("01"), rt_static_text("extra text after JSON value"), I64{1}) -> return I64{33}
+    if !compiler_json_fixture_error(rt_static_text("null\nfalse"), rt_static_text("extra text after JSON value"), I64{2}) -> return I64{34}
+    if !compiler_json_fixture_error(rt_static_text("[1,]"), rt_static_text("expected `,` or `]`"), I64{1}) -> return I64{35}
+    if !compiler_json_fixture_error(rt_static_text("[1"), rt_static_text("expected `,` or `]`"), I64{1}) -> return I64{36}
+    if !compiler_json_fixture_error(rt_static_text("["), rt_static_text("expected a JSON value"), I64{1}) -> return I64{37}
+    if !compiler_json_fixture_error(rt_static_text("{{\"a\":1,}}"), rt_static_text("expected `,` or `}}`"), I64{1}) -> return I64{38}
+    if !compiler_json_fixture_error(rt_static_text("{{\"a\":1"), rt_static_text("expected `,` or `}}`"), I64{1}) -> return I64{39}
+    if !compiler_json_fixture_error(rt_static_text("{{\"a\"\n1}}"), rt_static_text("expected `:` after object key"), I64{2}) -> return I64{40}
+    // Duplicate detected after colon, BEFORE the next value's whitespace.
+    if !compiler_json_fixture_error(rt_static_text("{{\"a\":1,\n\"\\u0061\"\n:\nNaN}}"), rt_static_text("duplicate object key `a`"), I64{3}) -> return I64{41}
+    if !compiler_json_fixture_error(rt_static_text(" null"), rt_static_text("expected a JSON value"), I64{1}) -> return I64{42}
+    nested :: jet_rt_string_builder_new()
+    at := I64{0}
+    loop at < (I64{64}) {
+        rt_text_push_scalar(nested, I64{91})
+        at += I64{1}
+    }
+    rt_text_push_scalar(nested, I64{48})
+    at = I64{0}
+    loop at < (I64{64}) {
+        rt_text_push_scalar(nested, I64{93})
+        at += I64{1}
+    }
+    accepted :: compiler_json_fixture_value(nested, DATA_TREE_ARRAY, I64{0}, nested)
+    jet_rt_string_drop(nested)
+    if !accepted -> return I64{43}
+    too_deep :: jet_rt_string_builder_new()
+    at = I64{0}
+    loop at < (I64{65}) {
+        rt_text_push_scalar(too_deep, I64{91})
+        at += I64{1}
+    }
+    rejected :: compiler_json_fixture_error(too_deep, rt_static_text("JSON value is nested too deeply"), I64{1})
+    jet_rt_string_drop(too_deep)
+    if !rejected -> return I64{44}
+    // The canonical parser has no total-input cap; all numeric lexemes enter
+    // the million-digit validator. Its boundary is inclusive.
+    large :: rt_text_builder_with_capacity(I64{1000001})
+    at = I64{0}
+    loop at < (I64{1000000}) {
+        rt_text_push_scalar(large, I64{57})
+        at += I64{1}
+    }
+    boundary :: compiler_json_fixture_value(large, DATA_TREE_NUMBER, I64{0}, large)
+    rt_text_push_scalar(large, I64{57})
+    limited :: compiler_json_fixture_error(large, rt_static_text("JSON number exceeds the 1000000-digit limit"), I64{1})
+    jet_rt_string_drop(large)
+    if !boundary -> return I64{45}
+    if !limited -> return I64{46}
+    if !compiler_json_fixture_value(rt_static_text("1e+1000000"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e+1000000")) -> return I64{47}
+    if !compiler_json_fixture_value(rt_static_text("1e-1000000"), DATA_TREE_NUMBER, I64{0}, rt_static_text("1e-1000000")) -> return I64{48}
+    if !compiler_json_fixture_error(rt_static_text("1e1000001"), rt_static_text("JSON number exponent exceeds the ±1000000 limit"), I64{1}) -> return I64{49}
+    if !compiler_json_fixture_error(rt_static_text("1e-1000001"), rt_static_text("JSON number exponent exceeds the ±1000000 limit"), I64{1}) -> return I64{50}
+    if !compiler_json_fixture_error(rt_static_text("1e9223372036854775808"), rt_static_text("JSON number exponent is out of range"), I64{1}) -> return I64{51}
+    if !compiler_json_fixture_error(rt_static_text("1e-9223372036854775809"), rt_static_text("JSON number exponent is out of range"), I64{1}) -> return I64{52}
+    if !compiler_json_fixture_error(rt_static_text("1e-9223372036854775808"), rt_static_text("JSON number exponent exceeds the ±1000000 limit"), I64{1}) -> return I64{53}
+    I64{0}
+}
+
+// Canonical lifecycle edges needed by compiler-side Dyn marshalling.
+#Export(c) fn jet_rt_compiler_needed_dyn_fixture() -> I64 {
+    decimal :: rt_static_text("123456789012345678901234567890")
+    exact :: jet_rt_int_from_static(rt_text_data(decimal), rt_text_len(decimal))
+    integer :: jet_rt_record_new_dyn_int(exact)
+    jet_rt_int_drop(exact)
+    cloned_dyn :: jet_rt_handle_clone_dyn(integer)
+    projected :: jet_rt_record_get_dyn_int(cloned_dyn)
+    rendered :: jet_rt_handle_show_dyn(cloned_dyn)
+    int_ok :: jet_rt_handle_eq_dyn(integer, cloned_dyn) && jet_rt_string_eq(rendered, decimal)
+    jet_rt_string_drop(rendered)
+    jet_rt_handle_drop_dyn(integer)
+    jet_rt_handle_drop_dyn(cloned_dyn)
+    projected_text :: jet_rt_int_to_string(projected)
+    projection_ok :: jet_rt_string_eq(projected_text, decimal)
+    jet_rt_string_drop(projected_text)
+    jet_rt_int_drop(projected)
+    if !int_ok || !projection_ok -> return I64{1}
+    bytes :: data_sequence_new(I64{2}, RT_HOST_U8_STRIDE)
+    host_u8_put(data_tree_word(bytes + DATA_SEQUENCE_DATA), I64{0}, I64{0})
+    host_u8_put(data_tree_word(bytes + DATA_SEQUENCE_DATA), I64{1}, I64{255})
+    data_tree_store(bytes + DATA_SEQUENCE_LENGTH, I64{2})
+    binary :: jet_rt_record_new_dyn_bytes(bytes)
+    binary_copy :: jet_rt_handle_clone_dyn(binary)
+    binary_text :: jet_rt_handle_show_dyn(binary_copy)
+    binary_ok :: jet_rt_handle_eq_dyn(binary, binary_copy) && jet_rt_string_eq(binary_text, rt_static_text("AP8="))
+    jet_rt_string_drop(binary_text)
+    jet_rt_handle_drop_dyn(binary)
+    jet_rt_handle_drop_dyn(binary_copy)
+    if !binary_ok -> return I64{2}
+    stamp :: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
+    data_tree_store(stamp + DYN_DATETIME_SECS, I64{-1})
+    data_tree_store(stamp + DYN_DATETIME_NANOS, I64{120000000})
+    data_tree_store(stamp + DYN_DATETIME_LEAP, I64{0})
+    data_tree_store(stamp + DYN_DATETIME_OFFSET, I64{19800})
+    date :: jet_rt_record_new_dyn_date_time(stamp)
+    date_copy :: jet_rt_handle_clone_dyn(date)
+    date_text :: jet_rt_handle_show_dyn(date_copy)
+    date_ok :: jet_rt_handle_eq_dyn(date, date_copy) && jet_rt_string_eq(date_text, rt_static_text("1970-01-01T05:29:59.12+05:30"))
+    data_tree_store(stamp + DYN_DATETIME_OFFSET, I64{0})
+    utc :: jet_rt_record_new_dyn_date_time(stamp)
+    offsets_differ :: !jet_rt_handle_eq_dyn(date, utc)
+    data_tree_store(stamp + DYN_DATETIME_LEAP, I64{1})
+    leap :: jet_rt_record_new_dyn_date_time(stamp)
+    leap_text :: jet_rt_handle_show_dyn(leap)
+    leap_ok :: jet_rt_string_eq(leap_text, rt_static_text("1969-12-31T23:59:60.12Z"))
+    jet_rt_string_drop(date_text)
+    jet_rt_string_drop(leap_text)
+    jet_rt_handle_drop_dyn(date)
+    jet_rt_handle_drop_dyn(date_copy)
+    jet_rt_handle_drop_dyn(utc)
+    jet_rt_handle_drop_dyn(leap)
+    jet_rt_free(stamp, DYN_DATETIME_BYTES, I64{8})
+    if !date_ok || !offsets_differ || !leap_ok -> return I64{3}
+    nan :: jet_rt_record_new_dyn_float(rt_f64_from_bits(I64{9221120237041090560}))
+    nan_copy :: jet_rt_handle_clone_dyn(nan)
+    nan_distinct :: !jet_rt_handle_eq_dyn(nan, nan_copy) && !jet_rt_handle_eq_dyn(nan, nan)
+    jet_rt_handle_drop_dyn(nan)
+    jet_rt_handle_drop_dyn(nan_copy)
+    if !nan_distinct -> return I64{4}
+    I64{0}
+}

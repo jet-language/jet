@@ -1,0 +1,571 @@
+// Payload places, recursive enum wrapper boxes, and partial field ownership.
+use jet_foundation.[
+    MIRAccess,
+    MIRBinaryOp,
+    MIRBlockID,
+    MIRCallee,
+    MIRCallArg,
+    MIRConstant,
+    MIRDropKind,
+    MIREnumArg,
+    MIRField,
+    MIRFieldValue,
+    MIRFunction,
+    MIRFunctionID,
+    MIROperation,
+    MIRPayloadKind,
+    MIRPhiIncoming,
+    MIRPlace,
+    MIRPlaceBase,
+    MIRPlaceID,
+    MIRProgram,
+    MIRProjection,
+    MIRTerminator,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    mir_field_id,
+    mir_function_id,
+    mir_owned_ownership,
+    mir_ownership_from_access,
+    mir_type_from_kind,
+    mir_type_id,
+]
+
+fn fx_payload_place(b: &FxBuilder, root: MIRPlaceID, kind: MIRPayloadKind, ty: MIRType, access: MIRAccess) -> MIRPlaceID Never! {
+    base := MIRPlaceBase.Static{name: ""}
+    projections := [MIRProjection]{}
+    loop row in b.places {
+        if row.id == root {
+            base = row.base
+            projections = row.projections
+        }
+    }
+    &projections.push(MIRProjection.Payload{kind: kind, span: fx_span()})
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: base, projections: projections, access: access, persist_key: None})
+    place
+}
+
+fn fx_payload_cons(b: &FxBuilder, head: MIRValueID, tail: MIRValueID) -> MIRValueID Never! {
+    fx_owned(&b, fx_named("Chain"), MIROperation.Enum{type_id: mir_type_id("Chain"), variant: "Cons", args: [MIREnumArg]{
+        MIREnumArg{field: Val(mir_field_id("Chain.Cons.head")), value: head, boxed: false},
+        MIREnumArg{field: Val(mir_field_id("Chain.Cons.tail")), value: tail, boxed: true},
+    }})
+}
+
+// enum Chain { Nil, Cons(head: Int, tail: Chain) } // recursive tail boxed
+// fn sum(xs: Chain) -> Int {
+//     if xs is .Nil -> return 0
+//     xs.head + sum(xs.tail)
+// }
+// fn set(&opt: Int?) { if opt is present -> opt.value = 9 }
+// fn rename(&opt: String?) { if opt is present -> opt.value = "new" }
+// fn run() {
+//     xs := Chain.Cons(3, Chain.Cons(4, Chain.Nil))
+//     print(sum(xs))
+//     ys := copy xs
+//     ys.tail.head = 8
+//     print(sum(ys))
+//     print(sum(xs))
+//     opt := present(1); set(&opt); print(opt.value)
+//     text := present("old"); rename(&text); print(text.value)
+//     result := Ok(2); result.value = 5; print(result.value)
+//     failure := Err("fault"); failure.value = "fixed"; print(failure.value)
+// }
+// expect-stdout payload: "7\n11\n7\n9\nnew\n5\nfixed\n"
+fn fx_payload() -> MIRProgram Never! {
+    chain :: fx_named("Chain")
+    maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    text_maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: fx_string()})
+    definition := fx_type_def("Chain", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("Nil", MIRVariantPayload.Unit),
+        fx_variant("Cons", MIRVariantPayload.Named{fields: [MIRField]{fx_field("Chain.Cons", "head", fx_int()), fx_field("Chain.Cons", "tail", chain)}}),
+    }, methods: [MIRFunctionID]{}})
+    definition.boxed_edges = [String]{"Cons.tail"}
+
+    s := fx_builder()
+    xs :: fx_param(&s, "xs", chain, fx_borrow())
+    nil :: fx_copy(&s, fx_bool(), MIROperation.EnumIs{subject: xs, owner: mir_type_id("Chain"), variant: "Nil"})
+    fx_block(&s, 0, MIRTerminator.Branch{condition: nil, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    zero :: fx_int_const(&s, 0)
+    fx_block(&s, 1, MIRTerminator.Return{value: Val(zero)})
+    head :: fx_copy(&s, fx_int(), MIROperation.EnumPayload{subject: xs, owner: mir_type_id("Chain"), variant: "Cons", index: 0})
+    tail :: fx_value(&s, chain, fx_borrow(), MIROperation.EnumPayload{subject: xs, owner: mir_type_id("Chain"), variant: "Cons", index: 1})
+    rest :: fx_copy(&s, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(tail, MIRAccess.Read)}, type_args: [MIRType]{}})
+    total :: fx_int_op(&s, MIRBinaryOp.Add, "add", head, rest)
+    fx_block(&s, 2, MIRTerminator.Return{value: Val(total)})
+
+    e := fx_builder()
+    parameter :: fx_write_param(&e, "opt", maybe)
+    window :: fx_payload_place(&e, parameter, MIRPayloadKind.Option, fx_int(), MIRAccess.Write)
+    nine :: fx_int_const(&e, 9)
+    fx_do(&e, MIROperation.WritePlace{place: window, value: nine})
+    fx_block(&e, 0, MIRTerminator.Return{value: None})
+
+    n := fx_builder()
+    text_parameter :: fx_write_param(&n, "opt", text_maybe)
+    text_window :: fx_payload_place(&n, text_parameter, MIRPayloadKind.Option, fx_string(), MIRAccess.Write)
+    fresh :: fx_owned(&n, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "new"}})
+    fx_do(&n, MIROperation.ReplacePlace{place: text_window, value: fresh})
+    fx_block(&n, 0, MIRTerminator.Return{value: None})
+
+    r := fx_builder()
+    local :: fx_local(&r, "xs", chain, mir_owned_ownership())
+    end :: fx_owned(&r, chain, MIROperation.Enum{type_id: mir_type_id("Chain"), variant: "Nil", args: [MIREnumArg]{}})
+    four :: fx_int_const(&r, 4)
+    last :: fx_payload_cons(&r, four, end)
+    three :: fx_int_const(&r, 3)
+    first :: fx_payload_cons(&r, three, last)
+    fx_do(&r, MIROperation.WritePlace{place: local, value: first})
+    borrowed :: fx_value(&r, chain, fx_borrow(), MIROperation.ReadPlace{place: local})
+    sum :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(borrowed, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, sum)
+    duplicate :: fx_owned(&r, chain, MIROperation.Copy{value: borrowed, fact: MIRCopyFact.Explicit})
+    other :: fx_local(&r, "ys", chain, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: other, value: duplicate})
+    tail_place :: fx_payload_place(&r, other, MIRPayloadKind.Enum{owner: mir_type_id("Chain"), variant: "Cons", index: 1}, chain, MIRAccess.Write)
+    head_place :: fx_payload_place(&r, tail_place, MIRPayloadKind.Enum{owner: mir_type_id("Chain"), variant: "Cons", index: 0}, fx_int(), MIRAccess.Write)
+    eight :: fx_int_const(&r, 8)
+    fx_do(&r, MIROperation.WritePlace{place: head_place, value: eight})
+    changed :: fx_value(&r, chain, fx_borrow(), MIROperation.ReadPlace{place: other})
+    changed_sum :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(changed, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, changed_sum)
+    original_sum :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("sum_chain")}, args: [MIRCallArg]{fx_arg(borrowed, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, original_sum)
+    other_gone :: fx_owned(&r, chain, MIROperation.MovePlace{place: other})
+    fx_do(&r, MIROperation.Drop{value: other_gone, kind: MIRDropKind.Value})
+    local_gone :: fx_owned(&r, chain, MIROperation.MovePlace{place: local})
+    fx_do(&r, MIROperation.Drop{value: local_gone, kind: MIRDropKind.Value})
+
+    opt :: fx_local(&r, "opt", maybe, mir_owned_ownership())
+    one :: fx_int_const(&r, 1)
+    present :: fx_owned(&r, maybe, MIROperation.Present{value: one})
+    fx_do(&r, MIROperation.WritePlace{place: opt, value: present})
+    fx_call_write(&r, "set_payload", opt, maybe)
+    payload :: fx_payload_place(&r, opt, MIRPayloadKind.Option, fx_int(), MIRAccess.Read)
+    now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: payload})
+    fx_print(&r, now)
+    opt_gone :: fx_owned(&r, maybe, MIROperation.MovePlace{place: opt})
+    fx_do(&r, MIROperation.Drop{value: opt_gone, kind: MIRDropKind.Value})
+
+    text_opt :: fx_local(&r, "text", text_maybe, mir_owned_ownership())
+    old :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "old"}})
+    text_present :: fx_owned(&r, text_maybe, MIROperation.Present{value: old})
+    fx_do(&r, MIROperation.WritePlace{place: text_opt, value: text_present})
+    fx_call_write(&r, "rename_payload", text_opt, text_maybe)
+    text_payload :: fx_payload_place(&r, text_opt, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    text_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: text_payload})
+    fx_print(&r, text_now)
+    text_gone :: fx_owned(&r, text_maybe, MIROperation.MovePlace{place: text_opt})
+    fx_do(&r, MIROperation.Drop{value: text_gone, kind: MIRDropKind.Value})
+
+    result :: fx_local(&r, "result", result_ty, mir_owned_ownership())
+    two :: fx_int_const(&r, 2)
+    ok :: fx_owned(&r, result_ty, MIROperation.ResultOk{value: two})
+    fx_do(&r, MIROperation.WritePlace{place: result, value: ok})
+    result_payload :: fx_payload_place(&r, result, MIRPayloadKind.Result{ok: true}, fx_int(), MIRAccess.Write)
+    five :: fx_int_const(&r, 5)
+    fx_do(&r, MIROperation.ReplacePlace{place: result_payload, value: five})
+    result_now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: result_payload})
+    fx_print(&r, result_now)
+    result_gone :: fx_owned(&r, result_ty, MIROperation.MovePlace{place: result})
+    fx_do(&r, MIROperation.Drop{value: result_gone, kind: MIRDropKind.Value})
+    failure :: fx_local(&r, "failure", result_ty, mir_owned_ownership())
+    bad :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "fault"}})
+    err :: fx_owned(&r, result_ty, MIROperation.ResultErr{value: bad})
+    fx_do(&r, MIROperation.WritePlace{place: failure, value: err})
+    err_payload :: fx_payload_place(&r, failure, MIRPayloadKind.Result{ok: false}, fx_string(), MIRAccess.Write)
+    fixed :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "fixed"}})
+    fx_do(&r, MIROperation.ReplacePlace{place: err_payload, value: fixed})
+    err_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: err_payload})
+    fx_print(&r, err_now)
+    failure_gone :: fx_owned(&r, result_ty, MIROperation.MovePlace{place: failure})
+    fx_do(&r, MIROperation.Drop{value: failure_gone, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("sum_chain", s, fx_int()), fx_function("set_payload", e, fx_unit()), fx_function("rename_payload", n, fx_unit()), fx_function("run", r, fx_unit())}, ^[MIRTypeDef]{definition})
+}
+
+// struct Pair { first: String, second: String }
+// fn run() {
+//     pair := Pair{"moved", "kept"}
+//     text :: move pair.first
+//     print(text); print(pair.second)
+//     drop text; drop pair // only the live second field is dropped
+// }
+// expect-stdout payload-move: "moved\nkept\n"
+fn fx_payload_move() -> MIRProgram Never! {
+    pair :: fx_named("MovePair")
+    types :: [MIRTypeDef]{fx_type_def("MovePair", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("MovePair", "first", fx_string()), fx_field("MovePair", "second", fx_string())}, methods: [MIRFunctionID]{}})}
+    b := fx_builder()
+    local :: fx_local(&b, "pair", pair, mir_owned_ownership())
+    first :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "moved"}})
+    second :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "kept"}})
+    value :: fx_owned(&b, pair, MIROperation.Struct{type_id: mir_type_id("MovePair"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("MovePair.first"), value: first}, MIRFieldValue{field: mir_field_id("MovePair.second"), value: second}}})
+    fx_do(&b, MIROperation.WritePlace{place: local, value: value})
+    moved_place :: fx_field_place(&b, local, "MovePair.first", fx_string())
+    loop (index, row) in b.places {
+        if row.id == moved_place -> b.places[index].access = MIRAccess.Move
+    }
+    kept_place :: fx_field_place(&b, local, "MovePair.second", fx_string())
+    moved :: fx_owned(&b, fx_string(), MIROperation.MovePlace{place: moved_place})
+    fx_print(&b, moved)
+    kept :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: kept_place})
+    fx_print(&b, kept)
+    fx_do(&b, MIROperation.Drop{value: moved, kind: MIRDropKind.Value})
+    gone :: fx_owned(&b, pair, MIROperation.MovePlace{place: local})
+    fx_do(&b, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+// #5041 P2 A3: an Option/Result box copy shares the box (one more owner);
+// a write into it, or a move out of it, through a place detaches it first
+// (box.unique), and a payload take out of a box another owner holds copies
+// the payload and leaves the box to its other owners.
+// fn run() {
+//     a := present("x"); b := copy a
+//     a.value = "y"                // write through a shared box: detach
+//     print(a.value); print(b.value)
+//     r := Ok("keep"); s := copy r
+//     taken := ^s.value            // move out through a shared box: detach
+//     print(taken); print(r.value)
+//     c := copy b
+//     v := (^b)!                   // take from a box c shares: copy
+//     print(v); print(c.value)
+// }
+// expect-stdout boxes-cow: "y\nx\nkeep\nkeep\nx\nx\n"
+fn fx_boxes_cow() -> MIRProgram Never! {
+    text_maybe :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_string(), err: fx_string()})
+    r := fx_builder()
+    a :: fx_local(&r, "a", text_maybe, mir_owned_ownership())
+    x :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "x"}})
+    a_value :: fx_owned(&r, text_maybe, MIROperation.Present{value: x})
+    fx_do(&r, MIROperation.WritePlace{place: a, value: a_value})
+    a_read :: fx_value(&r, text_maybe, fx_borrow(), MIROperation.ReadPlace{place: a})
+    b_value :: fx_owned(&r, text_maybe, MIROperation.Copy{value: a_read, fact: MIRCopyFact.Explicit})
+    b :: fx_local(&r, "b", text_maybe, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: b, value: b_value})
+    a_window :: fx_payload_place(&r, a, MIRPayloadKind.Option, fx_string(), MIRAccess.Write)
+    y :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "y"}})
+    fx_do(&r, MIROperation.ReplacePlace{place: a_window, value: y})
+    a_payload :: fx_payload_place(&r, a, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    a_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: a_payload})
+    fx_print(&r, a_now)
+    b_payload :: fx_payload_place(&r, b, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    b_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: b_payload})
+    fx_print(&r, b_now)
+
+    rr :: fx_local(&r, "r", result_ty, mir_owned_ownership())
+    keep :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "keep"}})
+    ok :: fx_owned(&r, result_ty, MIROperation.ResultOk{value: keep})
+    fx_do(&r, MIROperation.WritePlace{place: rr, value: ok})
+    r_read :: fx_value(&r, result_ty, fx_borrow(), MIROperation.ReadPlace{place: rr})
+    s_value :: fx_owned(&r, result_ty, MIROperation.Copy{value: r_read, fact: MIRCopyFact.Explicit})
+    s :: fx_local(&r, "s", result_ty, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: s, value: s_value})
+    s_moved :: fx_payload_place(&r, s, MIRPayloadKind.Result{ok: true}, fx_string(), MIRAccess.Move)
+    taken :: fx_owned(&r, fx_string(), MIROperation.MovePlace{place: s_moved})
+    fx_print(&r, taken)
+    r_payload :: fx_payload_place(&r, rr, MIRPayloadKind.Result{ok: true}, fx_string(), MIRAccess.Read)
+    r_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: r_payload})
+    fx_print(&r, r_now)
+
+    b_read :: fx_value(&r, text_maybe, fx_borrow(), MIROperation.ReadPlace{place: b})
+    c_value :: fx_owned(&r, text_maybe, MIROperation.Copy{value: b_read, fact: MIRCopyFact.Explicit})
+    c :: fx_local(&r, "c", text_maybe, mir_owned_ownership())
+    fx_do(&r, MIROperation.WritePlace{place: c, value: c_value})
+    b_moved :: fx_value(&r, text_maybe, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: b})
+    v :: fx_owned(&r, fx_string(), MIROperation.OptionValue{subject: b_moved})
+    fx_print(&r, v)
+    c_payload :: fx_payload_place(&r, c, MIRPayloadKind.Option, fx_string(), MIRAccess.Read)
+    c_now :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ReadPlace{place: c_payload})
+    fx_print(&r, c_now)
+
+    fx_do(&r, MIROperation.Drop{value: v, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: b_moved, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: taken, kind: MIRDropKind.Value})
+    loop place in ([MIRPlaceID]{a, c, rr, s}) {
+        ty :: if place == rr || place == s -> result_ty else -> text_maybe
+        gone :: fx_owned(&r, ty, MIROperation.MovePlace{place: place})
+        fx_do(&r, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    }
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// A moved inline payload must stop borrowing its wrapper before the wrapper
+// drops. The loop edge reads the header after that Drop, just as walk's
+// `rest = ^e ?? []` in last_use_moves. Exercise all native payload wrappers.
+// expect-stdout payload-move-backedge: "3\n3\n3\n"
+fn fx_payload_move_backedge() -> MIRProgram Never! {
+    list :: mir_type_from_kind(MIRTypeKind.List{inner: fx_string()})
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: list})
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: list, err: list})
+    envelope :: fx_named("ListEnvelope")
+    types :: [MIRTypeDef]{fx_type_def("ListEnvelope", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("Items", MIRVariantPayload.Single{value: list}),
+    }, methods: [MIRFunctionID]{}})}
+    r := fx_builder()
+    loop kind in 0..<3 {
+        items :: fx_local(&r, "items{kind}", list, mir_owned_ownership())
+        count :: fx_local(&r, "count{kind}", fx_int(), mir_copy_ownership())
+        initial :: fx_owned(&r, list, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+        zero :: fx_int_const(&r, 0)
+        fx_do(&r, MIROperation.WritePlace{place: items, value: initial})
+        fx_do(&r, MIROperation.WritePlace{place: count, value: zero})
+        header :: kind * 3 + 1
+        body :: header + 1
+        done :: header + 2
+        fx_block(&r, fx_word(U64{0}, kind * 3), MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, header)}})
+        now :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: count})
+        three :: fx_int_const(&r, 3)
+        more :: fx_compare(&r, MIRBinaryOp.Lt, now, three)
+        fx_block(&r, header, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: fx_word(U64{0}, body)}, else_target: MIRBlockID{value: fx_word(U64{0}, done)}})
+        // Nontrivial elements detect freeing contents as well as header UAF.
+        text :: fx_owned(&r, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "still-owned"}})
+        next :: fx_owned(&r, list, MIROperation.BuildList{values: [MIRValueID]{text}, trait_coercion: None})
+        wrapper_ty :: if kind == 0 -> option else -> if kind == 1 -> result else -> envelope
+        operation :: if kind == 0 -> MIROperation.Present{value: next} else -> if kind == 1 -> MIROperation.ResultOk{value: next} else -> MIROperation.Enum{type_id: mir_type_id("ListEnvelope"), variant: "Items", args: [MIREnumArg]{MIREnumArg{field: None, value: next, boxed: false}}}
+        wrapper :: fx_value(&r, wrapper_ty, mir_ownership_from_access(MIRAccess.Move), operation)
+        extraction :: if kind == 0 -> MIROperation.OptionValue{subject: wrapper} else -> if kind == 1 -> MIROperation.ResultValue{subject: wrapper, ok: true} else -> MIROperation.EnumPayload{subject: wrapper, owner: mir_type_id("ListEnvelope"), variant: "Items", index: 0}
+        payload :: fx_owned(&r, list, extraction)
+        fx_do(&r, MIROperation.ReplacePlace{place: items, value: payload})
+        fx_do(&r, MIROperation.Drop{value: wrapper, kind: MIRDropKind.Value})
+        one :: fx_int_const(&r, 1)
+        incremented :: fx_int_op(&r, MIRBinaryOp.Add, "add", now, one)
+        fx_do(&r, MIROperation.WritePlace{place: count, value: incremented})
+        fx_block(&r, body, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, header)}})
+        final_count :: fx_copy(&r, fx_int(), MIROperation.ReadPlace{place: count})
+        fx_print(&r, final_count)
+        gone :: fx_owned(&r, list, MIROperation.MovePlace{place: items})
+        fx_do(&r, MIROperation.Drop{value: gone, kind: MIRDropKind.Value})
+    }
+    fx_block(&r, 9, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+}
+
+// Rust's Closed is a fieldless, zero-sized enum. Box<Closed>::into_raw may
+// therefore be the non-dereferenceable address 1. A borrowed Closed parameter
+// is an opaque pointer, not a native enum box with a tag at pointer + 0.
+fn fx_opaque_enum_rejected(name: String, operation: Int) -> MIRProgram Never! {
+    ty :: fx_named(name)
+    variants := [MIRVariant]{fx_variant("Closed", MIRVariantPayload.Unit)}
+    if name == "TaskFailure" {
+        variants = [MIRVariant]{
+            fx_variant("Cancelled", MIRVariantPayload.Unit),
+            fx_variant("DeadlineBlown", MIRVariantPayload.Unit),
+            fx_variant("Panicked", MIRVariantPayload.Single{value: fx_string()}),
+        }
+    }
+    definition := fx_type_def(name, MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+    definition.key = "<corelib>/native-enum-fixture::{name}"
+    b := fx_builder()
+    subject :: fx_param(&b, "opaque", ty, fx_borrow())
+    if operation == 0 {
+        fx_copy(&b, fx_bool(), MIROperation.EnumIs{subject: subject, owner: mir_type_id(name), variant: "Closed"}).drop("fixture result")
+    } else if operation == 1 {
+        fx_owned(&b, ty, MIROperation.Enum{type_id: mir_type_id(name), variant: "Closed", args: [MIREnumArg]{}}).drop("fixture result")
+    } else {
+        fx_value(&b, fx_string(), fx_borrow(), MIROperation.EnumPayload{subject: subject, owner: mir_type_id(name), variant: "Panicked", index: 0}).drop("fixture result")
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
+}
+
+// A mismatch prints what the lowering produced instead.
+fn fx_opaque_enum_rejection_check(name: String, operation: Int) -> Bool Never! {
+    program :: fx_opaque_enum_rejected(name, operation)
+    if lower_native_enum_layout(program, fx_named(name)) {
+        print("opaque-enum {name}/{operation}: has a native enum layout")
+        return false
+    }
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    expected :: "opaque runtime enum {mir_type_display_name(fx_named(name))} has no native enum layout"
+    found := false
+    loop issue in lowered.issues {
+        if issue.message == expected -> found = true
+    }
+    if !found {
+        loop issue in lowered.issues -> print("opaque-enum {name}/{operation} issue: {issue.message}")
+        print("opaque-enum {name}/{operation}: expected issue: {expected}")
+        return false
+    }
+    loop function in lowered.lir.functions {
+        if function.name != "run" -> next
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Load(_, _, offset) {
+                    if offset == 0 {
+                        print("opaque-enum {name}/{operation}: reads the opaque value at offset 0")
+                        return false
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+fn fx_opaque_enum_rejection_checks() -> Bool Never! {
+    // A source-owned enum with the same spelling still has its native layout.
+    local := fx_opaque_enum_rejected("Closed", 0)
+    local.types[0].key = "Closed"
+    if !lower_native_enum_layout(local, fx_named("Closed")) {
+        print("opaque-enum: a source-owned Closed has no native enum layout")
+        return false
+    }
+    if !fx_opaque_enum_rejection_check("Closed", 0) -> return false
+    if !fx_opaque_enum_rejection_check("Closed", 1) -> return false
+    if !fx_record_enum_projection_check() -> return false
+    if !fx_raw_pointer_lowering_check() -> return false
+    print("opaque-enum: rejection checks passed (Closed ZST, construction); TaskFailure record payload projects natively; raw pointer lowering lints clean")
+    true
+}
+
+// TaskFailure has a Core record schema (Records.jet): the runtime value is
+// rebuilt in its native layout at the route boundary, so a payload projection
+// reads the native box and is not rejected as an opaque runtime enum. A
+// mismatch prints the reason.
+fn fx_record_enum_projection_check() -> Bool Never! {
+    program :: fx_opaque_enum_rejected("TaskFailure", 2)
+    ty :: fx_named("TaskFailure")
+    if lower_record_schema(program, ty) == None {
+        print("record projection: TaskFailure has no record schema")
+        return false
+    }
+    if !lower_native_enum_layout(program, ty) {
+        print("record projection: TaskFailure has no native enum layout")
+        return false
+    }
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    loop issue in lowered.issues {
+        if issue.message.contains("opaque runtime enum") {
+            print("record projection issue: {issue.message}")
+            return false
+        }
+    }
+    true
+}
+
+// `cell :: I64{1337}; p :: *cell; print(p.*)`: the raw-addressed local is a
+// cell, the Ptr word becomes a typed pointer only through jet_rt_sentry_read,
+// and the whole module lowers and lints with no issue. The pointee is a
+// physically trivial I64: a bitwise Ptr read of an owning value (exact Int,
+// String) is rejected, as the sentry read is a plain ptr::read.
+fn fx_raw_pointer_lowering_check() -> Bool Never! {
+    ptr_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
+    b := fx_builder()
+    cell :: fx_local(&b, "cell", fx_i64(), mir_copy_ownership())
+    value :: fx_i64_const(&b, 1337)
+    fx_do(&b, MIROperation.WritePlace{place: cell, value: value})
+    pointer :: fx_copy(&b, ptr_ty, MIROperation.RawAddressOf{place: cell})
+    read :: fx_copy(&b, fx_i64(), MIROperation.Deref{value: pointer})
+    fx_print(&b, read)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    program :: fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if lowered.issues.len() > 0 {
+        loop issue in lowered.issues -> print("raw pointer issue: {issue.message}")
+        return false
+    }
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_sentry_read" -> return true
+                    }
+                }
+            }
+        }
+    }
+    print("raw pointer: no jet_rt_sentry_read call in the lowered module")
+    false
+}
+
+// A match on an owned Result<FileReader, String> whose carrier has no later
+// use: each arm takes its payload out of the carrier, as MIRRust.rs moves it
+// (carrier_has_later_use; the Err arm's probe is no later use of the Ok
+// payload). FileReader has no clone, so a copy could not lower.
+fn fx_payload_take_handle_check() -> Bool Never! {
+    reader_ty :: fx_named("FileReader")
+    carrier_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: reader_ty, err: fx_string()})
+    b := fx_builder()
+    param :: fx_param(&b, "opened", carrier_ty, mir_owned_ownership())
+    b.params[0].access = MIRAccess.Move
+    carrier :: fx_owned(&b, carrier_ty, MIROperation.Move{value: param})
+    is_ok :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: carrier})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: is_ok, then_target: MIRBlockID{value: fx_word(U64{0}, 1)}, else_target: MIRBlockID{value: fx_word(U64{0}, 2)}})
+    reader :: fx_owned(&b, reader_ty, MIROperation.ResultValue{subject: carrier, ok: true})
+    fx_do(&b, MIROperation.Drop{value: reader, kind: MIRDropKind.Value})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 3)}})
+    error :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: carrier, ok: false})
+    fx_do(&b, MIROperation.Drop{value: error, kind: MIRDropKind.Value})
+    fx_block(&b, 2, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 3)}})
+    fx_block(&b, 3, MIRTerminator.Return{value: None})
+    program :: fx_program([MIRFunction]{fx_function("take", b, fx_unit())}, [MIRTypeDef]{})
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{mir_function_id("take")})
+    loop issue in lowered.issues -> print("payload-take-handle: {issue.function}: {issue.message}")
+    loop issue in lir_lint_module(lowered.lir) -> print("payload-take-handle: lint b{issue.block}: {issue.message}")
+    lowered.issues.len() == 0 && lir_lint_module(lowered.lir).len() == 0
+}
+
+// The subject-switch shape of take_lock (`if files.create(…) == { .Ok(writer)
+// -> …; .Err(error) -> … }`, ArtifactStore.acquire_lock) and of
+// `if open_checked(p) == { .Val(file) -> found = Val(file); None -> {} }`:
+// Jet sema binds the call result to the generated local `it`, each arm reads
+// `it`'s place, the arm chain re-tests on a trivial phi of the arm's test, and
+// `it`'s cleanup moves it out to a Drop. The Rust tier tests the call value
+// itself and MIRRust.rs moves the payload out of it (carrier_has_later_use);
+// natively the arm takes the payload out of `it`'s carrier (clearing it, so
+// the cleanup drop releases only the rest). The re-test's read of `it` is on
+// the infeasible false edge after the arm, so it is no later use. FileReader
+// has no clone, so a copy could not lower.
+fn fx_payload_take_subject_local(option: Bool) -> MIRProgram Never! {
+    reader_ty :: fx_named("FileReader")
+    carrier_ty :: if option -> mir_type_from_kind(MIRTypeKind.Option{inner: reader_ty}) else -> mir_type_from_kind(MIRTypeKind.Result{ok: reader_ty, err: fx_string()})
+    b := fx_builder()
+    param :: fx_param(&b, "opened", carrier_ty, mir_owned_ownership())
+    b.params[0].access = MIRAccess.Move
+    carrier :: fx_owned(&b, carrier_ty, MIROperation.Move{value: param})
+    subject_local :: fx_local(&b, "it", carrier_ty, mir_owned_ownership())
+    fx_do(&b, MIROperation.WritePlace{place: subject_local, value: carrier})
+    read :: fx_owned(&b, carrier_ty, MIROperation.ReadPlace{place: subject_local})
+    test :: fx_copy(&b, fx_bool(), if option -> MIROperation.OptionIsSome{subject: read} else -> MIROperation.ResultIsOk{subject: read})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: test, then_target: MIRBlockID{value: fx_word(U64{0}, 1)}, else_target: MIRBlockID{value: fx_word(U64{0}, 2)}})
+    reader :: fx_owned(&b, reader_ty, if option -> MIROperation.OptionValue{subject: read} else -> MIROperation.ResultValue{subject: read, ok: true})
+    fx_do(&b, MIROperation.Drop{value: reader, kind: MIRDropKind.Value})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 2)}})
+    again :: fx_copy(&b, fx_bool(), MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: MIRBlockID{value: fx_word(U64{0}, 0)}, value: test}, MIRPhiIncoming{block: MIRBlockID{value: fx_word(U64{0}, 1)}, value: test}}})
+    fx_block(&b, 2, MIRTerminator.Branch{condition: again, then_target: MIRBlockID{value: fx_word(U64{0}, 4)}, else_target: MIRBlockID{value: fx_word(U64{0}, 3)}})
+    // The next arm re-reads `it` (only when the first arm's test failed).
+    probed :: fx_value(&b, carrier_ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: subject_local})
+    _ := fx_copy(&b, fx_bool(), if option -> MIROperation.OptionIsSome{subject: probed} else -> MIROperation.ResultIsOk{subject: probed})
+    fx_do(&b, MIROperation.Drop{value: probed, kind: MIRDropKind.Value})
+    fx_block(&b, 3, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 5)}})
+    // `it`'s cleanup.
+    cleanup :: fx_value(&b, carrier_ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: subject_local})
+    fx_do(&b, MIROperation.Drop{value: cleanup, kind: MIRDropKind.Value})
+    fx_block(&b, 4, MIRTerminator.Jump{target: MIRBlockID{value: fx_word(U64{0}, 5)}})
+    fx_block(&b, 5, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("take", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+fn fx_payload_take_subject_local_check() -> Bool Never! {
+    clean := true
+    loop option in ([Bool]{false, true}) {
+        name :: if option -> "payload-take-subject-option" else -> "payload-take-subject-result"
+        lowered :: lir_lower_callables(fx_payload_take_subject_local(option), [MIRFunctionID]{mir_function_id("take")})
+        loop issue in lowered.issues -> print("{name}: {issue.function}: {issue.message}")
+        loop issue in lir_lint_module(lowered.lir) -> print("{name}: lint b{issue.block}: {issue.message}")
+        if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> clean = false
+    }
+    clean
+}

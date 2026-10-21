@@ -22,7 +22,7 @@ const routeSource = readFileSync(`${dirname(fileURLToPath(import.meta.url))}/../
 const only = new Set((process.env.FX_ONLY ?? "").split(",").filter(Boolean));
 
 // The hand-built fixtures of LowerFixtures.jet, then every
-// `// expect-stdout <name>: <JSON string>` line of Tests/Fixtures/*.jet.
+// `// expect-stdout <name>: <JSON string>` line of Tests/Fragments.fixture/Fixtures/*.jet.
 const expected = [
   { name: "hello", stdout: "hello, world\n" },
   { name: "arithmetic", stdout: "18\n" },
