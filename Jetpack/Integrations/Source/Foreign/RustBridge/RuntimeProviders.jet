@@ -14,6 +14,9 @@ use jetpack_foundation.[
 ]
 use core.files as files
 use core.sys as sys
+use jet_pkg_model.[
+    ForeignBridgeError, ForeignIdentityBuilder, pkg_bridge_error, pkg_bridge_sha_file,
+]
 
 // One pinned crate: name and Cargo version requirement.
 struct FFICrateSpec {
@@ -361,9 +364,6 @@ fn pkg_ffi_emit_secrets_helper_bin(crate_name: String) -> String Never! {
 #![allow(warnings)]
 use std::io::Read;
 use std::process::exit;
-use jet_pkg_model.[
-    ForeignBridgeError, ForeignIdentityBuilder, pkg_bridge_error, pkg_bridge_sha_file,
-]
 
 fn hex_encode(bytes: &[u8]) -> String {{
     let mut s = String::with_capacity(bytes.len() * 2);

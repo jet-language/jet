@@ -3,12 +3,6 @@
 
 use jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
 use core.files as files
-
-// The persistent worker. Hole: `allowed`, one `'Name' => 1` row per sub.
-PKG_PERL_WORKER :: prep { ```use strict;
-use warnings;
-use JSON::PP ();
-use IO::Handle ();
 use jet_pkg_model.[
     ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage, pkg_ascii_lower,
     pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
@@ -19,6 +13,12 @@ use jet_pkg_model.[
     pkg_worker_invoke_wrapper, pkg_worker_prepare_build, pkg_worker_render_supervisor_c,
     pkg_worker_require_supported_host,
 ]
+
+// The persistent worker. Hole: `allowed`, one `'Name' => 1` row per sub.
+PKG_PERL_WORKER :: prep { ```use strict;
+use warnings;
+use JSON::PP ();
+use IO::Handle ();
 binmode(STDIN);
 binmode(STDOUT);
 my %allowed = (
