@@ -125,8 +125,7 @@ fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: 
 // decision under CI when set, else the default. An unreadable package
 // manifest has no policy.
 fn trust_project_policy_decision(project_dir: String) -[FS, Env]> TrustDecision? {
-    loaded :: PackageFacts.load(project_dir) ?? return None
-    facts :: loaded ?? return None
+    facts :: PackageFacts.load(project_dir) ?? return None
     policy :: facts.authority.trust ?? return None
     if sys.get("CI") != None && policy.ci_prompt != None -> return policy.ci_prompt
     policy.default
