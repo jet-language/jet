@@ -960,8 +960,10 @@ const namesIndex = unicodeNameIndex.map(([cp, name]) => {
 });
 asset("UNICODE_NAME_INDEX", 8, namesIndex, [3,4,4], namesPool);
 if (!checkOnly) mkdirSync(assetRoot, {recursive: true});
-const coreOutputs = assets.map(a => [`${assetRoot}/${a.module}.jet`, a.source]);
-coreOutputs.push([`${assetRoot}/assets.jet`,
+// Core source files are PascalCase; the module names inside them stay snake_case.
+const pascalFile = (module) => module.split("_").map((part) => part[0].toUpperCase() + part.slice(1)).join("");
+const coreOutputs = assets.map(a => [`${assetRoot}/${pascalFile(a.module)}.jet`, a.source]);
+coreOutputs.push([`${assetRoot}/Assets.jet`,
   `${HEADER_COMMENT}${assets.map(a => `module ${a.module}`).join("\n")}\n`]);
 coreOutputs.push([`${assetRoot}/manifest.json`, JSON.stringify({
   schema: 1, unicode: "17.0.0", byteOrder: "little", inputs: PINNED_SHA256,
