@@ -1320,3 +1320,63 @@ fn dns_system_ip(name: I64, milliseconds: I64, family: I64, data_out: I64, lengt
 
 #Export(c) fn jet_net_dns_a_lookup(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_ip(name, milliseconds, I64{4}, data_out, length_out, error) }
 #Export(c) fn jet_net_dns_aaaa_lookup(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_ip(name, milliseconds, I64{6}, data_out, length_out, error) }
+
+// NetHTTP.rs:744-776 jet_net_dns_result: a lookup's String failure as the
+// canonical NetError, classified by the message as the reference does.
+fn dns_text_starts_with(text: I64, prefix: I64) -> Bool {
+    rt_text_len(text) >= rt_text_len(prefix) && rt_text_equal_bytes(rt_text_data(text), rt_text_data(prefix), rt_text_len(prefix))
+}
+
+fn dns_text_contains(text: I64, needle: I64) -> Bool { rt_text_find(text, needle, I64{0}, false) >= I64{0} }
+
+// detail("dns", None, Some(name), message, None); takes `message`.
+fn dns_net_detail_take(name: I64, message: I64) -> I64 {
+    value :: jet_rt_alloc(NET_DETAIL_BYTES, I64{8})
+    net_put(value, NET_DETAIL_OPERATION, jet_rt_string_clone(rt_static_text("dns")))
+    net_put(value, NET_DETAIL_ADDRESS, I64{0})
+    net_put(value, NET_DETAIL_NAME, jet_rt_string_clone(name))
+    net_put(value, NET_DETAIL_MESSAGE, message)
+    net_put(value, NET_DETAIL_OS_PRESENT, I64{0})
+    net_put(value, NET_DETAIL_OS_CODE, I64{0})
+    value
+}
+
+// `status` is a *_lookup result whose failure text is in `error`; a scheduler
+// stop wrote none and stays a propagated stop.
+fn dns_net_result(status: I64, name: I64, error: I64) -> I64 {
+    if (status == I64{1}) -> return I64{1}
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    message :: trap_word(error)
+    if dns_text_starts_with(message, rt_static_text("DNS name not found")) {
+        jet_rt_string_drop(message)
+        trap_store(error, net_error_new(NET_ERROR_DNS, jet_rt_record_new_jet_net_dns_error_not_found(name)))
+        return I64{0}
+    }
+    if dns_text_starts_with(message, rt_static_text("network operation cancelled")) {
+        trap_store(error, net_error_new(NET_ERROR_CANCELLED, dns_net_detail_take(name, message)))
+        return I64{0}
+    }
+    if dns_text_starts_with(message, rt_static_text("network protocol error")) {
+        trap_store(error, net_error_new(NET_ERROR_PROTOCOL, dns_net_detail_take(name, message)))
+        return I64{0}
+    }
+    if (dns_text_contains(message, rt_static_text("timed out")) || dns_text_contains(message, rt_static_text("timeout"))) {
+        trap_store(error, net_error_new(NET_ERROR_TIMEOUT, dns_net_detail_take(name, message)))
+        return I64{0}
+    }
+    failure :: jet_rt_record_new_jet_net_dns_error_failure(message)
+    jet_rt_string_drop(message)
+    trap_store(error, net_error_new(NET_ERROR_DNS, failure))
+    I64{0}
+}
+
+// NetHTTP.rs:4084-4098: the NetError forms of the system TXT/PTR/SRV lookups.
+#Export(c) fn jet_net_dns_txt(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_txt_lookup(name, milliseconds, data_out, length_out, error), name, error) }
+#Export(c) fn jet_net_dns_ptr(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_ptr_lookup(name, milliseconds, data_out, length_out, error), name, error) }
+#Export(c) fn jet_net_dns_srv(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_srv_lookup(name, milliseconds, data_out, length_out, error), name, error) }
+
+// NetHTTP.rs:4297-4311 and CAbiRoutes.rs:22469-22495: SRV field reads.
+#Export(c) fn jet_net_dns_srv_priority(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value)) }
+#Export(c) fn jet_net_dns_srv_weight(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value + I64{8})) }
+#Export(c) fn jet_net_dns_srv_port(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value + I64{16})) }
+#Export(c) fn jet_net_dns_srv_target(value: I64) -> I64 { jet_rt_string_clone(trap_word(value + I64{24})) }

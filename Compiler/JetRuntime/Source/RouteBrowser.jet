@@ -60,3 +60,43 @@ fn browser_stat(path: I64, facts: I64) -> I64 {
     rt_text_store(some, jet_int_owned_from_i64(millis))
     I64{1}
 }
+
+// Path::new(root).join(path): PathBuf::push, the same join the host path
+// leaf implements.
+#Export(c) fn jet_browser_path_join_raw(root: I64, path: I64) -> I64 { jet_fs_host_path_join_raw(root, path) }
+
+// Path::with_extension("html"): the path up to the end of the file stem, then
+// ".html". Trailing separators and "." components after the file name are
+// not part of it; with no file name (empty, a root, a lone ".", or "..") the
+// path is unchanged. A stem keeps a leading dot (".rc" has no extension).
+#Export(c) fn jet_browser_html_path_raw(path: I64) -> I64 {
+    data :: rt_text_data(path)
+    end := rt_text_len(path)
+    start := I64{0}
+    loop {
+        loop end > (I64{0}) && rt_text_byte(data + end - I64{1}) == (I64{47}) { end -= I64{1} }
+        start = end
+        loop start > (I64{0}) && rt_text_byte(data + start - I64{1}) != (I64{47}) { start -= I64{1} }
+        if !(start > I64{0} && end - start == I64{1} && rt_text_byte(data + start) == I64{46}) -> break
+        end = start
+    }
+    length :: end - start
+    if (length == I64{0}) -> return jet_rt_string_clone(path)
+    dot :: rt_text_byte(data + start) == I64{46}
+    if ((length == I64{1} && dot) || (length == I64{2} && dot && rt_text_byte(data + start + I64{1}) == I64{46})) {
+        return jet_rt_string_clone(path)
+    }
+    stem_end := end
+    at := end - I64{1}
+    loop at > start {
+        if (rt_text_byte(data + at) == I64{46}) {
+            stem_end = at
+            break
+        }
+        at -= I64{1}
+    }
+    result :: rt_text_copy(data, stem_end)
+    if (result == I64{0}) -> return I64{0}
+    jet_rt_string_builder_push(result, rt_static_text(".html"))
+    result
+}

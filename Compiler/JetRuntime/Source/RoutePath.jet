@@ -1,0 +1,322 @@
+// PathFiles.rs:21-71 and Path.rs:1-140: the core.handle.path value routes.
+// A Path8 handle owns one native List<U8> of its bytes (ByteHandlesABI.jet).
+// Every rule is lexical over the Unix std::path component grammar after the
+// shared `\` -> `/` source spelling (Path.rs:3-9); nothing touches the
+// filesystem. Text results and kernel inputs are the lossy UTF-8 rendering,
+// as the reference converts with to_string_lossy.
+
+// A Path handle holding a copy of `len` bytes at `data`.
+fn path_route_new(data: I64, len: I64) -> I64 {
+    sequence :: data_sequence_new(len, RT_HOST_U8_STRIDE)
+    bytes :: rt_text_word(sequence + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < len {
+        host_u8_put(bytes, at, rt_text_byte(data + at))
+        at += I64{1}
+    }
+    rt_text_store(sequence + DATA_SEQUENCE_LENGTH, len)
+    result :: jet_rt_alloc(PATH_HANDLE_BYTES, I64{8})
+    data_tree_store(result + PATH_HANDLE_SEQUENCE, sequence)
+    result
+}
+
+fn path_route_from_text(text: I64) -> I64 { path_route_new(rt_text_data(text), rt_text_len(text)) }
+
+// The shared lexical source: an owned text with every `\` spelled `/`.
+fn path_route_lexical(text: I64) -> I64 {
+    result :: rt_text_copy(rt_text_data(text), rt_text_len(text))
+    data :: rt_text_data(result)
+    at := I64{0}
+    loop at < rt_text_len(result) {
+        if (rt_text_byte(data + at) == I64{92}) -> rt_text_put(data + at, I64{47})
+        at += I64{1}
+    }
+    result
+}
+
+// The lossy rendering of a handle, then its lexical source.
+fn path_route_source(path: I64) -> I64 {
+    shown :: path_handle_render(path)
+    result :: path_route_lexical(shown)
+    jet_rt_string_drop(shown)
+    result
+}
+
+fn path_route_byte(data: I64, at: I64) -> I64 { rt_text_byte(data + at) }
+
+// Components::trim_right on [start, end): the end of the last component,
+// skipping separators and "." components (a "." at `start` is the leading
+// CurDir and stays). Never trims into the root separator at `start`.
+fn path_route_trim_end(data: I64, start: I64, end: I64, rooted: Bool) -> I64 {
+    floor :: if rooted -> start + I64{1} else -> start
+    cut := end
+    loop {
+        loop cut > floor && path_route_byte(data, cut - I64{1}) == (I64{47}) { cut -= I64{1} }
+        first := cut
+        loop first > floor && path_route_byte(data, first - I64{1}) != (I64{47}) { first -= I64{1} }
+        if !(cut - first == I64{1} && path_route_byte(data, first) == I64{46} && first > start) -> break
+        cut = first
+    }
+    cut
+}
+
+// The start of the component ending at `end` (after trimming).
+fn path_route_component_start(data: I64, floor: I64, end: I64) -> I64 {
+    first := end
+    loop first > floor && path_route_byte(data, first - I64{1}) != (I64{47}) { first -= I64{1} }
+    first
+}
+
+fn path_route_is_dot(data: I64, at: I64, len: I64) -> Bool { len == I64{1} && path_route_byte(data, at) == I64{46} }
+fn path_route_is_dot_dot(data: I64, at: I64, len: I64) -> Bool { len == I64{2} && path_route_byte(data, at) == I64{46} && path_route_byte(data, at + I64{1}) == I64{46} }
+
+// Path::file_name: the last component when it is Normal, as [start, start+len);
+// length -1 when there is none (empty, a root, ".", or "..").
+fn path_route_file_name(data: I64, len: I64, out: I64) -> I64 {
+    rooted :: len > I64{0} && path_route_byte(data, I64{0}) == I64{47}
+    end :: path_route_trim_end(data, I64{0}, len, rooted)
+    floor :: if rooted -> I64{1} else -> I64{0}
+    start :: path_route_component_start(data, floor, end)
+    length :: end - start
+    rt_text_store(out, start)
+    if (length <= I64{0} || path_route_is_dot(data, start, length) || path_route_is_dot_dot(data, start, length)) -> return I64{-1}
+    length
+}
+
+// rsplit_file_at_dot: the position of the extension dot in a file name, or -1
+// when the name has none (no dot, or only a leading one).
+fn path_route_extension_dot(data: I64, start: I64, length: I64) -> I64 {
+    at := start + length - I64{1}
+    loop at > start {
+        if (path_route_byte(data, at) == I64{46}) -> return at
+        at -= I64{1}
+    }
+    I64{-1}
+}
+
+// PathBuf::from(text): the text's bytes.
+#Export(c) fn jet_path_from(text: I64) -> I64 { path_route_from_text(text) }
+
+// Path.rs:12-19: PathBuf::push over both lexical sources (an absolute part
+// replaces; otherwise one separator unless the base is empty or ends in one).
+#Export(c) fn jet_path_join(path: I64, other: I64) -> I64 {
+    base :: path_route_source(path)
+    part :: path_route_lexical(other)
+    joined :: jet_fs_host_path_join_raw(base, part)
+    jet_rt_string_drop(base)
+    jet_rt_string_drop(part)
+    result :: path_route_from_text(joined)
+    jet_rt_string_drop(joined)
+    result
+}
+
+// Path::parent: None for an empty path or a lone root; otherwise the path up
+// to the last component, trimmed as Components::as_path trims it.
+#Export(c) fn jet_path_parent(path: I64, some: I64) -> I64 {
+    source :: path_route_source(path)
+    data :: rt_text_data(source)
+    len :: rt_text_len(source)
+    rooted :: len > I64{0} && path_route_byte(data, I64{0}) == I64{47}
+    floor :: if rooted -> I64{1} else -> I64{0}
+    end :: path_route_trim_end(data, I64{0}, len, rooted)
+    if (end <= floor) {
+        jet_rt_string_drop(source)
+        return I64{0}
+    }
+    start :: path_route_component_start(data, floor, end)
+    rest :: path_route_trim_end(data, I64{0}, start, rooted)
+    rt_text_store(some, path_route_new(data, rest))
+    jet_rt_string_drop(source)
+    I64{1}
+}
+
+#Export(c) fn jet_path_extension(path: I64, some: I64) -> I64 {
+    source :: path_route_source(path)
+    data :: rt_text_data(source)
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    length :: path_route_file_name(data, rt_text_len(source), slot)
+    start :: rt_text_word(slot)
+    jet_rt_free(slot, I64{8}, I64{8})
+    dot :: if (length < I64{0}) -> I64{-1} else -> path_route_extension_dot(data, start, length)
+    if (dot < I64{0}) {
+        jet_rt_string_drop(source)
+        return I64{0}
+    }
+    rt_text_store(some, rt_text_copy(data + dot + I64{1}, start + length - dot - I64{1}))
+    jet_rt_string_drop(source)
+    I64{1}
+}
+
+#Export(c) fn jet_path_stem(path: I64, some: I64) -> I64 {
+    source :: path_route_source(path)
+    data :: rt_text_data(source)
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    length :: path_route_file_name(data, rt_text_len(source), slot)
+    start :: rt_text_word(slot)
+    jet_rt_free(slot, I64{8}, I64{8})
+    if (length < I64{0}) {
+        jet_rt_string_drop(source)
+        return I64{0}
+    }
+    dot :: path_route_extension_dot(data, start, length)
+    end :: if (dot < I64{0}) -> start + length else -> dot
+    rt_text_store(some, rt_text_copy(data + start, end - start))
+    jet_rt_string_drop(source)
+    I64{1}
+}
+
+// The Unix components of [0, len) after the root: Normal and ParentDir parts
+// pushed as owned texts in order, CurDir dropped. True when rooted.
+fn path_route_parts(data: I64, len: I64, parts: I64) -> Bool {
+    rooted :: len > I64{0} && path_route_byte(data, I64{0}) == I64{47}
+    at := I64{0}
+    loop at < len {
+        loop at < len && path_route_byte(data, at) == (I64{47}) { at += I64{1} }
+        if (at >= len) -> break
+        first :: at
+        loop at < len && path_route_byte(data, at) != (I64{47}) { at += I64{1} }
+        length :: at - first
+        if path_route_is_dot(data, first, length) -> next
+        path_route_push(parts, rt_text_copy(data + first, length))
+    }
+    rooted
+}
+
+// A word list (native List header, 8-byte stride) of owned texts.
+fn path_route_push(words: I64, text: I64) {
+    slot :: data_sequence_reserve(words, I64{8})
+    rt_text_store(slot, text)
+    rt_text_store(words + DATA_SEQUENCE_LENGTH, rt_text_word(words + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+
+fn path_route_words_drop(words: I64) {
+    count :: rt_text_word(words + DATA_SEQUENCE_LENGTH)
+    at := I64{0}
+    loop at < count {
+        jet_rt_string_drop(rt_text_word(rt_text_word(words + DATA_SEQUENCE_DATA) + at * I64{8}))
+        at += I64{1}
+    }
+    capacity :: rt_text_word(words + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(words + DATA_SEQUENCE_DATA), capacity * I64{8}, I64{8})
+    jet_rt_free(words, DATA_SEQUENCE_BYTES, I64{8})
+}
+
+fn path_route_word(words: I64, at: I64) -> I64 { rt_text_word(rt_text_word(words + DATA_SEQUENCE_DATA) + at * I64{8}) }
+fn path_route_count(words: I64) -> I64 { rt_text_word(words + DATA_SEQUENCE_LENGTH) }
+
+fn path_route_pop(words: I64) {
+    count :: path_route_count(words)
+    jet_rt_string_drop(path_route_word(words, count - I64{1}))
+    rt_text_store(words + DATA_SEQUENCE_LENGTH, count - I64{1})
+}
+
+fn path_route_text_is_dot_dot(text: I64) -> Bool { path_route_is_dot_dot(rt_text_data(text), I64{0}, rt_text_len(text)) }
+
+// Path.rs:42-66 jet_std_path_normalize: CurDir drops, ParentDir pops a kept
+// Normal, stays as ".." in a relative path with none, and vanishes at a root.
+#Export(c) fn jet_path_normalize(path: I64) -> I64 {
+    source :: path_route_source(path)
+    raw :: data_sequence_new(I64{0}, I64{8})
+    rooted :: path_route_parts(rt_text_data(source), rt_text_len(source), raw)
+    jet_rt_string_drop(source)
+    kept :: data_sequence_new(I64{0}, I64{8})
+    depth := I64{0}
+    at := I64{0}
+    loop at < path_route_count(raw) {
+        part :: path_route_word(raw, at)
+        at += I64{1}
+        if path_route_text_is_dot_dot(part) {
+            if (depth > I64{0}) {
+                path_route_pop(kept)
+                depth -= I64{1}
+            } else if !rooted {
+                path_route_push(kept, jet_rt_string_clone(part))
+            }
+            next
+        }
+        path_route_push(kept, jet_rt_string_clone(part))
+        depth += I64{1}
+    }
+    path_route_words_drop(raw)
+    text :: jet_rt_string_builder_new()
+    if rooted -> rt_text_push_word(text, I64{47}, I64{1})
+    at = I64{0}
+    loop at < path_route_count(kept) {
+        if (at != I64{0}) -> rt_text_push_word(text, I64{47}, I64{1})
+        jet_rt_string_builder_push(text, path_route_word(kept, at))
+        at += I64{1}
+    }
+    path_route_words_drop(kept)
+    joined :: jet_rt_string_builder_finish(text)
+    result :: path_route_from_text(joined)
+    jet_rt_string_drop(joined)
+    result
+}
+
+// Path.rs:71-119 `components`: ParentDir pops a non-".." part, stays as ".."
+// in a relative path, and vanishes at a root.
+fn path_route_containment_parts(path: I64, parts: I64) -> Bool {
+    source :: path_route_source(path)
+    raw :: data_sequence_new(I64{0}, I64{8})
+    rooted :: path_route_parts(rt_text_data(source), rt_text_len(source), raw)
+    jet_rt_string_drop(source)
+    at := I64{0}
+    loop at < path_route_count(raw) {
+        part :: path_route_word(raw, at)
+        at += I64{1}
+        if path_route_text_is_dot_dot(part) {
+            count :: path_route_count(parts)
+            if (count > I64{0} && !path_route_text_is_dot_dot(path_route_word(parts, count - I64{1}))) {
+                path_route_pop(parts)
+            } else if !rooted {
+                path_route_push(parts, jet_rt_string_clone(part))
+            }
+            next
+        }
+        path_route_push(parts, jet_rt_string_clone(part))
+    }
+    path_route_words_drop(raw)
+    rooted
+}
+
+#Export(c) fn jet_path_is_within(path: I64, base: I64) -> Bool {
+    base_parts :: data_sequence_new(I64{0}, I64{8})
+    path_parts :: data_sequence_new(I64{0}, I64{8})
+    base_rooted :: path_route_containment_parts(base, base_parts)
+    path_rooted :: path_route_containment_parts(path, path_parts)
+    base_count :: path_route_count(base_parts)
+    path_count :: path_route_count(path_parts)
+    within := base_rooted == path_rooted && path_count >= base_count
+    at := I64{0}
+    loop within && at < base_count {
+        if !jet_rt_string_eq(path_route_word(base_parts, at), path_route_word(path_parts, at)) -> within = false
+        at += I64{1}
+    }
+    if (within && !base_rooted && base_count == I64{0} && path_count > I64{0} && path_route_text_is_dot_dot(path_route_word(path_parts, I64{0}))) -> within = false
+    path_route_words_drop(base_parts)
+    path_route_words_drop(path_parts)
+    within
+}
+
+// Path.rs:122-140 (Unix): HOME when it is valid UTF-8, else the current
+// directory, else empty.
+#Export(c) fn jet_path_home() -> I64 {
+    home :: rt_env_get(rt_static_text("HOME"))
+    if (home != I64{0}) {
+        result :: path_route_from_text(home)
+        jet_rt_string_drop(home)
+        return result
+    }
+    slot :: jet_rt_alloc(I64{16}, I64{8})
+    text := jet_rt_string_clone(rt_static_text(""))
+    if (jet_sys_current_dir_raw(slot, slot + I64{8}) == I64{1}) {
+        jet_rt_string_drop(text)
+        text = rt_text_word(slot)
+    } else {
+        jet_rt_string_drop(rt_text_word(slot + I64{8}))
+    }
+    jet_rt_free(slot, I64{16}, I64{8})
+    result :: path_route_from_text(text)
+    jet_rt_string_drop(text)
+    result
+}
