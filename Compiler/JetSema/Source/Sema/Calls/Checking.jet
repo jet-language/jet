@@ -589,7 +589,7 @@ fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool
         else -> false
     }
     if !element && !sema_expression_place_below_element(expr) -> return false
-    start :: expr_span(expr).start
+    start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
     mark_span :: Span{start: start - 1, end: start}
     if element {
         &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "pass `.copy()` of the element instead of `^`, or take it out with a removing call such as `pop`"))
@@ -605,7 +605,7 @@ fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool
 // None when the move is rejected.
 fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Expr, value: ^TExpr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
     if !taken -> return Val(^value)
-    start :: expr_span(expr).start
+    start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
     payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
     if payload < 0 -> return None
     moved :: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value

@@ -3228,11 +3228,13 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         return Val(projected_value.value)
     }
     routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
-    // Only method absence enables the callable field.
+    // Only method absence enables the callable field. As in the reference,
+    // the callee field is spanned at the method name and the call runs from
+    // that name to its last argument.
     if sema_expr_function_field(receiver_value.ty, method, routed_method, environment, program) {
         call_end := method_span.end
         if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
-        return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: Span{start: expr_source_start(receiver), end: method_span.end}}, args, Span{start: expr_span(receiver).start, end: call_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expr_check_indirect_call(Expr.Field{base: receiver, member: method, span: method_span}, args, Span{start: method_span.start, end: call_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     take_pattern := sema_expr_check_take_pattern_method(receiver, receiver_value, method, args, method_span, expected, environment, program, &scopes, &state, &diagnostics)
     if take_pattern.handled -> return take_pattern.value
@@ -4394,7 +4396,12 @@ fn sema_expr_subject_shorthand(expr: Expr, expected: Type?, context: SemaCheckCo
         chain :: sema_expr_bare_member_chain_text(expr)
         if context.subject_shorthand_depth > 0 -> &diagnostics.push(sema_lint("L0512", span, "subject shorthand `{chain}` is nested inside another subject shorthand", "implicit subjects become hard to track when shorthand scopes nest", "rewrite it with a named binding: `(item) -> item{chain}`"))
         subject :: "__jet_subject"
-        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: span, ty: Val(params[0]), ty_span: None}}, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
+        // The reference spans the parameter at the chain's node (its last
+        // member); the subject the chain reads is spanned at its leading `.`,
+        // and a name resolves only at or after its declaration, so the
+        // parameter starts at the chain's first byte.
+        param_span :: Span{start: expr_source_start(expr), end: span.end}
+        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: param_span, ty: Val(params[0]), ty_span: None}}, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
     }
     None
 }

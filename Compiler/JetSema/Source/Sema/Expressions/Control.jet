@@ -722,8 +722,8 @@ fn sema_failure_parent_error(operand_error: Type, scopes: SemaScopeTable, contex
 
 // 2 and the one conversion law shared by
 // explicit `?` and automatic call propagation. `implicit` selects wording only.
-fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span: Span, implicit: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
-    operand :: sema_expr_unwrap_tag(inner.ty)
+fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, span: Span, implicit: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
+    operand :: sema_expr_unwrap_tag(operand_ty)
     if operand == {
         .Result(_, error) -> {
             // `Never` is uninhabited whatever the caller's rail. A callee the
@@ -743,7 +743,7 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
             }
             // A callback with no return row takes the carrier of its first
             // propagated call whose callee declares a failure route.
-            if context.callback_return_open && context.callback_return_row == None && scopes.failure_carrier == None && sema_failure_source_declares_failure(source_expr, environment, program, scopes) -> context.callback_return_row = Val(sema_expr_unwrap_tag(inner.ty))
+            if context.callback_return_open && context.callback_return_row == None && scopes.failure_carrier == None && sema_failure_source_declares_failure(source_expr, environment, program, scopes) -> context.callback_return_row = Val(sema_expr_unwrap_tag(operand_ty))
             normalized_target :: sema_expr_unwrap_tag(target)
             if normalized_target == (Type.Named{name: "Err"}) -> sema_failure_union_record_propagation(callee, error, &context)
             // `Never!` proves no failure route remains, even when a
@@ -778,11 +778,11 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
                     if type_identity_equal(value, target_value) -> return sema_expression_propagation_taken(&context, TTryConvert.NoConversion)
                 }
             }
-            &diagnostics.push(sema_error("E0403", span, "`?` on `{type_name(inner.ty)}` needs a function that returns the same optional type", "propagation passes `None` back to the caller", "declare `{type_name(inner.ty)}` as the optional return type, or handle it with `??`"))
+            &diagnostics.push(sema_error("E0403", span, "`?` on `{type_name(operand_ty)}` needs a function that returns the same optional type", "propagation passes `None` back to the caller", "declare `{type_name(operand_ty)}` as the optional return type, or handle it with `??`"))
             return None
         }
         else -> {
-            &diagnostics.push(sema_error("E0403", span, "`?` only works on a fallible value, not {type_name(inner.ty)}", "`?` unwraps success or returns early with the failure", "call something that returns `T E!` or an optional value, or remove `?`"))
+            &diagnostics.push(sema_error("E0403", span, "`?` only works on a fallible value, not {type_name(operand_ty)}", "`?` unwraps success or returns early with the failure", "call something that returns `T E!` or an optional value, or remove `?`"))
             return None
         }
     }
@@ -882,24 +882,37 @@ fn sema_expression_propagated(inner: TExpr, conversion: TTryConvert, span: Span)
 fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Own only the checked tree, never the READ source AST. Carrier metadata
     // and conversion reads finish before its owner enters the replacement.
-    if sema_expr_unwrap_tag(value.ty) == {
-        .Result(_, _) -> {}
-        else -> return Val(^value)
-    }
-    // Compiler-generated bodies (derived codecs) spell their carriers out and
-    // keep the Result; only a proven `Never` rail still unwraps.
-    if context.compiler_generated {
-        if sema_expr_unwrap_tag(value.ty) == .Result(_, generated_error) {
-            if sema_expr_unwrap_tag(generated_error) != (Type.Named{name: "Never"}) -> return Val(^value)
-        }
-    }
-    if sema_expression_failure_carrier_position(expected, value.ty) -> return Val(^value)
+    if !sema_expression_auto_propagates(value.ty, expected, context) -> return Val(^value)
     span :: expr_span(expr)
-    conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
+    conversion :: sema_expression_propagation_conversion(value.ty, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
     location :: sema_expression_panic_location(environment, program, scopes, span)
     propagated :: sema_tir_node(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
     sema_expr_expected(propagated, expected, environment, program, &diagnostics)
+}
+
+// Whether a call root's checked carrier propagates automatically: only a
+// Result does. Compiler-generated bodies (derived codecs) spell their
+// carriers out and keep the Result; only a proven `Never` rail still unwraps.
+fn sema_expression_auto_propagates(ty: Type, expected: Type?, context: SemaCheckContext) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == {
+        .Result(_, _) -> {}
+        else -> return false
+    }
+    if context.compiler_generated {
+        if sema_expr_unwrap_tag(ty) == .Result(_, generated_error) {
+            if sema_expr_unwrap_tag(generated_error) != (Type.Named{name: "Never"}) -> return false
+        }
+    }
+    !sema_expression_failure_carrier_position(expected, ty)
+}
+
+// A call root rejected after its callee was resolved still has the callee's
+// result carrier; as in the reference, its automatic propagation is checked
+// as for an accepted call.
+fn sema_expression_rejected_call_propagation(result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if !context.failure_success_view || !sema_expression_auto_propagates(result_type, expected, context) -> return
+    _ := sema_expression_propagation_conversion(result_type, None, span, true, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -907,7 +920,7 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     // propagate a second time before this check sees it.
     inner :: sema_check_expression_carrier(value, None, environment, program, &scopes, &state, &tail_store, &check_context, &diagnostics) ?? return None
     try_conversion :: if conversion == {
-        .NoConversion -> sema_expression_propagation_conversion(inner, Val(value), span, false, environment, program, &scopes, &check_context, &diagnostics) ?? return None
+        .NoConversion -> sema_expression_propagation_conversion(inner.ty, Val(value), span, false, environment, program, &scopes, &check_context, &diagnostics) ?? return None
         else -> {
             unreachable_route :: if conversion == {
                 .Never -> true

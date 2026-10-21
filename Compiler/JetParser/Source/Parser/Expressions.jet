@@ -715,8 +715,10 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         if Int.from_u8(first_byte) >= 97 && Int.from_u8(first_byte) <= 122 {
             parser_bump(&state)
             member :: parser_bump(&state)
-            member_span :: parser_cover(token.span, member.span)
-            return ParsedExpr{expr: Expr.Field{base: Expr.Ident{name: "", span: token.span}, member: parser_value(state, member), span: member_span}, span: member_span}
+            // The field node is spanned at its member name, as in the
+            // reference; the parsed span covers the leading `.` too.
+            shorthand_span :: parser_cover(token.span, member.span)
+            return ParsedExpr{expr: Expr.Field{base: Expr.Ident{name: "", span: token.span}, member: parser_value(state, member), span: member.span}, span: shorthand_span}
         }
     }
     if kind == TOKEN_DOT && (parser_kind_at(&state, 1) == TOKEN_IDENT || parser_kind_at(&state, 1) == TOKEN_NULL) {

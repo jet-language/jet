@@ -2876,7 +2876,7 @@ fn sema_ownership_reject_read_param_move(state: &SemaOwnershipState, expr: Expr,
     if root.symbol.kind != SymbolKind.Parameter || root.access != AccessConvention.Read -> return false
     // An ExpiringSecret loan's own move rule reports the mark.
     if sema_contains_expiring_secret_loan(root.symbol.ty ?? Type.Named{name: "Unit"}) -> return false
-    start :: expr_span(expr).start
+    start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
     &diagnostics.push(sema_ownership_diag_move_from_borrowed(root.symbol.name, Span{start: start - 1, end: start}))
     true
 }

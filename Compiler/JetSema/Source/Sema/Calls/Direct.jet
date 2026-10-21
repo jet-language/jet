@@ -734,7 +734,10 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
         compiler_allowed := scopes.comptime_execution_depth > 0 || environment.function_name == "build"
         check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
-        if !check.arguments_complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+        if !check.arguments_complete {
+            sema_expression_rejected_call_propagation(check.result_type, span, expected, environment, program, &scopes, &context, &diagnostics)
+            return SemaDirectSpecialCheck{handled: true, value: None}
+        }
         value := sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: value}
     }

@@ -367,6 +367,12 @@ fn sema_call_core_projection_error(module_name: String, member: String, error: C
 fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     typed_signature :: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
+    // A compiler query checks its own argument count against its contract,
+    // as the reference checks a function of the imported Core module, and
+    // keeps checking the call past a wrong count.
+    if sema_compiler_services_is_compiler_query(module_name, member) {
+        if core_call(module_name, member) == .Val(row) -> return Val(row)
+    }
     // Variadic `core.term.eprint` joins its arguments into
     // one write through the arity-1 row (Rust `checked_core_record(…, 1, …)`);
     // its special checker owns the argument count.
