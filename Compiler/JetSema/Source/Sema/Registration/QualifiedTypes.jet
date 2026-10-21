@@ -1,0 +1,119 @@
+// Types written with a module alias (`enc.EncodingError`) name their target
+// through the declaring file's import; the alias means nothing in any other
+// module. Once imports are bound, each module's declared signatures replace
+// such a name with the target's canonical key, so every copy of a symbol (an
+// import binding, a package name) carries types that resolve in whichever
+// module checks a use of it.
+use jet_foundation.[
+    Symbol,
+    Type,
+]
+
+fn sema_registration_canonicalize_qualified_types(graph: &SemaRegistrationGraph) Never! {
+    module_keys := [[String:String]]{}
+    loop module_index in 0..<graph.modules.len() -> &module_keys.push(sema_registration_module_qualified_keys(graph, module_index))
+    loop module_index in 0..<graph.modules.len() {
+        keys :: module_keys[module_index]
+        if keys.len() > 0 {
+            sema_registration_canonical_functions(&graph.modules[module_index].functions, keys)
+            loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_canonical_functions(&graph.modules[module_index].nominals[nominal].methods, keys)
+            loop implementation in 0..<graph.modules[module_index].impls.len() -> sema_registration_canonical_functions(&graph.modules[module_index].impls[implementation].methods, keys)
+            loop position in 0..<graph.modules[module_index].symbols.len() -> sema_registration_canonical_symbol(&graph.modules[module_index].symbols[position], keys)
+        }
+        // An import binding copies its declaring module's symbol, written
+        // in that module's names.
+        loop import_index in 0..<graph.modules[module_index].imports.len() {
+            loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+                source :: graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_name
+                source_index :: sema_registration_module_index(graph, source) ?? next
+                if module_keys[source_index].len() == 0 -> next
+                sema_registration_canonical_symbol(&graph.modules[module_index].imports[import_index].bindings[binding].symbol, module_keys[source_index])
+            }
+        }
+    }
+}
+
+// Each alias-qualified type name the module's declarations write, mapped to
+// its target's canonical key through the module's own imports.
+fn sema_registration_module_qualified_keys(graph: SemaRegistrationGraph, module_index: Int) -> [String:String] Never! {
+    names := [String]{}
+    loop function in graph.modules[module_index].functions -> sema_registration_function_qualified_names(function, &names)
+    loop nominal in graph.modules[module_index].nominals {
+        loop method in nominal.methods -> sema_registration_function_qualified_names(method, &names)
+    }
+    loop implementation in graph.modules[module_index].impls {
+        loop method in implementation.methods -> sema_registration_function_qualified_names(method, &names)
+    }
+    loop symbol in graph.modules[module_index].symbols {
+        if symbol.ty == .Val(ty) -> sema_registration_type_qualified_names(ty, &names)
+    }
+    keys := [String:String]{}
+    identity :: graph.modules[module_index].module_identity
+    loop name in names {
+        qualified :: name.split_once(".") ?? next
+        resolved :: sema_registration_lookup_qualified(graph, identity, qualified.before, qualified.after) ?? next
+        keys[name] = resolved.symbol.id.key
+    }
+    keys
+}
+
+fn sema_registration_function_qualified_names(function: SemaRegistrationFunction, names: &[String]) Never! {
+    sema_registration_type_qualified_names(function.signature, &names)
+    loop parameter in function.parameters -> sema_registration_type_qualified_names(parameter.ty, &names)
+}
+
+fn sema_registration_canonical_functions(functions: &[SemaRegistrationFunction], keys: [String:String]) Never! {
+    loop row in 0..<functions.len() {
+        functions[row].signature = sema_registration_canonical_type(functions[row].signature, keys)
+        sema_registration_canonical_symbol(&functions[row].symbol, keys)
+        loop parameter in 0..<functions[row].parameters.len() {
+            functions[row].parameters[parameter].ty = sema_registration_canonical_type(functions[row].parameters[parameter].ty, keys)
+            sema_registration_canonical_symbol(&functions[row].parameters[parameter].symbol, keys)
+        }
+    }
+}
+
+fn sema_registration_canonical_symbol(symbol: &Symbol, keys: [String:String]) Never! {
+    if symbol.ty == .Val(ty) -> symbol.ty = Val(sema_registration_canonical_type(ty, keys))
+}
+
+fn sema_registration_canonical_type(ty: Type, keys: [String:String]) -> Type Never! {
+    names := [String]{}
+    sema_registration_type_qualified_names(ty, &names)
+    found := [String]{}
+    actuals := [Type]{}
+    loop name in names {
+        key :: keys.get(name) ?? next
+        &found.push(name)
+        &actuals.push(Type.Named{name: key})
+    }
+    if found.len() == 0 -> return ty.copy()
+    sema_inference_substitute_type(ty, found, actuals)
+}
+
+// The alias-qualified `Named` types in `ty` (`alias.Name`; a canonical key
+// holds `::` and is already resolved).
+fn sema_registration_type_qualified_names(ty: Type, names: &[String]) Never! {
+    if ty == {
+        .Named(name) -> {
+            if name.contains(".") && !name.contains("::") && !names.contains(name) -> &names.push(name)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_registration_type_qualified_names(inner, &names)
+        .Map(key, _, value) -> {
+            sema_registration_type_qualified_names(key, &names)
+            sema_registration_type_qualified_names(value, &names)
+        }
+        .Result(ok, err) -> {
+            sema_registration_type_qualified_names(ok, &names)
+            sema_registration_type_qualified_names(err, &names)
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> sema_registration_type_qualified_names(param, &names)
+            if ret == .Val(declared) -> sema_registration_type_qualified_names(declared, &names)
+        }
+        .Apply(_, args) -> loop arg in args -> sema_registration_type_qualified_names(arg, &names)
+        .Tuple(fields) -> loop field in fields -> sema_registration_type_qualified_names(field.ty, &names)
+        .Union(members) -> loop member in members -> sema_registration_type_qualified_names(member, &names)
+        else -> {}
+    }
+}

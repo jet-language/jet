@@ -870,6 +870,27 @@ fn jet_codegen_lower_compare_operand(builder: &JetCodegenBuilder, program: JetCo
     jet_codegen_lower_expr(&builder, program, operand)
 }
 
+// `x == None` and `x != None` test the Option's tag. Neither compares a
+// payload, so no equality helper is generated for the payload type (which
+// may hold Shared state that has no equality at all).
+fn jet_codegen_lower_none_comparison(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, op: TBinaryOp, lhs: TExpr, rhs: TExpr) -> MIRValueID? {
+    if op != TBinaryOp.Eq && op != TBinaryOp.Ne -> return None
+    if rhs.kind == .Absent -> return jet_codegen_lower_option_presence(&builder, program, expression, op, lhs)
+    if lhs.kind == .Absent -> return jet_codegen_lower_option_presence(&builder, program, expression, op, rhs)
+    None
+}
+
+fn jet_codegen_lower_option_presence(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, op: TBinaryOp, subject: TExpr) -> MIRValueID? {
+    if jet_codegen_unwrap_pattern_tags(subject.ty) == {
+        .Option(_) -> {}
+        else -> return None
+    }
+    value :: jet_codegen_lower_expr(&builder, program, subject)
+    present :: jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.OptionIsSome{subject: value})
+    if op == TBinaryOp.Ne -> return Val(present)
+    Val(jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.Unary{op: MIRUnaryOp.Not, value: present}))
+}
+
 fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TExpr, index: Int, record: CoreCallRecord, widen_to_vec: Bool) -> MIRCallArg {
     access := MIRAccess.Read
     place := MIRPlaceID?{None}
@@ -5760,6 +5781,8 @@ fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegen
             }
             folded :: jet_codegen_fold_fact_enum_equality(&builder, program, expression, op, lhs, rhs)
             if folded == .Val(value) -> return value
+            tag_test :: jet_codegen_lower_none_comparison(&builder, program, expression, op, lhs, rhs)
+            if tag_test == .Val(value) -> return value
             left := jet_codegen_lower_compare_operand(&builder, program, op, lhs, rhs, true)
             right := jet_codegen_lower_compare_operand(&builder, program, op, rhs, lhs, false)
             dispatch := jet_codegen_binary_dispatch(&builder, program, op, overflow, lhs.ty, expression.span, line)

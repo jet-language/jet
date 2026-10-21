@@ -337,7 +337,10 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // A default written in another module checks in its declaring module's
         // names (sema_default_owner_scope), as a fresh value of its own.
         owner_scope := sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes)
-        default_in_owner :: owner_scope != None
+        default_in_owner :: if owner_scope == {
+            .Val(_) -> true
+            .None -> false
+        }
         binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, &scopes, &state, expr_span(args[index].expr)) else -> [String]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.

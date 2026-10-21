@@ -338,8 +338,9 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
 // anchored at this literal.
 fn sema_expression_struct_field_default(field: Field, default_value: Expr, literal_span: Span, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     owner_scope := sema_default_owner_scope(environment, program, scopes, owner.module_name, default_value)
-    if owner_scope == None -> return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    scope := ^owner_scope ?? return None
+    scope := ^owner_scope ?? {
+        return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     default_diagnostics := [Diagnostic]{}
     checked :: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, &default_diagnostics)
     loop diagnostic in default_diagnostics -> &diagnostics.push(sema_default_use_site_diagnostic(diagnostic, literal_span))
