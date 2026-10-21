@@ -26,8 +26,10 @@ struct IRBuildResult {
 // a variable a closure writes, kept in a frame cell); -1: the slot is the
 // variable itself. `owned`: the variable owns its value, which is dropped
 // when its scope ends (every other holder of the value has its own copy).
-// `symbol`: the checked symbol key of a variable that has one.
-struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""} }
+// `symbol`: the checked symbol key of a variable that has one. `write`: an
+// aggregate write parameter (or receiver), whose slot addresses the caller's
+// storage, so a whole-value assignment writes there.
+struct IRBinding { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false} }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`.
@@ -67,6 +69,11 @@ struct IRBuilder {
     // Calls emitted where the program is only read (display impls): their
     // callee ids are resolved when the function is done.
     deferred: [IRDeferredCall]
+    // The open `#Transact` blocks (innermost last) an early exit unwinds.
+    transactions: [IRTxFrame]
+    // The open contract scopes (innermost last) whose `post` clauses a
+    // return checks.
+    contracts: [IRContractFrame]
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
@@ -407,7 +414,7 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure], from
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {

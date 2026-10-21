@@ -52,7 +52,7 @@ fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Boo
         return Val(slot)
     }
     slot :: ir_new_slot(&b, row, IRSlotKind.Param, ir_intern_name(&m, name))
-    &b.bindings.push(IRBinding{name: name, slot: slot, owned: owned && m.types[row].drop != ""})
+    &b.bindings.push(IRBinding{name: name, slot: slot, owned: owned && m.types[row].drop != "", write: write})
     Val(slot)
 }
 
@@ -111,14 +111,14 @@ fn ir_executable_return(function: TFunc) -> Type? Never! {
 // any other function cannot get here.
 fn ir_return_fallthrough(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
     if b.f.result < 0 {
-        ir_emit_return(&m, &b, -1)
+        ir_return_slot(&m, &p, &b, -1, Span{start: 0, end: 0})
         return
     }
     ret :: b.ret ?? Type.Named{name: "Unit"}
     if ir_untag(ret) == .Result(ok, _) {
         if ir_unit_type(ir_untag(ok)) {
             boxed :: ir_result_box(&m, p, &b, ret, true, -1)
-            ir_emit_return(&m, &b, boxed)
+            ir_return_slot(&m, &p, &b, boxed, Span{start: 0, end: 0})
             return
         }
     }
@@ -181,6 +181,15 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             // The variable's old value ends here when it owns it (a write
             // parameter's or cell's holder owns the value behind the address).
             owned :: ir_own(&m, &b, result)
+            if binding.write && ir_kind_of(m, b, binding.slot) == .Aggregate {
+                // The caller's value is replaced in place: its old value
+                // ends here, the new one's bytes move into its storage.
+                if ir_has_drop(m, b, binding.slot) -> ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
+                size :: m.types[b.f.slot_type[binding.slot]].size
+                ir_emit(&b.f, IROp.CopyBytes, -1, binding.slot, owned, size, b.line)
+                b.fresh[owned] = false
+                return
+            }
             if (binding.owned || binding.indirect >= 0) && ir_has_drop(m, b, current) -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)
             if binding.indirect >= 0 {
                 ir_emit(&b.f, IROp.Store, -1, binding.slot, 0, owned, b.line)
@@ -240,19 +249,21 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         }
         .Break(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
+            ir_tx_unwind_loop(&m, &p, &b, frame.exit, span)
             ir_drop_bindings(&m, &b, frame.mark)
             depth :: ir_depth(b.f, frame.exit)
             ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
         }
         .Continue(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "next outside a loop")
+            ir_tx_unwind_loop(&m, &p, &b, frame.exit, span)
             ir_drop_bindings(&m, &b, frame.mark)
             depth :: ir_depth(b.f, frame.next)
             ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
         }
         .Inline(body, _) | .Region(body, _) -> ir_stmts(&m, &p, &b, body)
-        .Contract(_) -> ir_fail(&b, Span{start: 0, end: 0}, "statement Contract")
-        .ContractScope(_, _, _, _, span) -> ir_fail(&b, span, "statement ContractScope")
+        .Contract(contract) -> ir_contract(&m, &p, &b, contract)
+        .ContractScope(pre, body, post, result, span) -> ir_contract_scope(&m, &p, &b, pre, body, post, result, span)
         .RefutableBind(pattern, init, fallback, span) -> ir_refutable_bind(&m, &p, &b, pattern, init, fallback, span)
         .TupleDestructure(_, init, _, binds, span) | .StructDestructure(_, init, _, binds, span) -> ir_field_destructure(&m, &p, &b, init, binds, span)
         .ListDestructure(_, init, count, _, line, elements, span) -> {
@@ -288,6 +299,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
             slot :: ir_value_as(&m, &p, &b, value, target_row, span)
             if ir_failed(b) -> return
             if slot >= 0 -> ir_store(&m, &b, frame.value, slot)
+            ir_tx_unwind_loop(&m, &p, &b, frame.exit, span)
             ir_drop_bindings(&m, &b, frame.mark)
             depth :: ir_depth(b.f, frame.exit)
             ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
@@ -316,7 +328,7 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
         .ContextBlock(_, _, span) -> ir_fail(&b, span, "statement ContextBlock")
         .Shield(_, span) -> ir_fail(&b, span, "statement Shield")
         .ScopeMember(_, _, span) -> ir_fail(&b, span, "statement ScopeMember")
-        .Transact(_, _, _, _, span) -> ir_fail(&b, span, "statement Transact")
+        .Transact(handle, snapshots, stm, body, span) -> ir_transact(&m, &p, &b, handle, snapshots, stm, body, span)
         .GCEdit(_, _, _, _, _, _, span) -> ir_fail(&b, span, "statement GCEdit")
         .SplitViews(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, span) -> ir_fail(&b, span, "statement SplitViews")
         .Erased(_, _, _) -> {}
@@ -854,6 +866,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             if ir_failed(b) || slot < 0 -> return slot
             return ir_copy_value(&m, p, &b, slot, span)
         }
+        .MaterializeView(value) -> return ir_materialize_view(&m, &p, &b, expression.ty, value, span)
         .StructLit(fields, extra) -> {
             if extra != None -> return ir_fail_slot(&b, span, "struct literal with host extras")
             if ir_default_err(p, expression.ty) -> return ir_default_err_literal(&m, &p, &b, expression.ty, fields, span)
@@ -1402,9 +1415,14 @@ fn ir_static_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, owner: T
         slots := [Int]{}
         borrowed := [Bool]{}
         loop arg in args {
-            if arg.fn_coerce != None || arg.widen_to_vec || arg.widen_to_union != None || arg.box_as_trait != None || arg.spread -> return ir_fail_slot(&b, span, "coerced Prelude static call argument")
-            slot :: ir_expr(&m, &p, &b, arg.value)
+            // A function value already is its closure (Lower ignores
+            // fn_coercion); a `[T#N]` is carried as the List it widens to.
+            if arg.widen_to_union != None || arg.box_as_trait != None || arg.spread -> return ir_fail_slot(&b, span, "coerced Prelude static call argument")
+            value :: ir_expr(&m, &p, &b, arg.value)
             if ir_failed(b) -> return -1
+            // A moved widening is a copy: the caller keeps its own array.
+            moved_widening :: arg.widen_to_vec && !arg.borrow && !arg.mut_borrow && value >= 0 && !b.fresh[value]
+            slot :: if moved_widening -> ir_copy_value(&m, p, &b, value, span) else -> value
             &slots.push(slot)
             &borrowed.push(arg.borrow || arg.mut_borrow)
         }
@@ -1561,7 +1579,10 @@ fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [
         &moves.push(ir_receiver_access(p.functions[row].kind) == "move")
     }
     loop (index, arg) in args {
-        if arg.fn_coerce != None || arg.widen_to_vec || arg.box_as_trait != None || arg.spread -> return ir_fail_slot(&b, span, "coerced call argument")
+        // A function value already is its closure (Lower ignores
+        // fn_coercion); a widened `[T#N]` is the List it is carried as, and
+        // a move parameter's ir_own copies it.
+        if arg.box_as_trait != None || arg.spread -> return ir_fail_slot(&b, span, "coerced call argument")
         if params[index].convention == .Write || arg.mut_borrow {
             address :: ir_place_address(&m, &p, &b, arg.value, &backs, span)
             if ir_failed(b) -> return -1
@@ -2225,7 +2246,7 @@ fn ir_return(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr?, span: Sp
         if ir_failed(b) -> return
         ir_release(&m, &b, slot)
         if b.ret != None && !b.plain -> return ir_return_fallthrough(&m, &p, &b)
-        ir_emit_return(&m, &b, -1)
+        ir_return_slot(&m, &p, &b, -1, span)
         return
     }
     result_row :: b.f.result
@@ -2233,7 +2254,7 @@ fn ir_return(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr?, span: Sp
     if ir_failed(b) -> return
     if slot < 0 -> return ir_fail(&b, span, "return of a value without a slot")
     owned :: ir_own(&m, &b, slot)
-    ir_emit_return(&m, &b, owned)
+    ir_return_slot(&m, &p, &b, owned, span)
 }
 
 // `value?` (codegen jet_codegen_lower_try_value): the success payload, or
@@ -2286,7 +2307,7 @@ fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_r
         if !is_result -> return ir_fail(&b, span, "`?` on an Option in a Result function")
         returned :: ir_try_reraise(&m, &p, &b, subject, conversion, success, error, span)
         if ir_failed(b) -> return
-        ir_emit_return(&m, &b, returned)
+        ir_return_slot(&m, &p, &b, returned, span)
         return
     }
     optional := b.failure == .Optional(_)
@@ -2299,7 +2320,7 @@ fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_r
         result_row :: b.f.result
         null :: ir_temp(&m, &b, result_row)
         ir_emit(&b.f, IROp.Const, null, 0, -1, -1, b.line)
-        ir_emit_return(&m, &b, null)
+        ir_return_slot(&m, &p, &b, null, span)
         return
     }
     ir_fail(&b, span, "`?` without a matching failure carrier")
@@ -2460,15 +2481,16 @@ fn ir_fallback_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, fallback: TOrFa
             right :: ir_word_const(&m, &b, 0)
             ir_stop(&m, &p, &b, 2, text, left, right, location)
         }
-        .Break -> ir_loop_jump(&m, &b, None, true, span)
-        .Continue -> ir_loop_jump(&m, &b, None, false, span)
-        .BreakLabel(label) -> ir_loop_jump(&m, &b, Val(label), true, span)
-        .ContinueLabel(label) -> ir_loop_jump(&m, &b, Val(label), false, span)
+        .Break -> ir_loop_jump(&m, &p, &b, None, true, span)
+        .Continue -> ir_loop_jump(&m, &p, &b, None, false, span)
+        .BreakLabel(label) -> ir_loop_jump(&m, &p, &b, Val(label), true, span)
+        .ContinueLabel(label) -> ir_loop_jump(&m, &p, &b, Val(label), false, span)
     }
 }
 
-fn ir_loop_jump(m: &IRModule, b: &IRBuilder, label: String?, exit: Bool, span: Span) Never! {
+fn ir_loop_jump(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, exit: Bool, span: Span) Never! {
     frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break or next outside a loop")
+    ir_tx_unwind_loop(&m, &p, &b, frame.exit, span)
     ir_drop_bindings(&m, &b, frame.mark)
     depth :: ir_depth(b.f, if exit -> frame.exit else -> frame.next)
     ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
@@ -2694,6 +2716,25 @@ fn ir_is_view(ty: Type) -> Bool Never! {
     false
 }
 
+// A view (or fixed list) copied out as the owned collection `ty` (codegen
+// jet_codegen_collection_materialize_view): the source's header read as
+// `ty`'s, its elements copied, and a fresh owned source dropped.
+fn ir_materialize_view(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, value: TExpr, span: Span) -> Int Never! {
+    slot :: ir_expr(&m, &p, &b, value)
+    if ir_failed(b) || slot < 0 -> return slot
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    have :: b.f.slot_type[slot]
+    source := slot
+    if have != row {
+        if m.types[have].kind != m.types[row].kind || m.types[have].size != m.types[row].size -> return ir_fail_slot(&b, span, "view {ir_type_name(value.ty)} materialized as {ir_type_name(ty)}")
+        source = ir_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.Copy, source, slot, -1, -1, b.line)
+    }
+    copied :: ir_copy_value(&m, p, &b, source, span)
+    ir_release(&m, &b, slot)
+    copied
+}
+
 // A slice's (start, end, exclusive) as native words and a Bool (Lower
 // lower_slice_bounds): a Range value's fields, or the bare bounds with the
 // kernel's own stop (exclusive for a String, inclusive for a List).
@@ -2912,7 +2953,7 @@ fn ir_indirect_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, callee: TExpr, a
     if ir_failed(b) || boxed < 0 -> return -1
     slots := [Int]{boxed}
     loop (index, arg) in args {
-        if arg.mut_borrow || arg.fn_coerce != None || arg.spread -> return ir_fail_slot(&b, span, "write or coerced argument of an indirect call")
+        if arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "write or spread argument of an indirect call")
         row :: ir_value_type(&m, p, params[index]) ?? return ir_fail_slot(&b, span, "argument type {params[index]}")
         slot :: ir_value_as(&m, &p, &b, arg.value, row, span)
         if ir_failed(b) -> return -1

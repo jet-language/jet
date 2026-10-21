@@ -81,12 +81,14 @@ fn ir_task_release_body(m: &IRModule, a: &IRBuilder) Never! {
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
-// A Core closure call by kind; the kinds other than `task` and
-// `scope.guard` are not built here.
+// A Core closure call by kind; the kinds other than `task`, `scope.guard`
+// and the transaction hooks are not built here.
 fn ir_core_closure_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, kind: TCoreClosureKind, span: Span) -> Int Never! {
     if kind == {
         .Spawn(group, site, label, executable) -> return ir_task_spawn(&m, &p, &b, ty, group, site, label ?? "", executable, span)
         .Guard(executable) -> return ir_scope_guard(&m, &p, &b, ty, executable, span)
+        .OnCommit(handle_name, executable) -> return ir_transaction_hook(&m, &p, &b, handle_name, executable, true, span)
+        .OnRollback(handle_name, executable) -> return ir_transaction_hook(&m, &p, &b, handle_name, executable, false, span)
         else -> return ir_fail_slot(&b, span, "Core closure call {ir_core_closure_name(kind)}")
     }
 }
