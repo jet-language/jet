@@ -82,7 +82,12 @@ fn jet_cli_emit_tier_program(file: String, source: String, color: Bool, json: Bo
     entry :: result.entry_function ?? return jet_cli_ice("the MIR program of `{file}` lost its entry function")
     // As the native route does (Host.jet jet_cli_native_executable): a Rust
     // foreign helper lowers from its own attached copy of the program.
-    attached :: jet_cli_rust_foreign_attached(result.rust_foreign, program) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(err, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    helper := JetCLIRustForeignArtifact?{None}
+    if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == {
+        .Ok(realized) -> helper = realized
+        .Err(error) -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(error, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    attached :: jet_cli_rust_foreign_attached(helper, program) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(err, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     lowered :: if attached.len() == 1 -> lir_lower_entry(attached[0], entry) else -> lir_lower_entry(program, entry)
     functions := [String]{}
     messages := [String]{}

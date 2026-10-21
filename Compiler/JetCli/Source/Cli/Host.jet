@@ -25,6 +25,7 @@ use jet_driver.[
     JetDriverCompileResult,
     JetDriverCompileTarget,
     JetDriverDocModule,
+    JetDriverForeignLinkFacts,
     JetDriverRustForeignError,
     JetDriverRustForeignFacts,
     JetDriverVerbOutput,
@@ -126,9 +127,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
-                if result.mir == .Val(program) {
-                    if jet_cli_rust_foreign_realize(result.rust_foreign, program) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
-                } else { jet_cli_finish(jet_cli_ice("the checked Rust foreign declarations finished without their MIR link facts")) }
+                if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
             }
             output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if jet_cli_errors(diagnostics).len() == 0 {
@@ -384,9 +383,15 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
         None -> {}
         .Val(program) -> {
             if result.trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
-            attached := jet_cli_rust_foreign_attached(rust_foreign, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
+            helper := JetCLIRustForeignArtifact?{None}
+            if jet_cli_rust_foreign_realize(rust_foreign, result.foreign_link) == {
+                .Ok(realized) -> helper = realized
+                .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
+            }
+            attached := jet_cli_rust_foreign_attached(helper, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
             if result.trace_sink == .Val(sink) -> sink.end("native.rust_foreign", attached.len())
-            stopped :: if attached.len() == 1 -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &attached[0], sources, runtime_dir, keep_going, fault_dump, &fronts, &census) else -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &program, sources, runtime_dir, keep_going, fault_dump, &fronts, &census)
+            rust_helper :: if helper == .Val(artifact) -> Val(jet_cli_rust_foreign_archive(artifact)) else -> None
+            stopped :: if attached.len() == 1 -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &attached[0], result.foreign_link, rust_helper, sources, runtime_dir, keep_going, fault_dump, &fronts, &census) else -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &program, result.foreign_link, rust_helper, sources, runtime_dir, keep_going, fault_dump, &fronts, &census)
             if stopped != None -> return stopped
         }
     }
@@ -400,15 +405,14 @@ fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIFor
     jet_cli_native_back(^front, result.trace_sink, result.compiler_threads, level, runtime_dir, object_path, executable_path, keep_going, fault_dump, &census)
 }
 
-// jet_cli_rust_foreign_prepare without taking the program: none, or the one
-// copy a realized Rust foreign helper attaches to.
-fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRProgram) -[FS, Env, Exec, Time.Wait]> [MIRProgram] JetDriverRustForeignError! {
-    realized :: jet_cli_rust_foreign_realize(facts, program)
-    if realized == {
+// None, or the one copy of `program` the realized Rust foreign helper
+// `helper` attaches to.
+fn jet_cli_rust_foreign_attached(helper: JetCLIRustForeignArtifact?, program: MIRProgram) -> [MIRProgram] JetDriverRustForeignError! {
+    if helper == {
         // copy: the program stays the compile result's (owner: result.mir, read by the native
         // route and the caller afterwards); the Rust foreign helper attaches to its own
         // rewritten program (owner: the returned list). Only programs with a helper pay this.
-        .Val(artifact) -> { return Ok([MIRProgram]{jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, program.copy())}) }
+        .Val(artifact) -> { return Ok([MIRProgram]{jet_cli_rust_foreign_attach(artifact, program.copy())}) }
         .None -> { return Ok([MIRProgram]{}) }
     }
 }
@@ -433,7 +437,7 @@ fn jet_cli_rust_foreign_attached(facts: JetDriverRustForeignFacts, program: MIRP
 // half holds both the MIR and the LIR, so only a lowering failure writes a
 // `fault_dump` of both; an object failure (jet_cli_native_back) writes the
 // LIR its per-function jobs hand back, the MIR being released by then.
-fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, threads: CompilerThreads, unpruned: &MIRProgram, sources: JetCLIForeignSources, runtime_dir: String, keep_going: Bool, fault_dump: String?, fronts: &[JetCLINativeFront], census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, threads: CompilerThreads, unpruned: &MIRProgram, foreign_link: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, keep_going: Bool, fault_dump: String?, fronts: &[JetCLINativeFront], census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
     entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
     // Only functions the entry reaches are lowered, generic ones per instance.
     if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
@@ -459,7 +463,7 @@ fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTrac
     if trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
     foreign := JetCLIForeignInputs?{None}
     foreign_error := ""
-    if jet_cli_native_c_inputs(unpruned, sources, runtime_dir) == {
+    if jet_cli_native_c_inputs(foreign_link, rust_helper, sources, runtime_dir) == {
         .Ok(inputs) -> foreign = Val(inputs)
         .Err(error) -> foreign_error = error.message
     }
@@ -1838,6 +1842,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             output = jet_cli_gates_run(file, gate_args, color, json)
         }
         .Output(file, address, color, json) -> output = jet_cli_output_run(file, address, color, json)
+        .Doctor(online, apply, cross_target, color) -> output = jet_cli_doctor(online, apply, cross_target, color)
         .CompilerService(op) -> output = jet_cli_compiler_service(op)
     }
     output

@@ -6359,8 +6359,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // The slot IR route reads what lowering would read and lowers nothing.
     if capture.stop_before_lowering {
         if request.trace_sink == .Val(sink) -> sink.end("lower", sema_functions.len())
+        foreign_link :: jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
         capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, entry_module_identity: load.entry_module_identity})
-        return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
+        result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
+        result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
+        result.foreign_link = foreign_link
+        return result
     }
 
     lowered := jet_driver_lower_releasing(^prelower_released, &sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, request.native_stop_points, jet_driver_resolved_package_edition(load), kg.enabled)
@@ -6448,6 +6452,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     load.diagnostics = stage_diagnostics
     package_facts :: package_facts_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     foreign_artifacts := lower_foreign_artifacts(checked_graph.modules, package_facts)
+    foreign_link :: jet_driver_foreign_link_facts(checked_graph.modules, load.source_files)
     // Test mode (Rust artifact_plan.rs `lower_test`/`lower_harness`, mir.rs
     // `lower_artifact_rows`): the checked tests' facts and their one Test
     // harness, lowered while the tests' checked TIR rows are still resident.
@@ -6695,6 +6700,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if !emit_rust {
         result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, None, true, trace)
         result.rust_foreign = rust_foreign
+        result.foreign_link = foreign_link
         jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
         return result
     }
@@ -6759,6 +6765,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     }
     result := jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), emitted_source, emit_manifest, None, true, trace)
     result.rust_foreign = rust_foreign
+    result.foreign_link = foreign_link
     jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
     result
 }

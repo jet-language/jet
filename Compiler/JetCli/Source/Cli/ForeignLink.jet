@@ -5,8 +5,8 @@
 use core.files as cli_files
 use core.process as cli_process
 use core.sys as cli_sys
-use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, jet_driver_c_dependencies]
-use jet_foundation.[MIRForeign, MIRProgram, MIRType, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
+use jet_foundation.[Type, mir_sha256_bytes, mir_sha256_hex_bytes]
 
 #Error
 struct JetCLIForeignLinkError { message: String }
@@ -264,8 +264,8 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
 }
 
 // FFI.rs `inline_c_type`: the C spelling of a checked inline scalar.
-fn jet_cli_inline_c_type(ty: MIRType) -> String Never! {
-    if ty.kind == {
+fn jet_cli_inline_c_type(ty: Type) -> String Never! {
+    if ty == {
         .Int -> "int64_t"
         .Float -> "double"
         .Float32 -> "float"
@@ -276,46 +276,16 @@ fn jet_cli_inline_c_type(ty: MIRType) -> String Never! {
     }
 }
 
-// The checked span's triple-quoted foreign body (InlineAsm.jet's recovery
-// rule): MIR keeps the declaration span in its module's source, not the text.
-fn jet_cli_inline_c_body(program: MIRProgram, row: MIRForeign) -> String? Never! {
-    file := U64?{None}
-    loop owner in program.modules {
-        if owner.id.value == row.module_id.value -> file = Val(owner.source_file.value)
-    }
-    wanted :: file ?? return None
-    loop source_file in program.source_files {
-        if source_file.id.value != wanted -> next
-        bytes :: source_file.source.bytes()
-        if row.span.start < 0 || row.span.end < row.span.start || row.span.end > bytes.len() -> return None
-        open := -1
-        at := row.span.start
-        loop at + 2 < row.span.end {
-            if bytes[at] == (U8{34}) && bytes[at + 1] == (U8{34}) && bytes[at + 2] == (U8{34}) {
-                if open < 0 {
-                    open = at + 3
-                    at += 3
-                    next
-                }
-                return Val(String.from_bytes(bytes.slice(open, at)) ?? return None)
-            }
-            at += 1
-        }
-        return None
-    }
-    None
-}
-
 // FFI.rs `emit_native_inline_source`: the body, its prototype and the
 // `jet_inline_<wrapper>` symbol the checked foreign row calls.
-fn jet_cli_inline_c_source(row: MIRForeign, body: String, index: Int) -> String Never! {
+fn jet_cli_inline_c_source(row: JetDriverInlineC, body: String) -> String Never! {
     ret :: if row.return_type == .Val(ty) -> jet_cli_inline_c_type(ty) else -> "void"
     types := [String]{}
     typed := [String]{}
     args := [String]{}
     loop (position, param) in row.params {
         base :: jet_cli_inline_c_type(param.ty)
-        c_type :: if param.access == .Write -> "{base}*" else -> base
+        c_type :: if param.write -> "{base}*" else -> base
         &types.push(c_type)
         &typed.push("{c_type} p{position}")
         &args.push("p{position}")
@@ -323,7 +293,7 @@ fn jet_cli_inline_c_source(row: MIRForeign, body: String, index: Int) -> String 
     call :: if ret == "void" -> "{row.name}({args.join(", ")});" else -> "return {row.name}({args.join(", ")});"
     declared :: if types.len() == 0 -> "void" else -> types.join(", ")
     defined :: if typed.len() == 0 -> "void" else -> typed.join(", ")
-    "/* Jet #FFI provenance: entry {index}, language c. */\n#include <stdint.h>\n#include <stdbool.h>\n{ret} {row.name}({declared});\n{body}\n{ret} {row.symbol}({defined}) {{ {call} }}\n"
+    "/* Jet #FFI provenance: entry {row.index}, language c. */\n#include <stdint.h>\n#include <stdbool.h>\n{ret} {row.name}({declared});\n{body}\n{ret} {row.symbol}({defined}) {{ {call} }}\n"
 }
 
 // FFI.rs `emit_inline_build_rs` for the native link: every selected inline C
@@ -332,15 +302,12 @@ fn jet_cli_inline_c_source(row: MIRForeign, body: String, index: Int) -> String 
 // them together with undefined symbols refused, so bodies may share C state
 // but nothing may stay unresolved; then one archive joins the native link.
 // None when the program has no inline C body.
-fn jet_cli_native_inline_c(program: MIRProgram, cache: String) -[FS, Env, Exec, Time.Wait]> String? JetCLIForeignLinkError! {
+fn jet_cli_native_inline_c(facts: JetDriverForeignLinkFacts, cache: String) -[FS, Env, Exec, Time.Wait]> String? JetCLIForeignLinkError! {
     units := [String]{}
-    loop (index, row) in program.foreign {
-        inline :: row.path.starts_with("jet_ffi_") && row.symbol == "jet_inline_{row.path}"
-        if !inline -> next
-        if row.foreign_language == .Cpp -> return Err(jet_cli_foreign_link_error("inline C++ `{row.name}` needs a C++ runtime, which the native static link does not package"))
-        if row.foreign_language != .C -> next
-        body :: jet_cli_inline_c_body(program, row) ?? return Err(jet_cli_foreign_link_error("inline C `{row.name}` has no triple-quoted body within its checked source span"))
-        &units.push(jet_cli_inline_c_source(row, body, index))
+    loop row in facts.inline_c {
+        if row.cpp -> return Err(jet_cli_foreign_link_error("inline C++ `{row.name}` needs a C++ runtime, which the native static link does not package"))
+        body :: row.body ?? return Err(jet_cli_foreign_link_error("inline C `{row.name}` has no triple-quoted body within its checked source span"))
+        &units.push(jet_cli_inline_c_source(row, body))
     }
     if units.len() == 0 -> return Ok(None)
     tools :: jet_cli_native_c_tools() ?? return Err(err)
@@ -449,8 +416,10 @@ fn jet_cli_native_c_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetC
     Ok(JetCLIForeignSources{root: root, declarations: jet_driver_c_dependencies(snapshot)})
 }
 
-// Runtime factories consume this closure without program platform inputs.
-fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
+// The checked foreign link facts `facts` realized as link inputs: the C
+// provider archives, the realized Rust helper archive `rust_helper` (its
+// exact StaticLibrary) and the inline C archive, in that order.
+fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
     inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
     root :: sources.root
     // Every archive key hashes the tools, flags, source and preprocessed
@@ -458,11 +427,11 @@ fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, 
     // every project and every compiler stage; a fresh project starts warm.
     cache :: "{jet_cli_rust_foreign_cache()}/clinks"
     declarations :: sources.declarations
-    libraries := program.cffi.direct_links
+    libraries := facts.direct_links.copy()
     if libraries.len() == 0 {
-        loop row in program.cffi.libs -> &libraries.push(row.lib)
+        loop lib in facts.libraries -> &libraries.push(lib)
     }
-    loop lib in program.cffi.transitive_links -> &libraries.push(lib)
+    loop lib in facts.transitive_links -> &libraries.push(lib)
     libraries = jet_cli_sorted_set(libraries)
     loop lib in libraries {
         // These names select the program's one implicit musl platform below.
@@ -522,17 +491,9 @@ fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, 
             jet_cli_foreign_add(&inputs, path) ?? return Err(err)
         }
     }
-    // Generated foreign providers already declare exact objects/archives.
-    loop link in program.links {
-        loop artifact in link.artifacts {
-            if artifact.kind == {
-                .Object | .StaticLibrary -> jet_cli_foreign_add(&inputs, artifact.path) ?? return Err(err)
-                else -> { return Err(jet_cli_foreign_link_error("native foreign link input `{artifact.path}` is not an object or static archive")) }
-            }
-        }
-    }
+    if rust_helper == .Val(path) -> jet_cli_foreign_add(&inputs, path) ?? return Err(err)
     // FFI.rs's inline C bridge: every selected `#FFI(c)` body, one archive.
-    if jet_cli_native_inline_c(program, cache) == {
+    if jet_cli_native_inline_c(facts, cache) == {
         .Val(archive) -> { jet_cli_foreign_add(&inputs, archive) ?? return Err(err) }
         .None -> {}
         .Err(error) -> { return Err(error) }
@@ -564,12 +525,9 @@ fn jet_cli_foreign_platform_archive(runtime_dir: String, name: String) -[FS, Env
 // with the Jet-only runtime object. The runtime pack already holds a private,
 // initialized libc; a second libc beside it would be uninitialized.
 // Programs without a foreign closure preserve the original link line exactly.
-fn jet_cli_native_c_inputs(program: MIRProgram, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
-    inputs := jet_cli_native_c_closure(program, sources, runtime_dir) ?? return Err(err)
-    has_c := inputs.names.len() > 0 || program.cffi.libs.len() > 0 || program.cffi.direct_links.len() > 0 || program.cffi.transitive_links.len() > 0
-    loop row in program.foreign {
-        if row.foreign_language == .C || row.foreign_language == .Rust -> has_c = true
-    }
+fn jet_cli_native_c_inputs(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs JetCLIForeignLinkError! {
+    inputs := jet_cli_native_c_closure(facts, rust_helper, sources, runtime_dir) ?? return Err(err)
+    has_c :: inputs.names.len() > 0 || facts.libraries.len() > 0 || facts.direct_links.len() > 0 || facts.transitive_links.len() > 0 || facts.c_or_rust_rows
     if !has_c -> return Ok(inputs)
     loop name in ([String]{"libc.a", "libgcc_eh.a", "libgcc.a"}) {
         path :: jet_cli_foreign_platform_archive(runtime_dir, name) ?? return Err(err)
