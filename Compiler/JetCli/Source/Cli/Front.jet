@@ -901,19 +901,11 @@ fn jet_cli_has_doctests(source: String) -> Bool Never! {
     false
 }
 
-// Source/main.rs `has_entry_fn(file, "test")`: a top-level `fn test` is the
-// command override. Top-level declarations start their line.
-fn jet_cli_declares_test_override(source: String) -> Bool Never! {
-    loop line in source.split("\n") {
-        if line.starts_with("fn test(") || line.starts_with("fn test ") -> return true
-    }
-    false
-}
-
-// `jet test <file> [<filter>]` (Source/CmdCompile.rs `TestRunOpts::parse`,
-// `run_test_opts`, `run_test_target` up to the compile). Directory and package
-// targets, doctests, the `fn test` override, the result cache, and the flags
-// above are not ported yet.
+// `jet test [<target>] [<filter>]` (Source/CmdCompile.rs `TestRunOpts::parse`,
+// `run_test_opts`, `run_test_target` up to the compile). A package directory
+// (or no target inside a package) tests through its own `fn test(t: Test)` when
+// it declares one, as `jet build` runs its `fn build`. Doctests, the result
+// cache, and the flags above are not ported yet.
 fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     options := JetCLITestOptions{release: false, capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, project_root: None, status: ""}
     fresh := false
@@ -992,27 +984,36 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         .Selected(release) -> options.release = release
     }
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
-    // A bare `jet test` or `jet test <dir>` tests the package: its entry file loads the
-    // whole package, and the harness collects every #Test of every package file.
-    if positionals.len() == 0 {
-        directory :: cli_files.cwd() ?? "."
-        if jet_cli_has_manifest_above(directory) {
+    // A bare `jet test` or `jet test <dir>` tests the package: the directory's own
+    // `fn test(t: Test)` file when it declares one (also for a workspace root), otherwise
+    // its stock entry. The entry file loads the whole package, and the harness collects
+    // every #Test of every package file.
+    if positionals.len() == 0 || cli_files.is_dir(positionals[0]) {
+        directory :: if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0]
+        if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) {
+            return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+        }
+        if !show_default {
+            if jet_cli_command_override(directory, "test", color) == {
+                .Entry(found) -> return jet_cli_test_file(found.path, color, verbose, threads, options, fresh, quiet)
+                .Refused(plan) -> return ^plan
+                .Absent -> {}
+            }
+        }
+        if positionals.len() == 0 {
             notices := [String]{}
-            if jet_cli_resolve_bare_entry("test", directory, None, false, color, &notices) == {
+            if jet_cli_resolve_bare_entry("test", directory, None, !show_default, color, &notices) == {
                 .Entry(entry) -> return jet_cli_test_file(entry.path, color, verbose, threads, options, fresh, quiet)
                 .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
                 .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("test", directory, color))
             }
         }
-        return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
-    }
-    target :: positionals[0]
-    if cli_files.is_dir(target) {
-        if jet_cli_resolve_directory_target("test", target, None, false, color) == {
+        if jet_cli_resolve_directory_target("test", directory, None, !show_default, color) == {
             .File(path, _, _) -> return jet_cli_test_file(path, color, verbose, threads, options, fresh, quiet)
             .Refused(plan) -> return plan
         }
     }
+    target :: positionals[0]
     // Source/main.rs `resolve_source_path`: the typed spelling, else `<target>.jet`.
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
