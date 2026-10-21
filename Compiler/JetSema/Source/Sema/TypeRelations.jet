@@ -751,7 +751,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, module_identi
             && nominal.kind != SemaRegistrationNominalKind.TypeAlias
             // A trait in type position (`CompilerTraceSink?`) is a type too: a signature from
             // another package spells it bare where the caller holds its owner-qualified name.
-            && nominal.kind != SemaRegistrationNominalKind.Trait -> next
+            && (nominal.kind != SemaRegistrationNominalKind.Trait || owner_row.module_identity.starts_with("<corelib>/")) -> next
         if !sema_registration_visible(nominal.symbol.visibility, caller.module_identity, caller.package_identity, owner_row.module_identity, owner_row.package_identity) -> next
         if found == .Val(previous) {
             if previous.module_index != owner.module_index -> return None
@@ -783,7 +783,10 @@ fn sema_type_graph_base_name(ty: Type) -> String? {
 // The registered nominal row `actual` names from `caller_module_identity`.
 fn sema_type_resolve_nominal_row(graph: SemaRegistrationGraph, actual: Type, caller_module_identity: String) -> SemaRegistrationRowRef? {
     name :: sema_type_graph_base_name(actual) ?? return None
-    resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return sema_type_unscoped_nominal_row(graph, name)
+    resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? {
+        if caller_module_identity.starts_with("<corelib>/") -> return None
+        return sema_type_unscoped_nominal_row(graph, name)
+    }
     if resolved.symbol.kind != SymbolKind.Type -> return None
     sema_type_graph_resolved_nominal_row(graph, resolved)
 }

@@ -459,7 +459,7 @@ fn sema_failure_declared_conversion(source: Type, target: Type, environment: Sem
 // scope; the package is still one namespace, so its routine applies here.
 fn sema_failure_namespace_conversion(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     graph :: program.registration_graph ?? return None
-    if !sema_registration_package_is_namespace(environment.package_identity) -> return None
+    if !sema_registration_package_is_namespace(environment.package_identity) || environment.module_identity.starts_with("<corelib>/") -> return None
     loop module_row in graph.modules {
         if module_row.package_identity != environment.package_identity -> next
         loop function in module_row.functions {

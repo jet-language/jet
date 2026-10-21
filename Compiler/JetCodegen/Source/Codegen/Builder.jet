@@ -1062,7 +1062,8 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
     module_packages := [String:String]{}
     package_nominals := [String:[String:JetCodegenNominalIdentity]]{}
     loop semantic_module in modules {
-        if !sema_registration_package_is_namespace(semantic_module.package_identity) -> next
+        // Source packages only: Core resolves its own types through the Core owner routes.
+        if !sema_registration_package_is_namespace(semantic_module.package_identity) || semantic_module.module_identity.starts_with("<corelib>/") -> next
         module_packages[semantic_module.module_identity] = semantic_module.package_identity
         names := package_nominals.get(semantic_module.package_identity) ?? [String:JetCodegenNominalIdentity]{}
         loop nominal in semantic_module.nominals {
@@ -1078,6 +1079,7 @@ fn jet_codegen_nominal_index(modules: [SemaGraphModuleResult]) -> JetCodegenNomi
     }
     import_nominals := [String:[String:JetCodegenNominalIdentity]]{}
     loop semantic_module in modules {
+        if semantic_module.module_identity.starts_with("<corelib>/") -> next
         imported := [String:JetCodegenNominalIdentity]{}
         loop import_row in semantic_module.imports {
             if import_row.target_module_identity.starts_with("<corelib>/") -> next
