@@ -1156,6 +1156,18 @@ fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffec
     }
 }
 
+// `close(^value)`: an edge to the value type's own `Close.close`
+// implementation, the method codegen calls for it. Implementations are keyed
+// by the implementing type's name, so a same-named type in another module
+// adds its implementation too: the row may only grow, never miss one.
+fn sema_effect_record_close(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, value: TExpr) Never! {
+    owner :: sema_effect_symbol_leaf(type_name(value.ty))
+    suffix :: "|Close::close#{owner}"
+    loop (key, impl_key) in facts.trait_impls {
+        if key.ends_with(suffix) -> sema_effect_node_add_edge(&nodes, node_index, impl_key)
+    }
+}
+
 // The declaring module of a `kind:{module}::{name}` type symbol key
 // (`symbol_id` with an empty owner).
 fn sema_effect_symbol_module(key: String) -> String? Never! {
@@ -1201,6 +1213,9 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
             sema_effect_record_memory_open(&nodes, node_index, expression.span, "foreign or dynamically selected function body")
         }
         .RequireStop(_, _, _) | .Never(_) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
+        // `close(^value)` runs the value type's own `Close.close`, so that
+        // method's effects are this function's (codegen calls it directly).
+        .Close(value) -> sema_effect_record_close(&nodes, facts, node_index, value)
         .Lambda(value) | .LambdaValue(value) -> {
             sema_effect_merge_lambda(&nodes, node_index, value)
             return

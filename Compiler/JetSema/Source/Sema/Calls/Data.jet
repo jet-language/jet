@@ -409,6 +409,16 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
                 }
             }
+            // `suite.run()` runs the package's `#Test` blocks on the harness the
+            // `Test` value carries and returns the failure count.
+            if name == "Test" && method == "run" {
+                if args.len() != 0 -> sema_data_arity_diagnostic("Test.run", 0, args.len(), span, &diagnostics)
+                if type_args.len() != 0 -> sema_data_check_explicit_type_args("Test.run", type_args, 0, span, &diagnostics)
+                sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                value := sema_tir_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.TestSuiteRun, args: [TExpr]{}}, span)
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+            }
         }
         .Apply(name, parameters) -> {
             if name == "DataStream" && parameters.len() == 1 && method == "next" {
