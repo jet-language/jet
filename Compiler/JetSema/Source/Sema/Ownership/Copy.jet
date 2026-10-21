@@ -158,8 +158,10 @@ fn sema_copy_apply_is_dynamic_loan(name: String) -> Bool Never! {
 fn sema_copy_named_is_core(name: String) -> Bool Never! {
     // CoreModuleExports is the canonical closed Core type surface. The
     // language carriers below are intrinsic and intentionally have no module
-    // export row; all other Core names come from the generated table.
+    // export row, nor do the process handles the checker types itself; all
+    // other Core names come from the generated table.
     if name == "Unit" || name == "Never" || name == "Err" || name == "U8" || name == "str" || name == "bytes" || name == "Complex" || name == "Range" -> return true
+    if sema_process_handle_type(name) -> return true
     core_type_modules(name).len() > 0
 }
 

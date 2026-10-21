@@ -26,6 +26,17 @@ fn sema_process_named(name: String) -> Type Never! {
     Type.Named{name: name}
 }
 
+// The Core types this module types itself that Core declares nowhere and
+// exports from no module: the spawned child, its plan, streams and line
+// reader, the stream mode, the terminal policy and session, and the parsed
+// arguments. Copy and sendability judgments know them as Core types.
+fn sema_process_handle_type(name: String) -> Bool Never! {
+    if name == {
+        "ProcessChild" | "ProcessPlan" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines" | "ProcessStreamMode" | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession" | "ParsedArgs" -> true
+        else -> false
+    }
+}
+
 fn sema_process_result(ok: Type, err: Type) -> Type Never! {
     Type.Result{ok: ok, err: err}
 }
