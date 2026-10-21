@@ -315,6 +315,117 @@ when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
+### Single slot IR (target middle end)
+
+D-ARCH-IR1=A replaces the three middle representations, TIR→MIR, the MIR
+optimizer and lint, MIR→LIR, and LIR-based instruction selection and register
+allocation, with one IR per function. The target pipeline is:
+
+```text
+checked program (TIR + sema facts) -> IR (slots, structured control) -> x86-64 selection
+  -> existing encoder, object writer, DWARF, static linker, runtime pack
+```
+
+**Frozen boundaries.** Both ends of the middle stay exactly as they are; only
+the internals between them are reworked. Changing either boundary needs the
+owner's explicit approval.
+
+- *Front-end boundary:* the IR builder consumes exactly what codegen consumes
+  today: the checked program (TIR `TFunc` rows and the sema facts they carry).
+  The parser, sema and every front-end API stay unchanged. A data-oriented
+  front end (flat AST, facts in tables keyed by node id) is a later,
+  separate step; when it lands, it changes the builder's input reader and
+  nothing below it.
+- *Emission boundary:* the IR path produces `X64CompiledFunction` and
+  `X64FunctionDebug` rows for the existing encoder (`X64/Encoder.jet`),
+  object writer (`Image/Object.jet`), DWARF writer (`Image/Dwarf.jet`) and
+  static linker (`Image/StaticLink.jet`). It calls the same runtime symbols
+  with the same System V ABI and links the same runtime pack, so a program
+  built on either path behaves identically.
+
+**Data model** ([`Compiler/JetIR/Source/IR.jet`](../../Compiler/JetIR/Source/IR.jet)).
+An `IRModule` holds interned type rows (the checked `Type`, its kind, size,
+alignment, ABI class and drop symbol), interned names, read-only data rows and
+the functions, keyed by their stable function key. An `IRFunction` is one flat
+arena in struct-of-arrays form: slot columns (type, kind, name, line) and
+instruction columns (`op`, `dst`, `a`, `b`, `c`, line), plus one shared
+operand pool for calls. Slots `0..<param_count` are the parameters. There is
+no per-instruction or per-slot heap allocation, and every reference is an
+integer id.
+
+- **Not SSA.** A slot is a mutable typed variable. An instruction reads slots
+  and writes at most one. Loops need no block parameters, so the back-edge
+  copies that made up half of all LIR instructions do not exist.
+- **Structured control.** `Block`, `Loop`, `If`/`Else`, `End`, `Br depth`,
+  `BrIf`, `Return` and `Unreachable`; there are no arbitrary jumps. Every
+  opener records the index of its `End`, so a walker skips a region in O(1).
+  The form maps one-to-one onto Wasm blocks and locals.
+- **Explicit ownership.** `Copy`, `Move`, `Drop` and `Close` are instructions.
+  The builder emits them from the checked ownership facts, and only for types
+  that have a drop.
+- **Semantic operations where Jet semantics live.** For example, `Add` on an
+  exact `Int` slot means inline arithmetic with a big-integer spill, and
+  `Concat` means String concatenation. The slot's type row selects the
+  meaning, and the machine layer chooses the instruction sequence. The
+  runtime routes are the old backend's symbols.
+- **Content hash.** A function's key is the SHA-256 of its text form, in which
+  every interned id is spelled out by content. That key is the unit for the
+  store, caching and per-function hot swap, and it replaces the MIR digest.
+
+**SSA only on demand.** A pass that needs SSA (value numbering, constant
+propagation across joins) builds an SSA view of one function, uses it and
+discards it. A view is never stored, never spans functions and never becomes
+the program's representation. O0 builds never construct one.
+
+**Consumers and their replacements.**
+
+| Consumer today | Reads | Replacement |
+|---|---|---|
+| TIR→MIR lowering and assembly (`JetCodegen/Source/Codegen`, Driver assemble) | TIR | IR builder (`JetIR/Source/Build*.jet`), from the same checked rows |
+| MIR legality and lint (`JetOptimizer/Source/Verification`) | MIR | one structural IR verifier that runs only in verify mode; sema remains the single semantic check |
+| MIR optimizer (`JetOptimizer/Source/Transforms`) and LIR passes (`JetBackend/Source/Opt`) | MIR, LIR | none at O0; O1/O2 passes are rewritten on the IR (inlining splices slot arenas; loop work uses the structured loops; SSA views where needed) |
+| MIR→LIR lowering (`JetBackend/Source/Lower`) and LIR selection/allocation (`X64/Select.jet`, `X64/RegAlloc.jet`) | MIR, LIR | IR x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) |
+| Encoder, object writer, DWARF, static linker | x64 rows | unchanged (emission boundary); DWARF variables are slots |
+| Comptime evaluator (`JetEval`) and in-memory native comptime | MIR | runs the IR (in-memory machine code from the same selector), one meaning for comptime and run time |
+| Web emission (`JetCodegen/Source/Emit/Web`) | MIR | structured IR maps to Wasm and JS control directly |
+| Rust emission (`MIRRust`) | MIR | removed with Rust, not ported |
+| REPL, session host and hot swap | MIR, LIR | per-function IR units keyed by content hash |
+| Test harness lowering, canonical pass journal, cost reports, acceleration ledger | MIR | read the IR and its facts |
+
+**Migration order.** Each step lands only with its proof, and each cutover
+deletes the old path: there are no permanent dual paths.
+
+1. *Spike, then O0 corpus.* The IR builder, x86-64 selection and a
+   differential runner sit beside the old path. They are not part of the
+   self-hosting unit until cutover. Coverage grows by collect-all censuses:
+   one keep-going run over the corpus, Core and the compiler unit yields
+   one histogram of unsupported constructs, which is fixed as a batch.
+2. *O0 cutover* (`jet run`, `jet dev`, native comptime). This step deletes
+   the MIR→LIR O0 route.
+3. *Self-host on the IR.* The compiler built through the IR rebuilds itself
+   to a byte-identical fixed point.
+4. *O1/O2 on the IR* (`jet build`, `--release`). This step deletes
+   `JetOptimizer`, the LIR and `JetBackend/Source/Lower`.
+5. *Comptime evaluator and web emission on the IR.* This step deletes the MIR
+   and its evaluator.
+6. *Data-oriented front end* (flat AST and facts by node id), the separate
+   later step. It changes the builder's input reader only.
+
+**Differential oracle.** Every cutover requires the following:
+
+- *Corpus:* each program the old backend passes produces byte-identical
+  stdout, stderr and exit status on both paths. A program the old backend
+  fails but the IR passes must match its golden output.
+- *Self-host:* the compiler built through the IR rebuilds itself to a
+  byte-identical stage, and it produces the old-path compiler's output on
+  the corpus.
+- *Comptime:* the evaluator on the IR agrees with the MIR evaluator on every
+  comptime program.
+
+The phase trace sets the old path's `lower`, `assemble`, `optimize`,
+`native.lower` and `native.object` against the IR path's `ir.build`, `ir.x64`
+and `ir.object` on the same corpus and machine.
+
 ### Typed IR (TIR) — the codegen seam
 
 The [TIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) accepts the
