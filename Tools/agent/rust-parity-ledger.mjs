@@ -14,7 +14,8 @@
 // Writes Docs/audits/rust-exit-parity/{items.tsv,tests.tsv,cli.tsv,offdev.tsv,
 // summary.json,SUMMARY.md}; SUMMARY.md is the owner summary. It also reports the
 // hand-checked matcher samples listed in Docs/audits/rust-exit-parity/samples/rounds.tsv
-// (read from the working tree).
+// and applies the reviewed triage of every unmatched row (triage.tsv, with group
+// rationales in triage-groups.tsv), all read from the working tree.
 //
 // Usage: node Tools/agent/rust-parity-ledger.mjs --rev <commit> [--jet-rev <commit>]
 //          [--jet-refs <ref,ref>] [--check]
@@ -22,7 +23,9 @@
 //   --jet-refs  secondary Jet trees; empty string disables them.
 //   --check     regenerate in memory at the commits the committed summary.json
 //               records (unless given explicitly); print `differs: <path>` per
-//               mismatch to stderr and exit 1 if committed outputs differ.
+//               mismatch to stderr and exit 1 if committed outputs differ or the
+//               triage leaves a row unclassified, cites a missing Jet file,
+//               has a row matching nothing or a group without a rationale.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,6 +37,9 @@ const OUT_REL = 'Docs/audits/rust-exit-parity';
 const OUTPUTS = ['items.tsv', 'tests.tsv', 'cli.tsv', 'offdev.tsv', 'summary.json', 'SUMMARY.md'];
 const MAPPING_PATH = 'Compiler/JetParser/Tests/RustTestMapping.tsv';
 const RETIRED_PATH = 'Tools/testkit/retired-with-rust.tsv';
+const TRIAGE_FILE = 'triage.tsv';
+const GROUPS_FILE = 'triage-groups.tsv';
+const CLASSES = ['covered', 'missing', 'obsolete'];
 
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -1126,6 +1132,218 @@ function classifyTest(t, ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Triage: the reviewed class of every unmatched row
+// ---------------------------------------------------------------------------
+
+// triage.tsv rows: kind (item|test), rust_file (a Rust path, or a directory prefix ending
+// in `/`), name (`Owner::name`, `name`, or `*` for every other row of that file or
+// directory), class (covered|missing|obsolete), group, evidence. The most specific row
+// wins: the exact file before directory prefixes (longest first); within one path
+// `Owner::name`, then `name`, then `*`. triage-groups.tsv rows: group, class, rationale.
+// Malformed rows are reported as problems, never silently applied.
+function loadTriage() {
+  const problems = [];
+  const read = (file, head) => {
+    const p = join(ROOT, OUT_REL, file);
+    if (!existsSync(p)) return [];
+    const lines = readFileSync(p, 'utf8').split('\n');
+    if (lines[0] !== head.join('\t')) {
+      problems.push(`${file}:1: header must be ${head.join(' ')}`);
+      return [];
+    }
+    return lines
+      .slice(1)
+      .map((l, i) => ({ at: `${file}:${i + 2}`, cols: l.replace(/\r$/, '').split('\t') }))
+      .filter((r) => r.cols.some(Boolean));
+  };
+  const rules = new Map();
+  for (const { at, cols } of read(TRIAGE_FILE, ['kind', 'rust_file', 'name', 'class', 'group', 'evidence'])) {
+    const [kind, path, name, cls, group, evidence] = cols;
+    if (cols.length !== 6 || cols.some((c) => !c.trim())) problems.push(`${at}: needs 6 non-empty columns`);
+    else if (kind !== 'item' && kind !== 'test') problems.push(`${at}: kind \`${kind}\` is not item or test`);
+    else if (!CLASSES.includes(cls)) problems.push(`${at}: class \`${cls}\` is not ${CLASSES.join(', ')}`);
+    else {
+      const key = `${kind}\t${path}`;
+      if (!rules.has(key)) rules.set(key, new Map());
+      const prior = rules.get(key).get(name);
+      if (prior) problems.push(`${at}: repeats ${prior.at}`);
+      else rules.get(key).set(name, { at, cls, group, evidence, hits: 0 });
+    }
+  }
+  const groups = new Map();
+  for (const { at, cols } of read(GROUPS_FILE, ['group', 'class', 'rationale'])) {
+    const [group, cls, rationale] = cols;
+    if (cols.length !== 3 || cols.some((c) => !c.trim())) problems.push(`${at}: needs 3 non-empty columns`);
+    else if (!CLASSES.includes(cls)) problems.push(`${at}: class \`${cls}\` is not ${CLASSES.join(', ')}`);
+    else if (groups.has(group)) problems.push(`${at}: repeats group \`${group}\``);
+    else groups.set(group, { at, cls, rationale, items: 0, tests: 0, rustLines: 0 });
+  }
+  return { rules, groups, problems };
+}
+
+function triageRule(triage, kind, file, names) {
+  const paths = [file];
+  for (let i = file.lastIndexOf('/'); i > 0; i = file.lastIndexOf('/', i - 1)) paths.push(file.slice(0, i + 1));
+  for (const p of paths) {
+    const byName = triage.rules.get(`${kind}\t${p}`);
+    if (!byName) continue;
+    for (const n of names) {
+      const r = byName.get(n);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+// `path/File.ext:LINE` citations in triage evidence (extensionless files such as a
+// tests/ui `stderr` too), with the cited definition's name when written
+// `path:LINE (name ...)`; a citation qualified by a ref (`origin/port/main:path:LINE`)
+// names another tree and is not checked here.
+const CITE_RE = /(?<![:\w./-])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+):(\d+)(?:-\d+)?(?:\s*\(\s*([A-Za-z_][\w.:]*))?/g;
+
+// Sets cls/group/classEvidence on every row: the triage class for unmatched rows
+// (`unclassified` when no triage row applies), `-` for rows a ledger rule matched.
+// Checks every citation against the Jet tree (or the pinned Rust tree for Rust paths)
+// and returns the class counts and every triage problem.
+function applyTriage(itemRows, testRows, ctx) {
+  const triage = loadTriage();
+  const problems = [...triage.problems];
+  const zero = () => ({ covered: 0, missing: 0, obsolete: 0, unclassified: 0 });
+  const counts = { items: zero(), tests: zero() };
+  // Per area (`crates/<crate>`, `Source/<file>`, `tests`): rows and Rust lines per class,
+  // and rows per missing group.
+  const areas = {};
+  const apply = (r, kind, unmatched, names) => {
+    if (!unmatched) {
+      Object.assign(r, { cls: '-', group: '-', classEvidence: '-' });
+      return;
+    }
+    const rule = triageRule(triage, kind, r.file, names);
+    if (rule) {
+      rule.hits++;
+      Object.assign(r, { cls: rule.cls, group: rule.group, classEvidence: rule.evidence });
+      const lines = r.end - r.start + 1;
+      const g = triage.groups.get(rule.group);
+      if (g) {
+        g[kind === 'item' ? 'items' : 'tests']++;
+        g.rustLines += lines;
+      }
+      const area = r.file.startsWith('tests/') ? 'tests' : r.file.split('/').slice(0, 2).join('/');
+      const a = (areas[area] ??= { groups: {} });
+      const c = (a[rule.cls] ??= { items: 0, tests: 0, rust_lines: 0 });
+      c[kind === 'item' ? 'items' : 'tests']++;
+      c.rust_lines += lines;
+      if (rule.cls === 'missing') bump(a.groups, rule.group);
+    } else {
+      Object.assign(r, { cls: 'unclassified', group: '-', classEvidence: '-' });
+    }
+    bump(counts[kind === 'item' ? 'items' : 'tests'], r.cls);
+  };
+  for (const r of itemRows) {
+    const names = r.owner ? [`${r.owner}::${r.name}`, r.name, '*'] : [r.name, '*'];
+    apply(r, 'item', r.status === 'not-ported', names);
+  }
+  for (const t of testRows) apply(t, 'test', t.status === 'not-mapped', [t.name, '*']);
+
+  const cites = new Map();
+  for (const byName of triage.rules.values()) {
+    for (const rule of byName.values()) {
+      if (rule.hits === 0) problems.push(`${rule.at}: matches no unmatched row`);
+      const g = triage.groups.get(rule.group);
+      if (!g) problems.push(`${rule.at}: group \`${rule.group}\` has no rationale in ${GROUPS_FILE}`);
+      else if (g.cls !== rule.cls) problems.push(`${rule.at}: class ${rule.cls} differs from group \`${rule.group}\` (${g.cls})`);
+      const found = [...rule.evidence.matchAll(CITE_RE)];
+      if (rule.cls === 'covered' && found.length === 0) problems.push(`${rule.at}: covered evidence cites no path:LINE`);
+      for (const m of found) {
+        if (!cites.has(m[1])) cites.set(m[1], []);
+        cites.get(m[1]).push({ at: rule.at, line: Number(m[2]), name: m[3] ?? null });
+      }
+    }
+  }
+  for (const [name, g] of triage.groups) {
+    if (g.items + g.tests === 0) problems.push(`${g.at}: group \`${name}\` classifies no row`);
+  }
+  const sources = [...cites.keys()].map((p) => (ctx.jetFiles.has(p) ? `${ctx.jetRev}:${p}` : ctx.rustPaths.has(p) ? `${ctx.rev}:${p}` : null));
+  const known = [...cites.keys()].filter((_, i) => sources[i] !== null);
+  for (const [p, uses] of cites) {
+    if (!ctx.jetFiles.has(p) && !ctx.rustPaths.has(p)) for (const u of uses) problems.push(`${u.at}: cites \`${p}\`, absent from the Jet and Rust trees`);
+  }
+  // A citation naming its definition (`path:LINE (name)`, a compound identifier) must
+  // find that name within three lines of LINE (its last `.`/`::` segment, also as the
+  // tail of a module-prefixed identifier), so drifted or invented lines are caught.
+  eachBlob(sources.filter(Boolean), (i, text) => {
+    const lines = text.split('\n');
+    for (const u of cites.get(known[i])) {
+      if (u.line < 1 || u.line > lines.length) {
+        problems.push(`${u.at}: cites \`${known[i]}:${u.line}\`, past its ${lines.length} lines`);
+        continue;
+      }
+      const word = u.name === null ? null : u.name.split(/::|\./).filter(Boolean).pop();
+      if (!word || !isCompound(word) || basename(known[i]).replace(/\.[^.]+$/, '') === word) continue;
+      const window = lines.slice(Math.max(0, u.line - 4), u.line + 3).join('\n');
+      if (!new RegExp(`(?<![A-Za-z0-9])${word}(?![A-Za-z0-9_])`).test(window)) {
+        problems.push(`${u.at}: \`${word}\` is not within 3 lines of \`${known[i]}:${u.line}\``);
+      }
+    }
+  });
+  problems.sort(cmp);
+
+  const groups = [...triage.groups]
+    .map(([group, g]) => ({ group, class: g.cls, items: g.items, tests: g.tests, rust_lines: g.rustLines, rationale: g.rationale }))
+    .sort((a, b) => b.items + b.tests - (a.items + a.tests) || cmp(a.group, b.group));
+  return { items: counts.items, tests: counts.tests, areas, groups, problems };
+}
+
+// The triage sections of the owner summary: class counts, missing and obsolete rows
+// per area, then every missing (behavior groups, then test-only groups), obsolete and
+// covered group with its size and rationale, then every problem.
+function triageSummary(t) {
+  const out = ['## Triage of unmatched rows\n'];
+  out.push(
+    'Every `not-ported` item and `not-mapped` test carries a reviewed class from `triage.tsv` (columns `class`, `group`, `class_evidence` of `items.tsv` and `tests.tsv`): ' +
+      '`covered` (a Jet counterpart exists; the evidence cites its `path:line`), `missing` (Jet lacks the behavior; `partial:` names what Jet has and lacks, `untested:` a test whose behavior Jet has without a Jet test), ' +
+      '`obsolete` (no meaning in Jet: Rust-host plumbing, a retired surface, or a Jet design that makes it unnecessary; cited). ' +
+      'Group rationales live in `triage-groups.tsv`. `rust lines` sums the Rust source lines of the rows. ' +
+      'The ledger checks every cited Jet `path:line` exists and that a cited definition name sits within three lines of it; `--check` fails on any unclassified row or triage problem.\n',
+  );
+  const classes = [...CLASSES, 'unclassified'];
+  out.push(table(['class', 'items', 'tests', 'rows'], classes.map((c) => [c, count(t.items[c]), count(t.tests[c]), count((t.items[c] ?? 0) + (t.tests[c] ?? 0))])));
+  const areaRows = (cls) =>
+    Object.entries(t.areas)
+      .filter(([, a]) => a[cls])
+      .sort((x, y) => y[1][cls].rust_lines - x[1][cls].rust_lines || cmp(x[0], y[0]));
+  out.push('## Missing by area\n');
+  out.push('Rust area (`crates/<crate>`, `Source/<file>`, every integration test under `tests`), largest Rust line count first, with its five largest missing groups.\n');
+  out.push(
+    table(
+      ['area', 'items', 'tests', 'rust lines', 'largest groups'],
+      areaRows('missing').map(([area, a]) => [
+        `\`${area}\``,
+        count(a.missing.items),
+        count(a.missing.tests),
+        count(a.missing.rust_lines),
+        byCount(a.groups).slice(0, 5).map(([g, n]) => `\`${g}\` ${n}`).join(', '),
+      ]),
+    ),
+  );
+  out.push('## Obsolete by area\n');
+  out.push(table(['area', 'items', 'tests', 'rust lines'], areaRows('obsolete').map(([area, a]) => [`\`${area}\``, count(a.obsolete.items), count(a.obsolete.tests), count(a.obsolete.rust_lines)])));
+  const section = (title, note, gs) => {
+    out.push(`## ${title}\n`);
+    out.push(`${note} ${gs.length} groups.\n`);
+    out.push(table(['group', 'items', 'tests', 'rust lines', 'rationale'], gs.map((g) => [`\`${g.group}\``, count(g.items), count(g.tests), count(g.rust_lines), g.rationale])));
+  };
+  const missing = t.groups.filter((g) => g.class === 'missing');
+  section('Missing behavior (owner list)', 'Groups holding Rust items Jet lacks, largest first; each names what is absent.', missing.filter((g) => g.items > 0));
+  section('Missing tests', 'Groups of Rust tests only: no Jet test exercises them (`untested:` when the behavior exists in Jet, `absent:` when it was not found).', missing.filter((g) => g.items === 0));
+  section('Obsolete groups (owner approval needed to drop)', 'Rows dropped from parity, with the reason; the owner approves each group.', t.groups.filter((g) => g.class === 'obsolete'));
+  section('Covered groups', 'Jet counterparts the name matcher missed; every row cites its Jet location in `class_evidence`.', t.groups.filter((g) => g.class === 'covered'));
+  out.push('## Triage problems\n');
+  out.push(t.problems.length === 0 ? 'None.\n' : t.problems.map((p) => `- ${p}`).join('\n') + '\n');
+  return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Output
 // ---------------------------------------------------------------------------
 
@@ -1266,12 +1484,6 @@ function generate({ rev, jetRev, refs }) {
     if (r.status === 'dropped') bump(droppedByFile, r.file);
   }
 
-  const itemsTsv =
-    row(['rust_file', 'line', 'end', 'kind', 'owner', 'name', 'status', 'evidence', 'jet']) +
-    itemRows
-      .map((r) => row([r.file, r.start + 1, r.end + 1, r.kind, r.owner ?? '-', r.name, r.status, r.evidence, r.jet]))
-      .join('');
-
   // Tests.
   const caseNames = [...cases].map(([name, list]) => [name, list[0]]);
   const testNames = testNameIndex(jet, [...caseNames, ...uiStems]);
@@ -1289,9 +1501,18 @@ function generate({ rev, jetRev, refs }) {
     if (t.status === 'not-mapped') bump(notMappedByFile, t.file);
   }
 
+  const triage = applyTriage(itemRows, testRows, { jetFiles, jetRev, rev, rustPaths: new Set(rustPaths) });
+
+  const itemsTsv =
+    row(['rust_file', 'line', 'end', 'kind', 'owner', 'name', 'status', 'evidence', 'jet', 'class', 'group', 'class_evidence']) +
+    itemRows
+      .map((r) =>
+        row([r.file, r.start + 1, r.end + 1, r.kind, r.owner ?? '-', r.name, r.status, r.evidence, r.jet, r.cls, r.group, r.classEvidence]),
+      )
+      .join('');
   const testsTsv =
-    row(['rust_file', 'line', 'name', 'status', 'evidence', 'jet']) +
-    testRows.map((t) => row([t.file, t.line, t.name, t.status, t.evidence, t.jet])).join('');
+    row(['rust_file', 'line', 'name', 'status', 'evidence', 'jet', 'class', 'group', 'class_evidence']) +
+    testRows.map((t) => row([t.file, t.line, t.name, t.status, t.evidence, t.jet, t.cls, t.group, t.classEvidence])).join('');
 
   // CLI census (primary tree only).
   const cliRows = jet.cli.sort((a, b) => cmp(a.file, b.file) || a.line - b.line);
@@ -1364,6 +1585,7 @@ function generate({ rev, jetRev, refs }) {
     cli: { total: cliRows.length, surfaces },
     kept_rust: keptRust,
     offdev: offdevSummary,
+    triage,
   });
 
   return {
@@ -1472,6 +1694,7 @@ function ownerSummary(s, current) {
   out.push('## Tests\n');
   out.push(table(['status', 'rows'], byCount(ts.by_status).map(([k, v]) => [k, count(v)])));
   out.push(table(['evidence', 'rows'], byCount(ts.by_evidence).map(([k, v]) => [`\`${k}\``, count(v)])));
+  out.push(triageSummary(s.triage));
   out.push(residualSample(current));
   out.push('## Not-ported items by area\n');
   out.push('Area = first two path segments of the Rust file; every row: `items.tsv` where status is `not-ported`.\n');
@@ -1520,6 +1743,11 @@ function main() {
 
   const outputs = generate({ rev, jetRev, refs });
   const outDir = join(ROOT, OUT_REL);
+  const triage = JSON.parse(outputs['summary.json']).triage;
+  const unclassified = triage.items.unclassified + triage.tests.unclassified;
+  for (const p of triage.problems) process.stderr.write(`triage: ${p}\n`);
+  if (unclassified > 0) process.stderr.write(`triage: ${unclassified} unmatched rows have no class\n`);
+  const triageOk = unclassified === 0 && triage.problems.length === 0;
 
   if (opts.check) {
     const differing = [];
@@ -1535,9 +1763,9 @@ function main() {
     if (differing.length > 0) {
       for (const f of differing) process.stderr.write(`differs: ${f}\n`);
       process.stderr.write('rust-parity-ledger: committed outputs are stale; rerun without --check\n');
-      process.exit(1);
     }
-    process.stdout.write(`rust-parity-ledger: up to date (${rev}, jet ${jetRev})\n`);
+    if (differing.length > 0 || !triageOk) process.exit(1);
+    process.stdout.write(`rust-parity-ledger: up to date (${rev}, jet ${jetRev}); every unmatched row classified\n`);
     return;
   }
 
