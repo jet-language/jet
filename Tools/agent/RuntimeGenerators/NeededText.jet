@@ -1,0 +1,225 @@
+// The compiler's allocation-free Unicode 17 Alphabetic / Numeric decisions,
+// reproduced from checksum-pinned UCD inputs. Frozen range hashes keep the
+// exact parity oracle of the former table. Each output is a balanced decision
+// tree over merged ranges; Alphabetic is split into units of 96 ranges because
+// a large flat unit costs the frozen parser quadratic time.
+use core.crypto as crypto
+use core.files as files
+
+UCD_DIRECTORY :: "tests/data/unicode/ucd"
+NEEDED_TEXT_DIRECTORY :: "Compiler/JetRuntime/Source"
+UNICODE_DATA_SHA256 :: "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c"
+DERIVED_CORE_SHA256 :: "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08"
+ALPHABETIC_RANGES_SHA256 :: "7de9ffd68b766619ca4c145a53801b407db2cdc618802232f5ceaf9871df8d73"
+NUMERIC_RANGES_SHA256 :: "7cf73db1c4a4a841517b6020051330dbedd6031a76bcd42a7096e0716838b8d4"
+ALPHABETIC_UNIT_RANGES :: 96
+MAX_SCALAR :: 1114111
+
+// An inclusive scalar range and the expression its leaf returns.
+struct TextRange {
+    lo: Int
+    hi: Int
+    result: String
+}
+
+fn hex_digit_value(code: Int) -> Int Never! {
+    if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 65 && code <= 70 -> code - 55
+        code >= 97 && code <= 102 -> code - 87
+        else -> 0 - 1
+    }
+}
+
+// The value of a hexadecimal scalar spelling, or None.
+fn parse_hex(text: String) -> Int? Never! {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return None
+    value := 0
+    loop byte in bytes {
+        digit :: hex_digit_value(Int.from_u8(byte))
+        if digit < 0 -> return None
+        value = value * 16 + digit
+    }
+    Val(value)
+}
+
+fn upper_hex(value: Int) -> String Never! {
+    digits :: "0123456789ABCDEF"
+    if value == 0 -> return "0"
+    out := ""
+    rest := value
+    loop rest > 0 {
+        digit :: rest % 16
+        out = "{byte_slice(digits, digit, digit + 1)}{out}"
+        rest = rest /% 16
+    }
+    out
+}
+
+fn pinned_ucd(name: String, sha256: String) -[FS]> String GeneratorError! {
+    path :: "{UCD_DIRECTORY}/{name}"
+    text :: files.read(path) ?? return Err(generator_fail("cannot read {path}: {err}"))
+    if crypto.sha256(text.bytes()).hex() != sha256 -> return Err(generator_fail("UCD checksum mismatch: {name}"))
+    Ok(text)
+}
+
+// The text before the first `separator` of `text` (all of it when absent).
+fn field_before(text: String, separator: String) -> String Never! {
+    if text.split_once(separator) == {
+        .Val(parts) -> parts.before
+        .None -> text
+    }
+}
+
+// The text after the first `separator` of `text`, or None when absent.
+fn field_after(text: String, separator: String) -> String? Never! {
+    if text.split_once(separator) == {
+        .Val(parts) -> Val(parts.after)
+        .None -> None
+    }
+}
+
+// `lo..hi ; Alphabetic # …` rows of DerivedCoreProperties.txt.
+fn alphabetic_ranges(derived: String) -> [TextRange] GeneratorError! {
+    rows := [TextRange]{}
+    loop raw in derived.split("\n") {
+        data :: field_before(raw, "#")
+        rest :: field_after(data, ";") ?? next
+        if field_before(rest, ";").trim() != "Alphabetic" -> next
+        extent :: field_before(data, ";").trim()
+        lo :: parse_hex(field_before(extent, "..")) ?? return Err(generator_fail("malformed Alphabetic row: {raw}"))
+        hi_text :: field_after(extent, "..") ?? field_before(extent, "..")
+        hi :: parse_hex(hi_text) ?? return Err(generator_fail("malformed Alphabetic row: {raw}"))
+        &rows.push(TextRange{lo: lo, hi: hi, result: "true"})
+    }
+    Ok(rows)
+}
+
+fn is_numeric_category(category: String) -> Bool Never! { category == "Nd" || category == "Nl" || category == "No" }
+
+// Nd/Nl/No scalars of UnicodeData.txt, with `<…, First>`/`<…, Last>` pairs as ranges.
+fn numeric_ranges(data: String) -> [TextRange] GeneratorError! {
+    rows := [TextRange]{}
+    pending_lo := -1
+    pending_category := ""
+    loop raw in data.split("\n") {
+        if raw == "" -> next
+        after_code :: field_after(raw, ";") ?? return Err(generator_fail("malformed UCD row: {raw}"))
+        after_name :: field_after(after_code, ";") ?? return Err(generator_fail("malformed UCD row: {raw}"))
+        cp :: parse_hex(field_before(raw, ";")) ?? return Err(generator_fail("malformed UCD row: {raw}"))
+        name :: field_before(after_code, ";")
+        category :: field_before(after_name, ";")
+        if name.ends_with(", First>") {
+            pending_lo = cp
+            pending_category = category
+            next
+        }
+        if name.ends_with(", Last>") {
+            if pending_lo < 0 || pending_category != category -> return Err(generator_fail("malformed UCD range: {raw}"))
+            if is_numeric_category(category) -> &rows.push(TextRange{lo: pending_lo, hi: cp, result: "true"})
+            pending_lo = -1
+            next
+        }
+        if is_numeric_category(category) -> &rows.push(TextRange{lo: cp, hi: cp, result: "true"})
+    }
+    if pending_lo >= 0 -> return Err(generator_fail("unterminated UCD range"))
+    Ok(rows)
+}
+
+// Sorted by start (stable), overlapping or adjacent ranges merged, and the
+// serialization checked against the frozen hash.
+fn merged_ranges(name: String, input: [TextRange], frozen: String) -> [TextRange] GeneratorError! {
+    sorted := input
+    &sorted.sort_by((left: TextRange, right: TextRange) -> left.lo <=> right.lo)
+    rows := [TextRange]{}
+    loop range in sorted {
+        if range.lo > range.hi || range.hi > MAX_SCALAR -> return Err(generator_fail("invalid UCD range {name}"))
+        last :: rows.len() - 1
+        if last >= 0 && range.lo <= rows[last].hi + 1 {
+            if range.hi > rows[last].hi -> rows[last] = TextRange{lo: rows[last].lo, hi: range.hi, result: "true"}
+        } else {
+            &rows.push(range)
+        }
+    }
+    serialized := [String]{}
+    loop range in rows -> &serialized.push("(0x{upper_hex(range.lo)},0x{upper_hex(range.hi)})")
+    digest :: crypto.sha256(serialized.join(",").bytes()).hex()
+    if digest != frozen -> return Err(generator_fail("frozen range parity mismatch: {name}"))
+    Ok(rows)
+}
+
+fn tree_arm(guard: String, children: [TextRange], indent: String) -> String Never! {
+    if children.len() == 0 -> return "{indent}    {guard} -> return false\n"
+    inner :: decision_tree(children, "{indent}        ")
+    "{indent}    {guard} -> {{\n{inner}{indent}    }}\n"
+}
+
+// A balanced `if` over the sorted ranges: below the middle range, above it, or
+// inside it (its result).
+fn decision_tree(rows: [TextRange], indent: String) -> String Never! {
+    if rows.len() == 0 -> return "{indent}return false\n"
+    mid :: rows.len() /% 2
+    row :: rows[mid]
+    below :: tree_arm("(cp < I64{{{row.lo}}})", rows[0..<mid], indent)
+    above :: tree_arm("(cp > I64{{{row.hi}}})", rows[mid + 1..<rows.len()], indent)
+    "{indent}if {{\n{below}{above}{indent}    else -> return {row.result}\n{indent}}}\n"
+}
+
+fn needed_text_header(digest_name: String, frozen: String) -> String Never! {
+    "// Generated by Tools/agent/RuntimeGenerators; Unicode 17.0.0.\n// Frozen UNICODE_{digest_name} ranges SHA256 {frozen}; reproducible from pinned UCD.\n// Static decisions: no allocation, Core calls, or locale dependency.\n"
+}
+
+fn decision_function(symbol: String, body: String) -> String Never! {
+    "fn {symbol}(cp: I64) -> Bool Never! {{\n{body}}}\n"
+}
+
+// Every CompilerNeededText*.jet output for the two properties.
+fn render_needed_text(alphabetic_input: [TextRange], numeric_input: [TextRange]) -> [GeneratedFile] GeneratorError! {
+    outputs := [GeneratedFile]{}
+    alphabetic :: merged_ranges("ALPHABETIC", alphabetic_input, ALPHABETIC_RANGES_SHA256) ?? return Err(err)
+    header :: needed_text_header("ALPHABETIC", ALPHABETIC_RANGES_SHA256)
+    chunks := [TextRange]{}
+    at := 0
+    loop at < alphabetic.len() {
+        end :: if at + ALPHABETIC_UNIT_RANGES < alphabetic.len() -> at + ALPHABETIC_UNIT_RANGES else -> alphabetic.len()
+        part :: alphabetic[at..<end]
+        index :: chunks.len()
+        helper :: "compiler_text_alphabetic_{index}"
+        &chunks.push(TextRange{lo: part[0].lo, hi: part[part.len() - 1].hi, result: "{helper}(cp)"})
+        &outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextAlphabetic{index}.jet", text: "{header}{decision_function(helper, decision_tree(part, "    "))}"})
+        at = end
+    }
+    &outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextAlphabetic.jet", text: "{header}{decision_function("compiler_text_alphabetic", decision_tree(chunks, "    "))}"})
+    numeric :: merged_ranges("NUMERIC", numeric_input, NUMERIC_RANGES_SHA256) ?? return Err(err)
+    &outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextNumeric.jet", text: "{needed_text_header("NUMERIC", NUMERIC_RANGES_SHA256)}{decision_function("compiler_text_numeric", decision_tree(numeric, "    "))}"})
+    Ok(outputs)
+}
+
+fn read_needed_text() -[FS]> [GeneratedFile] GeneratorError! {
+    derived :: pinned_ucd("DerivedCoreProperties.txt", DERIVED_CORE_SHA256) ?? return Err(err)
+    data :: pinned_ucd("UnicodeData.txt", UNICODE_DATA_SHA256) ?? return Err(err)
+    alphabetic :: alphabetic_ranges(derived) ?? return Err(err)
+    numeric :: numeric_ranges(data) ?? return Err(err)
+    render_needed_text(alphabetic, numeric)
+}
+
+#Test("decision trees split at the middle range and return its result") {
+    rows :: [TextRange]{TextRange{lo: 48, hi: 57, result: "true"}, TextRange{lo: 65, hi: 70, result: "true"}}
+    expected :: "    if {{\n        (cp < I64{{65}}) -> {{\n            if {{\n                (cp < I64{{48}}) -> return false\n                (cp > I64{{57}}) -> return false\n                else -> return true\n            }}\n        }}\n        (cp > I64{{70}}) -> return false\n        else -> return true\n    }}\n"
+    assert_eq(decision_tree(rows, "    "), expected)
+    assert_eq(decision_tree([TextRange]{}, "  "), "  return false\n")
+}
+
+#Test("UCD rows parse into ranges and First/Last pairs") {
+    data :: "0030;DIGIT ZERO;Nd;0;EN;;0;0;0;N;;;;;\n0041;LATIN CAPITAL LETTER A;Lu;0;L;;;;;N;;;;0061;\n3400;<CJK Ideograph Extension A, First>;Lo;0;L;;;;;N;;;;;\n4DBF;<CJK Ideograph Extension A, Last>;Lo;0;L;;;;;N;;;;;\n2160;ROMAN NUMERAL ONE;Nl;0;L;<compat> 0049;;;1;N;;;;2170;\n"
+    numeric :: numeric_ranges(data) ?? panic("numeric rows did not parse: {err.message}")
+    assert_eq(numeric.len(), 2)
+    assert_eq(numeric[1].lo, 8544)
+    derived :: "0041..005A    ; Alphabetic # L&  [26] LATIN CAPITAL LETTER A..Z\n00AA          ; Alphabetic # Lo       FEMININE ORDINAL INDICATOR\n0030..0039    ; ID_Continue # Nd [10]\n"
+    alphabetic :: alphabetic_ranges(derived) ?? panic("alphabetic rows did not parse: {err.message}")
+    assert_eq(alphabetic.len(), 2)
+    assert_eq(alphabetic[0].hi, 90)
+    assert_eq(alphabetic[1].lo, 170)
+    assert_eq(upper_hex(1114111), "10FFFF")
+}
