@@ -319,24 +319,47 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     true
 }
 
+// `by_value` 1 hands the Iter the header at `source` (left zeroed): its
+// elements move into the Iter when the header owns its buffer alone. A buffer
+// another owner shares (copy-on-write: a List clone, or an element
+// List of one) or a frozen one (cap 0 over read-only data) keeps its elements
+// for those owners; the Iter pulls clones and the header gives up its
+// reference, as by_value 0 leaves the source untouched.
 #Export(c) fn jet_rt_native_iter_from_list(source: I64, meta: I64, by_value: I64) -> I64 {
     node :: iter_new(I64{0}, meta)
     header :: coll_list_new()
     trap_store(node + I64{112}, header)
-    if (by_value != I64{0}) {
+    if (by_value != I64{0} && iter_list_sole(source)) {
         coll_copy(source, header, I64{24})
         coll_zero(source, I64{24})
-    } else {
-        scratch :: coll_slot_new(meta)
-        at := I64{0}
-        loop at < trap_word(source) {
-            coll_slot_clone(trap_word(source + I64{16}) + at * trap_word(meta), scratch, meta)
-            coll_list_push(header, scratch, meta)
-            at += I64{1}
-        }
-        jet_rt_free(scratch, coll_size(meta), I64{8})
+        return node
     }
+    scratch :: coll_slot_new(meta)
+    at := I64{0}
+    loop at < trap_word(source) {
+        coll_slot_clone(trap_word(source + I64{16}) + at * trap_word(meta), scratch, meta)
+        coll_list_push(header, scratch, meta)
+        at += I64{1}
+    }
+    jet_rt_free(scratch, coll_size(meta), I64{8})
+    if (by_value != I64{0}) { iter_list_release(source, meta) }
     node
+}
+
+// Whether the List header at `source` may give its elements away: its owned
+// buffer has no other owner, or it holds nothing (an empty frozen header).
+fn iter_list_sole(source: I64) -> Bool {
+    if (trap_word(source + I64{8}) == I64{0}) -> return trap_word(source) == I64{0}
+    jet_rt_block_unique(trap_word(source + I64{16}))
+}
+
+// The header at `source` gives up its reference to the buffer it shares: the
+// last owner drops the elements and frees it; a frozen buffer is never released.
+fn iter_list_release(source: I64, meta: I64) {
+    if (trap_word(source + I64{8}) != I64{0} && jet_rt_block_release(trap_word(source + I64{16}))) {
+        coll_list_drop(source, meta, I64{0})
+    }
+    coll_zero(source, I64{24})
 }
 
 #Export(c) fn jet_rt_native_iter_drop(node: I64) {
@@ -891,23 +914,40 @@ fn iter_release_callback(node: I64) {
     node
 }
 
-// Unbox one initialized failure carrier. Payload moves to target; the box is
-// released without dropping the moved payload. Returns 1=success, 0=failure.
+// Unbox one initialized failure carrier into target (an Ok/present payload)
+// or error (an Err payload). Returns 1=success, 0=failure.
 fn iter_unbox(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool {
     raw :: trap_word(carrier_slot)
     optional :: (trap_word(carrier + I64{48}).bit_and(I64{4294967295})) == I64{7}
     ok :: trap_word(carrier + I64{56})
     if optional {
         if (raw == I64{0}) { return false }
-        coll_copy(raw, target, coll_payload(ok))
-        jet_rt_free(raw, coll_size(ok), I64{8})
+        iter_box_take(raw, I64{0}, coll_size(ok), target, ok)
         return true
     }
     err :: trap_word(carrier + I64{64})
     success :: trap_word(raw) != I64{0}
-    coll_copy(raw + I64{8}, if success -> target else -> error, coll_payload(if success -> ok else -> err))
-    jet_rt_free(raw, coll_result_size(ok, err), I64{8})
+    iter_box_take(raw, I64{8}, coll_result_size(ok, err), if success -> target else -> error, if success -> ok else -> err)
     success
+}
+
+// Takes the payload of `meta` at `raw + offset` out of the carrier box `raw`
+// of `size` bytes into `target`, consuming the carrier's reference (Refcount.jet).
+// A box the carrier owns alone gives its payload up and is freed without
+// dropping it. A box other owners share (a clone of a List element) or a
+// frozen one keeps its payload for them: target gets a clone, and the box
+// loses this owner; the last owner drops the payload and frees it.
+fn iter_box_take(raw: I64, offset: I64, size: I64, target: I64, meta: I64) {
+    if jet_rt_block_unique(raw) {
+        coll_copy(raw + offset, target, coll_payload(meta))
+        jet_rt_free(raw, size, I64{8})
+        return
+    }
+    coll_slot_clone(raw + offset, target, meta)
+    if jet_rt_block_release(raw) {
+        coll_slot_drop(raw + offset, meta)
+        jet_rt_free(raw, size, I64{8})
+    }
 }
 
 fn iter_pull_filter_map(node: I64, output: I64) -> Bool {
