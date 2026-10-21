@@ -868,6 +868,13 @@ fn ir_value_as(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr, ro
 fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
     have :: b.f.slot_type[slot]
     if have == row -> return slot
+    // A `Never` value (a call that does not return, as `?? fatal()`) ends
+    // the path; what follows is unreached.
+    if ir_never_type(m.types[have].ty) {
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        target_ty :: m.types[row].ty
+        return ir_unreachable_value(&m, p, &b, target_ty)
+    }
     want_box :: ir_is_result(m.types[row].ty)
     have_box :: ir_is_result(m.types[have].ty)
     if want_box && !have_box {
