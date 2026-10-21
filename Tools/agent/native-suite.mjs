@@ -9,7 +9,7 @@ export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node =
     if (!suites.length || new Set(suites).size !== suites.length || suites.some(suite => !nativeSuiteNames.includes(suite))) throw Error('invalid or empty native suite selection');
     const definitions = [
         ['unsafe-ratchet', node, [join(root, 'Tools/agent/check-unsafe-ratchet.mjs')]],
-        ['agent-doc-flags', node, [join(root, 'Tools/agent/check-agent-doc-flags.mjs')]],
+        ['agent-doc-flags', jet, ['run', join(root, 'Tools/agent/AgentDocFlags')]],
         ['decision-index', jet, ['run', join(root, 'Tools/agent/DecisionIndex'), '--', '--check']],
         ['core-coverage', node, [join(root, 'Tools/agent/core-coverage-census.mjs'), '--check']],
     ].map(([scope, command, args]) => ({ scope, command, args, cwd: root, kind: 'gate', documents: {} }));
