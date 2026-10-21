@@ -784,6 +784,15 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
     // otherwise the stock build of its run entry.
     if !sandbox && (args.len() < 2 || cli_files.is_dir(args[1])) {
         directory :: if args.len() < 2 -> cli_files.cwd() ?? "." else -> args[1]
+        // The directory's own `fn build` is its build entry, also for a workspace root whose
+        // members are runnable (`jet build Compiler/`).
+        if !jet_argv.contains("--show-default") && jet_cli_option_value(jet_argv, "-p") == None {
+            if jet_cli_command_override(directory, "build", color) == {
+                .Entry(found) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, release: release, threads: threads, invocation: invocation, notice: ""}
+                .Refused(plan) -> return ^plan
+                .Absent -> {}
+            }
+        }
         notices := [String]{}
         resolved :: jet_cli_resolve_bare_entry("build", directory, jet_cli_option_value(jet_argv, "-p"), !jet_argv.contains("--show-default"), color, &notices)
         if resolved == {
