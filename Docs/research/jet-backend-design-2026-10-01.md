@@ -2939,7 +2939,7 @@ borrowed four-word Jet callback adapter `[payload, next, release, clone]`,
 not a Rust owner or an OS descriptor. Lowering supplies typed source-method
 callbacks, preserving source buffering, UTF-8 validation, CR/LF handling,
 fault checkpoints and `<core.prelude>:0` error rendering. The runtime copies
-callbacks into a kind-28 iterator's existing closure fields; no second
+callbacks into a kind-29 iterator's existing closure fields; no second
 producer/context allocation is required. A pull returns EOF (0), a moved slot
 (1), or a stopped rail (-1, with an unwritten output). Borrowed file/stdin
 sources are eagerly snapshotted; owned sources are lazy. Process producers
