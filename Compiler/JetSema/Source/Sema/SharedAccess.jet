@@ -345,17 +345,29 @@ fn sema_shared_access_project_place(value: Expr, environment: SemaScopeEnvironme
     }
 }
 
+// The locked-edit callback spans the whole written place, from its first
+// byte: the payload name the projection reads (spanned at the cell handle)
+// resolves against the callback parameter, which must not start after it.
 fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span)? {
     if target == {
         .Field(base, field, span) -> {
             projected :: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
-            return Val((handle: projected.handle, span: span, target: LValue.Field{base: projected.place, field: field, span: span}))
+            return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Field{base: projected.place, field: field, span: span}))
         }
         .Index(base, index, span, kind) -> {
             projected :: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
-            return Val((handle: projected.handle, span: span, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}))
+            return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}))
         }
         else -> { return None }
+    }
+}
+
+// The first source byte of a place: a field or an element is spanned at its
+// member or brackets, so the place starts at its root.
+fn sema_shared_access_place_start(value: Expr) -> Int Never! {
+    if value == {
+        .Field(base, _, _) | .Index(base, _, _, _) | .Slice(base, _, _, _, _) -> return sema_shared_access_place_start(base)
+        else -> return expr_span(value).start
     }
 }
 
