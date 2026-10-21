@@ -9,7 +9,7 @@ use jet_pkg_model.[PackageGateError, pkg_check_project_gate]
 use jet_foundation.[PolicyKey]
 
 // Rust `record_json`.
-fn trust_record_json(record: TrustRecord) -> String Never! {
+fn trust_record_json(record: TrustRecord) -> String TrustError! {
     if record == {
         .Hash(hash) -> trust_json_object_text([TrustJSONField]{
             {key: "type", value: Dyn.Text("hash")},
@@ -37,7 +37,7 @@ fn trust_record_json(record: TrustRecord) -> String Never! {
 }
 
 // Rust `records_json`: `{"grants":[...]}`.
-fn trust_records_json(records: [TrustRecord]) -> String Never! {
+fn trust_records_json(records: [TrustRecord]) -> String TrustError! {
     rendered := [String]{}
     loop record in records -> &rendered.push(trust_record_json(record))
     "{{\"grants\":[{rendered.join(",")}]}}"

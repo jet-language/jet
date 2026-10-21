@@ -118,7 +118,7 @@ fn pkg_bundle_native_signing(run: BundleSigningRun) -> BundleSigningFact? Bundle
     Ok(Val(BundleSigningFact.signed().with_tool(tool, identity, "unspecified")))
 }
 // Exact Component::Normal/CurDir policy, including stripped macOS app root.
-fn pkg_bundle_native_relative(plan: &BundlePlan, file: &BundleFile, strip: Bool) -> String BundleMaterializeError! {
+fn pkg_bundle_native_relative(plan: BundlePlan, file: BundleFile, strip: Bool) -> String BundleMaterializeError! {
     raw := file.path.replace("\\", "/")
     if strip {
         root :: "{plan.metadata.identifier}.app/"
@@ -138,7 +138,7 @@ fn pkg_bundle_native_relative(plan: &BundlePlan, file: &BundleFile, strip: Bool)
 fn pkg_bundle_native_tree(plan: &BundlePlan, stage: String, strip: Bool) BundleMaterializeError! -[FS, Env]> {
     seen := [String]{}
     loop file in plan.files {
-        relative :: pkg_bundle_native_relative(&plan, &file, strip)
+        relative :: pkg_bundle_native_relative(plan, file, strip)
         if seen.contains(relative) -> return Err(BundleMaterializeError{reason: "package plan emits duplicate materialized path `{relative}`"})
         &seen.push(relative)
         destination :: files.join(stage, relative)
@@ -153,7 +153,7 @@ fn pkg_bundle_native_builtin(plan: &BundlePlan, compiler_version: String) -[FS, 
     executable :: pkg_bundle_native_regular(sys.executable())
     tool_identity :: pkg_bundle_native_hash(executable)
     paths := [String]{}
-    loop file in plan.files -> &paths.push(pkg_bundle_native_relative(&plan, &file, true))
+    loop file in plan.files -> &paths.push(pkg_bundle_native_relative(plan, file, true))
     order := [Int]{}
     loop index in 0..<paths.len() -> &order.push(index)
     &order.sort_by((left: Int, right: Int) -> paths[left] <=> paths[right])

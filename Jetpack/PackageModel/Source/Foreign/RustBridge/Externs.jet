@@ -190,7 +190,7 @@ struct CRecordDefinitions {
         base :: self.aliases.get(name) ?? return false
         if stack.contains(name) -> return false
         &stack.push(name)
-        result :: self.is_record_type_with_stack(base, stack)
+        result :: self.is_record_type_with_stack(base, &stack)
         _ := &stack.pop()
         result
     }
@@ -209,7 +209,7 @@ struct CRecordDefinitions {
             .Char -> Val("u32")
             .IntN(signed, bits) -> Val(pkg_ffi_int_rust_name(signed, bits))
             .Float32 -> Val("f32")
-            .FixedList(elem, len) -> self.fixed_list_rust_type(elem, len, stack)
+            .FixedList(elem, len) -> self.fixed_list_rust_type(elem, len, &stack)
             .Named(name) -> self.named_rust_type(name, stack)
             .Fn(_, _, _, _, _, _) -> Val("*mut core::ffi::c_void")
             else -> None
@@ -218,7 +218,7 @@ struct CRecordDefinitions {
 
     fn fixed_list_rust_type(self, elem: Type, len: Measure, stack: &[String]) -> String? Never! {
         length :: pkg_ffi_fixed_length(len) ?? return None
-        element :: self.rust_type_with_stack(elem, stack) ?? return None
+        element :: self.rust_type_with_stack(elem, &stack) ?? return None
         Val("[{element}; {length}]")
     }
 
@@ -230,7 +230,7 @@ struct CRecordDefinitions {
         base :: self.aliases.get(name) ?? return None
         if stack.contains(name) -> return None
         &stack.push(name)
-        resolved :: self.rust_type_with_stack(base, stack)
+        resolved :: self.rust_type_with_stack(base, &stack)
         _ := &stack.pop()
         resolved
     }

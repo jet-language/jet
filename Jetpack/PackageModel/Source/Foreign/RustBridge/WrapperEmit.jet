@@ -449,11 +449,11 @@ fn pkg_ffi_emit_asm_wrapper(entry: ExternEntry, inline: InlineEntry) -> String N
     memory_inputs :: contract.target.starts_with("x86_64") && output_param == None && inline.param_names.len() + gp_outputs > 14 && word_inputs && pkg_ffi_asm_stack_inputs(instructions, inline.param_names)
     if memory_inputs {
         &operands.push("__jet_args = in(reg) __jet_args.as_ptr()")
-        loop (line_index, line) in instructions {
-            if !line.starts_with("push {{") -> next
+        loop line_index in 0..<instructions.len() {
+            if !instructions[line_index].starts_with("push {{") -> next
             loop (index, name) in inline.param_names {
                 wanted :: "push {{{name}}}"
-                if line == wanted -> instructions[line_index] = "push qword ptr [{{__jet_args}} + {index * 8}]"
+                if instructions[line_index] == wanted -> instructions[line_index] = "push qword ptr [{{__jet_args}} + {index * 8}]"
             }
         }
     } else {

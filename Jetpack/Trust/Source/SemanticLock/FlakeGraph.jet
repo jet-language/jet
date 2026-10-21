@@ -440,15 +440,14 @@ struct FlakeGraph {
             .None -> {}
         }
         lock_path :: files.with_name(path, "flake.lock")
-        lock_read :: files.read(lock_path)
-        lock_missing :: if lock_read == {
-            .Ok(_) -> false
+        lock_text := String?{None}
+        if files.read(lock_path) == {
+            .Ok(content) -> lock_text = Val(content)
             .Err(error) -> if error == {
-                .NotFound(_) -> true
-                else -> false
+                .NotFound(_) -> {}
+                else -> return Err(TrustError.IO("couldn't read `{lock_path}`: {error}"))
             }
         }
-        lock_text :: if lock_missing -> None else -> Val(lock_read ?? return Err(TrustError.IO("couldn't read `{lock_path}`: {err}")))
         graph := FlakeGraph.parse_with_lock(path, text, lock_text, true)
         &graph.attach_composition_sources(path)
         graph.validate()
