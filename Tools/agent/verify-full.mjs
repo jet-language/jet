@@ -77,7 +77,7 @@ if (process.env.JET_NATIVE_TRACE_LOG) {
 }
 const shardIndex = process.env.JET_TEST_SHARD ?? '0';
 const shardCount = process.env.JET_TEST_SHARD_COUNT ?? '1';
-const selection = spawnSync('bash', [join(repo, 'Tools/ci/test-shards.sh'), shardIndex, shardCount], { cwd: repo, env, encoding: 'utf8' });
+const selection = spawnSync(binary, ['run', 'Tools/ci/TestShards.jet', '--', shardIndex, shardCount], { cwd: repo, env, encoding: 'utf8' });
 if (selection.error || selection.status !== 0) throw Error(`native suite inventory failed: ${selection.error ?? selection.stderr}`);
 const suites = selection.stdout.trim().split('\n').filter(Boolean);
 if (!suites.length || new Set(suites).size !== suites.length || suites.some(suite => !['golden', 'ui', 'cases', 'registries'].includes(suite))) throw Error('invalid or empty native suite inventory');

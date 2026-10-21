@@ -17,7 +17,6 @@ const external = mkdtempSync(join(base, 'verify-native-evidence-'));
 const put = (name, content) => { const path = join(sandbox, name); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content, { mode: 0o755 }); };
 try {
     for (const path of ['Tools/agent/verify-full.sh', 'Tools/agent/verify-full.mjs', 'Tools/agent/native-suite.mjs']) put(path, readFileSync(join(repo, path)));
-    put('Tools/ci/test-shards.sh', '#!/usr/bin/env bash\nprintf "%s\\n" golden ui cases registries\n');
     for (const gate of ['closeout-gate', 'check-unsafe-ratchet', 'check-agent-doc-flags', 'decision-index', 'core-coverage-census']) put(`Tools/agent/${gate}.mjs`, `if (process.env.FIXTURE_MODE === 'closeout' && ${JSON.stringify(gate)} === 'closeout-gate') process.exit(3);\n`);
     put('Tools/agent/proof-source.mjs', `import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -30,6 +29,7 @@ if(process.argv[1]===fileURLToPath(import.meta.url))console.log(process.argv[3])
     put('bin/jet', `#!/usr/bin/env node
 const {writeFileSync}=require('node:fs');
 const args=process.argv.slice(2),suite=args[2].split(' ')[1],mode=process.env.FIXTURE_MODE;
+if(args[0]==='run'&&args[1]==='Tools/ci/TestShards.jet'){console.log('golden\\nui\\ncases\\nregistries');process.exit(0);}
 if(args[0]!=='test'||!args[1].endsWith('/Tools/testkit'))process.exit(64);
 if(suite==='golden'&&mode==='signal')process.kill(process.pid,'SIGTERM');
 if(suite==='golden'&&mode==='ordinary')process.exit(17);
