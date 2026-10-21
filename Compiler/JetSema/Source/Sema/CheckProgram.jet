@@ -7131,7 +7131,8 @@ fn sema_authority_maximal_chain(graph: SemaRegistrationGraph, modules: [SemaGrap
                     segments :: graph.modules[graph_module].source_segments
                     location :: sema_source_location_at(segments, site)
                     line :: sema_source_line_at(segments, site)
-                    if location == .Val(found) && line == .Val(number) -> &chain.push("unknown callee at {found.source_path}:{number}")
+                    detail :: if effects.maximal_detail == "" -> "" else -> ": {effects.maximal_detail}"
+                    if location == .Val(found) && line == .Val(number) -> &chain.push("unknown callee at {found.source_path}:{number}{detail}")
                 }
                 return chain
             }
