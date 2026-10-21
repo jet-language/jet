@@ -151,6 +151,17 @@ struct EffectivePolicy {
     provenance: [PolicyDeclaration]
 }
 
+// The resolution as `key = value` followed by every declaration of its chain,
+// the last one effective and the earlier ones shadowed.
+fn policy_explain(resolution: EffectivePolicy) -> String Never! {
+    out := "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}"
+    loop (index, declaration) in resolution.provenance {
+        status :: if index + 1 == resolution.provenance.len() -> "effective" else -> "shadowed"
+        out = "{out}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
+    }
+    out
+}
+
 #Error
 enum PolicyError {
     ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)

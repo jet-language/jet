@@ -8,6 +8,7 @@ use core.text as lint_unicode
 // Compiler-scoped names stay distinct from Jetpack Syntax in the flat bootstrap.
 LINT_POLICY_FIELD_LINTS :: "lints"
 LINT_POLICY_FIELD_DENY :: "deny"
+LINT_POLICY_BLOCK_POLICY :: "policy"
 
 // One parse failure from a lint-selection surface. Code/name are present only
 // when the rejected value is a registered diagnostic code, so the caller can
@@ -65,6 +66,23 @@ fn lint_auto_derive_name() -> String Never! {
     row.lint_name ?? panic("lint rows have names")
 }
 
+// The registered refusal for a source-level lint allowance that used a
+// rendered diagnostic code: `#allow(...)` follows the package policy's
+// name-only law.
+fn lint_selection_code_error(value: String, surface: String, span: Span?) -> Diagnostic? Never! {
+    if !lint_is_diagnostic_code_shape(value) -> return None
+    name :: lint_name_for_code(value)
+    what :: if name == {
+        .Val(_) -> "`{value}` is a diagnostic code; {surface} takes lint names"
+        .None -> "`{value}` is a diagnostic code; {surface} takes registered lint names"
+    }
+    fix :: if name == {
+        .Val(canonical) -> "write `{canonical}` in {surface} instead of `{value}`"
+        .None -> "write a registered lint name in {surface} instead of `{value}`"
+    }
+    Val(diagnostic_from_registry("E0927", span, what, "lint selectors use stable snake_case names; diagnostic codes are rendered report identities", fix))
+}
+
 // Rust `parse_policy_lints`: the `lints:` part of a package policy.
 fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
     lints_body :: lint_block_body(body, LINT_POLICY_FIELD_LINTS) ?? return Ok(None)
@@ -74,6 +92,47 @@ fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
         deny = lint_parse_name_list(entry.value.trim())
     }
     Ok(Val(deny))
+}
+
+// The package source's `policy.lints.deny`, read with the same reader as the
+// package model. Loader validation owns malformed-package diagnostics.
+fn lint_parse_package_source(source: String) -> [String]? LintPolicyError! {
+    stripped :: lint_strip_comments(source)
+    body :: lint_block_body(stripped, LINT_POLICY_BLOCK_POLICY) ?? return Ok(None)
+    lint_parse_policy_lints(body)
+}
+
+// `source` without `//` line comments outside string literals; each comment's
+// newline is kept.
+fn lint_strip_comments(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    quoted := false
+    escaped := false
+    at := 0
+    loop at < raw.len() {
+        code :: Int.from_u8(raw[at])
+        if quoted {
+            &out.push(raw[at])
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+        } else if code == 34 {
+            quoted = true
+            &out.push(raw[at])
+        } else if code == 47 && at + 1 < raw.len() && Int.from_u8(raw[at + 1]) == 47 {
+            at += 2
+            loop at < raw.len() && Int.from_u8(raw[at]) != 10 -> at += 1
+            if at < raw.len() -> &out.push(raw[at])
+        } else {
+            &out.push(raw[at])
+        }
+        at += 1
+    }
+    String.from_bytes(out) ?? panic("comment removal keeps UTF-8")
 }
 
 // Rust `parse_lint_name_list`.

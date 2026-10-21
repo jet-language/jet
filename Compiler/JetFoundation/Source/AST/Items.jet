@@ -150,6 +150,64 @@ struct ImportedItem {
     alias: String?
 }
 
+// One name an import declaration binds, as owned leaf projections of the
+// declaration.
+struct ImportBinding {
+    module_alias: String
+    original: String?
+    local: String
+    alias: String?
+    module_alias_span: Span
+    item_span: Span?
+    local_span: Span
+    items_span: Span?
+    import_span: Span
+    is_pub: Bool
+    is_package_pub: Bool
+}
+
+// The local name of one `use a.[b as c]` member: its alias, else the last
+// segment of its path.
+fn member_import_local(original: String, alias: String?) -> String Never! {
+    if alias == .Val(name) -> return name
+    parts :: original.split(".").to_list()
+    parts[parts.len() - 1]
+}
+
+// The name a whole-module or file import binds.
+fn import_alias(declaration: ImportDecl) -> String Never! {
+    if declaration.alias != "" -> return declaration.alias
+    if declaration.kind == {
+        .File(path, _) -> {
+            parts :: path.split("/").to_list()
+            parts[parts.len() - 1]
+        }
+        .Module(name, _) -> name
+        .Unqualified(module_alias, _, _, _, _) -> module_alias
+    }
+}
+
+// Every binding a declaration introduces, in source order. A file import binds
+// through its program, not through a name here.
+fn import_walk_bindings(declaration: ImportDecl) -> [ImportBinding] Never! {
+    bindings := [ImportBinding]{}
+    if declaration.kind == {
+        .Module(name, path_span) -> {
+            alias :: if declaration.alias == "" -> None else -> Val(declaration.alias)
+            &bindings.push(ImportBinding{module_alias: name, original: None, local: import_alias(declaration), alias: alias, module_alias_span: path_span, item_span: None, local_span: declaration.alias_span, items_span: None, import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+        }
+        .Unqualified(module_alias, module_alias_span, items, items_span, _) -> {
+            loop (index, item) in items {
+                item_span :: if index < declaration.item_spans.len() -> Val(declaration.item_spans[index]) else -> None
+                local_span :: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> item_span ?? module_alias_span
+                &bindings.push(ImportBinding{module_alias: module_alias, original: Val(item.original), local: member_import_local(item.original, item.alias), alias: item.alias, module_alias_span: module_alias_span, item_span: item_span, local_span: local_span, items_span: Val(items_span), import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+            }
+        }
+        .File(_, _) -> {}
+    }
+    bindings
+}
+
 struct InlineVersion {
     text: String
     span: Span
@@ -831,6 +889,33 @@ struct Func {
     body: [Stmt]
 }
 
+// Only a concrete `App` or `App E!` return makes `run` an app entry.
+fn type_is_app(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "App"
+        .Result(ok, _) -> ok == Type.Named{name: "App"}
+        else -> false
+    }
+}
+
+// The app entry `run`, searched through authored code-module bodies.
+fn app_entry_run_fn(items: [Item]) -> Func? Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if function.name == "run" && function.return_type == .Val(ty) && type_is_app(ty) -> return Val(function)
+            }
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) {
+                    if app_entry_run_fn(body) == .Val(function) -> return Val(function)
+                }
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
 struct StructDef {
     span: Span
     is_pub: Bool
@@ -964,6 +1049,54 @@ enum UnitScaleProvenance {
     SymbolicPi(numerator: UnitRatio, denominator: UnitRatio)
     Conventional(value: String, source: String)
     Measured(central_value: String, standard_uncertainty: String, source: String)
+}
+
+// The type a unit member declares: each `_`-separated segment with its first
+// character uppercased.
+fn unit_family_type_name(member: String) -> String Never! {
+    out := ""
+    loop segment in member.split("_") {
+        if segment.len() > 0 -> out = "{out}{segment.slice(0, 1).to_upper()}{segment.slice(1, segment.len())}"
+    }
+    if out == "" -> return member.copy()
+    out
+}
+
+// The distinct types a unit family declares, in member order: one linear type
+// per member, or a Point and a Delta per member of an affine family. Points do
+// not inherit point+point arithmetic; sema adds the closed Point/Delta algebra.
+// Every generated name and derive keeps the member's span. The canonical
+// core.units Time family declares none.
+fn unit_family_distinct_defs(family: UnitFamilyDef) -> [DistinctDef] Never! {
+    definitions := [DistinctDef]{}
+    if family.family == "Time" && family.resolved_owner == Val("core.units") -> return definitions
+    affine := false
+    if family.base != None {
+        loop member in family.members {
+            if member.offset.numerator != 0 -> affine = true
+        }
+    }
+    loop member in family.members {
+        base_name :: unit_family_type_name(member.name)
+        names :: if affine -> [String]{"{base_name}Point", "{base_name}Delta"} else -> [String]{base_name}
+        loop (index, name) in names {
+            point :: affine && index == 0
+            derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
+            quantity := QuantityInfo?{None}
+            if family.resolved_dimension == .Val(dimension) {
+                &derives.push(NamedSpan{name: "Encode", span: member.name_span})
+                &derives.push(NamedSpan{name: "Decode", span: member.name_span})
+                kind :: if {
+                    !affine -> QuantityKind.Linear
+                    point -> QuantityKind.Point
+                    else -> QuantityKind.Delta
+                }
+                quantity = Val(QuantityInfo{dimension: dimension, kind: kind})
+            }
+            &definitions.push(DistinctDef{is_pub: family.is_pub, is_package_pub: family.is_package_pub, type_markers: [Marker]{}, derives: derives, quantity: quantity, name: name, name_span: member.name_span, base: Type.Float, base_span: member.name_span, range: None, span: member.name_span})
+        }
+    }
+    definitions
 }
 
 struct EnumDef {

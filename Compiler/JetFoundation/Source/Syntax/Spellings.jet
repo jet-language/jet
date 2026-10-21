@@ -1,0 +1,50 @@
+// Identifier classes and the ordered completion catalogs of the syntax
+// registry. The spelling constants themselves live in Data/Syntax.
+
+// Only the underscore prefix affects source visibility; a bare `_` stays an
+// ordinary binding spelling.
+enum IdentifierClass {
+    Ordinary
+    SoftPublic
+    Reserved
+}
+
+fn classify_identifier(name: String) -> IdentifierClass Never! {
+    if name.starts_with("__") -> return IdentifierClass.Reserved
+    // After the ASCII `_`, a second character also means more than one byte.
+    if name.starts_with("_") && name.bytes().len() > 1 -> return IdentifierClass.SoftPublic
+    IdentifierClass.Ordinary
+}
+
+// The current keyword catalog in registry order, for completion and rename:
+// structure, control flow, declarations, preparation, migrations, ownership,
+// expert scopes, concurrency, tests, typestate, protocols, rules, validation
+// and the reserved literals.
+JET_KEYWORD_NAMES :: prep { [String]{
+    "fn", "pub", "priv", "use", "as", "extern", "module", "rust",
+    "if", "else", "loop", "in", "break", "next", "return", "yield", "defer",
+    "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag", "effect", "derive",
+    "prep", "fact", "distinct",
+    "migration", "rename", "add", "remove", "change", "via",
+    "self",
+    "Unsafe", "Impure", "Context",
+    "task", "freeze", "shared", "Transact", "Job", "Test", "Todo",
+    "State", "Transition", "state",
+    "protocol", "client", "server",
+    "marker",
+    "validate", "check",
+    "true", "false", "None", "it",
+} }
+
+// The built-in type catalog in registry order.
+JET_TYPE_NAMES :: prep { [String]{
+    "Int", "Float", "Bool", "String", "()", "Char", "Err",
+    "Shared", "SharedSnapshot", "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition",
+    "Task", "Receiver", "Sender", "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank",
+    "PriorityQueue", "Cache", "Tally", "Bits", "Bytes", "ViewIter",
+    "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64",
+} }
+
+fn jet_keyword_names() -> [String] Never! { JET_KEYWORD_NAMES.copy() }
+
+fn jet_type_names() -> [String] Never! { JET_TYPE_NAMES.copy() }

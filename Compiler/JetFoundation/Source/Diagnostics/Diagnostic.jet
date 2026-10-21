@@ -183,6 +183,53 @@ fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) ->
     updated
 }
 
+// Put the nearest wrapped report first, followed by its own causes in their
+// existing order.
+fn diagnostic_caused_by(diagnostic: ^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
+    updated := diagnostic
+    &updated.cause.push(DiagnosticCause{code: cause.code.copy(), span: cause.span, origin: cause.origin.copy()})
+    loop link in cause.cause -> &updated.cause.push(link.copy())
+    updated
+}
+
+// A cause names a report by its code, primary span and owning source snapshot.
+fn diagnostic_cause_matches(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
+    cause.code == diagnostic.code && cause.span == diagnostic.span && cause.origin == diagnostic.origin
+}
+
+fn diagnostic_cause_is_pending(diagnostic: Diagnostic, pending: [Diagnostic]) -> Bool Never! {
+    loop cause in diagnostic.cause {
+        loop candidate in pending {
+            if diagnostic_cause_matches(cause, candidate) -> return true
+        }
+    }
+    false
+}
+
+// Put root diagnostics before reports that name them as causes. The stable pass
+// keeps source order among independent reports and breaks a cycle by leaving
+// the remaining reports in their original order.
+fn diagnostic_order_root_first(diagnostics: ^[Diagnostic]) -> [Diagnostic] Never! {
+    pending := diagnostics
+    ordered := [Diagnostic]{}
+    loop pending.len() > 0 {
+        next := -1
+        loop index in 0..<pending.len() {
+            if !diagnostic_cause_is_pending(pending[index], pending) {
+                next = index
+                break
+            }
+        }
+        if next < 0 {
+            loop rest in pending -> &ordered.push(rest.copy())
+            break
+        }
+        root :: &pending.remove(next, .Slot) ?? panic("root-first ordering selected a pending diagnostic")
+        &ordered.push(root)
+    }
+    ordered
+}
+
 fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
     &updated.labels.push(DiagnosticLabel{span: span, message: message})

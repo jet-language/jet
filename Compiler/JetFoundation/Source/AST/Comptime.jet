@@ -1,5 +1,38 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
+// The compiler stage at which a checked fact becomes available; distinct from
+// the language execution phase `$phase` returns.
+enum CompilerStage {
+    Parsed
+    Resolved
+    Typed
+    Prepared
+    Emitted
+}
+
+COMPILER_STAGE_ALL :: prep { [CompilerStage]{
+    CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed,
+    CompilerStage.Prepared, CompilerStage.Emitted
+} }
+
+fn compiler_stage_as_str(stage: CompilerStage) -> String Never! {
+    if stage == {
+        .Parsed -> "Parsed"
+        .Resolved -> "Resolved"
+        .Typed -> "Typed"
+        .Prepared -> "Prepared"
+        .Emitted -> "Emitted"
+    }
+}
+
+// What a metadata producer owes: an unavailable producer never becomes a
+// default value.
+enum MetadataProducerStatus {
+    ContractOnly
+    NotImplemented
+    ExistingCallableProducerNeedsExtension
+}
+
 enum CtFloat {
     F32(value: Float)
     F64(value: Float)
