@@ -1,0 +1,190 @@
+// Rust TestingComparison.rs `ComparisonRecord::from_json` and its typed field
+// readers: decode one authenticated canonical comparison payload, then run the
+// same structural validation as before indexing or attaching it to a receipt.
+// Unknown fields stay in the CanonicalJSON value and are ignored here.
+
+fn comparison_decode_error(message: String) -> ComparisonRecordError Never! { ComparisonRecordError{message: message} }
+
+// Rust `json_field` over `json_object(value, "comparison value")`.
+fn comparison_json_field(value: CanonicalJSON, key: String) -> CanonicalJSON ComparisonRecordError! {
+    if value == {
+        .Object(fields) -> {
+            loop field in fields {
+                if field.key == key -> return Ok(field.value)
+            }
+            Err(comparison_decode_error("comparison value is missing `{key}`"))
+        }
+        else -> Err(comparison_decode_error("comparison value must be an object"))
+    }
+}
+
+fn comparison_json_text(value: CanonicalJSON, key: String) -> String ComparisonRecordError! {
+    if comparison_json_field(value, key) == {
+        .String(text) -> Ok(text)
+        else -> Err(comparison_decode_error("comparison field `{key}` must be a string"))
+    }
+}
+
+fn comparison_json_integer(value: CanonicalJSON, key: String) -> String ComparisonRecordError! {
+    if comparison_json_field(value, key) == {
+        .Integer(text) -> Ok(text)
+        else -> Err(comparison_decode_error("comparison field `{key}` must be an integer"))
+    }
+}
+
+fn comparison_json_bool(value: CanonicalJSON, key: String) -> Bool ComparisonRecordError! {
+    if comparison_json_field(value, key) == {
+        .Bool(flag) -> Ok(flag)
+        else -> Err(comparison_decode_error("comparison field `{key}` must be a boolean"))
+    }
+}
+
+fn comparison_json_array(value: CanonicalJSON, key: String) -> [CanonicalJSON] ComparisonRecordError! {
+    if comparison_json_field(value, key) == {
+        .Array(values) -> Ok(values)
+        else -> Err(comparison_decode_error("comparison field `{key}` must be an array"))
+    }
+}
+
+fn comparison_json_optional_value(value: CanonicalJSON, key: String) -> CanonicalJSON? ComparisonRecordError! {
+    child :: comparison_json_field(value, key)
+    if child == CanonicalJSON.Null -> return Ok(None)
+    Ok(Val(child))
+}
+
+fn comparison_json_optional_string(value: CanonicalJSON, key: String) -> String? ComparisonRecordError! {
+    child :: comparison_json_optional_value(value, key) ?? return Ok(None)
+    if child == {
+        .String(text) -> Ok(Val(text))
+        else -> Err(comparison_decode_error("comparison field `{key}` must be a string or null"))
+    }
+}
+
+fn comparison_json_optional_integer(value: CanonicalJSON, key: String) -> String? ComparisonRecordError! {
+    child :: comparison_json_optional_value(value, key) ?? return Ok(None)
+    if child == {
+        .Integer(text) -> Ok(Val(text))
+        else -> Err(comparison_decode_error("comparison field `{key}` must be an integer or null"))
+    }
+}
+
+// Rust `str::parse::<u16 | u64 | usize>`: optional leading `+`, decimal
+// digits only, within `maximum`.
+fn comparison_parse_unsigned(text: String, maximum: Int, message: String) -> Int ComparisonRecordError! {
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return Err(comparison_decode_error(message))
+    loop index in start..<bytes.len() {
+        if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> return Err(comparison_decode_error(message))
+    }
+    digits :: String.from_bytes_lossy(bytes[start..<bytes.len()])
+    number :: if Int.parse(digits) == {
+        .Ok(value) -> value
+        .Err(_) -> { return Err(comparison_decode_error(message)) }
+    }
+    if number > maximum -> return Err(comparison_decode_error(message))
+    Ok(number)
+}
+
+// Rust `parse_comparison_status`.
+fn comparison_parse_status(value: String) -> ComparisonStatus ComparisonRecordError! {
+    if value == {
+        "matched" -> Ok(ComparisonStatus.Matched)
+        "mismatch" -> Ok(ComparisonStatus.Mismatch)
+        "empty" -> Ok(ComparisonStatus.Empty)
+        "unsupported" -> Ok(ComparisonStatus.Unsupported)
+        "unavailable" -> Ok(ComparisonStatus.Unavailable)
+        "timeout" -> Ok(ComparisonStatus.Timeout)
+        "cancelled" -> Ok(ComparisonStatus.Cancelled)
+        "invalid_oracle" -> Ok(ComparisonStatus.InvalidOracle)
+        "contaminated" -> Ok(ComparisonStatus.Contaminated)
+        else -> Err(comparison_decode_error("unknown comparison status `{value}`"))
+    }
+}
+
+// Rust `parse_observation_relation`: any other non-empty name is Custom.
+fn comparison_parse_relation(value: String) -> ObservationRelation ComparisonRecordError! {
+    if value == "" -> return Err(comparison_decode_error("comparison relation cannot be empty"))
+    Ok(if value == {
+        "typed_equality" -> ObservationRelation.TypedEquality
+        "ordered_effects" -> ObservationRelation.OrderedEffects
+        "typed_failure" -> ObservationRelation.TypedFailure
+        else -> ObservationRelation.Custom{name: value}
+    })
+}
+
+// Rust `json_strings`.
+fn comparison_json_strings(value: CanonicalJSON, key: String) -> [String] ComparisonRecordError! {
+    result := [String]{}
+    loop child in comparison_json_array(value, key) {
+        if child == {
+            .String(text) -> &result.push(text)
+            else -> return Err(comparison_decode_error("comparison field `{key}` entries must be strings"))
+        }
+    }
+    Ok(result)
+}
+
+// Rust `comparison_observation_from_json`: an unlabelled observation needs a
+// non-empty raw rendering.
+fn comparison_observation_from_json(value: CanonicalJSON, label: String) -> ComparisonObservation ComparisonRecordError! {
+    raw :: comparison_json_text(value, "raw")
+    typed_failure :: comparison_json_optional_string(value, "typed_failure")
+    mutation :: comparison_json_optional_string(value, "mutation")
+    ordered_effects :: comparison_json_strings(value, "ordered_effects")
+    cleanup :: comparison_json_strings(value, "cleanup")
+    if raw == "" && label == "" -> return Err(comparison_decode_error("comparison observation raw value cannot be empty"))
+    Ok(ComparisonObservation{raw: raw, typed_failure: typed_failure, mutation: mutation, ordered_effects: ordered_effects, cleanup: cleanup})
+}
+
+// Rust `comparison_identity_from_json`.
+fn comparison_identity_from_json(value: CanonicalJSON) -> ComparisonIdentity ComparisonRecordError! {
+    identity := comparison_identity_new(comparison_json_text(value, "case_id"), comparison_json_text(value, "input_id"), comparison_json_text(value, "source"), comparison_json_text(value, "tool"), comparison_json_text(value, "target"))
+    if comparison_json_optional_integer(value, "seed") == .Val(text) {
+        identity.seed = Val(U64{comparison_parse_unsigned(text, 18446744073709551615, "comparison identity seed is not a valid u64")})
+    }
+    Ok(identity)
+}
+
+// Rust `comparison_sample_from_json`: replays come in pairs.
+fn comparison_sample_from_json(value: CanonicalJSON, index: Int) -> ComparisonSample ComparisonRecordError! {
+    identity :: comparison_identity_from_json(comparison_json_field(value, "identity"))
+    reference :: comparison_observation_from_json(comparison_json_field(value, "reference"), "sample {index} reference")
+    candidate :: comparison_observation_from_json(comparison_json_field(value, "candidate"), "sample {index} candidate")
+    sample := comparison_sample_new(identity, reference, candidate)
+    reference_replay :: comparison_json_optional_value(value, "reference_replay")
+    candidate_replay :: comparison_json_optional_value(value, "candidate_replay")
+    if reference_replay == .Val(child) -> sample.reference_replay = Val(comparison_observation_from_json(child, "reference replay"))
+    if candidate_replay == .Val(child) -> sample.candidate_replay = Val(comparison_observation_from_json(child, "candidate replay"))
+    if (sample.reference_replay != None) != (sample.candidate_replay != None) -> return Err(comparison_decode_error("comparison sample {index} must provide both replays"))
+    if comparison_json_optional_value(value, "declared_equal") == .Val(child) {
+        if child == {
+            .Bool(flag) -> sample.declared_equal = Val(flag)
+            else -> return Err(comparison_decode_error("comparison sample {index} declared_equal must be bool or null"))
+        }
+    }
+    Ok(sample)
+}
+
+// Rust `ComparisonRecord::from_json`.
+fn comparison_record_from_json(value: CanonicalJSON) -> ComparisonRecord ComparisonRecordError! {
+    schema :: comparison_parse_unsigned(comparison_json_integer(value, "schema_version"), 65535, "comparison schema_version is not a valid u16")
+    if (U16{schema}) != TEST_COMPARISON_SCHEMA_VERSION -> return Err(comparison_decode_error("unsupported comparison schema version {schema}"))
+    status :: comparison_parse_status(comparison_json_text(value, "status"))
+    relation :: comparison_parse_relation(comparison_json_text(value, "relation"))
+    samples := [ComparisonSample]{}
+    loop (index, child) in comparison_json_array(value, "samples") -> &samples.push(comparison_sample_from_json(child, index))
+    discarded :: comparison_parse_unsigned(comparison_json_integer(value, "discarded_cases"), 18446744073709551615, "comparison discarded_cases is not a valid usize")
+    first_difference := Int?{None}
+    if comparison_json_optional_integer(value, "first_difference") == .Val(text) {
+        first_difference = Val(comparison_parse_unsigned(text, 18446744073709551615, "comparison first_difference is not a valid usize"))
+    }
+    reduced := ComparisonSample?{None}
+    if comparison_json_optional_value(value, "reduced_counterexample") == .Val(child) -> reduced = Val(comparison_sample_from_json(child, 0))
+    contamination :: comparison_json_optional_string(value, "contamination")
+    reason :: comparison_json_optional_string(value, "reason")
+    universal_proof :: comparison_json_bool(value, "universal_proof")
+    record :: ComparisonRecord{schema_version: U16{schema}, status: status, relation: relation, samples: samples, discarded_cases: discarded, first_difference: first_difference, reduced_counterexample: reduced, contamination: contamination, reason: reason, universal_proof: universal_proof}
+    comparison_record_validate(record)
+    Ok(record)
+}

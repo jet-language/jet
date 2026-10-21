@@ -44,6 +44,69 @@ fn foundation_json_append(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
 
+// Rust `f64` Display (`value.to_string()`): the shortest round-trip digits,
+// never in exponent form, with no `.0` on integral values. Jet Float
+// interpolation is Rust `{:?}`, which carries the same digits; only the
+// layout differs.
+fn foundation_float_display(value: Float) -> String Never! {
+    debug :: "{value}"
+    bytes :: debug.bytes()
+    exponent_at := -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{101}) {
+            exponent_at = index
+            break
+        }
+    }
+    if exponent_at < 0 {
+        if bytes.len() < 2 || bytes[bytes.len() - 2] != (U8{46}) || bytes[bytes.len() - 1] != (U8{48}) -> return debug
+        return String.from_bytes_lossy(bytes[0..<bytes.len() - 2])
+    }
+    negative :: bytes[0] == (U8{45})
+    mantissa_start :: if negative -> 1 else -> 0
+    digits := [U8]{}
+    point := -1
+    loop index in mantissa_start..<exponent_at {
+        if bytes[index] == (U8{46}) {
+            point = digits.len()
+            next
+        }
+        &digits.push(bytes[index])
+    }
+    if point < 0 -> point = digits.len()
+    exponent_negative :: bytes[exponent_at + 1] == (U8{45})
+    exponent_start :: if exponent_negative -> exponent_at + 2 else -> exponent_at + 1
+    exponent := 0
+    loop index in exponent_start..<bytes.len() {
+        exponent = exponent * 10 + Int.from_u8(bytes[index]) - 48
+    }
+    if exponent_negative {
+        point -= exponent
+    } else {
+        point += exponent
+    }
+    out := [U8]{}
+    if negative -> &out.push(U8{45})
+    if point <= 0 {
+        foundation_json_append(&out, "0.")
+        loop _ in 0..<(0 - point) -> &out.push(U8{48})
+        loop digit in digits -> &out.push(digit)
+        return String.from_bytes(out) ?? panic("float display is ASCII")
+    }
+    loop index in 0..<point {
+        if index < digits.len() {
+            &out.push(digits[index])
+        } else {
+            &out.push(U8{48})
+        }
+    }
+    if point < digits.len() {
+        &out.push(U8{46})
+        loop index in point..<digits.len() -> &out.push(digits[index])
+    }
+    String.from_bytes(out) ?? panic("float display is ASCII")
+}
+
 // Shared structural Debug quoting (formerly JetEval's value formatter).
 fn foundation_debug_quoted(text: String, quote: Int) -> String Never! {
     out := [U8]{}

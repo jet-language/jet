@@ -1,0 +1,51 @@
+// Host edges of Evidence.rs: the environment that names a report and its build
+// provenance, and whole-report file IO. The codec itself stays host-free.
+use core.sys as evidence_sys
+use core.files as evidence_files
+
+EVIDENCE_REPORT_ENV :: "JET_EVIDENCE_REPORT"
+EVIDENCE_REPORT_ID_ENV :: "JET_EVIDENCE_REPORT_ID"
+EVIDENCE_TOOLCHAIN_ENV :: "JET_EVIDENCE_TOOLCHAIN"
+EVIDENCE_TARGET_ENV :: "JET_EVIDENCE_TARGET"
+EVIDENCE_PROFILE_ENV :: "JET_EVIDENCE_PROFILE"
+EVIDENCE_SOURCE_REVISION_ENV :: "JET_EVIDENCE_SOURCE_REVISION"
+EVIDENCE_BUILD_REVISION_ENV :: "JET_EVIDENCE_BUILD_REVISION"
+EVIDENCE_REVISION_ENV :: "JET_EVIDENCE_REVISION"
+
+// EvidenceBuild::from_environment: an unset variable is the empty string.
+fn evidence_build_from_environment() -[Env]> EvidenceBuild Never! {
+    EvidenceBuild{toolchain: evidence_sys.get(EVIDENCE_TOOLCHAIN_ENV) ?? "", target: evidence_sys.get(EVIDENCE_TARGET_ENV) ?? "", profile: evidence_sys.get(EVIDENCE_PROFILE_ENV) ?? ""}
+}
+
+// EvidenceRevision::from_environment.
+fn evidence_revision_from_environment() -[Env]> EvidenceRevision Never! {
+    EvidenceRevision{source: evidence_sys.get(EVIDENCE_SOURCE_REVISION_ENV) ?? "", build: evidence_sys.get(EVIDENCE_BUILD_REVISION_ENV) ?? "", revision: evidence_sys.get(EVIDENCE_REVISION_ENV) ?? ""}
+}
+
+// The report id a test producer stamps on its records; "test-run" when unset.
+fn evidence_report_id_from_environment() -[Env]> String Never! {
+    evidence_sys.get(EVIDENCE_REPORT_ID_ENV) ?? "test-run"
+}
+
+// EvidenceRecord::from_test_codes with its provenance read from the environment.
+fn evidence_record_from_test_environment(kind_code: Int, state: Int, name: String, message: String, file: String, line: U32) -[Env]> EvidenceRecord EvidenceCodecError! {
+    evidence_record_from_test_codes(kind_code, state, name, message, file, line, evidence_report_id_from_environment(), evidence_build_from_environment(), evidence_revision_from_environment())
+}
+
+// EvidenceReport::read.
+fn evidence_report_read(path: String) -[FS.Read]> EvidenceReport EvidenceCodecError! {
+    bytes :: if evidence_files.read_bytes(path) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(evidence_codec_error("{error}")) }
+    }
+    evidence_report_from_bytes(bytes, U64.MAX)
+}
+
+// EvidenceReport::write.
+fn evidence_report_write(report: EvidenceReport, path: String) EvidenceCodecError! -[FS.Write]> {
+    bytes :: evidence_report_encode(report)
+    if evidence_files.write_bytes(path, bytes) == {
+        .Ok(_) -> return
+        .Err(error) -> { return Err(evidence_codec_error("{error}")) }
+    }
+}
