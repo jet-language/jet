@@ -1,0 +1,477 @@
+// The IR builder's runtime routes: Core calls and builtin methods through
+// the old path's route table (argument and result carriers, payloads).
+
+use jet_foundation.[CoreCallRecord, Span, Type, TBuiltinOp, TClosureOp, TExpr, tir_builtin_mutates_receiver]
+use jet_backend.[LowerRouteCarrier, lower_runtime_route]
+use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type]
+
+// `list.push(value)`: grows the buffer to twice its capacity (at least 4)
+// when full, then stores the element at `len` (Lower lower_helper_list_push).
+fn ir_list_push(m: &IRModule, b: &IRBuilder, list: Int, row: Int, value: Int) Never! {
+    stride :: ir_list_stride(m, row)
+    width :: ir_word_const(&m, &b, stride)
+    length :: ir_load_word(&m, &b, list, 0)
+    capacity :: ir_load_word(&m, &b, list, 8)
+    ir_open_if(&b.f, ir_bool_op(&m, &b, IROp.Eq, length, capacity), b.line)
+    grown :: ir_word_op(&m, &b, IROp.Add, capacity, capacity)
+    four :: ir_word_const(&m, &b, 4)
+    ir_open_if(&b.f, ir_bool_op(&m, &b, IROp.Lt, grown, four), b.line)
+    ir_emit(&b.f, IROp.Copy, grown, four, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    align :: ir_word_const(&m, &b, 8)
+    data :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{ir_word_op(&m, &b, IROp.Mul, grown, width), align}, ir_word_row(&m))
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, ir_load_word(&m, &b, list, 16), ir_word_op(&m, &b, IROp.Mul, length, width)}, -1)
+    ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
+    ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
+    ir_end(&b.f, b.line)
+    address :: ir_element_address(&m, &b, ir_load_word(&m, &b, list, 16), length, stride)
+    ir_store_at(&m, &b, address, 0, value)
+    ir_emit(&b.f, IROp.Store, -1, list, 0, ir_word_op(&m, &b, IROp.Add, length, ir_word_const(&m, &b, 1)), b.line)
+}
+
+// Builtin methods (codegen jet_codegen_builtin_route_plan): Lists inline,
+// Strings through the runtime routes the old path calls.
+fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TBuiltinOp, args: [TExpr], span: Span) -> Int Never! {
+    subject :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || subject < 0 -> return -1
+    kind :: ir_kind_of(m, b, subject)
+    element := -1
+    if ir_list_element(&m, p, b, subject) == .Val(row) -> element = row
+    operands := [Int]{subject}
+    loop arg in args {
+        slot :: ir_expr(&m, &p, &b, arg)
+        if ir_failed(b) -> return -1
+        &operands.push(slot)
+    }
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    if element >= 0 {
+        if operation == {
+            .LenList -> return ir_load_at(&m, &b, subject, 0, int_row)
+            .IsEmpty -> return ir_bool_op(&m, &b, IROp.Eq, ir_load_word(&m, &b, subject, 0), ir_word_const(&m, &b, 0))
+            .Push -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "push without a value")
+                value :: ir_adapt(&m, p, &b, operands[1], element, span)
+                if ir_failed(b) -> return -1
+                ir_list_push(&m, &b, subject, element, value)
+                return -1
+            }
+            .Clear -> {
+                ir_emit(&b.f, IROp.Store, -1, subject, 0, ir_word_const(&m, &b, 0), b.line)
+                return -1
+            }
+            .JoinSep -> {
+                if operands.len() != 2 -> return ir_fail_slot(&b, span, "join without a separator")
+                separator :: operands[1]
+                builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, ir_pointer_row(&m))
+                b.fresh[builder] = false
+                walk :: ir_walk_open(&m, &b, subject, element)
+                later :: ir_bool_op(&m, &b, IROp.Ne, walk.index, ir_word_const(&m, &b, 0))
+                ir_open_if(&b.f, later, b.line)
+                _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, separator}, -1)
+                ir_end(&b.f, b.line)
+                ir_render_push_value(&m, p, &b, builder, walk.item, IRRender.Show, span)
+                ir_walk_close(&m, &b, walk)
+                return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, ir_string_row(&m))
+            }
+            else -> {}
+        }
+    }
+    if kind == .String {
+        // Lower lower_string_method calls these exports directly; every other
+        // String builtin crosses its runtime route.
+        symbol :: if operation == {
+            .LenString -> "jet_char_len"
+            .IsEmpty -> "jet_string_is_empty"
+            .Contains -> "jet_string_contains"
+            .StartsWith -> "jet_string_starts_with"
+            .EndsWith -> "jet_string_ends_with"
+            else -> ""
+        }
+        if symbol != "" {
+            result_row :: if operation == .LenString -> int_row else -> bool_row
+            result :: ir_runtime(&m, &b, symbol, operands, result_row)
+            loop operand in operands -> ir_release(&m, &b, operand)
+            return result
+        }
+    }
+    ir_builtin_route(&m, &p, &b, ty, receiver.ty, operation, operands, span)
+}
+
+// A builtin method through its canonical route (codegen
+// jet_codegen_builtin_route_plan, Lower lower_route_call).
+fn ir_builtin_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, operands: [Int], span: Span) -> Int Never! {
+    if operation == {
+        .OptionZip(_, _) | .Zip(_, _, _, _, _, _, _) | .Unzip(_) | .Indexes | .ListMinMax(_) | .Indexed(_) | .MapToList(_) | .IterSplit(_) | .ToString
+        | .RemoveList(_, _) | .PriorityQueueRemove(_, _) | .MapNew | .SetCopy | .BitSetNew | .ByteBufferNew | .BagLen | .AtomicMethod(_) | .ViewNew(_) | .ViewMutNew(_) | .ComputeViewNew(_) | .ComputeViewMutNew(_) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
+        else -> {}
+    }
+    if tir_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
+    route :: jet_codegen_builtin_route_plan(operation, receiver_ty, ty, jet_codegen_failure_carrier_for_type(ty))
+    if route.arity != operands.len() -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
+    result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
+    ir_route(&m, &p, &b, route.symbol, operands, route.borrow_mask, result, span)
+}
+
+// ---------------------------------------------------------------------------
+// List closure methods (codegen ClosureMethods.jet routes jet_list_map,
+// jet_list_filter, ...), expanded inline over the list with each element
+// passed to the closure box.
+
+fn ir_call_closure(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_row: Int) -> Int Never! {
+    code :: ir_temp(&m, &b, ir_pointer_row(&m))
+    ir_emit(&b.f, IROp.Load, code, boxed, 8, -1, b.line)
+    operands := [Int]{boxed}
+    loop arg in args -> &operands.push(arg)
+    dst :: if result_row >= 0 && m.types[result_row].kind != .Unit -> ir_fresh_temp(&m, &b, result_row) else -> -1
+    start :: ir_args(&b.f, operands)
+    ir_emit(&b.f, IROp.CallIndirect, dst, code, start, operands.len(), b.line)
+    dst
+}
+
+fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
+    list :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || list < 0 -> return -1
+    element :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver.ty)}")
+    operands := [Int]{}
+    loop arg in args {
+        slot :: ir_expr(&m, &p, &b, arg)
+        if ir_failed(b) -> return -1
+        &operands.push(slot)
+    }
+    if operands.len() == 0 -> return ir_fail_slot(&b, span, "closure method without a closure")
+    callback :: operands[operands.len() - 1]
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    result_row :: if ir_unit_type(ty) -> -1 else -> ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if operation == {
+        .Each | .EachRef -> {
+            walk :: ir_walk_open(&m, &b, list, element)
+            _ :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, -1)
+            ir_walk_close(&m, &b, walk)
+            return -1
+        }
+        .Map -> {
+            result :: ir_list_empty(&m, &b, result_row)
+            mapped_row :: ir_list_element(&m, p, b, result) ?? return ir_fail_slot(&b, span, "map result {ir_type_name(ty)}")
+            walk :: ir_walk_open(&m, &b, list, element)
+            ir_list_push(&m, &b, result, mapped_row, ir_call_closure(&m, &b, callback, [Int]{walk.item}, mapped_row))
+            ir_walk_close(&m, &b, walk)
+            return result
+        }
+        .Filter -> {
+            result :: ir_list_empty(&m, &b, result_row)
+            walk :: ir_walk_open(&m, &b, list, element)
+            keep :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, bool_row)
+            ir_open_if(&b.f, keep, b.line)
+            ir_list_push(&m, &b, result, element, walk.item)
+            ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+            return result
+        }
+        .Any | .All -> {
+            any :: operation == .Any
+            result :: ir_temp(&m, &b, bool_row)
+            ir_emit(&b.f, IROp.Const, result, if any -> 0 else -> 1, -1, -1, b.line)
+            walk :: ir_walk_open(&m, &b, list, element)
+            test :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, bool_row)
+            decided :: if any -> test else -> ir_bool_op(&m, &b, IROp.Eq, test, ir_int_constant(&m, &b, bool_row, 0))
+            ir_open_if(&b.f, decided, b.line)
+            ir_emit(&b.f, IROp.Const, result, if any -> 1 else -> 0, -1, -1, b.line)
+            ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+            return result
+        }
+        .CountWhere -> {
+            count :: ir_word_const(&m, &b, 0)
+            walk :: ir_walk_open(&m, &b, list, element)
+            test :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, bool_row)
+            ir_open_if(&b.f, test, b.line)
+            ir_emit(&b.f, IROp.Add, count, count, ir_word_const(&m, &b, 1), IR_OVERFLOW_WRAP, b.line)
+            ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+            result :: ir_temp(&m, &b, result_row)
+            ir_emit(&b.f, IROp.Copy, result, count, -1, -1, b.line)
+            return result
+        }
+        .Fold -> {
+            if operands.len() != 2 -> return ir_fail_slot(&b, span, "fold without an initial value")
+            accumulator :: ir_temp(&m, &b, result_row)
+            ir_store(&m, &b, accumulator, ir_adapt(&m, p, &b, operands[0], result_row, span))
+            walk :: ir_walk_open(&m, &b, list, element)
+            next_value :: ir_call_closure(&m, &b, callback, [Int]{accumulator, walk.item}, result_row)
+            ir_store(&m, &b, accumulator, next_value)
+            ir_walk_close(&m, &b, walk)
+            return accumulator
+        }
+        .Find -> {
+            result :: ir_temp(&m, &b, result_row)
+            ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+            walk :: ir_walk_open(&m, &b, list, element)
+            test :: ir_call_closure(&m, &b, callback, [Int]{walk.item}, bool_row)
+            ir_open_if(&b.f, test, b.line)
+            element_size :: m.types[element].size
+            boxed :: ir_box_alloc(&m, &b, element_size, result_row)
+            ir_store_at(&m, &b, boxed, 0, walk.item)
+            ir_emit(&b.f, IROp.Copy, result, boxed, -1, -1, b.line)
+            ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+            return result
+        }
+        else -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)}")
+    }
+}
+
+fn ir_closure_op_name(operation: TClosureOp) -> String Never! {
+    text := "{operation}"
+    separators :: [String]{"(", "{{", " "}
+    loop separator in separators {
+        parts :: text.split(separator).to_list()
+        text = parts[0]
+    }
+    text
+}
+
+// ---------------------------------------------------------------------------
+// Runtime routes (Lower Routes.jet lower_route_call / lower_route_result):
+// Core calls, Prelude conversions and builtin methods call the runtime's
+// C-ABI export of their route (RuntimeRoutes.jet). Each argument crosses as
+// its route carrier: a Word is the exact-Int carrier word (a fixed-width
+// integer is boxed into one for the call), a List its data pointer and
+// length. A List result comes back as its length with its data in an out
+// slot; an Option or Result result as a tag word with its payload in one
+// zeroed out slot, from which the builder makes its own box.
+
+// `inputs[i]` is an argument slot; `borrowed[i]` whether the route only reads
+// it (a fresh borrowed argument is dropped after the call; a consumed one
+// belongs to the route, so a read of another holder's value is copied first).
+fn ir_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, span: Span) -> Int Never! {
+    name :: ir_route_symbol(symbol)
+    route :: lower_runtime_route(name) ?? return ir_fail_slot(&b, span, "runtime route {name}")
+    if route.params.len() != inputs.len() -> return ir_fail_slot(&b, span, "runtime route {name} takes {route.params.len()} arguments, not {inputs.len()}")
+    args := [Int]{}
+    loop (index, slot) in inputs {
+        &args.push(if index < borrowed.len() && !borrowed[index] -> ir_own(&m, &b, slot) else -> slot)
+    }
+    lowered := [Int]{}
+    temporaries := [Int]{}
+    loop (index, slot) in args {
+        carrier :: route.params[index]
+        if carrier == .Unit -> next
+        if slot < 0 -> return ir_fail_slot(&b, span, "runtime route {name} argument {index} without a value")
+        kind :: ir_kind_of(m, b, slot)
+        if carrier == {
+            .Word -> {
+                if kind == .Int {
+                    &lowered.push(slot)
+                } else if kind == .Word {
+                    row :: m.types[b.f.slot_type[slot]]
+                    if !row.signed && row.bits == 64 -> return ir_fail_slot(&b, span, "runtime route {name} U64 argument")
+                    exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{slot}, ir_type_row(&m, Type.Int) ?? 0)
+                    &lowered.push(exact)
+                    &temporaries.push(exact)
+                } else {
+                    return ir_fail_slot(&b, span, "runtime route {name} Word argument of {m.types[b.f.slot_type[slot]].ty}")
+                }
+            }
+            .Flag -> {
+                if kind != .Bool -> return ir_fail_slot(&b, span, "runtime route {name} Flag argument of {m.types[b.f.slot_type[slot]].ty}")
+                &lowered.push(slot)
+            }
+            .Float -> {
+                if kind != .Float -> return ir_fail_slot(&b, span, "runtime route {name} Float argument of {m.types[b.f.slot_type[slot]].ty}")
+                &lowered.push(slot)
+            }
+            .Text -> {
+                if kind != .String -> return ir_fail_slot(&b, span, "runtime route {name} Text argument of {m.types[b.f.slot_type[slot]].ty}")
+                &lowered.push(slot)
+            }
+            .Tag(_, variants) -> {
+                row :: ir_enum_def(m, p, b.f.slot_type[slot]) ?? return ir_fail_slot(&b, span, "runtime route {name} Tag argument of {m.types[b.f.slot_type[slot]].ty}")
+                if kind != .Word || ir_variant_names(p, row) != variants -> return ir_fail_slot(&b, span, "runtime route {name} Tag argument of {m.types[b.f.slot_type[slot]].ty}")
+                &lowered.push(slot)
+            }
+            .List(element) -> {
+                if ir_list_element(&m, p, b, slot) == None -> return ir_fail_slot(&b, span, "runtime route {name} List argument of {m.types[b.f.slot_type[slot]].ty}")
+                if element == .List(_) || element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                &lowered.push(ir_load_word(&m, &b, slot, 16))
+                &lowered.push(ir_load_word(&m, &b, slot, 0))
+            }
+            else -> return ir_fail_slot(&b, span, "runtime route {name} argument carrier {carrier}")
+        }
+    }
+    dst := -1
+    if route.result == {
+        .Plain(carrier) -> dst = ir_route_plain(&m, p, &b, route.export, lowered, carrier, result, span)
+        .Option(some) -> dst = ir_route_option(&m, p, &b, route.export, lowered, some, result, span)
+        .Result(ok, err) -> dst = ir_route_result(&m, p, &b, route.export, lowered, ok, err, result, span)
+        .Tuple(_) -> return ir_fail_slot(&b, span, "runtime route {name} with a tuple result")
+    }
+    if ir_failed(b) -> return -1
+    loop temporary in temporaries -> ir_release(&m, &b, temporary)
+    loop (index, slot) in args {
+        if slot < 0 -> next
+        if index < borrowed.len() && !borrowed[index] {
+            b.fresh[slot] = false
+        } else {
+            ir_release(&m, &b, slot)
+        }
+    }
+    dst
+}
+
+// Lower Strings.jet lower_route_symbol: a view route is its owned twin.
+fn ir_route_symbol(symbol: String) -> String Never! {
+    if symbol == "jet_string_after_view" -> return "jet_string_after"
+    if symbol == "jet_string_before_view" -> return "jet_string_before"
+    if symbol == "jet_string_trim_view" || symbol == "jet_unicode_trim_view" -> return "jet_unicode_trim"
+    symbol.copy()
+}
+
+// The variant names of the enum declaration `row`, comma-joined.
+fn ir_variant_names(p: IRProgram, row: Int) -> String Never! {
+    names := [String]{}
+    if p.types[row].kind == .Enum(variants, _) {
+        loop variant in variants -> &names.push(variant.name)
+    }
+    names.join(",")
+}
+
+// A zeroed frame out slot of `words` words.
+fn ir_out_slot(m: &IRModule, b: &IRBuilder, words: Int) -> Int Never! {
+    slot :: ir_temp(&m, &b, ir_pointer_row(&m))
+    ir_emit(&b.f, IROp.StackAddress, slot, 8 * words, 8, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    loop index in 0..<words -> ir_emit(&b.f, IROp.Store, -1, slot, 8 * index, zero, b.line)
+    slot
+}
+
+fn ir_address_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int) -> Int Never! {
+    address :: ir_temp(&m, &b, ir_pointer_row(&m))
+    ir_emit(&b.f, IROp.Offset, address, base, offset, -1, b.line)
+    address
+}
+
+fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], carrier: LowerRouteCarrier, result: Type, span: Span) -> Int Never! {
+    if carrier == .Unit {
+        _ :: ir_runtime(&m, &b, export, args, -1)
+        return -1
+    }
+    row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    if carrier == .List(element) {
+        if element == .List(_) || element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {export} List of {element} result")
+        out :: ir_out_slot(&m, &b, 1)
+        call_args := args
+        &call_args.push(out)
+        length :: ir_runtime(&m, &b, export, call_args, ir_word_row(&m))
+        storage :: ir_fresh_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
+        ir_route_list_header(&m, &b, storage, 0, ir_load_word(&m, &b, out, 0), length)
+        return storage
+    }
+    if carrier == .Handle(_) || carrier == .HandleMut(_) || carrier == .Option(_) -> return ir_fail_slot(&b, span, "runtime route {export} result carrier {carrier}")
+    ir_runtime(&m, &b, export, args, row)
+}
+
+// A List header (len, cap, data) at `offset` of `base` from a route's
+// (data, length) pair.
+fn ir_route_list_header(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, data: Int, length: Int) Never! {
+    ir_emit(&b.f, IROp.Store, -1, base, offset, length, b.line)
+    ir_emit(&b.f, IROp.Store, -1, base, offset + 8, length, b.line)
+    ir_emit(&b.f, IROp.Store, -1, base, offset + 16, data, b.line)
+}
+
+// The payload a route wrote to `out` stored at `offset` of the box `base`.
+fn ir_route_store_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, payload: Type, carrier: LowerRouteCarrier, out: Int, span: Span) Never! {
+    if carrier == .Unit -> return
+    if carrier == .List(_) -> return ir_route_list_header(&m, &b, base, offset, ir_load_word(&m, &b, out, 0), ir_load_word(&m, &b, out, 8))
+    if carrier == .Handle(_) || carrier == .HandleMut(_) || carrier == .Option(_) -> return ir_fail(&b, span, "runtime route payload carrier {carrier}")
+    row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "payload type {payload}")
+    value :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Load, value, out, 0, -1, b.line)
+    ir_emit(&b.f, IROp.Store, -1, base, offset, value, b.line)
+}
+
+fn ir_route_option(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], some: LowerRouteCarrier, result: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    payload :: if ir_untag(result) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {export} Option result as {result}") }
+    list :: some == .List(_)
+    out :: ir_out_slot(&m, &b, if list -> 2 else -> 1)
+    call_args := args
+    &call_args.push(out)
+    if list -> &call_args.push(ir_address_at(&m, &b, out, 8))
+    selector :: ir_runtime(&m, &b, export, call_args, ir_word_row(&m))
+    boxed :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Const, boxed, 0, -1, -1, b.line)
+    ir_open_if(&b.f, ir_bool_op(&m, &b, IROp.Ne, selector, ir_word_const(&m, &b, 0)), b.line)
+    present :: ir_box_alloc(&m, &b, if list -> 24 else -> ir_type_size(&m, p, payload), row)
+    ir_route_store_payload(&m, p, &b, present, 0, payload, some, out, span)
+    ir_emit(&b.f, IROp.Copy, boxed, present, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    b.fresh[boxed] = true
+    boxed
+}
+
+fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], ok: LowerRouteCarrier, err: LowerRouteCarrier, result: Type, span: Span) -> Int Never! {
+    ok_ty := Type.Int
+    err_ty := Type.Int
+    if ir_untag(result) == .Result(success, failure) {
+        ok_ty = success
+        err_ty = failure
+    } else {
+        return ir_fail_slot(&b, span, "runtime route {export} Result result as {result}")
+    }
+    list :: ok == .List(_) || err == .List(_)
+    out :: ir_out_slot(&m, &b, if list -> 2 else -> 1)
+    call_args := args
+    if ok != .Unit {
+        &call_args.push(out)
+        if ok == .List(_) -> &call_args.push(ir_address_at(&m, &b, out, 8))
+    }
+    if err != .Unit {
+        &call_args.push(out)
+        if err == .List(_) -> &call_args.push(ir_address_at(&m, &b, out, 8))
+    }
+    selector :: ir_runtime(&m, &b, export, call_args, ir_word_row(&m))
+    boxed :: ir_result_box(&m, p, &b, result, true, -1)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, selector, b.line)
+    ir_open_if(&b.f, ir_bool_op(&m, &b, IROp.Ne, selector, ir_word_const(&m, &b, 0)), b.line)
+    ir_route_store_payload(&m, p, &b, boxed, 8, ok_ty, ok, out, span)
+    ir_else(&b.f, b.line)
+    ir_route_store_payload(&m, p, &b, boxed, 8, err_ty, err, out, span)
+    ir_end(&b.f, b.line)
+    b.fresh[boxed] = true
+    boxed
+}
+
+// A Core call (codegen CoreCall -> Lower lower_route_call): its checked
+// arguments to the record's runtime route.
+fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [TExpr], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
+    canonical :: jet_codegen_canonical_core_record(record)
+    if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic Core call {canonical.module_name}.{canonical.member}")
+    loop flag in widen {
+        if flag -> return ir_fail_slot(&b, span, "Core call {canonical.module_name}.{canonical.member} widening a fixed list")
+    }
+    symbol :: if canonical.symbol == {
+        .Prelude(name) -> name
+        .Rust(name) -> name
+        .SourceOwned -> { return ir_fail_slot(&b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
+    }
+    slots := [Int]{}
+    loop arg in args {
+        slot :: ir_expr(&m, &p, &b, arg)
+        if ir_failed(b) -> return -1
+        &slots.push(slot)
+    }
+    result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
+    ir_route(&m, &p, &b, symbol, slots, canonical.signature.borrow_mask, result, span)
+}
+
+// The C export of a Prelude route symbol (its last `::` segment when the
+// route table has no row).
+fn ir_route_export(symbol: String) -> String Never! {
+    if lower_runtime_route(symbol) == .Val(route) -> return route.export
+    parts :: symbol.split("::").to_list()
+    parts[parts.len() - 1].copy()
+}
