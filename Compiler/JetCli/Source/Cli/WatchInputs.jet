@@ -85,7 +85,7 @@ fn jet_cli_watch_runtime_literals(source: String) -> [String:Bool] Never! {
             loop cursor < bytes.len() && jet_cli_watch_whitespace(bytes[cursor]) -> cursor += 1
             if jet_cli_watch_quoted(bytes, cursor) == .Val(literal) {
                 value :: literal.text
-                if value != "" && !value.contains("{") && !value.contains("}") && !value.contains("://") -> inputs[value] = (inputs.get(value) ?? false) || directory
+                if value != "" && !value.contains("{{") && !value.contains("}}") && !value.contains("://") -> inputs[value] = (inputs.get(value) ?? false) || directory
                 offset = literal.end + 1
             } else { offset = cursor + 1 }
         }

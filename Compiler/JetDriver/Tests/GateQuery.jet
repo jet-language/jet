@@ -48,6 +48,6 @@ fn run() {
     external.gate_policies = [JetDriverGatePolicy{package_identity: (jet_driver_source_query(external)).modules[0].package_identity, declarations: [PolicyDeclaration{key: PolicyKey.TrustGrant, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 0}, target: None, source: "organization"}]}]
     forbidden :: jet_driver_gate_query(external)
     gate_query_require(!forbidden.complete && forbidden.diagnostics.len() == 1 && forbidden.diagnostics[0].code == "E3415", "external policy diagnostics use entry module fallback")
-    malformed :: jet_driver_gate_query(gate_query_request("fn run( {", None))
+    malformed :: jet_driver_gate_query(gate_query_request("fn run( {{", None))
     gate_query_require(!malformed.complete && malformed.diagnostics.len() > 0 && malformed.ledger.rows.len() == 0, "load failure prevents projection")
 }

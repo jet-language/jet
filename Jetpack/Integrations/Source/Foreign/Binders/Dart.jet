@@ -236,7 +236,7 @@ fn pkg_dart_parse(source: String) -> [DartFunction] ForeignBindError! {
         loop raw_item in pkg_binder_slice(header, open + 1, close).split(",") {
             item :: raw_item.trim()
             if item == "" -> next
-            if item.contains("{") || item.contains("}") || item.contains("[") || item.contains("]") -> return Err(ForeignBindError.Source("Dart entry point `{name}` cannot use named or optional parameters"))
+            if item.contains("{{") || item.contains("}}") || item.contains("[") || item.contains("]") -> return Err(ForeignBindError.Source("Dart entry point `{name}` cannot use named or optional parameters"))
             words :: pkg_binder_words(item)
             if words.len() != 2 -> return Err(ForeignBindError.Source("Dart entry point `{name}` needs explicit positional parameter types"))
             kind :: DartScalar.parse(words[0]) ?? return Err(ForeignBindError.Source("Dart entry point `{name}` uses unsupported parameter type `{words[0]}`"))
