@@ -51,7 +51,8 @@ else {if(process.env.FIXTURE_MODE==='registry')process.exit(1);const manifest=JS
         rmSync(join(sandbox, '.corrupted'), { force: true });
         if (mode === 'pinned') writeFileSync(join(container, 'source.manifest.json'), JSON.stringify({ commit: '0123456789012345678901234567890123456789' }));
         const evidence = join(external, mode);
-        const ran = spawnSync('bash', [join(sandbox, 'Tools/agent/verify-full.sh')], { cwd: sandbox, env: { ...process.env, PATH: `${sandbox}/bin:${process.env.PATH}`, JET: join(sandbox, 'bin/jet'), FIXTURE_MODE: mode, JET_VERIFY_TMPDIR: external, JET_CI_EVIDENCE_DIR: evidence, JET_TEST_SHARD: '0', JET_TEST_SHARD_COUNT: '1' }, encoding: 'utf8', timeout: 30000 });
+        // The timeout only catches a hang; a loaded machine (release preflights run beside builds) needs headroom.
+        const ran = spawnSync('bash', [join(sandbox, 'Tools/agent/verify-full.sh')], { cwd: sandbox, env: { ...process.env, PATH: `${sandbox}/bin:${process.env.PATH}`, JET: join(sandbox, 'bin/jet'), FIXTURE_MODE: mode, JET_VERIFY_TMPDIR: external, JET_CI_EVIDENCE_DIR: evidence, JET_TEST_SHARD: '0', JET_TEST_SHARD_COUNT: '1' }, encoding: 'utf8', timeout: 300000 });
         assert.equal(ran.error, undefined); assert.equal(ran.signal, null);
         assert.equal(ran.status, ['pass', 'pinned'].includes(mode) ? 0 : 1, ran.stderr);
         const report = JSON.parse(readFileSync(join(evidence, 'verify-full.json'), 'utf8'));
