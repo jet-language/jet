@@ -4,6 +4,7 @@
 // declarations already present in SemaScopeTable.
 use jet_foundation.[
     BUILTIN_METHOD_ROWS,
+    BinOp,
     COLLECTION_OPERATIONS,
     AccessConvention,
     CallArg,
@@ -24,6 +25,7 @@ use jet_foundation.[
     TLetTy,
     TMethodRef,
     TStmt,
+    TGenericParam,
     Type,
     TypeTupleField,
     TextEdit,
@@ -199,6 +201,8 @@ fn sema_call_try_int_abs_source(receiver: Expr, receiver_value: TExpr, method: S
 // the already checked receiver so builtin identity comes from its Type rather
 // than from a user spelling or a basename.
 fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    hook :: sema_call_try_type_param_hook_method(receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if hook.handled -> return hook
     build :: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if build.handled -> return build
     dev :: sema_call_try_dev_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -212,6 +216,112 @@ fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: S
     transaction :: sema_call_try_transaction_hook(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if transaction.handled -> return transaction
     sema_call_try_builtin_host_route(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// Rust `infer_method_call`'s type-parameter dispatch (method_calls.rs:6877-6941)
+// over the compiler's synthetic hook traits (Traits.rs:2883
+// register_synthetic_operators, :3626 register_synthetic_binary_trait): inside
+// a generic body the bounded parameter is the trait's `Self`, so
+// `left.compare(right)` with `T: Comparable` takes a `T` and yields an
+// `Ordering`, and `left.equal(right)` with `T: Equatable` a `Bool`. The checked
+// call is the operator's own comparison, which is how codegen lowers a builtin
+// hook method (lower/method_calls.rs:629 lower_builtin_binary_method). The
+// first bound that declares the method decides, so a registered trait bound
+// keeps its candidate path. When no bound declares it, the trait with the
+// least name that does is the missing bound (E0901, Generics.rs:708).
+fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    rejected :: SemaMethodSpecialCheck{handled: true, value: None}
+    receiver_name :: if receiver_value.ty == {
+        .Named(name) -> Val(name)
+        else -> None
+    }
+    name :: receiver_name ?? return unhandled
+    parameter := TGenericParam?{None}
+    index := environment.generic_params.len()
+    loop index > 0 {
+        index -= 1
+        candidate :: environment.generic_params[index]
+        if candidate.name == name {
+            parameter = Val(candidate)
+            break
+        }
+    }
+    current :: parameter ?? return unhandled
+    hook_trait := String?{None}
+    loop bound in current.bounds {
+        segments :: bound.key.split(":").to_list()
+        trait_name :: segments[segments.len() - 1]
+        if sema_type_builtin_trait_symbol(trait_name) == .Val(builtin) && builtin.id.key == bound.key {
+            if sema_checked_operator_hook(trait_name) == (Val(method)) {
+                hook_trait = Val(trait_name)
+                break
+            }
+            next
+        }
+        if program.registration_graph == .Val(graph) {
+            row :: sema_call_trait_row_for_symbol(graph, bound) ?? next
+            if sema_call_trait_row_declares(graph, row, method) -> return unhandled
+        }
+    }
+    if hook_trait == None {
+        missing :: sema_call_type_param_method_trait(program, method) ?? return unhandled
+        &diagnostics.push(sema_error("E0901", span, "calling `{method}` needs `{missing}`", "methods on a type parameter require that bound", "add `<T: {missing}>` to the generic parameter list"))
+        if sema_checked_operator_hook(missing) != (Val(method)) || (method != "compare" && method != "equal") -> return rejected
+        hook_trait = Val(missing)
+    }
+    if method != "compare" && method != "equal" -> return unhandled
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`{method}` expects 1 argument, got {args.len()}", "every argument must match a parameter (not counting `self`)", "check the definition of `{method}` on the trait"))
+        return rejected
+    }
+    argument :: sema_check_expression(args[0].expr, Val(receiver_value.ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return rejected
+    assignable :: sema_call_type_assignable(receiver_value.ty, argument.ty, environment, program) ?? return rejected
+    if !assignable {
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` wants {sema_type_show(receiver_value.ty)}, but this is {sema_type_show(argument.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(receiver_value.ty, argument.ty)))
+        return rejected
+    }
+    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    ordering :: method == "compare"
+    op :: if ordering -> BinOp.Compare else -> BinOp.Eq
+    result_ty :: if ordering -> Type.Named{name: "Ordering"} else -> Type.Bool
+    value :: sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: receiver_value, rhs: argument}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// Rust's fallback over every registered trait (method_calls.rs:6887-6894):
+// the least-named trait that declares `method`, the synthetic hook traits
+// (Traits.rs:2883, :2852 Close, :3566 CheckedText) included.
+fn sema_call_type_param_method_trait(program: SemaProgramTables, method: String) -> String? {
+    best := String?{None}
+    synthetic :: [String]{"Add", "CheckedText", "Close", "Comparable", "Div", "Equatable", "Mul", "Sub"}
+    loop trait_name in synthetic {
+        declares :: sema_checked_operator_hook(trait_name) == (Val(method)) || (trait_name == "Close" && method == "close") || (trait_name == "CheckedText" && (method == "check" || method == "encode_hole"))
+        if !declares -> next
+        if best == .Val(current) && current <= trait_name -> next
+        best = Val(trait_name)
+    }
+    if program.registration_graph == .Val(graph) {
+        loop graph_module in graph.modules {
+            loop nominal in graph_module.nominals {
+                if nominal.kind != SemaRegistrationNominalKind.Trait -> next
+                declares :: loop trait_method in nominal.trait_methods {
+                    if trait_method.declaration.name == method -> break true
+                } ?? false
+                if !declares -> next
+                if best == .Val(current) && current <= nominal.symbol.name -> next
+                best = Val(nominal.symbol.name)
+            }
+        }
+    }
+    best
+}
+
+fn sema_call_trait_row_declares(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, method: String) -> Bool Never! {
+    loop trait_method in graph.modules[row.module_index].nominals[row.row].trait_methods {
+        if trait_method.declaration.name == method -> return true
+    }
+    false
 }
 
 fn sema_call_method_owner_type(name: String, type_args: [Type]) -> Type Never! {

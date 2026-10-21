@@ -642,10 +642,7 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         }
     }
     normalized :: sema_call_core_normalized_source_record(record, args)
-    // Typed JSON stays the compiler-owned Decode projection, never the
-    // untyped source `decode` (Rust TIR/lower/method_calls.rs:1734).
-    typed_json_decode :: record.module_name == "core.encoding.json" && record.member == "decode" && type_args.len() != 0
-    if !typed_json_decode && core_call_source_member(normalized) == .Val(member) {
+    if core_call_source_member(normalized) == .Val(member) {
         source_module := record.module_name
         source_member := member
         if member.starts_with("core.") {

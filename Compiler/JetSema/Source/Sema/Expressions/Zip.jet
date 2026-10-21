@@ -14,6 +14,7 @@ use jet_foundation.[
     TZipMode,
     Type,
     TypeTupleField,
+    expr_span,
     type_name,
     type_tuple_struct_name,
 ]
@@ -268,6 +269,7 @@ fn sema_expression_zip_consume_receiver(receiver: Expr, receiver_type: Type, met
 }
 
 fn sema_expression_zip_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method == "zip" && receiver_value.ty == .Option(_) -> return sema_expression_option_zip(receiver_value, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if !sema_expression_zip_family_name(method) || sema_expression_zip_sequence_elem(receiver_value.ty) == None -> return SemaMethodSpecialCheck{handled: false, value: None}
     is_pad := method == "zip_pad"
     inputs := [TExpr]{receiver_value}
@@ -300,4 +302,31 @@ fn sema_expression_zip_method(receiver: Expr, receiver_value: TExpr, method: Str
     }
     value :: sema_expression_zip_family(method, inputs, fields, common_fill, column_fills, fill_args, span, expected, environment, program, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}
+
+// Rust options_rng.rs:140-177 finish_option_zip (method_calls.rs:7885):
+// `a: T?`.zip(`b: U?`) is `(a: T, b: U)?`, present only when both are.
+fn sema_expression_option_zip(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`.zip()` takes one optional argument, got {args.len()}", "`.zip(other)` pairs this optional with another: present only when both are", "call `a.zip(b)` with exactly one `T?` argument"))
+        loop argument in args -> _ := sema_expression_zip_infer_arg(argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    other :: sema_expression_zip_infer_arg(args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    fields := [TypeTupleField]{}
+    if receiver_value.ty == .Option(left) && other.ty == .Option(right) {
+        // copy: `left` and `right` are payloads of the operands' types, which the operands keep
+        fields = [TypeTupleField]{TypeTupleField{name: "a", ty: left.copy()}, TypeTupleField{name: "b", ty: right.copy()}}
+    }
+    if fields.len() == 0 {
+        &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`.zip()` needs an optional argument, got {sema_type_show(other.ty)}", "`.zip(other)` combines two optionals into one paired optional", "pass a `T?` value"))
+        return failed
+    }
+    tuple_struct :: type_tuple_struct_name(fields)
+    pair :: Type.Tuple{fields: fields}
+    // copy: the operation names the pair type the result's Option also owns
+    operation :: TBuiltinOp.OptionZip{tuple_struct: tuple_struct, elem_ty: pair.copy()}
+    value :: sema_tir_node(Type.Option{inner: pair}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: operation, args: [TExpr]{other}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
 }

@@ -733,12 +733,67 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
     }
 }
 
+// Rust options_rng.rs:19-135 check_option_lift2 (method_calls.rs:3559):
+// `Option.lift2(f, a, b)` is `f(a, b)` when both optionals are present and
+// absent otherwise. `a` and `b` are checked first, since `f`'s parameter types
+// are their payload types.
+fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 3 {
+        &diagnostics.push(sema_error("E0104", span, "`Option.lift2` takes 3 arguments (f, a, b), got {args.len()}", "`Option.lift2(f, a, b)` applies a two-argument function only when both optionals are present", "call `Option.lift2((x, y) -> ..., a, b)`"))
+        sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    left :: sema_check_expression(args[1].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    right :: sema_check_expression(args[2].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    left_inner := Type?{None}
+    right_inner := Type?{None}
+    if left == .Val(value) {
+        // copy: `inner` is a payload of the checked operand's type, which the operand keeps
+        if value.ty == .Option(inner) -> left_inner = Val(inner.copy())
+    }
+    if right == .Val(value) {
+        // copy: `inner` is a payload of the checked operand's type, which the operand keeps
+        if value.ty == .Option(inner) -> right_inner = Val(inner.copy())
+    }
+    if left_inner == None || right_inner == None {
+        if left_inner == None {
+            shown :: if left == .Val(value) -> sema_type_show(value.ty) else -> "an unknown type"
+            &diagnostics.push(sema_error("E0108", expr_span(args[1].expr), "`Option.lift2`'s second argument must be optional, got {shown}", "`Option.lift2(f, a, b)` needs `a: T?`", "pass a `T?` value"))
+        }
+        if right_inner == None {
+            shown :: if right == .Val(value) -> sema_type_show(value.ty) else -> "an unknown type"
+            &diagnostics.push(sema_error("E0108", expr_span(args[2].expr), "`Option.lift2`'s third argument must be optional, got {shown}", "`Option.lift2(f, a, b)` needs `b: U?`", "pass a `T?` value"))
+        }
+        _ := sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    left_value :: left ?? return failed
+    right_value :: right ?? return failed
+    left_payload :: left_inner ?? return failed
+    right_payload :: right_inner ?? return failed
+    required :: Type.Fn{params: [Type]{left_payload, right_payload}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    function :: sema_check_expression(args[0].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    result := Type?{None}
+    if function.ty == .Fn(params, ret, _, _, _, _) && params.len() == 2 {
+        // copy: `value` is a payload of the checked callable's type, which the callable keeps
+        if ret == .Val(value) -> result = Val(Type.Option{inner: value.copy()})
+    }
+    result_ty :: result ?? {
+        &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`Option.lift2`'s first argument must be a function, got {sema_type_show(function.ty)}", "`Option.lift2(f, a, b)` needs `f: fn(T, U) R`", "pass a two-argument function or lambda"))
+        return failed
+    }
+    value :: sema_tir_node(result_ty, TExprKind.OptionLift2{function: function, left: left_value, right: right_value}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
+}
+
 fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     owner_symbol :: sema_call_static_source_owner(receiver, method, environment, program, scopes) ?? {
         if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if receiver == .Ident(name, _) {
             if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if name == "Option" && method == "lift2" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_option_lift2(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if sema_scope_resolve_index(scopes, name) == None && sema_call_retired_entropy_constructor(name, method, span) == .Val(retired) {
                 &diagnostics.push(retired)
                 sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

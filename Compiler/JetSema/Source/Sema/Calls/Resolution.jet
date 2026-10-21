@@ -300,6 +300,21 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
 
+// Rust direct_calls.rs:2354-2375: a call whose type-argument count doesn't
+// match leaves the callee's type parameters unbound, and its arguments are
+// still checked against the declared parameter types. The declared signature
+// when `type_args` is that mismatch, else None.
+fn sema_call_direct_type_arg_mismatch_signature(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
+    if type_args.len() == 0 -> return None
+    nearest :: sema_scope_resolve_index(scopes, name) ?? return None
+    index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
+    symbol :: sema_scope_binding_symbol(environment, scopes, index)
+    if symbol.kind != SymbolKind.Function -> return None
+    generic_params :: sema_inference_type_params(sema_scope_declaration_function_type_params(environment, program, symbol.id))
+    if generic_params.len() == 0 || generic_params.len() == type_args.len() -> return None
+    symbol.ty
+}
+
 fn sema_call_direct_target_generic_ready(target: SemaCallDirectTarget, diagnostics: &[Diagnostic], span: Span) -> Bool {
     if target.generic_params.len() > 0 && target.generic_substitutions.len() != target.generic_params.len() {
         &diagnostics.push(sema_error("E0904", span, "cannot infer type arguments for `{target.symbol.name}`", "generic call checking requires a complete inference result", "provide the function's type arguments explicitly"))

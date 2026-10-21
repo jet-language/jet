@@ -497,5 +497,12 @@ fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method: St
     if allocator != None -> return sema_call_memory_allocator_method(receiver, receiver_value, allocator, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     guard :: sema_call_memory_guard_shape(receiver, receiver_value.ty, scopes)
     if guard != None -> return sema_call_memory_shared_guard_method(receiver, receiver_value, guard, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // `Condition.notify_one()` and `.notify_all()` wake one or every waiter; the value is Unit.
+    if receiver_value.ty == .Named(name) {
+        if name == "Condition" && args.is_empty() && (method == "notify_one" || method == "notify_all") {
+            value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.ConditionNotify{condition: receiver_value, all: method == "notify_all"}, span)
+            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+        }
+    }
     sema_call_try_shared_owner_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }

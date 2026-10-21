@@ -2591,6 +2591,7 @@ fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment
     scopes.ownership_call_depth += 1
     target :: sema_call_resolve_direct(call.name, call.type_args, environment, program, &scopes, call.name_span, &diagnostics) ?? {
         scopes.ownership_call_depth -= 1
+        sema_expr_check_mismatched_type_arg_call(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return None
     }
     checked := sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
@@ -2599,6 +2600,22 @@ fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment
     &context.call_return_views.push(SemaCallReturnView{span: call.name_span, facts: value.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, call.name_span, value, &diagnostics) -> return None
     Val(value.value)
+}
+
+// Rust direct_calls.rs:2354-2375 then :2815: after a type-argument count
+// mismatch (E0119) the arguments are still checked, against the callee's
+// declared parameter types with its type parameters unbound (E0112).
+fn sema_expr_check_mismatched_type_arg_call(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    signature :: sema_call_direct_type_arg_mismatch_signature(call.name, call.type_args, environment, program, scopes) ?? return
+    params :: sema_call_params_from_type(signature) ?? return
+    loop (index, argument) in call.args {
+        value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? next
+        if index >= params.len() -> next
+        required :: params[index].ty ?? next
+        if sema_call_type_assignable(required, value.ty, environment, program) == (Val(false)) {
+            &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{call.name}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, value.ty)))
+        }
+    }
 }
 
 fn sema_expr_check_indirect_call(callee: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

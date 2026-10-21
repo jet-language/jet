@@ -1103,6 +1103,9 @@ fn sema_data_core_decode_member(module_name: String, member: String) -> Bool Nev
 fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
     if !sema_data_core_decode_member(module_name, member) -> return None
+    // Rust core_call.rs:3741: an untyped `cbor.decode(bytes)` is the Dyn
+    // parse row, not a typed decode.
+    if module_name == "core.encoding.cbor" && type_args.len() == 0 -> return None
     if module_name == "core.encoding.json" && type_args.len() == 0 {
         if updated_args.len() != 1 {
             sema_data_arity_diagnostic("core.encoding.json.decode", 1, updated_args.len(), span, &diagnostics)
