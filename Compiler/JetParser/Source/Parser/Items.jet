@@ -1694,7 +1694,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
         // (Rust `at_validate_block` / `validate_block`):
         // `validate { … }` holds the struct's rule statements as an ordinary
         // block; sema restricts and synthesizes them (sema_validate_blocks).
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_value(state, parser_current(&state)) == "validate" {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_LBRACE && parser_value_at(&state, 0) == "validate" {
             keyword :: parser_bump(&state)
             block :: parser_parse_block(&state)
             value.validate_block = block.statements
@@ -2372,11 +2372,14 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef? {
     // items, statements and `prep loop` templates (parser_marker_body).
     body :: parser_marker_body(&state)
     end :: parser_lookahead(&state, -1).span
+    type_param :: parser_value(state, type_name)
+    trait_name :: parser_value(state, trait_token)
     if parser_derive_nested_impl_span(body) == .Val(span) {
-        parser_add_fatal_code(&state, "E0003", span, "`derive {parser_value(state, type_name)}.{parser_value(state, trait_token)}` already names its implementation", "a derive provider body is the member list; a nested `impl` repeats the target and trait", "remove the `impl` wrapper and keep its members directly in the derive body")
+        message :: "`derive {type_param}.{trait_name}` already names its implementation"
+        parser_add_fatal_code(&state, "E0003", span, message, "a derive provider body is the member list; a nested `impl` repeats the target and trait", "remove the `impl` wrapper and keep its members directly in the derive body")
         return None
     }
-    Val(DeriveDef{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, type_param: parser_value(state, type_name), body: body, span: parser_cover(start.span, end)})
+    Val(DeriveDef{trait_name: trait_name, trait_span: trait_token.span, type_param: type_param, body: body, span: parser_cover(start.span, end)})
 }
 
 // Rust `derive_nested_impl_span`: the first `impl` or error conversion a

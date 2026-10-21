@@ -3919,7 +3919,8 @@ fn lower_move_root(c: LowerContext, value: MIRValueID) -> MIRValueID Never! {
 // every later clear.
 fn lower_clear_slot(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int) Never! {
     layout :: lower_repr_layout(lower_repr_of(p, &f, c.slots[slot].ty)) ?? return lower_set_slot(&f, slot, None)
-    lower_set_slot(&f, slot, Val(lower_placeholder(&f, layout)))
+    placeholder :: lower_placeholder(&f, layout)
+    lower_set_slot(&f, slot, Val(placeholder))
 }
 
 fn lower_placeholder(f: &LowerFunction, layout: LIRLayout) -> LIRValueID Never! {

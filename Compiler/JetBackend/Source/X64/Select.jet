@@ -675,7 +675,8 @@ fn x64_select_int_route(emitter: &X64Emitter, allocation: X64Allocation, row: In
         }
     }
     if bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Add, X64_RSP, bytes)
-    x64_patch_rel32(&emitter.code, done, emitter.code.len())
+    end :: emitter.code.len()
+    x64_patch_rel32(&emitter.code, done, end)
     if dst == .Val(result) -> x64_emit_move(&emitter, X64Loc.Reg{reg: reg}, result)
 }
 

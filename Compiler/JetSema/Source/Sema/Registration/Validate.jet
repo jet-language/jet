@@ -136,26 +136,19 @@ fn sema_validate_build(definition: StructDef, rules: [SemaValidateRule], span: S
 
 // The struct fields the rules' conditions and messages name, in order of
 // first reference.
-struct SemaValidateNames {
-    fields: [String:Bool]
-    found: [String]
-}
-
 fn sema_validate_referenced_fields(rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
-    state :: shared SemaValidateNames{fields: fields, found: [String]{}}
+    found := [String]{}
     // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
-        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(state, expression))
-        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(state, expression))
+        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(fields, &found, expression))
+        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(fields, &found, expression))
     }
-    permit :: state.guard_read()
-    permit.value.found.copy()
+    found
 }
 
-fn sema_validate_note_name(state: Shared<SemaValidateNames>, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+fn sema_validate_note_name(fields: [String:Bool], found: &[String], expression: Expr) Never! -[Mem.Alloc]> {
     if expression == .Ident(name, _) {
-        permit :: state.guard_edit()
-        if permit.value.fields.get(name) == None || permit.value.found.contains(name) -> return
-        &permit.value.found.push(name.copy())
+        if fields.get(name) == None || found.contains(name) -> return
+        &found.push(name.copy())
     }
 }

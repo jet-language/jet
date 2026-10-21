@@ -482,7 +482,10 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         swizzle :: sema_expression_math_swizzle(checked_base, math_name, member, span, &diagnostics)
         if swizzle.handled -> return if swizzle.value == .Val(read) -> sema_expr_expected(read, expected, environment, program, &diagnostics) else -> None
     }
-    sema_expression_field_checked(checked_base, member, span, expected, environment, program, &scopes, &context, &diagnostics)
+    value :: sema_expression_field_checked(checked_base, member, span, expected, environment, program, &scopes, &context, &diagnostics) ?? return None
+    // Lambda capture moves ask whether the captured field is a copy type.
+    sema_ownership_note_place_type(&state, span, value.ty)
+    Val(value)
 }
 
 // `alias.NAME` through a whole-module import `alias` (Rust `infer_field`:

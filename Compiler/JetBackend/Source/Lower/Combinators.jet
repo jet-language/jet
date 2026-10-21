@@ -508,7 +508,8 @@ fn lower_closure_try_filter(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
     lower_start(&f, admit, [LIRValueID]{})
     kept_value := item
     if lower_needs_drop(p, m, elem) {
-        kept_value = lower_new_value(&f, lower_value_layout(f, item), LIRDrop.Trivial, None)
+        kept_layout :: lower_value_layout(f, item)
+        kept_value = lower_new_value(&f, kept_layout, LIRDrop.Trivial, None)
         lower_clone_into(p, &m, &f, item, kept_value, elem)
     }
     lower_call_helper(&m, &f, "list.push", kept_ty, [LIRValueID]{kept, kept_value}, None)

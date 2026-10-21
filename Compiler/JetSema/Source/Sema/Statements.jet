@@ -2358,7 +2358,10 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
     }
     access :: sema_stmt_view_access(init_ty) ?? return true
     if sema_stmt_binding_is_place_view(binding.init) {
-        if sema_ownership_view_producer(binding.init) == .Val(producer) -> sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, sema_ownership_places_from_expr_in_state(producer.source, scopes, &state), producer.access, scopes, &diagnostics)
+        if sema_ownership_view_producer(binding.init) == .Val(producer) {
+            producer_places :: sema_ownership_places_from_expr_in_state(producer.source, scopes, &state)
+            sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer_places, producer.access, scopes, &diagnostics)
+        }
         return sema_ownership_record_binding_view(&state, binding, scopes)
     }
     places := sema_ownership_places_from_expr_in_state(binding.init, scopes, &state)

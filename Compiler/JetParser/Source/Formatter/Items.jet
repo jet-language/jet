@@ -672,7 +672,8 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         }
         // A migration block keeps its authored layout.
         .Migration(m) -> {
-            jfmt_write(&f, jfmt_src_text(f, m.span.start, m.span.end))
+            text :: jfmt_src_text(f, m.span.start, m.span.end)
+            jfmt_write(&f, text)
             jfmt_newline(&f)
             jfmt_skip_verbatim_comments(&f, m.span.end)
         }

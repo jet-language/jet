@@ -2183,6 +2183,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     lambda_work.meta.return_view_provenance = lambda_return_provenance
     fn_ty := Type.Fn{params: param_types, ret: ret_slot, effect_bound: expected_effects, param_contract: expected_contract, call_metadata: expected_metadata, return_view_provenance: lambda_return_provenance}
     captures_facts := TCaptureFacts{escapes: escapes, needs_fn_mut: lambda_work.meta.needs_fn_mut, mutable: lambda_work.meta.mut_captures, cloned: lambda_work.meta.cloned_captures, frozen: lambda_work.meta.frozen_captures, materialized: lambda_work.meta.materialized_captures, moved: lambda_work.meta.moved_captures}
+    sema_ownership_note_lambda(&state, lambda_state, lambda.span, captures_facts)
     lambda_effects := sema_expression_lambda_effects(&lambda_work)
     host_param_conventions := [AccessConvention]?{None}
     if host_callback && host_write -> host_param_conventions = Val([AccessConvention]{AccessConvention.Write})
