@@ -1,0 +1,170 @@
+#!/usr/bin/env jet
+// Real Jet-only object/archive input; no seed runtime or Rust oracle fallback.
+// Usage (from the repository root):
+//   Compiler/JetRuntime/Tests/RunCompilerNeededMath.jet OUT JET_ONLY_OBJECT_OR_ARCHIVE... [LINK_ARG...]
+use core.files as files
+use core.process as process
+use core.regex as re
+use core.term as term
+
+POLICY :: "Compiler/JetCli/Assets/native-c-policy.tsv"
+EXPECTED :: "CHECK OK — Jet-only compiler math: bit-exact platform libm, payloads, zeros, domains, fused cancellation\n"
+LINK_TAIL :: [String]{"-lpthread", "-ldl", "-lm", "-o"}
+
+// One child run as node's spawnSync reports it: no status after a signal or a
+// spawn failure; `signal` and `error` are "" when absent.
+struct Ran {
+    stdout: String
+    stderr: String
+    status: Int?
+    signal: String
+    error: String
+}
+
+fn fail(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// path.resolve against the working directory.
+fn resolve(cwd: String, path: String) -> String {
+    full :: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
+    parts := [String]{}
+    loop part in full.split("/").to_list() {
+        if part == ".." {
+            if parts.len() > 0 -> _ :: &parts.pop()
+        } else if part != "" && part != "." {
+            &parts.push(part)
+        }
+    }
+    "/{parts.join("/")}"
+}
+
+fn signal_name(number: Int) -> String {
+    names :: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM"}
+    if number > 0 && number < names.len() -> return names[number].copy()
+    "SIG{number}"
+}
+
+fn error_code(error: String) -> String {
+    if error.contains("(os error 2)") -> return "ENOENT"
+    if error.contains("(os error 13)") -> return "EACCES"
+    if error.contains("(os error 20)") -> return "ENOTDIR"
+    error.copy()
+}
+
+fn spawn(argv: [String]) -> Ran {
+    file :: argv[0].copy()
+    if process.cmd(argv).run() == {
+        .Ok(receipt) -> {
+            if receipt.signal == .Val(number) -> return Ran{stdout: receipt.output, stderr: receipt.errors, status: None, signal: signal_name(number), error: ""}
+            Ran{stdout: receipt.output, stderr: receipt.errors, status: Val(receipt.code), signal: "", error: ""}
+        }
+        .Err(error) -> Ran{stdout: "", stderr: "", status: None, signal: "", error: "spawnSync {file} {error_code("{error}")}"}
+    }
+}
+
+// The shared native C compiler (Tools/packaging/NativeCCompiler.jet) as a
+// child run: `$CC` (default `cc`) with `args` and the policy flags of
+// Compiler/JetCli/Assets/native-c-policy.tsv, NIX_HARDENING_ENABLE without the
+// policy's removed features. An unreadable or malformed policy is a failed
+// compiler run (exit 1, the reason on stderr), as the node driver's was.
+fn native_cc(root: String, args: [String]) -> Ran {
+    text :: files.read("{root}/{POLICY}") ?? return Ran{stdout: "", stderr: "ENOENT: no such file or directory, open '{root}/{POLICY}'\n", status: Val(1), signal: "", error: ""}
+    flags := [String]{}
+    removed := [String]{}
+    lines :: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line :: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() != 2 || fields[1] == "" -> return Ran{stdout: "", stderr: "native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"\n", status: Val(1), signal: "", error: ""}
+        if fields[0] == "flag" {
+            &flags.push(fields[1])
+        } else if fields[0] == "hardening-remove" {
+            &removed.push(fields[1])
+        } else {
+            return Ran{stdout: "", stderr: "native-c-policy.tsv:{index + 1}: unknown policy kind \"{fields[0]}\"\n", status: Val(1), signal: "", error: ""}
+        }
+    }
+    compiler :: process.env_get_or("CC", "cc")
+    spec := process.cmd([compiler.copy()]).args_extend(args).args_extend(flags)
+    if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
+        words :: re.split(Regex{"\s+"}, enabled)
+        kept :: loop word in words if word != "" && !removed.contains(word) -> word
+        spec = spec.env("NIX_HARDENING_ENABLE", kept.join(" "))
+    }
+    if spec.run() == {
+        .Ok(receipt) -> {
+            if receipt.signal == .Val(number) -> return Ran{stdout: receipt.output, stderr: receipt.errors, status: None, signal: signal_name(number), error: ""}
+            Ran{stdout: receipt.output, stderr: receipt.errors, status: Val(receipt.code), signal: "", error: ""}
+        }
+        .Err(error) -> Ran{stdout: "", stderr: "spawnSync {compiler} {error_code("{error}")}\n", status: Val(1), signal: "", error: ""}
+    }
+}
+
+fn json_string(text: String) -> String {
+    out := [U8]{34}
+    hex :: "0123456789abcdef".bytes()
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 34 || code == 92 {
+            &out.push(U8{92})
+            &out.push(byte)
+        } else if code == 8 || code == 9 || code == 10 || code == 12 || code == 13 {
+            &out.push(U8{92})
+            &out.push("btn fr".bytes()[code - 8])
+        } else if code < 32 {
+            loop escape in "\\u00".bytes() -> &out.push(escape)
+            &out.push(hex[code /% 16])
+            &out.push(hex[code % 16])
+        } else {
+            &out.push(byte)
+        }
+    }
+    &out.push(U8{34})
+    String.from_bytes_lossy(out)
+}
+
+// JSON.stringify({ status, signal, error }) + "\n".
+fn status_json(ran: Ran) -> String {
+    status :: if ran.status == .Val(code) -> "{code}" else -> "null"
+    signal :: if ran.signal == "" -> "null" else -> json_string(ran.signal)
+    error :: if ran.error == "" -> "null" else -> json_string(ran.error)
+    "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n"
+}
+
+// `${error ?? signal ?? stderr}` of a failed run.
+fn why(ran: Ran) -> String {
+    if ran.error != "" -> return "Error: {ran.error}"
+    if ran.signal != "" -> return ran.signal.copy()
+    ran.stderr.copy()
+}
+
+fn write(path: String, text: String) {
+    files.write(path, text) ?? fail("{error_code("{err}")}: cannot write '{path}'")
+}
+
+fn run() {
+    args :: process.args()
+    if args.len() < 2 || args[0] == "" -> fail("usage: RunCompilerNeededMath.jet OUT JET_ONLY_OBJECT_OR_ARCHIVE... [LINK_ARG...]")
+    root :: files.cwd() ?? fail("cannot read the working directory: {err}")
+    out :: resolve(root, args[0])
+    files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
+    binary :: "{out}/compiler-needed-math-fixture"
+    inputs :: loop input in args[1..<args.len()] -> if input.starts_with("-") -> input.copy() else -> resolve(root, input)
+    cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-fno-builtin", "{root}/Compiler/JetRuntime/Tests/compiler-needed-math-fixture.c"}
+    loop input in inputs -> &cc_args.push(input)
+    loop flag in LINK_TAIL -> &cc_args.push(flag)
+    &cc_args.push(binary.copy())
+    built :: native_cc(root, cc_args)
+    write("{out}/build.log", "{built.stdout}{built.stderr}")
+    write("{out}/build.status.json", status_json(built))
+    if built.error != "" || built.signal != "" || built.status != .Val(0) -> fail("compiler math fixture link failed: {why(built)}")
+    result :: spawn([binary])
+    write("{out}/stdout", result.stdout)
+    write("{out}/stderr", result.stderr)
+    write("{out}/status.json", status_json(result))
+    if result.error != "" || result.signal != "" || result.status != .Val(0) || result.stdout != EXPECTED || result.stderr != "" -> fail("compiler math fixture failed: {why(result)}")
+    print("Jet-only compiler math C ABI fixture passed")
+}

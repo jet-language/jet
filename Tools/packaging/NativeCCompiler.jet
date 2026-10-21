@@ -1,0 +1,209 @@
+#!/usr/bin/env jet
+// Native Jet consumers link against musl: glibc's fortified entry points are
+// not part of that platform ABI. Scope the policy to this C compiler child.
+// The policy rows live once in Compiler/JetCli/Assets/native-c-policy.tsv;
+// the Jet CLI embeds the same rows (Compiler/Bootstrap/generate-native-c-policy.mjs).
+// Runs `$CC` (default `cc`) with the caller's arguments followed by the policy
+// flags, the child's NIX_HARDENING_ENABLE without the policy's removed
+// features, and every stream inherited; exits as the compiler exits.
+// Usage (from the repository root): Tools/packaging/NativeCCompiler.jet CC_ARGS...
+// Tests: jet test Tools/packaging/NativeCCompiler.jet (the platform census
+// needs JET_PACK_MUSL_LIB, nm and a script-mode `jet` on PATH).
+use core.files as files
+use core.process as process
+use core.regex as re
+use core.sys as sys
+use core.term as term
+
+POLICY :: "Compiler/JetCli/Assets/native-c-policy.tsv"
+SELF :: "Tools/packaging/NativeCCompiler.jet"
+
+struct Rules {
+    flags: [String]
+    hardening_removed: [String]
+}
+
+fn fail(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// The node error code an OS error number names in a spawn or open failure.
+fn error_code(error: String) -> String {
+    if error.contains("(os error 2)") -> return "ENOENT"
+    if error.contains("(os error 13)") -> return "EACCES"
+    if error.contains("(os error 20)") -> return "ENOTDIR"
+    error.copy()
+}
+
+// JSON.stringify of a string.
+fn json_string(text: String) -> String {
+    out := [U8]{34}
+    hex :: "0123456789abcdef".bytes()
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 34 || code == 92 {
+            &out.push(U8{92})
+            &out.push(byte)
+        } else if code == 8 || code == 9 || code == 10 || code == 12 || code == 13 {
+            &out.push(U8{92})
+            &out.push("btn fr".bytes()[code - 8])
+        } else if code < 32 {
+            loop escape in "\\u00".bytes() -> &out.push(escape)
+            &out.push(hex[code /% 16])
+            &out.push(hex[code % 16])
+        } else {
+            &out.push(byte)
+        }
+    }
+    &out.push(U8{34})
+    String.from_bytes_lossy(out)
+}
+
+fn parse_rules(text: String) -> Rules {
+    flags := [String]{}
+    removed := [String]{}
+    lines :: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line :: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() != 2 || fields[1] == "" -> fail("native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
+        if fields[0] == "flag" {
+            &flags.push(fields[1])
+        } else if fields[0] == "hardening-remove" {
+            &removed.push(fields[1])
+        } else {
+            fail("native-c-policy.tsv:{index + 1}: unknown policy kind {json_string(fields[0])}")
+        }
+    }
+    Rules{flags: flags, hardening_removed: removed}
+}
+
+fn read_rules(root: String) -> Rules {
+    path :: "{root}/{POLICY}"
+    text :: files.read(path) ?? fail("{error_code("{err}")}: no such file or directory, open '{path}'")
+    parse_rules(text)
+}
+
+// The child's NIX_HARDENING_ENABLE: every whitespace-separated feature but the
+// removed ones, single-space joined. Nix's compiler wrapper adds fortify after
+// caller flags; its setup-hook NIX_HARDENING_DISABLE knob is not consulted by
+// an already-built wrapper.
+fn child_hardening(enabled: String, removed: [String]) -> String {
+    words :: re.split(Regex{"\s+"}, enabled)
+    kept :: loop word in words if word != "" && !removed.contains(word) -> word
+    kept.join(" ")
+}
+
+fn run() {
+    root :: files.cwd() ?? fail("cannot read the working directory: {err}")
+    rules :: read_rules(root)
+    compiler :: process.env_get_or("CC", "cc")
+    spec := process.cmd([compiler.copy()]).args_extend(process.args()).args_extend(rules.flags)
+        .stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) -> spec = spec.env("NIX_HARDENING_ENABLE", child_hardening(enabled, rules.hardening_removed))
+    receipt :: spec.run() ?? fail("spawnSync {compiler} {error_code("{err}")}")
+    if receipt.signal == .Val(signal) {
+        #Unsafe("re-raise the compiler's terminating signal on this process, as the parent shell expects") {
+            sys.kill(sys.getpid(), signal) ?? fail("kill {signal}: {err}")
+        }
+        return
+    }
+    if receipt.code != 0 -> process.exit(receipt.code)
+}
+
+fn test_root() -> String { files.cwd() ?? panic("cannot read the working directory") }
+
+// A command that must exit 0 with no signal; its stdout.
+fn test_command(argv: [String]) -> String {
+    receipt :: process.cmd(argv).output_limit(134217728).run() ?? panic("{argv[0]}: {err}")
+    if receipt.signal == .Val(signal) -> panic("{argv[0]}: {signal}")
+    if receipt.code != 0 -> panic("{argv.join(" ")}:\n{receipt.errors}")
+    receipt.output
+}
+
+#Test("native C policy keeps other hardening and never changes the parent environment") {
+    rules :: read_rules(test_root())
+    assert_eq(rules.flags, [String]{"-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"})
+    assert_eq(child_hardening("bindnow fortify format fortify3 stackprotector", rules.hardening_removed), "bindnow format stackprotector")
+}
+
+#Test("the Jet CLI embeds the same single native C policy rows") {
+    root :: test_root()
+    _ :: test_command(["node", "{root}/Compiler/Bootstrap/generate-native-c-policy.mjs", "--check"])
+    embedded :: files.read("{root}/Compiler/JetCli/Source/Cli/NativeCPolicy.jet") ?? panic("cannot read NativeCPolicy.jet")
+    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS :: prep {{ [String]{{\"-U_FORTIFY_SOURCE\", \"-D_FORTIFY_SOURCE=0\"}} }}"))
+    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep {{ [String]{{\"fortify\", \"fortify3\"}} }}"))
+}
+
+#Test("native fixture and packaging drivers have no independent C compiler policy") {
+    root :: test_root()
+    fallback :: Regex{"process\.env\.CC\s*\?\?"}
+    direct :: Regex{"\b(?:spawnSync|execFileSync|run|command)\([^\n]*(['\"])(?:cc|gcc|clang)['\"]\s*[,\]]"}
+    loop directory in ["Compiler/JetRuntime/Tests", "Compiler/JetBackend/Tests", "Tools/packaging"] {
+        entries :: files.list_dir("{root}/{directory}") ?? panic("cannot list {directory}")
+        loop entry in entries {
+            if !entry.name.ends_with(".mjs") -> next
+            source :: files.read("{root}/{directory}/{entry.name}") ?? panic("cannot read {directory}/{entry.name}")
+            if re.is_match(fallback, source) -> panic("{directory}/{entry.name}: use the shared native C driver")
+            if re.is_match(direct, source) -> panic("{directory}/{entry.name}: hard-coded C compiler bypasses the shared policy")
+        }
+    }
+}
+
+// The #Export(c) names of the runtime sources (Compiler/JetRuntime/sources.list).
+fn runtime_export_names(root: String) -> [String] {
+    list :: files.read("{root}/Compiler/JetRuntime/sources.list") ?? panic("cannot read Compiler/JetRuntime/sources.list")
+    export :: re.compile_with("^(?:// runtime-(?:init|fini): \\d+\\n)?#Export\\(c\\)\\s+(?:pub\\s+)?fn\\s+([A-Za-z_]\\w*)", re.flags(false, true, false)) ?? panic("export pattern")
+    names := [String]{}
+    loop line in list.split("\n").to_list() {
+        path :: line.trim()
+        if path == "" || path.starts_with("#") -> next
+        source :: files.read("{root}/{path}") ?? panic("cannot read {path}")
+        loop found in re.matches(export, source) {
+            if names.contains(found.groups[0]) -> panic("duplicate runtime #Export(c) {found.groups[0]}")
+            &names.push(found.groups[0])
+        }
+    }
+    if names.len() == 0 -> panic("empty runtime #Export(c) declarations")
+    names
+}
+
+fn forbidden(name: String) -> Bool { re.is_match(Regex{"_chk(?:_|$)"}, name) || re.is_match(Regex{"^__.*_2$"}, name) }
+
+#Test("real native C witnesses have no glibc fortified imports and resolve against the admitted platform archives") {
+    root :: test_root()
+    musl :: process.env_get("JET_PACK_MUSL_LIB") ?? panic("JET_PACK_MUSL_LIB must name the native pack static musl directory")
+    scratch :: process.env_get_or("JET_TEST_SCRATCH_DIR", sys.temp_dir())
+    files.create_dir_all(scratch) ?? panic("cannot create {scratch}")
+    out :: test_command(["mktemp", "-d", "{scratch}/native-c-platform-census-XXXXXX"]).trim()
+    archives := [String]{"{musl}/libc.a"}
+    loop name in ["libgcc.a", "libgcc_eh.a"] -> &archives.push(test_command(["{root}/{SELF}", "-print-file-name={name}"]).trim())
+    platform := [String]{}
+    loop path in archives {
+        loop line in test_command(["nm", "--defined-only", "--extern-only", "--format=posix", path.copy()]).split("\n").to_list() {
+            fields :: re.split(Regex{"\s+"}, line)
+            if fields.len() >= 2 && fields[0] != "" && re.full_match(Regex{"[A-Za-z]"}, fields[1]) -> &platform.push(fields[0])
+        }
+    }
+    provider :: runtime_export_names(root)
+    collections :: files.read("{root}/Compiler/JetRuntime/Source/Collections.jet") ?? panic("cannot read Collections.jet")
+    stride_match :: re.match(Regex{"RT_HOST_U8_STRIDE\s*::\s*prep\s*\{{\s*I64\{{(1|8)\}}\s*\}}"}, collections) ?? panic("the TCP fixture must use the canonical U8 carrier epoch")
+    stride :: stride_match.groups[0]
+    problems := [String]{}
+    loop name in ["ProcessRoutesWitness", "ProcessExecutionWitness", "TerminalProcessWitness", "ProcessSpecWitness", "TCPRoutesWitness"] {
+        object :: "{out}/{name}.o"
+        argv := [String]{"{root}/{SELF}", "-std=c11", "-O1", "-fno-stack-protector", "-fno-PIE", "-fno-builtin", "-Wall", "-Wextra", "-Werror"}
+        if name == "TCPRoutesWitness" -> &argv.push("-DJET_TCP_U8_STRIDE={stride}")
+        loop tail in ["-c", "{root}/Compiler/JetRuntime/Tests/{name}.c", "-o", object.copy()] -> &argv.push(tail)
+        _ :: test_command(argv)
+        imports :: loop line in test_command(["nm", "-u", "--format=posix", object.copy()]).split("\n").to_list() if line != "" -> re.split(Regex{"\s+"}, line)[0]
+        loop symbol in imports {
+            if forbidden(symbol) -> &problems.push("{name}: forbidden import {symbol}")
+            if !platform.contains(symbol) && !provider.contains(symbol) && symbol != "__real_jet_rt_free" -> &problems.push("{name}: missing import {symbol}")
+        }
+    }
+    files.rmtree(out) ?? panic("cannot remove {out}")
+    assert_eq(problems, [String]{})
+}

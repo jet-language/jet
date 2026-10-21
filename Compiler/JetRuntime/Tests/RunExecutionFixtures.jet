@@ -1,0 +1,75 @@
+#!/usr/bin/env jet
+// BIN must be the C witness linked to the fresh UNIT1 + Host-tail runtime pack.
+// Usage (from the repository root): Compiler/JetRuntime/Tests/RunExecutionFixtures.jet BIN
+use core.files as files
+use core.process as process
+use core.term as term
+
+EXPECTED :: "CHECK OK — native execution: budget byte equality, modes, MAX sites, stop goldens, nonconsuming, stream flush\n"
+
+fn fail(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// path.resolve against the working directory.
+fn resolve(cwd: String, path: String) -> String {
+    full :: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
+    parts := [String]{}
+    loop part in full.split("/").to_list() {
+        if part == ".." {
+            if parts.len() > 0 -> _ :: &parts.pop()
+        } else if part != "" && part != "." {
+            &parts.push(part)
+        }
+    }
+    "/{parts.join("/")}"
+}
+
+fn signal_name(number: Int) -> String {
+    names :: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM"}
+    if number > 0 && number < names.len() -> return names[number].copy()
+    "SIG{number}"
+}
+
+fn error_code(error: String) -> String {
+    if error.contains("(os error 2)") -> return "ENOENT"
+    if error.contains("(os error 13)") -> return "EACCES"
+    if error.contains("(os error 20)") -> return "ENOTDIR"
+    error.copy()
+}
+
+// util.inspect of a short string, as node's assertion message shows it.
+fn inspect(text: String) -> String {
+    quote :: if text.contains("'") && !text.contains("\"") -> "\"" else -> "'"
+    body :: text.replace("\\", "\\\\").replace("\n", "\\n")
+    if quote == "'" -> return "'{body.replace("'", "\\'")}'"
+    "\"{body}\""
+}
+
+// assert.strictEqual's failure message: inspected values inline when node shows
+// them so (non-strings, or strings of at most 12 characters together), else
+// node's one-line actual/expected diff.
+fn not_equal(actual: String, expected: String, inline: Bool, message: String) -> Never {
+    head :: if message == "" -> "Expected values to be strictly equal:" else -> message.copy()
+    if inline -> fail("{head}\n\n{actual} !== {expected}\n")
+    fail("{head}\n+ actual - expected\n\n+ {actual}\n- {expected}\n")
+}
+
+fn strings_differ(actual: String, expected: String, message: String) -> Never {
+    not_equal(inspect(actual), inspect(expected), actual.chars().len() + expected.chars().len() <= 12, message)
+}
+
+fn run() {
+    args :: process.args()
+    if args.len() != 1 || args[0] == "" -> fail("usage: RunExecutionFixtures.jet BIN")
+    root :: files.cwd() ?? fail("cannot read the working directory: {err}")
+    binary :: resolve(root, args[0])
+    receipt :: process.cmd([binary.copy()]).timeout(Duration.milliseconds(30000) ?? fail("timeout")).run() ?? fail("spawnSync {binary} {error_code("{err}")}")
+    if receipt.timed_out -> fail("spawnSync {binary} ETIMEDOUT")
+    if receipt.signal == .Val(number) -> not_equal(inspect(signal_name(number)), "null", true, "")
+    if receipt.code != 0 -> not_equal("{receipt.code}", "0", true, receipt.errors)
+    if receipt.errors != "" -> strings_differ(receipt.errors, "", "")
+    if receipt.output != EXPECTED -> strings_differ(receipt.output, EXPECTED, "")
+    print("native execution witness: all cases passed")
+}
