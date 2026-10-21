@@ -4,6 +4,8 @@
 // and the embedded Core runtime modules), the native inline sources, and
 // the build script that compiles them for the selected target.
 
+use jet_foundation.[AccessConvention, Type, measure_expression]
+
 // The fixed crate prelude: panic containment, the host failure reporter,
 // and the per-thread failure slot every trampoline reports through.
 FFI_WRAPPER_PRELUDE :: prep { ```// Auto-generated FFI wrappers — do not edit.
@@ -582,7 +584,6 @@ fn pkg_ffi_emit_inline_build_rs(entries: [ExternEntry], toolchain: InlineNativeT
     runtime :: if has_cpp -> "println!(\"cargo:rustc-link-lib=dylib={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\");" else -> ""
     """
 use std::{{env, path::PathBuf, process::Command}};
-use jet_foundation.[AccessConvention, Type, measure_expression]
 
 fn checked(command: &mut Command) {{
     let status = command.status().expect("foreign compiler is unavailable");

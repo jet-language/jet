@@ -2,6 +2,8 @@
 // jet_pkg_model::TclBind. A session owns one thread-affine interpreter seeded
 // with the bound source; results cross with width checks and bounded strings.
 
+use core.files as files
+
 // A Tcl binding names the directory holding the embeddable runtime.
 struct TclBindResult {
     source: String
@@ -61,7 +63,6 @@ PKG_TCL_JET :: prep { ```#Import module c.@@abi@@ {
     fn close(handle: Int) = "@@abi@@_close"
 }
 use c.@@abi@@ as abi
-use core.files as files
 
 struct Session { value: Int }
 enum TclError { Eval }

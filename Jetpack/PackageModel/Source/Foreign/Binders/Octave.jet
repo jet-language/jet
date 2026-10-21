@@ -6,6 +6,9 @@
 // Octave remains responsible for the foreign computation, while Jet owns the
 // shape and error checks at the typed boundary.
 
+use jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+use core.files as files
+
 PKG_OCTAVE_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"} }
 
 // Bind the one-matrix functions of the Octave `.m` script at `path`.
@@ -126,8 +129,6 @@ fn pkg_octave_reserved(value: String) -> Bool Never! {
 PKG_OCTAVE_JET_HEAD :: prep { ```use c.@@abi@@ as abi
 use core.compute as compute
 use core.encoding.json as json
-use jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
-use core.files as files
 
 #Import module c.@@abi@@ {
     fn open() -> Int = "@@abi@@_open"
