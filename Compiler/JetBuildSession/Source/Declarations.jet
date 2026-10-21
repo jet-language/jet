@@ -75,8 +75,9 @@ fn build_session_add_action(state: &BuildSessionState, method: String, args: [Bu
 
 #Test("an allowlisted environment name the action does not declare is UndeclaredEnvName") {
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
-    session :: build_session_new(73, "envcheck", "fixture-compiler", policy)
-    toolchain_reply :: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text(value: "host"), .Text(value: "x86_64-unknown-linux-gnu")}, None, false, 1, 2)
+    session := build_session_new(73, "envcheck", "fixture-compiler", policy)
+    // Every session already holds the `host` toolchain; the action names its own.
+    toolchain_reply :: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "x86_64-unknown-linux-gnu")}, None, false, 1, 2)
     toolchain :: if toolchain_reply == {.Value(value) -> value else -> panic("toolchain declaration failed")}
     signing_reply :: build_session_call(&session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 3, 4)
     signing :: if signing_reply == {.Value(value) -> value else -> panic("signing declaration failed")}

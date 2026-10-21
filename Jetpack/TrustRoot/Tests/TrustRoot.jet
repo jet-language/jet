@@ -319,7 +319,9 @@ fn trust_test_tamper(sig_hex: String) -> String {
 // object insertion order, including this manifest's terminal newline.
 #Test("public trust manifest empty key ceremony wire is exact") {
     manifest :: trust_public_trust_manifest("jet-lang.dev", None, [PublicTrustKey]{}) ?? panic("render public manifest")
-    assert_eq(manifest, `{"schema":1,"domain":"jet-lang.dev","status":"awaiting-key-ceremony","root":null,"keys":[],"rotation":"offline threshold root rotation; publish a new manifest only after the old root verifies the new root"}` + "\n")
+    body :: `{"schema":1,"domain":"jet-lang.dev","status":"awaiting-key-ceremony","root":null,"keys":[],"rotation":"offline threshold root rotation; publish a new manifest only after the old root verifies the new root"}`
+    expected :: "{body}\n"
+    assert_eq(manifest, expected)
 }
 
 #Test("public trust manifest preserves its existing validation error") {

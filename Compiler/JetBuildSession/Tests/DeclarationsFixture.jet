@@ -9,8 +9,8 @@ use jet_build_session.[
 
 fn build_session_declarations_fixture() -> Bool Never! {
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
-    session :: build_session_new(71, "fixture", "fixture-compiler", policy)
-    other :: build_session_new(72, "other", "fixture-compiler", policy)
+    session := build_session_new(71, "fixture", "fixture-compiler", policy)
+    other := build_session_new(72, "other", "fixture-compiler", policy)
     empty :: BuildSessionValue.List{values: [BuildSessionValue]{}}
     inputs :: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "schema.txt")}}
     outputs :: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "generated/schema.bin")}}
@@ -24,16 +24,16 @@ fn build_session_declarations_fixture() -> Bool Never! {
     target :: if target_reply == {.Value(value) -> value else -> { return false }}
     source :: "package {{ name: \"fixture.schema\" }}\nVALUE :: 7\n"
     generated :: build_session_call(&session, "generate", [BuildSessionValue]{.Text(value: "schema")}, Val(source), false, 41, 50)
-    if generated != .Value(.Unit) -> return false
+    if generated != .Value(value: .Unit) -> return false
     wrong_generate :: build_session_call(&session, "generate", [BuildSessionValue]{.Text(value: "retired"), .Text(value: source)}, None, false, 51, 60)
     if wrong_generate == {.Failure(_) -> {} else -> return false}
     six_args := action_args
     &six_args.push(.Handle(type_name: "BuildToolchain", session: 71, id: 0))
     if build_session_call(&session, "action", six_args, None, false, 61, 70) == {.Failure(_) -> {} else -> return false}
     contribution :: build_session_call(&session, "contribute", [BuildSessionValue]{.Text(value: "cache_slots"), .Int(value: 8)}, None, false, 71, 80)
-    if contribution != .Value(.Unit) -> return false
+    if contribution != .Value(value: .Unit) -> return false
     plan :: build_session_call(&session, "plan", [BuildSessionValue]{target}, None, false, 81, 90)
-    if plan != .Value(.Handle(type_name: "BuildPlan", session: 71, id: 0)) -> return false
+    if plan != .Value(value: .Handle(type_name: "BuildPlan", session: 71, id: 0)) -> return false
     // Source is retained in memory; its digest is content-derived, and no
     // generated file or declared command has been materialized or executed.
     if !build_session_fixture_storage_matches(session, source) -> return false
@@ -47,7 +47,8 @@ fn build_session_declarations_fixture() -> Bool Never! {
     first :: build_session_compiler_node("check", "fixture", [BuildGraphInputDigest]{{name: "b", digest: "two"}, {name: "a", digest: "one"}, {name: "a", digest: "one"}})
     second :: build_session_compiler_node("check", "fixture", [BuildGraphInputDigest]{{name: "a", digest: "one"}, {name: "b", digest: "two"}})
     if first.key != second.key || first.inputs != ([String]{"a", "b"}) || first.input_digests.len() != 2 -> return false
-    finished :: build_session_finish(&session, .Handle(type_name: "BuildPlan", session: 71, id: 0))
+    // `fn build(b: Build)` returns nothing: the configured session is the plan.
+    finished :: build_session_finish(&session, .Unit)
     selected :: finished.plan ?? return false
     if finished.diagnostics.len() != 0 || build_plan_graph(selected).actions[0].key != graph.actions[0].key -> return false
     selected_modules :: build_plan_selected_generated(selected)

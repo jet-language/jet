@@ -24,18 +24,6 @@ fn edit_indexed(rows: &[(left: Int, right: Int)]) {
     rows[0].left += 1
 }
 
-fn read_cell(cell: Cell<Pair>) -> Int {
-    guard :: cell.guard_read()
-    guard.get().left
-}
-
-fn edit_cell(cell: Cell<Pair>) -> Int {
-    guard :: cell.guard_edit()
-    value :: guard.get()
-    guard.set(Pair{left: value.left + 1, right: value.right})
-    guard.get().left
-}
-
 fn read_shared(state: Shared<Pair>) -> Int {
     guard :: state.guard_read()
     guard.value.left
@@ -57,9 +45,6 @@ fn edit_shared(state: Shared<Pair>) -> Int {
     print(some?.left ?? -1)
     print(none?.left ?? -1)
     print(Box<Int>{value: 11}.value)
-    cell :: Cell.new(Pair{left: 13, right: 14})
-    print(read_cell(cell))
-    print(edit_cell(cell))
     state :: shared Pair{left: 17, right: 18}
     print(read_shared(state))
     print(edit_shared(state))

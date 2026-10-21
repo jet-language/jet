@@ -6413,7 +6413,7 @@ mod stale_manifest_name_tests {
     fn declared_rule_rejection_uses_its_registered_diagnostic() {
         let root = tempdir("declared-rule-rejection");
         let entry = root.join("run.jet");
-        let source = include_str!("../../../Compiler/JetSema/Tests/RejectDiagnosticFixtures.jet");
+        let source = include_str!("../../../Compiler/JetSema/Tests/fixtures/RejectDiagnosticFixtures.fixture/RejectDiagnosticFixtures.jet");
         fs::write(&entry, source).unwrap();
         let (diagnostics, _) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
         let errors = diagnostics.iter()
