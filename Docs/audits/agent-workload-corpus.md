@@ -218,10 +218,10 @@ The focused integration test is the first CI tier:
 JET_NIX_TMP_CLEANED=1 timeout 20m scripts/agent/jet-env cargo test --test agent_workloads -- --nocapture
 ```
 
-The report-validator self-check is:
+The report-validator self-check is the gate's `#Test` blocks:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/test-agent-workload-gate.sh
+jet test Tools/ci/AgentWorkloads
 ```
 
 The old six-test run note is obsolete. The current source also checks the interpreter receipt, native OS matrix, Jet baseline ownership, production-path adapter reachability, and the first-program digest; a fresh full corpus run remains a closeout proof owned by #1173.
