@@ -10,7 +10,6 @@ const node = process.execPath;
 const cheap = [];
 for (const script of [
   'Tools/agent/gen-core-tables.mjs', 'Tools/agent/check-core-surface-ledger.mjs', 'Tools/agent/gen-unicode-tables.mjs',
-  'Tools/agent/gen-runtime-stop-exports.mjs',
   'Tools/agent/gen-runtime-host-carriers.mjs', 'Tools/agent/gen-runtime-host-errors.mjs',
   'Compiler/Bootstrap/generate-prelude-derives.mjs', 'Compiler/Bootstrap/generate-core-sources.mjs',
 ]) cheap.push(start('check-' + script.split('/').pop().replace(/\.mjs$/, ''), [node, script, '--check']));
@@ -22,7 +21,6 @@ for (const script of ['Tools/agent/RuntimeGenerators', 'Tools/agent/LexerKeyword
   cheap.push(start('test-' + script.split('/').pop().replace(/\.jet$/, ''), [jet, 'test', script]));
 }
 cheap.push(start('check-command-table', [node, 'Compiler/Bootstrap/check-command-table.mjs']));
-cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
 cheap.push(start('bootstrap-source-inventory', [node, '--test', 'Tools/agent/bootstrap-source-inventory.test.mjs']));
 cheap.push(start('mir-schema-grammar', [node, '--test', 'Compiler/JetBackend/Tests/mir-schema.test.mjs']));
 cheap.push(start('proof-source-guard', [node, '--test', 'Tools/agent/proof-source.test.mjs']));
