@@ -17,6 +17,7 @@ use jet_foundation.[
     Param,
     Span,
     Stmt,
+    StrFormat,
     StructDef,
     SwitchArm,
     SymbolKind,
@@ -386,6 +387,27 @@ fn sema_core_note_usage(used: &[String], spans: &[SemaCoreUsageSpan], usage: Str
             if row.usage == usage -> return
         }
         &spans.push(SemaCoreUsageSpan{usage: usage, span: span})
+    }
+}
+
+// The public `core.text.fmt` member an interpolation selector lowers through.
+// An integer value takes a private helper beside it (`fixed_int`, `hex`'s
+// width form), which comes with the same source module. Display and Debug
+// render through the typed route and name no member.
+fn sema_core_format_selector_member(format: StrFormat) -> String? Never! {
+    if format == {
+        .Display | .Debug -> None
+        .Pretty -> Val("pretty")
+        .Fixed(_) -> Val("decimal")
+        .Grouped(_) -> Val("grouped")
+        .Hex(_) -> Val("hex")
+        .Bin -> Val("bin")
+        .Oct -> Val("oct")
+        .Sci(_) -> Val("sci")
+        .Percent(_) -> Val("percent")
+        .Pad(_, _) -> Val("pad")
+        .PadLeft(_, _) -> Val("pad_left")
+        .Unit(_) -> Val("quantity")
     }
 }
 
@@ -1001,8 +1023,12 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
         }
         .Str(parts, _) -> loop part in parts {
             if part == {
-                .Interp(value, _) -> {
+                .Interp(value, format) -> {
                     sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(expr_span(value)))
+                    // A selector lowers to its `Core/text/fmt.jet` formatter by name
+                    // (jet_codegen_string_format_member), so no call here names it:
+                    // the selector's public member brings that source module in.
+                    if sema_core_format_selector_member(format) == .Val(member) -> sema_core_note_usage(&used, &spans, "core.text.fmt::{member}", Val(expr_span(value)))
                     sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
                 }
                 else -> {}

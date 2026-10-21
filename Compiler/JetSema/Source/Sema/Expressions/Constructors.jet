@@ -333,6 +333,19 @@ fn sema_expression_struct_field_value(field: Field, field_value: Expr, field_ref
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
 
+// An omitted field's declared default. Written in another module, it checks in
+// that module's names (sema_default_owner_scope); a problem it reports there is
+// anchored at this literal.
+fn sema_expression_struct_field_default(field: Field, default_value: Expr, literal_span: Span, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
+    owner_scope := sema_default_owner_scope(environment, program, scopes, owner.module_name, default_value)
+    if owner_scope == None -> return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scope := ^owner_scope ?? return None
+    default_diagnostics := [Diagnostic]{}
+    checked :: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, &default_diagnostics)
+    loop diagnostic in default_diagnostics -> &diagnostics.push(sema_default_use_site_diagnostic(diagnostic, literal_span))
+    checked
+}
+
 // A builtin Core record (`IOContext{...}`, `Tensor{...}`) has no Jet
 // declaration; its literal checks against the generated Core record rows.
 // A program declaration of the same name takes precedence.
@@ -481,7 +494,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             &diagnostics.push(sema_error("E0108", span, "field `{field.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{field.name}: ...` or declare a field default"))
             return None
         }
-        checked :: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        checked :: sema_expression_struct_field_default(field, default_value, span, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &values.push(checked)
     }
     value := sema_tir_node(result_ty, TExprKind.StructLit{fields: values, extra: None}, span)
