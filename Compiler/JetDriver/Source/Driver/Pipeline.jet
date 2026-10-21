@@ -1356,6 +1356,96 @@ fn jet_driver_default_run_entry(load: JetDriverLoadResult, semantic_graph: SemaG
     }
     None
 }
+
+// jet_driver_resolve_entry_function, then jet_driver_default_run_entry, over
+// the checked functions the slot IR builder reads (`functions`, before any
+// lowering): the key of the selected Source Output's function, else of the
+// manifest `entry:` binding, else of the entry module's `fn run` when it
+// takes no parameter or one `#CLI` record. None when the program has no
+// executable entry (a diagnostic says why when a binding fails).
+fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaGraphResult, functions: [TFunc], modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> String? {
+    counts := [String:Int]{}
+    loop function in functions -> counts[function.key] = (counts.get(function.key) ?? 0) + 1
+    loop source_module in semantic_graph.modules {
+        loop constant in source_module.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if !output.selected || output.kind == OutputKind.Check -> next
+                if output.module_id < 0 || output.module_id >= semantic_graph.modules.len() {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, source_module.module_identity, "E0003", output.reference, "the selected Output has no exact checked-module owner", "Output registration retains its authenticated module cursor", "retain the original Output module identity through checking"))
+                    return None
+                }
+                owner_identity :: semantic_graph.modules[output.module_id].module_identity
+                function_key :: symbol_id(SymbolKind.Function, owner_identity, "", output.semantic_name).key
+                if (counts.get(function_key) ?? 0) != 1 {
+                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_identity, "E0003", output.definition, "the selected Output entry has no unique checked function identity", "Output entry identity is retained from its registered callable", "retain the canonical function key through checking"))
+                    return None
+                }
+                return Val(function_key)
+            }
+        }
+    }
+    entry :: jet_driver_entry_selection(load) ?? return jet_driver_default_run_key(load, functions, modules)
+    target_module_identity := load.entry_module_identity
+    if entry.module_alias != None {
+        alias :: entry.module_alias ?? return None
+        target := String?{None}
+        loop import in load.imports {
+            if import.source_module_identity != load.entry_module_identity || import.declaration.alias != alias || !jet_driver_import_is_module_edge(import.declaration.kind) -> next
+            if target != None {
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0105", import.declaration.span, "the package entry module alias resolves more than once", "an explicit `entry: module_alias.function` binds through one loaded module edge", "retain exactly one import for the entry module alias"))
+                return None
+            }
+            target = Val(import.target_module_identity)
+        }
+        if target == None {
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry module alias is not imported by the selected source module", "qualified entry bindings resolve through one exact File or Module import alias", "import the entry module under the manifest's explicit alias"))
+            return None
+        }
+        target_module_identity = target ?? return None
+    }
+    module_found := false
+    loop semantic_module in semantic_graph.modules {
+        if semantic_module.module_identity == target_module_identity -> module_found = true
+    }
+    if !module_found {
+        &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry target module is not present in semantic results", "entry identity is fixed by the native-authorized module graph and explicit package binding", "retain the resolved entry target module in the checked graph"))
+        return None
+    }
+    function_key :: symbol_id(SymbolKind.Function, target_module_identity, "", entry.function_name).key
+    if counts.get(function_key) == {
+        .Val(count) -> {
+            if count == 1 -> return Val(function_key)
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the declared package entry has no unique checked function identity", "the private entry binding is resolved from its exact registered function symbol", "retain the canonical function key through checking"))
+        }
+        .None -> {
+            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package manifest entry function is not declared in the resolved entry module", "entry resolution uses the explicit `outputs.*.entry` function binding", "declare the selected function in the entry module referenced by the manifest"))
+        }
+    }
+    None
+}
+
+// jet_driver_default_run_entry over the checked functions: the entry
+// module's `fn run`, when it takes no parameter or one `#CLI` record (a
+// declared type with a CLI schema).
+fn jet_driver_default_run_key(load: JetDriverLoadResult, functions: [TFunc], modules: [SemaGraphModuleResult]) -> String? Never! {
+    key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "run").key
+    loop function in functions {
+        if function.key != key -> next
+        if function.params.len() == 0 -> return Val(key)
+        if function.params.len() != 1 -> return None
+        record :: if function.params[0].ty == {
+            .Named(name) -> name
+            else -> { return None }
+        }
+        loop source_module in modules {
+            loop definition in source_module.declarations.type_defs {
+                if definition.key == record && definition.cli != None -> return Val(key)
+            }
+        }
+        return None
+    }
+    None
+}
 fn jet_driver_empty_compile_trace() -> JetDriverCompileTrace Never! {
     JetDriverCompileTrace{stdout: [String]{}, stderr: [String]{}, soft_stop: false, exit_code: None}
 }
@@ -5511,13 +5601,16 @@ struct JetDriverCheckedProjectionCapture {
     lowering_inputs: JetDriverLoweringInputs?{None}
 }
 
-// What MIR lowering reads (Pipeline `jet_driver_lower_releasing`): the
-// checked functions it lowers, after Core pruning and keep-going traps; the
-// checked modules (declarations, names) beside them; the entry module.
+// What the slot IR builder reads, where MIR lowering would start (Pipeline
+// `jet_driver_lower_releasing`): the checked functions, after Core pruning
+// and keep-going traps; the checked modules (declarations, names) beside
+// them; the entry module; the key of the executable entry
+// (jet_driver_resolve_entry_key), None for a program without one.
 struct JetDriverLoweringInputs {
     functions: [TFunc]
     modules: [SemaGraphModuleResult]
     entry_module_identity: String
+    entry_key: String?
 }
 
 struct JetDriverLoweringInputsResult {
@@ -5525,15 +5618,28 @@ struct JetDriverLoweringInputsResult {
     inputs: JetDriverLoweringInputs?
 }
 
-// The slot IR route's front: the ordinary checked compile of `request`,
-// stopped right before MIR lowering, with the lowering inputs (None when the
-// compile stopped earlier; its result carries the diagnostics).
-fn jet_driver_lowering_inputs(request: ^JetDriverCompileRequest) -> JetDriverLoweringInputsResult {
-    kg := jet_driver_keep_going_log(None)
+// The native executable route's front: the ordinary checked compile of
+// `request`, stopped right before lowering, with the lowering inputs (None
+// when the compile stopped earlier; its result carries the diagnostics).
+// `keep_going` (JET_KEEP_GOING) collects every failure of every stage as
+// jet_driver_compile_keep_going does, one row each in the result's
+// keep_going_rows.
+fn jet_driver_lowering_inputs(request: ^JetDriverCompileRequest, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+    collecting :: keep_going != None
+    kg := jet_driver_keep_going_log(keep_going)
     capture := JetDriverCheckedProjectionCapture{stop_before_lowering: true}
     journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
     compile := jet_driver_compile_stages(request, &kg, false, false, &capture, &journal)
     compile.canonical_routes = canonical_pass_take(&journal)
+    if collecting {
+        jet_driver_trace_keep_going_begin(request.trace_sink)
+        if compile.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
+        // Reports of a stage that returned early; recorded rows are not repeated.
+        kg.diagnostic_mark = 0
+        jet_driver_keep_going_diagnostics(&kg, "final", compile.diagnostics)
+        compile.keep_going_rows = kg.rows
+        jet_driver_trace_keep_going_end(request.trace_sink, compile.keep_going_rows.len())
+    }
     JetDriverLoweringInputsResult{compile: ^compile, inputs: ^capture.lowering_inputs}
 }
 
@@ -6356,11 +6462,20 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(&kg, &sema_functions, runtime_semantic_modules)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
-    // The slot IR route reads what lowering would read and lowers nothing.
+    // The native executable route reads what lowering would read and lowers
+    // nothing; its entry resolves over the checked functions.
     if capture.stop_before_lowering {
         if request.trace_sink == .Val(sink) -> sink.end("lower", sema_functions.len())
+        jet_driver_trace_step_begin(request.trace_sink, "driver.preassemble.entry")
+        entry_diagnostics := load.diagnostics
+        load.diagnostics = [Diagnostic]{}
+        entry_key :: jet_driver_resolve_entry_key(load, checked_graph, sema_functions, runtime_semantic_modules, &entry_diagnostics)
+        load.diagnostics = entry_diagnostics
+        jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.entry", -1)
+        if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
+        if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
         foreign_link :: jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, entry_module_identity: load.entry_module_identity})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, entry_module_identity: load.entry_module_identity, entry_key: entry_key})
         result := jet_driver_compile_result(load, load.diagnostics, None, None, None, None, None, true, trace)
         result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
         result.foreign_link = foreign_link

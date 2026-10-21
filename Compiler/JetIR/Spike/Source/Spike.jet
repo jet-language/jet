@@ -116,7 +116,7 @@ fn ir_spike_front(file: String, trace_sink: JetCLITraceSink?) -> IRSpikeFront {
             // copy: a three-field row; the request moves into the compiler below.
             threads :: selected.compiler_threads.copy()
             root :: if snapshot.roots.len() > 0 -> snapshot.roots[0].canonical_path else -> "."
-            front := jet_driver_lowering_inputs(^selected)
+            front := jet_driver_lowering_inputs(^selected, None)
             if front.compile.internal_problem == .Val(problem) -> return IRSpikeFront.Stopped{output: jet_cli_ice(problem)}
             errors :: jet_driver_present_diagnostics(jet_cli_errors(front.compile.diagnostics), snapshot, front.compile.generated_source_files)
             source :: cli_files.read(file) ?? ""
