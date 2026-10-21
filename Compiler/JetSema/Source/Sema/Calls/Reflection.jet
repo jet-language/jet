@@ -16,6 +16,7 @@ use jet_foundation.[
     THostCall,
     TagMarker,
     Type,
+    core_identity_in_module,
     type_name,
 ]
 
@@ -31,6 +32,8 @@ fn sema_call_reflection_secret_leaf(name: String) -> Bool Never! {
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
 }
 
+// A Core crypto secret: tagged by a registry signature, or named by its
+// canonical source identity (`<corelib>/core.crypto::Secret`).
 fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> {
@@ -40,6 +43,7 @@ fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
             }
             return sema_call_reflection_secret_bearing(inner)
         }
+        .Named(name) -> core_identity_in_module(name, "core.crypto") && sema_call_reflection_secret_leaf(name)
         else -> false
     }
 }
