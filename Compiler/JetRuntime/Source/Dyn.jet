@@ -246,6 +246,138 @@ fn data_tree_render(target: I64, tree: I64) {
     data_tree_store(some, jet_rt_handle_show_dyn(tree))
     I64{1}
 }
+// DynKind.rs dyn_kind: the diagnostic name of a runtime tree's kind.
+fn data_tree_kind_name(kind: I64) -> I64 {
+    if kind == DATA_TREE_NULL -> return rt_static_text("null")
+    if kind == DATA_TREE_BOOL -> return rt_static_text("Bool")
+    if kind == DATA_TREE_INT -> return rt_static_text("Int")
+    if kind == DATA_TREE_FLOAT -> return rt_static_text("Float")
+    if kind == DATA_TREE_NUMBER -> return rt_static_text("number")
+    if kind == DATA_TREE_TEXT -> return rt_static_text("Text")
+    if kind == DATA_TREE_BYTE_LIST -> return rt_static_text("Bytes")
+    if kind == DATA_TREE_DATETIME -> return rt_static_text("DateTime")
+    if kind == DATA_TREE_ARRAY -> return rt_static_text("a list")
+    rt_static_text("an object")
+}
+// foundation/Dyn.rs get_opt: the borrowed value of the first Object entry
+// named `key`; 0 for a miss or a tree that is not an Object.
+fn data_tree_object_find(tree: I64, key: I64) -> I64 {
+    if data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_OBJECT -> return I64{0}
+    sequence :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        entry :: data + at * DATA_TREE_ENTRY_BYTES
+        if jet_rt_string_eq(data_tree_word(entry + DATA_TREE_ENTRY_KEY), key) -> return data_tree_word(entry + DATA_TREE_ENTRY_VALUE)
+        at += I64{1}
+    }
+    I64{0}
+}
+// The borrowed Array item at `position`; 0 when out of range or not an Array.
+fn data_tree_array_item(tree: I64, position: I64) -> I64 {
+    if data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_ARRAY -> return I64{0}
+    sequence :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    if (position < I64{0} || position >= data_tree_word(sequence + DATA_SEQUENCE_LENGTH)) -> return I64{0}
+    data_tree_word(data_tree_word(sequence + DATA_SEQUENCE_DATA) + position * DATA_TREE_ELEMENT_BYTES)
+}
+// Outcome.rs jet_dyn_stop_message: a builder holding "{site}: ".
+fn data_tree_stop_begin(site: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, site)
+    jet_rt_string_builder_push(target, rt_static_text(": "))
+    target
+}
+// Pushes the decimal text of a native i64.
+fn data_tree_push_count(target: I64, count: I64) {
+    exact :: jet_int_owned_from_i64(count)
+    text :: jet_rt_int_to_string(exact)
+    jet_rt_string_builder_push(target, text)
+    jet_rt_string_drop(text)
+    jet_rt_int_drop(exact)
+}
+// DynRuntime.rs jet_dyn_get_key: Some(clone) of the first entry named `key`.
+#Export(c) fn jet_dyn_get_key(tree: I64, key: I64, some: I64) -> I64 {
+    found :: data_tree_object_find(tree, key)
+    if (found == I64{0}) -> return I64{0}
+    data_tree_store(some, jet_rt_handle_clone_dyn(found))
+    I64{1}
+}
+// DynRuntime.rs jet_dyn_get_at: Some(clone) of the Array item at `index`.
+#Export(c) fn jet_dyn_get_at(tree: I64, index: I64, some: I64) -> I64 {
+    position :: jet_int_owned_to_i64(index)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    found :: data_tree_array_item(tree, position)
+    if (found == I64{0}) -> return I64{0}
+    data_tree_store(some, jet_rt_handle_clone_dyn(found))
+    I64{1}
+}
+// DynRuntime.rs jet_dyn_has: an Object has an entry named `key`.
+#Export(c) fn jet_dyn_has(tree: I64, key: I64) -> Bool { data_tree_object_find(tree, key) != I64{0} }
+// DynRuntime.rs jet_dyn_keys: an Object's keys in entry order; empty for
+// every other kind. Returns the count and an owned word column of texts.
+#Export(c) fn jet_dyn_keys(tree: I64, output: I64) -> I64 {
+    if data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_OBJECT {
+        data_tree_store(output, I64{0})
+        return I64{0}
+    }
+    sequence :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    words :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        data_tree_store(words + at * I64{8}, jet_rt_string_clone(data_tree_word(data + at * DATA_TREE_ENTRY_BYTES + DATA_TREE_ENTRY_KEY)))
+        at += I64{1}
+    }
+    data_tree_store(output, words)
+    length
+}
+// DynRuntime.rs jet_dyn_index_key: Ok(clone) of the first entry named `key`,
+// else the "{site}: ..." stop text. ok and err share the caller's slot.
+#Export(c) fn jet_dyn_index_key(tree: I64, key: I64, site: I64, ok: I64, err: I64) -> I64 {
+    found :: data_tree_object_find(tree, key)
+    if (found != I64{0}) {
+        data_tree_store(ok, jet_rt_handle_clone_dyn(found))
+        return I64{1}
+    }
+    kind :: data_tree_word(tree + DATA_TREE_TAG)
+    target :: data_tree_stop_begin(site)
+    if kind == DATA_TREE_OBJECT {
+        jet_rt_string_builder_push(target, rt_static_text("no key "))
+        rt_text_push_rust_debug_str(target, key)
+    } else {
+        jet_rt_string_builder_push(target, rt_static_text("expected an object, found "))
+        jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+    }
+    data_tree_store(err, jet_rt_string_builder_finish(target))
+    I64{0}
+}
+// DynRuntime.rs jet_dyn_index_at: Ok(clone) of the Array item at `index`,
+// else the "{site}: ..." stop text. ok and err share the caller's slot.
+#Export(c) fn jet_dyn_index_at(tree: I64, index: I64, site: I64, ok: I64, err: I64) -> I64 {
+    position :: jet_int_owned_to_i64(index)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    found :: data_tree_array_item(tree, position)
+    if (found != I64{0}) {
+        data_tree_store(ok, jet_rt_handle_clone_dyn(found))
+        return I64{1}
+    }
+    kind :: data_tree_word(tree + DATA_TREE_TAG)
+    target :: data_tree_stop_begin(site)
+    if kind == DATA_TREE_ARRAY {
+        jet_rt_string_builder_push(target, rt_static_text("index "))
+        data_tree_push_count(target, position)
+        jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
+        data_tree_push_count(target, data_tree_word(data_tree_word(tree + DATA_TREE_PAYLOAD) + DATA_SEQUENCE_LENGTH))
+        jet_rt_string_builder_push(target, rt_static_text(")"))
+    } else {
+        jet_rt_string_builder_push(target, rt_static_text("expected an array, found "))
+        jet_rt_string_builder_push(target, data_tree_kind_name(kind))
+    }
+    data_tree_store(err, jet_rt_string_builder_finish(target))
+    I64{0}
+}
 // Outcome.rs jet_dyn_stop_message: "{site}: {detail}". Native Dyn lowering
 // (Lower/Dyn.jet) lends the borrowed site text and a static detail span.
 #Export(c) fn jet_rt_dyn_stop_message(site: I64, detail: I64, length: I64) -> I64 {
