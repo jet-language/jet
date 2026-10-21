@@ -160,7 +160,8 @@ fn sema_ownership_crossing_named(ty: Type, nominal: SemaRegistrationNominal, cro
     found
 }
 
-// The fields, payloads, or underlying type of one nominal instantiation.
+// The fields, payloads, or underlying type of one nominal instantiation, each
+// resolved in the nominal's own module before the type arguments bind.
 fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: [Type], crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
     params :: sema_inference_registration_params(nominal.generic_params)
     if nominal.generic_params.len() != type_args.len() -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
@@ -178,26 +179,26 @@ fn sema_ownership_crossing_members(nominal: SemaRegistrationNominal, type_args: 
             .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
         }
         if underlying == .Val(declared) {
-            instantiated := sema_inference_substitute_type_bindings(declared, bindings)
+            instantiated := sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, declared), bindings)
             return sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
         }
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: nominal.symbol.name}))
     }
     loop field in nominal.fields {
-        instantiated := sema_inference_substitute_type_bindings(field.ty, bindings)
+        instantiated := sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, field.ty), bindings)
         problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk) ?? next
         return Val(sema_ownership_crossing_prepend(nominal.symbol.name, field.symbol.name, problem))
     }
     loop variant in nominal.variants {
         if variant.payload == {
             .Single(payload, _) -> {
-                instantiated := sema_inference_substitute_type_bindings(payload, bindings)
+                instantiated := sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, payload), bindings)
                 problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk)
                 if problem != None -> return problem
             }
             .Named(fields) -> {
                 loop field in fields {
-                    instantiated := sema_inference_substitute_type_bindings(field.ty, bindings)
+                    instantiated := sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, field.ty), bindings)
                     problem :: sema_ownership_crossing_type_inner(instantiated, crossing, true, strict_callable, cell_only, environment, program, context, &walk) ?? next
                     return Val(sema_ownership_crossing_prepend(nominal.symbol.name, field.name, problem))
                 }

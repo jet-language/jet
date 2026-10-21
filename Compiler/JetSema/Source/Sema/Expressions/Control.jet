@@ -851,6 +851,13 @@ fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, en
         .Result(_, _) -> {}
         else -> return Val(^value)
     }
+    // Compiler-generated bodies (derived codecs) spell their carriers out and
+    // keep the Result; only a proven `Never` rail still unwraps.
+    if context.compiler_generated {
+        if sema_expr_unwrap_tag(value.ty) == .Result(_, generated_error) {
+            if sema_expr_unwrap_tag(generated_error) != (Type.Named{name: "Never"}) -> return Val(^value)
+        }
+    }
     if sema_expression_failure_carrier_position(expected, value.ty) -> return Val(^value)
     span :: expr_span(expr)
     conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None

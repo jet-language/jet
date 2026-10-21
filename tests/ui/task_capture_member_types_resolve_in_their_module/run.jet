@@ -1,0 +1,18 @@
+// A task captures a value whose nominal type lives in another member file and
+// holds a field type only that file imports: the capture's copy and sendability
+// judgments resolve the field types where they are declared.
+fn count(holder: Holder) -> Int {
+    holder.children.len()
+}
+
+fn start(group: Group, holder: Holder) -> Int {
+    worker :: task count(holder)
+    ^worker.join() ?? 0
+}
+
+fn run() {
+    holder :: Holder{name: "h", children: [Pending]{}}
+    task.group work {
+        print("{start(work, holder)}")
+    }
+}

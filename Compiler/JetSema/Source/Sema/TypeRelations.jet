@@ -10,6 +10,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     Symbol,
+    SymbolID,
     SymbolKind,
     TGenericParam,
     TagMarker,
@@ -672,6 +673,18 @@ fn sema_type_resolve_declared_with_generics(graph: SemaRegistrationGraph, ty: Ty
 
 fn sema_type_resolve_declared(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String) -> Type Never! {
     sema_type_resolve_declared_with_generics(graph, ty, caller_module_identity, [TGenericParam]{})
+}
+
+// A nominal's declared member type (a field, payload, or underlying type)
+// resolved in the nominal's own module, where it is spelled: the module that
+// classifies a value of the nominal need not import its members' types. The
+// nominal's generic parameters stay open for the caller's bindings.
+fn sema_type_resolve_member_type(graph: SemaRegistrationGraph?, nominal: SemaRegistrationNominal, ty: Type) -> Type Never! {
+    if graph == .Val(registered) {
+        owner_params :: loop parameter in nominal.generic_params -> TGenericParam{name: parameter.name, bounds: [SymbolID]{}}
+        return sema_type_resolve_declared_with_generics(registered, ty, nominal.symbol.module_name, owner_params)
+    }
+    ty
 }
 
 fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {

@@ -615,6 +615,11 @@ struct SemaCheckContext {
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
+    // The body being checked is compiler-generated scaffolding (a derived
+    // codec or protocol method, a field policy wrapper) that spells every
+    // carrier out: a call root keeps its Result and an unmarked writing
+    // receiver is not reported. A `#Test` body is user code and is not.
+    compiler_generated: Bool{false}
 }
 
  
@@ -975,6 +980,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
+        compiler_generated: source.compiler_generated,
     }
     sema_comptime_body_sources_index(&snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1103,6 +1109,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
             subject_shorthand_depth: context.subject_shorthand_depth,
             arithmetic_policy: context.arithmetic_policy,
+            compiler_generated: context.compiler_generated,
         },
     }
 }
@@ -1183,6 +1190,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
     context.subject_shorthand_depth = saved.subject_shorthand_depth
     context.arithmetic_policy = saved.arithmetic_policy
+    context.compiler_generated = saved.compiler_generated
 }
 
 // Records why the body being checked is incomplete when no diagnostic says so.

@@ -1,0 +1,12 @@
+// A derived Decode body frames each field's decode Result with
+// `FieldError.under` and matches it; the generated calls keep their carriers.
+struct Inner { offset: Int, is_dst: Bool }
+
+struct Outer { name: String, inner: Inner, items: [Inner], note: String? }
+
+fn run() {
+    if Dyn.Null.decode<Outer>() == {
+        .Ok(value) -> print("{value.name}")
+        .Err(errors) -> print("{errors.len()}")
+    }
+}

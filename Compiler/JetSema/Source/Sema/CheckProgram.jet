@@ -1920,6 +1920,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
     context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
+    context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func)
     if !complete -> sema_check_unsupported(&context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
     // The declared signature's failure
     // domains and `Never` slots (E2417, E2422).

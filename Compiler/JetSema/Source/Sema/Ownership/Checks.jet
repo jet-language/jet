@@ -3252,8 +3252,10 @@ fn sema_receiver_mark_is_write_window(state: SemaOwnershipState, root: String) -
 // the local with no mark, so the compiler chooses and `^` stays optional
 // there. A writing call still needs `&`, and a take anywhere else (a field,
 // or a local read again later) still needs `^`.
-fn sema_receiver_mark_finish(state: &SemaOwnershipState, receiver: Expr, scopes: SemaScopeTable, receiver_last_use: Bool, diagnostics: &[Diagnostic]) {
+// A compiler-generated body names no receiver marks: its frame closes unread.
+fn sema_receiver_mark_finish(state: &SemaOwnershipState, receiver: Expr, scopes: SemaScopeTable, receiver_last_use: Bool, compiler_generated: Bool, diagnostics: &[Diagnostic]) {
     frame :: &state.receiver_frames.pop() ?? return
+    if compiler_generated -> return
     root :: sema_receiver_mark_place_root(receiver)
     places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     is_place :: root != None && places.len() > 0

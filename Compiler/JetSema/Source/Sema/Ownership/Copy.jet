@@ -215,21 +215,23 @@ fn sema_copy_generic_bindings(nominal: SemaRegistrationNominal, actual: Type) ->
     }
 }
 
-fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: [SemaInferenceBinding]) -> [Type] Never! {
+// Each member type resolves in the nominal's module before the caller's
+// type arguments are bound into it.
+fn sema_copy_nominal_declared_types(nominal: SemaRegistrationNominal, bindings: [SemaInferenceBinding], graph: SemaRegistrationGraph?) -> [Type] Never! {
     types := [Type]{}
     if nominal.source == {
         .SourceAST(item) -> {
             if item == {
-                .TypeAlias(definition) -> &types.push(sema_inference_substitute_type_bindings(definition.target, bindings))
-                .Distinct(definition) -> &types.push(sema_inference_substitute_type_bindings(definition.base, bindings))
+                .TypeAlias(definition) -> &types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, definition.target), bindings))
+                .Distinct(definition) -> &types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, definition.base), bindings))
                 else -> {}
             }
         }
         .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
     }
-    loop field in nominal.fields -> &types.push(sema_inference_substitute_type_bindings(field.ty, bindings))
+    loop field in nominal.fields -> &types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, field.ty), bindings))
     loop variant in nominal.variants {
-        if variant.payload_type == .Val(payload) -> &types.push(sema_inference_substitute_type_bindings(payload, bindings))
+        if variant.payload_type == .Val(payload) -> &types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, payload), bindings))
     }
     types
 }
@@ -457,7 +459,7 @@ fn sema_copy_nominal_facts(
     heap := false
     clock := false
     dynamic_loan := false
-    declared_types :: sema_copy_nominal_declared_types(nominal, bindings)
+    declared_types :: sema_copy_nominal_declared_types(nominal, bindings, graph)
     loop declared in declared_types {
         nested :: sema_copy_type_facts(declared, graph, caller_module_identity, generic_params, &walk)
         cloneable = cloneable && nested.cloneable
