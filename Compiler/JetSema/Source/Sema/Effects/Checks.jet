@@ -1170,7 +1170,8 @@ fn sema_effect_record_close(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex
             return
         }
     }
-    loop key in facts.close_methods.get(owner) ?? [String]{} -> sema_effect_node_add_edge(&nodes, node_index, key)
+    keys :: facts.close_methods.get(owner) ?? [String]{}
+    loop key in keys -> sema_effect_node_add_edge(&nodes, node_index, key)
 }
 
 // The declaring module of a `kind:{module}::{name}` type symbol key
