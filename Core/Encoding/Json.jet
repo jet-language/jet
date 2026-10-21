@@ -85,11 +85,20 @@ fn safe_limits() -> EncodingLimits Never! {
     }
 }
 /// Strict JSON → `Dyn`.
-fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false) }
+fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false, safe_limits()) }
+
+/// Strict JSON → `Dyn` under caller limits: `max_item_bytes` bounds the input
+/// size and `max_depth` the nesting of arrays and objects.
+fn parse_with_limits(text: String, limits: EncodingLimits) -> Dyn EncodingError! {
+    if limits.max_depth < 1 || limits.max_item_bytes < 1 {
+        return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive"))
+    }
+    parse_json(text, false, limits)
+}
 
 /// Strict JSON → `Dyn`, except that a repeated object name keeps the later
 /// value at the first name's position.
-fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true) }
+fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true, safe_limits()) }
 
 /// Coerce strings that are exactly booleans or finite numbers.
 fn decode(text: String) -> Dyn EncodingError! {
@@ -292,6 +301,7 @@ struct Parser {
     line: Int
     column: Int
     depth: Int
+    max_depth: Int
     path: [String]
     pending: [DataEvent]
     pending_index: Int
@@ -309,6 +319,7 @@ impl Parser {
             line: 1,
             column: 1,
             depth: 0,
+            max_depth: safe_limits().max_depth,
             path: [String]{},
             pending: [DataEvent]{},
             pending_index: 0,
@@ -575,7 +586,7 @@ impl Parser {
 
     fn parse_array(&self) -> Dyn EncodingError! {
         if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
-        if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if !&self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
         if self.recording -> &self.pending.push(DataEvent.ArrayStart)
         items := [Dyn]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -609,7 +620,7 @@ impl Parser {
 
     fn parse_object(&self) -> Dyn EncodingError! {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
-        if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if !&self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
         if self.recording -> &self.pending.push(DataEvent.ObjectStart)
         entries := [(key: String, value: Dyn)]{}
         positions := [String: Int]{}
@@ -660,13 +671,13 @@ impl Parser {
 
     fn enter(&self) -> Bool Never! {
         self.depth += 1
-        self.depth <= safe_limits().max_depth
+        self.depth <= self.max_depth
     }
 
     fn next_event(&self) -> DataEvent EncodingError! {
         if !self.parsed {
             if self.bytes.len() > safe_limits().max_item_bytes {
-                return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
+                return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
             }
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if self.eof() -> return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, ""))
@@ -683,12 +694,13 @@ impl Parser {
     }
 }
 
-fn parse_json(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
+fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> Dyn EncodingError! {
     raw :: text.bytes()
-    if raw.len() > safe_limits().max_item_bytes {
-        return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
+    if raw.len() > limits.max_item_bytes {
+        return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({limits.max_item_bytes})"))
     }
     p := Parser.new(raw, allow_duplicates, false)
+    p.max_depth = limits.max_depth
     value :: &p.parse_value()
     &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
     if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))
@@ -697,7 +709,7 @@ fn parse_json(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
 // Compiler-private typed decoder entry; number lexemes retain their target-free carriers.
 fn __parse_typed(text: String) -> Dyn EncodingError! {
     raw :: text.bytes()
-    if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
+    if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
     parser := Parser.new(raw, false, false)
     parser.typed_numbers = true
     value :: &parser.parse_value()

@@ -792,12 +792,18 @@ fn is_dir(path: String | Path) -[FS.Read]> Bool Never! {
 }
 
 
-/// Describe `path` without following a final link.
-fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
+/// Describe `path`. By default a final symbolic link is described itself;
+/// `links: .Follow` describes what it points to, and `links: .Refuse`
+/// reports `IOError.InvalidInput` when the path ends in a link.
+fn stat(path: String | Path, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError! {
     text :: path_text(path)
     file_fault("FS.Read", .Read, text)
-    row :: core.files.__stat_at(-1, text, false)
-    Ok(stat_from_row(row))
+    follow :: links == .Val(.Follow)
+    info :: stat_from_row(core.files.__stat_at(-1, text, follow))
+    if links == .Val(.Refuse) && info.is_symlink {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(text), os_code: None, cause: Val("path ends in a symbolic link")}))
+    }
+    Ok(info)
 }
 
 
