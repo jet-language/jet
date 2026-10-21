@@ -668,6 +668,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
         }
         .StructLit(fields, extra) -> {
             if extra != None -> return ir_fail_slot(&b, span, "struct literal with host extras")
+            if ir_default_err(p, expression.ty) -> return ir_default_err_literal(&m, &p, &b, expression.ty, fields, span)
             ty :: ir_value_type(&m, p, expression.ty) ?? return ir_type_fail(&b, span, expression.ty)
             if m.types[ty].kind != .Aggregate -> return ir_fail_slot(&b, span, "struct literal of {ir_type_name(expression.ty)}")
             storage :: ir_fresh_temp(&m, &b, ty)
@@ -683,6 +684,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
             return storage
         }
         .Field(receiver, field) -> {
+            if ir_default_err(p, receiver.ty) -> return ir_default_err_field(&m, &p, &b, expression.ty, receiver, field.name, span)
             base :: ir_expr(&m, &p, &b, receiver)
             if ir_failed(b) -> return -1
             if base < 0 || ir_kind_of(m, b, base) != .Aggregate -> return ir_fail_slot(&b, span, "field of {ir_type_name(receiver.ty)}")
@@ -1462,6 +1464,93 @@ fn ir_receiver_access(kind: TFuncKind) -> String Never! {
         .Write -> "write"
         .Move -> "move"
     }
+}
+
+// ---------------------------------------------------------------------------
+// The default `Err` (Lower NativeErr.jet): the runtime's own JetErr handle.
+
+// `Err{message, code, cause, ...}` (Lower lower_native_err_construct): the
+// fields in source order, then jet_rt_record_new_jet_err(message, code,
+// cause), which clones the message and the code box's text and takes the
+// cause handle out of its Option box. Any other field (the private metadata)
+// is evaluated and released: the runtime keeps its own fresh state.
+fn ir_default_err_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, fields: [TStructFieldValue], span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    message := -1
+    code := -1
+    cause := -1
+    others := [Int]{}
+    loop field in fields {
+        value :: ir_expr(&m, &p, &b, field.value)
+        if ir_failed(b) -> return -1
+        if field.field.name == "message" {
+            message = value
+        } else if field.field.name == "code" {
+            code = value
+        } else if field.field.name == "cause" {
+            cause = value
+        } else {
+            &others.push(value)
+        }
+    }
+    if message < 0 || code < 0 || cause < 0 -> return ir_fail_slot(&b, span, "default Err literal without message, code and cause")
+    loop other in others -> ir_release(&m, &b, other)
+    // The cause handle: moved out of an owned box (the box is freed), cloned
+    // out of a borrowed one.
+    pointer_row :: ir_pointer_row(&m)
+    taken :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Const, taken, 0, -1, -1, b.line)
+    present :: ir_option_is_some(&m, &b, cause)
+    ir_open_if(&b.f, present, b.line)
+    handle :: ir_load_word(&m, &b, cause, 0)
+    if b.fresh[cause] {
+        ir_emit(&b.f, IROp.Copy, taken, handle, -1, -1, b.line)
+        bytes :: ir_word_const(&m, &b, 8)
+        align :: ir_word_const(&m, &b, 8)
+        _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{cause, bytes, align}, -1)
+    } else {
+        cloned :: ir_runtime(&m, &b, "jet_rt_handle_clone_jet_err", [Int]{handle}, pointer_row)
+        ir_emit(&b.f, IROp.Copy, taken, cloned, -1, -1, b.line)
+    }
+    ir_end(&b.f, b.line)
+    b.fresh[cause] = false
+    result :: ir_runtime(&m, &b, "jet_rt_record_new_jet_err", [Int]{message, code, taken}, row)
+    ir_release(&m, &b, message)
+    ir_release(&m, &b, code)
+    result
+}
+
+// `error.message` / `.code` / `.cause` of a default `Err` (Lower
+// lower_native_err_field, lower_record_load_value): an owned copy through
+// jet_rt_record_get_jet_err_<field>; an optional field's getter writes its
+// payload to an out word and reports presence, and the value gets a new box.
+fn ir_default_err_field(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, name: String, span: Span) -> Int Never! {
+    if name != "message" && name != "code" && name != "cause" -> return ir_fail_slot(&b, span, "field {name} of the default Err")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    error :: ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || error < 0 -> return -1
+    getter :: "jet_rt_record_get_jet_err_{name}"
+    if name == "message" {
+        text :: ir_runtime(&m, &b, getter, [Int]{error}, row)
+        ir_release(&m, &b, error)
+        return text
+    }
+    out :: ir_out_slot(&m, &b, 1)
+    zero :: ir_word_const(&m, &b, 0)
+    word_row :: ir_word_row(&m)
+    presence :: ir_runtime(&m, &b, getter, [Int]{error, out}, word_row)
+    boxed :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Const, boxed, 0, -1, -1, b.line)
+    some :: ir_bool_op(&m, &b, IROp.Ne, presence, zero)
+    ir_open_if(&b.f, some, b.line)
+    present :: ir_box_alloc(&m, &b, 8, row)
+    payload :: ir_load_word(&m, &b, out, 0)
+    ir_emit(&b.f, IROp.Store, -1, present, 0, payload, b.line)
+    ir_emit(&b.f, IROp.Copy, boxed, present, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    b.fresh[boxed] = true
+    ir_release(&m, &b, error)
+    boxed
 }
 
 // ---------------------------------------------------------------------------
