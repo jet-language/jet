@@ -6058,7 +6058,7 @@ fn nested_pure_closure_never_carriers_compile_and_run() {
 fn taking_result_subject_coverage_checks_and_runs_the_call_once() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let (bundle, nominals) = checked_bundle(include_str!(
-            "../../../../../Compiler/JetSema/Tests/ErrArmFlowFixtures.jet"
+            "../../../../../Compiler/JetSema/Tests/fixtures/ErrArmFlowFixtures.fixture/ErrArmFlowFixtures.jet"
         ));
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,

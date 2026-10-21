@@ -73,8 +73,9 @@ struct RendererDescriptor {
     render_probe: fn() -> String
 }
 
-// One entry per active generated response binder.
-PKG_GENERATOR_REGISTRY :: prep { [RendererDescriptor]{
+// One entry per active generated response binder. A function, not a `prep`
+// table: its rows hold function values, which no comptime value can carry.
+fn pkg_generator_registry() -> [RendererDescriptor] Never! { [RendererDescriptor]{
     {language: ForeignLanguage.Lua, runtime: BinderRuntime.EmbeddedLua, stub_kind: BindingStubKind.LuaScript, protocol: DecoderProtocol.LuaRawJSON, render_probe: pkg_lua_render_probe},
     {language: ForeignLanguage.PowerShell, runtime: BinderRuntime.SupervisedPowerShell, stub_kind: BindingStubKind.PowerShellScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_powershell_render_probe},
     {language: ForeignLanguage.Perl, runtime: BinderRuntime.SupervisedPerl, stub_kind: BindingStubKind.PerlScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_perl_render_probe},
@@ -89,7 +90,7 @@ PKG_GENERATOR_REGISTRY :: prep { [RendererDescriptor]{
 // protocol without a second match list.
 fn pkg_renderer_for(descriptor: BinderDescriptor) -> RendererDescriptor? Never! {
     if descriptor.status != BinderStatus.Active -> return None
-    loop renderer in PKG_GENERATOR_REGISTRY {
+    loop renderer in pkg_generator_registry() {
         if renderer.language == descriptor.language && renderer.stub_kind == descriptor.stub_kind -> return Val(renderer)
     }
     None

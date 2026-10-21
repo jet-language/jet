@@ -204,19 +204,19 @@ fn embedded_generic_methods_keep_owner_and_method_scopes() {
 
 #[test]
 fn fallible_sibling_supplies_uncontextual_err_arm_carrier() {
-    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmJoinFixtures.jet"));
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/fixtures/ErrArmJoinFixtures.fixture/ErrArmJoinFixtures.jet"));
     assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }
 
 #[test]
 fn deferred_err_arm_keeps_branch_bindings_and_optional_flow() {
-    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmScopeFixtures.jet"));
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/fixtures/ErrArmScopeFixtures.fixture/ErrArmScopeFixtures.jet"));
     assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }
 
 #[test]
 fn deferred_err_arm_joins_actual_moves_and_checks_scope_end_after_payload() {
-    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmFlowFixtures.jet"));
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/fixtures/ErrArmFlowFixtures.fixture/ErrArmFlowFixtures.jet"));
     assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }
 

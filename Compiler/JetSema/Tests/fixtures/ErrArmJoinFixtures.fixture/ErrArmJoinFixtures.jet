@@ -1,0 +1,20 @@
+// A local cannot spell a carrier annotation; the sibling supplies it.
+fn join_payload() -> (value: Int, tag: Int) Err! { return Ok((value: 7, tag: 0)) }
+fn err_first(flag: Bool) -> Int {
+    result :: if flag -> Err("bad") else -> join_payload()
+    if result == {
+        .Ok(payload) -> payload.value
+        .Err(error) -> 0
+    }
+}
+fn err_last(flag: Bool) -> Int {
+    result :: if flag -> join_payload() else -> Err("bad")
+    if result == {
+        .Ok(payload) -> payload.value
+        .Err(error) -> 0
+    }
+}
+fn run() {
+    print(err_first(false))
+    print(err_last(true))
+}
