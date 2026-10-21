@@ -120,7 +120,6 @@ use jet_foundation.[
     tir_generated_local,
     tir_each_pattern_child,
     tir_each_stmt_child,
-    tir_symbol_local,
     tir_user_local,
     type_identity_key,
     type_is_unit_callable_return,
@@ -276,57 +275,6 @@ fn jet_codegen_lower_context_block(builder: &JetCodegenBuilder, program: JetCode
     jet_codegen_leave_scope(&builder, program, scope)
 }
 
-fn jet_codegen_lower_defer_thunk(builder: &JetCodegenBuilder, program: JetCodegenProgram, close: TExpr, resource: SymbolID, scope_id: Int, span: Span) -> MIRValueID {
-    if resource.key == "" -> panic("checked deferred resource has an empty symbol identity")
-    binding := JetCodegenBinding?{None}
-    index := builder.bindings.len() - 1
-    loop index >= 0 {
-        candidate := builder.bindings[index]
-        if candidate.symbol_key == resource.key && candidate.depth <= builder.scope_depth {
-            binding = Val(candidate)
-            break
-        }
-        index -= 1
-    }
-    captured :: binding ?? panic("checked deferred resource has no active Source binding")
-    local := tir_symbol_local(captured.name, span, resource)
-    // Rust emit_deferred_close lowers the close at the exit edge and discards
-    // its value: the callee's own checked return (a defaulted `Unit Err!`
-    // Close.close) is not the Unit statement's type, so a Unit close runs as
-    // a statement of a Unit thunk instead of being its returned value.
-    // copy: the defer thunk owns its close type, while `close` is the caller's checked defer
-    // expression (a read parameter), which stays in the TIR.
-    close_type :: close.ty.copy()
-    unit_close :: close_type == Type.Named{name: "Unit"}
-    // copy: the defer thunk's body owns its close expression, while `close` is the caller's checked
-    // defer expression (a read parameter), which stays in the TIR.
-    executable :: if unit_close -> TLambdaBody.Block{body: [TStmt]{TStmt.ExprStmt{value: close.copy(), span: span}}} else -> TLambdaBody.Expr{value: close.copy()}
-    lambda := TLambda{
-        executable: executable,
-        source_span: span,
-        frame_schedule: None,
-        frame_schedule_derivation: None,
-        capture_facts: TCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}},
-        failure_carrier: jet_codegen_failure_carrier_for_type(close_type),
-        effects: builder.function.effects,
-        host_param_conventions: None,
-        source_params: [String]{},
-        source_param_symbols: [SymbolID]{},
-        jit_name: "jet_defer_{scope_id}",
-        param_types: [Type]{},
-        ret: Val(close_type),
-        is_move: false,
-        boxed: false,
-        rc: false,
-        arc: false,
-        captures: [TCapture]{TCapture{source: captured.name, local: local, ty: captured.ty}},
-        materialized_captures: [String]{},
-        frozen_captures: [String]{},
-        uses_stack_sentry: false,
-    }
-    jet_codegen_lower_lambda(&builder, program, lambda, false, "defer-close-{scope_id}").value
-}
-
 fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, program: JetCodegenProgram, group: TLocal, limit: TExpr?, body: [TStmt], span: Span) {
     scope := jet_codegen_enter_scope(&builder, program, MIRScopeKind.TaskGroup, span, Val(group.name))
     group_ty := Type.Named{name: "Group"}
@@ -369,8 +317,7 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, program: JetCodegen
     close_arg := TCallArg{value: resource, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "jet_std::JetTaskGroup", generics: [TPreludeArg]{}}, owner_type: None, method: close_method, type_args: [Type]{}, args: [TCallArg]{close_arg}}, span: span, integer_bounds: None, cost: None}
     group_symbol :: group.symbol_id ?? panic("checked task-group local has no symbol identity")
-    thunk := jet_codegen_lower_defer_thunk(&builder, program, close, group_symbol, scope.value, span)
-    jet_codegen_register_deferred_call(&builder, program, thunk, close.ty)
+    jet_codegen_register_defer_close(&builder, program, close, group_symbol, span)
 
     jet_codegen_lower_block(&builder, program, body)
     jet_codegen_leave_scope(&builder, program, scope)
@@ -2464,10 +2411,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
         .Shield(body, span) -> jet_codegen_lower_scoped(&builder, program, MIRScopeKind.Shield, None, body, span)
         .ScopeMember(kind, body, span) -> jet_codegen_lower_scope_member(&builder, program, kind, body, span)
         .TaskGroup(group, limit, body, span) -> jet_codegen_lower_task_group(&builder, program, group, limit, body, span)
-        .DeferClose(close, resource, scope_id, span) -> {
-            thunk := jet_codegen_lower_defer_thunk(&builder, program, close, resource, scope_id, span)
-            jet_codegen_register_deferred_call(&builder, program, thunk, close.ty)
-        }
+        .DeferClose(close, resource, _, span) -> jet_codegen_register_defer_close(&builder, program, close, resource, span)
         .RefutableBind(pattern, init, fallback, span) -> jet_codegen_lower_refutable_bind(&builder, program, pattern, init, fallback, span)
         .Match(subject, arms, exhaustive, span) -> jet_codegen_lower_pattern_match(&builder, program, subject, arms, None, exhaustive, "checked exhaustive match", span)
         .RangeSwitch(subject, arms, else_body, span) -> jet_codegen_lower_range_switch(&builder, program, subject, arms, else_body, span)

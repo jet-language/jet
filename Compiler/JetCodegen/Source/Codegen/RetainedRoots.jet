@@ -1,13 +1,7 @@
 // Native root storage is a capture-address view of the ordinary owned place.
 // Ownership/action grants and the existing live flags travel with that view;
 // the borrowed address itself never grants a source Move.
-use jet_foundation.[MIRAccess, MIRCallArg, MIRCaptureParam, MIRInstruction, MIRPlaceBase, MIRPlaceID, MIRRetainedRootCellAction, MIRRetainedRootCellBinding, MIRRetainedRootCellGrant, MIRRetainedRootLivePlace, MIRTerminator, MIRType, MIRValueID, MIROperation, Span, SymbolID, TLocal, Type, mir_ownership_from_access, tir_symbol_local]
-
-struct JetCodegenRetainedDeferred {
-    thunk: MIRValueID
-    place: MIRPlaceID
-    ty: Type
-}
+use jet_foundation.[MIRAccess, MIRCaptureParam, MIRInstruction, MIRPlaceBase, MIRPlaceID, MIRRetainedRootCellAction, MIRRetainedRootCellBinding, MIRRetainedRootCellGrant, MIRRetainedRootLivePlace, MIRType, MIRValueID, MIROperation, Span, TLocal, Type, mir_ownership_from_access]
 
 struct JetCodegenRetainedCapture {
     value: MIRValueID
@@ -39,11 +33,6 @@ fn jet_codegen_record_retained_instruction(builder: &JetCodegenBuilder, instruct
                 site = Val(JetCodegenRetainedGrantContext{place: place, action: if access == MIRAccess.Write -> MIRRetainedRootCellAction.Write else -> MIRRetainedRootCellAction.Read})
             }
         }
-        .IndirectCall(_, _, _) -> {
-            // The deferred producer supplies Cleanup only after the owned
-            // root thunk has moved to an ordinary scoped temporary.
-            if annotation == .Val(context) && context.action == MIRRetainedRootCellAction.Cleanup -> site = Val(context)
-        }
         else -> {}
     }
     checked := site ?? return
@@ -55,7 +44,7 @@ fn jet_codegen_record_retained_instruction(builder: &JetCodegenBuilder, instruct
                 if checked.action != MIRRetainedRootCellAction.Write && checked.action != MIRRetainedRootCellAction.Initialize -> panic("retained initializer annotation is not a complete value write")
             }
             .Cleanup -> {
-                if checked.action != MIRRetainedRootCellAction.Move && checked.action != MIRRetainedRootCellAction.Cleanup -> panic("retained cleanup annotation is not its owned move or deferred invocation")
+                if checked.action != MIRRetainedRootCellAction.Move -> panic("retained cleanup annotation is not its owned move")
             }
             else -> panic("retained producer context grants only initialization or cleanup")
         }
@@ -119,56 +108,4 @@ fn jet_codegen_attach_retained_live(builder: &JetCodegenBuilder, program: JetCod
     builder.places[row].base = MIRPlaceBase.Capture{value: capture.value}
     value_type :: jet_codegen_lower_type_for_function(record.ty, builder, program)
     &builder.retained_cells[index].live_places.push(MIRRetainedRootLivePlace{place: record.place, live: record.live, value_type: value_type, drop_kind: record.kind})
-}
-
-fn jet_codegen_retain_deferred_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, thunk: MIRValueID, result_type: Type) Never! {
-    ty :: Type.Fn{params: [Type]{}, ret: Val(result_type), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    declaration :: SymbolID{key: "{builder.function.key}|retained-defer|{thunk.value}"}
-    local :: tir_symbol_local("$root-defer.{thunk.value}", builder.current_span, declaration)
-    place :: jet_codegen_bind_retained_root(&builder, program, local, ty, false)
-    span := builder.current_span
-    jet_codegen_initialize_retained_place(&builder, program, span, place, thunk)
-    &builder.retained_deferred.push(JetCodegenRetainedDeferred{thunk: thunk, place: place, ty: ty})
-}
-
-fn jet_codegen_emit_retained_deferred(builder: &JetCodegenBuilder, program: JetCodegenProgram, thunk: MIRValueID) -> Bool Never! {
-    loop deferred_view in builder.retained_deferred {
-        if deferred_view.thunk != thunk -> next
-        // copy: the lowering helpers below write the builder (`&builder`), and `deferred_view` is a
-        // row of builder.retained_deferred, so its metadata is detached before those writes.
-        deferred := deferred_view.copy()
-        record := JetCodegenDropLive?{None}
-        loop live in builder.drop_live_places {
-            if live.place == deferred.place -> record = Val(live)
-        }
-        owner :: record ?? panic("retained defer has no canonical live flag")
-        span := builder.current_span
-        live :: jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.ReadPlace{place: owner.live})
-        run :: jet_codegen_new_block(&builder, program, span, "retained-defer-live")
-        next_block :: jet_codegen_new_block(&builder, program, span, "retained-defer-next")
-        jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: live, then_target: run, else_target: next_block})
-        jet_codegen_switch_block(&builder, program, run)
-        // IndirectCall borrows its native closure box; it does not release it.
-        // Claim the root owner BEFORE the callback, using MovePlace's existing
-        // flag clear. Ordinary scoped ownership covers callback Stop as well
-        // as normal return, without re-registering a root cleanup.
-        jet_codegen_enter_lexical(&builder, program)
-        previous := builder.retained_grant_context
-        builder.retained_grant_context = Val(JetCodegenRetainedGrantContext{place: deferred.place, action: MIRRetainedRootCellAction.Cleanup})
-        moved :: jet_codegen_emit_value(&builder, program, span, deferred.ty, MIROperation.MovePlace{place: deferred.place})
-        declaration :: SymbolID{key: "{builder.function.key}|retained-defer-invoke|{deferred.thunk.value}"}
-        local :: tir_symbol_local("$root-defer-invoke.{deferred.thunk.value}", span, declaration)
-        temporary :: jet_codegen_bind_local_with_base(&builder, program, local, deferred.ty, false, None, None, None, None, false)
-        _ :: jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: temporary, value: moved})
-        ty :: jet_codegen_lower_type_for_function(deferred.ty, builder, program)
-        value :: jet_codegen_emit_mir_type(&builder, program, span, ty, mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: temporary})
-        builder.retained_grant_context = Val(JetCodegenRetainedGrantContext{place: deferred.place, action: MIRRetainedRootCellAction.Cleanup})
-        _ :: jet_codegen_emit(&builder, program, span, None, MIROperation.IndirectCall{callee: value, args: [MIRCallArg]{}, type_args: [MIRType]{}})
-        builder.retained_grant_context = previous
-        jet_codegen_leave_lexical(&builder, program)
-        if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: next_block})
-        jet_codegen_switch_block(&builder, program, next_block)
-        return true
-    }
-    false
 }
