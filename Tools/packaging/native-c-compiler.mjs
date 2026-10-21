@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // Native Jet consumers link against musl: glibc's fortified entry points are
 // not part of that platform ABI. Scope the policy to this C compiler child.
-// The policy rows live once in Compiler/JetCli/Assets/native-c-policy.tsv;
-// the Jet CLI embeds the same rows (Compiler/Bootstrap/generate-native-c-policy.mjs).
+// The policy rows live once in Compiler/JetCli/Source/Cli/native-c-policy.tsv;
+// the Jet CLI embeds the same file while the compiler builds (NativeCPolicy.jet).
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const nativeCCompiler = fileURLToPath(import.meta.url);
-export const nativeCPolicyPath = resolve(dirname(nativeCCompiler), '../../Compiler/JetCli/Assets/native-c-policy.tsv');
+export const nativeCPolicyPath = resolve(dirname(nativeCCompiler), '../../Compiler/JetCli/Source/Cli/native-c-policy.tsv');
 
 export function parseNativeCPolicy(text) {
   const flags = [], hardeningRemoved = [];

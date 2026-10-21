@@ -1,8 +1,8 @@
 #!/usr/bin/env jet
 // Native Jet consumers link against musl: glibc's fortified entry points are
 // not part of that platform ABI. Scope the policy to this C compiler child.
-// The policy rows live once in Compiler/JetCli/Assets/native-c-policy.tsv;
-// the Jet CLI embeds the same rows (Compiler/Bootstrap/generate-native-c-policy.mjs).
+// The policy rows live once in Compiler/JetCli/Source/Cli/native-c-policy.tsv;
+// the Jet CLI embeds the same file while the compiler builds (NativeCPolicy.jet).
 // Runs `$CC` (default `cc`) with the caller's arguments followed by the policy
 // flags, the child's NIX_HARDENING_ENABLE without the policy's removed
 // features, and every stream inherited; exits as the compiler exits.
@@ -15,7 +15,7 @@ use core.regex as re
 use core.sys as sys
 use core.term as term
 
-POLICY :: "Compiler/JetCli/Assets/native-c-policy.tsv"
+POLICY :: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
 SELF :: "Tools/packaging/NativeCCompiler.jet"
 
 struct Rules {
@@ -129,12 +129,10 @@ fn test_command(argv: [String]) -> String {
     assert_eq(child_hardening("bindnow fortify format fortify3 stackprotector", rules.hardening_removed), "bindnow format stackprotector")
 }
 
-#Test("the Jet CLI embeds the same single native C policy rows") {
-    root :: test_root()
-    _ :: test_command(["node", "{root}/Compiler/Bootstrap/generate-native-c-policy.mjs", "--check"])
-    embedded :: files.read("{root}/Compiler/JetCli/Source/Cli/NativeCPolicy.jet") ?? panic("cannot read NativeCPolicy.jet")
-    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS :: prep {{ [String]{{\"-U_FORTIFY_SOURCE\", \"-D_FORTIFY_SOURCE=0\"}} }}"))
-    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep {{ [String]{{\"fortify\", \"fortify3\"}} }}"))
+#Test("the Jet CLI embeds the same single native C policy file") {
+    embedded :: files.read("{test_root()}/Compiler/JetCli/Source/Cli/NativeCPolicy.jet") ?? panic("cannot read NativeCPolicy.jet")
+    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS :: prep {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"flag\") }}"))
+    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"hardening-remove\") }}"))
 }
 
 #Test("native fixture and packaging drivers have no independent C compiler policy") {

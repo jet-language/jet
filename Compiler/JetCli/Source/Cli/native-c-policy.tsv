@@ -1,0 +1,14 @@
+# The one native C compiler policy. Native Jet programs link musl: glibc's
+# fortified `*_chk` / `__*_2` entry points are not part of that platform ABI.
+# Consumers: the Jet CLI (NativeCPolicy.jet beside this file embeds it while
+# the compiler builds), Tools/packaging/native-c-compiler.mjs and
+# Tools/packaging/NativeCCompiler.jet. Edit only this file.
+# kind	value
+# flag: appended after the caller's C compiler arguments.
+# hardening-remove: a Nix cc-wrapper feature removed from the child's
+#   NIX_HARDENING_ENABLE (the wrapper adds fortify after caller flags); every
+#   other feature and the parent environment stay unchanged.
+flag	-U_FORTIFY_SOURCE
+flag	-D_FORTIFY_SOURCE=0
+hardening-remove	fortify
+hardening-remove	fortify3

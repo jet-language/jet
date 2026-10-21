@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { nativeCCompiler, nativeCEnvironment, nativeCFlags } from './native-c-compiler.mjs';
+import { nativeCCompiler, nativeCEnvironment, nativeCFlags, nativeCPolicyPath } from './native-c-compiler.mjs';
 import { runtimeExportSignatures } from '../agent/runtime-route-abi.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -28,12 +28,11 @@ test('native C policy keeps other hardening and never changes the parent environ
   assert.deepEqual(nativeCEnvironment({ KEEP: 'unchanged' }), { KEEP: 'unchanged' });
 });
 
-test('the Jet CLI embeds the same single native C policy rows', () => {
-  const result = spawnSync(process.execPath, [join(root, 'Compiler/Bootstrap/generate-native-c-policy.mjs'), '--check'], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
+test('the Jet CLI embeds the same single native C policy file', () => {
   const embedded = readFileSync(join(root, 'Compiler/JetCli/Source/Cli/NativeCPolicy.jet'), 'utf8');
-  assert.match(embedded, /JET_CLI_NATIVE_C_FLAGS :: prep \{ \[String\]\{"-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"\} \}/u);
-  assert.match(embedded, /JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep \{ \[String\]\{"fortify", "fortify3"\} \}/u);
+  assert.equal(nativeCPolicyPath, join(root, 'Compiler/JetCli/Source/Cli/native-c-policy.tsv'));
+  assert.match(embedded, /JET_CLI_NATIVE_C_FLAGS :: prep \{ jet_cli_native_c_policy_values\(embed_file\("native-c-policy\.tsv"\), "flag"\) \}/u);
+  assert.match(embedded, /JET_CLI_NATIVE_C_HARDENING_REMOVED :: prep \{ jet_cli_native_c_policy_values\(embed_file\("native-c-policy\.tsv"\), "hardening-remove"\) \}/u);
 });
 
 test('native fixture and packaging drivers have no independent C compiler policy', () => {
