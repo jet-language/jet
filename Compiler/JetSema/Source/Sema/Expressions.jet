@@ -3287,12 +3287,13 @@ fn sema_expr_expiring_secret_inner(ty: Type, environment: SemaScopeEnvironment, 
 }
 
 // `ExpiringSecret.with` lends its callback a read loan of the secret. The
-// callback is first checked against `fn(#loan T)` with no return type, so a
-// move, store, return or replacement of the loan reports against the loan
-// (E0201); a result that still holds the loan, or a function that could
-// capture it, escapes the callback (E0201 at `.with`). The ordinary source
-// call then runs with that result as `R` (its `Expired` failure included);
-// its reports that repeat a loan-check report are the same fault, kept once.
+// callback is first judged as an open callback of `fn(#loan T)` (no return
+// row, never stored): a move, store, return or replacement of the loan reports
+// against the loan (E0201), and a result that still holds the loan, or a
+// function that could capture it, escapes the callback (E0201 at `.with`).
+// A callback judged clean runs the ordinary source call with its result as
+// `R`; otherwise the call stands as the `R Expired!` it would return (`Unit`
+// for an escaped result), so its own failure route is still judged.
 fn sema_expr_check_expiring_secret_with(receiver: Expr, receiver_value: TExpr, secret_type: Type, routed_method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if args.len() != 1 {
         &diagnostics.push(sema_error("E0104", method_span, "`with` expects 1 argument, got {args.len()}", "`.with` takes exactly one closure", "call `.with(value -> ...)` with a closure"))
@@ -3309,34 +3310,32 @@ fn sema_expr_check_expiring_secret_with(receiver: Expr, receiver_value: TExpr, s
         return None
     }
     loan_expected :: Type.Fn{params: [Type]{sema_expiring_secret_loan_type(secret_type)}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    loan_start :: diagnostics.len()
-    callback :: sema_probe_expression(args[0].expr, Val(loan_expected), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    loan_reports :: loop index in loan_start..<diagnostics.len() -> diagnostics[index]
+    loan_reports := [Diagnostic]{}
+    scope_mark :: sema_scope_mark(&scopes)
+    context_mark :: sema_check_context_mark(&context)
+    fork :: sema_ownership_fork(&state)
+    callback :: sema_expression_lambda_collection_callback(args[0].expr, Val(loan_expected), environment, program, &scopes, &state, &tail_store, &context, &loan_reports)
+    sema_ownership_fork_rollback(&state, fork)
+    sema_ownership_fork_close(&state, fork)
+    sema_check_context_rollback(&context, context_mark)
+    sema_scope_rollback(&scopes, scope_mark)
     result := Type.Named{name: "Unit"}
     if callback == .Val(checked_callback) -> result = sema_call_signature_return(checked_callback.ty) ?? Type.Named{name: "Unit"}
     returns_function :: if result == {
         .Fn(_, _, _, _, _, _) -> true
         else -> false
     }
-    if returns_function || sema_contains_expiring_secret_loan(result) {
+    escaped :: returns_function || sema_contains_expiring_secret_loan(result)
+    if !escaped && !sema_has_error_since(loan_reports, 0) {
+        result_args :: if type_args.len() > 0 -> type_args else -> [Type]{result}
+        return sema_expr_check_declared_method(receiver, receiver_value, "with", routed_method, method_span, owner_type_args, result_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    loop report in loan_reports -> &diagnostics.push(report)
+    if escaped {
         &diagnostics.push(sema_error("E0201", method_span, "an ExpiringSecret loan cannot escape its callback", "the callback receives a temporary read-only loan; returning a secret would create another owned credential outside the expiry boundary", "return a non-secret result such as a signature, public key, status, or response"))
+        result = Type.Named{name: "Unit"}
     }
-    result_args :: if type_args.len() > 0 -> type_args else -> [Type]{sema_strip_expiring_secret_loan(result)}
-    ordinary_reports := [Diagnostic]{}
-    value :: sema_expr_check_declared_method(receiver, receiver_value, "with", routed_method, method_span, owner_type_args, result_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &ordinary_reports)
-    loop report in ordinary_reports {
-        if !sema_expr_report_repeats(loan_reports, report) -> &diagnostics.push(report)
-    }
-    value
-}
-
-// One fault at one site is reported once: the loan check's report stands for
-// the ordinary call's report of the same code at the same span.
-fn sema_expr_report_repeats(reports: [Diagnostic], report: Diagnostic) -> Bool Never! {
-    loop earlier in reports {
-        if earlier.code == report.code && earlier.span == report.span -> return true
-    }
-    false
+    Val(sema_tir_node(Type.Result{ok: result, err: Type.Named{name: "Expired"}}, TExprKind.Unit, method_span))
 }
 
 fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

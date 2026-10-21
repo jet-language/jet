@@ -4953,6 +4953,23 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     Val(checked)
 }
 
+// `return value` in a callback expected with no return row (the Rust
+// reference's callback `ret`): until a propagated fallible call gives the
+// callback that call's carrier, the value has no slot (E0113, naming the
+// enclosing function); after it, the value must fit that carrier. Either way
+// the value stays the callback's result, so its caller still judges it.
+fn sema_stmt_check_open_callback_return(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    value_span :: expr_span(value)
+    if context.callback_return_row == .Val(row) {
+        fits :: if row == .Result(success, _) -> sema_type_assignable(success, checked.ty) else -> sema_type_assignable(row, checked.ty)
+        if !fits -> &diagnostics.push(sema_return_value_mismatch(context.function_name, row, checked.ty, value_span))
+        return Val(checked)
+    }
+    &diagnostics.push(sema_error("E0113", value_span, "`{context.function_name}` doesn't return a value", "a function hands back a value only when it declares a return type", "remove the value (a bare `return`), or write `-> {type_name(checked.ty)}` after the parameter list"))
+    Val(checked)
+}
+
 // The declared return type is a `T !E` carrier.
 fn sema_stmt_return_type_is_result(return_type: Type?) -> Bool Never! {
     declared :: return_type ?? return false
@@ -5381,7 +5398,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     else -> {
                         // `value` is narrowed to the returned expression here (the
                         // None arm above); it is read in place through a read parameter.
-                        checked :: sema_stmt_check_returned_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                        checked :: if return_type == None && context.callback_return_open -> sema_stmt_check_open_callback_return(value, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_stmt_check_returned_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         if {
                             checked == None -> {
                                 complete = false
@@ -5991,7 +6008,16 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
             else -> {
                 discard_fact_start :: context.call_facts.len()
                 discard_diagnostic_start :: diagnostics.len()
-                value :: sema_check_expression(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                // A direct call statement in a callback with no return row
+                // keeps the Result its callee declares (the Rust reference's
+                // open-callback statement root): the statement reports it
+                // unchecked (E0402) and the callback's return row becomes
+                // that carrier.
+                raw_call :: context.failure_inference && context.callback_return_open && expr == .Call(_) && sema_failure_source_declares_failure(Val(expr), environment, program, scopes)
+                value :: if raw_call -> sema_check_expression_carrier(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if raw_call && context.callback_return_row == None && value == .Val(raw) {
+                    if sema_stmt_type_is_fallible(raw.ty) && sema_expr_unwrap_tag(raw.ty) == .Result(_, _) -> context.callback_return_row = Val(sema_expr_unwrap_tag(raw.ty))
+                }
                 if {
                     value != None -> {
                         checked :: value
@@ -6002,7 +6028,7 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
                             sema_stmt_type_is_fallible(checked.ty) -> {
                                 // A failure that survives to statement
                                 // position (a non-propagating carrier) must be handled.
-                                &diagnostics.push(sema_error("E0402", expr_span(expr), "this call can fail and nothing checks it", "a fallible result can't be ignored — handle it or say failure is impossible", "use `?`, `??`, `?? panic(...)`, or `.drop(\"reason\")` to intentionally discard"))
+                                &diagnostics.push(sema_error("E0402", expr_span(expr), "this call can fail and nothing checks it", "a fallible result can't be ignored — handle it or say failure is impossible", "use `?`, `??`, `panic ...`, or `.drop(\"reason\")` to intentionally discard"))
                                 complete = false
                             }
                             else -> {

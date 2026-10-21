@@ -2532,13 +2532,11 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     if places.len() == 0 -> return true
     binding :: sema_ownership_binding_for_expr(&state, expr, scopes)
     // An ExpiringSecret loan is lent for the callback only: an exact move of
-    // it is refused (an unmarked read keeps lending it).
-    if !unmarked && binding != None {
-        loan :: binding
-        if sema_contains_expiring_secret_loan(loan.symbol.ty ?? Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(loan.symbol.name, "be moved", expr_span(expr)))
-            return false
-        }
+    // it is refused and nothing moves (an unmarked read keeps lending it);
+    // the call that asked for the move still checks.
+    if !unmarked && binding == .Val(loan) && sema_contains_expiring_secret_loan(loan.symbol.ty ?? Type.Named{name: "Unit"}) {
+        &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(loan.symbol.name, "be moved", expr_span(expr)))
+        return true
     }
     if binding != None {
         info :: binding
@@ -2745,6 +2743,13 @@ fn sema_ownership_argument_is_secret(state: &SemaOwnershipState, expr: Expr, sco
     false
 }
 
+// The argument names a binding that holds an ExpiringSecret loan.
+fn sema_ownership_binding_is_expiring_secret_loan(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    binding :: sema_ownership_binding_for_expr(&state, expr, scopes)
+    if binding == .Val(info) -> return sema_contains_expiring_secret_loan(info.symbol.ty ?? Type.Named{name: "Unit"})
+    false
+}
+
 // Rust `reject_expiring_secret_loan_change`: the `.with` callback's loan is
 // read-only; moving, changing or dropping it could let the credential escape.
 fn sema_ownership_diag_expiring_secret_loan_change(name: String, action: String, span: Span) -> Diagnostic {
@@ -2763,6 +2768,8 @@ fn sema_ownership_diag_move_from_borrowed(name: String, mark_span: Span) -> Diag
 fn sema_ownership_reject_read_param_move(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     root :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return false
     if root.symbol.kind != SymbolKind.Parameter || root.access != AccessConvention.Read -> return false
+    // An ExpiringSecret loan's own move rule reports the mark.
+    if sema_contains_expiring_secret_loan(root.symbol.ty ?? Type.Named{name: "Unit"}) -> return false
     start :: expr_span(expr).start
     &diagnostics.push(sema_ownership_diag_move_from_borrowed(root.symbol.name, Span{start: start - 1, end: start}))
     true

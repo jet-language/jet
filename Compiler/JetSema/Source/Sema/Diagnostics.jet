@@ -424,12 +424,6 @@ fn sema_secret_bearing_crypto_leaf(leaf: String) -> Bool Never! {
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
 }
 
-// A read argument that is exactly the loan of `want` stands in for `want`.
-fn sema_expiring_secret_loan_matches(want: Type, got: Type) -> Bool Never! {
-    if got == .Tagged(marker, inner) -> return marker == (TagMarker.Internal{internal_tag: InternalTag.ExpiringSecretLoan}) && inner == want
-    false
-}
-
 // Whether a value of `ty` carries an ExpiringSecret loan anywhere a store,
 // return or escape could keep it.
 fn sema_contains_expiring_secret_loan(ty: Type) -> Bool Never! {
@@ -458,20 +452,5 @@ fn sema_contains_expiring_secret_loan(ty: Type) -> Bool Never! {
             false
         }
         else -> false
-    }
-}
-
-// `ty` with every ExpiringSecret loan read as the secret it lends: the type
-// the callback's result has once the loan is the source call's own `T`.
-fn sema_strip_expiring_secret_loan(ty: Type) -> Type Never! {
-    if ty == {
-        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
-        .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.ExpiringSecretLoan}) -> sema_strip_expiring_secret_loan(inner) else -> Type.Tagged{marker: marker.copy(), inner: sema_strip_expiring_secret_loan(inner)}
-        .Option(inner) -> Type.Option{inner: sema_strip_expiring_secret_loan(inner)}
-        .List(inner) -> Type.List{element: sema_strip_expiring_secret_loan(inner)}
-        .Shared(inner) -> Type.Shared{inner: sema_strip_expiring_secret_loan(inner)}
-        .Result(ok, err) -> Type.Result{ok: sema_strip_expiring_secret_loan(ok), err: sema_strip_expiring_secret_loan(err)}
-        .Apply(name, args) -> Type.Apply{name: name, args: loop arg in args -> sema_strip_expiring_secret_loan(arg)}
-        else -> ty
     }
 }

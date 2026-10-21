@@ -551,6 +551,12 @@ struct SemaCheckContext {
     // its first propagated call, as the Rust reference's callback inference.
     failure_inference: Bool
     inferred_failure_carrier: TFailureCarrier?
+    // An expected callback with no return row (`fn(T)`, nothing after it):
+    // its `return value` has no slot until a propagated fallible call gives it
+    // that call's carrier as its row (`callback_return_row`), as the Rust
+    // reference's callback `ret`.
+    callback_return_open: Bool{false}
+    callback_return_row: Type?{None}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
     // The enclosing named callable, for the return verdicts.
@@ -963,6 +969,8 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         failure_success_view: source.failure_success_view,
         failure_inference: source.failure_inference,
         inferred_failure_carrier: source.inferred_failure_carrier,
+        callback_return_open: source.callback_return_open,
+        callback_return_row: source.callback_return_row,
         failure_contract_source: source.failure_contract_source,
         function_name: source.function_name,
         fallback_err_denial: source.fallback_err_denial,
@@ -1090,6 +1098,8 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             failure_success_view: context.failure_success_view,
             failure_inference: context.failure_inference,
             inferred_failure_carrier: context.inferred_failure_carrier,
+            callback_return_open: context.callback_return_open,
+            callback_return_row: context.callback_return_row,
             failure_contract_source: context.failure_contract_source,
             function_name: context.function_name,
             fallback_err_denial: context.fallback_err_denial,
@@ -1176,6 +1186,8 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.failure_success_view = saved.failure_success_view
     context.failure_inference = saved.failure_inference
     context.inferred_failure_carrier = saved.inferred_failure_carrier
+    context.callback_return_open = saved.callback_return_open
+    context.callback_return_row = saved.callback_return_row
     context.failure_contract_source = saved.failure_contract_source
     context.function_name = saved.function_name
     context.fallback_err_denial = saved.fallback_err_denial

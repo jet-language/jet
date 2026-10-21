@@ -1804,6 +1804,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 lambda_scopes.failure_carrier = outer_failure_carrier
                 lambda_context.failure_inference = false
                 lambda_context.inferred_failure_carrier = None
+                lambda_context.callback_return_open = false
+                lambda_context.callback_return_row = None
             } else {
                 // A callback expected to return a Result
                 // propagates into that carrier. An unannotated callback whose
@@ -1819,6 +1821,11 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))
                 lambda_context.failure_inference = infers
                 lambda_context.inferred_failure_carrier = None
+                // An expected callable with no return row leaves `return
+                // value` without a slot (E0113) until a propagated fallible
+                // call gives the callback that call's carrier.
+                lambda_context.callback_return_open = infers && expected_params != None && expected_ret == None
+                lambda_context.callback_return_row = None
             }
         }
     }
@@ -2216,6 +2223,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         // An inline loop shares its owner's failure route, including an
         // adopted open-callback carrier.
         context.inferred_failure_carrier = lambda_context.inferred_failure_carrier
+        context.callback_return_row = lambda_context.callback_return_row
     }
     sema_expression_lambda_merge_context_facts(&lambda_context, &context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
     // #3708: the callback's propagated failures stay rows of the enclosing

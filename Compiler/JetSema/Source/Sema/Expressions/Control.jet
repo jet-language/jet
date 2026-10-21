@@ -578,6 +578,38 @@ fn sema_failure_function_inferable(func: Func) -> Bool {
     func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"
 }
 
+// Whether the callee of `expr` declares a failure route on its declared
+// return (the Rust reference's `resolved_ret`): a direct call of a function
+// with no written return (the default `Err` route) or a written fallible one.
+// A written plain return (`-> Int`) declares none even though the call carries
+// the default route; any other fallible source declares its own.
+fn sema_failure_source_declares_failure(expr: Expr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    source :: expr ?? return true
+    if source == {
+        .Paren(inner, _) -> return sema_failure_source_declares_failure(Val(inner), environment, program, scopes)
+        .Call(call) -> {
+            index :: sema_scope_resolve_index(scopes, call.name) ?? return true
+            symbol :: scopes.bindings[index].symbol
+            if symbol.kind != SymbolKind.Function -> return true
+            site :: sema_scope_declaration_site(environment, program, symbol.id) ?? return true
+            if site == .Function(module_index, row) {
+                if program.registration_graph == .Val(graph) -> return sema_failure_written_return_fails(graph.modules[module_index].functions[row].declaration.return_type)
+                return true
+            }
+            item :: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return true
+            if item == .Func(func) -> return sema_failure_written_return_fails(func.return_type)
+            return true
+        }
+        else -> return true
+    }
+}
+
+fn sema_failure_written_return_fails(return_type: Type?) -> Bool Never! {
+    written :: return_type ?? return true
+    if sema_expr_unwrap_tag(written) == .Result(_, error) -> return sema_expr_unwrap_tag(error) != (Type.Named{name: "Never"})
+    false
+}
+
 // #3708: one propagated failure of this body: the callee's key when the
 // propagated value is a call of a declared function, else "" (a failure
 // source the solve can never discharge).
@@ -709,6 +741,9 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
                 &diagnostics.push(sema_failure_no_carrier(error, span, implicit))
                 return sema_failure_defer_obligation(callee, &diagnostics)
             }
+            // A callback with no return row takes the carrier of its first
+            // propagated call whose callee declares a failure route.
+            if context.callback_return_open && context.callback_return_row == None && scopes.failure_carrier == None && sema_failure_source_declares_failure(source_expr, environment, program, scopes) -> context.callback_return_row = Val(sema_expr_unwrap_tag(inner.ty))
             normalized_target :: sema_expr_unwrap_tag(target)
             if normalized_target == (Type.Named{name: "Err"}) -> sema_failure_union_record_propagation(callee, error, &context)
             // `Never!` proves no failure route remains, even when a

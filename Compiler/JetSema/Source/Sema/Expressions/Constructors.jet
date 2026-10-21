@@ -727,6 +727,9 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             supplied := [Bool]{}
             loop _ in fields -> &supplied.push(false)
             named_values := [TNamedEnumArg]{}
+            // A field whose value does not fit its slot is reported and the
+            // remaining fields are still checked, so every bad field reports.
+            failed := false
             loop arg in args {
                 label := ""
                 payload_expr := Expr.Unit{span: span}
@@ -759,15 +762,19 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, fields[found].ty, generic_names), generic_names, generic_args)
                 sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
                 diagnostic_start :: diagnostics.len()
-                checked :: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+                checked_value :: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if checked_value == None {
                     sema_expression_enum_payload_replace_mismatch(payload_owner, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                    return None
+                    failed = true
+                    next
                 }
+                checked :: checked_value
                 if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
                 compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
                 if !compatible {
                     &diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
-                    return None
+                    failed = true
+                    next
                 }
                 if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
                 &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
@@ -778,6 +785,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                     return None
                 }
             }
+            if failed -> return None
             payload = TEnumPayload.Named{fields: named_values}
         }
     }
