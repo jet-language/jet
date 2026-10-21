@@ -3,22 +3,61 @@
 // inputs and assertions are preserved from the Rust source tags below.
 // Rust-only scoped-driver/unwind, mutation injection and cross-tier orchestration
 // in tests/selfhost_terminators.rs:197-386 stay outside this source-lexer suite.
+use jet_foundation.[Name, Span, name_empty, name_text]
+use jet_lexer.[
+    Lexed,
+    STRING_PART_BYTE,
+    STRING_PART_INTERPOLATION,
+    STRING_PART_TEXT,
+    StringPart,
+    TOKEN_AT,
+    TOKEN_CHAR,
+    TOKEN_COLON,
+    TOKEN_COLON_COLON,
+    TOKEN_COLON_EQ,
+    TOKEN_COMPARE,
+    TOKEN_DOLLAR,
+    TOKEN_DOT,
+    TOKEN_EOF,
+    TOKEN_FENCE_CLOSE,
+    TOKEN_FENCE_OPEN,
+    TOKEN_GT,
+    TOKEN_IDENT,
+    TOKEN_LBRACKET,
+    TOKEN_LE,
+    TOKEN_LT,
+    TOKEN_RBRACKET,
+    TOKEN_STRING,
+    Token,
+    TokenLiteral,
+    lex,
+    lex_payload,
+]
 
 fn lexer_test_raw(source: String) -> Lexed { lex_payload(source.bytes(), false) }
 
 // Rust inputs contain byte 13; Jet deliberately has no \r string escape.
 fn lexer_test_cr() -> String Never! { String.from_bytes([U8]{13}) ?? panic("ASCII carriage return") }
 
-fn lexer_test_strings(tokens: [Token]) -> [[StringPart]] Never! {
+// The spelling of a name of `lexed`'s table (token text, decoded value, part text).
+fn lexer_test_name(lexed: Lexed, name: Name) -> String Never! { name_text(lexed.tables.names, name) }
+
+// The literal facts of `token`; a token without a literal row has none.
+fn lexer_test_literal(lexed: Lexed, token: Token) -> TokenLiteral Never! {
+    if token.literal < 0 -> return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}}
+    lexed.tables.literals[token.literal].copy()
+}
+
+fn lexer_test_strings(lexed: Lexed) -> [[StringPart]] Never! {
     strings := [[StringPart]]{}
-    loop token in tokens {
-        if token.kind == TOKEN_STRING -> &strings.push(token.payload.string_parts.copy())
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_STRING -> &strings.push(lexer_test_literal(lexed, token).string_parts)
     }
     strings
 }
 
-fn lexer_test_text(parts: [StringPart], expected: String) -> Bool Never! {
-    parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text == expected
+fn lexer_test_text(lexed: Lexed, parts: [StringPart], expected: String) -> Bool Never! {
+    parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && lexer_test_name(lexed, parts[0].text) == expected
 }
 
 fn lexer_test_hole(parts: [StringPart]) -> Bool Never! {
@@ -31,11 +70,11 @@ fn lexer_test_hole(parts: [StringPart]) -> Bool Never! {
 fn lexer_test_first_string(source: String) -> String Never! {
     lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    strings :: lexer_test_strings(lexed.tokens)
+    strings :: lexer_test_strings(lexed)
     assert(strings.len() > 0)
     parts :: strings[0]
     assert(parts.len() == 1 && parts[0].kind == STRING_PART_TEXT)
-    parts[0].text.copy()
+    lexer_test_name(lexed, parts[0].text)
 }
 
 // Rust: crates/jet-lexer/src/lib.rs:15
@@ -70,10 +109,10 @@ fn lexer_test_first_string(source: String) -> String Never! {
 #Test("typed_head_holes_still_split_interpolation") {
     lexed :: lex(`URL.{"https://x/{name}"}`.bytes())
     assert(lexed.diagnostics.is_empty())
-    strings :: lexer_test_strings(lexed.tokens)
+    strings :: lexer_test_strings(lexed)
     assert_eq(strings.len(), 1)
     parts :: strings[0]
-    assert(parts.len() == 2 && parts[0].kind == STRING_PART_TEXT && parts[1].kind == STRING_PART_INTERPOLATION && parts[0].text == "https://x/")
+    assert(parts.len() == 2 && parts[0].kind == STRING_PART_TEXT && parts[1].kind == STRING_PART_INTERPOLATION && lexer_test_name(lexed, parts[0].text) == "https://x/")
 }
 
 // Rust: crates/jet-lexer/src/lib.rs:83
@@ -84,6 +123,23 @@ fn lexer_test_first_string(source: String) -> String Never! {
         if diagnostic.what.contains("isn't an escape") -> found = true
     }
     assert(found)
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:106
+#Test("escaped_apostrophe_is_one_char_not_a_string_escape") {
+    lexed :: lexer_test_raw(`'\''`)
+    assert(lexed.diagnostics.is_empty())
+    found := false
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_CHAR && lexer_test_name(lexed, token.decoded) == "'" -> found = true
+    }
+    assert(found)
+    quoted :: lexer_test_raw(`"\'"`)
+    rejected := false
+    loop diagnostic in quoted.diagnostics {
+        if diagnostic.what.contains("isn't an escape") -> rejected = true
+    }
+    assert(rejected)
 }
 
 // Reuses origin/port/compiler Payload01.jet and Strings.jet Scan controls.
@@ -113,7 +169,7 @@ fn lexer_test_delimiter_cases() -> [LexerTestDelimiterCase] Never! {
             assert(diagnostic.fix.contains("ordinary string"))
             assert(diagnostic.fix.contains("backtick raw string"))
         }
-        assert(lexer_test_strings(lexed.tokens).len() > 0)
+        assert(lexer_test_strings(lexed).len() > 0)
     }
 }
 
@@ -129,13 +185,13 @@ fn lexer_test_delimiter_cases() -> [LexerTestDelimiterCase] Never! {
         lexed :: lexer_test_raw(source)
         assert(lexed.diagnostics.is_empty())
         expected :: if source.contains(lexer_test_cr()) -> "hello{lexer_test_cr()}" else -> "hello"
-        assert(lexer_test_text(lexer_test_strings(lexed.tokens)[0], expected))
+        assert(lexer_test_text(lexed, lexer_test_strings(lexed)[0], expected))
     }
     languages :: [String]{"c", "cpp", "asm"}
     loop lang in languages {
         lexed :: lexer_test_raw("#FFI({lang}) fn foreign() {{ \"\"\"text {{value}} \\raw\"\"\" }}")
         assert(lexed.diagnostics.is_empty())
-        assert(lexer_test_text(lexer_test_strings(lexed.tokens)[0], `text {value} \raw`))
+        assert(lexer_test_text(lexed, lexer_test_strings(lexed)[0], `text {value} \raw`))
     }
 }
 
@@ -152,7 +208,7 @@ value={value}
 }`
     lexed :: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
-    strings :: lexer_test_strings(lexed.tokens)
+    strings :: lexer_test_strings(lexed)
     assert_eq(strings.len(), 2)
     assert(strings[0].len() == 1 && strings[0][0].kind == STRING_PART_TEXT)
     assert(lexer_test_hole(strings[1]))
@@ -167,8 +223,8 @@ fn add(a: Int, b: Int) -> Int {
     lexed :: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
     found := false
-    loop parts in lexer_test_strings(lexed.tokens) {
-        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text.contains("-> return") -> found = true
+    loop parts in lexer_test_strings(lexed) {
+        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && lexer_test_name(lexed, parts[0].text).contains("-> return") -> found = true
     }
     assert(found)
 }
@@ -182,7 +238,7 @@ fn add(a: Int, b: Int) -> Int {
     loop source in sources {
         lexed :: lexer_test_raw(source)
         assert(lexed.diagnostics.is_empty())
-        assert(lexer_test_text(lexer_test_strings(lexed.tokens)[1], `add {a}, {b}`))
+        assert(lexer_test_text(lexed, lexer_test_strings(lexed)[1], `add {a}, {b}`))
     }
 }
 
@@ -191,7 +247,7 @@ fn add(a: Int, b: Int) -> Int {
     source :: "#[Meta(category: FFI(asm)), Task] fn work() {{ text :: \"\"\"\nvalue={{value}}\n\"\"\" }}"
     lexed :: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
-    assert(lexer_test_hole(lexer_test_strings(lexed.tokens)[0]))
+    assert(lexer_test_hole(lexer_test_strings(lexed)[0]))
 }
 
 // Rust: crates/jet-lexer/src/Lexer/Scan.rs:1197
@@ -203,12 +259,12 @@ multiline :: Path.{"""
 """}`
     lexed :: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
-    strings :: lexer_test_strings(lexed.tokens)
+    strings :: lexer_test_strings(lexed)
     assert_eq(strings.len(), 3)
-    assert(lexer_test_text(strings[0], "\n"))
-    assert(strings[1].len() == 2 && strings[1][0].kind == STRING_PART_TEXT && strings[1][0].text == `\n{literal}-`)
+    assert(lexer_test_text(lexed, strings[0], "\n"))
+    assert(strings[1].len() == 2 && strings[1][0].kind == STRING_PART_TEXT && lexer_test_name(lexed, strings[1][0].text) == `\n{literal}-`)
     assert_eq(strings[1][1].kind, STRING_PART_INTERPOLATION)
-    assert(lexer_test_text(strings[2], `\logs\app`))
+    assert(lexer_test_text(lexed, strings[2], `\logs\app`))
 }
 
 // Rust: crates/jet-lexer/src/Lexer/Scan.rs:1228
@@ -230,45 +286,40 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
 `
     lexed :: lexer_test_raw("{source}{tail}")
     assert(lexed.diagnostics.is_empty())
-    strings :: lexer_test_strings(lexed.tokens)
+    strings :: lexer_test_strings(lexed)
     assert_eq(strings.len(), prefix_count + 7)
-    assert(lexer_test_text(strings[prefix_count], "\n"))
-    assert(lexer_test_text(strings[prefix_count + 1], `\n`))
-    assert(lexer_test_text(strings[prefix_count + 2], `\n`))
-    assert(lexer_test_text(strings[prefix_count + 3], "\n"))
-    assert(lexer_test_text(strings[prefix_count + 4], "\n"))
+    assert(lexer_test_text(lexed, strings[prefix_count], "\n"))
+    assert(lexer_test_text(lexed, strings[prefix_count + 1], `\n`))
+    assert(lexer_test_text(lexed, strings[prefix_count + 2], `\n`))
+    assert(lexer_test_text(lexed, strings[prefix_count + 3], "\n"))
+    assert(lexer_test_text(lexed, strings[prefix_count + 4], "\n"))
     first :: strings[prefix_count + 5]
     second :: strings[prefix_count + 6]
     assert(first.len() == 1 && first[0].kind == STRING_PART_BYTE && first[0].byte == 0x41)
     assert(second.len() == 1 && second[0].kind == STRING_PART_BYTE && second[0].byte == 0x42)
 }
 
-// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1284 (stale no-diagnostics assert;
-// current lex_raw emits E0003 and $layout).
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1271
 #Test("at_distinguishes_prefix_package_ref_and_fence") {
     lexed :: lexer_test_raw("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$")
-    assert_eq(lexed.diagnostics.len(), 1)
-    assert_eq(lexed.diagnostics[0].code, "E0003")
-    assert_eq(lexed.diagnostics[0].span, Val(Span{start: 15, end: 22}))
-    edit :: lexed.diagnostics[0].edit ?? panic("retired layout edit")
-    assert_eq(edit.new_text, "$layout")
+    assert(lexed.diagnostics.is_empty())
     tokens :: lexed.tokens
-    assert(tokens[0].kind == TOKEN_IDENT && tokens[0].payload.decoded == "foo")
+    assert(tokens[0].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[0].decoded) == "foo")
     assert_eq(tokens[1].kind, TOKEN_AT)
-    assert(tokens[2].kind == TOKEN_IDENT && tokens[2].payload.decoded == "bar")
-    assert(tokens[3].kind == TOKEN_IDENT && tokens[3].payload.decoded == "@baz")
-    assert(tokens[4].kind == TOKEN_IDENT && tokens[4].payload.decoded == "T")
+    assert(tokens[2].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[2].decoded) == "bar")
+    assert(tokens[3].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[3].decoded) == "@baz")
+    assert(tokens[4].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[4].decoded) == "T")
     assert_eq(tokens[5].kind, TOKEN_DOT)
-    assert(tokens[6].kind == TOKEN_IDENT && tokens[6].payload.decoded == "$layout")
+    assert(tokens[6].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[6].decoded) == "@layout")
     assert_eq(tokens[7].kind, TOKEN_FENCE_OPEN)
     assert_eq(tokens[11].kind, TOKEN_FENCE_CLOSE)
-    assert(tokens[12].kind == TOKEN_IDENT && tokens[12].payload.decoded == "$build")
-    assert(tokens[13].kind == TOKEN_IDENT && tokens[13].payload.decoded == "T")
+    assert(tokens[12].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[12].decoded) == "$build")
+    assert(tokens[13].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[13].decoded) == "T")
     assert_eq(tokens[14].kind, TOKEN_DOT)
-    assert(tokens[15].kind == TOKEN_IDENT && tokens[15].payload.decoded == "$layout")
-    assert(tokens[16].kind == TOKEN_IDENT && tokens[16].payload.decoded == "a")
+    assert(tokens[15].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[15].decoded) == "$layout")
+    assert(tokens[16].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[16].decoded) == "a")
     assert_eq(tokens[17].kind, TOKEN_DOLLAR)
-    assert(tokens[18].kind == TOKEN_IDENT && tokens[18].payload.decoded == "b")
+    assert(tokens[18].kind == TOKEN_IDENT && lexer_test_name(lexed, tokens[18].decoded) == "b")
     assert_eq(tokens[19].kind, TOKEN_DOLLAR)
     assert_eq(tokens[20].kind, TOKEN_LBRACKET)
     assert_eq(tokens[22].kind, TOKEN_RBRACKET)
@@ -299,32 +350,35 @@ byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* bloc
     decimals :: [Float]{1.25, 12.5, 0.35, 32.5}
     loop index in 0..<4 {
         token :: result.tokens[index]
+        literal :: lexer_test_literal(result, token)
         assert_eq(token.kind, 5)
         assert_eq(token.span, Span{start: starts[index], end: ends[index]})
-        assert_eq(token.payload.text, spellings[index])
-        assert_eq(token.payload.integer ?? -1, -1)
-        assert_eq(token.payload.decimal ?? 0.0, decimals[index])
-        assert_eq(token.payload.suffix, "")
+        assert_eq(lexer_test_name(result, token.text), spellings[index])
+        assert_eq(literal.integer ?? -1, -1)
+        assert_eq(literal.decimal ?? 0.0, decimals[index])
+        assert_eq(lexer_test_name(result, literal.suffix), "")
     }
     string :: result.tokens[4]
+    string_literal :: lexer_test_literal(result, string)
     assert_eq(string.span, Span{start: 39, end: 64})
     assert_eq(string.kind, 3)
-    assert_eq(string.payload.text, `"prefix {1.25e-2} suffix"`)
-    assert_eq(string.payload.integer ?? -1, -1)
-    assert_eq(string.payload.decimal ?? 0.0, 0.0)
-    assert_eq(string.payload.suffix, "")
+    assert_eq(lexer_test_name(result, string.text), `"prefix {1.25e-2} suffix"`)
+    assert_eq(string_literal.integer ?? -1, -1)
+    assert_eq(string_literal.decimal ?? 0.0, 0.0)
+    assert_eq(lexer_test_name(result, string_literal.suffix), "")
     eof :: result.tokens[5]
+    eof_literal :: lexer_test_literal(result, eof)
     assert_eq(eof.span, Span{start: 64, end: 64})
     assert_eq(eof.kind, 49)
-    assert_eq(eof.payload.text, "")
-    assert_eq(eof.payload.integer ?? -1, -1)
-    assert_eq(eof.payload.decimal ?? 0.0, 0.0)
-    assert_eq(eof.payload.suffix, "")
-    nested :: string.payload.string_parts[1].tokens[0]
+    assert_eq(lexer_test_name(result, eof.text), "")
+    assert_eq(eof_literal.integer ?? -1, -1)
+    assert_eq(eof_literal.decimal ?? 0.0, 0.0)
+    assert_eq(lexer_test_name(result, eof_literal.suffix), "")
+    nested :: string_literal.string_parts[1].tokens[0]
     assert_eq(nested.span, Span{start: 48, end: 55})
     assert_eq(nested.kind, 5)
-    assert_eq(nested.payload.text, "1.25e-2")
-    assert_eq(nested.payload.decimal ?? 0.0, 0.0125)
+    assert_eq(lexer_test_name(result, nested.text), "1.25e-2")
+    assert_eq(lexer_test_literal(result, nested).decimal ?? 0.0, 0.0125)
 }
 
 fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [Int], decoded: String, runs: [Span], positions: [String]) Never! {
@@ -334,8 +388,8 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
         assert_eq(token.kind, kinds[index])
         assert_eq(token.span, Span{start: starts[index], end: ends[index]})
         expected_raw :: String.from_bytes(source.bytes().slice(starts[index], ends[index])) ?? panic("literal UTF-8 boundary")
-        assert_eq(token.payload.text, expected_raw)
-        if token.kind == 3 -> assert_eq(token.payload.decoded, decoded)
+        assert_eq(lexer_test_name(result, token.text), expected_raw)
+        if token.kind == 3 -> assert_eq(lexer_test_name(result, token.decoded), decoded)
     }
     assert_eq(result.diagnostics.len(), runs.len())
     loop (index, diagnostic) in result.diagnostics {
@@ -372,21 +426,21 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
 #Test("parser_ready_tokens_spans_payloads_and_diagnostics") {
     result :: lexer_test_raw("Name 500ms 1.25 true \"ok\" 'x'")
     assert_eq(result.tokens[0].kind, 1)
-    assert_eq(result.tokens[0].payload.text, "Name")
+    assert_eq(lexer_test_name(result, result.tokens[0].text), "Name")
     assert_eq(result.tokens[1].kind, 6)
-    assert_eq(result.tokens[1].payload.integer ?? -1, 500)
-    assert_eq(result.tokens[1].payload.suffix, "ms")
+    assert_eq(lexer_test_literal(result, result.tokens[1]).integer ?? -1, 500)
+    assert_eq(lexer_test_name(result, lexer_test_literal(result, result.tokens[1]).suffix), "ms")
     assert_eq(result.tokens[2].kind, 5)
-    assert_eq(result.tokens[2].payload.decimal ?? 0.0, 1.25)
+    assert_eq(lexer_test_literal(result, result.tokens[2]).decimal ?? 0.0, 1.25)
     assert_eq(result.tokens[3].kind, 8)
     assert_eq(result.tokens[4].kind, 3)
-    assert_eq(result.tokens[4].payload.decoded, "ok")
+    assert_eq(lexer_test_name(result, result.tokens[4].decoded), "ok")
     assert_eq(result.tokens[5].kind, 7)
-    assert_eq(result.tokens[5].payload.decoded, "x")
+    assert_eq(lexer_test_name(result, result.tokens[5].decoded), "x")
     assert_eq(result.tokens[6].kind, 49)
     assert_eq(result.diagnostics.len(), 0)
     interpolated :: lexer_test_raw(`"a{value + 1}b"`)
-    parts :: interpolated.tokens[0].payload.string_parts
+    parts :: lexer_test_literal(interpolated, interpolated.tokens[0]).string_parts
     assert_eq(parts.len(), 3)
     assert_eq(parts[0].kind, 1)
     assert_eq(parts[1].kind, 2)
@@ -412,8 +466,9 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
 // Rust: tests/selfhost_terminators.rs:514-537
 #Test("inline_foreign_bodies_and_commented_interpolations") {
     foreign :: lexer_test_raw(`#FFI(C) fn f() { """int f() { return "x"; }""" }`)
-    assert_eq(foreign.tokens[10].payload.decoded, `int f() { return "x"; }`)
-    assert_eq(foreign.tokens[10].payload.string_parts[0].kind, 1)
+    foreign_literal :: lexer_test_literal(foreign, foreign.tokens[10])
+    assert_eq(lexer_test_name(foreign, foreign.tokens[10].decoded), `int f() { return "x"; }`)
+    assert_eq(foreign_literal.string_parts[0].kind, 1)
     assert_eq(foreign.diagnostics.len(), 0)
     missing :: lexer_test_raw(`#FFI(C) fn bad() { """int f() {`)
     assert_eq(missing.diagnostics.len(), 1)
@@ -421,8 +476,8 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
     span :: missing.diagnostics[0].span ?? panic("missing foreign close span")
     assert_eq(span.start, 19)
     commented :: lexer_test_raw(`"a{ /* } */ value + 1}b"`)
-    nested :: commented.tokens[0].payload.string_parts[1].tokens[1]
-    assert_eq(nested.payload.text, "value")
+    nested :: lexer_test_literal(commented, commented.tokens[0]).string_parts[1].tokens[1]
+    assert_eq(lexer_test_name(commented, nested.text), "value")
     assert_eq(nested.span.start, 12)
 }
 
@@ -430,10 +485,10 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
 #Test("unicode_alphanumeric_unit_suffixes") {
     result :: lexer_test_raw("12msμ 3usd٢")
     assert_eq(result.tokens[0].kind, 6)
-    assert_eq(result.tokens[0].payload.suffix, "msμ")
+    assert_eq(lexer_test_name(result, lexer_test_literal(result, result.tokens[0]).suffix), "msμ")
     assert_eq(result.tokens[0].span.end, 6)
     assert_eq(result.tokens[1].kind, 6)
-    assert_eq(result.tokens[1].payload.suffix, "usd٢")
+    assert_eq(lexer_test_name(result, lexer_test_literal(result, result.tokens[1]).suffix), "usd٢")
     assert_eq(result.tokens[1].span.end, 13)
     assert_eq(result.tokens[2].kind, 49)
 }
@@ -441,10 +496,10 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
 // Rust: tests/selfhost_terminators.rs:562-580
 #Test("integer_payload_overflow_is_zero") {
     result :: lexer_test_raw("9223372036854775807 9223372036854775808 0x7fffffffffffffff 0x8000000000000000")
-    assert_eq(result.tokens[0].payload.integer ?? -1, 9223372036854775807)
-    assert_eq(result.tokens[1].payload.integer ?? -1, 0)
-    assert_eq(result.tokens[2].payload.integer ?? -1, 9223372036854775807)
-    assert_eq(result.tokens[3].payload.integer ?? -1, 0)
+    assert_eq(lexer_test_literal(result, result.tokens[0]).integer ?? -1, 9223372036854775807)
+    assert_eq(lexer_test_literal(result, result.tokens[1]).integer ?? -1, 0)
+    assert_eq(lexer_test_literal(result, result.tokens[2]).integer ?? -1, 9223372036854775807)
+    assert_eq(lexer_test_literal(result, result.tokens[3]).integer ?? -1, 0)
     assert_eq(result.diagnostics.len(), 0)
     assert_eq(result.tokens[4].kind, 49)
 }
