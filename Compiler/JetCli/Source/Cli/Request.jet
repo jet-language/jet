@@ -294,6 +294,9 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
         budget.files += 1
         if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
         source :: String.from_bytes(^read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
+        // A script (a `#!/...` launch line) is a standalone program wherever
+        // it lives, never a member of the package around it.
+        if jet_cli_is_script(source) -> next
         &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: child, identity: jet_cli_identity_key("file", read.stat), source: source})
     }
     None
@@ -1051,23 +1054,40 @@ fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: B
     JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
 }
 
-// The authorized source snapshot `jet_cli_prepare_overlays` compiles.
+// Whether the entry at `entry_path` (or its overlay) is a script: its first
+// line is a `#!/...` launch line (Authority.jet `jet_cli_is_script`).
+fn jet_cli_entry_is_script(entry_path: String, overlays: [JetCLIOverlay]) -[FS, Env]> Bool Never! {
+    loop overlay in overlays {
+        if jet_cli_overlay_path(overlay.path) == entry_path -> return jet_cli_is_script(overlay.source)
+    }
+    reader :: cli_files.open(entry_path, .Refuse) ?? return false
+    head :: reader.read(3) ?? return false
+    head == "#!/".bytes()
+}
+
+// The authorized source snapshot `jet_cli_prepare_overlays` compiles. A script
+// is a standalone program wherever it lives: its snapshot is the script alone,
+// rooted at its own directory, never the package around it.
 fn jet_cli_prepare_snapshot(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool) -> JetCLISnapshotted {
     anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
-    root :: jet_cli_source_root(anchor_path)
+    entry_path :: jet_cli_overlay_path(entry)
+    script :: jet_cli_entry_is_script(entry_path, overlays)
+    root :: if script -> jet_cli_parent(entry_path) ?? "/" else -> jet_cli_source_root(anchor_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_snapshot_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-    if jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == .Val(problem) {
-        return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+    if !script {
+        if jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == .Val(problem) {
+            return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+        }
     }
     prefix :: if root == "/" -> "/" else -> "{root}/"
-    entry_path :: jet_cli_overlay_path(entry)
     // An explicitly selected entry is a source whatever its suffix (`jet self
-    // devtools reduce` and `ice-report` compile the input under its own name);
-    // the walk's placement, link, stat and read rules still hold for it.
-    if !entry_path.ends_with(".jet") && entry_path.starts_with(prefix) {
+    // devtools reduce` and `ice-report` compile the input under its own name),
+    // and so is a script, which the walk leaves out; the walk's placement,
+    // link, stat and read rules still hold for it.
+    if (script || !entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) {
         relative :: entry_path.slice(prefix.len()..<entry_path.len())
         if !jet_cli_outside_walk(root, relative) {
             stat :: cli_files.stat(entry_path) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)

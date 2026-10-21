@@ -11,20 +11,20 @@ mkdir: bin
 symlink: {jet} bin/jet
 step first: ./script_mode.jet alpha --beta -- gamma
 env: PATH={work}/bin:{env:PATH}
-env: JET_STORE_DIR={work}/store
+env: XDG_CACHE_HOME={work}/cache
 exit: 0
 stdout: = script_runs_directly_first.out
 step rerun: ./script_mode.jet again
 env: PATH={work}/bin:{env:PATH}
-env: JET_STORE_DIR={work}/store
+env: XDG_CACHE_HOME={work}/cache
 exit: 0
 stdout: = script_runs_directly_rerun.out
 step plain: jet plain.jet alpha
-env: JET_STORE_DIR={work}/store
+env: XDG_CACHE_HOME={work}/cache
 exit: 1
 stderr: ~ "Error [E1803]"
 stderr: ~ "(or `-A`/`--allow-all` for every effect)"
 step allow_all: jet -A plain.jet alpha
-env: JET_STORE_DIR={work}/store
+env: XDG_CACHE_HOME={work}/cache
 exit: 0
 stdout: = script_runs_directly_allow_all.out

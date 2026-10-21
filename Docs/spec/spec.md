@@ -1654,7 +1654,8 @@ A file whose first line is a `#!/...` launch line, such as
 `#!/usr/bin/env jet`, is a script. A script runs as `-A` runs a program, with
 the invoking user's authority as a shell script has it: it needs no package
 block and never stops with E1803 for an undecided right, and it is still
-fully checked. `jet <file> [args...]` runs a file, and every word after the
+fully checked. A script is a standalone program wherever it lives, never a
+member of the package around it. `jet <file> [args...]` runs a file, and every word after the
 file is the program's, so an executable script runs as `./tool.jet args`.
 An unchanged script reruns its kept build without compiling.
 

@@ -588,12 +588,15 @@ or `-v` comes before `--`; a verbose run reports them before the program
 starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
 `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
 
-A script's run keeps its built program in the machine-wide artifact store
-([`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)), keyed by
+A script is a standalone program wherever it lives: its source snapshot is the
+script alone, and the source walk of a package leaves every script out. A
+script's run keeps its built program in the user cache directory
+(`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
+[`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)), keyed by
 the compiler identity, the Core and runtime file identities, the profile, and
-every file of the source snapshot; a rerun with the same key runs the kept
-program without compiling. A compile that read a comptime input file keeps
-nothing, and a `--verbose` or traced run always compiles.
+the script's source; a rerun with the same key runs the kept program without
+compiling. A compile that read a comptime input file keeps nothing, and a
+`--verbose` or traced run always compiles.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed

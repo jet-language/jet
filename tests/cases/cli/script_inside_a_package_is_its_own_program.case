@@ -1,0 +1,23 @@
+# A `#!/usr/bin/env jet` file inside a package directory is a standalone
+# program: the package's check and run never see it (no second `fn run`,
+# E0624), and the script runs alone.
+env: NO_COLOR=1
+requires: os:unix
+fixture: fixtures/script_in_package
+chmod: tools/witness.jet 755
+mkdir: bin
+symlink: {jet} bin/jet
+step check: jet check
+exit: 0
+step package: jet run
+exit: 0
+stdout: == "package run\n"
+step script: ./tools/witness.jet one two
+env: PATH={work}/bin:{env:PATH}
+env: XDG_CACHE_HOME={work}/cache
+exit: 0
+stdout: == "script run: one two\n"
+step via_jet: jet tools/witness.jet three
+env: XDG_CACHE_HOME={work}/cache
+exit: 0
+stdout: == "script run: three\n"
