@@ -1,0 +1,464 @@
+// core.log host cells and sinks. Rust providers: CoreLib/Top/Log.rs (state
+// cells :40-78, flush :80, spans :153-207, JSON/text records :592-768),
+// Core/LogState.rs (trace id), CoreLib/Top/CoreSlice7LogRaw.rs (record emit,
+// span allocate) and the AOT jet_log_write_line/jet_log_process_exit leaves
+// (Codegen/mod.rs:3955-3956). Every cell is thread_local! in Rust, so each OS
+// thread owns one LogState88 block (allocated on first use, freed by the TLS
+// destructor): level0 disabled8 format16 sink24 (owned E4 or 0 for "")
+// sample_every32 sample_count40 next_span48 trace56 (owned E4 or 0)
+// spans: data64 len72 cap80, each span a 16-byte {id, owned name E4}.
+// The devtools publication of Log.rs (:316-590) reaches only installed event
+// sinks; the native runtime installs none, so it has no native counterpart.
+LOG_STATE_BYTES :: prep { I64{88} }
+LOG_STATE_LEVEL :: prep { I64{0} }
+LOG_STATE_DISABLED :: prep { I64{8} }
+LOG_STATE_FORMAT :: prep { I64{16} }
+LOG_STATE_SINK :: prep { I64{24} }
+LOG_STATE_SAMPLE_EVERY :: prep { I64{32} }
+LOG_STATE_SAMPLE_COUNT :: prep { I64{40} }
+LOG_STATE_NEXT_SPAN :: prep { I64{48} }
+LOG_STATE_TRACE :: prep { I64{56} }
+LOG_STATE_SPANS :: prep { I64{64} }
+LOG_STATE_SPANS_LEN :: prep { I64{72} }
+LOG_STATE_SPANS_CAP :: prep { I64{80} }
+// LogField32 (CommonTypes.rs:2693): key0 value8 kind16 owned E4s, redacted24.
+LOG_FIELD_BYTES :: prep { I64{32} }
+log_state_key := I64{0}
+
+fn rt_log_state_drop_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+// runtime-init: 3
+#Export(c) fn jet_rt_log_state_init() {
+    if (log_state_key != I64{0}) -> return
+    closure :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(closure, I64{1})
+    rt_text_store(closure + I64{8}, rt_log_state_drop_address())
+    rt_text_store(closure + I64{16}, I64{0})
+    log_state_key = jet_rt_tls_key_new(closure)
+}
+#Export(c) fn jet_rt_log_state_drop(_closure: I64, state: I64) -> I64 {
+    log_text_drop(rt_text_word(state + LOG_STATE_SINK))
+    log_text_drop(rt_text_word(state + LOG_STATE_TRACE))
+    spans :: rt_text_word(state + LOG_STATE_SPANS)
+    count :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    at := I64{0}
+    loop at < count {
+        jet_rt_string_drop(rt_text_word(spans + at * I64{16} + I64{8}))
+        at += I64{1}
+    }
+    capacity :: rt_text_word(state + LOG_STATE_SPANS_CAP)
+    if (capacity != I64{0}) -> jet_rt_free(spans, capacity * I64{16}, I64{8})
+    jet_rt_free(state, LOG_STATE_BYTES, I64{8})
+    I64{0}
+}
+
+fn log_text_drop(text: I64) {
+    if (text != I64{0}) -> jet_rt_string_drop(text)
+}
+
+// The calling thread's cells, created with Log.rs's initial values.
+fn log_state() -> I64 {
+    state :: jet_rt_tls_get(log_state_key)
+    if (state != I64{0}) -> return state
+    fresh :: jet_rt_alloc(LOG_STATE_BYTES, I64{8})
+    thread_zero(fresh, LOG_STATE_BYTES)
+    rt_text_store(fresh + LOG_STATE_SAMPLE_EVERY, I64{1})
+    rt_text_store(fresh + LOG_STATE_NEXT_SPAN, I64{1})
+    jet_rt_tls_set(log_state_key, fresh)
+    fresh
+}
+
+// Replace an owned "" -or- text cell with a copy of `value`.
+fn log_text_cell_store(cell: I64, value: I64) {
+    log_text_drop(rt_text_word(cell))
+    rt_text_store(cell, if (rt_text_len(value) == I64{0}) -> I64{0} else -> jet_rt_string_clone(value))
+}
+
+#Export(c) fn jet_log_level_load() -> I64 { jet_int_owned_from_i64(rt_text_word(log_state() + LOG_STATE_LEVEL)) }
+#Export(c) fn jet_log_level_store(value: I64) {
+    native :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    rt_text_store(log_state() + LOG_STATE_LEVEL, native)
+}
+#Export(c) fn jet_log_disabled_load() -> Bool { rt_text_word(log_state() + LOG_STATE_DISABLED) != I64{0} }
+#Export(c) fn jet_log_disabled_store(value: Bool) {
+    rt_text_store(log_state() + LOG_STATE_DISABLED, if value -> I64{1} else -> I64{0})
+}
+// Log.rs:67: the cell is a u8 (`value as u8`).
+#Export(c) fn jet_log_format_store(value: I64) {
+    native :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    rt_text_store(log_state() + LOG_STATE_FORMAT, native.bit_and(I64{255}))
+}
+#Export(c) fn jet_log_sink_store(value: I64) { log_text_cell_store(log_state() + LOG_STATE_SINK, value) }
+#Export(c) fn jet_log_sample_store(value: I64) {
+    native :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    rt_text_store(log_state() + LOG_STATE_SAMPLE_EVERY, native)
+}
+#Export(c) fn jet_log_sample_count_store(value: I64) {
+    native :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    rt_text_store(log_state() + LOG_STATE_SAMPLE_COUNT, native)
+}
+// LogState.rs:11.
+#Export(c) fn jet_ring_log_set_trace_id(id: I64) { log_text_cell_store(log_state() + LOG_STATE_TRACE, id) }
+
+// std::process::exit(code as i32): rt::cleanup flushes stdout, then exit.
+#Export(c) fn jet_log_process_exit(code: I64) {
+    native :: host_i32(code)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    jet_rt_stdout_flush()
+    _ := host_call(I64{231}, native, I64{0}, I64{0})
+}
+
+// Log.rs:316: the metric's slot and Metric events exist only for installed
+// devtools event sinks, which the native runtime never installs; the leaf
+// keeps the adapter's exact-Int narrowing of the value.
+#Export(c) fn jet_log_publish_metric(_name: I64, value: I64) {
+    _ := jet_int_owned_to_i64(value)
+}
+
+// OpenOptions::new().create(true).append(true).open(path), EINTR retried:
+// the descriptor, or a negative errno (a NUL-bearing path never opens).
+fn log_sink_open(path: I64) -> I64 {
+    length :: rt_text_len(path)
+    data :: rt_text_data(path)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{0}) -> return I64{-22}
+        at += I64{1}
+    }
+    name :: fd_c_path(path)
+    fd := I64{-4}
+    // O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, mode 0666.
+    loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{525377}, I64{438})
+    fd_c_path_drop(name, path)
+    fd
+}
+
+// Log.rs:80: flush stderr, then open (creating) and flush the file sink.
+#Export(c) fn jet_ring_log_flush() {
+    _ := host_stdio_flush_failure(true)
+    path :: rt_text_word(log_state() + LOG_STATE_SINK)
+    if (path == I64{0}) -> return
+    fd :: log_sink_open(path)
+    if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
+}
+
+// CoreSlice7LogRaw.rs:5 / Log.rs:153: the thread's next span id, then +1.
+#Export(c) fn jet_log_span_allocate_raw(name: I64, item0: I64, item1: I64) {
+    state :: log_state()
+    id :: rt_text_word(state + LOG_STATE_NEXT_SPAN)
+    rt_text_store(state + LOG_STATE_NEXT_SPAN, wrapping(id + I64{1}))
+    rt_text_store(item0, jet_int_owned_from_i64(id))
+    rt_text_store(item1, jet_rt_string_clone(name))
+}
+
+// Log.rs:165: push a clone of the span on the thread's active stack.
+#Export(c) fn jet_ring_log_enter(span: I64) {
+    state :: log_state()
+    length :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    capacity :: rt_text_word(state + LOG_STATE_SPANS_CAP)
+    if (length == capacity) {
+        grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+        data :: jet_rt_alloc(grown * I64{16}, I64{8})
+        old :: rt_text_word(state + LOG_STATE_SPANS)
+        coll_copy(old, data, length * I64{16})
+        if (capacity != I64{0}) -> jet_rt_free(old, capacity * I64{16}, I64{8})
+        rt_text_store(state + LOG_STATE_SPANS, data)
+        rt_text_store(state + LOG_STATE_SPANS_CAP, grown)
+    }
+    slot :: rt_text_word(state + LOG_STATE_SPANS) + length * I64{16}
+    rt_text_store(slot, data_tree_word(span + LOG_SPAN_ID))
+    rt_text_store(slot + I64{8}, jet_rt_string_clone(data_tree_word(span + LOG_SPAN_NAME)))
+    rt_text_store(state + LOG_STATE_SPANS_LEN, length + I64{1})
+}
+
+// Log.rs:190: remove the last active span with this id (rposition), if any.
+#Export(c) fn jet_ring_log_close(span: I64) {
+    state :: log_state()
+    id :: data_tree_word(span + LOG_SPAN_ID)
+    spans :: rt_text_word(state + LOG_STATE_SPANS)
+    length :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    at := length
+    loop at > (I64{0}) {
+        at -= I64{1}
+        slot :: spans + at * I64{16}
+        if (rt_text_word(slot) == id) {
+            jet_rt_string_drop(rt_text_word(slot + I64{8}))
+            coll_copy(slot + I64{16}, slot, (length - at - I64{1}) * I64{16})
+            rt_text_store(state + LOG_STATE_SPANS_LEN, length - I64{1})
+            return
+        }
+    }
+}
+
+// Log.rs:606 jet_log_json_escape: only " \ LF CR TAB are escaped.
+fn log_json_escape_push(target: I64, value: I64) {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    start := I64{0}
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(data + at)
+        escape :: if {
+            (byte == I64{34}) -> rt_static_text("\\\"")
+            (byte == I64{92}) -> rt_static_text("\\\\")
+            (byte == I64{10}) -> rt_static_text("\\n")
+            (byte == I64{13}) -> rt_static_text("\\r")
+            (byte == I64{9}) -> rt_static_text("\\t")
+            else -> I64{0}
+        }
+        if (escape != I64{0}) {
+            rt_text_append(target, data + start, at - start)
+            jet_rt_string_builder_push(target, escape)
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    rt_text_append(target, data + start, length - start)
+}
+
+fn log_text_is(value: I64, literal: I64) -> Bool { jet_rt_string_eq(value, literal) }
+
+// Log.rs:621: int/float/bool/counter values are written raw, others quoted.
+fn log_fields_json_push(target: I64, data: I64, count: I64) {
+    at := I64{0}
+    loop at < count {
+        field :: rt_text_word(data + at * I64{8})
+        jet_rt_string_builder_push(target, rt_static_text(",\""))
+        log_json_escape_push(target, rt_text_word(field))
+        jet_rt_string_builder_push(target, rt_static_text("\":"))
+        kind :: rt_text_word(field + I64{16})
+        raw :: log_text_is(kind, rt_static_text("int")) || log_text_is(kind, rt_static_text("float")) || log_text_is(kind, rt_static_text("bool")) || log_text_is(kind, rt_static_text("counter"))
+        if raw {
+            jet_rt_string_builder_push(target, rt_text_word(field + I64{8}))
+        } else {
+            jet_rt_string_builder_push(target, rt_static_text("\""))
+            log_json_escape_push(target, rt_text_word(field + I64{8}))
+            jet_rt_string_builder_push(target, rt_static_text("\""))
+        }
+        at += I64{1}
+    }
+}
+
+// Log.rs:642: `,"spans":["name",...]` for a nonempty active stack.
+fn log_spans_json_push(target: I64, state: I64) {
+    length :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    if (length == I64{0}) -> return
+    spans :: rt_text_word(state + LOG_STATE_SPANS)
+    jet_rt_string_builder_push(target, rt_static_text(",\"spans\":["))
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) -> jet_rt_string_builder_push(target, rt_static_text(","))
+        jet_rt_string_builder_push(target, rt_static_text("\""))
+        log_json_escape_push(target, rt_text_word(spans + at * I64{16} + I64{8}))
+        jet_rt_string_builder_push(target, rt_static_text("\""))
+        at += I64{1}
+    }
+    jet_rt_string_builder_push(target, rt_static_text("]"))
+}
+
+// Log.rs:657: append `line` + LF to the file sink, else eprintln to stderr.
+fn log_write(state: I64, line: I64) {
+    path :: rt_text_word(state + LOG_STATE_SINK)
+    if (path == I64{0}) {
+        _ := host_stdio_text_failure(line, true, true, false)
+        return
+    }
+    fd :: log_sink_open(path)
+    if (fd < I64{0}) -> return
+    written :: host_write_all(fd, rt_text_data(line), rt_text_len(line))
+    if (written == I64{0}) -> _ := host_write_all(fd, rt_text_data(rt_static_text("\n")), I64{1})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+}
+
+// `line.replace(" }", "}")` over the whole rendered record.
+fn log_drop_space_before_brace(line: I64) -> I64 {
+    data :: rt_text_data(line)
+    length :: rt_text_len(line)
+    result :: rt_text_builder_with_capacity(length)
+    start := I64{0}
+    at := I64{0}
+    last :: length - I64{1}
+    loop at < last {
+        if (rt_text_byte(data + at) == I64{32} && rt_text_byte(data + at + I64{1}) == I64{125}) {
+            rt_text_append(result, data + start, at - start)
+            start = at + I64{1}
+            at += I64{2}
+        } else {
+            at += I64{1}
+        }
+    }
+    rt_text_append(result, data + start, length - start)
+    result
+}
+
+// Log.rs:671.
+fn log_emit_json(state: I64, level: I64, message: I64, ts: I64, fields: I64, count: I64) {
+    line :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(line, rt_static_text("{{\"level\":\""))
+    jet_rt_string_builder_push(line, level)
+    jet_rt_string_builder_push(line, rt_static_text("\",\"body\":\""))
+    log_json_escape_push(line, message)
+    trace :: rt_text_word(state + LOG_STATE_TRACE)
+    if (trace != I64{0}) {
+        jet_rt_string_builder_push(line, rt_static_text("\",\"trace_id\":\""))
+        log_json_escape_push(line, trace)
+    }
+    jet_rt_string_builder_push(line, rt_static_text("\",\"ts\":"))
+    rt_text_push_number(line, ts)
+    log_fields_json_push(line, fields, count)
+    log_spans_json_push(line, state)
+    jet_rt_string_builder_push(line, rt_static_text(" }}"))
+    finished :: log_drop_space_before_brace(line)
+    jet_rt_string_drop(line)
+    log_write(state, finished)
+    jet_rt_string_drop(finished)
+}
+
+fn log_leap(year: I64) -> Bool { (year % I64{4} == I64{0} && year % I64{100} != I64{0}) || year % I64{400} == I64{0} }
+
+fn log_push_padded(target: I64, value: I64, width: I64) {
+    digits := I64{1}
+    bound := I64{10}
+    loop value >= bound {
+        digits += I64{1}
+        bound *= I64{10}
+    }
+    loop digits < width {
+        rt_text_push_scalar(target, I64{48})
+        digits += I64{1}
+    }
+    rt_text_push_number(target, value)
+}
+
+// Log.rs:804 unix_to_ymdhms for the non-negative wall seconds.
+fn log_push_timestamp(target: I64, secs: I64) {
+    days := secs /% I64{86400}
+    time_of_day :: secs % I64{86400}
+    year := I64{1970}
+    loop {
+        span :: if log_leap(year) -> I64{366} else -> I64{365}
+        if (days < span) -> break
+        days -= span
+        year += I64{1}
+    }
+    month := I64{1}
+    loop month <= (I64{12}) {
+        length :: if {
+            (month == I64{2}) -> (if log_leap(year) -> I64{29} else -> I64{28})
+            (month == I64{4} || month == I64{6} || month == I64{9} || month == I64{11}) -> I64{30}
+            else -> I64{31}
+        }
+        if (days < length) -> break
+        days -= length
+        month += I64{1}
+    }
+    log_push_padded(target, year, I64{4})
+    rt_text_push_scalar(target, I64{45})
+    log_push_padded(target, month, I64{2})
+    rt_text_push_scalar(target, I64{45})
+    log_push_padded(target, days + I64{1}, I64{2})
+    rt_text_push_scalar(target, I64{84})
+    log_push_padded(target, time_of_day /% I64{3600}, I64{2})
+    rt_text_push_scalar(target, I64{58})
+    log_push_padded(target, (time_of_day % I64{3600}) /% I64{60}, I64{2})
+    rt_text_push_scalar(target, I64{58})
+    log_push_padded(target, time_of_day % I64{60}, I64{2})
+    rt_text_push_scalar(target, I64{90})
+}
+
+// Log.rs:698.
+fn log_emit_text(state: I64, level: I64, message: I64, ts: I64, fields: I64, count: I64) {
+    line :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(line, rt_static_text("["))
+    label :: if {
+        log_text_is(level, rt_static_text("debug")) -> rt_static_text("DEBUG")
+        log_text_is(level, rt_static_text("info")) -> rt_static_text("INFO")
+        log_text_is(level, rt_static_text("warn")) -> rt_static_text("WARN")
+        log_text_is(level, rt_static_text("error")) -> rt_static_text("ERROR")
+        log_text_is(level, rt_static_text("critical")) -> rt_static_text("CRITICAL")
+        log_text_is(level, rt_static_text("fatal")) -> rt_static_text("FATAL")
+        else -> level
+    }
+    jet_rt_string_builder_push(line, label)
+    jet_rt_string_builder_push(line, rt_static_text("] "))
+    log_push_timestamp(line, ts /% I64{1000})
+    trace :: rt_text_word(state + LOG_STATE_TRACE)
+    if (trace != I64{0}) {
+        jet_rt_string_builder_push(line, rt_static_text(" trace="))
+        jet_rt_string_builder_push(line, trace)
+    }
+    jet_rt_string_builder_push(line, rt_static_text(" | "))
+    jet_rt_string_builder_push(line, message)
+    if (count != I64{0}) -> jet_rt_string_builder_push(line, rt_static_text(" "))
+    at := I64{0}
+    loop at < count {
+        field :: rt_text_word(fields + at * I64{8})
+        if (at != I64{0}) -> jet_rt_string_builder_push(line, rt_static_text(" "))
+        jet_rt_string_builder_push(line, rt_text_word(field))
+        jet_rt_string_builder_push(line, rt_static_text("="))
+        jet_rt_string_builder_push(line, rt_text_word(field + I64{8}))
+        at += I64{1}
+    }
+    log_write(state, line)
+    jet_rt_string_drop(line)
+}
+
+// Log.rs:592: an explicit format code, else text on a terminal stderr.
+fn log_format_active(state: I64) -> I64 {
+    explicit :: rt_text_word(state + LOG_STATE_FORMAT)
+    if (explicit != I64{0}) -> return explicit
+    if host_is_tty(I64{2}) -> I64{2} else -> I64{1}
+}
+
+// CoreSlice7LogRaw.rs:2 -> Log.rs:737 jet_log_emit. `fields` borrows a buffer
+// of `count` LogField32 handles.
+#Export(c) fn jet_log_record_emit_raw(level: I64, message: I64, fields: I64, count: I64) {
+    state :: log_state()
+    if (rt_text_word(state + LOG_STATE_DISABLED) != I64{0}) -> return
+    every :: rt_text_word(state + LOG_STATE_SAMPLE_EVERY)
+    next :: wrapping(rt_text_word(state + LOG_STATE_SAMPLE_COUNT) + I64{1})
+    rt_text_store(state + LOG_STATE_SAMPLE_COUNT, next)
+    if (every > I64{1} && (next - I64{1}) % every != I64{0}) -> return
+    ts :: deadline_wall_now_ms()
+    total :: if (count < I64{0} || fields == I64{0}) -> I64{0} else -> count
+    if (log_format_active(state) == I64{2}) {
+        log_emit_text(state, level, message, ts, fields, total)
+    } else {
+        log_emit_json(state, level, message, ts, fields, total)
+    }
+}
+
+// LogField record carrier (CAbiRoutes.rs:15455): text members are copied.
+#Export(c) fn jet_rt_record_new_log_field(key: I64, value: I64, kind: I64, redacted: Bool) -> I64 {
+    result :: jet_rt_alloc(LOG_FIELD_BYTES, I64{8})
+    rt_text_store(result, jet_rt_string_clone(key))
+    rt_text_store(result + I64{8}, jet_rt_string_clone(value))
+    rt_text_store(result + I64{16}, jet_rt_string_clone(kind))
+    rt_text_store(result + I64{24}, if redacted -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_record_get_log_field_key(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_log_field_value(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_log_field_kind(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_log_field_redacted(value: I64) -> Bool { rt_text_word(value + I64{24}) != I64{0} }
+#Export(c) fn jet_rt_handle_clone_log_field(value: I64) -> I64 {
+    jet_rt_record_new_log_field(rt_text_word(value), rt_text_word(value + I64{8}), rt_text_word(value + I64{16}), rt_text_word(value + I64{24}) != I64{0})
+}
+#Export(c) fn jet_rt_handle_drop_log_field(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(value))
+    jet_rt_string_drop(rt_text_word(value + I64{8}))
+    jet_rt_string_drop(rt_text_word(value + I64{16}))
+    jet_rt_free(value, LOG_FIELD_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_log_field(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) &&
+        jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) &&
+        jet_rt_string_eq(rt_text_word(left + I64{16}), rt_text_word(right + I64{16})) &&
+        rt_text_word(left + I64{24}) == rt_text_word(right + I64{24})
+}

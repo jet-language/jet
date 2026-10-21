@@ -1,0 +1,64 @@
+// core.math raw leaves. Rust providers: CoreLib/Top/MathRandomFns.rs:93-115
+// (the ambient RNG cell) and MathRandomTime.rs:1044 (jet_numeric_stop).
+// Core/Math/Random.jet owns the xorshift transition; these leaves only read
+// and compare-exchange the stream word. Inside a controlled World the World
+// owns the word (and journals each replacement); elsewhere each OS thread
+// owns one word, seeded 0x4d595df4d0f33173 (thread_local! JET_RNG).
+// TLS words hold `state XOR seed` so a fresh thread's zero word is the seed.
+RANDOM_DEFAULT_STATE :: prep { I64{5573589319906701683} }
+random_state_key := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_random_state_init() {
+    if (random_state_key == I64{0}) -> random_state_key = jet_rt_tls_key_new(I64{0})
+}
+
+fn random_thread_state() -> I64 { jet_rt_tls_get(random_state_key).bit_xor(RANDOM_DEFAULT_STATE) }
+fn random_thread_store(value: I64) { jet_rt_tls_set(random_state_key, value.bit_xor(RANDOM_DEFAULT_STATE)) }
+
+// MathRandomFns.rs:94 / Scheduler.rs:1508: the raw u64 bits, not an exact Int.
+#Export(c) fn jet_random_state_raw() -> I64 {
+    world :: world_current()
+    if (world == I64{0}) -> return random_thread_state()
+    sync_mutex_lock(world + I64{8})
+    value :: sync_load(world + I64{40})
+    sync_mutex_unlock(world + I64{8})
+    value
+}
+
+// MathRandomFns.rs:98 / Scheduler.rs:1512: both words are u64 values carried
+// as exact Ints; a World journals the accepted replacement as "rng:{value}".
+#Export(c) fn jet_random_try_update_raw(expected: I64, replacement: I64) -> Bool {
+    old :: jet_int_checked_fixed(expected, I64{7}, I64{0}, I64{0}, I64{0})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    new :: jet_int_checked_fixed(replacement, I64{7}, I64{0}, I64{0}, I64{0})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    world :: world_current()
+    if (world == I64{0}) {
+        if (random_thread_state() != old) -> return false
+        random_thread_store(new)
+        return true
+    }
+    sync_mutex_lock(world + I64{8})
+    if (sync_load(world + I64{40}) != old) {
+        sync_mutex_unlock(world + I64{8})
+        return false
+    }
+    sync_store(world + I64{40}, new)
+    world_event(world, services_msg_rng(), new, I64{0}, I64{1})
+    sync_mutex_unlock(world + I64{8})
+    true
+}
+
+// MathRandomFns.rs:110: a World takes the seed (journaled); else the thread word.
+#Export(c) fn jet_std_random_seed(seed: I64) {
+    value :: jet_int_owned_to_i64(seed)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if jet_rt_world_rng_seed(value) -> return
+    random_thread_store(value)
+}
+
+// MathRandomTime.rs:1044: jet_arithmetic_stop("", 0, message), the E3010 stop.
+#Export(c) fn jet_numeric_stop(message: I64) {
+    jet_rt_numeric_stop(I64{0}, I64{0}, I64{0}, rt_text_data(message), rt_text_len(message))
+}

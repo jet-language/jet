@@ -1,0 +1,92 @@
+// core.tasks interval timer channel: CoreLib/JetStd/MathTaskMem.rs:971-987
+// (period max(1) ms, ticks 1, 2, ... until a send is refused),
+// Scheduler.rs:3568 (an unbounded channel of kind interval) and
+// Scheduler.rs:4773-4794 (the producer runs on a detached host thread; one
+// created inside a deterministic world is a world task of that world).
+// The receiver handle is the native channel state (Channel.jet State160).
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+fn rt_interval_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// The element descriptor of an exact-Int channel (Collections.jet meta72:
+// stride 8, kind 1). Every tick is inside the inline exact-Int range, so a
+// queued tick owns no allocation and needs no clone or drop callback.
+fn interval_meta() -> I64 {
+    meta :: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(meta, I64{72})
+    sync_store(meta, I64{8})
+    sync_store(meta + I64{48}, I64{1})
+    meta
+}
+
+// reserve_send + commit on the unbounded channel: refused once the channel is
+// closed or has no receiver left.
+fn interval_send(channel: I64, tick: I64) -> Bool {
+    sync_mutex_lock(channel)
+    if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        return false
+    }
+    if (sync_load(channel + I64{56}) == I64{0}) -> sync_store(channel + I64{56}, interval_meta())
+    length :: sync_load(channel + I64{16})
+    channel_grow(channel, length + sync_load(channel + I64{80}) + I64{1})
+    target :: sync_load(channel + I64{32}) + ((sync_load(channel + I64{40}) + length) % sync_load(channel + I64{24})) * I64{8}
+    sync_store(target, jet_int_owned_from_i64(tick))
+    sync_store(channel + I64{16}, length + I64{1})
+    channel_wake_one(channel, false)
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    true
+}
+
+// Job24: channel (the producer's sender endpoint) 0, period ms 8, owned World
+// lease or 0 at 16.
+#Export(c) fn jet_rt_interval_worker(job: I64) -> I64 {
+    channel :: sync_load(job)
+    delay :: sync_load(job + I64{8})
+    world :: sync_load(job + I64{16})
+    jet_rt_free(job, I64{24}, I64{8})
+    save :: jet_rt_alloc(I64{32}, I64{8})
+    if (world != I64{0}) -> world_scope_enter(world, save, true)
+    tick := I64{1}
+    loop {
+        jet_scheduler_sleep_ms(delay)
+        if !interval_send(channel, tick) -> break
+        tick += I64{1}
+    }
+    if (world != I64{0}) {
+        world_task_finished(world)
+        world_scope_leave(save)
+        jet_rt_world_drop(world)
+    }
+    jet_rt_free(save, I64{32}, I64{8})
+    jet_rt_native_sender_drop(channel)
+    I64{0}
+}
+
+#Export(c) fn interval(ms: I64) -> I64 {
+    native :: jet_int_owned_to_i64(ms)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    delay :: if (native < I64{1}) -> I64{1} else -> native
+    channel :: channel_new(I64{-1}, I64{2}, delay)
+    sync_store(channel + I64{120}, I64{1})
+    channel_retain(channel)
+    job :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(job, channel)
+    sync_store(job + I64{8}, delay)
+    world :: world_current()
+    sync_store(job + I64{16}, if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
+    if (world != I64{0}) -> world_task_spawned(world)
+    handle :: thread_spawn(rt_interval_worker_address(), job)
+    if (handle < I64{0}) {
+        scheduler_fatal(scheduler_msg_start_failed())
+        return channel
+    }
+    _ := thread_detach(handle)
+    channel
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_receiver_63726174653a3a6a65745f666f756e646174696f6e3a3a4e756d657269633a3a4a6574496e74(channel: I64) {
+    jet_rt_native_receiver_drop(channel)
+}

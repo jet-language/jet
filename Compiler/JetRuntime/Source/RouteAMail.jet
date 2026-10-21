@@ -1,0 +1,93 @@
+// core.email carrier marshaling after Core source validated construction:
+// CoreLib/Email.rs:1615-1621 attachment_parts/envelope_parts, plus the
+// Address and Envelope record glue their routes cross with. Native layouts
+// are MailAddress.jet's Address16, MailAttachment.jet's Attachment40 and
+// MailEnvelope.jet's Envelope40 (inline Address16, inline Address List24).
+
+// Email.rs:1615: Attachment { filename, mime, bytes } from borrowed inputs.
+#Export(c) fn attachment_parts(filename: I64, mime: I64, data: I64, length: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_ATTACHMENT_BYTES, I64{8})
+    rt_text_store(result, jet_rt_string_clone(filename))
+    rt_text_store(result + I64{8}, jet_rt_string_clone(mime))
+    count :: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
+    bytes :: mail_list_init(count, RT_HOST_U8_STRIDE, result + I64{16})
+    at := I64{0}
+    loop at < count {
+        host_u8_put(bytes, at, host_u8_get(data, at))
+        at += I64{1}
+    }
+    result
+}
+
+// Email.rs:1619: Envelope { from, recipients } from a borrowed Address and a
+// borrowed buffer of Address handles.
+#Export(c) fn envelope_parts(from: I64, recipients: I64, count: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_ENVELOPE_BYTES, I64{8})
+    mail_address_copy_into(from, result)
+    mail_address_list_from_slots_into(recipients, count, result + MAIL_ADDRESS_BYTES)
+    result
+}
+
+// Address record (display=OptText, mailbox=Text): the constructor borrows the
+// optional display box and the mailbox; getters return owned clones.
+#Export(c) fn jet_rt_record_new_address(display: I64, mailbox: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_ADDRESS_BYTES, I64{8})
+    rt_text_store(result, if (display == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(display)))
+    rt_text_store(result + I64{8}, jet_rt_string_clone(mailbox))
+    result
+}
+#Export(c) fn jet_rt_record_get_address_display(value: I64, some: I64) -> I64 {
+    display :: rt_text_word(value)
+    if (display == I64{0}) -> return I64{0}
+    rt_text_store(some, jet_rt_string_clone(display))
+    I64{1}
+}
+#Export(c) fn jet_rt_record_get_address_mailbox(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_handle_clone_address(value: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_ADDRESS_BYTES, I64{8})
+    mail_address_copy_into(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_address(value: I64) {
+    if (value == I64{0}) -> return
+    mail_address_drop_fields(value)
+    jet_rt_free(value, MAIL_ADDRESS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_address(left: I64, right: I64) -> Bool { mail_address_eq(left, right) }
+
+// Address sequences hold inline Address16 elements; get lends the element,
+// push moves the handle's fields and frees its shell.
+#Export(c) fn jet_rt_record_seq_list_rec_address_new(capacity: I64) -> I64 { data_sequence_new(capacity, MAIL_ADDRESS_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_address_len(value: I64) -> I64 { rt_text_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_address_get(value: I64, index: I64) -> I64 { data_sequence_slot(value, index, MAIL_ADDRESS_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_address_push(value: I64, item: I64) {
+    slot :: data_sequence_reserve(value, MAIL_ADDRESS_BYTES)
+    coll_copy(item, slot, MAIL_ADDRESS_BYTES)
+    jet_rt_free(item, MAIL_ADDRESS_BYTES, I64{8})
+    rt_text_store(value + DATA_SEQUENCE_LENGTH, rt_text_word(value + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+
+// Envelope record (from=Rec.Address, recipients=List.Rec.Address): the
+// constructor consumes the Address handle and the sequence shell; `from`
+// returns an owned Address handle, `recipients` lends the inline header.
+#Export(c) fn jet_rt_record_new_envelope(from: I64, recipients: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_ENVELOPE_BYTES, I64{8})
+    coll_copy(from, result, MAIL_ADDRESS_BYTES)
+    jet_rt_free(from, MAIL_ADDRESS_BYTES, I64{8})
+    coll_copy(recipients, result + MAIL_ADDRESS_BYTES, DATA_SEQUENCE_BYTES)
+    jet_rt_free(recipients, DATA_SEQUENCE_BYTES, I64{8})
+    result
+}
+#Export(c) fn jet_rt_record_get_envelope_from(value: I64) -> I64 { jet_rt_handle_clone_address(value) }
+#Export(c) fn jet_rt_record_get_envelope_recipients(value: I64) -> I64 { value + MAIL_ADDRESS_BYTES }
+#Export(c) fn jet_rt_handle_clone_envelope(value: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_ENVELOPE_BYTES, I64{8})
+    mail_envelope_copy_into(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_envelope(value: I64) {
+    if (value == I64{0}) -> return
+    mail_envelope_drop_fields(value)
+    jet_rt_free(value, MAIL_ENVELOPE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_envelope(left: I64, right: I64) -> Bool { mail_envelope_eq(left, right) }
