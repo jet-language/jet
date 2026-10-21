@@ -9,6 +9,7 @@ use jet_foundation.[
     tir_each_expr_child,
     tir_each_stmt_child,
     TStrFormat,
+    core_identity_in_module,
 ]
 use jet_foundation.[Span, TExprKind, TStrPart, Type]
 
@@ -98,7 +99,7 @@ fn jet_codegen_core_reach_one_stmt_keys(statement: TStmt, functions: [TFunc], ke
                     }
                     member :: if name == "ProcessStdoutStream" || name.ends_with("::ProcessStdoutStream") -> "__stdout_next_line" else if name == "ProcessStderrStream" || name.ends_with("::ProcessStderrStream") -> "__stderr_next_line" else -> ""
                     loop helper in functions {
-                        if member != "" && helper.name == member && helper.module_identity.starts_with("<corelib>/Core/process::") -> jet_codegen_core_reach_add(&keys, helper.key)
+                        if member != "" && helper.name == member && core_identity_in_module(helper.module_identity, "core.process") -> jet_codegen_core_reach_add(&keys, helper.key)
                     }
                 }
                 jet_codegen_core_reach_stmt_keys(body, functions, &keys)

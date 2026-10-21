@@ -89,6 +89,7 @@ use jet_foundation.[
     mir_runtime_owned_ownership,
     mir_type_identity_key,
     type_name,
+    core_identity_in_module,
 ]
 use core.math as math
 
@@ -2202,8 +2203,8 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
     }
     // Public Unicode casing uses the same pinned full mapping as String's
     // methods, not the bootstrap subset's private map_case implementation.
-    lowercase :: name == "<corelib>/Core/text::Core/text/text.jet::lower"
-    uppercase :: name == "<corelib>/Core/text::Core/text/text.jet::upper"
+    lowercase :: name == "<corelib>/core.text::lower"
+    uppercase :: name == "<corelib>/core.text::upper"
     if lowercase || uppercase {
         if function.params.len() != 1 || !lower_text_type(function.params[0].ty) || !lower_text_type(function.return_type) {
             lower_fail(&m, &f, "Core text casing has an unsupported checked signature")
@@ -2237,18 +2238,18 @@ fn lower_function_lent(p: MIRProgram, m: &LowerModule, f: &LowerFunction, functi
 fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) -> LowerContext? {
     // These Core bodies still disagree with their shared-runtime contracts.
     // Recognize semantic owners, never example names or particular inputs.
-    if function.key == "<corelib>/Core/compute::Core/compute/compute.jet::ones"
-        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::device_auto"
-        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::device_vulkan"
-        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::profile_show"
-        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::matmul"
-        || function.key == "<corelib>/Core/compute::Core/compute/solve.jet::dense" {
+    if function.key == "<corelib>/core.compute::ones"
+        || function.key == "<corelib>/core.compute::device_auto"
+        || function.key == "<corelib>/core.compute::device_vulkan"
+        || function.key == "<corelib>/core.compute::profile_show"
+        || function.key == "<corelib>/core.compute::matmul"
+        || function.key == "<corelib>/core.compute.solve::dense" {
         lower_fail(&m, &f, "Core.compute operation {function.key} lacks native O0 device/numeric parity")
         return None
     }
-    if function.key == "<corelib>/Core/archive::Core/archive/archive.jet::zip_open"
-        || function.key == "<corelib>/Core/web::Core/web/query.jet::invalidate"
-        || function.key.starts_with("<corelib>/Core/testing::") {
+    if function.key == "<corelib>/core.archive::zip_open"
+        || function.key == "<corelib>/core.web.query::invalidate"
+        || core_identity_in_module(function.key, "core.testing") {
         lower_fail(&m, &f, "Core operation {function.key} does not have native O0 semantic parity yet")
         return None
     }

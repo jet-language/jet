@@ -31,6 +31,7 @@ use jet_foundation.[
     type_with_effective_fn_returns,
     core_source_owns_type,
     type_name,
+    core_identity_in_module,
 ]
 
 fn sema_type_is_core_view_generic(ty: Type) -> Bool Never! {
@@ -954,7 +955,7 @@ fn sema_type_bound_satisfied_nominal(graph: SemaRegistrationGraph, nominal: Sema
 // declaring identity, never the display path or an application's same-named
 // struct.
 fn sema_type_provider_close_owner(nominal: SemaRegistrationNominal) -> Bool Never! {
-    if !nominal.symbol.module_name.starts_with("<corelib>/Core/files::") -> return false
+    if !core_identity_in_module(nominal.symbol.module_name, "core.files") -> return false
     if nominal.symbol.name == {
         "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> true
         else -> false
@@ -1143,7 +1144,7 @@ fn sema_type_assignable_in_graph_with_generics(graph: SemaRegistrationGraph, req
 // Rust `resolve_type` names a qualified Core type export (`files.Stat`) by
 // its bare leaf, the spelling a fixed Core row returns (`core.files.stat`'s
 // `Stat`). Registration gives the export its owner's canonical identity
-// (`<corelib>/Core/files::Core/files/files.jet::Stat`), so a canonical Core
+// (`<corelib>/core.files::Stat`), so a canonical Core
 // nominal meets the bare leaf when its owner Core module exports that type
 // and the leaf names nothing in the caller's module. As in Rust, a Core
 // record that only shares a built-in typed head's leaf (`core.files.path`'s

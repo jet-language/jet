@@ -10,7 +10,7 @@ use jet_foundation.[
     mir_type_from_kind, mir_type_id,
 ]
 
-FX_CORE_BARE_ZONED :: "<corelib>/Core/time::Core/time/time.jet::ZonedDateTime"
+FX_CORE_BARE_ZONED :: "<corelib>/core.time::ZonedDateTime"
 
 fn fx_core_bare_zoned(b: &FxBuilder, bare: MIRType, seconds: Int, zone: String) -> MIRValueID Never! {
     count :: fx_int_const(&b, seconds)
@@ -25,7 +25,7 @@ fn fx_core_bare_stamp(b: &FxBuilder, stamp: MIRType, zoned: MIRValueID) -> MIRVa
     fx_owned(&b, stamp, MIROperation.Enum{type_id: mir_type_id("CoreBareStamp"), variant: "At", args: [MIREnumArg]{MIREnumArg{field: None, value: zoned, boxed: false}}})
 }
 
-// struct <corelib>/Core/time::Core/time/time.jet::ZonedDateTime { seconds: Int, zone: String }
+// struct <corelib>/core.time::ZonedDateTime { seconds: Int, zone: String }
 // enum CoreBareStamp { At(ZonedDateTime) } // the payload spelled bare
 // fn run() {
 //     a :: CoreBareStamp.At(ZonedDateTime{5, "UTC"}); b :: copy a

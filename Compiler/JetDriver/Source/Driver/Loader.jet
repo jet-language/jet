@@ -2400,7 +2400,7 @@ fn jet_driver_bind_package_namespaces(
     true
 }
 
-// Root component of every embedded Core module path (`<corelib>/Core/Perf/Perf.jet`),
+// Root component of every embedded Core module path (`<corelib>/Core/perf/perf.jet`),
 // the Rust `Diagnostics::CORE_SOURCE_ROOT`. Core is library source, not the
 // user's program; no authorized disk file ever carries this prefix.
 JET_DRIVER_CORE_SOURCE_ROOT :: prep { "<corelib>" }
@@ -2413,19 +2413,18 @@ fn jet_driver_unit_is_core(unit: JetDriverSourceUnit) -> Bool Never! {
     unit.root_index < 0 && unit.source_origin == SemaSourceOrigin.CompilerGenerated && unit.path.starts_with("{JET_DRIVER_CORE_SOURCE_ROOT}/")
 }
 
-// A Core source module's identity is its canonical owner prefix
-// (`<corelib>/Core/Perf::Core/Perf/Perf.jet`), so its nominals are keyed
-// `<corelib>/Core/Perf::Core/Perf/Perf.jet::PerfError` exactly as in Rust.
+// A Core source module's identity is its module name under the Core root
+// (`<corelib>/core.perf`), so its nominals are keyed
+// `<corelib>/core.perf::PerfError` wherever its file lives: renaming or
+// moving a Core file changes no identity and no runtime symbol.
 fn jet_driver_unit_module_identity(unit: JetDriverSourceUnit) -> String Never! {
     if !jet_driver_unit_is_core(unit) -> return jet_driver_module_identity(unit.package_identity, unit.path)
     if unit.file_index < 0 -> return unit.path
-    jet_driver_core_source_owner_key(unit.relative_path)
+    jet_driver_core_source_owner_key(unit.module_name)
 }
 
-fn jet_driver_core_source_owner_key(relative_path: String) -> String Never! {
-    parts := relative_path.split("/").to_list()
-    _ := &parts.pop()
-    "{JET_DRIVER_CORE_SOURCE_ROOT}/{parts.join("/")}::{relative_path}"
+fn jet_driver_core_source_owner_key(module_name: String) -> String Never! {
+    "{JET_DRIVER_CORE_SOURCE_ROOT}/{module_name}"
 }
 
 // Rust `core_source_import_module`: the Core module an import names, including

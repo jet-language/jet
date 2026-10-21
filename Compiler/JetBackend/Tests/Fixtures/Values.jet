@@ -449,7 +449,7 @@ fn fx_dir_entry_definition(key: String) -> MIRTypeDef Never! {
 }
 
 fn fx_qualified_record_identity_checks() -> Bool Never! {
-    core_key :: "<corelib>/Core/files::Core/files/files.jet::DirEntry"
+    core_key :: "<corelib>/core.files::DirEntry"
     core_ty :: fx_named(core_key)
     definition :: fx_dir_entry_definition(core_key)
     program :: fx_program([MIRFunction]{}, [MIRTypeDef]{definition})
@@ -477,7 +477,7 @@ fn fx_qualified_record_identity_checks() -> Bool Never! {
 // expect-runtime-only qualified-dir-entries: real directory results rebuild, read and drop native DirEntry slots
 // expect-requires-route qualified-dir-entries jet_std_fs_list_dir_raw
 fn fx_qualified_dir_entries() -> MIRProgram Never! {
-    key :: "<corelib>/Core/files::Core/files/files.jet::DirEntry"
+    key :: "<corelib>/core.files::DirEntry"
     entries :: fx_list_type(fx_named(key))
     result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: entries, err: fx_named("IOError")})
     b := fx_builder()

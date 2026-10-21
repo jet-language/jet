@@ -1511,10 +1511,20 @@ for (const m of fnBody(mirRustRs, "core_native_probe_name").matchAll(/starts_wit
 const ownedTypes = new Set();
 for (const m of readFileSync(`${repo}/crates/jet-foundation/src/CoreModuleExports.rs`, "utf8").matchAll(/CoreSourceOwnedType \{ path: "([^"]+)", name: "([^"]+)" \}/g)) ownedTypes.add(`${m[1]}::${m[2]}`);
 if (ownedTypes.size === 0) throw new Error("gen-c-abi-routes: no CORE_SOURCE_OWNED_TYPES rows");
+// A Core module identity is its module name under the Core root
+// (`<corelib>/core.net`); its source path comes from the CoreSourceOwned table.
+const coreModulePath = new Map();
+const corePathModule = new Map();
+for (const m of readFileSync(`${repo}/Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet`, "utf8").matchAll(/module_name: "([^"]+)", alias: "[^"]*", path: "([^"]+)"/g)) {
+  coreModulePath.set(m[1], m[2]);
+  corePathModule.set(m[2], m[1]);
+}
+const coreInModule = (name, module) => name === `<corelib>/${module}` || name.startsWith(`<corelib>/${module}::`) || name.startsWith(`<corelib>/${module}.`);
 const coreLeaf = (name) => name.slice("<corelib>/".length).split("::").pop();
 const ownsType = (name) => {
   const parts = name.startsWith("<corelib>/") ? name.slice("<corelib>/".length).split("::") : [];
-  return parts.length >= 3 && ownedTypes.has(`${parts[parts.length - 2]}::${parts[parts.length - 1]}`);
+  const path = parts.length >= 2 ? coreModulePath.get(parts[0]) : undefined;
+  return path !== undefined && ownedTypes.has(`${path}::${parts[parts.length - 1]}`);
 };
 const isSourceOwned = (name) => ownsType(name) || sourceOwned.some((rule) => name.startsWith(rule.prefix) && (!rule.suffix || name.endsWith(rule.suffix)) && (!rule.leaves || rule.leaves.includes(coreLeaf(name))));
 const sourceNominalReferences = new Set();
@@ -1536,14 +1546,14 @@ const nativeType = (name) => {
   if (declaration?.decls.length === 1 && (declaration.decls[0].generic || isSourceOwned(name) || sourceNominalReferences.has(generated))) return declaration.key;
   const native = canonical && !isSourceOwned(name) ? coreLeaf(name) : name;
   if (explicitTable.has(name)) return explicitTable.get(name);
-  const fileName = /^<corelib>\/Core\/(files|term)::Core\/\1\/\1\.jet::/.test(name) ? coreLeaf(name) : name;
+  const fileName = /^<corelib>\/core\.(files|term)::/.test(name) ? coreLeaf(name) : name;
   if (fileTable.has(fileName)) return fileTable.get(fileName);
   for (const table of leafTables) if (table.has(native)) return table.get(native);
-  const emailName = name.replace(/^<corelib>\/Core\/email::Core\/email\/email\.jet::/, "");
+  const emailName = name.replace(/^<corelib>\/core\.email::/, "");
   if (emailTable.has(emailName)) return `jet_email::${emailTable.get(emailName)}`;
   if (rootPrelude.has(native)) return rootPrelude.get(native);
   for (const table of lateLeafTables) if (table.has(native)) return table.get(native);
-  if (canonical && name.startsWith("<corelib>/Core/sync::") && name.endsWith("::RowPolicy")) return null;
+  if (canonical && coreInModule(name, "core.sync") && name.endsWith("::RowPolicy")) return null;
   const core = coreTable.get(canonical ? coreLeaf(name) : name);
   if (!core) return null;
   if (core === "JetRowPolicy" || core === "JetTaskFailure") return core;
@@ -1575,7 +1585,8 @@ const jetNames = new Map(); // Jet name -> runtime handle name
   for (const file of readdirSync(coreDir, { recursive: true }).filter((f) => f.endsWith(".jet")).sort()) {
     const rel = `Core/${file}`;
     for (const m of readFileSync(`${coreDir}/${file}`, "utf8").matchAll(/^\s*(?:struct|enum) ([A-Z][A-Za-z0-9_]*)\b/gm)) {
-      candidates.add(`<corelib>/${dirname(rel)}::${rel}::${m[1]}`);
+      const module = corePathModule.get(rel);
+      if (module) candidates.add(`<corelib>/${module}::${m[1]}`);
     }
   }
   // Pure Core source functions can mention concrete generic records without
@@ -2089,9 +2100,11 @@ for (const [runtime] of handleRows) {
   if (!handles.get(runtime).startsWith("crate::__jet_")) continue;
   const names = [...jetNames].filter(([, target]) => target === runtime).map(([name]) => name).sort();
   for (const key of names) {
-    const match = /^<corelib>\/[^:]+::(Core\/[^:]+\.jet)::([A-Za-z_]\w*)(?:<(.*)>)?$/.exec(key);
+    const match = /^<corelib>\/([a-z0-9_.]+)::([A-Za-z_]\w*)(?:<(.*)>)?$/.exec(key);
     if (!match) continue;
-    const [, path, name, argumentsText] = match;
+    const [, module, name, argumentsText] = match;
+    const path = coreModulePath.get(module);
+    if (!path) continue;
     const source = readFileSync(`${repo}/${path}`, "utf8");
     if (!new RegExp(`\\b(?:struct|enum)\\s+${name}\\b`).test(source)) continue;
     const base = argumentsText === undefined ? key : key.slice(0, key.length - argumentsText.length - 2);
@@ -2276,7 +2289,7 @@ jet.push("");
 jet.push("// The runtime handle type a Jet type generated Rust holds natively crosses the");
 jet.push("// boundary as, keyed by the Jet name MIR spells it with: a Core table name");
 jet.push("// (`LocalDate`), or a canonical Core source identity");
-jet.push("// (`<corelib>/Core/net::Core/net/net.jet::TCPStream`) whose own Jet shape");
+jet.push("// (`<corelib>/core.net::TCPStream`) whose own Jet shape");
 jet.push("// generated Rust replaces. It is dropped by `jet_rt_handle_drop_<runtime>`;");
 jet.push("// copied by `jet_rt_handle_clone_<runtime>` when `clone`; rendered by");
 jet.push("// `jet_rt_handle_display_<runtime>` / `jet_rt_handle_show_<runtime>` /");

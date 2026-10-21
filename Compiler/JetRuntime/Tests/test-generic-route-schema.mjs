@@ -356,9 +356,9 @@ pub mod shadow {
   assert.ok(jet.includes(`LowerRecordSchema{jet_name: "${pair}", variants: "", fields: "first=Float,second=Flag"}`));
   // Measurement is source-owned; a seed JetMeasurement carrier is not that
   // authored declaration and must not manufacture a canonical layout alias.
-  assert.ok(!jet.includes(`jet_name: "<corelib>/Core/units::Core/units/units.jet::Measurement<Float>", runtime: "${measurement}"`));
-  assert.ok(!jet.includes('LowerNativeType{jet_name: "<corelib>/Core/units::Core/units/units.jet::Measurement<Float>"'));
-  assert.ok(jet.includes(`jet_name: "<corelib>/Core/units::Core/units/units.jet::Pair<Float,Bool>", runtime: "${pair}"`));
+  assert.ok(!jet.includes(`jet_name: "<corelib>/core.units::Measurement<Float>", runtime: "${measurement}"`));
+  assert.ok(!jet.includes('LowerNativeType{jet_name: "<corelib>/core.units::Measurement<Float>"'));
+  assert.ok(jet.includes(`jet_name: "<corelib>/core.units::Pair<Float,Bool>", runtime: "${pair}"`));
   assert.ok(rust.includes(`jet_rt_record_new_${runtimeAbiAtom(measurement)}(m0: f64, m1: f64)`));
   assert.ok(rust.includes("crate::JetMeasurement::<f64> { value: m0, uncertainty: m1 }"));
   // Existing schema, handle and helper definitions remain byte-identical.
@@ -374,7 +374,7 @@ pub mod shadow {
   const pipeJet = readFileSync(join(fixture, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
   const pipeRust = readFileSync(join(fixture, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
   for (const type of ["ProcessStdoutStream", "ProcessStderrStream"]) {
-    assert.ok(pipeJet.includes(`jet_name: "<corelib>/Core/process::Core/process/process.jet::${type}", runtime: "${type}", clone: true`));
+    assert.ok(pipeJet.includes(`jet_name: "<corelib>/core.process::${type}", runtime: "${type}", clone: true`));
     assert.ok(pipeJet.includes(`jet_name: "${type}", runtime: "${type}", clone: true`));
     assert.ok(!pipeRust.includes(type), "provider must not invent a Rust carrier or adapter");
     assert.ok(!pipeJet.includes(`LowerRecordSchema{jet_name: "${type}"`));
@@ -453,10 +453,10 @@ pub mod shadow {
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   // Source-owned generics have actual mangled declarations and private,
   // mangled fields, not a historical native carrier name or a C route.
-  const sampleKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Sample";
-  const pairKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Pair";
-  const scalarKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Scalar";
-  const markerKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Marker";
+  const sampleKey = "<corelib>/core.fixture::Sample";
+  const pairKey = "<corelib>/core.fixture::Pair";
+  const scalarKey = "<corelib>/core.fixture::Scalar";
+  const markerKey = "<corelib>/core.fixture::Marker";
   const scalarSource = generatedRecordPath(scalarKey), markerSource = generatedRecordPath(markerKey);
   const sampleSource = generatedRecordPath(sampleKey), pairSource = generatedRecordPath(pairKey);
   put("Core/fixture/fixture.jet", "struct Sample<T> { value: T, uncertainty: T }\nstruct Pair<A,B> { first: A, second: B }\nstruct Scalar { value: Float }\nstruct Marker {}\n");
@@ -487,7 +487,7 @@ pub fn source_pair(first: f64, second: bool) -> ${pairSource}<f64,bool> { ${pair
   assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_new_${runtimeAbiAtom(sampleInstance)}", jet_name: "${sampleKey}<Float>", op: "record.new", member: ""}`));
   assert.ok(sourceJet.includes(`LowerNativeExport{symbol: "jet_rt_record_get_${runtimeAbiAtom(sampleInstance)}_uncertainty", jet_name: "${sampleKey}<Float>", op: "record.get", member: "uncertainty"}`));
   assert.ok(sourceRust.includes(`#[cfg(not(jet_native_pack))]\n    #[no_mangle]\n    pub extern "C" fn jet_rt_record_new_${runtimeAbiAtom(sampleInstance)}(`));
-  const treeKey = "<corelib>/Core/fixture::Core/fixture/fixture.jet::Tree";
+  const treeKey = "<corelib>/core.fixture::Tree";
   const treeSource = generatedRecordPath(treeKey);
   put("Core/fixture/fixture.jet", readFileSync(join(fixture, "Core/fixture/fixture.jet"), "utf8") + "enum Tree { Empty, Bytes([U8]), Number(Float) }\n");
   put("runtime.rs", readFileSync(join(fixture, "runtime.rs"), "utf8") + `

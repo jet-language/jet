@@ -42,6 +42,7 @@ use jet_foundation.[
     stable_id,
     tir_generated_local,
     tir_user_local,
+    core_identity_in_module,
 ]
 
 fn jet_codegen_dyn_type() -> Type Never! {
@@ -150,7 +151,7 @@ fn jet_codegen_typed_codec_target(ty: Type) -> Bool Never! {
         .Map(key, _, _) -> return jet_codegen_unwrap_pattern_tags(key) == Type.String
         .Named(name) -> {
             // Core's ZonedDateTime is the `Dyn.DateTime` payload: a built-in typed codec.
-            if name == "ZonedDateTime" || (name.starts_with("<corelib>/Core/time::") && name.ends_with("::ZonedDateTime")) -> return true
+            if name == "ZonedDateTime" || (core_identity_in_module(name, "core.time") && name.ends_with("::ZonedDateTime")) -> return true
             return name == "Data" || name == "Dyn" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128"
         }
         .Tagged(_, inner) -> return jet_codegen_typed_codec_target(inner)

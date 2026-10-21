@@ -15,7 +15,7 @@ fn jet_driver_core_library_sources(rows: [JetDriverCoreSource]) -> [CoreSharedSo
         members := row.owned_members
         &members.sort()
         &sources.push(CoreSharedSource{
-            module_owner_key: jet_driver_core_source_owner_key(row.path),
+            module_owner_key: jet_driver_core_source_owner_key(row.module_name),
             path: row.path, source: row.source, owned_members: members,
         })
     }
@@ -71,7 +71,7 @@ struct JetDriverCoreSourceParentHost {
 fn jet_driver_core_source_parent_new(rows: ^[JetDriverCoreSource], runtime: ^CoreSharedParentRuntime) -> JetDriverCoreSourceParentHost Never! {
     original := ^rows
     keys := [String:String]{}
-    loop row in original -> keys[row.path] = jet_driver_core_source_owner_key(row.path)
+    loop row in original -> keys[row.path] = jet_driver_core_source_owner_key(row.module_name)
     original = loop fresh_item in original -> fresh_item
     &original.sort_by((a: JetDriverCoreSource, b: JetDriverCoreSource) -> ((keys.get(a.path) ?? "") <=> (keys.get(b.path) ?? "")).then(a.path <=> b.path))
     JetDriverCoreSourceParentHost{

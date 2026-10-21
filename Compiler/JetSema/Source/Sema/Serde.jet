@@ -2,6 +2,7 @@ use jet_foundation.[
     TField,
     TTypeDef,
     Type,
+    core_identity_in_module,
 ]
 
 enum SemaSerdeDirection {
@@ -177,7 +178,7 @@ fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: Sem
             if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
             // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the
             // `Dyn.DateTime` payload, a built-in codec with no source impl.
-            if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || name.starts_with("<corelib>/Core/time::")) -> return true
+            if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || core_identity_in_module(name, "core.time")) -> return true
             if sema_serde_core_data_name(environment, program, name, direction) -> return true
             if direction == SemaSerdeDirection.Decode && name == "Secret" -> return true
             if sema_serde_generic_bound(environment, program, name, direction) -> return true

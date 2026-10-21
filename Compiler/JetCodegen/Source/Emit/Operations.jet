@@ -106,6 +106,7 @@ use jet_foundation.[
     derivation_payload_json,
     mir_operation_value_uses,
     mir_terminator_value_uses,
+    core_identity_in_module,
 ]
 
 fn jet_rust_emit_binary_operator(op: MIRBinaryOp) -> String Never! {
@@ -3076,7 +3077,7 @@ fn jet_rust_emit_email_provider_call(ctx: &JetRustEmitContext, function: MIRFunc
     if member == "smtp" && args.len() == 1 {
         bytes_field := MIRFieldID?{None}
         loop definition in ctx.program.types {
-            if !definition.key.starts_with("<corelib>/Core/crypto::") || !definition.key.ends_with("::Secret") -> next
+            if !core_identity_in_module(definition.key, "core.crypto") || !definition.key.ends_with("::Secret") -> next
             if definition.kind == .Struct(fields, _) {
                 loop field in fields {
                     if field.name == "bytes" {
@@ -3391,7 +3392,7 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
 
 // MIRRust is_core_http_type: a canonical `core.http` declaration with this leaf.
 fn jet_rust_emit_is_core_http_type(definition: MIRTypeDef, leaf: String) -> Bool Never! {
-    definition.key.starts_with("<corelib>/Core/http::") && definition.key.ends_with("::{leaf}") && !core_source_owns_type(definition.key)
+    core_identity_in_module(definition.key, "core.http") && definition.key.ends_with("::{leaf}") && !core_source_owns_type(definition.key)
 }
 
 // MIRRust native_int_payload_value: a Jet `Int` stored in a fixed-width payload

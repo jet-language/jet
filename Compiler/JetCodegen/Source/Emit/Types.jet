@@ -59,6 +59,7 @@ use jet_foundation.[
     MIRForeignLanguage,
     mir_type_from_kind,
     type_name,
+    core_identity_in_module,
 ]
 
 // A `ViewMut<T>` is already the `&mut [T]` borrow, so a read parameter of
@@ -1090,7 +1091,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
     if args.len() == 0 && name.name == "Never" -> return "std::convert::Infallible"
     if args.len() == 0 && name.name == "Stm" -> return "{ctx.config.root_prefix}JetSharedTransaction"
     if args.len() == 0 && name.name == "Transaction" -> return "JetTransaction"
-    if args.len() == 0 && name.name == "<corelib>/Core/net::Core/net/net.jet::__ResolveError" -> return "{ctx.config.root_prefix}Jet__ResolveError"
+    if args.len() == 0 && name.name == "<corelib>/core.net::__ResolveError" -> return "{ctx.config.root_prefix}Jet__ResolveError"
     // MIRRust rust_type: ScopeGuard is an inference-only carrier, and the loop
     // cursors are Prelude carriers with no MIR declaration row.
     if name.name == "ScopeGuard" -> return "_"
@@ -2085,7 +2086,7 @@ fn jet_rust_emit_compiler_owned_type(key: String) -> Bool Never! {
     if core_enum_variants(leaf) != None && (!key.starts_with("<corelib>/") || jet_rust_emit_core_rust_type_name(key) != None) -> return true
     if jet_rust_emit_core_email_type_name(leaf) != None || jet_rust_emit_core_crypto_rust_type_name(leaf) != None -> return true
     if (jet_rust_emit_core_rust_type_name(leaf) ?? "") == "JetMappedFile" -> return true
-    key.starts_with("<corelib>/Core/files::Core/files/files.jet::") && (leaf == "FileReader" || leaf == "FileWriter" || leaf == "FileScope")
+    key.starts_with("<corelib>/core.files::") && (leaf == "FileReader" || leaf == "FileWriter" || leaf == "FileScope")
 }
 
 // MIRRust runtime_declares_type: handles and compiler-owned rows (`Ordering`,
@@ -2829,7 +2830,7 @@ fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String?
 }
 
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {
-    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return name.copy()
+    if (core_identity_in_module(name, "core.sync") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return name.copy()
     jet_rust_emit_core_source_type_leaf(name)
 }
 
@@ -3016,7 +3017,7 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
 
 // Context.rs core_rust_type_name: the `jet_std::` carriers of registered Core owners.
 fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
-    if raw.starts_with("<corelib>/Core/sync::") && raw.ends_with("::RowPolicy") -> return None
+    if core_identity_in_module(raw, "core.sync") && raw.ends_with("::RowPolicy") -> return None
     if core_source_owns_type(raw) -> return None
     name :: jet_rust_emit_core_qualified_leaf(jet_rust_emit_core_source_type_leaf(raw)) ?? return None
     if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("Dyn")
@@ -3080,7 +3081,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
 
 // Context.rs file_handle_rust_type: top-level Prelude handles (not `jet_std`).
 fn jet_rust_emit_file_handle_type_name(raw: String) -> String? {
-    name :: if raw.starts_with("<corelib>/Core/files::Core/files/files.jet::") || raw.starts_with("<corelib>/Core/term::Core/term/term.jet::") -> jet_rust_emit_core_source_type_leaf(raw) else -> raw.copy()
+    name :: if raw.starts_with("<corelib>/core.files::") || raw.starts_with("<corelib>/core.term::") -> jet_rust_emit_core_source_type_leaf(raw) else -> raw.copy()
     if name == {
         "FileReader" -> Val("JetFileReader")
         "FileWriter" -> Val("JetFileWriter")
@@ -3188,7 +3189,7 @@ fn jet_rust_emit_binary_text_handle_type_name(name: String) -> String? {
 }
 
 fn jet_rust_emit_core_email_type_name(raw: String) -> String? {
-    prefix :: "<corelib>/Core/email::Core/email/email.jet::"
+    prefix :: "<corelib>/core.email::"
     name :: if raw.starts_with(prefix) -> jet_rust_emit_core_source_type_leaf(raw) else -> raw.copy()
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"email", "core.email", "core::email"}) ?? return None
     if leaf == "EmailError" -> return Val("Error")
@@ -3199,7 +3200,7 @@ fn jet_rust_emit_core_email_type_name(raw: String) -> String? {
 
 fn jet_rust_emit_core_crypto_rust_type_name(raw: String) -> String? {
     name := raw.copy()
-    if raw.starts_with("<corelib>/Core/crypto::Core/crypto/crypto.jet::") || raw.starts_with("<corelib>/Core/crypto::Core/crypto/expert.jet::") -> name = jet_rust_emit_core_source_type_leaf(raw)
+    if raw.starts_with("<corelib>/core.crypto::") || raw.starts_with("<corelib>/core.crypto.expert::") -> name = jet_rust_emit_core_source_type_leaf(raw)
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"crypto", "core.crypto", "core::crypto"}) ?? return None
     if leaf == {
         "WrappedVaultKey" -> Val("JetWrappedVaultKey")

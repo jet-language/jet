@@ -225,7 +225,7 @@ export function nativeProviderHandles(definitions) {
     validateRuntimeRoute({ symbol: name, name, params: params.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, definition);
   }
   return types.flatMap((runtime) => [
-    { jetName: `<corelib>/Core/process::Core/process/process.jet::${runtime}`, runtime },
+    { jetName: `<corelib>/core.process::${runtime}`, runtime },
     { jetName: runtime, runtime },
   ]);
 }

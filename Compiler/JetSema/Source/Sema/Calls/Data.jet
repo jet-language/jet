@@ -25,6 +25,7 @@ use jet_foundation.[
     expr_span,
     type_name,
     UnOp,
+    core_identity_in_module,
 ]
 
 fn sema_dyn_type() -> Type Never! { Type.Named{name: "Dyn"} }
@@ -33,7 +34,7 @@ fn sema_data_decode_error() -> Type Never! { Type.List{element: Type.Named{name:
 fn sema_data_result(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
 
 fn sema_data_nominal_is(name: String, leaf: String) -> Bool Never! {
-    name == leaf || (name.starts_with("<corelib>/Core/data::") && name.ends_with("::{leaf}"))
+    name == leaf || (core_identity_in_module(name, "core.data") && name.ends_with("::{leaf}"))
 }
 
 fn sema_data_source_type_name(environment: SemaScopeEnvironment, program: SemaProgramTables, leaf: String) -> String Never! {
