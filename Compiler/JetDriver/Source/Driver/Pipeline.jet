@@ -3501,6 +3501,14 @@ fn jet_driver_comptime_flush(
         if eval_result.error == None && eval_result.internal_problem == None && eval_result.complete && !eval_result.soft_stop {
             evaluated_value = jet_eval_comptime_value(&eval_result, comptime_request.span)
         }
+        if request.eval_config.ir_differential {
+            // The staged session holds the declared modules (the runtime
+            // modules are identity-only when the batch stages bare).
+            if &staging.session == {
+                None -> {}
+                .Val(session) -> jet_driver_comptime_ir_differential(session.program.modules, batch.functions, comptime_request, values, request.eval_config, evaluated_value, eval_result.error, eval_result.internal_problem, request.trace_sink)
+            }
+        }
         // The retired session keeps the program for the next entry.
         _ := jet_eval_retire_in_place(&eval_result, comptime_request.span)
         &machines.push(JetDriverComptimeMachine{program: None, session: ^eval_result.session, globals_count: values.len()})

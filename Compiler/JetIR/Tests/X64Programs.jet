@@ -552,6 +552,19 @@ fn xp_exact_ops() -> IRModule {
         XPRow{op: IROp.Shr, left: -77, right: 100, big: false},
         XPRow{op: IROp.Shr, left: 1000003, right: 63, big: false},
         XPRow{op: IROp.Shr, left: 0, right: 3, big: true},
+        // Power-of-two divisors: shifts and masks, a big dividend the route.
+        XPRow{op: IROp.FloorDiv, left: -1000003, right: 8, big: false},
+        XPRow{op: IROp.Mod, left: -1000003, right: 8, big: false},
+        XPRow{op: IROp.Rem, left: -1000003, right: 8, big: false},
+        XPRow{op: IROp.Rem, left: 1000003, right: 8, big: false},
+        XPRow{op: IROp.FloorDiv, left: -1000003, right: 1099511627776, big: false},
+        XPRow{op: IROp.Mod, left: -1000003, right: 1099511627776, big: false},
+        XPRow{op: IROp.Rem, left: -1000003, right: 1099511627776, big: false},
+        XPRow{op: IROp.Rem, left: -7, right: 2, big: false},
+        XPRow{op: IROp.Mod, left: -7, right: 2, big: false},
+        XPRow{op: IROp.FloorDiv, left: 0, right: 2, big: true},
+        XPRow{op: IROp.Mod, left: 0, right: 1024, big: true},
+        XPRow{op: IROp.Rem, left: 0, right: 1024, big: true},
     }
     loop (index, row) in rows {
         left :: if row.big -> big else -> xp_const(&f, t.int, row.left)
@@ -630,6 +643,38 @@ fn xp_words() -> IRModule {
     wrapped :: xp_temp(&f, t.u8)
     hundred :: xp_const(&f, t.u8, 100)
     _ := ir_emit(&f, IROp.Add, wrapped, bb, hundred, IR_OVERFLOW_WRAP, 21)
+    // Power-of-two divisors (shifts and masks) and wrapping products by
+    // 2^k (left shifts, the factor on either side).
+    four :: xp_const(&f, t.i32, 4)
+    rows :: [IROp]{IROp.FloorDiv, IROp.Mod, IROp.Rem}
+    loop (index, op) in rows {
+        divided :: xp_temp(&f, t.i32)
+        xp_op_at(&f, op, divided, y, four, 22 + index)
+        xp_print_value(&m, &f, t, "jet_rt_i64_to_string", divided)
+    }
+    page :: xp_const(&f, t.u64, 4096)
+    pages :: xp_temp(&f, t.u64)
+    xp_op_at(&f, IROp.FloorDiv, pages, w, page, 25)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", pages)
+    within :: xp_temp(&f, t.u64)
+    xp_op_at(&f, IROp.Mod, within, w, page, 26)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", within)
+    words :: xp_temp(&f, t.u64)
+    _ := ir_emit(&f, IROp.Mul, words, w, eight, IR_OVERFLOW_WRAP, 27)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", words)
+    four_bytes :: xp_const(&f, t.u8, 4)
+    quadrupled :: xp_temp(&f, t.u8)
+    _ := ir_emit(&f, IROp.Mul, quadrupled, four_bytes, cc, IR_OVERFLOW_WRAP, 28)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", quadrupled)
+    // Convert: I32 to Float rounds (exactly here), Float back to I32 truncates.
+    widened :: xp_temp(&f, t.float)
+    _ := ir_emit(&f, IROp.Convert, widened, x, -1, -1, 29)
+    xp_print_value(&m, &f, t, "jet_rt_float_to_string", widened)
+    negative_float :: xp_temp(&f, t.float)
+    _ := ir_emit(&f, IROp.Convert, negative_float, y, -1, -1, 30)
+    back :: xp_temp(&f, t.i32)
+    _ := ir_emit(&f, IROp.Convert, back, negative_float, -1, -1, 30)
+    xp_print_value(&m, &f, t, "jet_rt_i64_to_string", back)
     xp_return(&f, -1)
     xp_entry(&m, f)
     m
@@ -754,6 +799,22 @@ fn xp_structs() -> IRModule {
     start :: ir_args(&f, [Int]{duplicate})
     _ := ir_emit(&f, IROp.CallIndirect, second, code, start, 1, 20)
     xp_print_int(&m, &f, t, second)
+    // r := q into temporary storage: its address folds into the CopyBytes,
+    // a Load, an Offset and a call argument.
+    scratch :: xp_temp(&f, t.point)
+    _ := ir_emit(&f, IROp.StackAddress, scratch, 16, 8, -1, 21)
+    _ := ir_emit(&f, IROp.CopyBytes, -1, scratch, duplicate, 16, 21)
+    ry :: xp_temp(&f, t.int)
+    _ := ir_emit(&f, IROp.Load, ry, scratch, 8, -1, 22)
+    xp_print_int(&m, &f, t, ry)
+    rx_field :: xp_temp(&f, t.pointer)
+    _ := ir_emit(&f, IROp.Offset, rx_field, scratch, 0, -1, 23)
+    rx :: xp_temp(&f, t.int)
+    _ := ir_emit(&f, IROp.Load, rx, rx_field, 0, -1, 23)
+    xp_print_int(&m, &f, t, rx)
+    third :: xp_temp(&f, t.int)
+    xp_call(&f, total_row, [Int]{scratch}, third)
+    xp_print_int(&m, &f, t, third)
     xp_return(&f, -1)
     xp_entry(&m, f)
     m

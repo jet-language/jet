@@ -42,6 +42,7 @@ use jet_driver.[
     JetDriverScriptDependency,
 ]
 use jet_eval.[
+    JetEvalConfig,
     jet_eval_host_config,
 ]
 use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runtime_pack]
@@ -633,7 +634,7 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
         core_sources: core_sources,
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity()},
-        eval_config: jet_eval_host_config(),
+        eval_config: jet_cli_eval_config(),
         target: JetDriverCompileTarget.Native,
         record_store: None,
         trace_sink: None,
@@ -647,6 +648,16 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
     }
+}
+
+// The evaluator configuration of a CLI compile. Dev verification knob:
+// JET_COMPTIME_IR_DIFF=1 also runs every comptime item on the slot IR
+// evaluator and traces whether it agrees with the MIR evaluator (span
+// `comptime.ir` of `--trace`).
+fn jet_cli_eval_config() -> JetEvalConfig Never! {
+    config := jet_eval_host_config()
+    config.ir_differential = (cli_sys.get("JET_COMPTIME_IR_DIFF") ?? "") == "1"
+    config
 }
 
 // The CLI's raw build-input transport for checked `fn build` input services:

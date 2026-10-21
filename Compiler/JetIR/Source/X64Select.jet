@@ -29,7 +29,7 @@ use jet_backend.[
     X64Alu, X64Cond, X64CompiledFunction, X64DebugLocation, X64FloatOp, X64FunctionDebug, X64LineRow, X64Reloc, X64RelocTarget, X64Shift, X64VariableRange,
     X64_R10, X64_R11, X64_R8, X64_R9, X64_RAX, X64_RBP, X64_RCX, X64_RDI, X64_RDX, X64_RSI, X64_RSP,
     dwarf_cfa_advance, dwarf_cfa_def_cfa, dwarf_cfa_def_cfa_offset, dwarf_cfa_def_cfa_register, dwarf_cfa_offset, dwarf_cfa_remember_state, dwarf_cfa_restore_state,
-    x64_alu_ri, x64_alu_rr, x64_call_reg, x64_call_rel32, x64_cond_invert, x64_cqo, x64_debug_line, x64_div, x64_dwarf_register, x64_fits_i32,
+    x64_alu_ri, x64_alu_rr, x64_call_reg, x64_call_rel32, x64_cond_invert, x64_cqo, x64_cvtsd2ss, x64_cvtsi2sd, x64_cvtsi2ss, x64_cvtss2sd, x64_cvttsd2si, x64_cvttss2si, x64_debug_line, x64_div, x64_dwarf_register, x64_fits_i32,
     x64_float_load, x64_float_op, x64_float_store, x64_idiv, x64_imul_rr, x64_jcc_rel32, x64_jmp_rel32, x64_lea, x64_lea_rip,
     x64_load, x64_load_indexed, x64_mov_ri, x64_mov_rr, x64_movzx_r8, x64_mul, x64_neg,
     x64_patch_rel32, x64_pop, x64_push, x64_rep_movsb, x64_ret, x64_setcc, x64_shift_cl, x64_shift_ri, x64_store, x64_store_indexed, x64_test_rr, x64_ucomisd, x64_ucomiss, x64_ud2,
@@ -138,9 +138,11 @@ fn ir_x64_fail(e: &IRX64Emitter, f: IRFunction, at: Int, message: String) Never!
 // ---------------------------------------------------------------------------
 // Slot access.
 
-// Puts `slot`'s value in `reg`: its word (a constant's immediate) or a Float's bits.
+// Puts `slot`'s value in `reg`: its word (a constant's immediate, a frame
+// address's `lea`) or a Float's bits.
 fn ir_x64_load(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, slot: Int, reg: Int) Never! {
     if al.consts[slot] -> return x64_mov_ri(&e.code, reg, al.values[slot])
+    if al.frames[slot] != 0 -> return x64_lea(&e.code, reg, X64_RBP, al.frames[slot])
     if ir_x64_slot_class(m, f, slot) == {
         .General -> {
             held :: al.regs[slot]
@@ -404,7 +406,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: cold.symbol}})
                 ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
-                x64_patch_rel32(&e.code, x64_jmp_rel32(&e.code), cold.resume)
+                ir_x64_jump_to(&e, cold.resume)
             }
             .LocatedRoute -> {
                 path :: tables.texts.get(f.source_file) ?? -1
@@ -416,7 +418,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 at :: x64_call_rel32(&e.code)
                 &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: cold.symbol}})
                 ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
-                x64_patch_rel32(&e.code, x64_jmp_rel32(&e.code), cold.resume)
+                ir_x64_jump_to(&e, cold.resume)
             }
             .Compare -> {
                 ir_x64_operand(&e, m, f, al, cold.left, cold.left_imm, X64_RDI)
@@ -430,7 +432,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                     x64_movzx_r8(&e.code, X64_RAX, X64_RAX)
                     ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
                 }
-                x64_patch_rel32(&e.code, x64_jmp_rel32(&e.code), cold.resume)
+                ir_x64_jump_to(&e, cold.resume)
             }
             .Stop -> {
                 path :: tables.texts.get(cold.symbol) ?? -1
@@ -641,18 +643,77 @@ fn ir_x64_floor_adjust(e: &IRX64Emitter, op: IROp) Never! {
     } else {
         x64_alu_rr(&e.code, X64Alu.Add, X64_RDX, X64_RCX)
     }
-    x64_patch_rel32(&e.code, exact, e.code.len())
-    x64_patch_rel32(&e.code, same, e.code.len())
+    ir_x64_land(&e, exact)
+    ir_x64_land(&e, same)
+}
+
+// The k of a constant `slot` that holds 2^k with 1 <= k <= 62, else -1.
+fn ir_x64_power_of_two(al: IRX64Allocation, slot: Int) -> Int Never! {
+    if slot < 0 || !al.consts[slot] || al.values[slot] < 2 -> return -1
+    power := 2
+    k := 1
+    loop power < al.values[slot] && k < 62 {
+        power = power * 2
+        k += 1
+    }
+    if power == al.values[slot] -> k else -> -1
+}
+
+// `and reg, value` (through rcx when the mask does not fit an immediate).
+fn ir_x64_and_imm(e: &IRX64Emitter, reg: Int, value: Int) Never! {
+    if x64_fits_i32(value) -> return x64_alu_ri(&e.code, X64Alu.And, reg, value)
+    x64_mov_ri(&e.code, X64_RCX, value)
+    x64_alu_rr(&e.code, X64Alu.And, reg, X64_RCX)
+}
+
+// rax divided by 2^k (1 <= k <= 62) into rax as `op` rounds, without a
+// divide: FloorDiv shifts, Mod masks; a signed Div biases a negative
+// dividend by 2^k - 1 before the shift, and Rem subtracts that quotient
+// times 2^k. `signed` reads rax as a signed word. Uses rcx and rdx.
+fn ir_x64_power_division(e: &IRX64Emitter, op: IROp, signed: Bool, k: Int) Never! {
+    remainder :: op == .Rem || op == .Mod
+    if !signed || op == .FloorDiv || op == .Mod {
+        if remainder -> return ir_x64_and_imm(&e, X64_RAX, (1 << k) - 1)
+        return x64_shift_ri(&e.code, if signed -> X64Shift.Sar else -> X64Shift.Shr, X64_RAX, k)
+    }
+    x64_mov_rr(&e.code, X64_RDX, X64_RAX)
+    x64_shift_ri(&e.code, X64Shift.Sar, X64_RDX, 63)
+    x64_shift_ri(&e.code, X64Shift.Shr, X64_RDX, 64 - k)
+    if op == .Div {
+        x64_alu_rr(&e.code, X64Alu.Add, X64_RAX, X64_RDX)
+        return x64_shift_ri(&e.code, X64Shift.Sar, X64_RAX, k)
+    }
+    x64_alu_rr(&e.code, X64Alu.Add, X64_RDX, X64_RAX)
+    ir_x64_and_imm(&e, X64_RDX, 0 - (1 << k))
+    x64_alu_rr(&e.code, X64Alu.Sub, X64_RAX, X64_RDX)
+}
+
+fn ir_x64_division_symbol(op: IROp) -> String Never! {
+    if op == {
+        .Div -> "jet_int_div"
+        .Rem -> "jet_int_rem"
+        .FloorDiv -> "jet_int_floor_div"
+        else -> "jet_int_mod"
+    }
 }
 
 // Exact Int Div, Rem (truncating), FloorDiv, Mod (Int.jet int_division):
 // two inline operands and a divisor other than 0 and -1 divide natively
-// (the quotient and remainder of such words are inline); otherwise the
-// located runtime route, which keeps the division-by-zero stop and the big
-// quotient of the smallest inline word by -1.
+// (the quotient and remainder of such words are inline), a constant 2^k
+// divisor by shifts and masks; otherwise the located runtime route, which
+// keeps the division-by-zero stop and the big quotient of the smallest
+// inline word by -1.
 fn ir_x64_exact_division(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
     op :: f.op[at]
     sites := [Int]{}
+    k :: ir_x64_power_of_two(al, f.b[at])
+    if k > 0 {
+        ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
+        ir_x64_operand_test(&e, al, f.a[at], X64_RAX, &sites)
+        ir_x64_power_division(&e, op, true, k)
+        ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
+        return ir_x64_located_cold(&e, f, at, ir_x64_division_symbol(op), sites)
+    }
     ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
     ir_x64_load(&e, m, f, al, f.b[at], X64_RCX)
     ir_x64_operand_test(&e, al, f.a[at], X64_RAX, &sites)
@@ -670,13 +731,7 @@ fn ir_x64_exact_division(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
     if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(&e, op)
     if op == .Rem || op == .Mod -> x64_mov_rr(&e.code, X64_RAX, X64_RDX)
     ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
-    symbol :: if op == {
-        .Div -> "jet_int_div"
-        .Rem -> "jet_int_rem"
-        .FloorDiv -> "jet_int_floor_div"
-        else -> "jet_int_mod"
-    }
-    ir_x64_located_cold(&e, f, at, symbol, sites)
+    ir_x64_located_cold(&e, f, at, ir_x64_division_symbol(op), sites)
 }
 
 fn ir_x64_int_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
@@ -769,12 +824,12 @@ fn ir_x64_word_division(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables, at
         ir_x64_narrow(&e, X64_RAX, true, bits)
     }
     done :: x64_jmp_rel32(&e.code)
-    x64_patch_rel32(&e.code, divide, e.code.len())
+    ir_x64_land(&e, divide)
     x64_cqo(&e.code)
     x64_idiv(&e.code, X64_RCX)
     if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(&e, op)
     if remainder -> x64_mov_rr(&e.code, X64_RAX, X64_RDX)
-    x64_patch_rel32(&e.code, done, e.code.len())
+    ir_x64_land(&e, done)
 }
 
 // Fixed-width Shl, Shr of rax by rcx (cl) into rax.
@@ -808,6 +863,24 @@ fn ir_x64_word_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         right :: ir_x64_use(&e, m, f, al, f.b[at], X64_RCX)
         x64_alu_rr(&e.code, X64Alu.Cmp, left, right)
         return ir_x64_compare_result(&e, m, f, al, at, ir_x64_condition(op, ir_x64_unsigned(ty)))
+    }
+    k :: ir_x64_power_of_two(al, f.b[at])
+    division :: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
+    if k > 0 && division {
+        // A 2^k divisor is neither 0 nor -1: no stop can happen.
+        ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
+        ir_x64_power_division(&e, op, ty.signed, k)
+        return ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
+    }
+    if op == .Mul && f.c[at] == IR_OVERFLOW_WRAP {
+        // A wrapping product by 2^k is a left shift (the same low bits).
+        left_k :: ir_x64_power_of_two(al, f.a[at])
+        if k > 0 || left_k > 0 {
+            ir_x64_load(&e, m, f, al, if k > 0 -> f.a[at] else -> f.b[at], X64_RAX)
+            x64_shift_ri(&e.code, X64Shift.Shl, X64_RAX, if k > 0 -> k else -> left_k)
+            ir_x64_narrow(&e, X64_RAX, ty.signed, ir_x64_bits(ty))
+            return ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
+        }
     }
     ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
     ir_x64_load(&e, m, f, al, f.b[at], X64_RCX)
@@ -973,6 +1046,38 @@ fn ir_x64_not(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation,
     ir_x64_store(&e, m, f, al, dst, X64_RAX)
 }
 
+// Convert by the slot types: a Float or Float32 truncates into a Word
+// (cvttsd2si / cvttss2si), a Word, read as signed 64-bit, rounds into a Float
+// (cvtsi2sd / cvtsi2ss), and the Float widths convert into each other.
+fn ir_x64_convert(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
+    from :: ir_x64_type(m, f, f.a[at])
+    to :: ir_x64_type(m, f, f.dst[at])
+    dst :: f.dst[at]
+    float_from :: ir_x64_class(from) == .Float
+    float_to :: ir_x64_class(to) == .Float
+    if float_from && to.kind == .Word {
+        ir_x64_load_xmm(&e, m, f, al, f.a[at], 0)
+        if from.kind == .Float32 -> x64_cvttss2si(&e.code, X64_RAX, 0) else -> x64_cvttsd2si(&e.code, X64_RAX, 0)
+        ir_x64_normalize(&e, to, X64_RAX)
+        return ir_x64_store(&e, m, f, al, dst, X64_RAX)
+    }
+    if from.kind == .Word && float_to {
+        ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
+        if to.kind == .Float32 -> x64_cvtsi2ss(&e.code, 0, X64_RAX) else -> x64_cvtsi2sd(&e.code, 0, X64_RAX)
+        return ir_x64_store_xmm(&e, m, f, al, dst, 0)
+    }
+    if float_from && float_to {
+        ir_x64_load_xmm(&e, m, f, al, f.a[at], 0)
+        if from.kind == .Float32 && to.kind == .Float {
+            x64_cvtss2sd(&e.code, 0, 0)
+        } else if from.kind == .Float && to.kind == .Float32 {
+            x64_cvtsd2ss(&e.code, 0, 0)
+        }
+        return ir_x64_store_xmm(&e, m, f, al, dst, 0)
+    }
+    ir_x64_fail(&e, f, at, "no conversion from {ir_kind_name(from.kind)} to {ir_kind_name(to.kind)}")
+}
+
 // ---------------------------------------------------------------------------
 // Ownership.
 
@@ -985,7 +1090,7 @@ fn ir_x64_int_route(e: &IRX64Emitter, symbol: String) Never! {
     x64_mov_rr(&e.code, X64_RDI, X64_RAX)
     at :: x64_call_rel32(&e.code)
     &e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Runtime{symbol: symbol}})
-    x64_patch_rel32(&e.code, done, e.code.len())
+    ir_x64_land(&e, done)
 }
 
 fn ir_x64_transfer(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
@@ -1041,10 +1146,19 @@ fn ir_x64_value_width(ty: IRX64Shape) -> Int Never! {
     }
 }
 
+// The base register and displacement of `slot` + `offset`: rbp and the
+// storage's displacement for a frame address, else the slot's register
+// (`scratch` loaded).
+fn ir_x64_address(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, slot: Int, offset: Int, scratch: Int) -> (base: Int, disp: Int) Never! {
+    if al.frames[slot] != 0 -> return (base: X64_RBP, disp: al.frames[slot] + offset)
+    (base: ir_x64_use(&e, m, f, al, slot, scratch), disp: offset)
+}
+
 fn ir_x64_memory(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
     op :: f.op[at]
-    base :: ir_x64_use(&e, m, f, al, f.a[at], X64_R10)
-    offset :: f.b[at]
+    address :: ir_x64_address(&e, m, f, al, f.a[at], f.b[at], X64_R10)
+    base :: address.base
+    offset :: address.disp
     if !x64_fits_i32(offset) -> return ir_x64_fail(&e, f, at, "offset {offset} does not fit a displacement")
     if op == .Load {
         dst :: f.dst[at]
@@ -1063,10 +1177,14 @@ fn ir_x64_memory(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
     x64_store_indexed(&e.code, base, -1, 1, offset, X64_RAX, ir_x64_value_width(ty))
 }
 
-// Offset: dst = pointer a + b bytes.
+// Offset: dst = pointer a + b bytes (a frame address's is one `lea`).
 fn ir_x64_offset(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
-    ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
     offset :: f.b[at]
+    if al.frames[f.a[at]] != 0 && x64_fits_i32(al.frames[f.a[at]] + offset) {
+        x64_lea(&e.code, X64_RAX, X64_RBP, al.frames[f.a[at]] + offset)
+        return ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
+    }
+    ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
     if x64_fits_i32(offset) {
         if offset != 0 -> x64_alu_ri(&e.code, X64Alu.Add, X64_RAX, offset)
     } else {
@@ -1076,11 +1194,12 @@ fn ir_x64_offset(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
     ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
 }
 
-// CopyBytes: c bytes from pointer b to pointer a.
+// CopyBytes: c bytes from pointer b to pointer a; a frame address is its
+// rbp displacement.
 fn ir_x64_copy(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
-    ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
-    ir_x64_load(&e, m, f, al, f.b[at], X64_RDX)
-    ir_x64_copy_bytes(&e, X64_RDX, 0, X64_RAX, 0, f.c[at])
+    to :: ir_x64_address(&e, m, f, al, f.a[at], 0, X64_RAX)
+    from :: ir_x64_address(&e, m, f, al, f.b[at], 0, X64_RDX)
+    ir_x64_copy_bytes(&e, from.base, from.disp, to.base, to.disp, f.c[at])
 }
 
 fn ir_x64_const(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
@@ -1109,6 +1228,18 @@ fn ir_x64_branch(e: &IRX64Emitter, f: IRFunction, at: Int, depth: Int, condition
     if e.heads[row] >= 0 -> return x64_patch_rel32(&e.code, site, e.heads[row])
     &e.end_sites.push(site)
     &e.end_targets.push(e.open[row])
+}
+
+// Points the rel32 field at `site` to the end of the code so far.
+fn ir_x64_land(e: &IRX64Emitter, site: Int) Never! {
+    here :: e.code.len()
+    x64_patch_rel32(&e.code, site, here)
+}
+
+// A jmp to `target`, an offset already in the code.
+fn ir_x64_jump_to(e: &IRX64Emitter, target: Int) Never! {
+    site :: x64_jmp_rel32(&e.code)
+    x64_patch_rel32(&e.code, site, target)
 }
 
 fn ir_x64_open(e: &IRX64Emitter, at: Int, head: Int, false_site: Int) Never! {
@@ -1200,6 +1331,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> ir_x64_binary(&e, m, f, al, tables, at)
         .Neg -> ir_x64_neg(&e, m, f, al, tables, at)
         .Not -> ir_x64_not(&e, m, f, al, at)
+        .Convert -> ir_x64_convert(&e, m, f, al, at)
         .Concat -> ir_x64_helper(&e, m, f, al, "jet_rt_string_concat", [IRX64Arg]{IRX64Arg.Slot{slot: f.a[at]}, IRX64Arg.Slot{slot: f.b[at]}}, dst)
         .Call -> {
             if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return ir_x64_fail(&e, f, at, "function {f.a[at]} is not in the module")
@@ -1223,21 +1355,27 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Offset -> ir_x64_offset(&e, m, f, al, at)
         .CopyBytes -> ir_x64_copy(&e, m, f, al, at)
         .StackAddress -> {
+            if al.frames[dst] != 0 -> return
             x64_lea(&e.code, X64_RAX, X64_RBP, al.stack[at])
             ir_x64_store(&e, m, f, al, dst, X64_RAX)
         }
         .Block -> ir_x64_open(&e, at, -1, -1)
-        .Loop -> ir_x64_open(&e, at, e.code.len(), -1)
+        .Loop -> {
+            head :: e.code.len()
+            ir_x64_open(&e, at, head, -1)
+        }
         .If -> {
             truth :: ir_x64_truth(&e, m, f, al, f.a[at])
-            ir_x64_open(&e, at, -1, x64_jcc_rel32(&e.code, x64_cond_invert(truth)))
+            false_site :: x64_jcc_rel32(&e.code, x64_cond_invert(truth))
+            ir_x64_open(&e, at, -1, false_site)
         }
         .Else -> {
             if e.open.len() == 0 -> return ir_x64_fail(&e, f, at, "Else without an If")
             row :: e.open.len() - 1
             &e.end_sites.push(x64_jmp_rel32(&e.code))
             &e.end_targets.push(e.open[row])
-            if e.falses[row] >= 0 -> x64_patch_rel32(&e.code, e.falses[row], e.code.len())
+            false_site :: e.falses[row]
+            if false_site >= 0 -> ir_x64_land(&e, false_site)
             e.falses[row] = -1
         }
         .End -> ir_x64_end(&e, f, at)
@@ -1263,7 +1401,7 @@ fn ir_x64_variables(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX
         ty :: ir_x64_type(m, f, slot)
         variable :: variables.len()
         &variables.push(LIRDebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: false})
-        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty -> next
+        if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] || al.frames[slot] != 0 -> next
         if al.regs[slot] >= 0 {
             start :: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot]]
             stop :: positions[al.ends[slot] + 1]

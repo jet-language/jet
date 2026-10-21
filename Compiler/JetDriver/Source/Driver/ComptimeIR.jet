@@ -1,0 +1,61 @@
+// The comptime differential oracle: with `eval_config.ir_differential` set,
+// every comptime item the MIR evaluator evaluates is also built as slot IR
+// and run on the IR evaluator (jet_eval_ir_comptime), and one trace span
+// `comptime.ir` records the item and whether both agree. The MIR result is
+// what the compile uses; this only observes it.
+use jet_foundation.[CompilerTraceSink, Diagnostic, Span, TComptimeValue, TConstantDef, TExpr, TFunc, TStmt, TTypeDef, TVisibility]
+use jet_sema.[SemaComptimeItemRequest, SemaComptimeItemValue, SemaGraphModuleResult]
+use jet_codegen.[jet_codegen_comptime_item_function]
+use jet_eval.[JetEvalConfig, JetEvalError, JetEvalInternalProblem, JetEvalIRResult, jet_eval_ir_comptime]
+
+fn jet_driver_comptime_ir_differential(
+    modules: [SemaGraphModuleResult],
+    closure: [TFunc],
+    request: SemaComptimeItemRequest,
+    values: [SemaComptimeItemValue],
+    config: JetEvalConfig,
+    mir_value: TComptimeValue?,
+    mir_error: JetEvalError?,
+    mir_problem: JetEvalInternalProblem?,
+    trace_sink: CompilerTraceSink?,
+) {
+    item := jet_codegen_comptime_item_function(request, request.module_identity)
+    item.body = [TStmt]{TStmt.Return{value: Val(request.expression.copy()), span: request.span}}
+    type_defs := [TTypeDef]{}
+    constants := [TConstantDef]{}
+    // Landed values first: the builder keeps the first row of a key.
+    loop value in values {
+        &constants.push(TConstantDef{module_identity: value.module_identity.copy(), key: value.key.copy(), name: value.key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()})
+        if value.destination_key != value.key {
+            &constants.push(TConstantDef{module_identity: value.module_identity.copy(), key: value.destination_key.copy(), name: value.destination_key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()})
+        }
+    }
+    loop checked in modules {
+        loop definition in checked.declarations.type_defs -> &type_defs.push(definition.copy())
+        loop definition in checked.declarations.constants -> &constants.push(definition.copy())
+    }
+    ir := jet_eval_ir_comptime(closure.copy(), ^item, ^type_defs, ^constants, config, request.span)
+    row :: jet_driver_comptime_ir_row(request.key, mir_value, mir_error, mir_problem, ir)
+    if trace_sink == .Val(sink) {
+        sink.begin("comptime.ir", row, -1, -1)
+        sink.end("comptime.ir", 0)
+    }
+}
+
+// `<verdict>\t<item key>\t<MIR result>\t<IR result>`: SAME when both
+// produce the same value or the same diagnostic, DIFF otherwise, BUILD when
+// the IR builder could not build the item's closure.
+fn jet_driver_comptime_ir_row(key: String, mir_value: TComptimeValue?, mir_error: JetEvalError?, mir_problem: JetEvalInternalProblem?, ir: JetEvalIRResult) -> String Never! {
+    mir :: jet_driver_comptime_ir_outcome(mir_value, mir_error, mir_problem, "")
+    if ir.build_failures.len() > 0 -> return "BUILD\t{key}\t{mir}\t{ir.build_failures.join(" | ")}"
+    other :: jet_driver_comptime_ir_outcome(ir.value, ir.error, ir.internal_problem, ir.stdout)
+    verdict :: if mir == other -> "SAME" else -> "DIFF"
+    "{verdict}\t{key}\t{mir}\t{other}"
+}
+
+fn jet_driver_comptime_ir_outcome(value: TComptimeValue?, error: JetEvalError?, problem: JetEvalInternalProblem?, stdout: String) -> String Never! {
+    if problem == .Val(found) -> return "internal: {found.message}"
+    if error == .Val(failed) -> return "error {failed.diagnostic.code}: {failed.diagnostic.what}"
+    if value == .Val(data) -> return "value {data}"
+    "incomplete"
+}

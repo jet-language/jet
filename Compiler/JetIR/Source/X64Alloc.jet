@@ -64,13 +64,19 @@ struct IRX64Allocation {
     // Per slot: the callee-saved register holding it, -1 for its frame home.
     regs: [Int]
     // Per slot: the rbp displacement of its frame home (0 for a register
-    // slot, a constant slot or a Unit slot).
+    // slot, a constant slot, a frame address or a Unit slot).
     homes: [Int]
     // Per slot: whether it is a constant (a General temporary whose only
     // write is a Const): it has no place, every read is its immediate
     // `values[slot]` and its Const emits nothing.
     consts: [Bool]
     values: [Int]
+    // Per slot: the rbp displacement of the storage a frame address (a
+    // General temporary whose only write is a StackAddress) points at, 0 for
+    // any other slot: it has no place, its StackAddress emits nothing, a
+    // Load, Store, Offset or CopyBytes through it addresses rbp directly and
+    // any other read is a `lea`.
+    frames: [Int]
     // Per slot: the first and last instruction index of its live range
     // (-1 for a parameter's start); start > end when it is never referenced.
     starts: [Int]
@@ -95,7 +101,7 @@ fn ir_x64_reads_into(f: IRFunction, at: Int, reads: &[Int]) Never! {
     b :: f.b[at]
     c :: f.c[at]
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Load | .Offset | .If | .BrIf -> &reads.push(a)
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> &reads.push(a)
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat -> {
             &reads.push(a)
             &reads.push(b)
@@ -178,11 +184,13 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     }
     consts := [Bool]{}
     values := [Int]{}
+    addressed := [Bool]{}
     loop slot in 0..<count {
         at :: last_write[slot]
         constant :: slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .Const && ir_x64_row_class(m, f.slot_type[slot]) == .General
         &consts.push(constant)
         &values.push(if constant -> f.a[at] else -> 0)
+        &addressed.push(slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .StackAddress && ir_x64_row_class(m, f.slot_type[slot]) == .General)
     }
     // Loops, as (start, end) instruction pairs.
     loop_starts := [Int]{}
@@ -218,16 +226,18 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         }
     }
 
-    // Linear scan over the General slots, by start then slot.
+    // Linear scan over the General slots, by start then slot: one sort of
+    // the keys (start + 1) * count + slot (a parameter starts at -1).
     regs := [Int]{}
     loop _ in 0..<count -> &regs.push(-1)
-    order := [Int]{}
+    keys := [Int]{}
     loop slot in 0..<count {
-        if starts[slot] > ends[slot] || consts[slot] -> next
+        if starts[slot] > ends[slot] || consts[slot] || addressed[slot] -> next
         if ir_x64_row_class(m, f.slot_type[slot]) != .General -> next
-        &order.push(slot)
+        &keys.push((starts[slot] + 1) * count + slot)
     }
-    &order.sort_by((left: Int, right: Int) -> if starts[left] == starts[right] -> left <=> right else -> starts[left] <=> starts[right])
+    &keys.sort()
+    order :: loop key in keys -> key %% count
     pool :: IR_X64_SLOT_REGISTERS
     owners := [Int]{}
     loop _ in 0..<pool.len() -> &owners.push(-1)
@@ -282,7 +292,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     homes := [Int]{}
     loop slot in 0..<count {
         home := 0
-        if regs[slot] < 0 && !consts[slot] && starts[slot] <= ends[slot] && ir_x64_row_class(m, f.slot_type[slot]) != .Empty {
+        if regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && ir_x64_row_class(m, f.slot_type[slot]) != .Empty {
             depth += 8
             home = 0 - depth
         }
@@ -315,7 +325,9 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         }
         &stack.push(disp)
     }
+    frames := [Int]{}
+    loop slot in 0..<count -> &frames.push(if addressed[slot] -> stack[last_write[slot]] else -> 0)
     total :: ir_x64_align(depth, 16)
     frame_bytes :: total - 8 * kept.len()
-    IRX64Allocation{regs: ^regs, homes: ^homes, consts: ^consts, values: ^values, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home}
+    IRX64Allocation{regs: ^regs, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home}
 }

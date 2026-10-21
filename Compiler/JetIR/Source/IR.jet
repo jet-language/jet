@@ -26,6 +26,16 @@
 //                                              Float is IEEE
 //   Eq Ne Lt Le Gt Ge                          dst(Bool) a=left b=right
 //   Neg Not                                    dst  a=operand
+//   Convert      dst  a=operand                numeric conversion by the slot
+//                                              types: Float/Float32 to a Word
+//                                              truncates toward zero (signed
+//                                              64-bit, then wrapped to the
+//                                              Word; NaN and out of range give
+//                                              the minimum), a Word to a Float
+//                                              reads the word as signed 64-bit
+//                                              and rounds to nearest, Float to
+//                                              Float32 rounds, Float32 to Float
+//                                              is exact
 //   Concat       dst  a=left b=right           String + String (new owned String)
 //   Call         dst? a=function b=args c=count
 //   CallRuntime  dst? a=name (symbol) b=args c=count
@@ -91,6 +101,7 @@ enum IROp {
     Ge
     Neg
     Not
+    Convert
     Concat
     Call
     CallRuntime
@@ -358,6 +369,7 @@ fn ir_op_name(op: IROp) -> String Never! {
         .Ge -> "ge"
         .Neg -> "neg"
         .Not -> "not"
+        .Convert -> "convert"
         .Concat -> "concat"
         .Call -> "call"
         .CallRuntime -> "call_runtime"
