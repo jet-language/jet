@@ -182,14 +182,15 @@ fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previo
         if command == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
     actual := step
+    // The direct tier runs the staged entry by its full path from the case's
+    // work directory, the same cwd the compiled tier's artifact runs in.
     if command == "built" && golden.tier.direct {
-        argv := [String]{context.env.jet, "run", golden.entry.path}
+        argv := [String]{context.env.jet, "run", files.join(golden.source, golden.entry.path)}
         if step.argv.len() > 1 {
             &argv.push("--")
             loop arg in step.argv.slice(1, step.argv.len()) -> &argv.push(arg)
         }
         actual.argv = argv
-        if actual.cwd == "" -> actual.cwd = golden.source
     }
     if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
     kit_steps_invoke(actual, index, context, state)
