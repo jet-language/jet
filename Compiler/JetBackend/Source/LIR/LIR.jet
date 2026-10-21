@@ -6,17 +6,13 @@
 // compiled runtime or a code pointer value. Blocks take parameters instead
 // of phi nodes, and the entry block's parameters are the function's
 // parameters.
-use jet_foundation.[MIRTypeID, Call]
+use jet_foundation.[MIRTypeID, Call, compiler_take_rows]
 
 struct LIRValueID { value: Int }
 
 struct LIRBlockID { value: Int }
 
 struct LIRSignatureID { value: Int }
-
-struct LIRFunctionID { value: Int }
-
-struct LIRDataID { value: Int }
 
 // System V classification of one value. `Memory` values travel by hidden
 // pointer; a function without a result has no result layout.
@@ -167,41 +163,9 @@ struct LIRFunction {
 
 // Debug facts for the object writer's DWARF (Image/Dwarf.jet): which source
 // line every instruction comes from (LIRBlock.lines), which source
-// variables LIR values carry, and the source types those variables have,
-// described by their machine layout. Lowering records them; code generation
-// never reads them.
-enum LIRDebugEncoding { Signed Unsigned Float Bool Char }
-
-struct LIRDebugMember { name: String, offset: Int, ty: Int }
-
-struct LIRDebugEnumerator { name: String, value: Int }
-
-// Type references are rows of LIRModuleDebug.types; -1 is no type (an
-// untyped pointer). `Opaque` has a name and size but no known contents.
-enum LIRDebugTypeKind {
-    Base(encoding: LIRDebugEncoding)
-    Pointer(target: Int)
-    Struct(members: [LIRDebugMember])
-    Union(members: [LIRDebugMember])
-    Enum(enumerators: [LIRDebugEnumerator])
-    Typedef(target: Int)
-    Opaque
-}
-
-struct LIRDebugType { name: String, size: Int, kind: LIRDebugTypeKind }
-
-// A source variable: a parameter or a named local. `indirect` when the
-// carried value is the address of the variable's bytes (an inline aggregate)
-// rather than the variable itself.
-struct LIRDebugVariable {
-    name: String
-    ty: Int
-    line: Int
-    parameter: Bool
-    indirect: Bool
-}
-
-// From its definition on, `value` carries `variable` while it is live.
+// variables LIR values carry, and the source types those variables have
+// (Image/Emission.jet). Lowering records them; code generation never reads
+// them. From its definition on, `value` carries `variable` while it is live.
 struct LIRDebugBinding { variable: Int, value: LIRValueID }
 
 // `file` is a row of LIRModuleDebug.files, -1 for generated code (glue,
@@ -214,34 +178,21 @@ struct LIRFunctionDebug {
     bindings: [LIRDebugBinding]
 }
 
-// `directory` is the compilation directory relative `files` resolve
-// against; "" leaves that to the debugger (its working directory).
-struct LIRModuleDebug {
-    directory: String
-    files: [String]
-    types: [LIRDebugType]
-}
-
 fn lir_function_debug_none() -> LIRFunctionDebug Never! {
     LIRFunctionDebug{name: "", file: -1, line: 0, variables: [LIRDebugVariable]{}, bindings: [LIRDebugBinding]{}}
 }
 
-fn lir_module_debug_none() -> LIRModuleDebug Never! {
-    LIRModuleDebug{directory: "", files: [String]{}, types: [LIRDebugType]{}}
+// The object writer's input over `program`: its data objects, debug files
+// and types, and each function's source facts.
+fn lir_object_module(program: LIRModule) -> X64ObjectModule Never! {
+    functions :: loop function in program.functions -> X64FunctionSource{name: function.debug.name, file: function.debug.file, line: function.debug.line, variables: function.debug.variables}
+    X64ObjectModule{data: program.data, debug: program.debug, functions: functions}
 }
 
-// Read-only module objects, including immutable aggregate constant trees.
-struct LIRDataReloc {
-    offset: Int
-    target: LIRDataID
-    addend: Int
-}
-
-struct LIRData {
-    id: LIRDataID
-    bytes: [U8]
-    align: Int
-    relocs: [LIRDataReloc]
+// lir_object_module over a module the caller owns: its data rows move out.
+fn lir_object_module_take(program: &LIRModule) -> X64ObjectModule Never! {
+    functions :: loop function in program.functions -> X64FunctionSource{name: function.debug.name, file: function.debug.file, line: function.debug.line, variables: function.debug.variables}
+    X64ObjectModule{data: compiler_take_rows<LIRData>(&program.data), debug: program.debug, functions: functions}
 }
 
 // `signatures[i].id.value == i`, `functions[i].id.value == i` and

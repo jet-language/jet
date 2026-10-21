@@ -12,7 +12,7 @@ use jet_backend.[
     LIRJumpTarget, LIRLayout, LIRModule, LIRSignature, LIRSignatureID,
     LIRTerminator, LIRValue, LIRValueID, X64Alu, X64CompiledFunction,
     X64ExecutableResult, X64FunctionDebug, X64Reloc, X64RelocTarget, X64RuntimeExport,
-    lir_layout_bool, lir_layout_pointer, lir_layout_word, x64_alu_ri, x64_call_rel32,
+    lir_layout_bool, lir_layout_pointer, lir_layout_word, lir_object_module, x64_alu_ri, x64_call_rel32,
     x64_compile_module, x64_object_functions, x64_object_main, x64_object_main_debug, x64_mov_ri,
     x64_mov_rr, x64_pop, x64_push, x64_ret,
 ]
@@ -275,5 +275,5 @@ fn fx_bool_abi_executable() -> X64ExecutableResult Never! {
     driver :: fx_bool_abi_driver()
     &functions.push(driver)
     &debug.push(x64_object_main_debug(driver))
-    x64_object_functions(choose_module, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+    x64_object_functions(lir_object_module(choose_module), functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
 }

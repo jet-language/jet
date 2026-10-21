@@ -1,17 +1,15 @@
 // x86-64 code for a whole IR module, and its relocatable object through the
 // existing object writer (JetBackend Image/Object.jet). The writer and its
-// DWARF read an LIRModule for the data objects and per-function debug facts,
-// so the module result carries that shell: the IR data rows as LIR data
-// (same ids), then an immortal String header per ConstText row and the texts
-// the selector names itself (source paths, stop messages, big-integer
-// decimals); one shell function per IR function, with no blocks, carrying
-// its name, file, line and debug variables.
+// DWARF read an X64ObjectModule (Image/Emission.jet): the IR data rows as
+// LIR data (same ids), then an immortal String header per ConstText row and
+// the texts the selector names itself (source paths, stop messages,
+// big-integer decimals); the debug files and types; and per IR function its
+// name, file, line and debug variables.
 
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
 use jet_backend.[
-    LIRBlock, LIRData, LIRDataID, LIRDataReloc, LIRDebugBinding, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunction, LIRFunctionDebug, LIRFunctionID,
-    LIRModule, LIRModuleDebug, LIRSignature, LIRSignatureID, LIRValue,
-    X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64LineRow, X64Reloc, X64RuntimeExport, X64VariableRange,
+    LIRData, LIRDataID, LIRDataReloc, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunctionID, LIRModuleDebug,
+    X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64FunctionSource, X64LineRow, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
     x64_object_functions_threads, x64_object_main, x64_object_main_debug,
 ]
 
@@ -307,19 +305,16 @@ fn ir_x64_object(compiled: ^IRX64Result) -> X64ExecutableResult Never! {
     // Popped in function order.
     variables := compiler_take_rows<[LIRDebugVariable]>(&owned.variables)
     &variables.reverse()
-    shells := [LIRFunction]{}
-    loop (row, f) in owned.program.functions {
+    sources := [X64FunctionSource]{}
+    loop f in owned.program.functions {
         file :: owned.tables.file_rows.get(f.source_file) ?? -1
         listed := &variables.pop() ?? [LIRDebugVariable]{}
-        &shells.push(LIRFunction{
-            id: LIRFunctionID{value: row}, name: owned.functions[row].name, signature: LIRSignatureID{value: 0},
-            values: [LIRValue]{}, blocks: [LIRBlock]{},
-            debug: LIRFunctionDebug{name: f.name, file: file, line: f.line, variables: ^listed, bindings: [LIRDebugBinding]{}},
-        })
+        &sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: ^listed})
     }
-    program :: LIRModule{
-        signatures: [LIRSignature]{}, functions: ^shells, data: compiler_take_rows<LIRData>(&owned.tables.data),
+    program :: X64ObjectModule{
+        data: compiler_take_rows<LIRData>(&owned.tables.data),
         debug: LIRModuleDebug{directory: "", files: compiler_take_rows<String>(&owned.tables.files), types: compiler_take_rows<LIRDebugType>(&owned.tables.debug_types)},
+        functions: ^sources,
     }
     main :: x64_object_main(LIRFunctionID{value: entry})
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}

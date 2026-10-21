@@ -32,13 +32,14 @@ fn ir_spike_native_input(file: String, input: ^IRSpikeInput, threads: CompilerTh
         if built.program.function_rows.get(failure.key) == .Val(id) -> ir_spike_unreachable(&built.program.functions[id])
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-    compiled :: ir_x64_compile_module(built.program, threads)
-    if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
+    compiled := ir_x64_compile_module(^built.program, threads)
+    function_count :: compiled.functions.len()
+    if trace_sink == .Val(sink) -> sink.end("ir.x64", function_count)
     loop error in compiled.errors -> &rows.push("ir.x64 {ir_spike_field(error)}")
     if rows.len() > 0 -> return ir_spike_route_failed(file, rows)
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
-    object := ir_x64_object(built.program, compiled, built.program.entry)
-    if trace_sink == .Val(sink) -> sink.end("ir.object", compiled.functions.len())
+    object := ir_x64_object(^compiled)
+    if trace_sink == .Val(sink) -> sink.end("ir.object", function_count)
     if object.errors.len() > 0 {
         object_rows :: loop error in object.errors -> "ir.object {ir_spike_field(error)}"
         return ir_spike_route_failed(file, object_rows)

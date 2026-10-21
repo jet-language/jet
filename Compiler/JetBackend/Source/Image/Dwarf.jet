@@ -1,10 +1,10 @@
 // DWARF 5 debug information and `.eh_frame` call frame information for the
 // relocatable object (Image/Object.jet), so gdb and lldb can break on a
 // source line, step, show source, unwind and print a native program's
-// parameters and locals. Lowering records the source facts (LIR.jet "Debug
-// facts"); instruction selection records where each line's code starts,
-// the frame's call frame instructions and each variable's location ranges
-// (Select.jet X64FunctionDebug). This file only encodes them:
+// parameters and locals. The code generator records the source facts and,
+// per compiled function, where each line's code starts, the frame's call
+// frame instructions and each variable's location ranges (Emission.jet
+// X64ObjectModule, X64FunctionDebug). This file only encodes them:
 //
 // - `.eh_frame`: one CIE (CFA = rsp + 8, return address at CFA - 8) and one
 //   FDE per function with the function's call frame instructions. The
@@ -529,10 +529,10 @@ fn dwarf_section_offset(bytes: &[U8], relas: &[X64ObjectRela], symbol: Int, adde
 }
 
 // The source facts of compiled function `function` (`main` has none).
-fn dwarf_function_debug(program: LIRModule, function: X64CompiledFunction) -> LIRFunctionDebug Never! {
+fn dwarf_function_debug(program: X64ObjectModule, function: X64CompiledFunction) -> X64FunctionSource Never! {
     id :: function.id.value
-    if id < 0 || id >= program.functions.len() -> return lir_function_debug_none()
-    program.functions[id].debug
+    if id < 0 || id >= program.functions.len() -> return x64_function_source_none()
+    program.functions[id]
 }
 
 // The compile unit of `.debug_info` and the `.debug_loclists` it refers to:
@@ -545,7 +545,7 @@ fn dwarf_function_debug(program: LIRModule, function: X64CompiledFunction) -> LI
 // relocation's offset by the info bytes before its part and the loclists
 // offsets (the relocations against `symbols.loclists`) by the loclists
 // bytes before it, so the sections are those of the one-thread loop.
-fn dwarf_info(sections: &X64DwarfSections, program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
+fn dwarf_info(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
     info := [U8]{}
     relas := [X64ObjectRela]{}
     lists := [U8]{}
@@ -619,7 +619,7 @@ DWARF_INFO_MIN_WEIGHT_PER_THREAD :: 400
 // the compiled functions, their debug rows and offsets, the type DIE
 // offsets and the section symbols; read only.
 struct DwarfInfoShared {
-    program: LIRModule
+    program: X64ObjectModule
     functions: [X64CompiledFunction]
     debug: [X64FunctionDebug]
     offsets: [Int]
@@ -684,7 +684,7 @@ fn dwarf_info_part_take(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
 // located variable, its location list in `lists` referred to by a
 // relocation against `symbols.loclists` whose addend is the list's offset
 // in `lists`.
-fn dwarf_info_function(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], program: LIRModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
+fn dwarf_info_function(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
     facts :: dwarf_function_debug(program, function)
     if facts.file < 0 {
         dwarf_uleb(&info, DWARF_ABBREV_GENERATED)
@@ -734,7 +734,7 @@ fn dwarf_info_function(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], progr
     dwarf_uleb(&info, 0)
 }
 
-fn dwarf_line(sections: &X64DwarfSections, program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
+fn dwarf_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
     line := [U8]{}
     relas := [X64ObjectRela]{}
     elf64_u32(&line, 0)
@@ -816,7 +816,7 @@ fn dwarf_line(sections: &X64DwarfSections, program: LIRModule, functions: [X64Co
 // The debug and unwind sections for `functions` (placed at `offsets` in a
 // `.text` of `text_size` bytes; debug[i] belongs to functions[i]); the
 // subprograms of `.debug_info` on the threads `threads` admits.
-fn x64_dwarf_sections(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) -> X64DwarfSections Never! {
+fn x64_dwarf_sections(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
         eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: dwarf_abbrevs(), info: [U8]{}, info_relas: [X64ObjectRela]{},
         line: [U8]{}, line_relas: [X64ObjectRela]{}, loclists: [U8]{},

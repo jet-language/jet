@@ -155,7 +155,7 @@ if (mode === '--verify') {
         X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "beta", init_priority: 2, fini_priority: 7},
         X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "alpha", init_priority: 2, fini_priority: 7},
     }
-    current :: x64_object_functions(program, compiled.functions, compiled.debug, exports)
+    current :: x64_object_functions(lir_object_module(program), compiled.functions, compiled.debug, exports)
     assert(current.errors.len() == 0)
     files.write_bytes("runtime-lifecycle.o", current.bytes) ?? panic("cannot write runtime object")
 }

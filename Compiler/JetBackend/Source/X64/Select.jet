@@ -23,48 +23,6 @@
 
 use jet_foundation.[compiler_take_rows]
 
-enum X64RelocTarget {
-    Function(id: LIRFunctionID)
-    Runtime(symbol: String)
-    Data(id: LIRDataID)
-}
-
-// A rel32 field at `at` (offset in the function's code) that must hold the
-// distance from the end of the field to the target.
-struct X64Reloc { at: Int, target: X64RelocTarget }
-
-struct X64CompiledFunction {
-    id: LIRFunctionID
-    name: String
-    code: [U8]
-    relocs: [X64Reloc]
-}
-
-// Debug facts of one compiled function for Image/Dwarf.jet: a line row
-// where each run of code from one source line starts, the end of the
-// prologue, the call frame instructions of its FDE, and where each debug
-// variable lives over which code range.
-struct X64LineRow { at: Int, line: Int }
-
-// A register (hardware number), a frame slot at `offset` from rbp, or the
-// frame address rbp + `offset` itself (a StackSlot's address).
-enum X64DebugLocation {
-    Register(reg: Int)
-    Frame(offset: Int)
-    FrameAddress(offset: Int)
-}
-
-// LIRFunctionDebug.variables[variable] is at `location` for code offsets
-// start..<end.
-struct X64VariableRange { variable: Int, start: Int, end: Int, location: X64DebugLocation }
-
-struct X64FunctionDebug {
-    lines: [X64LineRow]
-    body: Int
-    cfi: [U8]
-    ranges: [X64VariableRange]
-}
-
 struct X64CompileResult {
     function: X64CompiledFunction?
     debug: X64FunctionDebug?

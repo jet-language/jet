@@ -162,20 +162,20 @@ fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Execut
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     loop row in compiled.debug -> &debug.push(row)
 
-    x64_object_functions(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+    x64_object_functions(lir_object_module(program), functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
 }
 
 // Shared section/relocation writer for hosted program and runtime objects,
 // on the calling thread. The native route's object, whose debug sections
 // build on the threads it admits, is x64_object_functions_threads.
-fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport]) -> X64ExecutableResult Never! {
+fn x64_object_functions(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport]) -> X64ExecutableResult Never! {
     x64_object_functions_threads(program, functions, debug, exports, compiler_threads_single())
 }
 
 // x64_object_functions with the `.debug_info` subprograms built on the
 // threads `threads` admits (Dwarf.jet dwarf_info); the bytes are the same
 // for any thread count.
-fn x64_object_functions_threads(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads) -> X64ExecutableResult Never! {
+fn x64_object_functions_threads(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads) -> X64ExecutableResult Never! {
     exported := [Int:Bool]{}
     export_names := [String:Bool]{}
     function_rows := [Int:Int]{}

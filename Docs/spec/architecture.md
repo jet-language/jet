@@ -337,11 +337,13 @@ owner's explicit approval.
   separate step; when it lands, it changes the builder's input reader and
   nothing below it.
 - *Emission boundary:* the IR path produces `X64CompiledFunction` and
-  `X64FunctionDebug` rows for the existing encoder (`X64/Encoder.jet`),
-  object writer (`Image/Object.jet`), DWARF writer (`Image/Dwarf.jet`) and
-  static linker (`Image/StaticLink.jet`). It calls the same runtime symbols
-  with the same System V ABI and links the same runtime pack, so a program
-  built on either path behaves identically.
+  `X64FunctionDebug` rows and an `X64ObjectModule` (data objects, debug files
+  and types, per-function source facts), all declared in
+  `Image/Emission.jet`, for the existing encoder (`X64/Encoder.jet`), object
+  writer (`Image/Object.jet`), DWARF writer (`Image/Dwarf.jet`) and static
+  linker (`Image/StaticLink.jet`). It calls the same runtime symbols with the
+  same System V ABI and links the same runtime pack, so a program built on
+  either path behaves identically.
 
 **Data model** ([`Compiler/JetIR/Source/IR.jet`](../../Compiler/JetIR/Source/IR.jet)).
 An `IRModule` holds interned type rows (the checked `Type`, its kind, size,

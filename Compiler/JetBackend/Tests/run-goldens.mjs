@@ -176,6 +176,7 @@ const BACKEND = [
   "Compiler/JetFoundation/Source/Text/RustDebug.jet",
   "Compiler/JetFoundation/Source/Encoding/Json.jet",
   "Compiler/JetBackend/Source/LIR/LIR.jet",
+  "Compiler/JetBackend/Source/Image/Emission.jet",
   "Compiler/JetBackend/Source/LIR/Lint.jet",
   "Compiler/JetBackend/Source/LIR/Print.jet",
   "Compiler/JetBackend/Source/LIR/Sanitize.jet",

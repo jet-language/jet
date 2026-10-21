@@ -77,6 +77,7 @@ let parts = [
     'Compiler/JetFoundation/Source/DerivationTypes.jet',
     'Compiler/JetFoundation/Source/MIR/MIR.jet',
     'Compiler/JetBackend/Source/LIR/LIR.jet',
+    'Compiler/JetBackend/Source/Image/Emission.jet',
     'Compiler/JetBackend/Source/LIR/Lint.jet',
     'Compiler/JetBackend/Source/X64/Encoder.jet',
     'Compiler/JetBackend/Source/X64/InlineAsm.jet',

@@ -176,6 +176,7 @@ const parts = [
   item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_failure_text("),
   item("Compiler/JetFoundation/Source/Threads.jet", "fn compiler_threads_single("),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
+  body("Compiler/JetBackend/Source/Image/Emission.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
   body("Compiler/JetBackend/Source/UiABI.jet"),
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Source/LIR/Sanitize.jet")] : []),
