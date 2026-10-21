@@ -182,6 +182,72 @@ fn sema_taint_effect_name(effect_value: Effect) -> String Never! {
     }
 }
 
+// The effect of the Core call `module.method` (Rust `Effects::core_effect`):
+// its registered row's effect, else the module's resolver default, so a call
+// the module does not declare still reaches its effect destination.
+fn sema_taint_core_effect(module_name: String, method: String) -> Effect? Never! {
+    if core_call(module_name, method) == .Val(record) -> return record.effect_kind
+    if module_name == "core.service" && method == "state_store" -> return Val(Effect.FS)
+    if module_name == "core.net" && method == "gethostname" -> return Val(Effect.Env)
+    if module_name == "core.http.server" && method == "__response_parts" -> return None
+    if (module_name == "core.sys" && method == "success") || (module_name == "core.process" && method == "status_ok") -> return None
+    if module_name == "core.time" && method == "__zone_env" -> return Val(Effect.Env)
+    if module_name == "core.time" && (method == "zone" || method == "parse_zoned" || method == "__zone_file_bytes") -> return Val(Effect.FS)
+    if module_name == "core.time" && ["clock", "time", "parse_time", "period", "period_days", "period_months", "period_years", "utc", "zoned", "zoned_local", "__embedded_zone_bytes", "__clock_mono_ns"].contains(method) -> return None
+    if module_name == "core.math.random" && method == "rng" -> return None
+    if module_name == "core.math" && method == "random" -> return Val(Effect.Rand)
+    if module_name == "core.term" && method == "style_force" -> return None
+    if module_name == "core.net" && ["ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4", "is_ipv6", "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts", "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string", "ready_readable", "ready_writable", "error_operation", "error_address", "error_name", "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority", "dns_srv_weight", "udp_packet_data", "udp_packet_addr", "udp_packet_bytes", "udp_packet_original_len", "udp_packet_truncated"].contains(method) -> return None
+    if module_name == "core.watcher" {
+        return if method == {
+            "files" -> Val(Effect.FS)
+            "process_pid" -> Val(Effect.Exec)
+            "port" -> Val(Effect.Net)
+            else -> None
+        }
+    }
+    if module_name == "core.web.browser" {
+        return if method == {
+            "profile" | "timeout" -> None
+            "locked" -> Val(Effect.FS)
+            "config_from_env" -> Val(Effect.Env)
+            else -> Val(Effect.Net)
+        }
+    }
+    if module_name == "core.encoding" && ["__read_byte", "__read_into", "__write_bytes", "__write_text", "__flush"].contains(method) -> return Val(Effect.IO)
+    if ["core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"].contains(module_name) && (method == "reader" || method == "writer") -> return Val(Effect.FS)
+    if module_name == "core.compute" && method != "device_cpu" -> return Val(Effect.GPU)
+    if module_name == "core.crypto" && method.starts_with("__jetc_") -> return Val(Effect.FS)
+    if module_name == "core.auth" && ["register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish", "__store_load", "__store_replace"].contains(method) -> return Val(Effect.DB)
+    if module_name == "core.crypto.vault" && ["get", "current", "versions", "load", "status", "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped", "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"].contains(method) -> return Val(Effect.Secret)
+    if module_name == {
+        "core.files" -> Val(Effect.FS)
+        "core.net" | "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val(Effect.Net)
+        "core.game.raylib" -> Val(Effect.GPU)
+        "core.time" -> Val(Effect.Time)
+        "core.math.random" | "core.crypto.random" -> Val(Effect.Rand)
+        "core.sys" -> Val(Effect.Env)
+        "core.process" | "core.plugin" | "core.mod" -> Val(Effect.Exec)
+        "core.term" -> Val(Effect.IO)
+        "core.db" -> Val(Effect.DB)
+        "core.log" -> Val(Effect.Log)
+        "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" -> Val(Effect.Browser)
+        else -> None
+    }
+}
+
+// A Core call that writes to a log, terminal, or serialized output, where a
+// credential would leak (Rust `Syntax::credential_sink`).
+fn sema_taint_credential_sink(module_name: String, method: String) -> Bool Never! {
+    if core_call(module_name, method) == .Val(record) {
+        if record.sink_class == .Val(sink_class) -> return sink_class == SinkClass.Credential
+    }
+    if module_name == "core.log" -> return true
+    if module_name == "core.term" -> return method == "print" || method == "eprint"
+    if ["core.encoding.json", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.cbor", "core.encoding.xml"].contains(module_name) -> return ["to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"].contains(method)
+    module_name == "core.encoding.jsonl" && method == "to_string"
+}
+
 fn sema_taint_builtin_tag(name: String) -> SemaTaintTagFact? {
     injection := [String]{"DB", "Exec", "Net"}
     if name == "Input" || name == "PII" || name == "Secret" {
@@ -645,20 +711,8 @@ fn sema_taint_method_destinations(state: SemaTaintFlowState, receiver: Expr, met
                 }
                 else -> {
                     &destinations.push("{module_row}.{method}")
-                    row := core_call(module_row, method)
-                    if row == {
-                        .Val(record) -> {
-                            if record.effect_kind == {
-                                .Val(effect_value) -> &destinations.push(sema_taint_effect_name(effect_value))
-                                .None -> {}
-                            }
-                            if record.sink_class == {
-                                .Val(sink_class) -> if sink_class == SinkClass.Credential -> &destinations.push("Log")
-                                .None -> {}
-                            }
-                        }
-                        .None -> {}
-                    }
+                    if sema_taint_core_effect(module_row, method) == .Val(effect_value) -> &destinations.push(sema_taint_effect_name(effect_value))
+                    if sema_taint_credential_sink(module_row, method) -> &destinations.push("Log")
                 }
             }
         }
