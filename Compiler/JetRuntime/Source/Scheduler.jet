@@ -137,18 +137,74 @@ fn scheduler_control_leave(save: I64) {
 // A process/test/doc root is not a Task frame. Keep the parent's control,
 // shield, wait depth and body provenance untouched in the caller's save slot.
 #Export(c) fn jet_rt_root_begin(save: I64) -> I64 {
-    parent_flags :: scheduler_scope_flags(scheduler_control_current())
+    parent :: scheduler_control_current()
+    parent_flags :: scheduler_scope_flags(parent)
     inherited :: (parent_flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
         ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
     control :: scheduler_control_new()
     sync_store(control + I64{104}, SCHEDULER_SCOPE_ROOT.bit_or((if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0})))
+    // Scheduler.rs:1776 jet_scheduler_with_root_control: an entry with no
+    // current control runs under the process root task control.
+    if (parent == I64{0}) -> scheduler_process_root_install(control)
     scheduler_control_enter(control, save)
     sync_store(thread_base() + I64{64}, I64{0})
     control
 }
 #Export(c) fn jet_rt_root_leave(control: I64, save: I64) {
     scheduler_control_leave(save)
+    scheduler_process_root_release(control)
     scheduler_control_drop(control)
+}
+
+// Scheduler.rs:1743-1759: the process root task control. Process signals
+// cancel it; a cancelled (or absent) root is replaced by a fresh root control
+// at the next lookup, which the running entry does not adopt. The slot owns
+// one reference and is guarded by the scheduler root mutex.
+scheduler_process_root := I64{0}
+
+fn scheduler_process_root_install(control: I64) {
+    scheduler_control_retain(control)
+    sync_mutex_lock(scheduler_root)
+    previous :: scheduler_process_root
+    scheduler_process_root = control
+    sync_mutex_unlock(scheduler_root)
+    scheduler_control_drop(previous)
+}
+
+fn scheduler_process_root_release(control: I64) {
+    sync_mutex_lock(scheduler_root)
+    owned :: scheduler_process_root == control
+    if owned -> scheduler_process_root = I64{0}
+    sync_mutex_unlock(scheduler_root)
+    if owned -> scheduler_control_drop(control)
+}
+
+// Returns a retained reference the caller drops.
+fn scheduler_root_task_control() -> I64 {
+    sync_mutex_lock(scheduler_root)
+    previous :: scheduler_process_root
+    replaced := I64{0}
+    if (previous == I64{0} || sync_load(previous + I64{16}) != I64{0}) {
+        fresh :: scheduler_control_new()
+        sync_store(fresh + I64{104}, SCHEDULER_SCOPE_ROOT)
+        scheduler_process_root = fresh
+        replaced = previous
+    }
+    control :: scheduler_process_root
+    scheduler_control_retain(control)
+    sync_mutex_unlock(scheduler_root)
+    scheduler_control_drop(replaced)
+    control
+}
+
+fn scheduler_control_is_root(control: I64) -> Bool { (scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} }
+
+// Scheduler.rs:521 jet_task_deliver_cancel: only a task unwinds a delivered
+// cancellation. A cancelled root has no catch frame: its wait points observe
+// the flag and return their cooperative fallback without publishing a stop.
+fn scheduler_root_cancel_observed() -> Bool {
+    control :: scheduler_control_current()
+    control != I64{0} && scheduler_control_is_root(control) && sync_load(control + I64{16}) != I64{0} && !scheduler_shielded()
 }
 
 // Only scheduler_text_new's owned, eight-aligned 24B E4 header is tagged.
@@ -269,8 +325,8 @@ fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
 // supersedes Cancelled (Scheduler.rs:929-938). Record precedes release status.
 fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     kind :: sync_load(record)
-    if (kind == I64{1}) -> scheduler_assert_not_root_cancel(control)
-    if (control == I64{0} || kind < I64{1} || kind > I64{5} || (kind == I64{5} && jet_rt_stop_domain() == I64{0})) {
+    // A root never unwinds a cancellation (scheduler_root_cancel_observed).
+    if (control == I64{0} || kind < I64{1} || kind > I64{5} || (kind == I64{5} && jet_rt_stop_domain() == I64{0}) || (kind == I64{1} && scheduler_control_is_root(control))) {
         scheduler_stop_drop(record)
         return false
     }
@@ -298,12 +354,6 @@ fn scheduler_scope_flags(control: I64) -> I64 {
     if (control == I64{0}) -> I64{0} else -> sync_load(control + I64{104})
 }
 fn scheduler_scope_delivered_kind(flags: I64) -> I64 { (flags.bit_and(SCHEDULER_SCOPE_MASK_KIND)) >> I64{8} }
-
-// Root controls are private and never cancel/interrupt targets. Cancellation
-// remains cooperative outside Task; violating this producer law is a defect.
-fn scheduler_assert_not_root_cancel(control: I64) {
-    if ((scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-}
 
 // Origin16 is dynamic: only an actual native Task frame can mint it.
 // The saved scalar is owned; zero is a valid token and must also be restored.
@@ -373,7 +423,6 @@ fn scheduler_delivered_status() -> I64 {
     if scheduler_shielded() -> return scheduler_delivered_status()
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
-    if (sync_load(control + I64{48}) != I64{0}) -> scheduler_assert_not_root_cancel(control)
     if (sync_swap(control + I64{48}, I64{0}) != I64{0}) {
         _ := scheduler_control_publish(control, scheduler_stop_new(I64{1}, scheduler_text_empty()))
     }
@@ -431,7 +480,7 @@ fn scheduler_task_cancelled() -> Bool {
     control != I64{0} && sync_load(control + I64{16}) != I64{0}
 }
 fn scheduler_deliver_cancel() {
-    scheduler_assert_not_root_cancel(scheduler_control_current())
+    if scheduler_root_cancel_observed() -> return
     _ := scheduler_native_publish(scheduler_stop_new(I64{1}, scheduler_text_empty()))
 }
 
@@ -512,7 +561,6 @@ fn scheduler_cancel_callback_remove(control: I64, node: I64) {
 }
 
 fn scheduler_control_cancel(control: I64) {
-    scheduler_assert_not_root_cancel(control)
     sync_store(control + I64{16}, I64{1})
     jet_rt_observe_task_control(sync_load(control + I64{56}), I64{-1}, I64{1})
     sync_park_wake(sync_load(control + I64{64}))
@@ -549,7 +597,6 @@ fn scheduler_control_cancel(control: I64) {
 #Export(c) fn jet_rt_scheduler_control_drop(control: I64) { scheduler_control_drop(control) }
 
 fn scheduler_control_interrupt(control: I64) {
-    scheduler_assert_not_root_cancel(control)
     sync_store(control + I64{48}, I64{1})
     scheduler_control_cancel(control)
 }
@@ -598,6 +645,8 @@ fn scheduler_observe_update(state: I64, wait: I64) {
 
 // Mirrors Scheduler.rs:1879-1967, including its per-site interrupt order.
 fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
+    // A cancelled root wait point returns its fallback without parking.
+    if scheduler_root_cancel_observed() -> return I64{0}
     world :: world_current()
     if (world != I64{0} && scheduler_control_current() != I64{0}) -> world_begin_wait(world, slot)
     control :: scheduler_control_current()
@@ -1219,7 +1268,6 @@ fn scheduler_thread_detach() {
 #Export(c) fn jet_rt_stop_take_message(record: I64) -> I64 { scheduler_stop_take_message(record) }
 #Export(c) fn jet_rt_stop_drop(record: I64) { scheduler_stop_drop(record) }
 #Export(c) fn jet_rt_control_publish_stop(kind: I64, jct_status: I64, owner: I64, start: I64, end: I64, message: I64, length: I64, form: I64) -> Bool {
-    if (kind == I64{1}) -> scheduler_assert_not_root_cancel(scheduler_control_current())
     if (kind == I64{5} && !scheduler_panic_check()) -> return false
     text :: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return false

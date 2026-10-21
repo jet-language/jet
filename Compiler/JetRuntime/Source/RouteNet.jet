@@ -1,0 +1,92 @@
+// NetHTTP.rs:2809-2942 UDP receive kernels and the UDPPacket carrier.
+// Packet96: inline Socket56 addr@0, truncated@56, native List<U8> header
+// @64 [length, capacity, data], original_len@88.
+NET_UDP_PACKET_BYTES :: prep { I64{96} }
+
+#Export(c) fn jet_rt_handle_clone_jet_udp_packet(value: I64) -> I64 {
+    result :: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
+    coll_copy(value, result, I64{64})
+    data_u8_list_copy_into(value + I64{64}, result + I64{64})
+    net_put(result, I64{88}, net_word(value, I64{88}))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_udp_packet(value: I64) {
+    if (value == I64{0}) -> return
+    data_u8_list_drop_fields(value + I64{64})
+    jet_rt_free(value, NET_UDP_PACKET_BYTES, I64{8})
+}
+// NetHTTP.rs:594 "UDPPacket({len} bytes from {addr})".
+#Export(c) fn jet_rt_handle_show_jet_udp_packet(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(result, rt_static_text("UDPPacket("))
+    rt_text_push_number(result, net_word(value, I64{64}))
+    jet_rt_string_builder_push(result, rt_static_text(" bytes from "))
+    address :: net_route_socket_text(value)
+    jet_rt_string_builder_push(result, address)
+    jet_rt_string_drop(address)
+    jet_rt_string_builder_push(result, rt_static_text(")"))
+    result
+}
+// Field projections borrow the packet's inline storage.
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_addr(value: I64) -> I64 { value }
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_truncated(value: I64) -> I64 { value + I64{56} }
+
+// NetHTTP.rs:2853 packet.addr.clone()
+#Export(c) fn jet_net_raw_udp_packet_addr(packet: I64) -> I64 { net_copy(packet, I64{56}) }
+
+// recv_from into a 65535-byte buffer, waiting on WouldBlock/Interrupted
+// under the socket's deadline; keep min(n, cap) bytes, truncated when n > cap.
+fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("udp receive")
+    if !net_udp_open(value, operation, error) -> return I64{0}
+    native :: jet_int_owned_to_i64(limit)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (positive && native <= I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("udp receive limit must be positive")), I64{0}, error)
+    if (!positive && native < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("udp receive limit must be non-negative")), I64{0}, error)
+    cap :: if (native < ceiling) -> native else -> ceiling
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_udp_deadline(value, scratch + I64{32})
+    buffer :: jet_rt_alloc(I64{65535} * RT_HOST_U8_STRIDE, I64{8})
+    packet :: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
+    thread_zero(packet, NET_UDP_PACKET_BYTES)
+    result := I64{0}
+    loop {
+        received := jet_socket_receive_from_raw(jet_udp_socket_fd_raw(value), buffer, I64{65535}, packet, scratch)
+        if (received >= I64{0}) {
+            if (received > I64{65535}) -> received = I64{65535}
+            kept :: if (received < cap) -> received else -> cap
+            data :: if (kept == I64{0}) -> I64{0} else -> jet_rt_alloc(kept * RT_HOST_U8_STRIDE, I64{8})
+            if (kept != I64{0}) -> rt_text_bytes_copy(data, buffer, kept * RT_HOST_U8_STRIDE)
+            net_put(packet, I64{56}, if (received > cap) -> I64{1} else -> I64{0})
+            net_put(packet, I64{64}, kept)
+            net_put(packet, I64{72}, kept)
+            net_put(packet, I64{80}, data)
+            net_put(packet, I64{88}, received)
+            net_put(output, I64{0}, packet)
+            result = I64{1}
+            break
+        }
+        code :: net_word(scratch, I64{8})
+        if (code == I64{11} || code == I64{4}) {
+            if !net_udp_wait(jet_udp_socket_fd_raw(value), true, operation, scratch, error) -> break
+        } else {
+            _ := net_route_errno(operation, I64{0}, code, error)
+            break
+        }
+    }
+    if (result == I64{0}) -> jet_rt_free(packet, NET_UDP_PACKET_BYTES, I64{8})
+    jet_rt_free(buffer, I64{65535} * RT_HOST_U8_STRIDE, I64{8})
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+
+// NetHTTP.rs:2809: a positive limit, kept bytes capped at 1 MiB.
+#Export(c) fn jet_net_udp_recv_from(value: I64, limit: I64, output: I64, error: I64) -> I64 {
+    net_udp_receive(value, limit, true, I64{1048576}, output, error)
+}
+
+// NetHTTP.rs:2905: a non-negative limit, kept bytes capped at 65535.
+#Export(c) fn jet_net_udp_receive(value: I64, limit: I64, output: I64, error: I64) -> I64 {
+    net_udp_receive(value, limit, false, I64{65535}, output, error)
+}

@@ -1,0 +1,174 @@
+// Interrupt.rs: the one process-signal mechanism behind core.process.on_signal
+// (Process.rs:58 jet_process_signal_arm_raw). Mask bits INT=1, HUP=2, TERM=4.
+// The handler only updates preallocated words (async-signal-safe); a
+// dispatcher thread polls every 10 ms and cancels the process root task
+// control once per delivered signal (Scheduler.jet scheduler_root_task_control).
+#Import(c) fn process_signal_install(signal: I64, handler: I64) -> I64 = "signal"
+
+// Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
+fn rt_process_signal_mark_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+fn rt_process_signal_dispatcher_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// State80: pendingInterrupts0 pendingSignals8 installed16 installMutex24
+// dispatchMutex32 handlersMutex40 handlers48/56/64 (INT, HUP, TERM: 1 when a
+// callback is registered) dispatcher72 (0 unstarted, 1 running, else an owned
+// start-failure text). Allocated once under the scheduler root mutex before
+// any handler can observe it, and never freed.
+process_signal_state := I64{0}
+
+fn process_signal_state_ensure() -> I64 {
+    if (process_signal_state != I64{0}) -> return process_signal_state
+    sync_mutex_lock(scheduler_root)
+    if (process_signal_state == I64{0}) {
+        state :: alloc_required_valid(I64{80}, I64{8})
+        thread_zero(state, I64{80})
+        process_signal_state = state
+    }
+    sync_mutex_unlock(scheduler_root)
+    process_signal_state
+}
+
+fn process_signal_bit(signal: I64) -> I64 {
+    if (signal == I64{2}) -> return I64{1}
+    if (signal == I64{1}) -> return I64{2}
+    if (signal == I64{15}) -> return I64{4}
+    I64{0}
+}
+
+// Interrupt.rs:116 jet_interrupt_mark: SIGINT also counts a pending
+// interrupt; every armed signal ORs its bit into the pending set.
+#Export(c) fn jet_rt_process_signal_mark(signal: I64) -> I64 {
+    state :: process_signal_state
+    if (state == I64{0}) -> return I64{0}
+    number :: net_i32(signal)
+    if (number == I64{2}) -> _ := sync_add(state, I64{1})
+    bit :: process_signal_bit(number)
+    if (bit == I64{0}) -> return I64{0}
+    loop {
+        pending :: sync_load(state + I64{8})
+        if (sync_cas(state + I64{8}, pending, pending.bit_or(bit)) == pending) -> break
+    }
+    I64{0}
+}
+
+fn process_signal_error(error: I64, text: I64) -> I64 {
+    rt_text_store(error, text)
+    I64{0}
+}
+
+// Interrupt.rs:143 arm_mask (unix): install the handler once per bit.
+fn process_signal_arm_mask(state: I64, mask: I64, error: I64) -> I64 {
+    if (mask.bit_and(I64{-8}) != I64{0}) -> return process_signal_error(error, jet_rt_string_clone(rt_static_text("invalid process signal")))
+    sync_mutex_lock(state + I64{24})
+    installed := sync_load(state + I64{16})
+    at := I64{0}
+    loop at < (I64{3}) {
+        bit :: I64{1} << at
+        if (mask.bit_and(bit) != I64{0} && installed.bit_and(bit) == I64{0}) {
+            number :: if (at == I64{0}) -> I64{2} else if (at == I64{1}) -> I64{1} else -> I64{15}
+            previous :: process_signal_install(number, rt_process_signal_mark_address())
+            if (previous == I64{-1}) {
+                sync_mutex_unlock(state + I64{24})
+                name :: if (at == I64{0}) -> rt_static_text("could not install the SIGINT handler") else if (at == I64{1}) -> rt_static_text("could not install the SIGHUP handler") else -> rt_static_text("could not install the SIGTERM handler")
+                return process_signal_error(error, jet_rt_string_clone(name))
+            }
+            installed = installed.bit_or(bit)
+            sync_store(state + I64{16}, installed)
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(state + I64{24})
+    I64{1}
+}
+
+// Interrupt.rs:245 JET_PROCESS_SIGNAL_DISPATCHER: started once; a start
+// failure is cached and reported on every later arm.
+fn process_signal_dispatcher_start(state: I64, error: I64) -> I64 {
+    sync_mutex_lock(state + I64{24})
+    status := sync_load(state + I64{72})
+    if (status == I64{0}) {
+        worker :: thread_spawn(rt_process_signal_dispatcher_address(), state)
+        if (worker < I64{0}) {
+            message :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(message, rt_static_text("could not start interrupt dispatcher: "))
+            cause :: host_errno_cause(-worker)
+            jet_rt_string_builder_push(message, cause)
+            jet_rt_string_drop(cause)
+            status = message
+        } else {
+            _ := thread_detach(worker)
+            status = I64{1}
+        }
+        sync_store(state + I64{72}, status)
+    }
+    sync_mutex_unlock(state + I64{24})
+    if (status == I64{1}) -> return I64{1}
+    process_signal_error(error, jet_rt_string_clone(status))
+}
+
+// Scheduler.rs:1746 root lookup, then cancel: Process.rs:61's callback.
+fn process_signal_cancel_root() {
+    control :: scheduler_root_task_control()
+    scheduler_control_cancel(control)
+    scheduler_control_drop(control)
+}
+
+// Interrupt.rs:287 jet_process_signal_dispatch: take the pending bits that
+// have a registered callback (TERM, HUP, INT order), keep the rest pending,
+// then run one callback per delivered signal under the dispatch lock.
+fn process_signal_dispatch(state: I64) {
+    sync_mutex_lock(state + I64{32})
+    deliverable := I64{0}
+    loop {
+        pending :: sync_load(state + I64{8})
+        if (pending == I64{0}) -> break
+        sync_mutex_lock(state + I64{40})
+        registered := I64{0}
+        if (pending.bit_and(I64{4}) != I64{0} && sync_load(state + I64{64}) != I64{0}) -> registered = registered.bit_or(I64{4})
+        if (pending.bit_and(I64{2}) != I64{0} && sync_load(state + I64{56}) != I64{0}) -> registered = registered.bit_or(I64{2})
+        if (pending.bit_and(I64{1}) != I64{0} && sync_load(state + I64{48}) != I64{0}) -> registered = registered.bit_or(I64{1})
+        sync_mutex_unlock(state + I64{40})
+        candidate :: pending.bit_and(registered)
+        if (candidate == I64{0}) -> break
+        if (sync_cas(state + I64{8}, pending, pending.bit_and(candidate.bit_xor(I64{-1}))) == pending) {
+            deliverable = candidate
+            break
+        }
+    }
+    if (deliverable.bit_and(I64{4}) != I64{0}) -> process_signal_cancel_root()
+    if (deliverable.bit_and(I64{2}) != I64{0}) -> process_signal_cancel_root()
+    if (deliverable.bit_and(I64{1}) != I64{0}) -> process_signal_cancel_root()
+    sync_mutex_unlock(state + I64{32})
+}
+
+// The "jet-process-signal" thread: sleep 10 ms, dispatch, forever.
+#Export(c) fn jet_rt_process_signal_dispatcher(state: I64) -> I64 {
+    interval :: jet_rt_alloc(I64{16}, I64{8})
+    loop {
+        trap_store(interval, I64{0})
+        trap_store(interval + I64{8}, I64{10000000})
+        loop {
+            slept :: host_call(I64{35}, interval, interval, I64{0})
+            if (slept != I64{-4}) -> break
+        }
+        process_signal_dispatch(state)
+    }
+}
+
+// Process.rs:58 jet_process_signal_arm_raw: look up (or replace) the root
+// task control, then register the root-cancel callback for one signal; the
+// slot is replaced, never accumulated. Core formats the failure text.
+#Export(c) fn jet_process_signal_arm_raw(mask: I64, error: I64) -> I64 {
+    native :: jet_int_owned_to_i64(mask)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    scheduler_control_drop(scheduler_root_task_control())
+    index :: if (native == I64{1}) -> I64{0} else if (native == I64{2}) -> I64{1} else if (native == I64{4}) -> I64{2} else -> I64{-1}
+    if (index < I64{0}) -> return process_signal_error(error, jet_rt_string_clone(rt_static_text("invalid process signal")))
+    state :: process_signal_state_ensure()
+    if (process_signal_arm_mask(state, native, error) == I64{0}) -> return I64{0}
+    if (process_signal_dispatcher_start(state, error) == I64{0}) -> return I64{0}
+    sync_mutex_lock(state + I64{40})
+    sync_store(state + I64{48} + index * I64{8}, I64{1})
+    sync_mutex_unlock(state + I64{40})
+    I64{1}
+}

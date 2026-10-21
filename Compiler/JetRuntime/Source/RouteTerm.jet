@@ -1,0 +1,188 @@
+// Terminal8Raw.rs/Term.rs core.term leaves over the runtime's one stdio layer.
+#Import(c) fn term_tcgetattr(fd: I64, termios: I64) -> I64 = "tcgetattr"
+#Import(c) fn term_tcsetattr(fd: I64, actions: I64, termios: I64) -> I64 = "tcsetattr"
+
+// Term.rs:152 stdout write_all, then flush when asked, when the frame is
+// nonempty, or when stdout is a terminal; io::Error's Display on failure.
+#Export(c) fn jet_terminal8_write_stdout(text: I64, flush: Bool, some: I64) -> I64 {
+    now :: flush || rt_text_len(text) != I64{0} || host_is_tty(I64{1})
+    host_stdio_option_cause(host_stdio_text_failure(text, false, false, now), some)
+}
+
+// Term.rs:168: stderr is unbuffered, so its flush adds no work.
+#Export(c) fn jet_terminal8_write_stderr(text: I64, flush: Bool, some: I64) -> I64 {
+    host_stdio_option_cause(host_stdio_text_failure(text, false, true, false), some)
+}
+
+// One byte from stdin: 1, 0 at end of input, or -errno. std's stdin maps
+// EBADF to end of input (handle_ebadf).
+fn term_read_byte(byte: I64, retry: Bool) -> I64 {
+    loop {
+        got := I64{0}
+        #Unsafe("byte lends one writable byte for a raw Linux read of stdin") {
+            got = os_syscall_i64(I64{0}, I64{0}, byte, I64{1}, I64{0}, I64{0}, I64{0})
+        }
+        if (got == I64{-4} && retry) -> next
+        if (got == I64{-9}) -> return I64{0}
+        return got
+    }
+}
+
+// Term.rs:300 stdin().read_line: bytes through the first LF (kept) or end of
+// input; (eof, line, None), or (false, "", Some(io::Error Display)). Invalid
+// UTF-8 is std's InvalidData "stream did not contain valid UTF-8".
+#Export(c) fn jet_terminal8_line(eof: I64, line: I64, error_tag: I64, error: I64) {
+    value :: jet_rt_string_builder_new()
+    byte :: jet_rt_alloc(I64{8}, I64{8})
+    failure := I64{0}
+    count := I64{0}
+    sync_mutex_lock(terminal_input_root)
+    loop {
+        got :: term_read_byte(byte, true)
+        if (got == I64{0}) -> break
+        if (got < I64{0}) {
+            failure = host_errno_cause(-got)
+            break
+        }
+        rt_text_append(value, byte, I64{1})
+        count += I64{1}
+        if (rt_text_byte(byte) == I64{10}) -> break
+    }
+    sync_mutex_unlock(terminal_input_root)
+    jet_rt_free(byte, I64{8}, I64{8})
+    if (failure == I64{0}) {
+        invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+        if (invalid != I64{0}) {
+            jet_rt_string_drop(invalid)
+            failure = jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8"))
+        }
+    }
+    #Unsafe("the caller lends the tuple's Bool byte, Text word and Option<Text> tag/payload words") {
+        if (failure != I64{0}) {
+            jet_rt_string_drop(value)
+            os_store_u8(eof, I64{0})
+            os_store_i64(line, jet_rt_string_builder_new())
+            os_store_i64(error_tag, I64{1})
+            os_store_i64(error, failure)
+        } else {
+            os_store_u8(eof, if (count == I64{0}) -> I64{1} else -> I64{0})
+            os_store_i64(line, value)
+            os_store_i64(error_tag, I64{0})
+        }
+    }
+}
+
+// IoLineStream.rs:86: one-byte reads until the trailing window equals the
+// delimiter (removed) or end of input; an empty delimiter stops after one
+// byte. Read errors propagate as read() reports them (no EINTR retry);
+// invalid UTF-8 is InvalidData carrying FromUtf8Error's Display.
+#Export(c) fn jet_terminal8_read_until(delimiter: I64, output: I64, error_tag: I64, error: I64) {
+    needle :: rt_text_data(delimiter)
+    width :: rt_text_len(delimiter)
+    value :: jet_rt_string_builder_new()
+    byte :: jet_rt_alloc(I64{8}, I64{8})
+    failure := I64{0}
+    sync_mutex_lock(terminal_input_root)
+    loop {
+        got :: term_read_byte(byte, false)
+        if (got == I64{0}) -> break
+        if (got < I64{0}) {
+            failure = host_errno_cause(-got)
+            break
+        }
+        rt_text_append(value, byte, I64{1})
+        length :: rt_text_len(value)
+        if (length >= width && rt_text_equal_bytes(rt_text_data(value) + length - width, needle, width)) {
+            rt_text_store(value + I64{8}, length - width)
+            break
+        }
+    }
+    sync_mutex_unlock(terminal_input_root)
+    jet_rt_free(byte, I64{8}, I64{8})
+    if (failure == I64{0}) -> failure = text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    #Unsafe("the caller lends the tuple's Text word and Option<Text> tag/payload words") {
+        if (failure != I64{0}) {
+            jet_rt_string_drop(value)
+            os_store_i64(output, jet_rt_string_builder_new())
+            os_store_i64(error_tag, I64{1})
+            os_store_i64(error, failure)
+        } else {
+            os_store_i64(output, value)
+            os_store_i64(error_tag, I64{0})
+        }
+    }
+}
+
+// Terminal8Raw.rs:37 jet_std_env_get: the logical environment, UTF-8 only.
+#Export(c) fn jet_terminal8_env(name: I64, some: I64) -> I64 { jet_std_env_get(name, some) }
+
+// Terminal8Raw.rs:40 jet_env_value_raw(name).is_some(): logical presence,
+// whatever the value's encoding.
+#Export(c) fn jet_terminal8_env_has(name: I64) -> Bool {
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    entry :: logical_environment_find(rt_text_data(name), rt_text_len(name))
+    shared_release(logical_env_root, false)
+    entry != I64{0}
+}
+
+// Term.rs:91: the process environment's JET_MACHINE_OUTPUT is exactly "1".
+#Export(c) fn jet_term_machine_output() -> Bool {
+    value :: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
+    if (value == I64{0}) -> return false
+    rt_text_byte(value) == I64{49} && rt_text_byte(value + I64{1}) == I64{0}
+}
+
+// Term.rs:713-760 (Linux termios): the per-thread stack of saved stdin modes.
+// A node is [previous, struct termios (60 bytes, padded to 64)].
+term_mode_key := I64{0}
+
+fn term_mode_saved_key() -> I64 {
+    if (term_mode_key == I64{0}) {
+        host_lock()
+        if (term_mode_key == I64{0}) -> term_mode_key = jet_rt_tls_key_new(I64{0})
+        host_unlock()
+    }
+    term_mode_key
+}
+
+// Clear ECHO; raw also clears ICANON and sets VMIN=1, VTIME=0. Any
+// tcgetattr/tcsetattr failure is false and saves nothing.
+#Export(c) fn jet_term_mode_enter(raw: Bool) -> Bool {
+    node :: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(node, I64{72})
+    mode :: node + I64{8}
+    if (net_i32(term_tcgetattr(I64{0}, mode)) != I64{0}) {
+        jet_rt_free(node, I64{72}, I64{8})
+        return false
+    }
+    next :: jet_rt_alloc(I64{64}, I64{8})
+    rt_text_bytes_copy(next, mode, I64{64})
+    flags :: net_load_uint(next + I64{12}, I64{4})
+    cleared :: if raw -> flags.bit_and(I64{4294967285}) else -> flags.bit_and(I64{4294967287})
+    net_store_uint(next + I64{12}, I64{4}, cleared)
+    if raw {
+        net_store_uint(next + I64{17} + I64{6}, I64{1}, I64{1})
+        net_store_uint(next + I64{17} + I64{5}, I64{1}, I64{0})
+    }
+    status :: net_i32(term_tcsetattr(I64{0}, I64{0}, next))
+    jet_rt_free(next, I64{64}, I64{8})
+    if (status != I64{0}) {
+        jet_rt_free(node, I64{72}, I64{8})
+        return false
+    }
+    key :: term_mode_saved_key()
+    trap_store(node, jet_rt_tls_get(key))
+    jet_rt_tls_set(key, node)
+    true
+}
+
+// Pop the newest saved mode and restore it; nothing saved is a no-op.
+#Export(c) fn jet_term_mode_leave() {
+    key :: term_mode_saved_key()
+    node :: jet_rt_tls_get(key)
+    if (node == I64{0}) -> return
+    jet_rt_tls_set(key, trap_word(node))
+    _ := term_tcsetattr(I64{0}, I64{0}, node + I64{8})
+    jet_rt_free(node, I64{72}, I64{8})
+}

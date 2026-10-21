@@ -182,7 +182,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
     reason := I64{0}
     received := false
     loop {
-        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
         sync_mutex_lock(channel)
         if channel_pop_locked(channel, out) {
             received = true
@@ -238,7 +238,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
     reason := I64{0}
     accepted := false
     loop {
-        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
         sync_mutex_lock(channel)
         if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
             channel_update(channel)
@@ -380,7 +380,7 @@ fn channel_reserve_send(channel: I64, meta: I64) -> I64 {
     reason := I64{0}
     reservation := I64{0}
     loop {
-        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
         sync_mutex_lock(channel)
         if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
             channel_update(channel)
@@ -583,7 +583,7 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
         }
         reason :: channel_text(I64{2})
         loop {
-            if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+            if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
             at = I64{0}
             loop at < count {
                 channel :: sync_load(receivers + at * I64{8})

@@ -1,0 +1,215 @@
+// ReactiveEventWatch.rs:1930-2261 WatchHandle/WatchSet constructors and
+// their shared (Rc) state. The devtools readiness publication has no native
+// sink registry; a process without devtools sinks publishes to none.
+// WatchState64: refs0 target8 (0 files, 1 process, 2 port) owned text16
+// (root or host) number24 (pid or port) snapshot32 seenReady40 active48.
+// Snapshot: a native header [length0 capacity8 data16] of Row32 (owned path
+// text0, modified ms8, len16, isDir24), in lstat walk order.
+// WatchSet32: refs0 and a native handle List header @8 [length, capacity, data].
+
+fn watch_state_new(target: I64, text: I64, number: I64, snapshot: I64, ready: I64) -> I64 {
+    state :: jet_rt_alloc(I64{64}, I64{8})
+    thread_zero(state, I64{64})
+    sync_store(state, I64{1})
+    sync_store(state + I64{8}, target)
+    sync_store(state + I64{16}, text)
+    sync_store(state + I64{24}, number)
+    sync_store(state + I64{32}, snapshot)
+    sync_store(state + I64{40}, ready)
+    sync_store(state + I64{48}, I64{1})
+    state
+}
+
+fn watch_snapshot_drop(snapshot: I64) {
+    if (snapshot == I64{0}) -> return
+    length :: trap_word(snapshot)
+    data :: trap_word(snapshot + I64{16})
+    at := I64{0}
+    loop at < length {
+        jet_rt_string_drop(trap_word(data + at * I64{32}))
+        at += I64{1}
+    }
+    capacity :: trap_word(snapshot + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{32}, I64{8})
+    jet_rt_free(snapshot, I64{24}, I64{8})
+}
+
+#Export(c) fn jet_rt_handle_clone_watch_handle(value: I64) -> I64 {
+    _ := sync_add(value, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_drop_watch_handle(value: I64) {
+    if (value == I64{0}) -> return
+    if (sync_add(value, I64{-1}) != I64{1}) -> return
+    jet_rt_string_drop(sync_load(value + I64{16}))
+    watch_snapshot_drop(sync_load(value + I64{32}))
+    jet_rt_free(value, I64{64}, I64{8})
+}
+
+#Export(c) fn jet_rt_handle_clone_watch_set(value: I64) -> I64 {
+    _ := sync_add(value, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_drop_watch_set(value: I64) {
+    if (value == I64{0}) -> return
+    if (sync_add(value, I64{-1}) != I64{1}) -> return
+    length :: sync_load(value + I64{8})
+    data :: sync_load(value + I64{24})
+    at := I64{0}
+    loop at < length {
+        jet_rt_handle_drop_watch_handle(trap_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    capacity :: sync_load(value + I64{16})
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+    jet_rt_free(value, I64{32}, I64{8})
+}
+
+fn watch_snapshot_push(snapshot: I64, path: I64, modified: I64, length: I64, directory: I64) {
+    count :: trap_word(snapshot)
+    capacity :: trap_word(snapshot + I64{8})
+    if (count == capacity) {
+        grown :: if (capacity == I64{0}) -> I64{8} else -> capacity * I64{2}
+        data :: jet_rt_alloc(grown * I64{32}, I64{8})
+        if (capacity != I64{0}) {
+            coll_copy(trap_word(snapshot + I64{16}), data, capacity * I64{32})
+            jet_rt_free(trap_word(snapshot + I64{16}), capacity * I64{32}, I64{8})
+        }
+        trap_store(snapshot + I64{8}, grown)
+        trap_store(snapshot + I64{16}, data)
+    }
+    row :: trap_word(snapshot + I64{16}) + count * I64{32}
+    trap_store(row, path)
+    trap_store(row + I64{8}, modified)
+    trap_store(row + I64{16}, length)
+    trap_store(row + I64{24}, directory)
+    trap_store(snapshot, count + I64{1})
+}
+
+// Path::join for a directory entry name (NUL-terminated at `name`).
+fn watch_join(parent: I64, name: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, parent)
+    length :: rt_text_len(parent)
+    if (length > I64{0} && rt_text_byte(rt_text_data(parent) + length - I64{1}) != I64{47}) -> rt_text_append(text, rt_text_data(rt_static_text("/")), I64{1})
+    rt_text_append(text, name, host_startup_byte_length(name))
+    text
+}
+
+// jet_watch_snapshot: a stack walk; symlink_metadata of every path, read_dir
+// of every directory; any failure is io_error_at(Read, that path).
+fn watch_snapshot(root: I64, snapshot: I64, error: I64) -> Bool {
+    stack := jet_rt_alloc(I64{64}, I64{8})
+    stack_capacity := I64{8}
+    depth := I64{1}
+    trap_store(stack, jet_rt_string_clone(root))
+    facts :: jet_rt_alloc(I64{160}, I64{8})
+    buffer :: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
+    failed := false
+    loop depth > (I64{0}) && !failed {
+        depth -= I64{1}
+        path :: trap_word(stack + depth * I64{8})
+        jet_fs_stat_raw(path, false, facts, facts + I64{128})
+        code :: files_out_errno(facts + I64{128})
+        if (code != I64{0}) {
+            _ := compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+            jet_rt_string_drop(path)
+            failed = true
+            break
+        }
+        mode :: trap_word(facts + I64{16}).bit_and(I64{61440})
+        seconds :: trap_word(facts + I64{80})
+        modified :: if (seconds < I64{0}) -> I64{0} else -> seconds * I64{1000} + trap_word(facts + I64{88}) /% I64{1000000}
+        directory :: mode == I64{16384}
+        watch_snapshot_push(snapshot, jet_rt_string_clone(path), modified, trap_word(facts + I64{56}), if directory -> I64{1} else -> I64{0})
+        if directory {
+            name :: fd_c_path(path)
+            fd := I64{-4}
+            loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+            fd_c_path_drop(name, path)
+            if (fd < I64{0}) {
+                _ := compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+                failed = true
+            } else {
+                loop {
+                    count :: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
+                    if (count == I64{0}) -> break
+                    if (count < I64{0}) {
+                        _ := compiler_fs_errno(HOST_IO_OP_READ, path, -count, error)
+                        failed = true
+                        break
+                    }
+                    at := I64{0}
+                    loop at < count {
+                        record :: buffer + at
+                        at += rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8}))
+                        entry :: record + I64{19}
+                        if files_dot_entry(entry) -> next
+                        if (depth == stack_capacity) {
+                            grown :: jet_rt_alloc(stack_capacity * I64{16}, I64{8})
+                            coll_copy(stack, grown, stack_capacity * I64{8})
+                            jet_rt_free(stack, stack_capacity * I64{8}, I64{8})
+                            stack = grown
+                            stack_capacity = stack_capacity * I64{2}
+                        }
+                        trap_store(stack + depth * I64{8}, watch_join(path, entry))
+                        depth += I64{1}
+                    }
+                }
+                _ := host_call(I64{3}, fd, I64{0}, I64{0})
+            }
+        }
+        jet_rt_string_drop(path)
+    }
+    loop depth > (I64{0}) {
+        depth -= I64{1}
+        jet_rt_string_drop(trap_word(stack + depth * I64{8}))
+    }
+    jet_rt_free(stack, stack_capacity * I64{8}, I64{8})
+    jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
+    jet_rt_free(facts, I64{160}, I64{8})
+    !failed
+}
+
+// WatchHandle::files: Err(IOError) when the initial snapshot fails.
+#Export(c) fn jet_watcher_files(path: I64, output: I64, error: I64) -> I64 {
+    snapshot :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(snapshot, I64{24})
+    if !watch_snapshot(path, snapshot, error) {
+        watch_snapshot_drop(snapshot)
+        return I64{0}
+    }
+    rt_text_store(output, watch_state_new(I64{0}, jet_rt_string_clone(path), I64{0}, snapshot, I64{0}))
+    I64{1}
+}
+
+// jet_process_alive: kill(pid, 0) succeeds or fails with EPERM; a pid that
+// is not positive or not an i32 is not alive.
+fn watch_process_alive(pid: I64) -> Bool {
+    if (pid <= I64{0} || pid > I64{2147483647}) -> return false
+    result :: host_call(I64{62}, pid, I64{0}, I64{0})
+    result == I64{0} || result == I64{-1}
+}
+
+// WatchHandle::process_pid: seen_ready starts as the first liveness probe.
+#Export(c) fn jet_watcher_process_pid(pid: I64) -> I64 {
+    native :: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ready :: watch_process_alive(native)
+    watch_state_new(I64{1}, jet_rt_string_builder_new(), native, I64{0}, if ready -> I64{1} else -> I64{0})
+}
+
+// WatchHandle::port: not ready until a later poll connects.
+#Export(c) fn jet_watcher_port(host: I64, port: I64) -> I64 {
+    native :: jet_int_owned_to_i64(port)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    watch_state_new(I64{2}, jet_rt_string_clone(host), native, I64{0}, I64{0})
+}
+
+// WatchSet::new: an empty shared handle list.
+#Export(c) fn jet_watcher_set() -> I64 {
+    value :: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(value, I64{32})
+    sync_store(value, I64{1})
+    value
+}

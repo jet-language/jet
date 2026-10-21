@@ -1,0 +1,189 @@
+// OsExtra.rs (core.sys identity, facts and POSIX control) and its libc doors.
+// Every call goes through the same musl function Rust's libc binding names;
+// the C int/long results are read at their declared width. Samples set errno
+// to 0 first, call, then read errno, as jet_sys_call_sample does.
+#Import(c) fn sys_fork() -> I64 = "fork"
+#Import(c) fn sys_getgroups(size: I64, list: I64) -> I64 = "getgroups"
+#Import(c) fn sys_initgroups(user: I64, group: I64) -> I64 = "initgroups"
+#Import(c) fn sys_mkfifo(path: I64, mode: I64) -> I64 = "mkfifo"
+#Import(c) fn sys_getloadavg(loadavg: I64, count: I64) -> I64 = "getloadavg"
+#Import(c) fn sys_utime(path: I64, times: I64) -> I64 = "utime"
+#Import(c) fn sys_times(buffer: I64) -> I64 = "times"
+#Import(c) fn sys_sysconf(name: I64) -> I64 = "sysconf"
+
+fn sys_errno_clear() { net_store_uint(net_errno_location(), I64{4}, I64{0}) }
+
+fn sys_errno() -> I64 { net_i32(net_load_uint(net_errno_location(), I64{4})) }
+
+// jet_sys_call_sample: (true, value, errno) as owned exact Ints.
+fn sys_sample(value: I64, available: I64, result: I64, errno: I64) {
+    code :: sys_errno()
+    #Unsafe("the caller lends the C-ABI tuple's Bool byte and two writable Int words") {
+        os_store_u8(available, I64{1})
+        os_store_i64(result, jet_int_owned_from_i64(value))
+        os_store_i64(errno, jet_int_owned_from_i64(code))
+    }
+}
+
+fn sys_some(some: I64, value: I64) -> I64 {
+    #Unsafe("some lends a writable C-ABI Option success word") { os_store_i64(some, jet_int_owned_from_i64(value)) }
+    I64{1}
+}
+
+// OsExtra.rs:101-162 unix identity calls cannot fail, so each is Some.
+#Export(c) fn jet_sys_getppid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{110}, I64{0}, I64{0}, I64{0})) }
+#Export(c) fn jet_sys_geteuid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{107}, I64{0}, I64{0}, I64{0})) }
+#Export(c) fn jet_sys_getgid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{104}, I64{0}, I64{0}, I64{0})) }
+#Export(c) fn jet_sys_getegid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{108}, I64{0}, I64{0}, I64{0})) }
+#Export(c) fn jet_sys_getpgrp_raw(some: I64) -> I64 { sys_some(some, host_call(I64{111}, I64{0}, I64{0}, I64{0})) }
+
+// OsExtra.rs:131 getgroups(0, NULL): the raw libc count (or -1).
+#Export(c) fn jet_sys_groups_count_raw(some: I64) -> I64 { sys_some(some, net_i32(sys_getgroups(I64{0}, I64{0}))) }
+
+// OsExtra.rs:140: capacity is already checked against the nonnegative i32
+// range by Core. The List is [count, gid0, ..., gid(capacity-1)], every slot
+// an owned exact Int; failure is never interpreted here.
+#Export(c) fn jet_sys_groups_fill_raw(capacity: I64, data_out: I64) -> I64 {
+    native :: jet_int_owned_to_i64(capacity)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    // Eight bytes of slack keep the last u32 read inside the allocation.
+    gids :: jet_rt_alloc(native * I64{4} + I64{8}, I64{8})
+    thread_zero(gids, native * I64{4} + I64{8})
+    count :: net_i32(sys_getgroups(native, gids))
+    length :: native + I64{1}
+    data :: jet_rt_alloc(length * I64{8}, I64{8})
+    trap_store(data, jet_int_owned_from_i64(count))
+    at := I64{0}
+    loop at < native {
+        trap_store(data + (at + I64{1}) * I64{8}, jet_int_owned_from_i64(net_load_uint(gids + at * I64{4}, I64{4})))
+        at += I64{1}
+    }
+    jet_rt_free(gids, native * I64{4} + I64{8}, I64{8})
+    trap_store(data_out, data)
+    length
+}
+
+// OsExtra.rs:169 fork(). Pending stdout is drained first so the child never
+// re-emits bytes the parent already printed (Rust's line writer holds none).
+#Export(c) fn jet_sys_fork_raw(available: I64, value: I64, errno: I64) {
+    jet_rt_stdout_flush()
+    sys_errno_clear()
+    sys_sample(net_i32(sys_fork()), available, value, errno)
+}
+
+// OsExtra.rs:205 initgroups(user, group as u32); Core checked NUL absence.
+#Export(c) fn jet_sys_initgroups_raw(user: I64, group: I64, available: I64, value: I64, errno: I64) {
+    native :: jet_int_owned_to_i64(group)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    name :: fd_c_path(user)
+    sys_errno_clear()
+    result :: net_i32(sys_initgroups(name, native.bit_and(I64{4294967295})))
+    fd_c_path_drop(name, user)
+    sys_sample(result, available, value, errno)
+}
+
+// OsExtra.rs:264 mkfifo(path, mode as u32).
+#Export(c) fn jet_sys_mkfifo_raw(path: I64, mode: I64, available: I64, value: I64, errno: I64) {
+    native :: jet_int_owned_to_i64(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    name :: fd_c_path(path)
+    sys_errno_clear()
+    result :: net_i32(sys_mkfifo(name, native.bit_and(I64{4294967295})))
+    fd_c_path_drop(name, path)
+    sys_sample(result, available, value, errno)
+}
+
+// OsExtra.rs:297 getloadavg(avg, 3): (true, count, avg0, avg1, avg2). The
+// three doubles cross as their raw f64 bits in the Float out slots.
+#Export(c) fn jet_sys_loadavg_raw(available: I64, count: I64, first: I64, second: I64, third: I64) {
+    averages :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(averages, I64{24})
+    result :: net_i32(sys_getloadavg(averages, I64{3}))
+    #Unsafe("averages owns three initialized f64 words; the caller lends the tuple's Bool byte, Int word and three Float words") {
+        os_store_u8(available, I64{1})
+        os_store_i64(count, jet_int_owned_from_i64(result))
+        os_store_i64(first, os_load_i64(averages))
+        os_store_i64(second, os_load_i64(averages + I64{8}))
+        os_store_i64(third, os_load_i64(averages + I64{16}))
+    }
+    jet_rt_free(averages, I64{24}, I64{8})
+}
+
+// OsExtra.rs:307 utime(path, {actime, modtime}).
+#Export(c) fn jet_sys_utime_raw(path: I64, atime: I64, mtime: I64, available: I64, value: I64, errno: I64) {
+    access :: jet_int_owned_to_i64(atime)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    modified :: jet_int_owned_to_i64(mtime)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    times :: jet_rt_alloc(I64{16}, I64{8})
+    trap_store(times, access)
+    trap_store(times + I64{8}, modified)
+    name :: fd_c_path(path)
+    sys_errno_clear()
+    result :: net_i32(sys_utime(name, times))
+    fd_c_path_drop(name, path)
+    jet_rt_free(times, I64{16}, I64{8})
+    sys_sample(result, available, value, errno)
+}
+
+// OsExtra.rs:317 times(&tms) and sysconf(_SC_CLK_TCK):
+// (true, utime, stime, cutime, cstime, elapsed, ticks).
+#Export(c) fn jet_sys_times_raw(available: I64, user: I64, system: I64, child_user: I64, child_system: I64, elapsed: I64, ticks: I64) {
+    buffer :: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(buffer, I64{32})
+    now :: sys_times(buffer)
+    rate :: sys_sysconf(I64{2})
+    #Unsafe("buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words") {
+        os_store_u8(available, I64{1})
+        os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer)))
+        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(buffer + I64{8})))
+        os_store_i64(child_user, jet_int_owned_from_i64(os_load_i64(buffer + I64{16})))
+        os_store_i64(child_system, jet_int_owned_from_i64(os_load_i64(buffer + I64{24})))
+        os_store_i64(elapsed, jet_int_owned_from_i64(now))
+        os_store_i64(ticks, jet_int_owned_from_i64(rate))
+    }
+    jet_rt_free(buffer, I64{32}, I64{8})
+}
+
+// OsExtra.rs:351 std::env::set_current_dir: a NUL byte is std's CString
+// refusal; otherwise chdir and io::Error's Display of the errno.
+#Export(c) fn jet_sys_set_current_dir_raw(path: I64, error: I64) -> I64 {
+    length :: rt_text_len(path)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) {
+            rt_text_store(error, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    name :: fd_c_path(path)
+    result :: host_call(I64{80}, name, I64{0}, I64{0})
+    fd_c_path_drop(name, path)
+    if (result < I64{0}) {
+        rt_text_store(error, host_errno_cause(-result))
+        return I64{0}
+    }
+    I64{1}
+}
+
+// OsExtra.rs:19 std::env::var_os(name).into_encoded_bytes(): the process
+// environment (the logical overlay never writes it). musl getenv finds no
+// name holding '=' (or empty); std refuses an interior NUL as absent.
+#Export(c) fn jet_sys_host_env_raw(name: I64, data_out: I64, length_out: I64) -> I64 {
+    host_arguments_require()
+    length :: rt_text_len(name)
+    if (length == I64{0}) -> return I64{0}
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(rt_text_data(name) + at)
+        if (byte == I64{0} || byte == I64{61}) -> return I64{0}
+        at += I64{1}
+    }
+    value :: host_environment_value_bytes(rt_text_data(name), length)
+    if (value == I64{0}) -> return I64{0}
+    size :: host_startup_byte_length(value)
+    rt_text_store(data_out, host_startup_bytes(value, size))
+    rt_text_store(length_out, size)
+    I64{1}
+}
