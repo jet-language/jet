@@ -169,7 +169,7 @@ fn lower_task_body_meta(p: MIRProgram, m: &LowerModule, f: &LowerFunction, body:
 // The owned closure box of `closure` for a runtime that consumes it.
 fn lower_task_owned_closure(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, closure: MIRValueID, ty: MIRType) -> LIRValueID? {
     value :: lower_use(&m, &f, closure) ?? return None
-    if lower_value_owned(c, closure) -> return Val(value)
+    if lower_value_takeable(c, closure) -> return Val(value)
     held :: lower_pointer(&f)
     lower_clone_into(p, &m, &f, value, held, ty)
     Val(held)

@@ -1892,11 +1892,12 @@ fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
     lower_is_owned(c.mir.values[index].ownership)
 }
 
-// Whether a consuming builtin may take `value`'s storage: an owned value that
-// is not a place read the operation leaves with its place. MIR never consumes
-// a BuiltinMethod receiver (mir_operation_value_consumption), so a `read`
-// receiver is not sunk (no cloning read) and is still the live place's value;
-// only a `move-out`, a sunk read or a fresh owner can be taken over.
+// Whether an operation may take `value`'s storage: an owned value that is not
+// a place read the operation leaves with its place. MIR sinks (clones) a place
+// read only where the operation consumes it (mir_operation_value_consumption):
+// never a BuiltinMethod receiver, nor a Read call argument or a callback a
+// non-spawn Core closure call keeps; such a `read` is still the live place's
+// value. Only a `move-out`, a sunk read or a fresh owner can be taken over.
 fn lower_value_takeable(c: LowerContext, value: MIRValueID) -> Bool Never! {
     if !lower_value_owned(c, value) -> return false
     c.place_reads.get(value.value) == None || c.sunk.get(value.value) != None
@@ -7374,7 +7375,7 @@ fn lower_reflect_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
     display_text :: lower_use(&m, &f, display) ?? return
     value :: lower_reflect_record(&m, &f, type_name, path, display_text, rows)
-    if lower_value_owned(c, display) -> lower_drop_value(p, c, &m, &f, display)
+    if lower_value_takeable(c, display) -> lower_drop_value(p, c, &m, &f, display)
     if lower_record_handle(p, result_ty) != None -> return lower_record_from_runtime(p, &m, &f, result_ty, value, dst)
     expected :: LowerRepr.Handle{drop: "jet_rt_handle_drop_jet_reflect_value", clone: "jet_rt_handle_clone_jet_reflect_value"}
     if lower_repr(p, result_ty) != expected -> return lower_fail(&m, &f, "ReflectOf result has no checked reflection record layout")

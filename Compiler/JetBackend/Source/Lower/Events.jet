@@ -53,7 +53,7 @@ fn lower_event_with_policy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     policy :: lower_use(&m, &f, args[0]) ?? return true
     dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_jet_event"}, None)
     lower_call_runtime(&m, &f, "jet_event_with_policy", [LIRValueID]{policy}, Val(dst))
-    if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, policy, policy_ty)
+    if lower_value_takeable(c, args[0]) -> lower_map_drop_value(p, &m, &f, policy, policy_ty)
     if instruction.result == None -> lower_emit(&f, LIRInst.Drop{value: dst})
     true
 }

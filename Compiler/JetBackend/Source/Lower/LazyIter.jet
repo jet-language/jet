@@ -391,7 +391,7 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             return true
         }
         meta :: lower_lazy_meta(p, &m, &f, elem)
-        moved :: lower_const_flag(&f, if lower_value_owned(c, values[0]) -> 1 else -> 0)
+        moved :: lower_const_flag(&f, if lower_value_takeable(c, values[0]) -> 1 else -> 0)
         lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(dst))
         return true
     }
@@ -413,7 +413,7 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         elem :: lower_list_element(source_ty) ?? return true
         handle :: lower_pointer(&f)
         meta :: lower_lazy_meta(p, &m, &f, elem)
-        moved :: lower_const_flag(&f, if lower_value_owned(c, values[0]) -> 1 else -> 0)
+        moved :: lower_const_flag(&f, if lower_value_takeable(c, values[0]) -> 1 else -> 0)
         lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(handle))
         source = handle
     }
@@ -455,7 +455,7 @@ fn lower_lazy_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if symbol == "jet_iter_is_sorted" || symbol == "jet_iter_compare" -> lower_lazy_meta_trait(&m, &f, meta, elem, "compare")
         &call_args.push(meta)
         if symbol == "jet_iter_compare" || symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of" {
-            &call_args.push(lower_const_flag(&f, if lower_value_owned(c, values[1]) -> 1 else -> 0))
+            &call_args.push(lower_const_flag(&f, if lower_value_takeable(c, values[1]) -> 1 else -> 0))
         }
     } else if collects {
         if result_ty.kind == .Result(ok, err) {

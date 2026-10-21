@@ -1,0 +1,23 @@
+// Running a List through an Iter reads the List: `xs.lazy()`,
+// `xs.try_collect()` and the List methods that run on an Iter (`dedup`,
+// `intersperse`, `last_index_of`, `average`, `is_sorted`) copy the elements,
+// and the source binding keeps every one of them.
+fn ok(text: String) -> String Err! { return Ok("{text}!") }
+
+fn run() {
+    xs :: [String]{"a", "a", "b"}
+    print("{xs.lazy().to_list().len()} {xs.len()} {xs[0]}")
+    print("{xs.dedup().to_list().len()} {xs.len()} {xs[2]}")
+    print("{xs.intersperse("-").to_list().len()} {xs.len()}")
+    print("{xs.last_index_of("a") ?? -1} {xs.len()} {xs[1]}")
+    ns :: [Int]{1, 2, 3}
+    print("{ns.average()} {ns.is_sorted()} {ns.len()} {ns[2]}")
+    rs :: [String Err!]{ok("x"), ok("y")}
+    if rs.try_collect() == {
+        .Ok(vs) -> print("{vs.len()} {rs.len()} {vs[0]}")
+        .Err(e) -> print("unexpected: {e.message}")
+    }
+    // A source whose last use is the call is taken over, not copied.
+    last :: [String]{"g"}
+    print(last.lazy().to_list().len())
+}
