@@ -3304,45 +3304,51 @@ Use `#Test` for test declarations and keep assertions about behavior rather
 than implementation details. The compiler and test runner own test discovery;
 the helper types only control inputs and observations.
 
-### `core.regex` — Unicode regular expressions
+### `core.regex` — linear-time regular expressions
 
-`core.regex` and Prelude use one `Regex`, `Match`, and `RegexFlags` surface.
-The Thompson/Pike VM supports concatenation, alternation, named and numbered
-groups, noncapturing groups, greedy/lazy quantifiers, bounded repetition, `.`,
-anchors, and Unicode `\d`, `\w`, and `\s` classes. Flags select Unicode
-case-insensitive matching, multiline anchors, and dot-all matching.
+`core.regex` is a Thompson/Pike VM over Unicode scalars, the same engine and
+rules as the Prelude engine, so every tier gives one answer. Matching is linear
+in the text, with no recursion and no step budget. It supports concatenation,
+alternation, capture groups numbered by their `(`, `(?:…)`, `(?<name>…)`, `*`,
+`+`, `?`, `{n}`, `{n,}`, `{n,m}`, `.`, `^`, `$` (end of text), classes over
+scalars (`[]`, `[^]`, ranges), `\d` and `\w` (ASCII), `\s` (Unicode
+White_Space), and `\p{L}`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}`,
+`\p{White_Space}` with `\P{…}` outside `[]`. `ignore_case` compares Unicode
+simple lowercase mappings; `multiline` lets `^` match after a newline;
+`dot_matches_newline` lets `.` match `\n`. Backreferences and lookaround are
+syntax errors. A malformed pattern is a typed `RegexError`. The implementation
+is in [`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
 
-The budget is an execution bound, not a promise of linear-time matching. The
-engine does not expose named capture groups: `Match.groups` is a positional
-list. Use the compiled `Pattern`/`Regex` values when the same expression is
-used repeatedly, and call `escape` for literal user input.
 Checked `Regex{"…"}` literals and inferred-head `.{"…"}` arguments produce the
 same source-owned `Regex` as `compile`; they do not use a separate native regex
 carrier or engine. The compiler validates the complete literal before lowering
 it through the source `compile` function and retaining its checked success value.
-`Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
-the entire match. `Match.groups` contains the captured groups in positional
-order, excluding the whole match; use `expand` for numbered substitution.
+
+`Match.start` and `Match.end` are character (Unicode scalar) positions.
+`Match.groups` is a positional list; a group that did not take part is `""`.
+`replace` expands `$0`…`$N`, `${name}` and `$$`. Use the compiled `Regex`
+value when the same expression is used repeatedly, and call `escape` for
+literal user input.
 
 | Signature | Result | Description |
 |---|---|---|
 | `flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags` | flags | Build explicit compilation flags. |
-| `compile(pattern: String) -> Regex !String` | regex | Compile a pattern with default flags. |
-| `compile_with(pattern: String, flags: RegexFlags) -> Regex !String` | regex | Compile with explicit flags. |
+| `compile(pattern: String) -> Regex !RegexError` | regex | Compile a pattern with default flags. |
+| `compile_with(pattern: String, flags: RegexFlags) -> Regex !RegexError` | regex | Compile with explicit flags. |
 | `escape(text: String) -> String` | text | Escape regex metacharacters. |
 | `is_match(pattern: Regex, text: String) -> Bool` | Boolean | Test whether any match exists. |
 | `full_match(pattern: Regex, text: String) -> Bool` | Boolean | Require the entire text to match. |
-| `match(pattern: Regex, text: String) -> ?Match` | match | Return the first capture-bearing match. |
+| `match(pattern: Regex, text: String) -> ?Match` | match | Return the first positional match record. |
 | `find(pattern: Regex, text: String) -> ?String` | text | Return the first matched text. |
 | `find_all(pattern: Regex, text: String) -> [String]` | text list | Return all matched text values. |
-| `finditer(pattern: Regex, text: String) -> [Match]` | matches | Return capture-bearing matches. |
-| `matches(pattern: Regex, text: String) -> [Match]` | matches | Return all capture-bearing matches. |
+| `finditer(pattern: Regex, text: String) -> [Match]` | matches | Return positional match records. |
+| `matches(pattern: Regex, text: String) -> [Match]` | matches | Return all positional match records. |
 | `split(pattern: Regex, text: String) -> [String]` | text list | Split on matches. |
 | `split_limit(pattern: Regex, text: String, n: Int) -> [String]` | text list | Split with a maximum number of matches. |
 | `replace(pattern: Regex, text: String, replacement: String) -> String` | text | Replace every match. |
 | `replace_first(pattern: Regex, text: String, replacement: String) -> String` | text | Replace only the first match. |
-| `expand(match: Match, template: String) -> String` | text | Expand numbered and named capture references. |
-| `purge()` | — | Clear the compiled-pattern cache. Existing Regex values remain valid. |
+| `expand(match: Match, template: String) -> String` | text | Expand numbered capture references. |
+| `purge() !RegexError` | — | Report that the source engine has no mutable cache to purge. |
 | `subn(pattern: Regex, text: String, replacement: String) -> {text: String, count: Int}` | replacement receipt | Replace matches and return their count. |
 
 The provider also exposes the concise names `regex`, `join`, `search`,
