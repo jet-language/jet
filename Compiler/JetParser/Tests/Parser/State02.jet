@@ -86,7 +86,9 @@ fn program(source: String) -> Program { parser_test_program(source) }
     source :: "fn host_open(path: String) -[FS]> Int\nfn run() {{}}\n"
     lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    assert(!jfmt_check_parse_accepts(parser_test_result(source).diagnostics))
+    // Rust `parse(&tokens).is_err()`: the ordinary parse reports an error. The check
+    // acceptance (`jfmt_check_parse_accepts`) admits E0081 on purpose, as `parse_for_check` does.
+    assert(loop d in parser_test_result(source).diagnostics { if d.severity == 1 -> break true } ?? false)
     checked :: parser_test_result(source)
     assert(loop d in checked.diagnostics { if d.code == "E0081" -> break true } ?? false)
     names := [String]{}
@@ -109,7 +111,8 @@ fn program(source: String) -> Program { parser_test_program(source) }
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1637
 #Test("derive_generic_type_holes_stay_in_the_template_ast") {
-    parsed :: program("\nderive T.TypeName {{\n    info :: T.reflect()\n    param :: info.type_params[0].name\n    fn get_value(self) -> @param {{ ~self.value }}\n    fn type_name(self) -> String {{ T.$name }}\n}}\n")
+    // The Rust fixture's retired `~self.value` (binary_unary.rs:949) is spelled `.copy()`.
+    parsed :: program("\nderive T.TypeName {{\n    info :: T.reflect()\n    param :: info.type_params[0].name\n    fn get_value(self) -> @param {{ self.value.copy() }}\n    fn type_name(self) -> String {{ T.$name }}\n}}\n")
     template :: loop item in parsed.items { if item == .UserDerive(d) -> break d } ?? panic("user derive")
     function :: loop body_item in template.body {
         if body_item == .Item(item) {

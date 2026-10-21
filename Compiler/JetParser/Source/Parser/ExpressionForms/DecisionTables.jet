@@ -288,12 +288,17 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
             if parser_block_definitely_exits_value_block(statements) {
                 return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: Span{start: close.span.start, end: close.span.start}}, span: parser_cover(open.span, close.span)}
             }
-            if result_handler -> parser_expression_form_result_error(&state, close.span, "A Result handler branch cannot be empty", "each exhaustive branch must produce a value or diverge", "add a value, `return`, or another diverging tail") else -> parser_expression_form_error(&state, "E0003", close.span, "this value branch is empty or ends with a statement", "a value branch must finish with one unadorned expression or a definite exit", "put a value as the last line, or use `return`, `break`, or `next`")
+            // conditionals.rs:1821-1843: a statement tail is E0114 at that statement; an
+            // empty branch is E0003 at the `}`.
+            if result_handler -> parser_expression_form_result_error(&state, close.span, "A Result handler branch cannot be empty", "each exhaustive branch must produce a value or diverge", "add a value, `return`, or another diverging tail")
+            else if statements.len() > 0 -> parser_expression_form_error(&state, "E0114", jfmt_stmt_span(statements[statements.len() - 1]), "this value branch ends with a statement instead of a value", "a value-expected block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
+            else -> parser_expression_form_error(&state, "E0003", close.span, "this `if` branch is empty but is used as a value", "when `if` produces a value, each branch must end with one", "put a value as the last line, like `{{ x }}`")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: Span{start: close.span.start, end: close.span.start}}, span: parser_cover(open.span, close.span)}
         }
         if kind == TOKEN_EOF {
             token :: parser_current(&state)
-            if result_handler -> parser_expression_form_result_error(&state, token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`") else -> parser_expression_form_error(&state, "E0003", token.span, "expected `}}` to close this value branch", "every `{{` needs a matching `}}`", "add `}}` after the branch value")
+            // conditionals.rs:1845-1853.
+            if result_handler -> parser_expression_form_result_error(&state, token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`") else -> parser_expression_form_error(&state, "E0003", token.span, "expected `}}` to close this `if` branch, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: token.span}, span: parser_cover(open.span, token.span)}
         }
         current_token :: parser_current(&state)

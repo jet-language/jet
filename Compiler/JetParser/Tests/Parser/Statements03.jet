@@ -1,21 +1,23 @@
 use jet_foundation.[Diagnostic, DiagnosticFixApplicability, Expr, Program, Span, TextEdit]
-use jet_lexer.[lex_payload]
-use jet_parser.[jfmt_check_parse_accepts, parse_tokens]
+use jet_lexer.[lex]
+use jet_parser.[parse_tokens]
 
-// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2017
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2097 (`Lexer::lex` inserts the
+// line terminators, as `lex` does)
 fn value_block_parsed(source: String) -> Program {
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for valid source")
     admission :: parse_tokens(lexed.tokens, lexed.tables)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse diagnostics")
     admission.program
 }
-// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2026
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2106 (`parse(..).expect_err`:
+// the parse reports an error)
 fn value_block_rejected(source: String) -> [Diagnostic] {
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for parser rejection")
     admission :: parser_test_result(source)
-    assert(!jfmt_check_parse_accepts(admission.diagnostics), "source should be rejected")
+    assert(loop diagnostic in admission.diagnostics { if diagnostic.severity == 1 -> break true } ?? false, "source should be rejected")
     admission.diagnostics
 }
 // Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2035
@@ -178,7 +180,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 
 // Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2347
 fn arm_table_checked(source: String) -> [Diagnostic] {
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex")
     admission :: parser_test_result(source)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse")

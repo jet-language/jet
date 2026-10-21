@@ -1,5 +1,5 @@
 use jet_foundation.[Expr, Func, Program, Type]
-use jet_lexer.[lex_payload]
+use jet_lexer.[lex]
 use jet_parser.[parse_tokens]
 
 fn result_handler_function(program: Program, name: String) -> Func? {
@@ -17,7 +17,7 @@ fn result_handler_binding(function: Func, name: String) -> Expr? {
 // Rust: crates/jet-parser/tests/result_handler_grammar.rs:4 (stale on dev: Rust rejects retired Error with E0432 and teaches Err)
 #Test("result_handler_lookahead_keeps_neighboring_forms_unambiguous") {
     source :: "\nfn optional() -> Success? {{ None }}\nfn fallible() Err! {{ Err(\"bad\") }}\n\nfn run(value: Int Err!, optional: String) {{\n    propagated :: value\n    noted :: value?(\"context\")\n    chained :: optional?.len\n    negated :: !true\n    handled :: value ? ok -> if {{\n        !true -> ok\n        else -> ok\n    }}\n    ! error -> error\n}}\n"
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
     parsed :: parse_tokens(lexed.tokens, lexed.tables)
     assert(parsed.diagnostics.is_empty(), "neighboring forms should parse")
@@ -72,7 +72,7 @@ fn result_handler_is_pointer_to(ty: Type, element: String) -> Bool Never! {
 // Rust: crates/jet-parser/tests/result_handler_grammar.rs:103
 #Test("pointer_mark_leaves_the_failure_contract_and_union_to_the_enclosing_type") {
     source :: "\nfn from_addr<T>(addr: Int) -> *T Never! {{ todo }}\nfn either(value: *Node | Label) {{}}\n"
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
     parsed :: parse_tokens(lexed.tokens, lexed.tables)
     assert(parsed.diagnostics.is_empty(), "pointer types should parse")
