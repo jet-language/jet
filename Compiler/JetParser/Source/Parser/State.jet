@@ -456,11 +456,22 @@ fn parser_add_error_here(state: &JetParserState, what: String, why: String, fix:
     parser_add_error(&state, span, what, why, fix)
 }
 
-// Name what the reader sees. Users never type `;`: the lexer inserts it at a
-// line end, and an explicit one is retired.
+// Rust `Tokens.rs` `describe`: name what the reader sees. Users never type
+// `;`: the lexer inserts it at a line end, and an explicit one is retired.
 fn parser_describe_token(state: JetParserState, token: Token) -> String Never! {
-    if token.kind == TOKEN_EOF -> return "the end of the file"
-    if token.kind == TOKEN_SEMI -> return "the end of the line"
+    kind :: token.kind
+    if kind == TOKEN_EOF -> return "the end of the file"
+    if kind == TOKEN_SEMI -> return "the end of the line"
+    if kind == TOKEN_IDENT -> return "the name `{parser_text(state, token)}`"
+    if kind == TOKEN_STRING -> return "a piece of quoted text"
+    if kind == TOKEN_RAW_STRING -> return "a piece of raw text"
+    if kind == TOKEN_INT -> return "a number"
+    if kind == TOKEN_FLOAT -> return "a decimal number"
+    if kind == TOKEN_UNIT_NUMBER -> return "a number with a unit suffix"
+    if kind == TOKEN_CHAR -> return "a character"
+    if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return "a comment"
+    keyword :: kind == TOKEN_SELF || kind == TOKEN_NULL || kind == TOKEN_BREAK || kind == TOKEN_RETURN || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE)
+    if keyword -> return "the keyword `{parser_text(state, token)}`"
     "`{parser_text(state, token)}`"
 }
 
@@ -497,8 +508,8 @@ fn parser_expect_name(state: &JetParserState, context: String) -> Token {
         &state,
         token.span,
         "expected a name {context}, found {found}",
-        "declarations and member paths are built from identifier tokens",
-        "write an identifier here",
+        "names start with a letter or `_`",
+        "e.g. `main`, `count`, `_tmp`",
     )
     parser_synthetic_token(TOKEN_IDENT, token.span)
 }

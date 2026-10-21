@@ -49,7 +49,7 @@ fn effect_origin_input(module_index: Int, file: String) -> SemaEffectModuleInput
     located :: sema_effect_locate_dispatch(site, inputs)
     if located.source_path != Val("worker.jet") || located.span != Val(site.dispatch.span) -> panic("foreign dispatch lost its source location")
     batch := [Diagnostic]{}
-    sema_effect_check_node(caller, [String]{"IO"}, false, Val(located), &batch)
+    sema_effect_check_node(caller, [String]{"IO"}, false, Val(located), "", &batch)
     all := [Diagnostic]{}
     sema_effect_publish_diagnostics(&all, inputs[0].source_segments, ^batch)
     if all.len() != 1 || all[0].code != "E0743" || all[0].source_path != Val("worker.jet") -> panic("publication rebound the foreign dispatch to main")
@@ -66,7 +66,7 @@ fn effect_origin_input(module_index: Int, file: String) -> SemaEffectModuleInput
     bounded.declared = [String]{"Net"}
     bounded.has_declared_row = true
     boundary := [Diagnostic]{}
-    sema_effect_check_node(bounded, [String]{"IO"}, false, None, &boundary)
+    sema_effect_check_node(bounded, [String]{"IO"}, false, None, "", &boundary)
     inputs[1] = effect_origin_input(1, "worker.jet")
     boundary_all := [Diagnostic]{}
     sema_effect_publish_diagnostics(&boundary_all, inputs[1].source_segments, ^boundary)

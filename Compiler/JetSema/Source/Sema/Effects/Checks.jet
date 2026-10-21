@@ -22,6 +22,7 @@ use jet_foundation.[
     Span,
     Stmt,
     SymbolKind,
+    TCallArg,
     TContract,
     TCoreClosureKind,
     TEffectFacts,
@@ -210,6 +211,13 @@ struct SemaEffectNode {
     // `module::name` in call paths and the source file name in reports.
     display_key: String{""}
     source_display: String{""}
+    // The Rust effect key (`name`, or `Owner::name` for a method): the
+    // name a denial's call chain shows for this function.
+    chain_name: String{""}
+    // The first entry of the declared effect row (E0740's span) and its first
+    // `!` prohibition (E0749's span).
+    row_span: Span?{None}
+    prohibition_span: Span?{None}
 }
 
 fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -652,22 +660,76 @@ fn sema_effect_apply_via(nodes: &[SemaEffectNode], node_index: Int, function: TF
     }
 }
 
+// Rust `Effects.rs` `e0740`: the span is the row's first entry.
 fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnostic {
+    over_list :: sema_effect_show(over)
     declared :: if node.declared.len() == 0 -> "no effects" else -> "`-[{sema_effect_show(node.declared)}]>`"
-    sema_error("E0740", node.span, "`{node.name}` uses the effect `{sema_effect_show(over)}`, which its signature doesn't allow", "the signature declares {declared}, so the body may only use those effects", "add `{sema_effect_show(over)}` to the effect list, or stop using it in `{node.name}`")
+    span :: node.row_span ?? node.name_span
+    diagnostic :: sema_error("E0740", span, "`{node.name}` uses the effect `{over_list}`, which its signature doesn't allow", "the signature declares {declared}, so the body may only use those; `{over_list}` is outside that set", "add `{over_list}` to the effect list, or stop using it in `{node.name}`")
+    diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
-fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
-    sema_error("E0749", node.span, "`{node.name}` reaches the `{sema_effect_show(reached)}` effect, which it prohibits", "a prohibited effect row applies to the function and every callee it can reach", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the prohibition")
+// Rust `Effects.rs` `e0749` / `e0749_panic`: a reached Panic names the
+// reachable function where the stop enters the call graph.
+fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String], panic_site: String) -> Diagnostic {
+    reached_list :: sema_effect_show(reached)
+    declared :: sema_effect_show(node.prohibited)
+    span :: node.prohibition_span ?? node.name_span
+    reaches_panic :: loop effect_name in reached {
+        if sema_effect_root(effect_name) == "Panic" -> break true
+    } ?? false
+    if reaches_panic {
+        diagnostic :: sema_error("E0749", span, "`{node.name}` can stop, but Panic is denied here", "`{panic_site}` can stop; `{node.name}` and every reachable callee must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{declared}]>` prohibition")
+        return diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name, panic_site}, [String]{}, None)
+    }
+    diagnostic :: sema_error("E0749", span, "`{node.name}` reaches the `{reached_list}` effect, which it prohibits with `-[!{declared}]>`", "a `-[!{declared}]>` row means the function and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop the `-[!{declared}]>` prohibition")
+    diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
 fn sema_effect_pure_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
     sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
 }
 
+// Rust `Effects.rs` `e0725`.
 fn sema_effect_replayable_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
-    span :: node.replayable_span ?? node.span
-    sema_error("E0725", span, "`{node.name}` is `#Replayable` but reaches `{sema_effect_show(reached)}`", "replayable code must use explicit deterministic inputs rather than ambient time, randomness, network, or console IO", "inject a deterministic provider or move the ambient effect outside the replayable function")
+    span :: node.replayable_span ?? node.name_span
+    diagnostic :: sema_error("E0725", span, "`{node.name}` is `#Replayable` but reaches `{sema_effect_show(reached)}`", "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge", "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function")
+    diagnostic_with_rights(^diagnostic, "replayable", [String]{node.name}, [String]{}, None)
+}
+
+// Rust `Registration.rs` `effect_key`: a method's key is `Owner::name`.
+fn sema_effect_chain_name(function: TFunc) -> String Never! {
+    owner :: if function.kind == {
+        .Method(_, owner_type) -> owner_type
+        .TraitMethod(_, _, owner_type, _, _) -> owner_type
+        else -> {
+            return function.name
+        }
+    }
+    if owner == {
+        .Named(name) | .Apply(name, _) -> "{sema_effect_symbol_leaf(name)}::{function.name}"
+        else -> function.name
+    }
+}
+
+// Rust `check_effect_boundaries` `panic_site`: the first function reached
+// depth-first that stops (a maximal row, a direct Panic, or a stop sentinel).
+fn sema_effect_panic_site(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, seen: &[Bool]) -> Int? Never! {
+    if seen[index] -> return None
+    seen[index] = true
+    if nodes[index].maximal -> return Val(index)
+    loop effect_name in nodes[index].direct {
+        if sema_effect_root(effect_name) == "Panic" -> return Val(index)
+    }
+    loop edge in nodes[index].call_edges {
+        if edge == "__jet_panic__" -> return Val(index)
+    }
+    loop edge in nodes[index].call_edges {
+        target :: node_by_key.get(edge) ?? next
+        site :: sema_effect_panic_site(nodes, node_by_key, target, &seen) ?? next
+        return Val(site)
+    }
+    None
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -754,6 +816,7 @@ fn sema_effect_node_from_source(function: TFunc, sources: [SemaEffectFunctionSou
     }
     node.display_key = "{function.module_name}::{function.name}"
     node.source_display = sema_effect_source_display(function.source_file)
+    node.chain_name = sema_effect_chain_name(function)
     at :: source_position ?? {
         sema_effect_check_tfunc_unsafe(function, &diagnostics)
         return node
@@ -779,8 +842,10 @@ fn sema_effect_node_from_source(function: TFunc, sources: [SemaEffectFunctionSou
         // remains inspectable after a failed gate check.
     }
     if actual.declared_effects == .Val(effect_row) {
+        if effect_row.len() > 0 -> node.row_span = Val(effect_row[0].span)
         loop entry in effect_row {
             prohibited :: entry.name.starts_with("!")
+            if prohibited && node.prohibition_span == None -> node.prohibition_span = Val(entry.span)
             raw := entry.name
             if prohibited {
                 pieces :: entry.name.split("!").to_list()
@@ -1096,6 +1161,21 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_by_key: [St
     }
 }
 
+// Rust `direct_calls.rs` `attribute_fn_arg`: a named function passed to a
+// function-typed parameter flows its effects through to this caller, and the
+// callee may invoke it any number of times.
+fn sema_effect_record_function_arguments(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, args: [TCallArg]) Never! {
+    loop argument in args {
+        if argument.value.ty == .Fn(_, _, _, _, _, _) {
+            if argument.value.kind == .ConstRef(symbol) {
+                if sema_effect_node_index(node_by_key, symbol.key) == None -> next
+                sema_effect_node_add_edge(&nodes, node_index, symbol.key)
+                &nodes[node_index].memory_calls.push(SemaMemoryCall{callee: symbol.key, span: argument.value.span, executions: None})
+            }
+        }
+    }
+}
+
 fn sema_effect_symbol_leaf(key: String) -> String Never! {
     parts :: key.split(":").to_list()
     if parts.len() == 0 -> key else -> parts[parts.len() - 1]
@@ -1243,6 +1323,12 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, expression: 
             sema_effect_record_memory_open(&nodes, node_index, expression.span, "foreign or dynamically selected function body")
         }
         .RequireStop(_, _, _) | .Never(_) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
+        // Rust `check_panic_call`: `value ?? panic(message)` stops through
+        // the same sentinel as a bare `panic(message)`.
+        .OrFallback(_, fallback, _) -> {
+            if fallback == .Panic(_, _) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
+        }
+        .Call(_, _, args) | .IndirectCall(_, _, args, _) | .ModuleCall(_, _, _, _, args) -> sema_effect_record_function_arguments(&nodes, facts.node_by_key, node_index, args)
         // `close(^value)` runs the value type's own `Close.close`, so that
         // method's effects are this function's (codegen calls it directly).
         .Close(value) -> sema_effect_record_close(&nodes, facts, node_index, value)
@@ -1500,9 +1586,12 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
     }
 }
 
+// Rust `Effects.rs` `e0712`: the region is both the call and the scope frame;
+// its own caps never grant the effects it is missing.
 fn sema_effect_scope_diagnostic(marker: String, over: [String], bounds: [String], span: Span) -> Diagnostic {
     allowed :: if bounds.len() == 0 -> "no effects" else -> "`{sema_effect_show(bounds)}`"
-    sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside — even through a call — must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
+    diagnostic :: sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside — even through a call — must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
+    diagnostic_with_rights(^diagnostic, "invocation", [String]{"#{marker}"}, [String]{"#{marker}"}, None)
 }
 
 // A scope cap list parsed once: the effect names it allows as a ranked set
@@ -1966,7 +2055,7 @@ fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [Strin
     }
 }
 
-fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_site: String, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     // This rule with (Rust `check_inferred_memo`, E0938): a
     // `#Memo` function that is not declared pure is judged by its solved row;
@@ -2013,7 +2102,7 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached
     }
     prohibited :: sema_effect_covered(solved, node.prohibited)
     if prohibited.len() > 0 {
-        &diagnostics.push(sema_effect_prohibited_diagnostic(node, prohibited))
+        &diagnostics.push(sema_effect_prohibited_diagnostic(node, prohibited, panic_site))
         valid = false
     }
     if node.is_replayable {
@@ -2200,7 +2289,12 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
                 dispatch = Val(sema_effect_locate_dispatch(found, inputs))
             }
         }
-        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, &function_diagnostics) {
+        panic_site := "the reachable call graph"
+        if nodes[node_index].prohibited.len() > 0 {
+            seen := (loop _ in nodes -> false)
+            if sema_effect_panic_site(nodes, calls.node_by_key, node_index, &seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
+        }
+        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_site, &function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }

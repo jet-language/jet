@@ -3072,6 +3072,10 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
             if graph.modules[module_index].program.items[item_index] == {
                 .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .Const(_) | .UnitFamily(_) | .Impl(_) | .EffectDecl(_) -> {}
                 .ExternRust(_) | .CModule(_) | .MarkerDecl(_) | .UserDerive(_) -> {}
+                // Rust `CheckInner.rs` `Item::Module(_) => {}`: a role module
+                // (`env.*`, `perf.*`, `dev`, `workspace`) carries no checked
+                // body; its contributions are validated by their own passes.
+                .Module(_) -> {}
                 .Test(test) -> {
                     if test.name == .Val(test_name) {
                         if test_names.get(test_name) != None || sema_scope_resolve_index(scopes, test_name) != None {
