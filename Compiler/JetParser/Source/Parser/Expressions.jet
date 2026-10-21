@@ -734,6 +734,10 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
             span: span,
         }
     }
+    // One marker read at expression position (Rust `primary`): the marker
+    // name is read first, then classified. Any name without its own value
+    // meaning is a declared tag applied to the value after it.
+    if kind == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT -> return parser_parse_marker_value(&state, depth + 1, allow_struct_lit, stop_before_comparison)
     if kind == TOKEN_LPAREN -> return parser_parse_parenthesized(&state, depth + 1)
     if kind == TOKEN_LBRACKET -> return parser_parse_collection(&state, depth + 1)
     if allow_struct_lit && kind == TOKEN_LBRACE {
@@ -812,6 +816,51 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     parser_add_error(&state, token.span, "expected a value, found `{found}`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
     if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_RPAREN && kind != TOKEN_RBRACKET && kind != TOKEN_COMMA && kind != TOKEN_SEMI -> parser_bump(&state)
     ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
+}
+
+// `#Name value` at expression position. `#Todo` is a typed goal; `#Meta` and
+// the statement switches carry no value; the retired `#Tainted[(Kind)] value`
+// recovers as the ordinary tag application; the old SIMD reduce selectors
+// stay recovery nodes for their retirement diagnostic. Sema validates the tag.
+fn parser_parse_marker_value(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
+    hash :: parser_bump(&state)
+    first :: parser_bump(&state)
+    name := parser_value(state, first)
+    name_end := first.span.end
+    loop parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT {
+        parser_bump(&state)
+        segment :: parser_bump(&state)
+        name = "{name}.{parser_value(state, segment)}"
+        name_end = segment.span.end
+    }
+    head_span :: Span{start: hash.span.start, end: name_end}
+    if name == {
+        "Meta" -> {
+            parser_add_fatal_code(&state, "E0349", head_span, "`#Meta` attaches to a binding or function", "`#Meta` is a tooling fact about a named source item; expressions do not carry it", "move `#Meta(...)` before a binding or function, or remove it")
+            return ParsedExpr{expr: Expr.Unit{span: head_span}, span: head_span}
+        }
+        "Off" | "DebugOnly" -> {
+            parser_add_fatal_code(&state, "E0343", head_span, "`#{name}` does not produce a value", "statement switch attributes control a whole statement; expressions must still produce values in every build", "put it before the statement: `#{name} <statement>`")
+            return ParsedExpr{expr: Expr.Unit{span: head_span}, span: head_span}
+        }
+        "Todo" -> return ParsedExpr{expr: Expr.Todo{span: head_span, expected_type: None}, span: head_span}
+        "Add" | "Mul" | "Min" | "Max" -> return ParsedExpr{expr: Expr.ReduceMarker{name: name, span: head_span}, span: head_span}
+        else -> {}
+    }
+    applied := name
+    if name == "Tainted" {
+        kind_name := ""
+        if parser_current_kind(&state) == TOKEN_LPAREN {
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_IDENT -> kind_name = parser_value(state, parser_bump(&state))
+            if parser_current_kind(&state) == TOKEN_RPAREN -> parser_bump(&state)
+        }
+        applied = if kind_name.len() == 0 -> "Input" else -> kind_name
+        parser_add_error_code(&state, "E0927", head_span, "`#Tainted` is retired", "taint kinds are ordinary declared fact tags", "write `#{applied} value`")
+    }
+    inner :: parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
+    span :: parser_cover(head_span, inner.span)
+    ParsedExpr{expr: Expr.Tainted{value: inner.expr, tag: Val(applied), span: span}, span: span}
 }
 
 fn parser_parse_string(state: &JetParserState, depth: Int) -> ParsedExpr {
@@ -1546,7 +1595,10 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     call := Call{name: name, name_span: name_span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
                     expression = ParsedExpr{expr: Expr.Call{call: call}, span: span}
                 }
-                .Field(receiver, method, method_span) -> {
+                .Field(receiver, method, field_span) -> {
+                    // A method call is spanned at its method name, the
+                    // field path's trailing bytes; `span` covers the call.
+                    method_span :: Span{start: field_span.end - method.count_bytes(), end: field_span.end}
                     expression = ParsedExpr{
                         expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None},
                         span: span,
