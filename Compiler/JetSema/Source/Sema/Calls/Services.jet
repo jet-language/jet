@@ -23,6 +23,8 @@ use jet_foundation.[
     TStrPart,
     Type,
     core_source_owns_type,
+    ast_empty_call_arg_flags,
+    core_call,
     UnOp,
     expr_span,
     tir_each_expr_child,
@@ -209,6 +211,25 @@ fn sema_services_check_core_method(api: String, contract: SemaServiceCoreMethodC
         sema_services_check_untyped_args(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    // A tree query with no Core row (`event_count`) is the ordinary source
+    // call `core.service.<member>(receiver, args…)`, as Rust lowers it
+    // (method_calls.rs `service_method_route` + `core_source_owns_call`).
+    if core_call("core.service", contract.member) == None {
+        identity :: sema_call_core_module_identity(environment, program, "core.service") ?? {
+            &diagnostics.push(sema_error("E0003", span, "service source module is not loaded", "`{api}` requires Core/Service/Service.jet", "load the registered Core source module"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        target :: sema_call_core_source_target(environment, program, identity, contract.member, [Type]{}, span, true, &diagnostics) ?? {
+            &diagnostics.push(sema_error("E0003", span, "service source receiver target is missing", "`{api}` requires its canonical source function", "load the registered Core source function"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        source_args := [CallArg]{CallArg{convention: contract.receiver_access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+        loop argument in updated_args -> &source_args.push(argument)
+        scopes.ownership_call_depth += 1
+        value := sema_call_core_check_source_owned(target, api, [Type]{}, source_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        scopes.ownership_call_depth -= 1
+        return SemaMethodSpecialCheck{handled: true, value: value}
+    }
     values := [TExpr]{}
     valid := true
     index := 0
@@ -357,8 +378,12 @@ fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value
         if updated_args[1].expr == {
             .Ident(identifier, _) -> {
                 handler_name = identifier
-                if sema_scope_resolve_index(scopes, identifier) != None {
-                    &diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "service worker handler is outside the checked builder shape", "service handlers must be top-level functions and cannot capture local values", "pass a top-level function name"))
+                // Rust `self.lookup(handler)`: only a body binding is a local;
+                // the root frame holds the module's items and imports.
+                local := false
+                if sema_scope_resolve_index(scopes, identifier) == .Val(index) -> local = scopes.frames[scopes.bindings[index].frame].parent >= 0
+                if local {
+                    &diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "service worker handler lifetime is outside the checked builder shape", "service topology values must stay visible to sema before runtime construction", "pass a top-level function, not a local or captured function value"))
                     valid = false
                 }
             }

@@ -1,3 +1,4 @@
+use core as core
 use core.reactive as reactive
 
 C_MAX_STORE_NAME :: 256
@@ -97,7 +98,7 @@ fn with_history<T>(name: String, value: T, limit: Int) -> WebStore<T> Never! {
     store
 }
 
-fn value<T>(store: WebStore<T>) -> T Never! { store.state.get() }
+fn value<T>(store: WebStore<T>) -> T Never! { reactive.get(store.state) }
 fn get<T>(store: WebStore<T>) -> T Never! { value<T>(store) }
 fn signal<T>(store: WebStore<T>) -> Signal<T> Never! { store.state }
 fn state_signal<T>(store: WebStore<T>) -> Signal<T> Never! { signal<T>(store) }
@@ -151,7 +152,7 @@ fn patch_rollback<T>(patch: &WebStorePatch<T>) -> WebStore<T>? Never! {
     if !patch.active -> return None
     store := patch.store
     before :: value<T>(store)
-    store.state.set(patch.backup)
+    store.state = reactive.set(store.state, patch.backup)
     _ :: record<T>(&store, "rollback", [String]{}, before)
     patch.active = false
     Val(store)
@@ -172,7 +173,7 @@ fn restore<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
 
 fn jump<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! {
     if index < 0 || index > store.history.len() -> return None
-    store.state.set(if index == 0 -> store.initial else -> store.history[index - 1])
+    store.state = reactive.set(store.state, if index == 0 -> store.initial else -> store.history[index - 1])
     store.cursor = index
     store.generation = store.generation + 1
     Val(store)

@@ -36,6 +36,7 @@ use jet_foundation.[
     Variant,
     ast_empty_call_arg_flags,
     core_enum_payload_variants,
+    core_enum_variant_labels,
     core_enum_variant_payload,
     core_enum_variants,
     core_module_enum_variants,
@@ -808,6 +809,9 @@ fn sema_expression_core_enum_literal(enum_name: String, display_name: String, va
         &diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
         return None
     }
+    if core_enum_variant_labels(enum_name, variant) == .Val(labels) {
+        return sema_expression_core_enum_named_literal(enum_name, display_name, variant, labels, payload_types, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if args.len() != payload_types.len() {
         &diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects {payload_types.len()} payload values", "this Core enum variant has positional payload fields", "pass exactly {payload_types.len()} values"))
         return None
@@ -839,6 +843,75 @@ fn sema_expression_core_enum_literal(enum_name: String, display_name: String, va
     }
     payload :: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
     value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
+    sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// A named-payload case of a Core enum without a source declaration
+// (`EmailError.Configuration{...}`), checked like a declared enum's named
+// payload (Rust `check_enum_lit`): fields keep their written order and every
+// declared field gets exactly one value.
+fn sema_expression_core_enum_named_literal(enum_name: String, display_name: String, variant: String, labels: [String], payload_types: [Type], args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    supplied := [Bool]{}
+    loop _ in labels -> &supplied.push(false)
+    named_values := [TNamedEnumArg]{}
+    failed := false
+    loop arg in args {
+        label := ""
+        payload_expr := Expr.Unit{span: span}
+        if arg == {
+            .Named(name, value) -> {
+                label = name
+                payload_expr = value
+            }
+            .Positional(_) -> {
+                &diagnostics.push(sema_error("E0764", span, "variant `{variant}` needs named payload fields", "this enum variant declares labeled fields", "write each variant field as `name: value`"))
+                return None
+            }
+        }
+        found := -1
+        loop (index, declared) in labels {
+            if declared == label {
+                found = index
+                break
+            }
+        }
+        if found < 0 {
+            &diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
+            return None
+        }
+        if supplied[found] {
+            &diagnostics.push(sema_error("E0105", expr_span(payload_expr), "variant field `{label}` is supplied more than once", "each enum payload field receives one value", "remove the duplicate field"))
+            return None
+        }
+        supplied[found] = true
+        field_ty :: payload_types[found]
+        sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
+        diagnostic_start :: diagnostics.len()
+        checked_value :: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if checked_value == None {
+            sema_expression_enum_payload_replace_mismatch(display_name, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            failed = true
+            next
+        }
+        checked :: checked_value
+        if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+        compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
+        if !compatible {
+            &diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
+            failed = true
+            next
+        }
+        if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
+        &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
+    }
+    loop (index, was_supplied) in supplied {
+        if !was_supplied {
+            &diagnostics.push(sema_error("E0108", span, "variant field `{labels[index]}` needs a value", "named enum payloads initialize every declared field", "supply the missing payload field"))
+            return None
+        }
+    }
+    if failed -> return None
+    value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Named{fields: named_values}}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
@@ -1474,8 +1547,15 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, p
     }
     parts :: path.split(".").to_list()
     if parts.len() != 2 -> return None
-    owner :: sema_expression_type_symbol(&scopes, environment, program, parts[0]) ?? return None
-    if sema_scope_declaration_enum_declares(environment, program, owner.id, parts[1]) -> Val(SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}) else -> None
+    head_value :: SemaExpressionVariantHead{enum_name: parts[0], variant: parts[1]}
+    owner :: sema_expression_type_symbol(&scopes, environment, program, parts[0])
+    if owner == .Val(symbol) {
+        if sema_scope_declaration_enum_declares(environment, program, symbol.id, parts[1]) -> return Val(head_value)
+        if sema_expression_core_export_variants(environment, program, symbol) == None -> return None
+    }
+    // A compiler-owned Core enum (`EmailError`) has no declaration; its
+    // named-payload case comes from the generated Core enum payload rows.
+    if core_enum_variant_labels(parts[0], parts[1]) != None -> Val(head_value) else -> None
 }
 
 // A record field written as the bare shorthand `{name}`: the parser gives its

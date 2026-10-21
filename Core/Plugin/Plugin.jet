@@ -13,61 +13,13 @@ package {
 //
 // The compiler still requires a literal artifact and attaches its frozen
 // Component interface, then projects tightened authority to its canonical
-// wire at that same boundary. The private checked source target decodes the
-// existing host wire; it never manufactures a fake or generic Component.
+// wire at that same boundary. `load` is the native `jet_plugin_load` route,
+// which decodes the host's load wire into the typed handle.
 
-// . Every export call fails with the compiler-owned
+// Every export call fails with the compiler-owned
 // `PluginError` (`Guest`, `Denied`, `Budget(limit: PluginLimit, fault)`,
 // `Defect`); each case carries a `PluginFault { export, message, frames }`
 // whose frames are `PluginFrame { function, component, offset }`. The host,
 // sema rows and every tier share that one carrier, so this module declares
 // no second copy of it.
 
-use core as core
-use core.text.parse as parse
-
-// Rust u64::from_str accepts a leading plus and leading zeros, but no
-// whitespace, negative sign, underscore, or non-ASCII digit.
-fn wire_handle(text: String) -> Int? Never! {
-    bytes :: text.bytes()
-    if bytes.len() == 0 -> return None
-    start :: if bytes[0] == (U8{43}) -> 1 else -> 0
-    if start == bytes.len() -> return None
-    value := 0
-    loop index in start..<bytes.len() {
-        digit :: Int.from_u8(bytes[index]) - 48
-        if digit < 0 || digit > 9 -> return None
-        value = value * 10 + digit
-        if value > 18446744073709551615 -> return None
-    }
-    if value == 0 -> return None
-    Val(value)
-}
-
-fn wire_result(wire: String) -> (handle: Int?, reason: String) Never! {
-    if wire.starts_with("O:") {
-        handle :: wire_handle(parse.strip_prefix(wire, "O:"))
-        if handle != None -> return (handle: handle, reason: "")
-    }
-    reason :: if wire.starts_with("E:") -> parse.strip_prefix(wire, "E:") else -> "plugin load failed"
-    (handle: None, reason: reason)
-}
-
-// Hidden checked ABI, NOT the public literal-artifact spelling. The compiler
-// materializes the existing Authority wire operand before source forwarding.
-fn __load_checked_wire(path: String, authority_wire: String) -[Exec]> Plugin Never! {
-    result :: wire_result(core.plugin.__load_wire(path, authority_wire))
-    if result.handle == .Val(handle) -> return core.plugin.__from_handle(U64{handle})
-    core.plugin.__stop(result.reason)
-}
-
-#Test("plugin load wire parse matches unsigned Rust grammar and exact refusals") {
-    assert_eq(wire_result("O:1"), (handle: Val(1), reason: ""))
-    assert_eq(wire_result("O:+0001"), (handle: Val(1), reason: ""))
-    assert_eq(wire_result("O:18446744073709551615"), (handle: Val(18446744073709551615), reason: ""))
-    assert_eq(wire_result("E:denied: root"), (handle: None, reason: "denied: root"))
-    assert_eq(wire_result("E:"), (handle: None, reason: ""))
-    loop wire in ["O:0", "O:+0", "O:-1", "O:18446744073709551616", "O: 1", "O:1 ", "O:1_0", "O:１", "O:+", "O:", "", "bad"] {
-        assert_eq(wire_result(wire), (handle: None, reason: "plugin load failed"))
-    }
-}

@@ -17,12 +17,14 @@ struct CoreModuleTypeExport {
 }
 
 // One variant of a compiler-owned Core enum family (Rust
-// `resolve_enum_variants_cloned` tables) and its positional payload types;
-// an empty payload is a unit variant.
+// `resolve_enum_variants_cloned` tables): its payload types in slot order (an
+// empty payload is a unit variant) and, for a named payload, each slot's
+// field label (empty for a positional payload).
 struct CoreEnumPayloadRow {
     enum_name: String
     variant: String
     payload: [Type]
+    labels: [String]
 }
 
 struct CoreModuleDeclaration {
@@ -239,6 +241,15 @@ fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
     if family -> return None
     declared :: core_enum_variants(name) ?? return None
     if declared.contains(variant) -> Val([Type]{}) else -> None
+}
+
+// The field labels of `name.variant`'s named payload, in slot order. `None`
+// when the variant is not a compiler-owned case with a named payload.
+fn core_enum_variant_labels(name: String, variant: String) -> [String]? {
+    loop row in CORE_ENUM_PAYLOAD_ROWS {
+        if row.enum_name == name && row.variant == variant -> return if row.labels.len() == 0 -> None else -> Val(row.labels)
+    }
+    None
 }
 
 // The variants of the enum `name` that the Core module `module_name` exports:

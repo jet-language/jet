@@ -3376,7 +3376,7 @@ function rustSyntaxList(name, constants, rel) {
 
 // Rust `Type` payload expressions as Jet `Type` row expressions.
 function rustPayloadType(expression, constants, rel) {
-  const text = expression.replace(/\s+/g, "");
+  const text = expression.replace(/\s+/g, "").replace(/,\)/g, ")");
   const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
   if (scalar[text]) return scalar[text];
   if (text === "u8_ty()") {
@@ -3389,6 +3389,15 @@ function rustPayloadType(expression, constants, rel) {
   if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
   const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
   if (list) return "Type.List{element: " + rustPayloadType(list[1], constants, rel) + "}";
+  const option = /^Type::Option\(Box::new\((.+)\)\)$/.exec(text);
+  if (option) return "Type.Option{inner: " + rustPayloadType(option[1], constants, rel) + "}";
+  const integer = /^Type::IntN\{signed:(true|false),bits:(\d+),?\}$/.exec(text);
+  if (integer) return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
+  const nominal = /^crate::Sema::Diagnostics::core_crypto_nominal\((.+)\)$/.exec(text);
+  if (nominal) {
+    return "Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: " +
+      rustPayloadType(nominal[1], constants, rel) + "}";
+  }
   throw new Error(rel + ": unsupported payload type `" + text + "`");
 }
 
@@ -3454,14 +3463,80 @@ function rustPluginVariantFamilies(source, constants) {
     if (!single && !menu[2].includes("VariantPayload::Unit")) throw new Error(CORE_TYPES_RS_PATH + ": plugin payload changed shape");
     for (const variant of names) rows.push({ variant, payload });
     for (const named of arm[2].matchAll(/variants\.insert\("(\w+)"\.to_string\(\), \(span, VariantPayload::Named\(vec!\[([\s\S]*?)\]\)\)\);/g)) {
-      const fields = Array.from(named[2].matchAll(/VariantField \{[\s\S]*?ty: ([\s\S]*?), ty_span: span \}/g),
-        (field) => rustPayloadType(field[1], constants, CORE_TYPES_RS_PATH));
+      const fields = Array.from(named[2].matchAll(/VariantField \{ name: "(\w+)"\.to_string\(\), [\s\S]*?ty: ([\s\S]*?), ty_span: span \}/g));
       if (!fields.length) throw new Error(CORE_TYPES_RS_PATH + ": plugin named payload changed shape");
-      rows.push({ variant: named[1], payload: fields });
+      rows.push({
+        variant: named[1],
+        payload: fields.map((field) => rustPayloadType(field[2], constants, CORE_TYPES_RS_PATH)),
+        labels: fields.map((field) => field[1]),
+      });
     }
     families.push({ name: arm[1], rows });
   }
   if (families.length !== 2) throw new Error(CORE_TYPES_RS_PATH + ": plugin enum families changed shape");
+  return families;
+}
+
+// The top-level `( … )` groups of a Rust tuple-list literal, without their parentheses.
+function rustTupleItems(text) {
+  const items = [];
+  let depth = 0;
+  let start = -1;
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === "(" && depth++ === 0) start = index + 1;
+    if (text[index] === ")" && --depth === 0) items.push(text.slice(start, index));
+  }
+  if (depth !== 0) throw new Error("unbalanced Rust tuple list");
+  return items;
+}
+
+// `core_email_variants`: per-enum unit menus, EmailError's cases sharing one
+// named field list, and explicit SMTPAuth/TLSTrust inserts in source order.
+function rustEmailVariantFamilies(source, constants) {
+  const rel = CORE_TYPES_RS_PATH;
+  const body = rustFunctionBody(source, "core_email_variants", rel);
+  const menu = /let units: &\[&str\] = match enum_name \{([\s\S]*?)\n\s*_ => return None,\s*\};/.exec(body);
+  if (!menu) throw new Error(rel + ": core_email_variants unit menu changed shape");
+  const families = [];
+  for (const arm of menu[1].matchAll(/((?:"\w+"\s*\|?\s*)+)=> &\[([^\]]*)\],/g)) {
+    const units = Array.from(arm[2].matchAll(/"(\w+)"/g), (unit) => ({ variant: unit[1], payload: [], labels: [] }));
+    for (const name of arm[1].matchAll(/"(\w+)"/g)) families.push({ name: name[1], rows: units.slice() });
+  }
+  const blocks = Array.from(body.matchAll(/if enum_name == "(\w+)" \{/g));
+  const tail = body.lastIndexOf("Some(variants)");
+  if (!blocks.length || tail < 0) throw new Error(rel + ": core_email_variants payload blocks changed shape");
+  blocks.forEach((block, index) => {
+    const text = body.slice(block.index, index + 1 < blocks.length ? blocks[index + 1].index : tail);
+    const family = families.find((candidate) => candidate.name === block[1]);
+    if (!family) throw new Error(rel + ": core_email_variants has a payload block for unmenued " + block[1]);
+    const shared = /for name in \[([^\]]*)\] \{\s*let fields = \[([\s\S]*?)\]\s*\.into_iter\(\)/.exec(text);
+    if (shared) {
+      const fields = rustTupleItems(shared[2]).map((item) => {
+        const field = /^\s*"(\w+)",\s*([\s\S]+?)\s*$/.exec(item);
+        if (!field) throw new Error(rel + ": core_email_variants shared field `" + item + "` changed shape");
+        return field;
+      });
+      for (const name of shared[1].matchAll(/"(\w+)"/g)) {
+        family.rows.push({
+          variant: name[1],
+          payload: fields.map((field) => rustPayloadType(field[2], constants, rel)),
+          labels: fields.map((field) => field[1]),
+        });
+      }
+      return;
+    }
+    const inserts = Array.from(text.matchAll(/variants\.insert\(\s*"(\w+)"\.to_string\(\),\s*\(\s*zero,\s*VariantPayload::(Unit|Named\(vec!\[([\s\S]*?)\]\))/g));
+    if (!inserts.length) throw new Error(rel + ": core_email_variants " + block[1] + " block changed shape");
+    for (const insert of inserts) {
+      const fields = insert[2] === "Unit" ? [] : Array.from(insert[3].matchAll(/VariantField \{\s*name: "(\w+)"\.to_string\(\),\s*name_span: zero,\s*ty: ([\s\S]*?),\s*ty_span: zero,?\s*\}/g));
+      if (insert[2] !== "Unit" && !fields.length) throw new Error(rel + ": core_email_variants " + insert[1] + " named payload changed shape");
+      family.rows.push({
+        variant: insert[1],
+        payload: fields.map((field) => rustPayloadType(field[2], constants, rel)),
+        labels: fields.map((field) => field[1]),
+      });
+    }
+  });
   return families;
 }
 
@@ -3549,6 +3624,8 @@ function coreEnumPayloadFamilies(declarations) {
   families.push(...rustIOVariantFamilies(coreTypes, constants));
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
   families.push(...rustPluginVariantFamilies(coreTypes, constants));
+  if (!/core_email_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": email enum resolver is missing");
+  families.push(...rustEmailVariantFamilies(coreTypes, constants));
   families.push(rustDataEventVariantFamily(coreTypes, constants));
   if (!/core_reduce_op_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_reduce_op_variants");
   families.push(rustGuardedUnitVariantFamily(coreTypes, constants, "core_reduce_op_variants"));
@@ -3599,8 +3676,9 @@ function generatedCoreEnumPayloadRows(declarations) {
     "// Source: " + sources.join(", ") + ", " + SYNTAX_RS_DIR,
     "// Source SHA-256: " + sha256(sources.map(read).join("") + syntax),
     "// Compiler-owned Core enum families without a Core.jet declaration, in",
-    "// Rust `resolve_enum_variants_cloned` order; each row is one variant and",
-    "// its positional payload types (none for a unit variant).",
+    "// Rust `resolve_enum_variants_cloned` order; each row is one variant, its",
+    "// payload types in slot order (none for a unit variant) and, for a named",
+    "// payload, the slots' field labels (none for a positional payload).",
     "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
   ];
   for (const family of families) {
@@ -3608,7 +3686,8 @@ function generatedCoreEnumPayloadRows(declarations) {
       lines.push(
         "    CoreEnumPayloadRow{enum_name: " + jetStringExpression(family.name) +
         ", variant: " + jetStringExpression(row.variant) +
-        ", payload: [Type]{" + row.payload.join(", ") + "}},",
+        ", payload: [Type]{" + row.payload.join(", ") + "}" +
+        ", labels: [String]{" + (row.labels ?? []).map(jetStringExpression).join(", ") + "}},",
       );
     }
   }
