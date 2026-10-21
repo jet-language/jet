@@ -1,0 +1,566 @@
+// core.math Fraction and Decimal routes. Rust providers: PreciseNumeric.rs
+// (route kernels), Numeric.rs CtFraction (334-480) and CtDecimal (2078-2791)
+// for the value law, MathRandomTime.rs:1041-1375 for the route wrappers and
+// CAbiRoutes.rs for the C ABI (borrowed Int and handle arguments, native()
+// on from_int/new, owned results).
+// A Fraction handle owns two exact-Int words, numerator@0 and denominator@8,
+// always reduced with the sign on the numerator. A Decimal handle owns its
+// signed exact-Int coefficient@0 and its scale@8 (digits after the point);
+// a zero coefficient is never negative and keeps its written scale.
+PRECISE_HANDLE_BYTES :: prep { I64{16} }
+PRECISE_TOP :: prep { I64{0} }
+PRECISE_BOTTOM :: prep { I64{8} }
+// JSONNumber.rs JSON_NUMBER_MAX_DIGITS / JSON_NUMBER_MAX_EXPONENT.
+DECIMAL_MAX_DIGITS :: prep { I64{1000000} }
+
+fn precise_top(value: I64) -> I64 { rt_text_word(value + PRECISE_TOP) }
+fn precise_bottom(value: I64) -> I64 { rt_text_word(value + PRECISE_BOTTOM) }
+
+fn precise_pair(top: I64, bottom: I64) -> I64 {
+    result :: jet_rt_alloc(PRECISE_HANDLE_BYTES, I64{8})
+    rt_text_store(result + PRECISE_TOP, top)
+    rt_text_store(result + PRECISE_BOTTOM, bottom)
+    result
+}
+
+// MathRandomTime.rs `panic!("{}", failure_message(..))` is a foreign String
+// panic under the CAbi guard: the payload bytes, a newline and the host-fault
+// status 101 (as rt_seq_capacity_overflow_stop), not a Jet stop report.
+fn precise_fault(message: I64) -> I64 {
+    trap_defect_prepare()
+    jet_rt_stdout_flush()
+    trap_write(rt_text_data(message), rt_text_len(message))
+    trap_msg_newline()
+    trap_defect_exit(I64{101})
+    I64{0}
+}
+
+// CAbi.rs native(): the Int argument must fit the host i64.
+fn precise_native_fits(value: I64) -> Bool {
+    _ := jet_int_owned_to_i64(value)
+    jet_scheduler_native_propagate() == I64{0}
+}
+
+fn precise_div(value: I64, divisor: I64) -> I64 { jet_int_div(value, divisor, I64{0}, I64{0}, I64{0}) }
+fn precise_rem(value: I64, divisor: I64) -> I64 { jet_int_rem(value, divisor, I64{0}, I64{0}, I64{0}) }
+fn precise_neg(value: I64) -> I64 { jet_int_sub(I64{0}, value) }
+fn precise_abs(value: I64) -> I64 { if int_negative(value) -> precise_neg(value) else -> jet_rt_int_clone(value) }
+fn precise_pow10(places: I64) -> I64 { jet_int_pow(I64{10}, places, I64{0}, I64{0}, I64{0}) }
+
+// value * 10^places; value is borrowed.
+fn precise_scale_up(value: I64, places: I64) -> I64 {
+    if (places == I64{0}) -> return jet_rt_int_clone(value)
+    factor :: precise_pow10(places)
+    result :: jet_int_mul(value, factor)
+    jet_rt_int_drop(factor)
+    result
+}
+
+// Consumes an owned magnitude; the result carries the sign unless it is zero.
+fn precise_signed(magnitude: I64, negative: Bool) -> I64 {
+    if (!negative || magnitude == I64{0}) -> return magnitude
+    result :: precise_neg(magnitude)
+    jet_rt_int_drop(magnitude)
+    result
+}
+
+// CtBigInt::gcd over the magnitudes; gcd(0, d) is d.
+fn precise_gcd(left: I64, right: I64) -> I64 {
+    a := precise_abs(left)
+    b := precise_abs(right)
+    loop b != (I64{0}) {
+        rest :: precise_rem(a, b)
+        jet_rt_int_drop(a)
+        a = b
+        b = rest
+    }
+    a
+}
+
+// The IEEE fields of a finite nonzero binary64: significand and power of two.
+fn precise_float_significand(bits: I64) -> I64 {
+    exponent :: (bits >> I64{52}).bit_and(I64{2047})
+    fraction :: bits.bit_and(I64{4503599627370495})
+    if (exponent == I64{0}) -> return fraction
+    fraction.bit_or(I64{4503599627370496})
+}
+
+fn precise_float_power(bits: I64) -> I64 {
+    exponent :: (bits >> I64{52}).bit_and(I64{2047})
+    if (exponent == I64{0}) -> return I64{-1074}
+    exponent - I64{1075}
+}
+
+fn precise_float_finite(bits: I64) -> Bool { (bits >> I64{52}).bit_and(I64{2047}) != I64{2047} }
+
+// ---- Fraction --------------------------------------------------------------
+
+// CtFraction::from_bigints, consuming both words; 0 for a zero denominator.
+fn fraction_make(numerator: I64, denominator: I64) -> I64 {
+    if (denominator == I64{0}) {
+        jet_rt_int_drop(numerator)
+        return I64{0}
+    }
+    top := numerator
+    bottom := denominator
+    if int_negative(bottom) {
+        flipped_top :: precise_neg(top)
+        flipped_bottom :: precise_neg(bottom)
+        jet_rt_int_drop(top)
+        jet_rt_int_drop(bottom)
+        top = flipped_top
+        bottom = flipped_bottom
+    }
+    divisor :: precise_gcd(top, bottom)
+    reduced_top :: precise_div(top, divisor)
+    reduced_bottom :: precise_div(bottom, divisor)
+    jet_rt_int_drop(top)
+    jet_rt_int_drop(bottom)
+    jet_rt_int_drop(divisor)
+    precise_pair(reduced_top, reduced_bottom)
+}
+
+fn fraction_cross(left: I64, right: I64, subtract: Bool) -> I64 {
+    a :: jet_int_mul(precise_top(left), precise_bottom(right))
+    b :: jet_int_mul(precise_top(right), precise_bottom(left))
+    sum :: if subtract -> jet_int_sub(a, b) else -> jet_int_add(a, b)
+    jet_rt_int_drop(a)
+    jet_rt_int_drop(b)
+    fraction_make(sum, jet_int_mul(precise_bottom(left), precise_bottom(right)))
+}
+
+fn fraction_parts(numerator: I64, denominator: I64) -> I64 {
+    result :: fraction_make(jet_rt_int_clone(numerator), jet_rt_int_clone(denominator))
+    if (result == I64{0}) -> return precise_fault(rt_static_text("invalid exact quotient"))
+    result
+}
+
+// CtFraction::to_string_rep: the finite Decimal spelling when one exists,
+// else "numerator/denominator".
+fn fraction_render(value: I64) -> I64 {
+    decimal :: decimal_from_fraction(value)
+    if (decimal != I64{0}) {
+        text :: decimal_render(decimal)
+        jet_rt_handle_drop_jet_decimal(decimal)
+        return text
+    }
+    result :: jet_rt_string_builder_new()
+    top :: jet_rt_int_to_string(precise_top(value))
+    jet_rt_string_builder_push(result, top)
+    jet_rt_string_drop(top)
+    rt_text_push_scalar(result, I64{47})
+    bottom :: jet_rt_int_to_string(precise_bottom(value))
+    jet_rt_string_builder_push(result, bottom)
+    jet_rt_string_drop(bottom)
+    result
+}
+
+#Export(c) fn jet_fraction_new(numerator: I64, denominator: I64, some: I64) -> I64 {
+    if !precise_native_fits(numerator) -> return I64{0}
+    if !precise_native_fits(denominator) -> return I64{0}
+    result :: fraction_make(jet_rt_int_clone(numerator), jet_rt_int_clone(denominator))
+    if (result == I64{0}) -> return I64{0}
+    rt_text_store(some, result)
+    I64{1}
+}
+
+#Export(c) fn jet_fraction_from_parts(numerator: I64, denominator: I64) -> I64 { fraction_parts(numerator, denominator) }
+#Export(c) fn jet_fraction_from_owned_parts(numerator: I64, denominator: I64) -> I64 { fraction_parts(numerator, denominator) }
+
+#Export(c) fn jet_fraction_from_int(value: I64) -> I64 {
+    if !precise_native_fits(value) -> return I64{0}
+    precise_pair(jet_rt_int_clone(value), I64{1})
+}
+
+// CtFraction::from_float: the exact binary64 value as a reduced ratio.
+#Export(c) fn jet_fraction_from_float(value: Float) -> I64 {
+    bits :: rt_f64_bits(value)
+    if !precise_float_finite(bits) -> return precise_fault(rt_static_text("Float has no word-sized exact Fraction"))
+    if (value == Float{0.0}) -> return precise_pair(I64{0}, I64{1})
+    significand :: precise_float_significand(bits)
+    power :: precise_float_power(bits)
+    if (power >= I64{0}) {
+        magnitude :: jet_int_shl(significand, power, I64{0}, I64{0}, I64{0})
+        return fraction_make(precise_signed(magnitude, bits < I64{0}), I64{1})
+    }
+    denominator :: jet_int_shl(I64{1}, -power, I64{0}, I64{0}, I64{0})
+    fraction_make(precise_signed(significand, bits < I64{0}), denominator)
+}
+
+#Export(c) fn jet_fraction_add(left: I64, right: I64) -> I64 { fraction_cross(left, right, false) }
+#Export(c) fn jet_fraction_sub(left: I64, right: I64) -> I64 { fraction_cross(left, right, true) }
+
+#Export(c) fn jet_fraction_mul(left: I64, right: I64) -> I64 {
+    fraction_make(jet_int_mul(precise_top(left), precise_top(right)), jet_int_mul(precise_bottom(left), precise_bottom(right)))
+}
+
+#Export(c) fn jet_fraction_div(left: I64, right: I64) -> I64 {
+    result :: fraction_make(jet_int_mul(precise_top(left), precise_bottom(right)), jet_int_mul(precise_bottom(left), precise_top(right)))
+    if (result == I64{0}) -> return precise_fault(rt_static_text("divided by zero"))
+    result
+}
+
+#Export(c) fn jet_fraction_equal(left: I64, right: I64) -> Bool {
+    jet_int_compare(precise_top(left), precise_top(right)) == I64{0} && jet_int_compare(precise_bottom(left), precise_bottom(right)) == I64{0}
+}
+
+#Export(c) fn jet_fraction_numerator(value: I64) -> I64 { jet_rt_int_clone(precise_top(value)) }
+#Export(c) fn jet_fraction_denominator(value: I64) -> I64 { jet_rt_int_clone(precise_bottom(value)) }
+#Export(c) fn jet_fraction_owned_numerator(value: I64) -> I64 { jet_rt_int_clone(precise_top(value)) }
+#Export(c) fn jet_fraction_owned_denominator(value: I64) -> I64 { jet_rt_int_clone(precise_bottom(value)) }
+#Export(c) fn jet_fraction_is_zero(value: I64) -> Bool { precise_top(value) == I64{0} }
+
+#Export(c) fn jet_fraction_to_int(value: I64) -> I64 {
+    if (precise_bottom(value) != I64{1}) -> return precise_fault(rt_static_text("Fraction is not an integer"))
+    jet_rt_int_clone(precise_top(value))
+}
+
+// CtFraction::to_float: numerator.to_f64() / denominator.to_f64().
+#Export(c) fn jet_fraction_to_float(value: I64) -> Float {
+    jet_int_owned_to_f64(precise_top(value)) / jet_int_owned_to_f64(precise_bottom(value))
+}
+
+#Export(c) fn jet_fraction_to_decimal(value: I64) -> I64 {
+    result :: decimal_from_fraction(value)
+    if (result == I64{0}) -> return precise_fault(rt_static_text("Fraction has a repeating expansion"))
+    result
+}
+
+#Export(c) fn jet_fraction_to_string(value: I64) -> I64 { fraction_render(value) }
+
+#Export(c) fn jet_rt_handle_clone_jet_fraction(value: I64) -> I64 {
+    precise_pair(jet_rt_int_clone(precise_top(value)), jet_rt_int_clone(precise_bottom(value)))
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_fraction(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_int_drop(precise_top(value))
+    jet_rt_int_drop(precise_bottom(value))
+    jet_rt_free(value, PRECISE_HANDLE_BYTES, I64{8})
+}
+
+#Export(c) fn jet_rt_handle_eq_jet_fraction(left: I64, right: I64) -> Bool { jet_fraction_equal(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_fraction(value: I64) -> I64 { fraction_render(value) }
+#Export(c) fn jet_rt_handle_display_jet_fraction(value: I64) -> I64 { fraction_render(value) }
+
+// ---- Decimal ---------------------------------------------------------------
+
+// CtDecimal::normalize over an owned coefficient: trailing fractional zeros
+// leave with the scale, and zero has scale 0.
+fn decimal_normalized(coefficient: I64, scale: I64) -> I64 {
+    digits := coefficient
+    places := scale
+    loop places > (I64{0}) && digits != (I64{0}) {
+        if (precise_rem(digits, I64{10}) != I64{0}) -> break
+        next :: precise_div(digits, I64{10})
+        jet_rt_int_drop(digits)
+        digits = next
+        places -= I64{1}
+    }
+    if (digits == I64{0}) -> places = I64{0}
+    precise_pair(digits, places)
+}
+
+// The count of `factor` in an owned value; the remaining cofactor replaces it.
+fn decimal_strip_factor(value: I64, factor: I64) -> I64 {
+    count := I64{0}
+    loop {
+        if (precise_rem(rt_text_word(value), factor) != I64{0}) -> break
+        next :: precise_div(rt_text_word(value), factor)
+        jet_rt_int_drop(rt_text_word(value))
+        rt_text_store(value, next)
+        count += I64{1}
+    }
+    count
+}
+
+// CtDecimal::from_fraction: the finite expansion of a reduced ratio, or 0
+// when its denominator has a prime factor other than 2 and 5.
+fn decimal_from_fraction(value: I64) -> I64 {
+    rest :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(rest, jet_rt_int_clone(precise_bottom(value)))
+    twos :: decimal_strip_factor(rest, I64{2})
+    fives :: decimal_strip_factor(rest, I64{5})
+    finite :: rt_text_word(rest) == I64{1}
+    jet_rt_int_drop(rt_text_word(rest))
+    jet_rt_free(rest, I64{8}, I64{8})
+    if !finite -> return I64{0}
+    scale :: if (twos > fives) -> twos else -> fives
+    scaled :: precise_scale_up(precise_top(value), scale)
+    digits :: precise_div(scaled, precise_bottom(value))
+    jet_rt_int_drop(scaled)
+    decimal_normalized(digits, scale)
+}
+
+// CtDecimal::to_string_rep: the coefficient's digits with the point `scale`
+// places from the right, zero-padded to one leading integer digit.
+fn decimal_render(value: I64) -> I64 {
+    digits :: jet_rt_int_to_string(precise_top(value))
+    scale :: precise_bottom(value)
+    if (scale == I64{0}) -> return digits
+    data :: rt_text_data(digits)
+    sign :: if (rt_text_byte(data) == I64{45}) -> I64{1} else -> I64{0}
+    count :: rt_text_len(digits) - sign
+    result :: jet_rt_string_builder_new()
+    if (sign == I64{1}) -> rt_text_push_scalar(result, I64{45})
+    if (count <= scale) {
+        rt_text_push_scalar(result, I64{48})
+        rt_text_push_scalar(result, I64{46})
+        pad := scale - count
+        loop pad > (I64{0}) {
+            rt_text_push_scalar(result, I64{48})
+            pad -= I64{1}
+        }
+        rt_text_append(result, data + sign, count)
+    } else {
+        whole :: count - scale
+        rt_text_append(result, data + sign, whole)
+        rt_text_push_scalar(result, I64{46})
+        rt_text_append(result, data + sign + whole, scale)
+    }
+    jet_rt_string_drop(digits)
+    result
+}
+
+fn decimal_digits_valid(data: I64, from: I64, to: I64) -> Bool {
+    at := from
+    loop at < to {
+        byte :: rt_text_byte(data + at)
+        if (byte < I64{48} || byte > I64{57}) -> return false
+        at += I64{1}
+    }
+    true
+}
+
+// JSONNumber.rs json_decimal_lexeme over the trimmed text: optional sign,
+// digits with at most one point (not both sides empty), an optional e/E i64
+// exponent, the digit and exponent limits; the written scale is kept and a
+// negative scale widens the coefficient. 0 for an invalid lexeme.
+fn decimal_parse(text: I64) -> I64 {
+    start :: numeric_trim_start(text)
+    end :: numeric_trim_end(text, start)
+    if (start >= end) -> return I64{0}
+    data :: rt_text_data(text)
+    at := start
+    negative := false
+    first :: rt_text_byte(data + at)
+    if (first == I64{45} || first == I64{43}) {
+        negative = first == I64{45}
+        at += I64{1}
+    }
+    stop := at
+    loop stop < end && rt_text_byte(data + stop) != (I64{101}) && rt_text_byte(data + stop) != (I64{69}) { stop += I64{1} }
+    exponent := I64{0}
+    if (stop < end) {
+        cursor := stop + I64{1}
+        exponent_negative := false
+        if (cursor < end && (rt_text_byte(data + cursor) == I64{45} || rt_text_byte(data + cursor) == I64{43})) {
+            exponent_negative = rt_text_byte(data + cursor) == I64{45}
+            cursor += I64{1}
+        }
+        if (cursor >= end || !decimal_digits_valid(data, cursor, end)) -> return I64{0}
+        loop cursor < end {
+            exponent = exponent * I64{10} + rt_text_byte(data + cursor) - I64{48}
+            // Past the limit the reference fails either way (range or i64 parse).
+            if (exponent > DECIMAL_MAX_DIGITS) -> return I64{0}
+            cursor += I64{1}
+        }
+        if exponent_negative -> exponent = -exponent
+    }
+    dot := at
+    loop dot < stop && rt_text_byte(data + dot) != (I64{46}) { dot += I64{1} }
+    fraction_start :: if (dot < stop) -> dot + I64{1} else -> stop
+    whole_len :: dot - at
+    fraction_len :: stop - fraction_start
+    if (whole_len == I64{0} && fraction_len == I64{0}) -> return I64{0}
+    if (!decimal_digits_valid(data, at, dot) || !decimal_digits_valid(data, fraction_start, stop)) -> return I64{0}
+    if (whole_len + fraction_len > DECIMAL_MAX_DIGITS) -> return I64{0}
+    scale :: fraction_len - exponent
+    if (scale < I64{0} && whole_len + fraction_len - scale > DECIMAL_MAX_DIGITS) -> return I64{0}
+    whole :: jet_rt_int_from_static(data + at, whole_len)
+    part :: jet_rt_int_from_static(data + fraction_start, fraction_len)
+    shifted :: precise_scale_up(whole, fraction_len)
+    coefficient :: jet_int_add(shifted, part)
+    jet_rt_int_drop(whole)
+    jet_rt_int_drop(part)
+    jet_rt_int_drop(shifted)
+    if (scale < I64{0}) {
+        widened :: precise_scale_up(coefficient, -scale)
+        jet_rt_int_drop(coefficient)
+        return precise_pair(precise_signed(widened, negative), I64{0})
+    }
+    precise_pair(precise_signed(coefficient, negative), scale)
+}
+
+// The coefficient of `value` at a scale no smaller than its own.
+fn decimal_scaled(value: I64, scale: I64) -> I64 { precise_scale_up(precise_top(value), scale - precise_bottom(value)) }
+
+fn decimal_common_scale(left: I64, right: I64) -> I64 {
+    if (precise_bottom(left) > precise_bottom(right)) -> return precise_bottom(left)
+    precise_bottom(right)
+}
+
+// CtDecimal::add_with_sign: the larger scale is kept, nothing is normalized.
+fn decimal_sum(left: I64, right: I64, subtract: Bool) -> I64 {
+    scale :: decimal_common_scale(left, right)
+    a :: decimal_scaled(left, scale)
+    b :: decimal_scaled(right, scale)
+    sum :: if subtract -> jet_int_sub(a, b) else -> jet_int_add(a, b)
+    jet_rt_int_drop(a)
+    jet_rt_int_drop(b)
+    precise_pair(sum, scale)
+}
+
+// CtDecimal::compare_value as -1/0/1.
+fn decimal_order(left: I64, right: I64) -> I64 {
+    scale :: decimal_common_scale(left, right)
+    a :: decimal_scaled(left, scale)
+    b :: decimal_scaled(right, scale)
+    order :: jet_int_compare(a, b)
+    jet_rt_int_drop(a)
+    jet_rt_int_drop(b)
+    order
+}
+
+// CtDecimal floor (0), ceil (1) and round (2, ties away from zero) at scale 0.
+fn decimal_integral(value: I64, mode: I64) -> I64 {
+    top :: precise_top(value)
+    denominator :: precise_pow10(precise_bottom(value))
+    quotient :: precise_div(top, denominator)
+    remainder :: precise_rem(top, denominator)
+    negative :: int_negative(top)
+    exact :: remainder == I64{0}
+    result := I64{0}
+    if (mode == I64{0}) {
+        result = if (negative && !exact) -> jet_int_sub(quotient, I64{1}) else -> jet_rt_int_clone(quotient)
+    } else if (mode == I64{1}) {
+        result = if (!negative && !exact) -> jet_int_add(quotient, I64{1}) else -> jet_rt_int_clone(quotient)
+    } else {
+        half :: precise_abs(remainder)
+        doubled :: jet_int_add(half, half)
+        magnitude :: precise_abs(quotient)
+        rounded :: if (jet_int_compare(doubled, denominator) >= I64{0}) -> jet_int_add(magnitude, I64{1}) else -> jet_rt_int_clone(magnitude)
+        result = precise_signed(rounded, negative)
+        jet_rt_int_drop(half)
+        jet_rt_int_drop(doubled)
+        jet_rt_int_drop(magnitude)
+    }
+    jet_rt_int_drop(denominator)
+    jet_rt_int_drop(quotient)
+    jet_rt_int_drop(remainder)
+    precise_pair(result, I64{0})
+}
+
+#Export(c) fn jet_decimal_from_str(text: I64) -> I64 {
+    result :: decimal_parse(text)
+    if (result != I64{0}) -> return result
+    // MathRandomTime.rs:1053 jet_panic("", 0, ..): a Jet stop with an empty file.
+    message :: rt_static_text("invalid Decimal string")
+    trap_simple(I64{0}, I64{1}, I64{0}, I64{0}, rt_text_data(message), rt_text_len(message))
+    I64{0}
+}
+
+#Export(c) fn jet_decimal_from_int(value: I64) -> I64 {
+    if !precise_native_fits(value) -> return I64{0}
+    precise_pair(jet_rt_int_clone(value), I64{0})
+}
+
+// CtDecimal::from_float: significand * 2^power, or * 5^-power at scale -power.
+#Export(c) fn jet_decimal_from_float(value: Float) -> I64 {
+    bits :: rt_f64_bits(value)
+    if !precise_float_finite(bits) -> return precise_fault(rt_static_text("Float is not finite"))
+    if (value == Float{0.0}) -> return precise_pair(I64{0}, I64{0})
+    significand :: precise_float_significand(bits)
+    power :: precise_float_power(bits)
+    if (power >= I64{0}) {
+        magnitude :: jet_int_shl(significand, power, I64{0}, I64{0}, I64{0})
+        return decimal_normalized(precise_signed(magnitude, bits < I64{0}), I64{0})
+    }
+    factor :: jet_int_pow(I64{5}, -power, I64{0}, I64{0}, I64{0})
+    magnitude :: jet_int_mul(significand, factor)
+    jet_rt_int_drop(factor)
+    decimal_normalized(precise_signed(magnitude, bits < I64{0}), -power)
+}
+
+#Export(c) fn jet_decimal_from_fraction(value: I64) -> I64 {
+    result :: decimal_from_fraction(value)
+    if (result == I64{0}) -> return precise_fault(rt_static_text("Fraction has a repeating expansion"))
+    result
+}
+
+#Export(c) fn jet_decimal_add(left: I64, right: I64) -> I64 { decimal_sum(left, right, false) }
+#Export(c) fn jet_decimal_sub(left: I64, right: I64) -> I64 { decimal_sum(left, right, true) }
+
+// CtDecimal::mul: the summed scale, trailing zeros dropped down to the larger
+// operand scale.
+#Export(c) fn jet_decimal_mul(left: I64, right: I64) -> I64 {
+    minimum :: decimal_common_scale(left, right)
+    product := jet_int_mul(precise_top(left), precise_top(right))
+    if (product == I64{0}) -> return precise_pair(product, minimum)
+    scale := precise_bottom(left) + precise_bottom(right)
+    loop scale > minimum {
+        if (precise_rem(product, I64{10}) != I64{0}) -> break
+        next :: precise_div(product, I64{10})
+        jet_rt_int_drop(product)
+        product = next
+        scale -= I64{1}
+    }
+    precise_pair(product, scale)
+}
+
+#Export(c) fn jet_decimal_div(left: I64, right: I64) -> I64 {
+    if (precise_top(right) == I64{0}) -> return precise_fault(rt_static_text("Decimal quotient does not fit Fraction, or divided by zero"))
+    fraction_make(decimal_scaled(left, precise_bottom(left) + precise_bottom(right)), decimal_scaled(right, precise_bottom(left) + precise_bottom(right)))
+}
+
+#Export(c) fn jet_decimal_equal(left: I64, right: I64) -> Bool { decimal_order(left, right) == I64{0} }
+
+// Ordering tag: Less 0, Equal 1, Greater 2.
+#Export(c) fn jet_decimal_compare(left: I64, right: I64) -> I64 { decimal_order(left, right) + I64{1} }
+
+#Export(c) fn jet_decimal_floor(value: I64) -> I64 { decimal_integral(value, I64{0}) }
+#Export(c) fn jet_decimal_ceil(value: I64) -> I64 { decimal_integral(value, I64{1}) }
+#Export(c) fn jet_decimal_round(value: I64) -> I64 { decimal_integral(value, I64{2}) }
+
+#Export(c) fn jet_decimal_to_int(value: I64) -> I64 {
+    denominator :: precise_pow10(precise_bottom(value))
+    remainder :: precise_rem(precise_top(value), denominator)
+    if (remainder != I64{0}) {
+        jet_rt_int_drop(remainder)
+        jet_rt_int_drop(denominator)
+        return precise_fault(rt_static_text("Decimal is not an integer"))
+    }
+    quotient :: precise_div(precise_top(value), denominator)
+    jet_rt_int_drop(denominator)
+    quotient
+}
+
+#Export(c) fn jet_decimal_to_fraction(value: I64) -> I64 {
+    fraction_make(jet_rt_int_clone(precise_top(value)), precise_pow10(precise_bottom(value)))
+}
+
+// CtDecimal::to_f64 is the correctly rounded binary64 of the exact value,
+// which is what the float parser returns for the canonical spelling.
+#Export(c) fn jet_decimal_to_float(value: I64) -> Float {
+    text :: decimal_render(value)
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    parsed :: jet_float_parse(text, slots, slots + I64{8})
+    bits :: rt_text_word(slots)
+    if (parsed == I64{0}) -> jet_rt_string_drop(rt_text_word(slots + I64{8}))
+    jet_rt_free(slots, I64{16}, I64{8})
+    jet_rt_string_drop(text)
+    rt_f64_from_bits(bits)
+}
+
+#Export(c) fn jet_decimal_to_string(value: I64) -> I64 { decimal_render(value) }
+
+#Export(c) fn jet_rt_handle_drop_jet_decimal(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_int_drop(precise_top(value))
+    jet_rt_free(value, PRECISE_HANDLE_BYTES, I64{8})
+}
+
+#Export(c) fn jet_rt_handle_eq_jet_decimal(left: I64, right: I64) -> Bool { jet_decimal_equal(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_decimal(value: I64) -> I64 { decimal_render(value) }
+#Export(c) fn jet_rt_handle_display_jet_decimal(value: I64) -> I64 { decimal_render(value) }
+#Export(c) fn jet_rt_handle_debug_jet_decimal(value: I64) -> I64 { decimal_render(value) }
