@@ -1,0 +1,246 @@
+// Heap-free runtime stop literals. Keep the active diagnostic registry as the
+// source of row prose; emitted words use the audited stack-write OS leaf.
+use core.files as files
+
+TRAP_TARGET_PATH :: "Compiler/JetRuntime/Source/TrapMessages.jet"
+TRAP_DEFECT_TARGET_PATH :: "Compiler/JetRuntime/Source/TrapDefectMessages.jet"
+ROUTES_PATH :: "Compiler/JetBackend/Source/Lower/Routes.jet"
+DEBUG_PATH :: "Compiler/JetFoundation/Source/Text/RustDebug.jet"
+
+// The native TLS refusal is defined once, in the lowering that reports it at
+// compile time; the runtime's stop and String-error leaves use this projection.
+fn native_tls_refusal(routes: String) -> String GeneratorError! {
+    marker :: "\nfn lower_tls_transport_message() -> String Never! {{\n    "
+    at :: routes.find(marker)
+    if at < 0 -> return Err(generator_fail("missing Lower/Routes.jet lower_tls_transport_message literal"))
+    rest :: byte_slice(routes, at + byte_len(marker), byte_len(routes))
+    literal :: quoted_literal(rest) ?? return Err(generator_fail("missing Lower/Routes.jet lower_tls_transport_message literal"))
+    if !String.from_bytes_lossy(rest.bytes()[literal.spelling_len..<rest.bytes().len()]).starts_with("\n}}") -> return Err(generator_fail("missing Lower/Routes.jet lower_tls_transport_message literal"))
+    if literal.value == "" -> return Err(generator_fail("native TLS refusal must be printable ASCII for word projection"))
+    loop byte in literal.value.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 32 || code > 126 -> return Err(generator_fail("native TLS refusal must be printable ASCII for word projection"))
+    }
+    Ok(literal.value)
+}
+
+// One word-writing function for `text`; ordinary stack-word rows also get the
+// matching `trap_build_*` appender into an owned text builder.
+fn emit(name: String, text: String, sink: String) -> String Never! {
+    out := "fn {name}() {{\n"
+    owned := "fn trap_build_{byte_tail(name, 5)}(builder: I64) {{\n"
+    loop word in text_words(text) {
+        out = "{out}    {sink}(I64{{{word.value}}}, I64{{{word.count}}})\n"
+        if sink == "trap_write_word" -> owned = "{owned}    rt_text_push_word(builder, I64{{{word.value}}}, I64{{{word.count}}})\n"
+    }
+    if sink == "trap_write_word" -> return "{out}}}\n\n{owned}}}\n"
+    "{out}}}\n"
+}
+
+// The canonical Rust Debug escaped-interval table, as numbers.
+fn debug_intervals(debug: String) -> [Int] GeneratorError! {
+    open :: debug.find("[Int]{{")
+    if open < 0 -> return Err(generator_fail("missing Rust Debug scalar interval table"))
+    rest :: byte_slice(debug, open + byte_len("[Int]{{"), byte_len(debug))
+    // The body runs to the first `}` followed by optional space and `}`.
+    body_end := -1
+    search := 0
+    loop {
+        close :: byte_slice(rest, search, byte_len(rest)).find("}}")
+        if close < 0 -> break
+        at :: search + close
+        after :: byte_slice(rest, at + 1, byte_len(rest)).trim_start()
+        if after.starts_with("}}") {
+            body_end = at
+            break
+        }
+        search = at + 1
+    }
+    if body_end < 0 -> return Err(generator_fail("missing Rust Debug scalar interval table"))
+    values := [Int]{}
+    current := -1
+    loop byte in byte_slice(rest, 0, body_end).bytes() {
+        code :: Int.from_u8(byte)
+        if code >= 48 && code <= 57 {
+            current = if current < 0 -> code - 48 else -> current * 10 + code - 48
+        } else if current >= 0 {
+            &values.push(current)
+            current = -1
+        }
+    }
+    if current >= 0 -> &values.push(current)
+    if values.len() % 2 != 0 -> return Err(generator_fail("invalid Rust Debug intervals"))
+    loop index in 1..<values.len() {
+        if values[index] < values[index - 1] -> return Err(generator_fail("invalid Rust Debug intervals"))
+    }
+    Ok(values)
+}
+
+struct TrapOutputs {
+    source: String
+    defects: String
+}
+
+fn render_trap_messages(registry: String, routes: String, debug: String) -> TrapOutputs GeneratorError! {
+    source := "{GENERATED_BY}; do not hand-edit.\n// Word constants are little-endian UTF-8. No String carrier, allocation,\n// mutable global, or numeric runtime is reached while writing these rows.\n\n"
+    loop code in ["E3001", "E3010", "E3011", "E0128"] {
+        why :: registry_field(registry, code, "why") ?? return Err(err)
+        fix :: registry_field(registry, code, "fix") ?? return Err(err)
+        source = "{source}// {code} Why: {why}\n// Fix: {fix}\n"
+        source = "{source}{emit("trap_footer_{code.lower()}", " Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}\n", "trap_write_word")}\n"
+    }
+    e3001_what :: registry_field(registry, "E3001", "what") ?? return Err(err)
+    e3010_what :: registry_field(registry, "E3010", "what") ?? return Err(err)
+    e0128_what :: registry_field(registry, "E0128", "what") ?? return Err(err)
+    layout_what :: if e3001_what.find("{{msg}}") < 0 -> e3001_what else -> "{before_hole(e3001_what)}invalid box layout{after_hole(e3001_what)}"
+    source = "{source}{emit("trap_invalid_layout_head", "Stop [E3001]: {layout_what}\n  --> <core.prelude>:0\n", "trap_write_word")}"
+    tls :: native_tls_refusal(routes) ?? return Err(err)
+    literals :: [MessageLiteral]{
+        MessageLiteral{name: "header_panic", text: "Stop [E3001]: {before_hole(e3001_what)}"},
+        MessageLiteral{name: "header_numeric", text: "Stop [E3010]: {before_hole(e3010_what)}"},
+        MessageLiteral{name: "header_todo", text: "Stop [E3011]: `"},
+        MessageLiteral{name: "header_zip", text: "Stop [E0128]: {before_hole(e0128_what)}"},
+        MessageLiteral{name: "zip_end", text: "{after_hole(e0128_what)}\n"},
+        MessageLiteral{name: "collections_end", text: "`\n  --> <core.collections>:0\n"},
+        MessageLiteral{name: "sequence_count", text: "sequence count must be nonnegative"},
+        MessageLiteral{name: "sequence_step", text: "step_by requires a positive step"},
+        MessageLiteral{name: "sequence_chunks", text: "chunks requires a positive size"},
+        MessageLiteral{name: "sequence_windows", text: "windows requires a positive size"},
+        MessageLiteral{name: "cursor_step", text: "iterator loop stride must be positive"},
+        MessageLiteral{name: "cursor_exhausted", text: "iterator loop value requested after exhaustion"},
+        MessageLiteral{name: "location", text: "  --> "},
+        MessageLiteral{name: "colon", text: ":"},
+        MessageLiteral{name: "in_function", text: " in "},
+        MessageLiteral{name: "newline", text: "\n"},
+        MessageLiteral{name: "space", text: " "},
+        MessageLiteral{name: "gutter_line", text: "|\n"},
+        MessageLiteral{name: "gutter_source", text: " | "},
+        MessageLiteral{name: "gutter_caret", text: "| "},
+        MessageLiteral{name: "caret", text: "^"},
+        MessageLiteral{name: "message_end", text: "`\n"},
+        MessageLiteral{name: "prelude_end", text: "`\n  --> <core.prelude>:0\n"},
+        MessageLiteral{name: "overflow", text: "This arithmetic overflows the value's type (the result is outside its range)"},
+        MessageLiteral{name: "divide_zero", text: "divided by zero"},
+        MessageLiteral{name: "native_index_range", text: "native Int argument exceeds host range"},
+        MessageLiteral{name: "list_head", text: "the list has "},
+        MessageLiteral{name: "list_position", text: " items, so position "},
+        MessageLiteral{name: "list_end", text: " doesn't exist`\n  --> <core.prelude>:0\n"},
+        MessageLiteral{name: "unreachable", text: "internal error: entered unreachable code: "},
+        MessageLiteral{name: "locals", text: "locals: "},
+        MessageLiteral{name: "todo", text: "#Todo at "},
+        MessageLiteral{name: "todo_expected", text: " — expected "},
+        MessageLiteral{name: "expected", text: "expected: "},
+        MessageLiteral{name: "got", text: ", got: "},
+        MessageLiteral{name: "range_head", text: "can't "},
+        MessageLiteral{name: "range_slice", text: "slice"},
+        MessageLiteral{name: "range_view", text: "view"},
+        MessageLiteral{name: "range_items", text: " items from "},
+        MessageLiteral{name: "range_to", text: " to "},
+        MessageLiteral{name: "range_open", text: " ("},
+        MessageLiteral{name: "exclusive", text: "exclusive"},
+        MessageLiteral{name: "inclusive", text: "inclusive"},
+        MessageLiteral{name: "range_end", text: ")`\n"},
+        MessageLiteral{name: "native_tls", text: tls},
+    }
+    loop literal in literals -> source = "{source}\n{emit("trap_msg_{literal.name}", literal.text, "trap_write_word")}"
+    // Retype the canonical Debug interval table at generation time. Runtime
+    // arithmetic stays fixed-width; only list indices cross the exact-Int seam.
+    values :: debug_intervals(debug) ?? return Err(err)
+    source = "{source}\n// Canonical Text/RustDebug.jet intervals, retyped to machine words.\n"
+    source = "{source}TRAP_DEBUG_RANGE_COUNT :: prep {{ I64{{{values.len() /% 2}}} }}\n"
+    source = "{source}TRAP_DEBUG_RANGES :: prep {{ [I64]{{\n"
+    row_start := 0
+    loop row_start < values.len() {
+        row_end :: if row_start + 12 < values.len() -> row_start + 12 else -> values.len()
+        words := [String]{}
+        loop index in row_start..<row_end -> &words.push("I64{{{values[index]}}}")
+        source = "{source}    {words.join(", ")},\n"
+        row_start += 12
+    }
+    source = "{source}}} }}\n"
+    // Both projections use the same canonical facts. Scoped private generation
+    // validates the frozen ordinary bytes first; default generation remains the
+    // canonical producer for both projections after the frozen gate is lifted.
+    defects := "{GENERATED_BY}; do not hand-edit.\n// NO-TLS host-defect rows: raw stack-word writes only; no capture,\n// String carrier, allocation, callback, mutable global, or numeric runtime.\n\n"
+    defects = "{defects}{emit("trap_defect_unreachable_head", "internal error: entered unreachable code: ", "trap_write_word_raw")}"
+    defects = "{defects}\n{emit("trap_defect_newline", "\n", "trap_write_word_raw")}"
+    Ok(TrapOutputs{source: source, defects: defects})
+}
+
+struct TrapWritePlan {
+    write_source: Bool
+    write_defects: Bool
+    message: String
+}
+
+// What one run writes. The ordinary projection is frozen under
+// --defects-only: any mismatch there fails before even the private rows are
+// written. --check never writes. The default run is the canonical producer of
+// both projections.
+fn trap_messages_plan(check: Bool, defects_only: Bool, source_current: Bool, defects_current: Bool) -> TrapWritePlan GeneratorError! {
+    if defects_only && !source_current -> return Err(generator_fail("TrapMessages.jet differs from canonical facts; frozen output was not written"))
+    if check {
+        if !source_current -> return Err(generator_fail("TrapMessages.jet is stale; run jet run Tools/agent/RuntimeGenerators"))
+        if !defects_current -> return Err(generator_fail("TrapDefectMessages.jet is stale; run jet run Tools/agent/RuntimeGenerators"))
+        return Ok(TrapWritePlan{write_source: false, write_defects: false, message: "runtime trap messages and private host-defect rows are current"})
+    }
+    Ok(TrapWritePlan{write_source: !defects_only && !source_current, write_defects: !defects_current, message: ""})
+}
+
+// The (word, count) lines of generated function `name` written through `sink`.
+fn emitted_words(source: String, name: String, sink: String) -> [String] Never! {
+    words := [String]{}
+    inside := false
+    header :: "fn {name}() {{"
+    loop line in source.split("\n") {
+        if line == header {
+            inside = true
+            next
+        }
+        if !inside -> next
+        if line == "}}" -> break
+        trimmed :: line.trim()
+        if !trimmed.starts_with("{sink}(I64{{") -> return [String]{}
+        &words.push(byte_tail(trimmed, byte_len(sink)))
+    }
+    words
+}
+
+fn plan_error(check: Bool, defects_only: Bool, source_current: Bool, defects_current: Bool) -> String Never! {
+    if trap_messages_plan(check, defects_only, source_current, defects_current) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+#Test("the private defect rows are the ordinary unreachable prefix and newline words") {
+    registry :: files.read(REGISTRY_PATH) ?? panic("the registry did not read")
+    routes :: files.read(ROUTES_PATH) ?? panic("the lowering routes did not read")
+    debug :: files.read(DEBUG_PATH) ?? panic("the Debug table did not read")
+    outputs :: render_trap_messages(registry, routes, debug) ?? panic("the trap messages did not render: {err.message}")
+    prefix :: emitted_words(outputs.defects, "trap_defect_unreachable_head", "trap_write_word_raw")
+    newline :: emitted_words(outputs.defects, "trap_defect_newline", "trap_write_word_raw")
+    assert_eq(prefix, emitted_words(outputs.source, "trap_msg_unreachable", "trap_write_word"))
+    assert_eq(newline, emitted_words(outputs.source, "trap_msg_newline", "trap_write_word"))
+    // 42 bytes: five full words and a two-byte tail; the newline is one byte.
+    counts :: loop word in prefix -> word.split("I64{{").to_list()[2]
+    assert_eq(counts, ["8}})", "8}})", "8}})", "8}})", "8}})", "2}})"])
+    assert_eq(newline.len(), 1)
+    assert(newline[0].ends_with(", I64{{1}})"))
+    assert_eq(outputs.defects.split("\nfn ").to_list().len() - 1 + (if outputs.defects.starts_with("fn ") -> 1 else -> 0), 2)
+}
+
+#Test("check never writes; the frozen gate fails before any write; the default produces both") {
+    current :: trap_messages_plan(true, false, true, true) ?? panic("current outputs fail the check")
+    assert(!current.write_source && !current.write_defects)
+    assert(plan_error(true, false, false, true).contains("TrapMessages.jet is stale"))
+    assert(plan_error(true, true, true, false).contains("TrapDefectMessages.jet is stale"))
+    assert(plan_error(false, true, false, false).contains("frozen output was not written"))
+    assert(plan_error(true, true, false, true).contains("frozen output was not written"))
+    scoped :: trap_messages_plan(false, true, true, false) ?? panic("scoped generation refused")
+    assert(!scoped.write_source && scoped.write_defects)
+    canonical :: trap_messages_plan(false, false, false, false) ?? panic("default generation refused")
+    assert(canonical.write_source && canonical.write_defects)
+    unchanged :: trap_messages_plan(false, false, true, true) ?? panic("default generation refused")
+    assert(!unchanged.write_source && !unchanged.write_defects)
+}

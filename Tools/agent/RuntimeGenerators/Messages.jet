@@ -1,0 +1,336 @@
+// The runtime's fixed message tables: scheduler, observe, test-reporter and
+// services literals, each written as words so the runtime unit never needs an
+// implicit String or Int carrier to produce them.
+
+SCHEDULER_TARGET_PATH :: "Compiler/JetRuntime/Source/SchedulerMessages.jet"
+OBSERVE_TARGET_PATH :: "Compiler/JetRuntime/Source/ObserveMessages.jet"
+TEST_TARGET_PATH :: "Compiler/JetRuntime/Source/TestMessages.jet"
+SERVICES_TARGET_PATH :: "Compiler/JetRuntime/Source/ServicesMessages.jet"
+TEST_ORDINARY_FAILURE :: "__jet_test_ordinary_failure__"
+
+// Owned E4 text: a sized text object whose data words are stored in place.
+fn owned_text_function(name: String, text: String) -> String Never! {
+    out := "\nfn {name}() -> I64 {{\n    text :: scheduler_text_new(I64{{{byte_len(text)}}})\n    data :: sync_load(text)\n"
+    loop word in text_words(text) -> out = "{out}    sync_store(data + I64{{{word.offset}}}, I64{{{word.value}}})\n"
+    "{out}    text\n}}\n"
+}
+
+// Words appended to a text builder or written to a descriptor by `sink`.
+fn word_writes(target: String, sink: String, text: String) -> String Never! {
+    out := ""
+    loop word in text_words(text) -> out = "{out}    {sink}({target}, I64{{{word.value}}}, I64{{{word.count}}})\n"
+    out
+}
+
+// Scheduler literals have no implicit String/Int carrier in the runtime unit.
+fn scheduler_literals() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "threads", text: "JET_SCHEDULER_THREADS"},
+        MessageLiteral{name: "replay", text: "JET_PROVE_REPLAY_TIME_MS"},
+        MessageLiteral{name: "epoch", text: "LEX_TEST_EPOCH"},
+        MessageLiteral{name: "pause", text: "task pause"},
+        MessageLiteral{name: "join", text: "task join"},
+        MessageLiteral{name: "sleep", text: "time sleep"},
+        MessageLiteral{name: "yield", text: "task yield"},
+        MessageLiteral{name: "shield", text: "shield exit"},
+        MessageLiteral{name: "admission", text: "task admission"},
+        MessageLiteral{name: "selection", text: "task selection"},
+        MessageLiteral{name: "deadline_head", text: "Error [E3003]: Deadline exceeded while waiting in "},
+        MessageLiteral{name: "deadline_tail", text: "\n Why: This wait point observed the task context deadline from `#Context(deadline: …)`\n Fix: Raise the deadline budget or shorten the work before this wait point\nMore: jet-lang.dev/e/E3003"},
+        MessageLiteral{name: "cancelled", text: "task cancelled at a cooperative wait point"},
+        MessageLiteral{name: "trace_head", text: "paused="},
+        MessageLiteral{name: "trace_mid", text: ",cancel="},
+        MessageLiteral{name: "yes", text: "true"},
+        MessageLiteral{name: "no", text: "false"},
+        MessageLiteral{name: "separator", text: ": "},
+        MessageLiteral{name: "start_failed", text: "could not start scheduler worker"},
+        MessageLiteral{name: "completion_exhausted", text: "task completion order exhausted"},
+        MessageLiteral{name: "rt_rate", text: "real-time callback rate must be positive"},
+        MessageLiteral{name: "rt_frames", text: "real-time callback frame count must be positive"},
+        MessageLiteral{name: "rt_native_range", text: "native Int argument exceeds host range"},
+        MessageLiteral{name: "rt_capacity", text: "capacity overflow"},
+        MessageLiteral{name: "rt_ring_frames", text: "real-time sample ring needs a positive frame count"},
+        MessageLiteral{name: "rt_self_join", text: "failed to join real-time worker: Resource deadlock avoided"},
+        MessageLiteral{name: "rt_join_failed", text: "failed to join real-time worker"},
+        MessageLiteral{name: "rt_start_failed", text: "failed to spawn real-time worker"},
+    }
+}
+
+fn render_scheduler_messages() -> String Never! {
+    source := "{GENERATED_BY}; UTF-8 E4 literals.\n"
+    loop literal in scheduler_literals() -> source = "{source}{owned_text_function("scheduler_msg_{literal.name}", literal.text)}"
+    source
+}
+
+// Observe fragments append directly to the canonical E4 builder, without
+// allocating an intermediate String for each fixed JSON/diagnostic fragment.
+fn observe_literals(what: String, why: String, fix: String) -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "task_label", text: "task@"},
+        MessageLiteral{name: "task_fallback", text: "task #"},
+        MessageLiteral{name: "site", text: " (spawn site "},
+        MessageLiteral{name: "close_site", text: ")"},
+        MessageLiteral{name: "yes", text: "true"},
+        MessageLiteral{name: "no", text: "false"},
+        MessageLiteral{name: "null", text: "null"},
+        MessageLiteral{name: "queued", text: "queued"},
+        MessageLiteral{name: "running", text: "running"},
+        MessageLiteral{name: "blocked", text: "blocked"},
+        MessageLiteral{name: "paused", text: "paused"},
+        MessageLiteral{name: "task_begin", text: "{{\"id\":"},
+        MessageLiteral{name: "parent", text: ",\"parent\":"},
+        MessageLiteral{name: "label", text: ",\"label\":\""},
+        MessageLiteral{name: "spawn", text: "\",\"spawn_site\":"},
+        MessageLiteral{name: "state", text: ",\"state\":\""},
+        MessageLiteral{name: "wait", text: "\",\"wait\":\""},
+        MessageLiteral{name: "deadline", text: "\",\"deadline_ms\":"},
+        MessageLiteral{name: "cancelled", text: ",\"cancelled\":"},
+        MessageLiteral{name: "channel_begin", text: "{{\"id\":"},
+        MessageLiteral{name: "depth", text: ",\"depth\":"},
+        MessageLiteral{name: "capacity", text: ",\"capacity\":"},
+        MessageLiteral{name: "send_waiters", text: ",\"send_waiters\":"},
+        MessageLiteral{name: "recv_waiters", text: ",\"recv_waiters\":"},
+        MessageLiteral{name: "closed", text: ",\"closed\":"},
+        MessageLiteral{name: "tasks", text: "\"tasks\":["},
+        MessageLiteral{name: "channels", text: "],\"channels\":["},
+        MessageLiteral{name: "end_arrays", text: "]}}"},
+        MessageLiteral{name: "entry", text: "\n  "},
+        MessageLiteral{name: "report_site", text: " (spawn site "},
+        MessageLiteral{name: "report_state", text: ")\n    state: "},
+        MessageLiteral{name: "report_wait", text: "\n    wait target: "},
+        MessageLiteral{name: "unknown", text: "unknown"},
+        MessageLiteral{name: "omitted_head", text: "\n  ... "},
+        MessageLiteral{name: "omitted_tail", text: " more parked task(s) omitted by the report limit ..."},
+        MessageLiteral{name: "report_head", text: "Stop [E3013]: {raw_before_hole(what)}"},
+        MessageLiteral{name: "report_tail", text: "{raw_after_hole(what)}\n Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/E3013\n"},
+        MessageLiteral{name: "live_begin", text: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\""},
+        MessageLiteral{name: "live_source", text: "\",\"source_id\":\""},
+        MessageLiteral{name: "live_build", text: "\",\"build_id\":\""},
+        MessageLiteral{name: "live_revision", text: "\",\"revision\":\""},
+        MessageLiteral{name: "live_world", text: "\",\"world_id\":\""},
+        MessageLiteral{name: "live_decisions", text: "\",\"decisions\":"},
+        MessageLiteral{name: "live_values", text: ",\"values\":["},
+        MessageLiteral{name: "live_schema", text: "],\"schema_version\":1,\"pid\":"},
+        MessageLiteral{name: "live_start", text: ",\"start_id\":\""},
+        MessageLiteral{name: "live_captured", text: "\",\"captured_ms\":"},
+        MessageLiteral{name: "live_tasks", text: ",\"tasks\":["},
+        MessageLiteral{name: "live_events", text: "],\"event_observations\":["},
+        MessageLiteral{name: "live_effects", text: "],\"effects\":{{\"compute\":"},
+        MessageLiteral{name: "live_waiting", text: ",\"waiting\":"},
+        MessageLiteral{name: "live_channel", text: ",\"channel\":"},
+        MessageLiteral{name: "live_time", text: ",\"time\":"},
+        MessageLiteral{name: "live_io", text: ",\"io\":"},
+        MessageLiteral{name: "live_resources", text: "}},\"resources\":{{\"workers\":"},
+        MessageLiteral{name: "live_running", text: ",\"running\":"},
+        MessageLiteral{name: "live_queued", text: ",\"queued\":"},
+        MessageLiteral{name: "live_cancelled", text: ",\"cancelled\":"},
+        MessageLiteral{name: "live_arenas", text: ",\"arenas\":"},
+        MessageLiteral{name: "live_allocs", text: ",\"arena_allocations\":"},
+        MessageLiteral{name: "live_bytes", text: ",\"arena_bytes\":"},
+        MessageLiteral{name: "live_runtime", text: "}},\"runtime\":{{\"elapsed_ns\":"},
+        MessageLiteral{name: "live_cpu", text: ",\"cpu_ns\":"},
+        MessageLiteral{name: "live_exit", text: ",\"exit\":"},
+        MessageLiteral{name: "live_end", text: "}}}}"},
+        MessageLiteral{name: "value_begin", text: "{{\"value_id\":\""},
+        MessageLiteral{name: "value_type", text: "\",\"type_identity\":\""},
+        MessageLiteral{name: "value_disposition", text: "\",\"disposition\":\""},
+        MessageLiteral{name: "value_reason", text: "\",\"reason\":\""},
+        MessageLiteral{name: "value_rendered", text: "\",\"rendered_value\":"},
+        MessageLiteral{name: "event_begin", text: "{{\"sequence\":"},
+        MessageLiteral{name: "event_source", text: ",\"source\":\""},
+        MessageLiteral{name: "event_id", text: "\",\"event_id\":"},
+        MessageLiteral{name: "event_owner", text: ",\"owner_id\":"},
+        MessageLiteral{name: "event_subscription", text: ",\"subscription_id\":"},
+        MessageLiteral{name: "event_dispatch", text: ",\"dispatch_id\":"},
+        MessageLiteral{name: "event_lifecycle", text: ",\"lifecycle\":\""},
+        MessageLiteral{name: "event_queued", text: "\",\"queued\":"},
+        MessageLiteral{name: "event_blocked", text: ",\"blocked\":"},
+        MessageLiteral{name: "event_running", text: ",\"running\":"},
+        MessageLiteral{name: "event_capacity", text: ",\"capacity\":"},
+        MessageLiteral{name: "event_overflow", text: ",\"overflow\":\""},
+        MessageLiteral{name: "event_priority", text: "\",\"priority\":"},
+        MessageLiteral{name: "event_failure", text: ",\"failure\":\""},
+        MessageLiteral{name: "event_terminal", text: "\",\"terminal\":\""},
+        MessageLiteral{name: "path_head", text: "jet-observe-"},
+        MessageLiteral{name: "path_tail", text: ".json"},
+        MessageLiteral{name: "stage_head", text: ".jet-observe-"},
+        MessageLiteral{name: "stage_tail", text: ".tmp"},
+        MessageLiteral{name: "proc_stat", text: "/proc/self/stat"},
+        MessageLiteral{name: "proc_auxv", text: "/proc/self/auxv"},
+        MessageLiteral{name: "root_label", text: "root"},
+        MessageLiteral{name: "env_observe", text: "JET_OBSERVE"},
+        MessageLiteral{name: "env_session", text: "JET_DEVTOOLS_RELAY_SESSION_ID"},
+        MessageLiteral{name: "env_source", text: "JET_DEVTOOLS_RELAY_SOURCE_ID"},
+        MessageLiteral{name: "env_build", text: "JET_DEVTOOLS_RELAY_BUILD_ID"},
+        MessageLiteral{name: "env_revision", text: "JET_DEVTOOLS_RELAY_REVISION"},
+        MessageLiteral{name: "env_world", text: "JET_DEVTOOLS_RELAY_WORLD_ID"},
+        MessageLiteral{name: "env_tmpdir", text: "TMPDIR"},
+        MessageLiteral{name: "default_tmpdir", text: "/tmp"},
+    }
+}
+
+fn render_observe_messages(registry: String) -> String GeneratorError! {
+    what :: registry_field_raw(registry, "E3013", "what") ?? return Err(err)
+    why :: registry_field_raw(registry, "E3013", "why") ?? return Err(err)
+    fix :: registry_field_raw(registry, "E3013", "fix") ?? return Err(err)
+    source := "{GENERATED_BY}; direct E4 builder fragments.\n"
+    loop literal in observe_literals(what, why, fix) {
+        source = "{source}\nfn observe_msg_{literal.name}(target: I64) {{\n{word_writes("target", "rt_text_push_word", literal.text)}}}\n"
+    }
+    Ok(source)
+}
+
+// Fixed-width, heap-free literals for the native unit-test reporter.
+fn test_literals() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "invalid", text: "internal error: native test record is invalid\n"},
+        MessageLiteral{name: "property_gap", text: "native property tests require a Jet property engine\n"},
+        MessageLiteral{name: "pass", text: "pass"},
+        MessageLiteral{name: "fail", text: "FAIL"},
+        MessageLiteral{name: "skip", text: "skip"},
+        MessageLiteral{name: "expected", text: "expected-fail"},
+        MessageLiteral{name: "unexpected", text: "UNEXPECTED-PASS (remove expected_fail: true)"},
+        MessageLiteral{name: "passed", text: " passed, "},
+        MessageLiteral{name: "failed", text: " failed, "},
+        MessageLiteral{name: "skipped", text: " skipped"},
+        MessageLiteral{name: "expected_count", text: " expected-fail"},
+        MessageLiteral{name: "unexpected_count", text: " unexpected-pass"},
+        MessageLiteral{name: "shuffle", text: "shuffle: seed="},
+        MessageLiteral{name: "json_schema", text: "{{\"schema\":\"jet.test.v1\",\"ok\":"},
+        MessageLiteral{name: "json_passed", text: ",\"passed\":"},
+        MessageLiteral{name: "json_failed", text: ",\"failed\":"},
+        MessageLiteral{name: "json_skipped", text: ",\"skipped\":"},
+        MessageLiteral{name: "json_expected", text: ",\"expectedFailures\":"},
+        MessageLiteral{name: "json_unexpected", text: ",\"unexpectedPasses\":"},
+        MessageLiteral{name: "json_tests", text: ",\"tests\":["},
+        MessageLiteral{name: "json_name", text: "{{\"name\":"},
+        MessageLiteral{name: "json_ok", text: ",\"ok\":"},
+        MessageLiteral{name: "json_expectation", text: ",\"expectedFailure\":"},
+        MessageLiteral{name: "json_skip", text: ",\"skipped\":"},
+        MessageLiteral{name: "json_stdout", text: ",\"stdout\":"},
+        MessageLiteral{name: "json_stderr", text: ",\"stderr\":"},
+        MessageLiteral{name: "true", text: "true"},
+        MessageLiteral{name: "false", text: "false"},
+    }
+}
+
+// Environment keys are owned E4 text, borrowed only for the existing host leaf.
+fn test_key_literals() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "json", text: "JET_TEST_JSON"},
+        MessageLiteral{name: "capture", text: "JET_TEST_CAPTURE"},
+        MessageLiteral{name: "shuffle", text: "JET_TEST_SHUFFLE_SEED"},
+    }
+}
+
+// Test-scope diagnostics use owned E4 builders, sharing these fixed-width
+// literal appenders with the reporter.
+fn test_scope_literals() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "expected", text: "expected "},
+        MessageLiteral{name: "region_stop", text: "this region to stop with "},
+        MessageLiteral{name: "region_fail", text: "this region to fail"},
+        MessageLiteral{name: "stop_code", text: "a stop with "},
+        MessageLiteral{name: "stop_message", text: "a stop whose message contains "},
+        MessageLiteral{name: "code_message", text: " whose message contains "},
+        MessageLiteral{name: "passed", text: ", but it passed"},
+        MessageLiteral{name: "got", text: ", got "},
+        MessageLiteral{name: "colon", text: ": "},
+        MessageLiteral{name: "timeout", text: "timeout: region took "},
+        MessageLiteral{name: "timeout_limit", text: "ns, limit was "},
+        MessageLiteral{name: "ns", text: "ns"},
+    }
+}
+
+fn render_test_messages() -> String Never! {
+    source := "{GENERATED_BY}; do not hand-edit.\n// Little-endian UTF-8 stack writes never construct a Rust String or exact Int.\n\n"
+    loop literal in test_literals() {
+        source = "{source}fn test_msg_{literal.name}(fd: I64) {{\n{word_writes("fd", "test_write_word", literal.text)}}}\n\n"
+    }
+    loop literal in test_key_literals() {
+        bytes :: literal.text.bytes()
+        source = "{source}fn test_key_{literal.name}() -> I64 {{\n    text :: test_text_new(I64{{{bytes.len()}}})\n    data :: trap_word(text)\n"
+        loop index in 0..<bytes.len() -> source = "{source}    trap_put(data + I64{{{index}}}, I64{{{Int.from_u8(bytes[index])}}})\n"
+        source = "{source}    text\n}}\n\n"
+    }
+    loop literal in test_scope_literals() {
+        source = "{source}fn test_scope_msg_{literal.name}(builder: I64) {{\n{word_writes("builder", "rt_text_push_word", literal.text)}}}\n\n"
+    }
+    ordinary :: TEST_ORDINARY_FAILURE.bytes()
+    source = "{source}fn test_scope_ordinary(text: I64) -> Bool {{\n    if (text == I64{{0}}) {{ return false }}\n    if (trap_word(text + I64{{8}}) != I64{{{ordinary.len()}}}) {{ return false }}\n    data :: trap_word(text)\n"
+    loop index in 0..<ordinary.len() -> source = "{source}    if (trap_byte(data + I64{{{index}}}) != I64{{{Int.from_u8(ordinary[index])}}}) {{ return false }}\n"
+    "{source}    true\n}}\n\n"
+}
+
+// Controlled-world and sentry literals use the runtime's existing E4 ABI.
+fn services_literals() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "world_backwards", text: "deterministic world cannot move time backwards; advance requires a non-negative duration"},
+        MessageLiteral{name: "world_exhausted", text: "deterministic world clock exhausted its supported range"},
+        MessageLiteral{name: "world_budget", text: "deterministic world execution budget exhausted while waiting for idle"},
+        MessageLiteral{name: "world_live", text: "deterministic world scope exited with live descendants; cancel and join every task"},
+        MessageLiteral{name: "world_overflow", text: "deterministic world timer overflowed"},
+        MessageLiteral{name: "world_nested", text: "deterministic world nesting is ambiguous; use the parent world explicitly"},
+        MessageLiteral{name: "world_sleep", text: "deterministic world sleep requires a controlled scheduler task"},
+        MessageLiteral{name: "world_network", text: "deterministic world has no controlled network provider"},
+        MessageLiteral{name: "world_foreign", text: "deterministic world has no controlled foreign provider"},
+        MessageLiteral{name: "world_entropy", text: "deterministic world has no controlled entropy provider"},
+        MessageLiteral{name: "world_clock", text: "deterministic world has no controlled clock provider"},
+        MessageLiteral{name: "world_external", text: "deterministic world has no controlled external-effect provider"},
+        MessageLiteral{name: "spawn", text: "task:spawn"},
+        MessageLiteral{name: "finish", text: "task:finish"},
+        MessageLiteral{name: "advance", text: "advance:"},
+        MessageLiteral{name: "timer", text: "timer:"},
+        MessageLiteral{name: "register", text: "timer:register:"},
+        MessageLiteral{name: "rng", text: "rng:"},
+        MessageLiteral{name: "seed", text: "rng:seed:"},
+        MessageLiteral{name: "colon", text: ":"},
+        MessageLiteral{name: "lf", text: "\n"},
+        MessageLiteral{name: "sentry_location", text: "  --> "},
+        MessageLiteral{name: "sentry_gate", text: ", in #Unsafe gate "},
+        MessageLiteral{name: "sentry_read", text: "read"},
+        MessageLiteral{name: "sentry_valid_ptr", text: "valid_ptr"},
+        MessageLiteral{name: "sentry_why", text: " Why: "},
+        MessageLiteral{name: "sentry_fix", text: "\n Fix: "},
+        MessageLiteral{name: "sentry_obligation", text: "\nobligation: valid_ptr = false\n"},
+        MessageLiteral{name: "sentry_foreign", text: "foreign: "},
+        MessageLiteral{name: "sentry_fenced", text: " = fenced\n"},
+        MessageLiteral{name: "sentry_unfenced", text: " = unfenced\n"},
+        MessageLiteral{name: "sentry_exit", text: "exit: "},
+        MessageLiteral{name: "sentry_footer1", text: "More: jet-lang.dev/e/R0801\n"},
+        MessageLiteral{name: "sentry_footer2", text: "More: jet-lang.dev/e/R0802\n"},
+        MessageLiteral{name: "sentry_footer3", text: "More: jet-lang.dev/e/R0803\n"},
+        MessageLiteral{name: "sentry_provenance", text: "no live allocation contains this address"},
+        MessageLiteral{name: "sentry_bounds", text: "the foreign access extends beyond a live allocation"},
+        MessageLiteral{name: "sentry_heap", text: "the address belongs to quarantined storage"},
+        MessageLiteral{name: "sentry_stack", text: "the owning Jet frame has expired"},
+        MessageLiteral{name: "sentry_address", text: "address 0x"},
+        MessageLiteral{name: "sentry_alignment", text: " is not aligned to "},
+        MessageLiteral{name: "sentry_bytes", text: " bytes"},
+        MessageLiteral{name: "ledger_key", text: "JET_MEMORY_LEDGER"},
+        MessageLiteral{name: "ledger_default", text: ".jet/memory/ledger-v1.jsonl"},
+        MessageLiteral{name: "ledger_head", text: "{{\"schema\":\"jet.memory.ledger\",\"version\":1,\"kind\":\"sentry\",\"code\":\"R080"},
+        MessageLiteral{name: "ledger_source", text: "\",\"source\":"},
+        MessageLiteral{name: "ledger_start", text: ",\"span_start\":"},
+        MessageLiteral{name: "ledger_end", text: ",\"span_end\":"},
+        MessageLiteral{name: "ledger_scope", text: ",\"byte_spans\":false,\"scope\":"},
+        MessageLiteral{name: "ledger_provenance", text: ",\"provenance\":\"source #Unsafe gate\",\"detail\":"},
+        MessageLiteral{name: "ledger_repairs", text: ",\"expected\":null,\"repairs\":"},
+        MessageLiteral{name: "ledger_repairs1", text: "[\"derive the pointer from live storage inside this gate\",\"remove the raw access\"]}}\n"},
+        MessageLiteral{name: "ledger_repairs2", text: "[\"move the raw access before the storage is released\",\"replace the raw pointer with an owned value\"]}}\n"},
+        MessageLiteral{name: "ledger_repairs3", text: "[\"derive an aligned pointer from the live allocation\",\"use the typed memory operation instead of raw address arithmetic\"]}}\n"},
+    }
+}
+
+fn render_services_messages(registry: String) -> String GeneratorError! {
+    literals := services_literals()
+    loop code in ["R0801", "R0802", "R0803"] {
+        loop field in ["what", "why", "fix"] {
+            text :: registry_field(registry, code, field) ?? return Err(err)
+            &literals.push(MessageLiteral{name: "sentry_{code.lower()}_{field}", text: text})
+        }
+    }
+    source := "{GENERATED_BY}; owned E4 literals.\n"
+    loop literal in literals -> source = "{source}{owned_text_function("services_msg_{literal.name}", literal.text)}"
+    Ok(source)
+}

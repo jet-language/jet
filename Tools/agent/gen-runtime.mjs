@@ -19,7 +19,7 @@ const check = args.includes("--check") ? ["--check"] : [];
 // Jet-authored generators run with the compiler built from this tree (JET).
 const jet = process.env.JET ?? "jet";
 const steps = [
-  ["GenRuntimeTrapMessages.jet", check],
+  ["RuntimeGenerators", check],
   ["gen-runtime-lifecycle.mjs", check],
   ["gen-runtime-stop-exports.mjs", check],
   ["gen-c-abi-routes.mjs", [runtime, ...check]],
@@ -27,7 +27,7 @@ const steps = [
 let failed = false;
 for (const [name, flags] of steps) {
   const script = join("Tools/agent", name);
-  const command = name.endsWith(".jet") ? [jet, "run", script, "--", ...flags] : [process.execPath, join(root, script), ...flags];
+  const command = name.endsWith(".mjs") ? [process.execPath, join(root, script), ...flags] : [jet, "run", script, "--", ...flags];
   const result = spawnSync(command[0], command.slice(1), { cwd: root, stdio: "inherit" });
   if (result.error || result.status !== 0) {
     console.error(`${name} failed: ${result.error?.message ?? result.signal ?? `exit ${result.status}`}`);
