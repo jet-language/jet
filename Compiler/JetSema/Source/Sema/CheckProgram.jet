@@ -7100,7 +7100,7 @@ fn sema_finalize_authority_constrained(policies: [SemaRegistrationPackagePolicy]
 // has no known body (an unresolved or dynamically selected callee), the
 // call chain from the function to the one making that call, by name; empty
 // when the row is not maximal.
-fn sema_authority_maximal_chain(modules: [SemaGraphModuleResult], rows: [String:[Int]], start: String) -> [String] {
+fn sema_authority_maximal_chain(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rows: [String:[Int]], start: String) -> [String] {
     parents := [String:String]{}
     seen := [String:Bool]{}
     queue := [String]{start}
@@ -7126,6 +7126,13 @@ fn sema_authority_maximal_chain(modules: [SemaGraphModuleResult], rows: [String:
                     at = parents.get(at) ?? break
                 }
                 &chain.reverse()
+                // The call that made the row maximal, as `file:line`.
+                if effects.maximal_span == .Val(site) && sema_registration_module_index(graph, modules[row[0]].module_identity) == .Val(graph_module) {
+                    segments :: graph.modules[graph_module].source_segments
+                    location :: sema_source_location_at(segments, site)
+                    line :: sema_source_line_at(segments, site)
+                    if location == .Val(found) && line == .Val(number) -> &chain.push("unknown callee at {found.source_path}:{number}")
+                }
                 return chain
             }
         }
@@ -7166,7 +7173,7 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
             if policy.authority_allow != None {
                 if !sema_effect_check_scope_bounds("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) {
                     complete = false
-                    chain :: sema_authority_maximal_chain(modules, function_rows, modules[module_index].functions[function_index].key)
+                    chain :: sema_authority_maximal_chain(graph, modules, function_rows, modules[module_index].functions[function_index].key)
                     if chain.len() > 0 && diagnostics.len() > reported -> diagnostics[diagnostics.len() - 1].call_chain = chain
                 }
             }
