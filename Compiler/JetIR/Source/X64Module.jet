@@ -1,0 +1,157 @@
+// x86-64 code for a whole IR module, and its relocatable object through the
+// existing object writer (JetBackend Image/Object.jet). The writer and its
+// DWARF read an LIRModule for the data objects and per-function debug facts,
+// so the module result carries that shell: the IR data rows as LIR data
+// (same ids), then an immortal String header per ConstText row and the texts
+// the selector names itself (source paths, stop messages, big-integer
+// decimals); one shell function per IR function, with no blocks, carrying
+// its name, file, line and debug variables.
+
+use jet_foundation.[CompilerThreads]
+use jet_backend.[
+    LIRBlock, LIRData, LIRDataID, LIRDataReloc, LIRDebugBinding, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunction, LIRFunctionDebug, LIRFunctionID,
+    LIRModule, LIRModuleDebug, LIRSignature, LIRSignatureID, LIRValue,
+    X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64RuntimeExport,
+    x64_object_functions_threads, x64_object_main, x64_object_main_debug,
+]
+
+// The module-wide rows every function's selection reads.
+struct IRX64Tables {
+    // LIR data: the IR data rows (same ids), then headers and texts.
+    data: [LIRData]
+    // Byte length of every data row.
+    lengths: [Int]
+    // Per IR data row: the data row of its immortal String header, -1 when
+    // no ConstText names it.
+    headers: [Int]
+    // Selector texts (source paths, stop messages, big-integer decimals) -> data row.
+    texts: [String:Int]
+    // DWARF: the source files (row per distinct path) and a debug type per IR type row.
+    files: [String]
+    file_rows: [String:Int]
+    debug_types: [LIRDebugType]
+    type_debug: [Int]
+}
+
+struct IRX64Result {
+    functions: [X64CompiledFunction]
+    debug: [X64FunctionDebug]
+    // Per function: the debug variables its ranges index.
+    variables: [[LIRDebugVariable]]
+    errors: [String]
+    tables: IRX64Tables
+    threads: CompilerThreads
+}
+
+fn ir_x64_add_text(tables: &IRX64Tables, text: String) -> Int Never! {
+    found :: tables.texts.get(text) ?? -1
+    if found >= 0 -> return found
+    id :: tables.data.len()
+    bytes :: text.bytes()
+    &tables.lengths.push(bytes.len())
+    &tables.data.push(LIRData{id: LIRDataID{value: id}, bytes: bytes, align: 1, relocs: [LIRDataReloc]{}})
+    tables.texts[text] = id
+    id
+}
+
+// The DWARF description of a slot type, by its machine layout.
+fn ir_x64_debug_type(ty: IRType) -> LIRDebugType Never! {
+    if ty.kind == {
+        .Unit -> LIRDebugType{name: "Unit", size: 0, kind: LIRDebugTypeKind.Opaque}
+        .Bool -> LIRDebugType{name: "Bool", size: 1, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Bool}}
+        .Int -> LIRDebugType{name: "Int", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Signed}}
+        .Word -> {
+            bits :: ir_x64_bits(ty)
+            LIRDebugType{name: "{if ty.signed -> "I" else -> "U"}{bits}", size: bits /% 8, kind: LIRDebugTypeKind.Base{encoding: if ty.signed -> LIRDebugEncoding.Signed else -> LIRDebugEncoding.Unsigned}}
+        }
+        .Float -> LIRDebugType{name: "Float", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
+        .Float32 -> LIRDebugType{name: "F32", size: 4, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
+        .Char -> LIRDebugType{name: "Char", size: 4, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Char}}
+        .String -> LIRDebugType{name: "String", size: 8, kind: LIRDebugTypeKind.Opaque}
+        .Pointer -> LIRDebugType{name: "Pointer", size: 8, kind: LIRDebugTypeKind.Pointer{target: -1}}
+        .Aggregate -> LIRDebugType{name: "Aggregate", size: ty.size, kind: LIRDebugTypeKind.Opaque}
+    }
+}
+
+fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
+    tables := IRX64Tables{data: [LIRData]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [LIRDebugType]{}, type_debug: [Int]{}}
+    loop (row, bytes) in m.data {
+        &tables.data.push(LIRData{id: LIRDataID{value: row}, bytes: bytes, align: 1, relocs: [LIRDataReloc]{}})
+        &tables.lengths.push(bytes.len())
+        &tables.headers.push(-1)
+    }
+    loop text in ir_x64_stop_texts() -> _ := ir_x64_add_text(&tables, text)
+    loop f in m.functions {
+        _ := ir_x64_add_text(&tables, f.source_file)
+        if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
+            tables.file_rows[f.source_file] = tables.files.len()
+            &tables.files.push(f.source_file)
+        }
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .ConstText {
+                row :: f.a[at]
+                if row < 0 || row >= tables.headers.len() || tables.headers[row] >= 0 -> next
+                // The process-lifetime String header [data, byte length,
+                // cap 0] over the row's bytes, which the runtime recognizes
+                // as immortal: clone returns it and drop ignores it.
+                header :: tables.data.len()
+                bytes := [U8]{}
+                loop _ in 0..<24 -> &bytes.push(U8{0})
+                length := tables.lengths[row]
+                loop index in 0..<8 {
+                    bytes[8 + index] = U8{length.bit_and(255)}
+                    length = length >> 8
+                }
+                &tables.data.push(LIRData{id: LIRDataID{value: header}, bytes: bytes, align: 8, relocs: [LIRDataReloc]{LIRDataReloc{offset: 0, target: LIRDataID{value: row}, addend: 0}}})
+                &tables.lengths.push(24)
+                tables.headers[row] = header
+            }
+            if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() -> _ := ir_x64_add_text(&tables, m.names[f.a[at]])
+        }
+    }
+    loop ty in m.types {
+        &tables.type_debug.push(tables.debug_types.len())
+        &tables.debug_types.push(ir_x64_debug_type(ty))
+    }
+    tables
+}
+
+// Compiles every function of `m` (function row = X64CompiledFunction id),
+// collecting every function's selection errors.
+fn ir_x64_compile_module(m: IRModule, threads: CompilerThreads) -> IRX64Result Never! {
+    tables :: ir_x64_tables(m)
+    result := IRX64Result{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, variables: [[LIRDebugVariable]]{}, errors: [String]{}, tables: tables, threads: threads}
+    loop row in 0..<m.functions.len() {
+        compiled :: ir_x64_compile_function(m, result.tables, row)
+        loop error in compiled.errors -> &result.errors.push(error)
+        &result.functions.push(compiled.function)
+        &result.debug.push(compiled.debug)
+        &result.variables.push(compiled.variables)
+    }
+    result
+}
+
+// The relocatable object of `compiled`: its functions behind a global
+// `main` that runs function row `entry` (no parameters, no result) through
+// the runtime's jet_rt_main, as the old native route's object.
+fn ir_x64_object(m: IRModule, compiled: IRX64Result, entry: Int) -> X64ExecutableResult Never! {
+    if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
+    if entry < 0 || entry >= m.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
+    if m.functions[entry].param_count != 0 || m.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {m.functions[entry].name} must take no parameters and return nothing"}}
+    shells := [LIRFunction]{}
+    loop (row, f) in m.functions {
+        file :: compiled.tables.file_rows.get(f.source_file) ?? -1
+        &shells.push(LIRFunction{
+            id: LIRFunctionID{value: row}, name: compiled.functions[row].name, signature: LIRSignatureID{value: 0},
+            values: [LIRValue]{}, blocks: [LIRBlock]{},
+            debug: LIRFunctionDebug{name: f.name, file: file, line: f.line, variables: compiled.variables[row], bindings: [LIRDebugBinding]{}},
+        })
+    }
+    program :: LIRModule{signatures: [LIRSignature]{}, functions: shells, data: compiled.tables.data, debug: LIRModuleDebug{directory: "", files: compiled.tables.files, types: compiled.tables.debug_types}}
+    main :: x64_object_main(LIRFunctionID{value: entry})
+    functions := [X64CompiledFunction]{main}
+    loop function in compiled.functions -> &functions.push(function)
+    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
+    loop row in compiled.debug -> &debug.push(row)
+    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, compiled.threads)
+}

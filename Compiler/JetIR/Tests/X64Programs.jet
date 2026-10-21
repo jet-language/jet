@@ -1,0 +1,810 @@
+// Hand-built IR programs through the x86-64 selector (Source/X64*.jet), the
+// existing object writer and the in-process linker with the runtime pack,
+// each run and compared with the old backend's build of the same Jet
+// program (X64ProgramSources.jet): stdout, stderr and exit status must be
+// identical. Prints one row per program with the selection time per function.
+//
+//     cd Compiler/JetIR/Tests && jet run X64Programs.jet -- <outdir> <runtime pack> <jet>
+//
+// <jet> is the compiler whose old backend builds each Jet source in
+// <outdir>; its runtime pack (jet-runtime/<key>/jet_runtime.pack.o) is the
+// one the IR objects link with.
+use jet_ir.[
+    IRClass, IRFunction, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_OVERFLOW_TRAP, IR_OVERFLOW_WRAP,
+    ir_args, ir_else, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_text, ir_intern_type, ir_module_new, ir_open, ir_open_if, ir_slot,
+    ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
+]
+use jet_backend.[x64_link_executable]
+use jet_foundation.[Type, compiler_threads_single]
+use core.files as files
+use core.process as process
+use core.time as time
+
+struct XPTypes {
+    int: Int
+    bool: Int
+    string: Int
+    float: Int
+    i32: Int
+    u8: Int
+    u64: Int
+    pointer: Int
+    point: Int
+}
+
+struct XPProgram {
+    name: String
+    ir: IRModule
+}
+
+fn xp_types(m: &IRModule) -> XPTypes {
+    XPTypes{
+        int: ir_intern_type(&m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
+        bool: ir_intern_type(&m, "Bool", IRType{ty: Type.Bool, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        string: ir_intern_type(&m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}),
+        float: ir_intern_type(&m, "Float", IRType{ty: Type.Float, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
+        i32: ir_intern_type(&m, "I32", IRType{ty: Type.IntN{signed: true, bits: 32}, kind: IRTypeKind.Word, size: 4, align: 4, class: IRClass.Integer, signed: true, bits: 32, drop: ""}),
+        u8: ir_intern_type(&m, "U8", IRType{ty: Type.IntN{signed: false, bits: 8}, kind: IRTypeKind.Word, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        u64: ir_intern_type(&m, "U64", IRType{ty: Type.IntN{signed: false, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
+        pointer: ir_intern_type(&m, "Pointer", IRType{ty: Type.Named{name: "Pointer"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        // struct Point { x: Int, y: Int }: a slot holds a pointer to its 16 bytes.
+        point: ir_intern_type(&m, "Point", IRType{ty: Type.Named{name: "Point"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Building blocks.
+
+fn xp_fn(name: String, file: String, line: Int) -> IRFunction {
+    ir_function_new(name, "test:{file}::{name}", "", file, line)
+}
+
+fn xp_param(m: &IRModule, f: &IRFunction, ty: Int, name: String) -> Int {
+    line :: f.line
+    ir_slot(&f, ty, IRSlotKind.Param, ir_intern_name(&m, name), line)
+}
+
+fn xp_local(m: &IRModule, f: &IRFunction, ty: Int, name: String) -> Int {
+    line :: f.line
+    ir_slot(&f, ty, IRSlotKind.Local, ir_intern_name(&m, name), line)
+}
+
+fn xp_temp(f: &IRFunction, ty: Int) -> Int {
+    ir_slot(&f, ty, IRSlotKind.Temp, -1, 0)
+}
+
+fn xp_set(f: &IRFunction, slot: Int, value: Int) {
+    _ := ir_emit(&f, IROp.Const, slot, value, -1, -1, 0)
+}
+
+fn xp_const(f: &IRFunction, ty: Int, value: Int) -> Int {
+    slot :: xp_temp(&f, ty)
+    xp_set(&f, slot, value)
+    slot
+}
+
+fn xp_op(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int) {
+    _ := ir_emit(&f, op, dst, a, b, IR_OVERFLOW_TRAP, 0)
+}
+
+// `op` at source line `line` (a trapping op names it in its stop).
+fn xp_op_at(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, line: Int) {
+    _ := ir_emit(&f, op, dst, a, b, IR_OVERFLOW_TRAP, line)
+}
+
+fn xp_new(f: &IRFunction, ty: Int, op: IROp, a: Int, b: Int) -> Int {
+    slot :: xp_temp(&f, ty)
+    xp_op(&f, op, slot, a, b)
+    slot
+}
+
+fn xp_text(m: &IRModule, f: &IRFunction, t: XPTypes, text: String) -> Int {
+    slot :: xp_temp(&f, t.string)
+    _ := ir_emit(&f, IROp.ConstText, slot, ir_intern_text(&m, text), -1, -1, 0)
+    slot
+}
+
+fn xp_runtime(m: &IRModule, f: &IRFunction, name: String, args: [Int], dst: Int) {
+    start :: ir_args(&f, args)
+    _ := ir_emit(&f, IROp.CallRuntime, dst, ir_intern_name(&m, name), start, args.len(), 0)
+}
+
+fn xp_call(f: &IRFunction, function: Int, args: [Int], dst: Int) {
+    start :: ir_args(&f, args)
+    _ := ir_emit(&f, IROp.Call, dst, function, start, args.len(), 0)
+}
+
+fn xp_drop(f: &IRFunction, slot: Int) {
+    _ := ir_emit(&f, IROp.Drop, -1, slot, -1, -1, 0)
+}
+
+fn xp_return(f: &IRFunction, slot: Int) {
+    _ := ir_emit(&f, IROp.Return, -1, slot, -1, -1, 0)
+}
+
+fn xp_br(f: &IRFunction, depth: Int) {
+    _ := ir_emit(&f, IROp.Br, -1, depth, -1, -1, 0)
+}
+
+fn xp_br_if(f: &IRFunction, condition: Int, depth: Int) {
+    _ := ir_emit(&f, IROp.BrIf, -1, condition, depth, -1, 0)
+}
+
+// print(text): jet_term_write_stdout_line(text, flush 1), as the old lowering.
+fn xp_print(m: &IRModule, f: &IRFunction, t: XPTypes, text: Int) {
+    flush :: xp_const(&f, t.bool, 1)
+    xp_runtime(&m, &f, "jet_term_write_stdout_line", [Int]{text, flush}, -1)
+}
+
+fn xp_print_text(m: &IRModule, f: &IRFunction, t: XPTypes, text: String) {
+    slot :: xp_text(&m, &f, t, text)
+    xp_print(&m, &f, t, slot)
+    xp_drop(&f, slot)
+}
+
+// print("{value}") through the display routine `symbol`.
+fn xp_print_value(m: &IRModule, f: &IRFunction, t: XPTypes, symbol: String, value: Int) {
+    text :: xp_temp(&f, t.string)
+    xp_runtime(&m, &f, symbol, [Int]{value}, text)
+    xp_print(&m, &f, t, text)
+    xp_drop(&f, text)
+}
+
+fn xp_print_int(m: &IRModule, f: &IRFunction, t: XPTypes, value: Int) {
+    xp_print_value(&m, &f, t, "jet_rt_int_to_string", value)
+}
+
+fn xp_add(m: &IRModule, f: IRFunction) -> Int {
+    row :: m.functions.len()
+    m.function_rows[f.key] = row
+    &m.functions.push(f)
+    row
+}
+
+fn xp_entry(m: &IRModule, f: IRFunction) {
+    m.entry = xp_add(&m, f)
+}
+
+// ---------------------------------------------------------------------------
+// Programs (each mirrors its Jet source in X64ProgramSources.jet).
+
+fn xp_hello() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    f := xp_fn("run", "hello.jet", 1)
+    xp_print_text(&m, &f, t, "hi")
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_exact_int() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    show := xp_fn("show", "exact_int.jet", 1)
+    n :: xp_param(&m, &show, t.int, "n")
+    xp_print_int(&m, &show, t, n)
+    xp_return(&show, -1)
+    show_row :: xp_add(&m, show)
+
+    f := xp_fn("run", "exact_int.jet", 5)
+    a :: xp_local(&m, &f, t.int, "a")
+    xp_set(&f, a, 4611686018427387903)
+    // a + a leaves the inline range: jet_int_add builds the big integer.
+    b :: xp_local(&m, &f, t.int, "b")
+    xp_op(&f, IROp.Add, b, a, a)
+    xp_call(&f, show_row, [Int]{b}, -1)
+    // Copy of a big integer: jet_rt_int_clone.
+    h :: xp_local(&m, &f, t.int, "h")
+    _ := ir_emit(&f, IROp.Copy, h, b, -1, -1, 0)
+    xp_call(&f, show_row, [Int]{h}, -1)
+    three :: xp_const(&f, t.int, 3)
+    c :: xp_local(&m, &f, t.int, "c")
+    xp_op(&f, IROp.Mul, c, b, three)
+    xp_call(&f, show_row, [Int]{c}, -1)
+    d :: xp_local(&m, &f, t.int, "d")
+    xp_op(&f, IROp.Sub, d, c, b)
+    xp_call(&f, show_row, [Int]{d}, -1)
+    e :: xp_local(&m, &f, t.int, "e")
+    _ := ir_emit(&f, IROp.Neg, e, d, -1, IR_OVERFLOW_TRAP, 0)
+    xp_call(&f, show_row, [Int]{e}, -1)
+    six :: xp_const(&f, t.int, 6)
+    seven :: xp_const(&f, t.int, 7)
+    g :: xp_local(&m, &f, t.int, "f")
+    xp_op(&f, IROp.Mul, g, six, seven)
+    xp_call(&f, show_row, [Int]{g}, -1)
+    hundred :: xp_const(&f, t.int, 100)
+    k :: xp_local(&m, &f, t.int, "g")
+    xp_op(&f, IROp.Sub, k, g, hundred)
+    xp_call(&f, show_row, [Int]{k}, -1)
+    less :: xp_new(&f, t.bool, IROp.Lt, e, a)
+    _ := ir_open_if(&f, less, 0)
+    xp_print_text(&m, &f, t, "less")
+    ir_else(&f, 0)
+    xp_print_text(&m, &f, t, "not less")
+    ir_end(&f, 0)
+    big :: xp_new(&f, t.bool, IROp.Gt, d, a)
+    _ := ir_open_if(&f, big, 0)
+    xp_print_text(&m, &f, t, "big")
+    ir_end(&f, 0)
+    answer :: xp_const(&f, t.int, 42)
+    same :: xp_new(&f, t.bool, IROp.Eq, g, answer)
+    _ := ir_open_if(&f, same, 0)
+    xp_print_text(&m, &f, t, "answer")
+    ir_end(&f, 0)
+    drops :: [Int]{a, b, h, c, d, e, g, k}
+    loop slot in drops -> xp_drop(&f, slot)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_control() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    classify := xp_fn("classify", "control.jet", 1)
+    n :: xp_param(&m, &classify, t.int, "n")
+    classify.result = t.int
+    zero :: xp_const(&classify, t.int, 0)
+    negative :: xp_new(&classify, t.bool, IROp.Lt, n, zero)
+    _ := ir_open_if(&classify, negative, 2)
+    minus :: xp_const(&classify, t.int, -1)
+    xp_return(&classify, minus)
+    ir_end(&classify, 0)
+    is_zero :: xp_new(&classify, t.bool, IROp.Eq, n, zero)
+    _ := ir_open_if(&classify, is_zero, 5)
+    xp_return(&classify, zero)
+    ir_end(&classify, 0)
+    one :: xp_const(&classify, t.int, 1)
+    xp_return(&classify, one)
+    classify_row :: xp_add(&m, classify)
+
+    f := xp_fn("run", "control.jet", 11)
+    total :: xp_local(&m, &f, t.int, "total")
+    i :: xp_local(&m, &f, t.int, "i")
+    xp_set(&f, total, 0)
+    xp_set(&f, i, 0)
+    // Block { Loop { ... } }: Br 1 out of the loop is `break`, Br 0 to the loop is `next`.
+    _ := ir_open(&f, IROp.Block, 14)
+    _ := ir_open(&f, IROp.Loop, 14)
+    limit :: xp_const(&f, t.int, 20)
+    running :: xp_new(&f, t.bool, IROp.Lt, i, limit)
+    done :: xp_new(&f, t.bool, IROp.Not, running, -1)
+    xp_br_if(&f, done, 1)
+    step :: xp_const(&f, t.int, 1)
+    xp_op(&f, IROp.Add, i, i, step)
+    five :: xp_const(&f, t.int, 5)
+    skip :: xp_new(&f, t.bool, IROp.Eq, i, five)
+    xp_br_if(&f, skip, 0)
+    twelve :: xp_const(&f, t.int, 12)
+    over :: xp_new(&f, t.bool, IROp.Gt, i, twelve)
+    _ := ir_open_if(&f, over, 19)
+    xp_br(&f, 2)
+    ir_end(&f, 0)
+    xp_op(&f, IROp.Add, total, total, i)
+    xp_br(&f, 0)
+    ir_end(&f, 0)
+    ir_end(&f, 0)
+    xp_print_int(&m, &f, t, total)
+    values :: [Int]{-5, 0, 7}
+    loop value in values {
+        arg :: xp_const(&f, t.int, value)
+        result :: xp_temp(&f, t.int)
+        xp_call(&f, classify_row, [Int]{arg}, result)
+        xp_print_int(&m, &f, t, result)
+        xp_drop(&f, result)
+    }
+    xp_drop(&f, total)
+    xp_drop(&f, i)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_calls() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    // sum8: eight parameters, two of them on the stack.
+    sum8 := xp_fn("sum8", "calls.jet", 1)
+    params := [Int]{}
+    names :: [String]{"a", "b", "c", "d", "e", "f", "g", "h"}
+    loop name in names -> &params.push(xp_param(&m, &sum8, t.int, name))
+    sum8.result = t.int
+    acc :: xp_local(&m, &sum8, t.int, "acc")
+    _ := ir_emit(&sum8, IROp.Copy, acc, params[0], -1, -1, 0)
+    loop index in 1..<8 {
+        factor :: xp_const(&sum8, t.int, index + 1)
+        term :: xp_new(&sum8, t.int, IROp.Mul, params[index], factor)
+        xp_op(&sum8, IROp.Add, acc, acc, term)
+    }
+    xp_return(&sum8, acc)
+    sum8_row :: xp_add(&m, sum8)
+
+    fib := xp_fn("fib", "calls.jet", 5)
+    n :: xp_param(&m, &fib, t.int, "n")
+    fib.result = t.int
+    two :: xp_const(&fib, t.int, 2)
+    small :: xp_new(&fib, t.bool, IROp.Lt, n, two)
+    _ := ir_open_if(&fib, small, 6)
+    xp_return(&fib, n)
+    ir_end(&fib, 0)
+    fib_row :: m.functions.len()
+    one :: xp_const(&fib, t.int, 1)
+    n1 :: xp_new(&fib, t.int, IROp.Sub, n, one)
+    r1 :: xp_temp(&fib, t.int)
+    xp_call(&fib, fib_row, [Int]{n1}, r1)
+    n2 :: xp_new(&fib, t.int, IROp.Sub, n, two)
+    r2 :: xp_temp(&fib, t.int)
+    xp_call(&fib, fib_row, [Int]{n2}, r2)
+    sum :: xp_new(&fib, t.int, IROp.Add, r1, r2)
+    xp_return(&fib, sum)
+    _ := xp_add(&m, fib)
+
+    even := xp_fn("even", "calls.jet", 12)
+    value :: xp_param(&m, &even, t.int, "n")
+    even.result = t.bool
+    pair :: xp_const(&even, t.int, 2)
+    rest :: xp_temp(&even, t.int)
+    xp_op_at(&even, IROp.Rem, rest, value, pair, 13)
+    nothing :: xp_const(&even, t.int, 0)
+    is_even :: xp_new(&even, t.bool, IROp.Eq, rest, nothing)
+    xp_return(&even, is_even)
+    even_row :: xp_add(&m, even)
+
+    half := xp_fn("half", "calls.jet", 16)
+    x :: xp_param(&m, &half, t.float, "x")
+    half.result = t.float
+    divisor :: xp_const(&half, t.float, 4611686018427387904)
+    halved :: xp_new(&half, t.float, IROp.Div, x, divisor)
+    xp_return(&half, halved)
+    half_row :: xp_add(&m, half)
+
+    f := xp_fn("run", "calls.jet", 20)
+    args := [Int]{}
+    loop value8 in 1..9 -> &args.push(xp_const(&f, t.int, value8))
+    total :: xp_temp(&f, t.int)
+    xp_call(&f, sum8_row, args, total)
+    xp_print_int(&m, &f, t, total)
+    twenty :: xp_const(&f, t.int, 20)
+    fibbed :: xp_temp(&f, t.int)
+    xp_call(&f, fib_row, [Int]{twenty}, fibbed)
+    xp_print_int(&m, &f, t, fibbed)
+    ten :: xp_const(&f, t.int, 10)
+    ten_even :: xp_temp(&f, t.bool)
+    xp_call(&f, even_row, [Int]{ten}, ten_even)
+    _ := ir_open_if(&f, ten_even, 23)
+    xp_print_text(&m, &f, t, "even")
+    ir_end(&f, 0)
+    seven :: xp_const(&f, t.int, 7)
+    seven_even :: xp_temp(&f, t.bool)
+    xp_call(&f, even_row, [Int]{seven}, seven_even)
+    odd :: xp_new(&f, t.bool, IROp.Not, seven_even, -1)
+    _ := ir_open_if(&f, odd, 26)
+    xp_print_text(&m, &f, t, "odd")
+    ir_end(&f, 0)
+    five :: xp_const(&f, t.float, 4617315517961601024)
+    result :: xp_temp(&f, t.float)
+    xp_call(&f, half_row, [Int]{five}, result)
+    xp_print_value(&m, &f, t, "jet_rt_float_to_string", result)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_strings() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    greet := xp_fn("greet", "strings.jet", 1)
+    name :: xp_param(&m, &greet, t.string, "name")
+    greet.result = t.string
+    hello :: xp_text(&m, &greet, t, "hello, ")
+    greeting :: xp_new(&greet, t.string, IROp.Concat, hello, name)
+    xp_drop(&greet, hello)
+    xp_return(&greet, greeting)
+    greet_row :: xp_add(&m, greet)
+
+    f := xp_fn("run", "strings.jet", 5)
+    a :: xp_local(&m, &f, t.string, "a")
+    _ := ir_emit(&f, IROp.ConstText, a, ir_intern_text(&m, "jet"), -1, -1, 0)
+    b :: xp_local(&m, &f, t.string, "b")
+    xp_call(&f, greet_row, [Int]{a}, b)
+    xp_print(&m, &f, t, b)
+    bang :: xp_text(&m, &f, t, "!")
+    c :: xp_local(&m, &f, t.string, "c")
+    xp_op(&f, IROp.Concat, c, b, bang)
+    xp_print(&m, &f, t, c)
+    // A String Copy is jet_rt_string_clone.
+    d :: xp_local(&m, &f, t.string, "d")
+    _ := ir_emit(&f, IROp.Copy, d, c, -1, -1, 0)
+    xp_print(&m, &f, t, d)
+    xp_drop(&f, d)
+    expected :: xp_text(&m, &f, t, "hello, jet!")
+    same :: xp_new(&f, t.bool, IROp.Eq, c, expected)
+    _ := ir_open_if(&f, same, 12)
+    xp_print_text(&m, &f, t, "same")
+    ir_end(&f, 0)
+    ordered :: xp_new(&f, t.bool, IROp.Lt, b, a)
+    _ := ir_open_if(&f, ordered, 15)
+    xp_print_text(&m, &f, t, "ordered")
+    ir_end(&f, 0)
+    // "n = {n}, a = {a}" through the runtime string builder.
+    n :: xp_local(&m, &f, t.int, "n")
+    xp_set(&f, n, 42)
+    builder :: xp_temp(&f, t.pointer)
+    xp_runtime(&m, &f, "jet_rt_string_builder_new", [Int]{}, builder)
+    pieces :: [String]{"n = ", ", a = "}
+    loop (index, piece) in pieces {
+        bytes :: xp_temp(&f, t.pointer)
+        _ := ir_emit(&f, IROp.DataAddress, bytes, ir_intern_text(&m, piece), -1, -1, 0)
+        length :: xp_const(&f, t.int, piece.bytes().len())
+        xp_runtime(&m, &f, "jet_rt_string_builder_push_static", [Int]{builder, bytes, length}, -1)
+        if index == 0 {
+            shown :: xp_temp(&f, t.string)
+            xp_runtime(&m, &f, "jet_rt_int_to_string", [Int]{n}, shown)
+            xp_runtime(&m, &f, "jet_rt_string_builder_push", [Int]{builder, shown}, -1)
+            xp_drop(&f, shown)
+        } else {
+            xp_runtime(&m, &f, "jet_rt_string_builder_push", [Int]{builder, a}, -1)
+        }
+    }
+    line :: xp_temp(&f, t.string)
+    xp_runtime(&m, &f, "jet_rt_string_builder_finish", [Int]{builder}, line)
+    xp_print(&m, &f, t, line)
+    drops :: [Int]{line, n, expected, c, bang, b, a}
+    loop slot in drops -> xp_drop(&f, slot)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_ownership() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    f := xp_fn("run", "ownership.jet", 1)
+    big :: xp_local(&m, &f, t.int, "big")
+    _ := ir_emit(&f, IROp.ConstBigInt, big, ir_intern_name(&m, "9223372036854775807"), -1, -1, 0)
+    one :: xp_const(&f, t.int, 1)
+    x :: xp_local(&m, &f, t.int, "x")
+    xp_op(&f, IROp.Add, x, big, one)
+    y :: xp_local(&m, &f, t.int, "y")
+    _ := ir_emit(&f, IROp.Copy, y, x, -1, -1, 0)
+    xp_print_int(&m, &f, t, y)
+    moved :: xp_text(&m, &f, t, "moved")
+    bang :: xp_text(&m, &f, t, "!")
+    s :: xp_local(&m, &f, t.string, "s")
+    xp_op(&f, IROp.Concat, s, moved, bang)
+    // Move ends `s`; only `t` is released afterwards, by Close.
+    owner :: xp_local(&m, &f, t.string, "t")
+    _ := ir_emit(&f, IROp.Move, owner, s, -1, -1, 0)
+    xp_print(&m, &f, t, owner)
+    xp_print_int(&m, &f, t, big)
+    _ := ir_emit(&f, IROp.Close, -1, owner, ir_intern_name(&m, "jet_rt_string_drop"), -1, 0)
+    drops :: [Int]{moved, bang, y, x, big}
+    loop slot in drops -> xp_drop(&f, slot)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_div_zero() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    divide := xp_fn("divide", "div_zero.jet", 1)
+    a :: xp_param(&m, &divide, t.int, "a")
+    b :: xp_param(&m, &divide, t.int, "b")
+    divide.result = t.int
+    q :: xp_temp(&divide, t.int)
+    xp_op_at(&divide, IROp.FloorDiv, q, a, b, 2)
+    xp_return(&divide, q)
+    divide_row :: xp_add(&m, divide)
+    f := xp_fn("run", "div_zero.jet", 5)
+    pairs :: [[Int]]{[Int]{84, 2}, [Int]{7, 0}}
+    loop pair in pairs {
+        left :: xp_const(&f, t.int, pair[0])
+        right :: xp_const(&f, t.int, pair[1])
+        result :: xp_temp(&f, t.int)
+        xp_call(&f, divide_row, [Int]{left, right}, result)
+        xp_print_int(&m, &f, t, result)
+    }
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_words() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    mix := xp_fn("mix", "words.jet", 1)
+    a :: xp_param(&m, &mix, t.i32, "a")
+    b :: xp_param(&m, &mix, t.i32, "b")
+    mix.result = t.i32
+    product :: xp_temp(&mix, t.i32)
+    xp_op_at(&mix, IROp.Mul, product, a, b, 2)
+    mixed :: xp_temp(&mix, t.i32)
+    xp_op_at(&mix, IROp.Sub, mixed, product, a, 2)
+    xp_return(&mix, mixed)
+    mix_row :: xp_add(&m, mix)
+
+    f := xp_fn("run", "words.jet", 5)
+    x :: xp_const(&f, t.i32, 1000)
+    y :: xp_const(&f, t.i32, -7)
+    mixed_value :: xp_temp(&f, t.i32)
+    xp_call(&f, mix_row, [Int]{x, y}, mixed_value)
+    xp_print_value(&m, &f, t, "jet_rt_i64_to_string", mixed_value)
+    quotient :: xp_temp(&f, t.i32)
+    xp_op_at(&f, IROp.FloorDiv, quotient, x, y, 9)
+    xp_print_value(&m, &f, t, "jet_rt_i64_to_string", quotient)
+    modulo :: xp_temp(&f, t.i32)
+    xp_op_at(&f, IROp.Mod, modulo, x, y, 10)
+    xp_print_value(&m, &f, t, "jet_rt_i64_to_string", modulo)
+    bb :: xp_const(&f, t.u8, 200)
+    cc :: xp_const(&f, t.u8, 50)
+    sum :: xp_temp(&f, t.u8)
+    xp_op_at(&f, IROp.Add, sum, bb, cc, 13)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", sum)
+    difference :: xp_temp(&f, t.u8)
+    xp_op_at(&f, IROp.Sub, difference, bb, cc, 14)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", difference)
+    w :: xp_const(&f, t.u64, 0xffffffffffff)
+    scale :: xp_const(&f, t.u64, 4096)
+    scaled :: xp_temp(&f, t.u64)
+    xp_op_at(&f, IROp.Mul, scaled, w, scale, 16)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", scaled)
+    eight :: xp_const(&f, t.u64, 8)
+    shifted :: xp_temp(&f, t.u64)
+    xp_op_at(&f, IROp.Shr, shifted, w, eight, 17)
+    xp_print_value(&m, &f, t, "jet_rt_u64_to_string", shifted)
+    zero :: xp_const(&f, t.i32, 0)
+    negative :: xp_new(&f, t.bool, IROp.Lt, y, zero)
+    _ := ir_open_if(&f, negative, 19)
+    xp_print_text(&m, &f, t, "negative")
+    ir_end(&f, 0)
+    larger :: xp_new(&f, t.bool, IROp.Gt, bb, cc)
+    _ := ir_open_if(&f, larger, 20)
+    xp_print_text(&m, &f, t, "unsigned order")
+    ir_end(&f, 0)
+    // A wrapping U8 sum, which a trapping one would refuse: 200 + 100 = 44.
+    wrapped :: xp_temp(&f, t.u8)
+    hundred :: xp_const(&f, t.u8, 100)
+    _ := ir_emit(&f, IROp.Add, wrapped, bb, hundred, IR_OVERFLOW_WRAP, 21)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_word_trap() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    grow := xp_fn("grow", "word_trap.jet", 1)
+    a :: xp_param(&m, &grow, t.u8, "a")
+    b :: xp_param(&m, &grow, t.u8, "b")
+    grow.result = t.u8
+    sum :: xp_temp(&grow, t.u8)
+    xp_op_at(&grow, IROp.Add, sum, a, b, 2)
+    xp_return(&grow, sum)
+    grow_row :: xp_add(&m, grow)
+    f := xp_fn("run", "word_trap.jet", 5)
+    pairs :: [[Int]]{[Int]{100, 100}, [Int]{200, 100}}
+    loop pair in pairs {
+        left :: xp_const(&f, t.u8, pair[0])
+        right :: xp_const(&f, t.u8, pair[1])
+        result :: xp_temp(&f, t.u8)
+        xp_call(&f, grow_row, [Int]{left, right}, result)
+        xp_print_value(&m, &f, t, "jet_rt_u64_to_string", result)
+    }
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_floats() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    show := xp_fn("show", "floats.jet", 1)
+    a :: xp_param(&m, &show, t.float, "a")
+    b :: xp_param(&m, &show, t.float, "b")
+    ops :: [IROp]{IROp.Add, IROp.Mul, IROp.Div}
+    loop op in ops {
+        value :: xp_new(&show, t.float, op, a, b)
+        xp_print_value(&m, &show, t, "jet_rt_float_to_string", value)
+    }
+    eight :: xp_const(&show, t.float, 4620693217682128896)
+    scaled :: xp_new(&show, t.float, IROp.Mul, b, eight)
+    less :: xp_new(&show, t.float, IROp.Sub, a, scaled)
+    xp_print_value(&m, &show, t, "jet_rt_float_to_string", less)
+    negated :: xp_new(&show, t.float, IROp.Neg, a, -1)
+    xp_print_value(&m, &show, t, "jet_rt_float_to_string", negated)
+    greater :: xp_new(&show, t.bool, IROp.Gt, a, b)
+    _ := ir_open_if(&show, greater, 7)
+    xp_print_text(&m, &show, t, "greater")
+    ir_end(&show, 0)
+    equal :: xp_new(&show, t.bool, IROp.Eq, a, b)
+    _ := ir_open_if(&show, equal, 10)
+    xp_print_text(&m, &show, t, "equal")
+    ir_end(&show, 0)
+    xp_return(&show, -1)
+    show_row :: xp_add(&m, show)
+    f := xp_fn("run", "floats.jet", 15)
+    pairs :: [[Int]]{[Int]{4609434218613702656, 4598175219545276416}, [Int]{4611686018427387904, 4611686018427387904}}
+    loop pair in pairs {
+        left :: xp_const(&f, t.float, pair[0])
+        right :: xp_const(&f, t.float, pair[1])
+        xp_call(&f, show_row, [Int]{left, right}, -1)
+    }
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_structs() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    // make: storage for the literal, a Store per member, the bytes returned
+    // through the hidden result pointer.
+    make := xp_fn("make", "structs.jet", 6)
+    x :: xp_param(&m, &make, t.int, "x")
+    y :: xp_param(&m, &make, t.int, "y")
+    make.result = t.point
+    literal :: xp_temp(&make, t.point)
+    _ := ir_emit(&make, IROp.StackAddress, literal, 16, 8, -1, 7)
+    _ := ir_emit(&make, IROp.Store, -1, literal, 0, x, 7)
+    _ := ir_emit(&make, IROp.Store, -1, literal, 8, y, 7)
+    xp_return(&make, literal)
+    make_row :: xp_add(&m, make)
+
+    total := xp_fn("total", "structs.jet", 10)
+    p :: xp_param(&m, &total, t.point, "p")
+    total.result = t.int
+    px :: xp_temp(&total, t.int)
+    _ := ir_emit(&total, IROp.Load, px, p, 0, -1, 11)
+    py :: xp_temp(&total, t.int)
+    _ := ir_emit(&total, IROp.Load, py, p, 8, -1, 11)
+    sum :: xp_new(&total, t.int, IROp.Add, px, py)
+    xp_return(&total, sum)
+    total_row :: xp_add(&m, total)
+
+    f := xp_fn("run", "structs.jet", 14)
+    three :: xp_const(&f, t.int, 3)
+    four :: xp_const(&f, t.int, 4)
+    point :: xp_local(&m, &f, t.point, "p")
+    xp_call(&f, make_row, [Int]{three, four}, point)
+    first :: xp_temp(&f, t.int)
+    xp_call(&f, total_row, [Int]{point}, first)
+    xp_print_int(&m, &f, t, first)
+    // q := p copies the bytes into storage of its own.
+    duplicate :: xp_local(&m, &f, t.point, "q")
+    _ := ir_emit(&f, IROp.StackAddress, duplicate, 16, 8, -1, 17)
+    _ := ir_emit(&f, IROp.CopyBytes, -1, duplicate, point, 16, 17)
+    qx :: xp_temp(&f, t.int)
+    _ := ir_emit(&f, IROp.Load, qx, duplicate, 0, -1, 18)
+    xp_print_int(&m, &f, t, qx)
+    // p.y through an Offset pointer.
+    field :: xp_temp(&f, t.pointer)
+    _ := ir_emit(&f, IROp.Offset, field, point, 8, -1, 19)
+    pyv :: xp_temp(&f, t.int)
+    _ := ir_emit(&f, IROp.Load, pyv, field, 0, -1, 19)
+    xp_print_int(&m, &f, t, pyv)
+    // total(q) through a code pointer.
+    code :: xp_temp(&f, t.pointer)
+    _ := ir_emit(&f, IROp.FunctionAddress, code, total_row, -1, -1, 20)
+    second :: xp_temp(&f, t.int)
+    start :: ir_args(&f, [Int]{duplicate})
+    _ := ir_emit(&f, IROp.CallIndirect, second, code, start, 1, 20)
+    xp_print_int(&m, &f, t, second)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+fn xp_programs() -> [XPProgram] {
+    [XPProgram]{
+        XPProgram{name: "hello", ir: xp_hello()},
+        XPProgram{name: "exact_int", ir: xp_exact_int()},
+        XPProgram{name: "control", ir: xp_control()},
+        XPProgram{name: "calls", ir: xp_calls()},
+        XPProgram{name: "strings", ir: xp_strings()},
+        XPProgram{name: "ownership", ir: xp_ownership()},
+        XPProgram{name: "div_zero", ir: xp_div_zero()},
+        XPProgram{name: "words", ir: xp_words()},
+        XPProgram{name: "word_trap", ir: xp_word_trap()},
+        XPProgram{name: "floats", ir: xp_floats()},
+        XPProgram{name: "structs", ir: xp_structs()},
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Driver.
+
+fn xp_quote(text: String) -> String {
+    text.replace("\n", "\\n")
+}
+
+fn xp_status(args: [String]) -> Int {
+    if args.len() < 3 {
+        print("usage: X64Programs.jet <outdir> <runtime pack> <jet>")
+        return 64
+    }
+    out :: args[0]
+    pack :: files.read_bytes(args[1]) ?? {
+        print("cannot read {args[1]}")
+        return 66
+    }
+    jet :: args[2]
+    failures := 0
+    print("program\tfunctions\tselect_us\tper_function_us\tmax_function_us\tcode_bytes\tobject_bytes\tresult")
+    loop program in xp_programs() {
+        m :: program.ir
+        // Per-function selection time, then the module result the object uses.
+        tables :: ir_x64_tables(m)
+        total_ns := 0
+        max_ns := 0
+        code_bytes := 0
+        loop row in 0..<m.functions.len() {
+            started :: time.instant()
+            one :: ir_x64_compile_function(m, tables, row)
+            spent :: started.elapsed().ns
+            total_ns += spent
+            if spent > max_ns -> max_ns = spent
+            code_bytes += one.function.code.len()
+        }
+        compiled :: ir_x64_compile_module(m, compiler_threads_single())
+        object :: ir_x64_object(m, compiled, m.entry)
+        if object.errors.len() > 0 {
+            loop error in object.errors -> print("{program.name}: {error}")
+            failures += 1
+            next
+        }
+        bufs := [[U8]]{object.bytes, pack.copy()}
+        linked :: x64_link_executable([String]{"{program.name}.o", args[1]}, ^bufs)
+        if linked.errors.len() > 0 {
+            loop error in linked.errors -> print("{program.name}: link: {error}")
+            failures += 1
+            next
+        }
+        exe :: "{out}/{program.name}.ir"
+        files.write_bytes(exe, linked.bytes) ?? {
+            print("cannot write {exe}")
+            return 73
+        }
+        files.set_mode(exe, 0o755) ?? {
+            print("cannot make {exe} executable")
+            return 73
+        }
+        source :: xp_source(program.name)
+        files.write("{out}/{program.name}.jet", source) ?? {
+            print("cannot write {out}/{program.name}.jet")
+            return 73
+        }
+        built :: process.cmd([String]{jet, "build", "{program.name}.jet"}).cwd(out).run() ?? {
+            print("{program.name}: cannot run {jet}")
+            return 70
+        }
+        if built.code != 0 {
+            print("{program.name}: old backend build failed: {xp_quote(built.output)}{xp_quote(built.errors)}")
+            failures += 1
+            next
+        }
+        ours :: process.cmd([String]{exe}).cwd(out).run() ?? {
+            print("{program.name}: cannot run {exe}")
+            return 70
+        }
+        theirs :: process.cmd([String]{"{out}/.jet/build/{program.name}"}).cwd(out).run() ?? {
+            print("{program.name}: cannot run the old build")
+            return 70
+        }
+        same :: ours.code == theirs.code && ours.output == theirs.output && ours.errors == theirs.errors
+        verdict :: if same -> "IDENTICAL (exit {ours.code}, {ours.output.len()} B out, {ours.errors.len()} B err)" else -> "DIFFERENT"
+        print("{program.name}\t{m.functions.len()}\t{total_ns /% 1000}\t{total_ns /% (1000 * m.functions.len())}\t{max_ns /% 1000}\t{code_bytes}\t{object.bytes.len()}\t{verdict}")
+        if !same {
+            failures += 1
+            print("  ir:  exit {ours.code} out `{xp_quote(ours.output)}` err `{xp_quote(ours.errors)}`")
+            print("  old: exit {theirs.code} out `{xp_quote(theirs.output)}` err `{xp_quote(theirs.errors)}`")
+        }
+    }
+    print(if failures == 0 -> "X64 PROGRAMS PASS" else -> "X64 PROGRAMS FAIL ({failures})")
+    if failures == 0 -> 0 else -> 1
+}
+
+fn run() {
+    process.exit(xp_status(process.args()))
+}

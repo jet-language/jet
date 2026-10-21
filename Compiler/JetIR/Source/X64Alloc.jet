@@ -1,0 +1,283 @@
+// Slot homes and linear-scan register allocation for x86-64 selection.
+//
+// Every slot that holds a value has one place for the whole function: a
+// callee-saved register (rbx, r12-r15) for the whole of its live range, or its
+// frame home. Selection then uses rax, rcx, rdx, rsi, rdi, r8-r11 and xmm0-7 as
+// scratch inside one instruction only, so a call never needs a value saved
+// around it and structured control never needs moves on its edges.
+//
+// A slot's live range is the span of instruction indexes that reference it
+// (parameters start at -1, before the first instruction). Because control is
+// structured, the span is exact up to loops: a range that overlaps a Loop but
+// does not lie inside it, or whose first reference inside the loop reads the
+// slot, is live around the back edge and grows to cover the whole loop. The
+// scan takes ranges by start; when no register is free the range that ends
+// last lives in its frame home.
+//
+// Frame: `push rbp; mov rbp, rsp`, the used callee-saved registers, then
+// `sub rsp` for the frame homes, StackAddress storage and the result storage
+// of calls that return an aggregate, rounded so rsp stays 16-byte aligned
+// at every call.
+
+// Callee-saved registers handed to slots, in preference order.
+IR_X64_SLOT_REGISTERS :: prep { [Int]{3, 12, 13, 14, 15} }
+
+// How a slot's value is held.
+enum IRX64Class {
+    // Unit: nothing is stored.
+    Empty
+    // A word in a general register or an 8-byte home (Bool, Int, fixed-width
+    // integers, Char, String, raw and owned pointers, and an aggregate's
+    // pointer to its bytes).
+    General
+    // Float bits (Float32 zero-extended) in an 8-byte home.
+    Float
+}
+
+fn ir_x64_class(ty: IRType) -> IRX64Class Never! {
+    if ty.kind == {
+        .Unit -> IRX64Class.Empty
+        .Float | .Float32 -> IRX64Class.Float
+        else -> IRX64Class.General
+    }
+}
+
+struct IRX64Allocation {
+    // Per slot: the callee-saved register holding it, -1 for its frame home.
+    regs: [Int]
+    // Per slot: the rbp displacement of its frame home (0 for a register
+    // slot or a Unit slot).
+    homes: [Int]
+    // Per slot: the first and last instruction index of its live range
+    // (-1 for a parameter's start); start > end when it is never referenced.
+    starts: [Int]
+    ends: [Int]
+    // Per instruction: the rbp displacement of a StackAddress's storage or
+    // of an aggregate-returning call's result storage (0 for none).
+    stack: [Int]
+    // The callee-saved registers the slots use, in push order.
+    saved: [Int]
+    // Bytes `sub rsp` reserves below the saved registers.
+    frame_bytes: Int
+    // rbp displacement of the hidden result pointer of a function that
+    // returns an aggregate, 0 for none.
+    result_home: Int
+}
+
+// The slots instruction `at` reads, into `reads` (cleared first).
+fn ir_x64_reads_into(f: IRFunction, at: Int, reads: &[Int]) Never! {
+    &reads.clear()
+    op :: f.op[at]
+    a :: f.a[at]
+    b :: f.b[at]
+    c :: f.c[at]
+    if op == {
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Load | .Offset | .If | .BrIf -> &reads.push(a)
+        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat -> {
+            &reads.push(a)
+            &reads.push(b)
+        }
+        .Call | .CallRuntime -> { loop index in b..<(b + c) -> &reads.push(f.args[index]) }
+        .CallIndirect -> {
+            &reads.push(a)
+            loop index in b..<(b + c) -> &reads.push(f.args[index])
+        }
+        .Store -> {
+            &reads.push(a)
+            &reads.push(c)
+        }
+        .CopyBytes -> {
+            &reads.push(a)
+            &reads.push(b)
+        }
+        .Return -> { if a >= 0 -> &reads.push(a) }
+        else -> {}
+    }
+}
+
+// The slot instruction `at` writes, or -1.
+fn ir_x64_write(f: IRFunction, at: Int) -> Int Never! {
+    if f.op[at] == {
+        .Drop | .Close | .Store | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Nop -> -1
+        else -> f.dst[at]
+    }
+}
+
+fn ir_x64_align(value: Int, align: Int) -> Int Never! {
+    if align <= 1 || value % align == 0 -> return value
+    value + align - value % align
+}
+
+fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
+    count :: f.slot_type.len()
+    starts := [Int]{}
+    ends := [Int]{}
+    // Whether the slot's first reference (in index order) writes it.
+    first_writes := [Bool]{}
+    loop slot in 0..<count {
+        if slot < f.param_count {
+            &starts.push(-1)
+            &ends.push(-1)
+            &first_writes.push(true)
+        } else {
+            &starts.push(f.op.len())
+            &ends.push(-1)
+            &first_writes.push(false)
+        }
+    }
+    reads := [Int]{}
+    loop at in 0..<f.op.len() {
+        ir_x64_reads_into(f, at, &reads)
+        loop slot in reads {
+            if slot < 0 || slot >= count -> next
+            if at < starts[slot] {
+                starts[slot] = at
+                first_writes[slot] = false
+            }
+            if at > ends[slot] -> ends[slot] = at
+        }
+        written :: ir_x64_write(f, at)
+        if written >= 0 && written < count {
+            if at < starts[written] {
+                starts[written] = at
+                first_writes[written] = true
+            }
+            if at > ends[written] -> ends[written] = at
+        }
+    }
+    // Loops, as (start, end) instruction pairs.
+    loop_starts := [Int]{}
+    loop_ends := [Int]{}
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Loop {
+            &loop_starts.push(at)
+            &loop_ends.push(f.a[at])
+        }
+    }
+    // Grow every range that is live around a back edge to its whole loop,
+    // until no range changes (once per nesting level at most).
+    changed := true
+    loop changed {
+        changed = false
+        loop slot in 0..<count {
+            if starts[slot] > ends[slot] -> next
+            loop row in 0..<loop_starts.len() {
+                head :: loop_starts[row]
+                tail :: loop_ends[row]
+                if ends[slot] < head || starts[slot] > tail -> next
+                inside :: starts[slot] > head && ends[slot] <= tail
+                if inside && first_writes[slot] -> next
+                if starts[slot] > head {
+                    starts[slot] = head
+                    changed = true
+                }
+                if ends[slot] < tail {
+                    ends[slot] = tail
+                    changed = true
+                }
+            }
+        }
+    }
+
+    // Linear scan over the General slots, by start then slot.
+    regs := [Int]{}
+    loop _ in 0..<count -> &regs.push(-1)
+    order := [Int]{}
+    loop slot in 0..<count {
+        if starts[slot] > ends[slot] -> next
+        if ir_x64_class(m.types[f.slot_type[slot]]) != .General -> next
+        &order.push(slot)
+    }
+    &order.sort_by((left: Int, right: Int) -> if starts[left] == starts[right] -> left <=> right else -> starts[left] <=> starts[right])
+    pool :: IR_X64_SLOT_REGISTERS
+    owners := [Int]{}
+    loop _ in 0..<pool.len() -> &owners.push(-1)
+    used := [Bool]{}
+    loop _ in 0..<pool.len() -> &used.push(false)
+    loop slot in order {
+        start :: starts[slot]
+        // Expire ranges that ended before this one starts.
+        loop row in 0..<pool.len() {
+            owner :: owners[row]
+            if owner >= 0 && ends[owner] < start -> owners[row] = -1
+        }
+        free := -1
+        loop row in 0..<pool.len() {
+            if free < 0 && owners[row] < 0 -> free = row
+        }
+        if free >= 0 {
+            owners[free] = slot
+            regs[slot] = pool[free]
+            used[free] = true
+            next
+        }
+        // Every register is taken: the range that ends last stays in its home.
+        victim := -1
+        loop row in 0..<pool.len() {
+            if victim < 0 || ends[owners[row]] > ends[owners[victim]] -> victim = row
+        }
+        if ends[owners[victim]] > ends[slot] {
+            regs[owners[victim]] = -1
+            owners[victim] = slot
+            regs[slot] = pool[victim]
+        }
+    }
+    saved := [Int]{}
+    loop row in 0..<pool.len() {
+        if used[row] -> &saved.push(pool[row])
+    }
+    // A stolen register may leave its first owner's push unused; keep only
+    // registers some slot ends up with.
+    kept := [Int]{}
+    loop reg in saved {
+        holds := false
+        loop slot in 0..<count {
+            if regs[slot] == reg -> holds = true
+        }
+        if holds -> &kept.push(reg)
+    }
+
+    // Frame homes below the saved registers.
+    depth := 8 * kept.len()
+    homes := [Int]{}
+    loop slot in 0..<count {
+        ty :: m.types[f.slot_type[slot]]
+        home := 0
+        if regs[slot] < 0 {
+            if ir_x64_class(ty) != .Empty {
+                depth += 8
+                home = 0 - depth
+            }
+        }
+        &homes.push(home)
+    }
+    result_home := 0
+    if f.result >= 0 && m.types[f.result].kind == .Aggregate {
+        depth += 8
+        result_home = 0 - depth
+    }
+    stack := [Int]{}
+    loop at in 0..<f.op.len() {
+        disp := 0
+        op :: f.op[at]
+        if op == .StackAddress {
+            size :: if f.a[at] > 0 -> f.a[at] else -> 8
+            align :: if f.b[at] > 16 -> 16 else if f.b[at] < 1 -> 1 else -> f.b[at]
+            depth = ir_x64_align(depth + size, align)
+            disp = 0 - depth
+        }
+        // An aggregate result lands in caller storage the hidden first
+        // argument points at, one per call site.
+        if (op == .Call || op == .CallRuntime || op == .CallIndirect) && f.dst[at] >= 0 {
+            ty :: m.types[f.slot_type[f.dst[at]]]
+            if ty.kind == .Aggregate {
+                align :: if ty.align > 16 -> 16 else if ty.align < 8 -> 8 else -> ty.align
+                depth = ir_x64_align(depth + ir_x64_align(ty.size, 8), align)
+                disp = 0 - depth
+            }
+        }
+        &stack.push(disp)
+    }
+    total :: ir_x64_align(depth, 16)
+    IRX64Allocation{regs: regs, homes: homes, starts: starts, ends: ends, stack: stack, saved: kept, frame_bytes: total - 8 * kept.len(), result_home: result_home}
+}
