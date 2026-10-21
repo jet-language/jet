@@ -2675,7 +2675,7 @@ fn jet_eval_stream_enumerate(machine: &JetEvalMachine, values: [JetEvalRuntimeVa
 
 fn jet_eval_stream_owns_row(row: MIRPreludeCall, args: [JetEvalRuntimeValue]) -> Bool Never! {
     if row.family != MIRPreludeFamily.BuiltinMethod || row.module_name != "core.builtin" -> return false
-    if row.member == "iter_enumerate" || row.member == "list_lazy" -> return true
+    if row.member == "iter_enumerate" || row.member == "list_lazy" || row.member == "string_split" -> return true
     if (row.member == "iter_to_list" || row.member == "iter_collect") && args.len() == 1 {
         if args[0] == .Stream(_, _, _, _) -> return true
     }
@@ -2685,6 +2685,17 @@ fn jet_eval_stream_owns_row(row: MIRPreludeCall, args: [JetEvalRuntimeValue]) ->
 // The lazy-stream builtin rows; `args` is borrowed.
 fn jet_eval_stream_route(machine: &JetEvalMachine, row: MIRPreludeCall, args: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
     if row.member == "iter_enumerate" -> return jet_eval_stream_enumerate(&machine, args, span)
+    // `split` is a lazy source over the pieces the host's split produces.
+    if row.member == "string_split" {
+        pieces :: jet_eval_host_row(&machine, row, args, None, span) ?? return None
+        data := jet_eval_data(pieces, &machine, span)
+        jet_eval_drop_value(&machine, pieces, span)
+        if data == .Val(value) {
+            if value == .List(items) -> return Val(JetEvalRuntimeValue.Stream{values: items, index: 0, step: 1, stages: [JetEvalRuntimeValue]{}})
+        }
+        jet_eval_compiler_fail(&machine, span, "MIR split host route did not return its pieces")
+        return None
+    }
     if row.member == "list_lazy" {
         if args.len() != 1 {
             jet_eval_compiler_fail(&machine, span, "MIR lazy route requires one List receiver")
@@ -9255,13 +9266,21 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
             if receiver_place != None {
                 row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
                 if jet_eval_route_is_mutating_member(row.member) {
-                    receiver_data :: jet_eval_data(jet_eval_value(&machine, frame_index, receiver, span) ?? return None, &machine, span) ?? return None
+                    receiver_value :: jet_eval_value(&machine, frame_index, receiver, span) ?? return None
+                    // A `&` receiver is the address of the place it writes: read
+                    // through it, and write the mutated value back through it.
+                    borrowed :: if receiver_value == {
+                        .Address(_, _, _) | .Window(_, _) -> true
+                        else -> false
+                    }
+                    receiver_data :: (if borrowed -> jet_eval_window_data(&machine, receiver_value, span) else -> jet_eval_data(receiver_value, &machine, span)) ?? return None
                     operands := [TComptimeValue]{}
                     loop arg in args {
                         &operands.push(jet_eval_data(jet_eval_value(&machine, frame_index, arg, span) ?? return None, &machine, span) ?? return None)
                     }
                     mutation :: jet_eval_route_mutating_builtin(row.member, receiver_data, operands, result_ty, &machine, span) ?? return None
-                    if !jet_eval_write_place(&machine, frame_index, receiver_place, JetEvalRuntimeValue.Data{value: mutation.receiver}, span) -> return None
+                    written :: if borrowed -> jet_eval_write_window(&machine, receiver_value, JetEvalRuntimeValue.Data{value: mutation.receiver}, span) else -> jet_eval_write_place(&machine, frame_index, receiver_place, JetEvalRuntimeValue.Data{value: mutation.receiver}, span)
+                    if !written -> return None
                     return Val(mutation.result)
                 }
             }

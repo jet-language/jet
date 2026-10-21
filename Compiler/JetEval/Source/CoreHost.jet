@@ -153,6 +153,25 @@ fn jet_eval_core_host_require(row: MIRPreludeCall, args: [JetEvalHostArgument]) 
     Val(jet_eval_core_host_value(TComptimeValue.Unit))
 }
 
+fn jet_eval_core_host_text(argument: JetEvalHostArgument) -> String? {
+    if argument.host == .Data(value) {
+        if value == .String(text) -> return Val(text)
+    }
+    None
+}
+
+// `core.builtin` `string_split` (`jet_iter_string_split`): the pieces the
+// compiler's own `split` produces, as a list the evaluator streams.
+fn jet_eval_core_host_split(row: MIRPreludeCall, args: [JetEvalHostArgument]) -> JetEvalHostResult? {
+    if row.module_name != "core.builtin" || row.member != "string_split" || row.family != MIRPreludeFamily.BuiltinMethod -> return None
+    if !jet_eval_core_host_signature(row, args, [Bool]{true, true}) -> return None
+    text :: jet_eval_core_host_text(args[0]) ?? return None
+    separator :: jet_eval_core_host_text(args[1]) ?? return None
+    pieces := [TComptimeValue]{}
+    loop piece in text.split(separator) -> &pieces.push(TComptimeValue.String{value: piece})
+    Val(jet_eval_core_host_value(TComptimeValue.List{values: pieces}))
+}
+
 fn jet_eval_core_host_prelude(runtime_execution: Bool, row: MIRPreludeCall, args: [JetEvalHostArgument], span: Span) -> JetEvalHostResult? {
     symbol :: mir_symbol_name(row.symbol)
     if symbol.starts_with("jet_std::jet_int_") {
@@ -162,6 +181,7 @@ fn jet_eval_core_host_prelude(runtime_execution: Bool, row: MIRPreludeCall, args
     if symbol == {
         "jet_int_compare" -> jet_eval_core_host_int_compare(row, args)
         "jet_require" | "jet_require_eq" -> jet_eval_core_host_require(row, args)
+        "jet_iter_string_split" -> jet_eval_core_host_split(row, args)
         else -> None
     }
 }

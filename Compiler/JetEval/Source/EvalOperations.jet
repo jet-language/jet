@@ -2028,6 +2028,14 @@ fn jet_eval_read_window(machine: &JetEvalMachine, value: JetEvalRuntimeValue, sp
     None
 }
 
+// The data behind an address or window, read through it.
+fn jet_eval_window_data(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> TComptimeValue? {
+    selected :: jet_eval_read_window(&machine, value, span) ?? return None
+    data := jet_eval_data(selected, &machine, span)
+    jet_eval_drop_value(&machine, selected, span)
+    data
+}
+
 // Consumes the replacement just like write_place. Window paths are composed
 // by ordinary projected replacement, including nested ranges and fields.
 fn jet_eval_write_window(machine: &JetEvalMachine, target: JetEvalRuntimeValue, replacement: JetEvalRuntimeValue, span: Span) -> Bool {
