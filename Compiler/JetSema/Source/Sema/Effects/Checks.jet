@@ -919,6 +919,9 @@ struct SemaEffectCallIndex {
     // names by trait name, and `{trait}::{method}` -> implementing type ->
     // that type's own method node.
     trait_implementers: [String:[String]]{[String:[String]]{}}
+    // Owner type name -> the keys of that type's own `close` methods
+    // (`…::{Owner}:close`), the targets of `close(^value)`.
+    close_methods: [String:[String]]{[String:[String]]{}}
     // "{module}|{trait}::{method}#{implementing type leaf}" -> that
     // implementation's own summary key, one flat map (no per-trait map copied
     // on every insert).
@@ -1156,16 +1159,16 @@ fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffec
     }
 }
 
-// `close(^value)`: an edge to the value type's own `Close.close`
-// implementation, the method codegen calls for it. Implementations are keyed
-// by the implementing type's name, so a same-named type in another module
-// adds its implementation too: the row may only grow, never miss one.
+// `close(^value)`: an edge to the value type's own `close` method, the
+// function codegen calls for it. Methods are indexed by their owner type's
+// name, so a same-named type in another module adds its method too: the row
+// may only grow, never miss one.
 fn sema_effect_record_close(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, value: TExpr) Never! {
-    owner :: sema_effect_symbol_leaf(type_name(value.ty))
-    suffix :: "|Close::close#{owner}"
-    loop (key, impl_key) in facts.trait_impls {
-        if key.ends_with(suffix) -> sema_effect_node_add_edge(&nodes, node_index, impl_key)
+    owner :: if sema_expr_unwrap_tag(value.ty) == {
+        .Named(name) | .Apply(name, _) -> sema_effect_symbol_leaf(name)
+        else -> return
     }
+    loop key in facts.close_methods.get(owner) ?? [String]{} -> sema_effect_node_add_edge(&nodes, node_index, key)
 }
 
 // The declaring module of a `kind:{module}::{name}` type symbol key
@@ -2112,7 +2115,16 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     }
     trait_implementers := [String:[String]]{}
     loop (group_row, trait_key) in implementer_keys -> trait_implementers[trait_key] = implementer_lists[group_row]
-    calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls}
+    close_methods := [String:[String]]{}
+    loop (key, _) in node_by_key {
+        if !key.ends_with(":close") -> next
+        owner_path :: key.removesuffix(":close")
+        split :: owner_path.cut_last("::") ?? next
+        rows := close_methods.get(split.after) ?? [String]{}
+        &rows.push(key)
+        close_methods[split.after] = rows
+    }
+    calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods}
     loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
     any_unsafe :: loop node in nodes {
         if node.is_unsafe -> break true
