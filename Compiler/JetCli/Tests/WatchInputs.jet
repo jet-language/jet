@@ -3,6 +3,12 @@
 use core.files as cli_files
 use core.sys as cli_sys
 use core.process as cli_process
+use jet_cli.[
+    jet_cli_lock_canonical, jet_cli_prepare_overlays, jet_cli_watch_discover,
+    jet_cli_watch_from_entry, jet_cli_watch_local_reference, jet_cli_watch_runtime_literals,
+]
+use jet_driver.[JetDriverCompileMode, jet_driver_query_loaded_input_paths]
+use jet_pkg_model.[WorkspaceDeclarationCache]
 
 struct JetCLIWatchFixtureRoot { path: String }
 impl JetCLIWatchFixtureRoot.Close {
@@ -14,7 +20,7 @@ impl JetCLIWatchFixtureRoot.Close {
 fn watch_inputs_require(ok: Bool, label: String) Never! {
     if !ok -> panic("watch inputs: {label}")
 }
-fn run() {
+#Test("watch_inputs") {
     base :: cli_sys.get("JET_CLI_FMT_TEST_ROOT") ?? panic("set disk-backed scratch")
     root :: "{base}/watch-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/assets") ?? panic("create assets")

@@ -1,4 +1,15 @@
 // Production collector, sema coverage and Driver query in the canonical unit.
+use jet_foundation.[
+    Diagnostic, Span, TBinaryOp, TCostKind, TCostState, TExpr, TExprKind, TOrFallback, TStmt, Type,
+    tir_cost_operation, tir_user_local,
+]
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode, JetDriverCompileRequest, jet_driver_cost_query,
+]
+use jet_cli.[jet_cli_cost_diagnostics, jet_cli_driver_request, jet_cli_inspect_build_query]
+use jet_codegen.[TCostReport, TCostSite, jet_codegen_cost_expr, jet_codegen_cost_stmt]
+
 fn cli_cost_expr(kind: TExprKind, ty: Type, start: Int) -> TExpr Never! {
     TExpr{ty: ty, kind: kind, span: Span{start: start, end: start + 1}, integer_bounds: None, cost: None}
 }
@@ -9,7 +20,7 @@ fn cli_cost_request(source: String) -> JetDriverCompileRequest {
     }
     jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
 }
-fn run() {
+#Test("lint_cost") {
     unknown :: cli_cost_expr(TExprKind.Local{local: tir_user_local("input", Span{start: 1, end: 2})}, Type.Int, 1)
     two :: cli_cost_expr(TExprKind.IntLit{value: 2, width: None}, Type.Int, 2)
     multiply :: cli_cost_expr(TExprKind.Binary{op: TBinaryOp.Mul, overflow: false, line: 1, lhs: unknown, rhs: two}, Type.Int, 3)

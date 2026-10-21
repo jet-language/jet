@@ -1,4 +1,9 @@
 // Rust: crates/jet-parser/src/Parser/mod.rs:2382
+use jet_parser.[parse_generated_source]
+use jet_foundation.[UnitFamilyDef]
+// The standard unit catalog as the compiler embeds it (JetSema's generated prelude source).
+use jet_sema.[SEMA_PRELUDE_UNITS_SOURCE]
+
 #Test("lambda_callable_interface_parses_only_parameters_and_effects") {
     parsed :: parser_test_program(`fn run() {
     f :: (n: Int) -[IO]> { print(n) }
@@ -75,7 +80,7 @@ fn run() {
 
 // Rust: crates/jet-parser/src/Parser/Items/distinct_units_structs.rs:1336
 #Test("standard_units_source_parses_with_unique_members_and_provenance") {
-    parsed :: parse_generated_source(PARSER_TEST_UNITS_SOURCE.bytes())
+    parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     assert(parsed.diagnostics.is_empty())
     families := [UnitFamilyDef]{}
     loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }

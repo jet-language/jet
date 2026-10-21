@@ -2,6 +2,17 @@
 // registered Foundation/Text/Read + diagnostics wrappers and the three CLI
 // providers with this run entry. Input .bytes() calls construct owned test
 // facts; they are not proof of a zero-copy String/native/host invocation.
+use jet_cli.[
+    JetCLIAdaptiveTable, JetCLIColorRequest, JetCLIOutputFacts, JetCLIOutputKind,
+    JetCLIOutputProfile, JetCLITableAlignment, JetCLITableCell, JetCLITableColumn, JetCLITableRow,
+    jet_cli_color_request, jet_cli_output_channel, jet_cli_output_profile, jet_cli_table,
+    jet_cli_table_append_pad, jet_cli_table_bound_text, jet_cli_table_cell_kind,
+    jet_cli_table_cell_lines, jet_cli_table_cell_text, jet_cli_table_cell_width, jet_cli_table_clip,
+    jet_cli_table_column, jet_cli_table_extend, jet_cli_table_fit_widths, jet_cli_table_layout,
+    jet_cli_table_render, jet_cli_table_row, jet_cli_table_structured, jet_cli_table_text_width,
+    jet_cli_table_wide, jet_cli_table_wrap,
+]
+
 fn shared_output_require(ok: Bool, name: String) Never! {
     if !ok -> panic("shared output: {name}")
 }
@@ -245,7 +256,7 @@ fn shared_output_bounds() Never! {
     shared_output_bytes(jet_cli_table_cell_lines(.Boolean{value: false}, 256)[0], "false", "boolean false")
     shared_output_require(jet_cli_table_cell_lines(.Empty, 256) == [[U8]]{[U8]{}}, "empty value")
 }
-fn run() Never! {
+#Test("shared_output") {
     shared_output_profiles()
     shared_output_grids()
     shared_output_text()

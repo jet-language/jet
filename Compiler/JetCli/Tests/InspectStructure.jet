@@ -1,7 +1,8 @@
 // Source/CmdStructure.rs transport contracts; no compilation is needed to render facts.
 use jet_foundation.[MIRStructureFact, MIRStructureFactKind, GateLedger, Span]
+use jet_cli.[jet_cli_structure_core, jet_cli_structure_report]
 
-fn run() Never! {
+#Test("inspect_structure") {
     empty :: jet_cli_structure_report([MIRStructureFact]{}, GateLedger{}, false)
     if !empty.ends_with("facts: 0\n  (none in this program)\ngates: 0\n  (none in this program)\n") -> panic("empty structure text")
     facts :: [MIRStructureFact]{MIRStructureFact{kind: MIRStructureFactKind.Liveness, subject: "unused", source: "entry.jet", span: Span{start: 3, end: 9}, status: "unreachable", detail: "private function is never reached", gate: None}}

@@ -1,11 +1,15 @@
 // Availability comes from the canonical producer, never from a CLI ID table.
 use jet_foundation.[CanonicalPassOptions, canonical_pass_boundary_gaps]
+use jet_cli.[
+    jet_cli_canonical_route_gap_text, jet_cli_canonical_route_gap_values, jet_cli_status_array,
+    jet_cli_status_json,
+]
 
 fn inspect_canonical_gap_require(ok: Bool, label: String) Never! {
     if !ok -> panic("canonical route gap projection: {label}")
 }
 
-fn run() {
+#Test("inspect_canonical_gaps") {
     disabled :: canonical_pass_boundary_gaps(CanonicalPassOptions{})
     inspect_canonical_gap_require(disabled.len() == 0, "ordinary invocation has no requested gaps")
     inspect_canonical_gap_require(jet_cli_status_json(jet_cli_status_array(jet_cli_canonical_route_gap_values(disabled))) == "[]", "empty gap JSON")

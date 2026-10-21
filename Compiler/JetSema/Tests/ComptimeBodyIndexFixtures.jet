@@ -1,5 +1,35 @@
 // Assembled with production sources by the canonical gate fixture runner.
 // The linear oracle is the pre-index query, used only for semantic comparison.
+use jet_sema.[
+    SemaBuildFacts, SemaCheckContext, SemaComptimeBodyValue, SemaComptimeBodyValues,
+    SemaComptimeBodyWork, SemaComptimeItemKind, SemaComptimeItemValue, SemaForeignProviderInput,
+    SemaRegistrationForeignHandleFacts, SemaRegistrationGraph, SemaRegistrationImportEdge,
+    SemaRegistrationModuleInput, SemaScopeDeclaration, SemaScopeEnvironment, SemaScopeFrame,
+    SemaScopeTable, SemaSourceOrigin, SemaSourceSegment, sema_check_context_init,
+    sema_check_context_mark, sema_check_context_rollback, sema_check_context_snapshot,
+    sema_checked_constant_with_values, sema_comptime_available_constants,
+    sema_comptime_available_constants_add, sema_comptime_body_capture,
+    sema_comptime_body_destination_key, sema_comptime_body_source_append,
+    sema_comptime_body_source_key, sema_comptime_body_sources_truncate,
+    sema_comptime_body_value_find, sema_comptime_body_values_append_items,
+    sema_comptime_body_values_debug, sema_comptime_body_values_freeze,
+    sema_comptime_body_values_prefix, sema_comptime_body_values_replace,
+    sema_comptime_body_values_truncate, sema_comptime_environment, sema_comptime_graph_apply_values,
+    sema_comptime_staged_constant_rows, sema_comptime_value_sites,
+    sema_expression_lambda_merge_context_facts, sema_graph_trail_init, sema_has_error_since,
+    sema_program_tables_init, sema_registration_module_index, sema_registration_prepare_graph,
+    sema_scope_environment_enter_probe_module, sema_scope_environment_init, sema_scope_init,
+]
+use jet_foundation.[
+    Diagnostic, Expr, Span, SymbolKind, TComptimeValue, TConstantDef, TTypeDef, Type,
+    jet_target_machine_hosted, symbol_id,
+]
+use jet_parser.[parse_source]
+use jet_driver.[
+    jet_driver_canonical_effect_module, jet_driver_comptime_apply_landed,
+    jet_driver_source_segments,
+]
+
 fn body_index_require(ok: Bool, message: String) Never! {
     if !ok -> panic("ComptimeBodyIndexFixtures: {message}")
 }
@@ -506,7 +536,7 @@ fn body_index_constant_size(size: Int) {
     body_index_require(available.indexed_constants == size && available.indexed_declarations == declaration_rows && available.counted_values == size, "N/2N/4N indexes each new constant once and each graph declaration once, never per batch")
 }
 
-fn run() {
+#Test("comptime_body_index_fixtures") {
     body_index_source_identity()
     body_index_identity_and_lifecycle()
     body_index_duplicate_prefixes()

@@ -1,4 +1,6 @@
 // Rust: crates/jet-parser/src/lib.rs:20
+use jet_foundation.[expr_span, pattern_binding_names, type_name]
+
 #Test("generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics") {
     result :: parser_test_result("module Weird<lower>(UPPER: Int) {{ fn ready() -> Bool {{ return true }} }}\nmodule Use :: Weird<String>(32)")
     assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
@@ -346,11 +348,11 @@
             loop stmt in function.body {
                 if stmt == .Val(binding) {
                     binding.init == .CallValue(callee, _, _) ?? panic("expected collecting loop call, got {binding.init:Debug}")
-                    callee == .Lambda(lambda) ?? panic("expected collecting loop lambda, got {callee:Debug}")
+                    callee == .Lambda(lambda) ?? panic("expected collecting loop lambda")
                     lambda.body == .Block(body) ?? panic("expected collecting loop block")
                     assert(!body.is_empty(), "expected one source loop, got {body:Debug}")
                     body[0] == .For(_, _, _, kind, _, _, _, _, _) ?? panic("expected one source loop, got {body:Debug}")
-                    kind == .Range(_, _, step, _) ?? panic("expected range source, got {kind:Debug}")
+                    kind == .Range(_, _, step, _) ?? panic("expected range source")
                     step == .Val(.Int(value, _, _, _)) ?? panic("expected numeric stride, got {step:Debug}")
                     assert_eq(value, 2)
                     binding_found = true

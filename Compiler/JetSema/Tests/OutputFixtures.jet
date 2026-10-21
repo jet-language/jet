@@ -1,5 +1,21 @@
 // Checked Output contracts use the production parser, registration graph and
 // resolver. Cases collect independent failures; no mock links or second checker.
+use jet_sema.[
+    SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaEffectModuleInput,
+    SemaForeignProviderInput, SemaOutputIntent, SemaRegistrationForeignHandleFacts,
+    SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+    SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+    sema_collect_comptime_declarations, sema_comptime_effect_sources, sema_effect_trait_bounds,
+    sema_effects_check_modules, sema_finalize_registration_graph, sema_has_error_since,
+    sema_output_resolve, sema_registration_module_index, sema_registration_prepare_graph,
+]
+use jet_parser.[parse_source]
+use jet_driver.[jet_driver_canonical_effect_module]
+use jet_foundation.[
+    OutputCallableAuthority, Span, SymbolKind, Type, compiler_threads_single,
+    failure_contract_of_function, jet_target_machine_hosted, name_mangle, symbol_id,
+]
+
 fn output_fixture_graph(label: String, source: String, effects_source: String, failures: &[String]) -> SemaRegistrationGraph? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
@@ -251,6 +267,6 @@ fn output_fixture_run(effects_source: String) Never! {
     if failures.len() > 0 -> panic("OutputFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
 }
 
-fn run() {
+#Test("output_fixtures") {
     output_fixture_run("effect IO\n")
 }

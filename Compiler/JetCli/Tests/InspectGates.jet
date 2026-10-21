@@ -1,8 +1,15 @@
 // CmdGates.rs consumer contracts over real canonical GateLedger rows.
-use jet_foundation.[GateLedger, GateKind, GateOperation, Span, gate_ledger_push, gate_ledger_sort]
+use jet_foundation.[
+    GateLedger, GateKind, GateOperation, Span, gate_ledger_push, gate_ledger_sort, ast_program,
+]
 use jet_driver.[JetDriverSourceQueryModule]
+use jet_cli.[
+    jet_cli_gate_append_invocation, jet_cli_gate_external, jet_cli_gate_trust_entries,
+    jet_cli_gates_entry, jet_cli_gates_report,
+]
+use jetpack_trust.[TrustGrant, TrustRecord]
 
-fn run() Never! {
+#Test("inspect_gates") {
     if jet_cli_gates_entry(["--kind", "unsafe", "--scope=source", "--gate", "unsafe", "run.jet"]) != (Val("run.jet")) -> panic("raw gate entry grammar")
     if jet_cli_gates_entry(["--kind", "unsafe"]) != None -> panic("option value became an entry")
     ledger := GateLedger{}

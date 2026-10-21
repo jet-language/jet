@@ -1,9 +1,16 @@
 // Evidence.rs byte/report invariants; assemble with Compiler and run.
+use jet_foundation.[
+    EvidenceExpectation, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
+    EvidenceSource, evidence_build_empty, evidence_identity_for_record, evidence_record_new,
+    evidence_record_with_expectation, evidence_report_encode, evidence_report_from_bytes,
+    evidence_report_from_records, evidence_report_query, evidence_revision_empty,
+]
+
 fn evidence_report_require(ok: Bool, name: String) Never! {
     if !ok -> panic("evidence report contract: {name}")
 }
 
-fn run() {
+#Test("evidence_report") {
     source :: EvidenceSource{path: "test.jet", line: U32{1}, column: U32{1}}
     identity :: evidence_identity_for_record("test-run", "addition", EvidenceProducerKind.Test, EvidenceKind.Unit, source, U64{1}, "")
     record :: evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, source, evidence_build_empty(), evidence_revision_empty())

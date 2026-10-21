@@ -1,5 +1,8 @@
 // Real filesystem and process-identity witnesses. No producer or runtime
 // publication is claimed: these are hostile/valid transport inputs.
+use jet_foundation.[foundation_json_quote]
+use jet_cli.[jet_cli_live_process_start, jet_cli_live_read_at]
+
 fn live_transport_fixture(pid: Int, start: String, captured: Int, events: String) -> String Never! {
     "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":{pid},\"start_id\":{foundation_json_quote(start)},\"captured_ms\":{captured},\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{events}}}"
 }
@@ -9,7 +12,7 @@ fn live_transport_rejected(pid: Int, path: String, message: String) {
         .Ok(_) -> panic("unsafe transport accepted: {message}")
     }
 }
-fn run() {
+#Test("live_transport") {
     // /proc start identity is the Linux/Android transport's actual authority.
     platform :: cli_sys.name()
     if platform != "linux" && platform != "android" -> return

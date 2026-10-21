@@ -2,6 +2,25 @@
 // fixture counter inputs; they are not claimed measurements of a checked program.
 // The snapshot is fixture input to the real loader, not a fabricated Sema
 // module or graph. These are CLISeams' ABI/empty-source ownership cases.
+use jet_driver.[
+    JET_DRIVER_EXIT_OK, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+    JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
+    JetDriverCoreSource, jet_driver_compiler_queries_check_disk,
+    jet_driver_compiler_queries_clear_measurement, jet_driver_compiler_queries_documents,
+    jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document,
+    jet_driver_compiler_queries_stats,
+]
+use jet_cli.[
+    JetCLISourceChange, JetCLITryAction, JetCLITryChecked, JetCLITryEdit, JetCLITryPlan,
+    JetCLITryVerdict, jet_cli_checked_semindex, jet_cli_driver_request, jet_cli_errors,
+    jet_cli_sem_ops_for_file, jet_cli_source_hash, jet_cli_try_canonical, jet_cli_try_check,
+    jet_cli_try_counter_delta, jet_cli_try_fail, jet_cli_try_output, jet_cli_try_parse,
+    jet_cli_try_read_plan, jet_cli_try_receipt, jet_cli_try_run, jet_cli_try_semantic_ops,
+    jet_cli_try_stage, jet_cli_try_verdict,
+]
+use jet_sema.[SchemaSnapshot]
+use jet_foundation.[Diagnostic, Span, TextEdit]
+
 fn try_service_request(core_sources: [JetDriverCoreSource]) -> JetDriverCompileRequest {
     source :: "use core.devtools as tools\nfn serve() -> Int {{ 7 }}"
     snapshot :: JetDriverAuthorizedSourceSnapshot{
@@ -44,7 +63,7 @@ fn try_service_ownership(request: ^JetDriverCompileRequest, expected_source_rows
         }
     }
 }
-fn run() {
+#Test("try") {
     try_service_ownership(^try_service_request([JetDriverCoreSource]{}), 1)
     try_service_ownership(^try_service_request([JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, source: ""},

@@ -1,11 +1,13 @@
 // Held-root closure: no intermediate symlink, no escaped name, no path reopen.
+use jet_cli.[JetCLIRootedDirectory, jet_cli_build_record_program_at, jet_cli_rooted_validate_name]
+
 struct JetCLIRootedFixtureRoot { path: String }
 impl JetCLIRootedFixtureRoot.Close {
     fn close(^self) -[FS]> {
         cli_files.remove_all(self.path).drop("test root cleanup")
     }
 }
-fn run() {
+#Test("rooted_store") {
     nul_name :: String.from_bytes([U8]{U8{97}, U8{0}, U8{98}}) ?? panic("NUL name fixture")
     loop name in ([String]{"", ".", "..", "a/b", "a\\b", nul_name}) {
         rejected :: jet_cli_rooted_validate_name(name) == .Err(_)

@@ -1,8 +1,18 @@
 // Production journal capture; requires SolSema4's canonical pass producer.
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode, jet_driver_optimization_query,
+]
+use jet_cli.[
+    jet_cli_canonical_routes, jet_cli_canonical_snapshot, jet_cli_decisions_report,
+    jet_cli_driver_request, jet_cli_status_json,
+]
+use jet_sema.[SchemaSnapshot]
+
 fn inspect_canonical_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectCanonicalRoutes: {message}")
 }
-fn run() {
+#Test("inspect_canonical_routes") {
     snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-routes", identity: "routes-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-routes/run.jet", relative_path: "run.jet", identity: "routes-source", source: "fn run() {{ value :: 2 + 3; print(value) }}"}}, foreign_cache_files: []}}, entry_root_identity: "routes-root", entry_path: "/inspect-routes/run.jet"}
     request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
     request.host_facts.target_triple = Val("x86_64-unknown-linux-gnu")

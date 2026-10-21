@@ -1,5 +1,8 @@
 // Canonical production-parser recovery, not a fixture-local parser.
 // Assemble with run-contract-fixtures.mjs OUTDIR <this fixture>.
+use jet_foundation.[ParseResult]
+use jet_parser.[parse_source]
+
 fn loop_diagnostic_expect(source: String, code: String, wanted_span: String) -> ParseResult {
     parsed :: parse_source(source.bytes())
     if parsed.diagnostics.len() != 1 -> panic("loop parity emitted extra or missing diagnostics")
@@ -9,7 +12,7 @@ fn loop_diagnostic_expect(source: String, code: String, wanted_span: String) -> 
     parsed
 }
 
-fn run() {
+#Test("loop_diagnostic_parity") {
     _ := loop_diagnostic_expect("fn run() {{\nvalues :: loop -> 1\n}}", "E0072", "loop")
     _ := loop_diagnostic_expect("fn run() {{\nvalues :: loop i < 4 -> i\n}}", "E0072", "loop")
     _ := loop_diagnostic_expect("fn run() {{\nouter := loop {{}}\n}}", "E0988", "outer := loop")

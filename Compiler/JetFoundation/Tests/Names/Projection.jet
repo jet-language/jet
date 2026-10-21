@@ -1,8 +1,14 @@
 // Assemble with the canonical Compiler unit, replacing its host entry.
+use jet_foundation.[
+    MIRNameAlias, MIRNameDeclaration, MIRNameDisplayPath, MIRNameFacts, MIRNameModule,
+    MIRNameVisibility, Span, name_ledger_canonical_path, name_ledger_display_path,
+    name_ledger_display_path_at, name_ledger_from_facts, name_ledger_semantic_identity,
+]
+
 fn names_projection_require(ok: Bool, message: String) Never! {
     if !ok -> panic("NameLedger projection: {message}")
 }
-fn run() Never! {
+#Test("names_projection") {
     span :: Span{start: 1, end: 2}
     facts := MIRNameFacts{modules: [MIRNameModule]{MIRNameModule{alias: "a", path: "a", package: "p"}, MIRNameModule{alias: "b", path: "b", package: "q"}}, declarations: [MIRNameDeclaration]{MIRNameDeclaration{module_index: 0, name: "Thing", path: "a.Thing", kind: "type", span: span, visibility: MIRNameVisibility.Public}}, aliases: [MIRNameAlias]{MIRNameAlias{module_index: 1, name: "Renamed", target: "a.Thing", target_module: Val(0), span: span, visibility: MIRNameVisibility.Public}}, references: [], structure_facts: []}
     ledger :: name_ledger_from_facts(facts.copy())

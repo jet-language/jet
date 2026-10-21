@@ -1,8 +1,16 @@
 // Assemble with the canonical Compiler unit, replacing its host entry.
+use jet_foundation.[
+    AccessConvention, CORE_CALL_COVERAGE_KNOWN, CORE_CALL_COVERAGE_SEMA, CoreCallCoverage,
+    CoreCallFallibility, CoreCallInterpreterRoute, CoreCallPureRoute, CoreCallRecord,
+    CoreCallResourceAccess, CoreCallSignature, CoreCallSymbol, CoreCapabilityContract,
+    CoreCapabilityKind, Type, core_call_has_direct_symbol, core_call_projection_in,
+    core_call_source_member, core_call_typed_signature,
+]
+
 fn core_source_owned_require(ok: Bool, message: String) Never! {
     if !ok -> panic("Core SourceOwned: {message}")
 }
-fn run() Never! {
+#Test("core_source_owned") {
     // CORE_CALLS rows are literal data; check-core-surface-ledger.mjs
     // --hostile-fixtures proves a source-owned row keeps its declaration facts.
     row :: CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, false}}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, interpreter_route: CoreCallInterpreterRoute.NoRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}

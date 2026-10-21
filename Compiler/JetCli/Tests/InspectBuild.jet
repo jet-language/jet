@@ -1,7 +1,23 @@
 // Checked declarations, not hand-authored BuildGraph rows, drive the reports.
-use jet_foundation.[MIRBlockID, MIRVectorFact, Span]
+use jet_foundation.[MIRBlockID, MIRVectorFact, Span, DIAGNOSTIC_LINT, diagnostic_from_registry]
 use core.build.[BuildGraphNode, BuildGraphInputDigest]
-use jet_driver.[jet_driver_query_build_nodes, jet_driver_compile_mir, jet_driver_source_query]
+use jet_driver.[
+    jet_driver_query_build_nodes, jet_driver_compile_mir, jet_driver_source_query,
+    JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+    JetDriverAuthorizedSourceSnapshot, JetDriverBuildQueryResult, JetDriverBuildQueryScope,
+    JetDriverCompileMode, JetDriverCompileRequest, JetDriverGeneratedModule,
+    jet_driver_build_plan_json, jet_driver_optimization_query, jet_driver_query_build_plan,
+]
+use jet_cli.[
+    JET_CLI_EXIT_ICE, jet_cli_build_compile_observation, jet_cli_build_duration,
+    jet_cli_build_nodes_host, jet_cli_build_nodes_report, jet_cli_build_query_failure,
+    jet_cli_build_report, jet_cli_build_vector, jet_cli_driver_request,
+]
+use jet_build_session.[
+    BuildSessionPolicy, BuildSessionValue, build_plan_graph, build_session_call,
+    build_session_finish, build_session_new,
+]
+use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
 fn inspect_build_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }
@@ -15,7 +31,7 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     }
     jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
 }
-fn run() {
+#Test("inspect_build") {
     empty :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
     inspect_build_require(jet_cli_build_report(empty, "[]", None, false) == "default pipeline: no root fn build\n", "default pipeline human")
     inspect_build_require(jet_cli_build_report(empty, "[]", None, true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":null}}\n", "default pipeline JSON")

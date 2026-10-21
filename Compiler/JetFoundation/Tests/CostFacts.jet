@@ -1,8 +1,13 @@
 // Exercise the production frozen-TIR fact channel in the canonical unit.
+use jet_foundation.[
+    Span, TBinaryOp, TCostFact, TCostKind, TCostState, TExpr, TExprKind, TIntegerBounds, TUnaryOp,
+    Type, tir_cost_combine_bounds, tir_expr_facts, tir_user_local,
+]
+
 fn cost_fact_expression(kind: TExprKind, ty: Type) -> TExpr Never! {
     TExpr{ty: ty, kind: kind, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
 }
-fn run() Never! {
+#Test("cost_facts") {
     one :: cost_fact_expression(TExprKind.IntLit{value: 1, width: None}, Type.Int)
     two :: cost_fact_expression(TExprKind.IntLit{value: 2, width: None}, Type.Int)
     small :: cost_fact_expression(TExprKind.Binary{op: TBinaryOp.Add, overflow: false, line: 1, lhs: one, rhs: two}, Type.Int)

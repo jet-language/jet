@@ -1,4 +1,12 @@
 // Production parse/check/lower/optimization; no constructed record or MIR.
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode, JetDriverCompileRequest, jet_driver_optimization_query,
+]
+use jet_cli.[jet_cli_driver_request]
+use jet_sema.[SchemaSnapshot]
+use jet_foundation.[foundation_parse_protocol_json, mir_program_digest]
+
 fn canonical_query_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("CanonicalPassQuery: {detail}")
 }
@@ -10,7 +18,7 @@ fn canonical_query_request() -> JetDriverCompileRequest {
     request.adapter_operation_ids = [String]{"mir.exact-constant-folding", "mir.optimize-pipeline", "mir.pass-order-facts", "mir.lower-expression", "tir.lower-checked-program", "sema.desugar-os-switches", "tir.canonicalize-loop-forms"}
     request
 }
-fn run() {
+#Test("canonical_pass_query") {
     query :: jet_driver_optimization_query(canonical_query_request())
     canonical_query_require(query.compile.complete && query.compile.internal_problem == None, "real compiler pipeline completes")
     canonical_query_require(query.canonical_routes.len() > 0, "opt-in capture is produced by actual pass boundaries")

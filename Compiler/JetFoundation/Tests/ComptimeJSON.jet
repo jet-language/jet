@@ -1,5 +1,8 @@
 use core.math as math
 use core.encoding as encoding
+use jet_foundation.[
+    CtFloat, CtKey, CtMapEntry, CtValue, ast_comptime_value_json, foundation_json_quote,
+]
 
 fn require_unsupported(value: CtValue, reason: String) Never! {
     if ast_comptime_value_json(value) == {
@@ -17,7 +20,7 @@ fn require_unsupported(value: CtValue, reason: String) Never! {
     }
 }
 
-fn run() {
+#Test("comptime_json") {
     numbers :: [Float]{math.nan(), math.infinity(), -math.infinity()}
     loop number in numbers {
         value :: CtValue.Float(CtFloat.F64(number))

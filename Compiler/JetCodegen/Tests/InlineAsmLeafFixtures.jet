@@ -1,10 +1,25 @@
 // Assemble with the compiler fixture unit: real parser/foreign admission feeds
 // the body-less asm producer, then the unchanged MIR legality gate checks it.
+use jet_parser.[parse_source]
+use jet_sema.[
+    SemaBuildFacts, SemaCheckedForeignProvider, SemaForeignProviderInput, SemaGraphModuleResult,
+    SemaRegistrationForeignHandleFacts, SemaRegistrationImportEdge, SemaRegistrationModuleInput,
+    SemaSourceOrigin, sema_checked_foreign_functions, sema_has_error_since,
+    sema_registration_prepare_graph,
+]
+use jet_driver.[jet_driver_canonical_effect_module, jet_driver_source_segments]
+use jet_foundation.[
+    Diagnostic, MIRCoreCall, MIRFunctionKind, MIROptimizationPassID, MIRPreludeCall,
+    MIRTargetApplicability, jet_target_machine_hosted, mir_source_file_id,
+]
+use jet_codegen.[jet_codegen_lower_asm_leaf, jet_codegen_nominal_index]
+use jet_optimizer.[MIRPassLegalityTables, mir_pass_validate_function]
+
 fn asm_leaf_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InlineAsmLeafFixtures: {message}")
 }
 
-fn run() {
+#Test("inline_asm_leaf_fixtures") {
     source :: "use core.mem\n#[Unsafe(\"the caller passes one machine word\"), FFI(asm)]\nfn asm_word(value: I64) -> I64 {{\n    \"\"\"\n    mov rax, {{value}} ; -> return\n    \"\"\"\n}}\n"
     parsed := parse_source(source.bytes())
     asm_leaf_require(!sema_has_error_since(parsed.diagnostics, 0), "the real inline asm declaration parses")

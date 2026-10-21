@@ -2,6 +2,16 @@
 // value shape and every response row survives the JSON round trip exactly,
 // and anything else is refused rather than guessed.
 use core.math as math
+use jet_foundation.[
+    CtEnumArg, CtFloat, CtKey, CtMapEntry, CtReport, CtValue, Diagnostic, JetConfigOutcome,
+    NamedCtKey, NamedCtValue, Span, compiler_service_check_diagnostics,
+    compiler_service_check_request, compiler_service_check_request_from,
+    compiler_service_check_response, compiler_service_comptime_outcome,
+    compiler_service_comptime_request, compiler_service_comptime_request_from,
+    compiler_service_comptime_response, compiler_service_render, compiler_service_value_from_wire,
+    compiler_service_value_wire, diagnostic_from_registry, foundation_parse_protocol_json,
+    jet_config_eval_diagnostic,
+]
 
 fn compiler_service_test_round_trip(value: CtValue) Never! {
     wire :: compiler_service_value_wire(value) ?? panic("a config value has a wire spelling")
@@ -15,7 +25,7 @@ fn compiler_service_test_response(text: String) -> Dyn Never! {
     foundation_parse_protocol_json(text) ?? panic("a service response is protocol JSON")
 }
 
-fn run() {
+#Test("compiler_service") {
     // comptime-evaluate values: scalars, floats by bit pattern, and nesting.
     compiler_service_test_round_trip(CtValue.Int(-9223372036854775807))
     compiler_service_test_round_trip(CtValue.BigInt("123456789012345678901234567890"))

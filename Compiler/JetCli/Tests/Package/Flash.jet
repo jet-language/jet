@@ -1,6 +1,17 @@
 // Behavioral ports of CmdFlash.rs. tests/target_machines.rs validates target
 // construction/audits but has no FlashPlan/FlashReceipt oracle or CLI launch.
 // These controlled in-memory fixtures prove policy only, never device flashing.
+use jet_foundation.[
+    CanonicalJSON, CanonicalJSONField, MIRByteSize, MIRMemoryKind, MIRTargetMachine,
+    MIRTargetProgrammerAdapter, MIRTargetProgrammerFacts, canonical_json_bytes,
+    canonical_json_sha256, jet_target_environment_identity, jet_target_hardware_json,
+    jet_target_json_quote, jet_target_machine_board_sensor_v1, jet_target_machine_errors_debug,
+    jet_target_machine_hosted, jet_target_machine_use_default, jet_target_machine_validate,
+    jet_target_memory_region_new, jet_target_programmer_missing_fact, jet_target_provider_identity,
+    mir_sha256_hex,
+]
+use jet_driver.[jet_driver_target_machine_by_name]
+
 fn flash_test_facts(adapter: MIRTargetProgrammerAdapter) -> MIRTargetProgrammerFacts Never! {
     MIRTargetProgrammerFacts{adapter: adapter, executable: "tool", chip: Val("chip"), interface: Val("iface"), config: [String]{"board.cfg"}, speed_khz: Val(1000), reset: true, machine: Val("machine"), cpu: Val("cpu")}
 }

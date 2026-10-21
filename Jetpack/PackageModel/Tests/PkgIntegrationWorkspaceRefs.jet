@@ -1,4 +1,8 @@
 // Direct classifier ports of tests/workspace.rs:192-267.
+use jet_pkg_model.[
+    NamedSourceDecl, ProviderKind, RefSource, RefSpec, SourceTable, WorkspaceIndex, WorkspaceMember,
+]
+
 #Test("dot_form_classified_when_source_is_declared") {
     table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mono", upstream: "github:acme/monorepo", via: ProviderKind.Nix}})
     spec :: RefSpec.classify_in("mono.ranker", table) ?? panic("dot form classifies")

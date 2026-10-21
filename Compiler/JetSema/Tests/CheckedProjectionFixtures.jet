@@ -1,5 +1,10 @@
 // Assemble with the production compiler sources and this replacement `run`.
-fn run() {
+use jet_sema.[
+    SemaOriginFact, sema_effect_memory_fact, sema_fact_local_origin, sema_origin_optional_int,
+]
+use jet_foundation.[TComptimeField, TComptimeReport, TComptimeValue, Type]
+
+#Test("checked_projection_fixtures") {
     if sema_fact_local_origin(None) != (TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Named{name: "OriginInfo"}}}}) -> panic("an untracked local must not fabricate origin")
     tracked :: sema_fact_local_origin(Val(SemaOriginFact{source: "borrower", line: Val(7), column: Val(3)}))
     if tracked != (TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "OriginInfo", fields: [TComptimeField]{

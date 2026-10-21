@@ -1,5 +1,10 @@
 // The CLI's native C policy constants are exactly the policy file's rows: the
 // Jet form of `generate-native-c-policy.mjs --check`.
+use jet_cli.[
+    JET_CLI_NATIVE_C_FLAGS, JET_CLI_NATIVE_C_HARDENING_REMOVED, JET_CLI_TOOLCHAIN_ROOT_ENV,
+    jet_cli_native_c_policy_values,
+]
+
 #Test("native C policy constants match native-c-policy.tsv") {
     root :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? panic("set {JET_CLI_TOOLCHAIN_ROOT_ENV} to the Jet source tree")
     policy :: cli_files.read("{root}/Compiler/JetCli/Assets/native-c-policy.tsv") ?? panic("read native-c-policy.tsv: {err}")

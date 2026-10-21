@@ -118,17 +118,17 @@ fn variadic_fixture_accept(file: String, require_coercions: Bool) {
     }
 }
 
-fn run() {
+#Test("variadic_fixtures") {
     root :: "Compiler/JetSema/Tests/fixtures"
-    variadic_fixture_reject("{root}/VariadicSpreadNonTail.jet", "E1312")
-    variadic_fixture_reject("{root}/VariadicMoveBorrowed.jet", "E0201")
-    variadic_fixture_reject("{root}/VariadicMoveReadTail.jet", "E0203")
-    variadic_fixture_reject("{root}/VariadicNonCloneSpread.jet", "E0211")
-    variadic_fixture_reject("{root}/VariadicSpreadElementMismatch.jet", "E0112")
+    variadic_fixture_reject("{root}/VariadicSpreadNonTail.fixture/VariadicSpreadNonTail.jet", "E1312")
+    variadic_fixture_reject("{root}/VariadicMoveBorrowed.fixture/VariadicMoveBorrowed.jet", "E0201")
+    variadic_fixture_reject("{root}/VariadicMoveReadTail.fixture/VariadicMoveReadTail.jet", "E0203")
+    variadic_fixture_reject("{root}/VariadicNonCloneSpread.fixture/VariadicNonCloneSpread.jet", "E0211")
+    variadic_fixture_reject("{root}/VariadicSpreadElementMismatch.fixture/VariadicSpreadElementMismatch.jet", "E0112")
     examples :: "Examples/features/basics"
     stems :: [String]{"variadics_spread", "variadics_owned_lists", "variadics_borrowed_lists", "variadics_mixed_lists", "variadics_eval_order", "variadics_coercions"}
     loop stem in stems -> variadic_fixture_accept("{examples}/{stem}.jet", false)
-    variadic_fixture_accept("{root}/VariadicSlotCoercions.jet", true)
-    variadic_fixture_accept("{root}/VariadicTimeReordered.jet", false)
+    variadic_fixture_accept("{root}/VariadicSlotCoercions.fixture/VariadicSlotCoercions.jet", true)
+    variadic_fixture_accept("{root}/VariadicTimeReordered.fixture/VariadicTimeReordered.jet", false)
     print("checked variadic packing and refusals: passed")
 }

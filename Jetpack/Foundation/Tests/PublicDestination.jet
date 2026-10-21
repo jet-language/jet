@@ -1,5 +1,9 @@
 // crates/jet-net/src/lib.rs:1079-1100 and strict range/mapped-v6 boundaries.
 // Pure cases use decoded parts, never a replacement IP parser or Core provider.
+use jetpack_foundation.[
+    FoundationFetchError, foundation_public_destination_ipv4, foundation_public_destination_ipv6,
+]
+
 #Test("foundation public_destination_policy_rejects_reserved_ipv4_space") {
     loop last in ([Int]{1, 9, 255}) -> assert(!foundation_public_destination_ipv4(192, 0, 0, last))
     assert(foundation_public_destination_ipv4(8, 8, 8, 8))

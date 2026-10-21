@@ -2,6 +2,10 @@
 // never a diagnostic rendering's byte equality.
 use core.math as math
 use core.encoding.json as json
+use jet_foundation.[
+    ComparisonIdentity, ComparisonObservation, ComparisonSample, ComparisonStatus,
+    ObservationRelation, testing_compare_samples_with_discarded,
+]
 
 fn comparison_equality_observation(value: Dyn) -> ComparisonObservation Never! {
     ComparisonObservation{raw: value.show(), typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
@@ -27,7 +31,7 @@ fn comparison_equality_status(reference: Dyn, candidate: Dyn) -> ComparisonStatu
     testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{sample}, 0).status
 }
 
-fn run() {
+#Test("comparison_equality") {
     comparison_equality_require(comparison_equality_status(Dyn.Float(math.nan()), Dyn.Float(math.nan())) == ComparisonStatus.Mismatch, "NaN never equals NaN")
     comparison_equality_require(comparison_equality_status(Dyn.Float(-0.0), Dyn.Float(0.0)) == ComparisonStatus.Matched, "signed zeros compare equal")
     left :: json.parse("{{\"a\":1,\"b\":2}}") ?? panic("left object")

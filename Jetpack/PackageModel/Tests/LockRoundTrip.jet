@@ -2,6 +2,20 @@
 // write/parse round trips, strict reader failures, the registered lock
 // diagnostics, and the on-disk recorders and bounded reader/writer.
 // Helpers live in LockEnvelope.jet.
+use jet_pkg_model.[
+    AuthorityHolds, BuildGrant, BuildStamp, ComptimeInput, DependencyProvenance, ForeignLanguage,
+    LockEnvelope, LockError, LockSource, LockedBrowser, LockedBuildContribution, LockedPackage,
+    LockedRevision, LockedSourceChannel, LockedToolchain, LockedWorkspaceMember, NixClosureRecord,
+    OverlayPolicy, OverlaySet, OverrideEnv, PKG_MAX_LOCK_BYTES, PKG_MAX_LOCK_VALUE_BYTES,
+    PKG_RUST_BRIDGE_PROVENANCE_PREFIX, PackageAuthority, PackageGrant, PackageOverride,
+    PartialNixClosure, PartialPackage, ProvenanceRequirement, ProviderAuthority, ProviderOverride,
+    ServiceTrust, TrustDecision, TrustPolicy, pkg_lock_load, pkg_lock_parse,
+    pkg_lock_parse_with_path, pkg_lock_read_text, pkg_lock_record_nix_realization,
+    pkg_lock_record_rust_bridge, pkg_lock_record_source_channel, pkg_lock_validate_package_nix,
+    pkg_lock_write, pkg_lock_write_atomically,
+]
+use jet_foundation.[Diagnostic, MIRRuntimeLayer]
+use jetpack_foundation.[UNIFIED_LOCK_FILE]
 
 fn pkg_lock_test_tricky(label: String) -> String Never! {
     "{label} \"quoted\" \\ slash"

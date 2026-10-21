@@ -1,5 +1,14 @@
 // Claims ported from crates/jet-env-model/src/ModuleEval/mod.rs #[cfg(test)] (environment surface).
 // JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
+use jet_env_model.[
+    AdapterRecipe, DevServiceExtra, EnvironmentRead, HostOverrideValue, IntegrationKind,
+    ModuleEntryKey, PromptPathMode, PromptStripMode, envmodel_evaluate_env,
+    envmodel_evaluate_env_with_environment, envmodel_evaluate_env_with_preset,
+    envmodel_evaluate_package_profile, envmodel_evaluate_source, envmodel_merge_all,
+    envmodel_merge_error_to_diagnostic, envmodel_merged_entry,
+]
+use jet_foundation.[CtValue, Namespace]
+use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 
 #Test("evaluates plain fact and packages") {
     src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [default.ripgrep, default.fd, unstable.neovim],\n        prompt: \"wordstats\",\n    }}\n}}\n"
@@ -34,16 +43,16 @@
     source :: "\nmodule env.dev {{\n    prompt: $DEV_ONLY\n    services: {{ dev_service: {{ enable: false }} }}\n    checks: [{{ name: \"dev-check\", command: \"true\" }}]\n    files: [\"config/dev.txt\": File{{ content: \"dev\\n\", mode: .Copy }}]\n}}\nmodule env.full {{\n    prompt: $FULL_ONLY\n    services: {{ full_service: {{ enable: false }} }}\n    checks: [{{ name: \"full-check\", command: \"true\" }}]\n    files: [\"config/full.txt\": File{{ content: \"full\\n\", mode: .Copy }}]\n}}\n"
     plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("the plan evaluates")
     service_names := [String]{}
-    loop service in plan.dev_services -> { &service_names.push(service.name) }
+    loop service in plan.dev_services -> &service_names.push(service.name)
     assert_eq(service_names, [String]{"dev_service"})
     check_names := [String]{}
-    loop check in plan.lifecycle.checks -> { &check_names.push(check.name) }
+    loop check in plan.lifecycle.checks -> &check_names.push(check.name)
     assert_eq(check_names, [String]{"dev-check"})
     destinations := [String]{}
-    loop file in plan.files -> { &destinations.push(file.destination) }
+    loop file in plan.files -> &destinations.push(file.destination)
     assert_eq(destinations, [String]{"config/dev.txt"})
     read_names := [String]{}
-    loop read in plan.environment_reads -> { &read_names.push(read.name) }
+    loop read in plan.environment_reads -> &read_names.push(read.name)
     assert_eq(read_names, [String]{"$DEV_ONLY"})
 }
 
@@ -59,7 +68,7 @@
     assert_eq(plan.applied, [String]{"base", "dev"})
     assert_eq(plan.sources, [String]{"profile.base", "profile.dev"})
     raws := [String]{}
-    loop package in plan.packages -> { &raws.push(package.raw) }
+    loop package in plan.packages -> &raws.push(package.raw)
     assert_eq(raws, [String]{"ripgrep@default", "fd@default"})
     assert_eq(plan.packages[0].source, "default")
     assert_eq(plan.packages[0].provider, "nix")

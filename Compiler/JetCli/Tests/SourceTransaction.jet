@@ -1,4 +1,9 @@
 // Assemble with Compiler and execute once with the real held-directory host.
+use jet_cli.[
+    JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes, jet_cli_fix_log,
+    jet_cli_fix_rewrite, jet_cli_transaction_relative, jet_cli_undo_source_changes,
+]
+
 struct JetCLITransactionFixtureRoot {
     path: String
 }
@@ -8,7 +13,7 @@ impl JetCLITransactionFixtureRoot.Close {
     }
 }
 
-fn run() {
+#Test("source_transaction") {
     root :: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
     owner :: JetCLITransactionFixtureRoot{path: root}

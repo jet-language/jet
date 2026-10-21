@@ -1,6 +1,31 @@
 // Assembled with the production bootstrap inventory by run-gate-fixtures.mjs.
 // Source padding admits real independent method jobs under the unchanged byte
 // threshold; it is not a performance corpus or a substitute task implementation.
+use jet_sema.[
+    SEMA_BODY_MIN_BYTES_PER_THREAD, SEMA_BODY_SCOPE_BYTES_PER_ITEM, SemaBodyJob, SemaBodyPart,
+    SemaBodyPlan, SemaBodyQueue, SemaBuildFacts, SemaComptimeBodyValues, SemaComptimeFunctionResult,
+    SemaComptimeItemValue, SemaForeignProviderInput, SemaGraphResult, SemaIncrementalCache,
+    SemaPreparedBody, SemaProgramTables, SemaRegistrationForeignHandleFacts, SemaRegistrationGraph,
+    SemaRegistrationHostHooks, SemaRegistrationImportEdge, SemaRegistrationModuleInput,
+    SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment, sema_check_body_part_in,
+    sema_check_body_plan_fill, sema_check_comptime_function, sema_check_method_jobs,
+    sema_check_method_parallel_eligible, sema_check_module_summary_scopes,
+    sema_check_parallel_method_jobs, sema_check_pass_environment,
+    sema_collect_comptime_declarations, sema_comptime_available_constants,
+    sema_comptime_environment, sema_comptime_probe_init, sema_finalize_registration_graph,
+    sema_function_memory_plan_from_graph, sema_host_hook_access, sema_incremental_cache_clear,
+    sema_incremental_cache_clear_measurement, sema_incremental_cache_new,
+    sema_incremental_cache_stats, sema_program_tables_init, sema_registration_prepare_graph,
+]
+use jet_parser.[parse_source]
+use jet_driver.[jet_driver_canonical_effect_module]
+use jet_foundation.[
+    AccessConvention, CompilerThreads, DIAGNOSTIC_ERROR, MIRSourceFile, Span, TExpr, TFunc,
+    TGenericParam, TTypeDef, Type, compiler_threads_admit, compiler_threads_single,
+    jet_target_machine_hosted, mir_source_file_id, tir_each_expr_child, tir_each_stmt_child,
+]
+use jet_codegen.[JetCodegenFunctions, lower_functions]
+
 fn method_wave_require(ok: Bool, message: String) Never! {
     if !ok -> panic("BodyMethodWaveFixtures: {message}")
 }
@@ -392,7 +417,7 @@ fn method_wave_cache_utf8_bytes_case() {
     method_wave_require(stats.live_items > 0 && stats.live_item_bytes == expected, "live_item_bytes matches the actual retained UTF-8 strings, not character counts or allocator RSS")
 }
 
-fn run() {
+#Test("body_method_wave_fixtures") {
     positive :: method_wave_source(false)
     negative :: method_wave_source(true)
     method_wave_case(positive, false, false, false, false)

@@ -1,4 +1,23 @@
 // Rust TargetMachine.rs tests:4595-4777,4800-4813; Driver/mod.rs:976-1002.
+use jet_foundation.[
+    MIRByteSize, MIRMMIOAccess, MIRMemoryRegion, MIRProviderContract, MIRProviderLimits,
+    MIRRuntimeLayer, MIRSVDProvenance, MIRSizeBudgetReport, MIRTargetCapability,
+    MIRTargetDMAChannelFact, MIRTargetInterruptFact, MIRTargetMachine, MIRTargetMachineError,
+    MIRTargetRegisterBlockFact, MIRTargetRegisterFact, MIRTargetUnsafeGate, jet_target_abi_c,
+    jet_target_allocator_json, jet_target_capabilities_for_core_usage,
+    jet_target_environment_identity, jet_target_hardware_empty, jet_target_hardware_validate,
+    jet_target_layout_cache_identity, jet_target_machine_bare_metal, jet_target_machine_error_debug,
+    jet_target_machine_errors_debug, jet_target_machine_hosted,
+    jet_target_machine_provides_capability, jet_target_machine_use_default,
+    jet_target_machine_use_from_core_apis, jet_target_machine_validate,
+    jet_target_machine_wasm_browser, jet_target_machine_wasm_no_os, jet_target_machine_wasm_wasi,
+    jet_target_max_runtime_layer, jet_target_memory_region_new, jet_target_no_whitespace,
+    jet_target_provider_identity, jet_target_provider_valid, jet_target_validate_allocator,
+    jet_target_validate_linker, jet_target_validate_memory_regions, jet_target_validate_mmio,
+    jet_target_validate_ram_budget,
+]
+use jet_driver.[JET_DRIVER_TARGET_MACHINE_NAMES, jet_driver_target_machine_by_name]
+
 fn target_test_valid_machine() -> MIRTargetMachine Never! {
     machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", "0.0.1")
     machine.memory = [MIRMemoryRegion]{

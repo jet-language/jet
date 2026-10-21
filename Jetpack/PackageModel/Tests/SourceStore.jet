@@ -1,5 +1,13 @@
 // Source-store contracts; all filesystem fixtures have explicit held scratch
 // parents, so these tests do not alter the user's default source store.
+use jet_pkg_model.[
+    pkg_source_snapshot_into, pkg_source_store_component, pkg_source_store_link_into_project,
+]
+use jetpack_foundation.[
+    foundation_open_directory_authority, foundation_read_file_nofollow_at_root,
+    foundation_tree_hash,
+]
+
 fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
     root :: files.join(sys.temp_dir(), "jet-source-store-{label}-{process.current_pid()}")
     files.remove_all(root).drop("a stale fixture may be absent")

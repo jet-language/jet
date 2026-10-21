@@ -21,7 +21,7 @@ function item(path, head) {
 const expressionPath = "Compiler/JetSema/Source/Sema/Expressions.jet";
 const builders = ["fn sema_tir_node(", "fn sema_tir_expr(", "fn sema_expression_todo("].map((head) => item(expressionPath, head));
 const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf8");
-const fixtures = readFileSync(join(repo, "Compiler/JetSema/Tests/TypedGoalFixtures.jet"), "utf8");
+const fixtures = readFileSync(join(repo, "Compiler/JetSema/Tests/TypedGoalFixtures.fixture/TypedGoalFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), foundation + "\n" + builders.join("\n") + "\n" + fixtures);
 writeFileSync(join(out, "project/package.jet"), 'name: "typed_goal_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');

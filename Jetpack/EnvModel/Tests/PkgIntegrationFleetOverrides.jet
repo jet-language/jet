@@ -1,6 +1,8 @@
 // KNOWN-FAILING #4840: production EnvModel discards fleet host overrides.
 // Port tests/fleet.rs:54-154; every original predicate, no invented implementation.
 // Keep separate from passing PkgIntegrationFleet.jet until #4840 restores the original model.
+use jet_env_model.[envmodel_evaluate_env]
+use jet_foundation.[CtValue]
 
 #Test("fleet_valid_captures_hosts_and_overrides KNOWN-FAILING #4840") {
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web.{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"

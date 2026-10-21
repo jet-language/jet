@@ -1,5 +1,11 @@
 // Source/predicate port of tests/authority_manifest.rs168-320 + cli_parts/inspect.rs294-302.
 // Reuses actual PackageModel parser/policy; no fake parser, bridge, or new production API.
+use jet_foundation.[Diagnostic, Span, policy_key_name]
+use jet_pkg_model.[
+    EffectBudgetWitness, Manifest, PackageEffects, PackageFacts, PackagePolicy,
+    ProvenanceRequirement, pkg_effect_enforce,
+]
+
 fn s1_authority_manifest_error(text: String) -> Diagnostic {
     if Manifest.parse("package.jet", text) == {
         .Err(error) -> return error.diagnostic

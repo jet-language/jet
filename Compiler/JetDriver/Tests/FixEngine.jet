@@ -1,9 +1,12 @@
 // Canonical compiler edit seam consumed by CLI fix and LSP. Transactions
 // publish this result through their held-root provider, not through the driver.
+use jet_driver.[jet_driver_apply_edits]
+use jet_foundation.[Span, TextEdit]
+
 fn fix_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("FixEngine: {detail}")
 }
-fn run() Never! {
+#Test("fix_engine") {
     unchanged :: jet_driver_apply_edits("abc", [TextEdit]{}) ?? panic("empty edits")
     fix_require(unchanged == "abc", "empty edits preserve bytes")
     inserted :: jet_driver_apply_edits("abc", [TextEdit]{

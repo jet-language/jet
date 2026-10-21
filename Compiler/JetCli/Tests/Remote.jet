@@ -1,5 +1,11 @@
 // CmdRemote and RemoteBuildBinding registry codecs, assembled with Compiler.
-fn run() Never! {
+use jet_cli.[
+    JetCLIRemoteBinding, JetCLIStatusField, JetCLIStatusValue, jet_cli_remote_binding_fields,
+    jet_cli_remote_name, jet_cli_remote_parse, jet_cli_remote_record, jet_cli_remote_unsigned,
+    jet_cli_status_array, jet_cli_status_field, jet_cli_status_object, jet_cli_status_render,
+]
+
+#Test("remote") {
     if jet_cli_remote_unsigned("+18446744073709551615") != .Val(U64.MAX) -> panic("remote maximum timeout")
     if jet_cli_remote_unsigned("18446744073709551616") != None || jet_cli_remote_unsigned("-0") != None || jet_cli_remote_unsigned("1_0") != None -> panic("remote unsigned grammar")
     if jet_cli_remote_name("builder-a_1.test") == .Err(_) || jet_cli_remote_name("bad/name") == .Ok(_) -> panic("remote host name grammar")

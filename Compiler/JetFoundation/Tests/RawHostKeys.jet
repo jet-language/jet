@@ -1,5 +1,10 @@
 // The compiler-private source keys are the existing runtime spellings.
 // No reserved-name parser exemption or compatibility alias is involved.
+use jet_foundation.[
+    CoreCallInterpreterRoute, Effect, Type, TypeTupleField, core_call, core_host_fixed_signature,
+    core_module_export, type_identity_equal,
+]
+
 fn raw_host_key_fixture(module_name: String, key: String, retired: String, parameters: [Type], result: Type, borrowed: [Bool], effect_kind: Effect, effect_leaf: String?) {
     row :: core_call(module_name, key) ?? panic("raw host route is registered")
     assert(row.module_name == module_name && row.member == key)
@@ -30,7 +35,7 @@ fn raw_host_key_fixture(module_name: String, key: String, retired: String, param
     assert(core_host_fixed_signature(module_name, retired) == None)
 }
 
-fn run() {
+#Test("raw_host_keys") {
     raw_host_key_fixture("core.term", "jet_term_is_terminal_raw", "__is_terminal", [Type]{Type.Int}, Type.Bool, [Bool]{false}, Effect.IO, None)
     raw_host_key_fixture("core.process", "jet_process_exit_status_raw", "__exit_status", [Type]{Type.Int}, Type.Option{inner: Type.String}, [Bool]{false}, Effect.Exec, None)
     raw_host_key_fixture("core.files", "jet_std_files_open_reader_nonblocking", "__open_nonblocking", [Type]{Type.String}, Type.Result{ok: Type.Named{name: "FileReader"}, err: Type.Named{name: "IOError"}}, [Bool]{true}, Effect.FS, Val("FS.Read"))

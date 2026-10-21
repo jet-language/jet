@@ -1,5 +1,10 @@
 // #4843; predicates from tests/gate_law.rs:20-38,77-85. E3415 text
 // observed from dev-595e0dca3 `jet check main.jet --force --json` (exit 1).
+use jet_pkg_model.[PackageGateError, pkg_check_invocation_flags, pkg_gate_refusal]
+use jet_foundation.[
+    Diagnostic, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, policy_key_name,
+]
+use jetpack_foundation.[CONFIG_DEFAULT_DIR, PACKAGE_FILE]
 
 fn pkg_gate_test_dir(label: String) -[FS]> String {
     files.tmpdir("gate-law-{label}-") ?? panic("gate law scratch")

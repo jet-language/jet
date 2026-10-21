@@ -1,6 +1,21 @@
 // Production query/CLI projection fixture; replace CLI Entry when assembling.
-use jet_foundation.[CanonicalPassOptions, canonical_pass_boundary_gaps]
+use jet_foundation.[
+    CanonicalPassOptions, canonical_pass_boundary_gaps, MIRAccelerationFact,
+    MIRAccelerationGateStatus, MIRAccelerationPin, MIRAccelerationProof,
+    MIRAccelerationWorkloadFacts, MIRBlockID, Span, mir_acceleration_deferred,
+    mir_acceleration_evaluate, mir_acceleration_gate,
+]
 use jet_optimizer.[mir_decision_ledger_from_rows]
+use jet_driver.[
+    JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile,
+    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode,
+    JetDriverCompileRequest, jet_driver_optimization_query,
+]
+use jet_cli.[
+    JetCLIAccelerationRuntime, JetCLIAccelerationSpan, jet_cli_acceleration_report,
+    jet_cli_decisions_report, jet_cli_driver_request, jet_cli_optimization_host,
+]
+use jet_sema.[SchemaSnapshot]
 fn inspect_optimization_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectOptimization: {message}")
 }
@@ -11,7 +26,7 @@ fn inspect_optimization_request(source: String) -> JetDriverCompileRequest {
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
-fn run() {
+#Test("inspect_optimization") {
     request :: inspect_optimization_request("#Inline fn helper(value: Int) -> Int {{ value + 1 }}\nfn run() {{\nanswer :: helper(3)\nprint(answer)\n}}")
     query :: jet_driver_optimization_query(^request)
     inspect_optimization_require(query.compile.complete && query.compile.internal_problem == None, "production query")

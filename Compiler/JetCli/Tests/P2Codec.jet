@@ -1,6 +1,18 @@
 // Contract fixture for the canonical L2 source assembler, following the
 // JetParser ContractFixtures convention: replace the host entry with this run.
 use core.encoding.base64 as p2_base64
+use jet_foundation.[canonical_json_bytes, canonical_json_parse]
+use jet_cli.[
+    JetCLIReceipt, JetCLIReceiptClaim, JetCLIReceiptInput, JetCLIReceiptSection,
+    JetCLIReceiptSectionRecord, JetCLIRecordIdentity, JetCLIRecordIndexEntry, JetCLIRecordLink,
+    jet_cli_receipt_decode, jet_cli_receipt_diff_sections, jet_cli_receipt_digest,
+    jet_cli_receipt_encode, jet_cli_receipt_field_diff_render, jet_cli_receipt_query_sections,
+    jet_cli_receipt_section_new, jet_cli_receipt_section_record_decode,
+    jet_cli_receipt_section_record_encode, jet_cli_receipt_section_record_identity,
+    jet_cli_record_entry_is_disposable, jet_cli_record_entry_normalize, jet_cli_record_index_new,
+    jet_cli_record_index_parse_line, jet_cli_record_index_save_replay,
+    jet_cli_record_index_to_jsonl, jet_cli_record_index_update,
+]
 
 fn p2_require(ok: Bool, name: String) Never! {
     if !ok -> panic("P2 codec contract failed: {name}")
@@ -101,7 +113,7 @@ fn p2_rust_wire() Never! {
     p2_require((jet_cli_receipt_encode(receipt) ?? [U8]{}) == wire, "byte-identical Rust receipt re-encode")
 }
 
-fn run() Never! {
+#Test("p2_codec") {
     p2_canonical()
     p2_receipt()
     p2_record()

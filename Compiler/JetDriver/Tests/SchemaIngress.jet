@@ -3,8 +3,9 @@
 use core.files as schema_test_files
 use core.sys as schema_test_sys
 use core.process as schema_test_process
+use jet_driver.[jet_driver_read_schema_dependency, load_snapshot]
 
-fn run() -[FS, Env]> {
+#Test("schema_ingress") {
     assert(schema_test_sys.get("JET_SCHEMA_CACHE_DIR") == None)
     root :: schema_test_files.join(schema_test_sys.temp_dir(), "jet-schema-ingress-{schema_test_process.current_pid()}")
     schema_test_files.create_dir(root) ?? panic("exclusive schema fixture root")

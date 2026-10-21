@@ -1,5 +1,18 @@
 // Checked-build transport policy, assembled with the canonical compiler unit.
-fn run() {
+use jet_driver.[
+    jet_driver_build_declared_network, jet_driver_build_fetch, jet_driver_build_http_error,
+    jet_driver_build_http_length, jet_driver_build_public_address,
+]
+use jet_foundation.[EffectRowEntry, Span]
+use jet_build_session.[BuildSessionValue]
+
+// The refusal message of a Content-Length check; empty when the headers are accepted.
+fn build_http_length_problem(headers: [[U8]]) -> String Never! {
+    if jet_driver_build_http_length(headers) == .Err(error) -> return error.message
+    ""
+}
+
+#Test("build_http_transport") {
     assert(jet_driver_build_public_address([U8]{8, 8, 8, 8}))
     denied :: [[U8]]{
         [U8]{0, 1, 2, 3}, [U8]{10, 1, 2, 3}, [U8]{100, 64, 0, 1},
@@ -24,11 +37,11 @@ fn run() {
     assert(!jet_driver_build_public_address([U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 127, 0, 0, 1}))
     assert(!jet_driver_build_public_address([U8]{}))
     assert(!jet_driver_build_public_address([U8]{1, 2, 3}))
-    assert(jet_driver_build_http_length([[U8]]{"Content-Length: 5".bytes()}) == .Ok(()))
-    assert(jet_driver_build_http_length([[U8]]{"cOnTeNt-LeNgTh: 67108865".bytes()}) == .Err("response exceeds its size bound"))
-    assert(jet_driver_build_http_length([[U8]]{"Content-Length: nope".bytes()}) == .Err("invalid Content-Length"))
-    assert(jet_driver_build_http_length([[U8]]{"Content-Length: -1".bytes()}) == .Err("invalid Content-Length"))
-    assert(jet_driver_build_http_length([[U8]]{"Location: https://other.invalid/".bytes()}) == .Ok(()))
+    assert_eq(build_http_length_problem([[U8]]{"Content-Length: 5".bytes()}), "")
+    assert_eq(build_http_length_problem([[U8]]{"cOnTeNt-LeNgTh: 67108865".bytes()}), "response exceeds its size bound")
+    assert_eq(build_http_length_problem([[U8]]{"Content-Length: nope".bytes()}), "invalid Content-Length")
+    assert_eq(build_http_length_problem([[U8]]{"Content-Length: -1".bytes()}), "invalid Content-Length")
+    assert_eq(build_http_length_problem([[U8]]{"Location: https://other.invalid/".bytes()}), "")
     span :: Span{start: 3, end: 5}
     net :: EffectRowEntry{name: "Net", span: span}
     wait :: EffectRowEntry{name: "Time.Wait", span: span}
@@ -40,7 +53,7 @@ fn run() {
     assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{wait})))
     assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{net, time})))
     assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{open})))
-    args :: [BuildSessionValue]{.Text("https://example.invalid/data"), .Text("pin")}
+    args :: [BuildSessionValue]{.Text(value: "https://example.invalid/data"), .Text(value: "pin")}
     refused :: jet_driver_build_fetch(None, None, false, "/", args, span)
     if refused == .Failure(error) {
         assert(error.code == "E3414")
@@ -48,7 +61,8 @@ fn run() {
         assert(error.start == 3 && error.end == 5)
     } else { panic("undeclared HTTP transport did not refuse") }
     unavailable :: jet_driver_build_fetch(None, None, true, "/", args, span)
-    assert(unavailable == .HostRequest("fetch", _))
+    if unavailable == .HostRequest(service, _) -> assert_eq(service, "fetch")
+    else -> panic("unavailable HTTP transport did not ask its host")
     certificate :: jet_driver_build_http_error("https://example.invalid/data", "unknownissuer", span)
     if certificate == .Failure(error) -> assert(error.what == "TLS certificate for `example.invalid` could not be trusted")
     else -> panic("raw TLS error lost source-owned meaning")

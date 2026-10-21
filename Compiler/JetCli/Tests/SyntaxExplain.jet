@@ -1,5 +1,11 @@
 // Offline syntax dictionary lookup, plaintext essays, and typo classification.
-fn run() Never! {
+use jet_cli.[
+    JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_edit_distance, jet_cli_explain_build_fact_name,
+    jet_cli_explain_policy, jet_cli_syntax_display, jet_cli_syntax_lookup, jet_cli_syntax_nearest,
+    jet_cli_syntax_plain_text, jet_cli_syntax_query,
+]
+
+#Test("syntax_explain") {
     keyword_index :: jet_cli_syntax_lookup("  Fn  ") ?? panic("case-insensitive syntax lookup")
     keyword :: JET_CLI_SYNTAX_ROWS[keyword_index]
     if keyword.token != "fn" || keyword.kind != JetCLISyntaxKind.Keyword -> panic("canonical keyword")

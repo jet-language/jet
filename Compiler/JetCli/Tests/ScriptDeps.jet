@@ -1,13 +1,21 @@
 // Source admission only: no compiler, Cargo, provider or network invocation.
 // End-to-end run/check predicates remain in tests/cases/inline_deps unchanged.
-use jet_driver.[jet_driver_build_source_catalog, jet_driver_package_target_facts, jet_driver_receipt_closure]
+use jet_driver.[
+    jet_driver_build_source_catalog, jet_driver_package_target_facts, jet_driver_receipt_closure,
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCoreSource, JetDriverScriptDependency,
+]
+use jet_cli.[
+    jet_cli_driver_request, jet_cli_identity_key, jet_cli_script_dependency_authority,
+    jet_cli_script_dependency_roots,
+]
 
 fn script_deps_test_root(path: String, source: String) -> JetDriverAuthorizedSourceRoot {
     stat :: cli_files.stat(path) ?? panic("script root identity")
     JetDriverAuthorizedSourceRoot{canonical_path: path, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "{path}/stats.jet", relative_path: "stats.jet", identity: "entry", source: source}}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}
 }
 
-fn run() {
+#Test("script_deps") {
     scratch :: cli_files.temp_dir("jet-native-script-deps") ?? panic("script scratch")
     path :: scratch.path
     package :: "{path}/.jet/inline-deps/textkit/1.4.2"

@@ -1,5 +1,9 @@
 // Source cases are shared with the Rust verification tier through the JSON
 // corpus. The assembly runner generates only calls into this production check.
+use jet_parser.[parse_source]
+use jet_sema.[SemaSourceSegment, check_program, sema_atomic_field_inner]
+use jet_foundation.[DIAGNOSTIC_ERROR]
+
 fn atomic_field_test_source(name: String, source: String, accepted: Bool, atomic: Bool) {
     parsed :: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("{name}: parity source must parse")

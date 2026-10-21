@@ -1,9 +1,18 @@
 // Pure ReceiptStore/RecordIndex contracts; assemble with Compiler and run.
+use jet_cli.[
+    JetCLIReceiptClaim, JetCLIReceiptInput, JetCLIReceiptSection, JetCLIReceiptSectionRecord,
+    JetCLIRecordIdentity, JetCLIRecordIndexEntry, JetCLIRecordLink, jet_cli_receipt_encode,
+    jet_cli_receipt_lookup_bytes, jet_cli_receipt_merge_sections, jet_cli_receipt_prepare,
+    jet_cli_receipt_section_new, jet_cli_record_index_find, jet_cli_record_index_fresh_sequence,
+    jet_cli_record_index_from_bytes, jet_cli_record_index_new, jet_cli_record_index_next_sequence,
+    jet_cli_record_index_query, jet_cli_record_index_to_bytes, jet_cli_record_index_update,
+]
+
 fn record_receipt_memory_require(ok: Bool, name: String) Never! {
     if !ok -> panic("record/receipt memory contract: {name}")
 }
 
-fn run() {
+#Test("record_receipt_memory") {
     digest :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     claim :: JetCLIReceiptClaim{verb: "run", key: digest, inputs: [JetCLIReceiptInput]{}}
     receipt :: jet_cli_receipt_prepare(claim, 0, [U8]{255, 115, 101, 99, 114, 101, 116}, [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, [String]{"secret"}) ?? panic("prepare")

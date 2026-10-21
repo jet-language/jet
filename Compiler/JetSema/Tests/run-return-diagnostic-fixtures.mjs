@@ -37,8 +37,8 @@ if (webHost) {
   builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_expr_unwrap_tag("));
 }
 const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf8");
-const fixtureName = webHost ? "WebHostDiagnosticFixtures.jet" : "ReturnDiagnosticFixtures.jet";
-const fixtures = readFileSync(join(repo, `Compiler/JetSema/Tests/${fixtureName}`), "utf8");
+const fixtureName = webHost ? "WebHostDiagnosticFixtures" : "ReturnDiagnosticFixtures";
+const fixtures = readFileSync(join(repo, `Compiler/JetSema/Tests/${fixtureName}.fixture/${fixtureName}.jet`), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), foundation + "\n" + builders.join("\n") + "\n" + fixtures);
 writeFileSync(join(out, "project/package.jet"), 'name: "return_diagnostic_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');

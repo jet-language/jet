@@ -1,6 +1,13 @@
 // Production codec + E0910 pass. The diagnostic renderings are the unchanged
 // tests/ui/{published_schema_breaking,migration_add_needs_default,
 // migration_change_no_converter,published_schema_bracket_marker_migration}.stderr.
+use jet_parser.[parse_source]
+use jet_sema.[
+    SNAPSHOT_VERSION, SchemaSnapshot, SnapshotField, check_schema_migrations,
+    sema_program_tables_init, snapshot_from_struct,
+]
+use jet_foundation.[Diagnostic, TTypeDef]
+
 fn schema_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("SchemaMigration: {detail}")
 }
@@ -20,7 +27,7 @@ fn schema_has(diagnostics: [Diagnostic], text: String) Never! {
     }
     schema_require(found, "expected diagnostic: {text}")
 }
-fn run() Never! {
+#Test("schema_migration") {
     wire :: "schema_version = 1\ntype = Account\npublished_version = 1.2.3\nsquashed_before = 1.0.0\nfield name: String\nfield verified: Bool\n"
     decoded :: SchemaSnapshot.parse(wire) ?? panic("snapshot codec")
     schema_require(decoded.write() == wire && decoded.fields.len() == 2, "canonical wire round trip")

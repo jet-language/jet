@@ -2,6 +2,8 @@
 // inspect_joined_values_do_not_consume_the_target_on_every_plane and
 // inspect_threads_preserves_live_replay_and_scope_errors_on_every_plane
 // (e2b4feaae), on the Jet inspect parser.
+use jet_cli.[JET_CLI_INSPECT_PLANES, JetCLIInspectScope, jet_cli_inspect_parse]
+
 fn inspect_parse_require(ok: Bool, name: String) Never! {
     if !ok -> panic(name)
 }
@@ -23,7 +25,7 @@ fn inspect_parse_error(argv: [String], expected: String) Never! {
     }
 }
 
-fn run() Never! {
+#Test("inspect_parse") {
     flags :: [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}
     loop plane in JET_CLI_INSPECT_PLANES {
         inspect_parse_target([String]{"inspect", plane, "--threads", "1", "input.jet"}, [String]{"--threads", "1"}, "{plane} --threads 1 before target")

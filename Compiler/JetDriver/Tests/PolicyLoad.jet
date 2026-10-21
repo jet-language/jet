@@ -1,6 +1,18 @@
 // Assemble with Compiler/Bootstrap/sources.list, replacing the CLI entry.
 // Exercise the real authorized loader; undefined calls deliberately prove that
 // policy queries do not need semantic compilation of a program body.
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverBuildQueryScope, JetDriverCompileRequest, JetDriverCompileTarget, JetDriverCoreSource,
+    JetDriverGeneratedModule, JetDriverHostFacts, JetDriverLoadResult,
+    jet_driver_build_next_session_id, jet_driver_generated_module_path, jet_driver_load,
+    jet_driver_package_source_digest, jet_driver_query_loaded_input_paths,
+]
+use jet_eval.[jet_eval_default_config]
+use jet_foundation.[
+    PolicyKey, PolicyScope, PolicyValue, Program, Span, compiler_threads_single, policy_resolve,
+]
+
 fn policy_load_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("PolicyLoad: {detail}")
 }
@@ -42,7 +54,7 @@ fn policy_load_has_code(load: JetDriverLoadResult, code: String, what: String) -
     false
 }
 
-fn run() Never! {
+#Test("policy_load") {
     build_scope := JetDriverBuildQueryScope{}
     policy_load_require(jet_driver_build_next_session_id(&build_scope) == Val(1) && jet_driver_build_next_session_id(&build_scope) == Val(2), "one command's package build invocations get distinct Source-owned identities")
     build_scope.next_session_id = 9223372036854775807

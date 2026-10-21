@@ -1,11 +1,16 @@
 // Actual Core typed error -> evaluator failed value -> structured diagnostic.
 // This fixture does not claim that an unavailable host service was executed.
-use core.build.[BuildSessionPolicy, BuildSessionError, build_session_new, build_session_error_projection, build_session_error_diag, build_session_error_json_text, build_key_debug_text, build_session_impure]
 use jet_foundation.[Span]
+use jet_build_session.[
+    BuildSessionError, BuildSessionPolicy, build_key_debug_text, build_session_error_diag,
+    build_session_error_json_text, build_session_error_projection, build_session_impure,
+    build_session_new,
+]
+use jet_eval.[jet_eval_build_failed_diagnostic, jet_eval_build_failed_value]
 fn build_services_require(ok: Bool, message: String) Never! {
     if !ok -> panic("BuildServices: {message}")
 }
-fn run() {
+#Test("build_services") {
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
     session :: build_session_new(91, "fixture", "compiler", policy)
     state :: session.storage.guard_read().value

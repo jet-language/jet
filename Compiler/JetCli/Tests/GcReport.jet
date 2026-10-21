@@ -1,8 +1,12 @@
 // Assemble with the Cli/Foundation unit; pure GC trace contracts.
+use jet_cli.[
+    jet_cli_gc_field, jet_cli_gc_object, jet_cli_gc_parse, jet_cli_gc_render, jet_cli_gc_text,
+]
+
 fn gc_report_require(ok: Bool, name: String) Never! {
     if !ok -> panic("GC report: {name}")
 }
-fn run() Never! {
+#Test("gc_report") {
     raw :: "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":1,\"started_unix_ms\":1000,\"updated_unix_ms\":1000,\"complete\":true,\"dropped_promotions\":0,\"collections\":2,\"sites\":[]}}"
     trace :: jet_cli_gc_parse(raw, "/project", 1000) ?? panic("valid trace: {err.detail}")
     gc_report_require(trace.collections == 2 && trace.sites.len() == 0, "empty identity evidence")

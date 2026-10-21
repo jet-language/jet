@@ -2,6 +2,15 @@
 // exactly the config-value program `jet` evaluates in-process, a refusal is
 // placed on the config expression as the in-process evaluator places it, and
 // a plain literal never reaches the compiler.
+use jet_foundation.[
+    CtValue, Expr, Func, JET_CONFIG_VALUE_NAME, JetConfigOutcome, compiler_service_comptime_outcome,
+    compiler_service_comptime_request, compiler_service_comptime_request_from,
+    compiler_service_comptime_response, expr_span, foundation_parse_protocol_json,
+    jet_config_eval_diagnostic, jet_config_eval_placed, jet_config_program,
+]
+use jet_parser.[parse_source]
+use jet_env_model.[envmodel_find_jet_binary]
+use jetpack_foundation.[BINARY_NAME]
 
 // The first top-level constant of `source`, with the source's functions.
 fn envmodel_service_test_constant(source: String) -> (expr: Expr, funcs: [String: Func]) {

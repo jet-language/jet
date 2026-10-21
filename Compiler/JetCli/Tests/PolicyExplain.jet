@@ -1,6 +1,10 @@
 // Rust envelope and byte-offset facts captured in SolCLI9/policy-capture.
 use jet_foundation.[PolicyDeclaration, PolicyKey, PolicyValue, PolicyScope, Span]
-fn run() Never! {
+use jet_cli.[
+    jet_cli_explain_marker_offset, jet_cli_explain_marker_site, jet_cli_explain_policy_lookup,
+    jet_cli_explanation_output,
+]
+#Test("policy_explain") {
  site :: jet_cli_explain_marker_site("C:/project/source.jet:+0005") ?? panic("usize grammar")
  if site.file != "C:/project/source.jet" || site.line != (U64{5}) -> panic("split the last colon without narrowing usize")
  max :: jet_cli_explain_marker_site("source.jet:18446744073709551615") ?? panic("maximum usize")

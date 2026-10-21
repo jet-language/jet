@@ -1,5 +1,16 @@
 // tests/jetpack_trust_root.rs integration assertions, not the TrustRoot unit suite.
 // Runtime UNRUN. Exact constants, typed error variants, records, and boundaries.
+use jetpack_trust_root.[
+    BoundIdentity, CacheProvenance, CacheReceipt, IdentityKind, MetadataRole, PublicTrustKey,
+    PublisherIdentity, RootBootstrap, SignedMetadata, SnapshotMetaEntry, SnapshotMetadata,
+    TUFRootMetadata, TargetMeta, TargetsMetadata, TimestampMetadata, TrustEngine, TrustFixtureRoot,
+    TrustKey, TrustRootPolicy, TrustSignature, TrustedClock, trust_allow_cache_witness,
+    trust_canonical_root, trust_canonical_snapshot, trust_canonical_targets,
+    trust_fixture_threshold_root, trust_is_cache_witness_allowed, trust_public_trust_manifest,
+    trust_sign_root, trust_sign_snapshot, trust_sign_targets, trust_sign_timestamp,
+]
+use jetpack_trust.[TrustGrant, trust_add_grant, trust_gate_build_identity]
+use jetpack_foundation.[Theme]
 
 #Test("trust_publication_exporter_rejects_the_test_index_key") {
     rejected :: if PublicTrustKey.from_nix_line("index", "jet-test-index-v1:{"A".repeat(43)}=") == {

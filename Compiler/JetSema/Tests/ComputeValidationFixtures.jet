@@ -1,6 +1,22 @@
 // Real checked/effect-solved functions feed the validation boundary. Proof facts
 // are produced explicitly with the canonical fact producers; this unit does not
 // pretend it checked a Core autodiff callback. Expected diagnostics are explicit.
+use jet_sema.[
+    SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaComputeCallFact,
+    SemaComputeValidationWork, SemaForeignProviderInput, SemaGraphModuleResult,
+    SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+    SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+    sema_check_context_init, sema_collect_comptime_declarations, sema_compute_note_panic,
+    sema_compute_record_autodiff_obligation, sema_compute_validate_autodiff_purity, sema_error,
+    sema_finalize_registration_graph, sema_function_compute_facts, sema_has_error_since,
+    sema_registration_prepare_graph,
+]
+use jet_parser.[parse_source]
+use jet_driver.[jet_driver_canonical_effect_module]
+use jet_foundation.[
+    Diagnostic, Span, SymbolKind, compiler_threads_single, jet_target_machine_hosted, symbol_id,
+]
+
 fn compute_fixture_modules(label: String, source: String, failures: &[String]) -> [SemaGraphModuleResult]? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
@@ -136,7 +152,7 @@ fn compute_fixture_size(size: Int, failures: &[String]) {
     compute_fixture_compare("{size} indexed functions", modules, [Diagnostic]{}, true, &failures)
 }
 
-fn run() {
+#Test("compute_validation_fixtures") {
     failures := [String]{}
     compute_fixture_cases(&failures)
     compute_fixture_size(64, &failures)

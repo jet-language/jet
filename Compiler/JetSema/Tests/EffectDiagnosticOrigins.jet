@@ -1,5 +1,13 @@
 // Exercise the production graph traversal and source publication: the ceiling
 // belongs to main, but its unbounded trait dispatch belongs to a helper module.
+use jet_sema.[
+    SemaEffectDispatchSite, SemaEffectFunctionSource, SemaEffectModuleInput, SemaEffectNode,
+    SemaSourceOrigin, SemaSourceSegment, sema_diagnostic_with_source_location,
+    sema_effect_check_node, sema_effect_find_dispatch, sema_effect_locate_dispatch,
+    sema_effect_publish_diagnostics, sema_effect_unbounded_dispatch_diagnostic,
+]
+use jet_foundation.[Diagnostic, Span, TEffectSpan]
+
 fn effect_origin_node(key: String, module_index: Int) -> SemaEffectNode Never! {
     SemaEffectNode{
         key: key, name: key, module_identity: key, module_index: module_index,
@@ -25,7 +33,7 @@ fn effect_origin_input(module_index: Int, file: String) -> SemaEffectModuleInput
     }
 }
 
-fn run() {
+#Test("effect_diagnostic_origins") {
     caller := effect_origin_node("main::ceiling", 0)
     caller.has_declared_row = true
     caller.declared = [String]{"IO"}

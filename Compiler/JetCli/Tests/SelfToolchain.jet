@@ -1,5 +1,7 @@
 // The canonical pin pre-parser used by the read-only self-toolchain report.
-fn run() Never! {
+use jetpack_trust.[trust_pin_identity_preparse]
+
+#Test("self_toolchain") {
     plain :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\njet: 0.4\ndeps: {{}}\n")
     if plain.payload_name != "app" || plain.payload_version != "1.0.0" || plain.jet != .Val("0.4") -> panic("canonical pin identity")
     unpinned :: trust_pin_identity_preparse("name: \"app\"\nversion: \"1.0.0\"\ndeps: {{}}\n")

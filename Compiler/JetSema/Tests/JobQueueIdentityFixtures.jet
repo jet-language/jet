@@ -1,7 +1,10 @@
 // Assemble with production compiler sources and this replacement run.
 // Admission is covered by the paired accepted/rejected Core corpus fixtures;
 // this assertion pins the production Jet diagnostic to the Rust contract.
-fn run() {
+use jet_foundation.[Span]
+use jet_sema.[sema_job_queue_identity_error]
+
+#Test("job_queue_identity_fixtures") {
     span :: Span{start: 7, end: 15}
     diagnostic :: sema_job_queue_identity_error("enqueue", span)
     assert(diagnostic.code == "E0112")

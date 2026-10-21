@@ -27,14 +27,14 @@ const production = assemble(sources);
 const foundation = assemble(sources.filter(path =>
     path.startsWith("Compiler/JetFoundation/")));
 const fixtures = [
-    ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.jet"],
-    ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.jet"],
-    ["gate-projection", "Compiler/JetCli/Tests/GateProjection.jet"],
-    ["export-boundary", "Compiler/JetSema/Tests/ExportBoundary.jet"],
-    ["view-field-provenance", "Compiler/JetSema/Tests/ViewFieldProvenance.jet"],
+    ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"],
+    ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.fixture/GateLedger.jet"],
+    ["gate-projection", "Compiler/JetCli/Tests/GateProjection.fixture/GateProjection.jet"],
+    ["export-boundary", "Compiler/JetSema/Tests/ExportBoundary.fixture/ExportBoundary.jet"],
+    ["view-field-provenance", "Compiler/JetSema/Tests/ViewFieldProvenance.fixture/ViewFieldProvenance.jet"],
     ["named-tuple-identity", "Compiler/JetSema/Tests/NamedTupleIdentityFixtures.jet"],
-    ["recovered-frozen", "Compiler/JetSema/Tests/FrozenFixtures.jet"],
-    ["recovered-policy-guest", "Compiler/JetSema/Tests/BurnDownFixtures.jet"],
+    ["recovered-frozen", "Compiler/JetSema/Tests/FrozenFixtures.fixture/FrozenFixtures.jet"],
+    ["recovered-policy-guest", "Compiler/JetSema/Tests/BurnDownFixtures.fixture/BurnDownFixtures.jet"],
 ];
 for (const [name, path] of fixtures) {
     const project = join(out, name);

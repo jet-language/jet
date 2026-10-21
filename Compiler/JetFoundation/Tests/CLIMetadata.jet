@@ -1,4 +1,10 @@
 // Assemble with the canonical Compiler unit; PortInteg owns execution/proof.
+use jet_foundation.[
+    CLICommandSchema, CLIInputSchema, CLIInputShape, CLISubcommandSchema, CLIValueKind,
+    JET_COMPILER_TARGET_USIZE_MAX, JobArgumentSchema, JobCachePolicy, JobFact, JobScope, JobSkip,
+    MetadataError, StringMapEntry, decode_record, encode_record, read_executable,
+]
+
 fn cli_metadata_require(ok: Bool, why: String) Never! { if !ok -> panic("CLI metadata: {why}") }
 fn cli_metadata_zeros(length: Int) -> [U8] Never! { loop _ in 0..<length -> U8{0} }
 fn cli_metadata_copy(out: &[U8], at: Int, bytes: [U8]) Never! {
@@ -128,7 +134,7 @@ fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never
     }
     cli_metadata_require(refused, "canonical failure classification")
 }
-fn run() {
+#Test("cli_metadata") {
     input :: CLIInputSchema{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false, default: None}, positional: Val(U16{0})}
     job :: JobFact{name: "release", scope: JobScope.Ship, doc: Val("ship"), arguments: [JobArgumentSchema]{}, after: [String]{}, packages: [String]{"."}, cwd: None, inputs: [String]{"a"}, outputs: [String]{"b"}, skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared, parallel: 2, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"}}, schedule: Val("daily")}
     hidden := job.copy()

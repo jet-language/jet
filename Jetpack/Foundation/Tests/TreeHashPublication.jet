@@ -5,6 +5,15 @@
 // replaced at its path (Authority.rs revalidate_file checks the handle only).
 // These are native behavioral cases, retained for Core #3593: no pathname
 // publication fallback and no fake Directory/FileWriter provider.
+use jetpack_foundation.[
+    FoundationPublicationCreate, FoundationPublicationLinks, FoundationPublicationPhase,
+    FoundationPublicationPolicy, MAX_TREE_FILE_BYTES, StreamingSHA256,
+    foundation_open_directory_authority, foundation_open_file_authority,
+    foundation_open_or_create_directory, foundation_open_root_directories,
+    foundation_remove_held_tree, foundation_stage_and_rename,
+    foundation_write_file_nofollow_at_root,
+]
+use jet_foundation.[mir_sha256_bytes, mir_sha256_hex_bytes]
 
 fn foundation_publication_test_root(label: String) -[FS, Env]> String Never! {
     home :: sys.get("HOME") ?? panic("publication fixtures require HOME")

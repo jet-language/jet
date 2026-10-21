@@ -1,3 +1,10 @@
+use jet_foundation.[Binding, Diagnostic, Func, Program, StructDef, Type, TypeAliasDef]
+use jet_lexer.[
+    STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_INT, lex, token_decoded, token_integer,
+    token_string_parts,
+]
+use jet_parser.[expand_named_marker_groups_with_uses, named_marker_groups, parse_tokens]
+
 fn entry02_program(source: String) -> Program { parser_test_program(source) }
 fn entry02_errors(source: String) -> [Diagnostic] { parser_test_errors(source) }
 fn entry02_func(program: Program, name: String) -> Func { parser_test_function(program, name) }
@@ -201,13 +208,11 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
     }
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2226
-#Test("pub_file_marker_sets_default_visibility") {
-    src :: "#PubFile\n\nfn greet() -> String {{\n    return \"hi\"\n}}\n\npriv fn secret() -> Int {{\n    return 0\n}}\n\nfn run() {{\n    return\n}}"
-    p :: entry02_program(src)
-    assert(p.pub_file)
-    assert(entry02_func(p, "greet").is_pub)
-    assert(!entry02_func(p, "secret").is_pub)
-    assert(entry02_func(p, "run").is_pub)
+// `#PubFile` was retired when every declaration became public by default: the
+// marker now reports E0418 (its old default-visibility flip has nothing to flip).
+#Test("retired_pub_file_marker_reports_e0418") {
+    src :: "#PubFile\n\nfn greet() -> String {{\n    return \"hi\"\n}}\n\nfn run() {{\n    return\n}}"
+    _ :: entry02_diag(entry02_errors(src), "E0418")
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2260
 #Test("pub_file_section_label_emits_e0415") {

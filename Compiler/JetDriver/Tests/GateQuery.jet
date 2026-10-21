@@ -1,4 +1,15 @@
 // Assemble with the production Compiler source unit, replacing CLI Entry.
+use jet_foundation.[
+    GateEntry, GateKind, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span,
+    compiler_threads_single, name_ledger_declaration,
+]
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileRequest, JetDriverCompileTarget, JetDriverGatePolicy, JetDriverHostFacts,
+    jet_driver_gate_query, jet_driver_source_query,
+]
+use jet_eval.[jet_eval_default_config]
+
 fn gate_query_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("GateQuery: {detail}")
 }
@@ -14,7 +25,7 @@ fn gate_query_request(source: String, policy: String?) -> JetDriverCompileReques
         canonical_effect_source: "", core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native, record_store: None, trace_sink: None, mir_lint_every_pass: false, compiler_threads: compiler_threads_single(),
     }
 }
-fn run() {
+#Test("gate_query") {
     request := gate_query_request("use \"helper\"\nfn run() {{ #Unsafe(\"audited fixture\") {{ }} undefined_call() }}", None)
     request.gate_set = GateSet{build_flag: true}
     request.external_gate_entries = [gate_query_external("/gates/trust")]

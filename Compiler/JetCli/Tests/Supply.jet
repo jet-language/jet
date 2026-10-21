@@ -1,6 +1,10 @@
 // CmdSupply::run_sbom uses the real checked Package and optional lock reader.
 // Exact deterministic SPDX/CycloneDX output stays plain under --json.
-fn run() {
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[Diagnostic, diagnostic_from_registry]
+use jet_cli.[jet_cli_report_cwd, jet_cli_reports_status_json]
+
+#Test("supply") {
     root :: "{cli_sys.temp_dir()}/jet-cli-supply-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/extracted/.jet") ?? panic("extracted fixture")
     cli_files.create_dir_all("{root}/inline/.jet") ?? panic("inline fixture")

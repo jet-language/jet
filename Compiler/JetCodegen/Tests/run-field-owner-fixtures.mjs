@@ -14,7 +14,7 @@ const rungs = join(out, "rungs");
 const assembled = spawnSync(process.execPath, [join(repo, "Tools/agent/stage1/ladder.mjs"), "rungs", repo, rungs], { encoding: "utf8" });
 if (assembled.status !== 0) throw new Error(assembled.stderr || assembled.stdout);
 const unit = readFileSync(join(rungs, "L4/project/src/compiler.jet"), "utf8");
-const fixtures = readFileSync(join(repo, "Compiler/JetCodegen/Tests/FieldOwnerFixtures.jet"), "utf8");
+const fixtures = readFileSync(join(repo, "Compiler/JetCodegen/Tests/FieldOwnerFixtures.fixture/FieldOwnerFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), unit + "\n" + fixtures);
 writeFileSync(join(out, "project/package.jet"), 'name: "field_owner_contract_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }\n');

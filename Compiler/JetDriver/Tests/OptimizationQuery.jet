@@ -1,4 +1,13 @@
 // Assemble against production sources, replacing CLI Entry. No manufactured MIR.
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode, JetDriverCompileRequest, jet_driver_optimization_query,
+]
+use jet_cli.[jet_cli_driver_request]
+use jet_sema.[SchemaSnapshot]
+use jet_foundation.[MIRArtifactBuildMode]
+use jet_optimizer.[mir_decision_ledger_json, mir_decision_ledger_read]
+
 fn optimization_query_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("OptimizationQuery: {detail}")
 }
@@ -9,7 +18,7 @@ fn optimization_query_request(triple: String) -> JetDriverCompileRequest {
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
-fn run() {
+#Test("optimization_query") {
     loop triple in ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"] {
         request := optimization_query_request(triple)
         request.profile = "selected-release"

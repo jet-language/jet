@@ -1,5 +1,19 @@
 // Assemble with the Compiler source unit. Exercises the real authorized
 // loader/checker/lowerer; no disk source mutation or synthesized `run`.
+use jet_driver.[
+    JET_DRIVER_CORE_SOURCE_ROOT, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+    JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
+    JetDriverCoreSource, jet_driver_checked_projection, jet_driver_compile_mir,
+    jet_driver_has_errors, jet_driver_load, jet_driver_module_display,
+    jet_driver_registration_module_inputs, jet_driver_schema_pending_breaks,
+    jet_driver_source_query,
+]
+use jet_cli.[jet_cli_checked_semindex, jet_cli_driver_request]
+use jet_sema.[SchemaSnapshot, SemaForeignProviderInput, SnapshotField]
+use jet_foundation.[Diagnostic, Item, Span, TComptimeValue]
+use jet_eval.[jet_eval_comptime_value, jet_eval_default_config, jet_eval_function]
+use jet_parser.[parse_source]
+
 fn seams_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("CLISeams: {detail}")
 }
@@ -101,7 +115,7 @@ fn seams_checked_projection() {
     legacy :: jet_driver_compile_mir(seams_request(source, JetDriverCompileMode.Doc))
     seams_require(legacy.complete && legacy.doc_modules.len() == 1, "legacy Doc keeps its existing user-only path")
 }
-fn run() {
+#Test("cli_seams") {
     seams_checked_projection()
     // A valid parse with an intentionally undefined body succeeds in the
     // load-only query. A semantic check instead would report E0102.

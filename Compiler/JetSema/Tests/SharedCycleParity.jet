@@ -1,4 +1,8 @@
 // Production parser + checker coverage for.
+use jet_parser.[parse_source]
+use jet_sema.[SemaSourceSegment, check_program]
+use jet_foundation.[DIAGNOSTIC_ERROR]
+
 fn shared_cycle_expect(source: String, fields: [String]) {
     parsed :: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("shared cycle fixture must parse")
@@ -16,7 +20,7 @@ fn shared_cycle_expect(source: String, fields: [String]) {
     if found != wanted -> panic("shared cycle fields differ from the canonical graph")
 }
 
-fn run() {
+#Test("shared_cycle_parity") {
     shared_cycle_expect("struct Node {{\nnext: Shared<Node>?\n}}", [String]{"next"})
     shared_cycle_expect("struct First {{\nsecond: Shared<Second>?\n}}\nstruct Second {{\nfirst: Shared<First>?\n}}", [String]{"first", "second"})
     // By-value containers can carry the strong edge; tuples and results are

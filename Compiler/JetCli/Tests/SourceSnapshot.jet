@@ -1,5 +1,15 @@
 // The full canonical compiler unit exercises the source authorization path,
 // not a leaf-only approximation or a semantic compile used as a load query.
+use jet_driver.[JetDriverAuthorizedSourceFile]
+use jet_foundation.[AppAuthorizedDirectory]
+use jet_cli.[
+    JET_CLI_MAX_SOURCE_FILES, JET_CLI_MAX_SOURCE_TOTAL, JetCLISourceBudget,
+    jet_cli_build_read_chain_current, jet_cli_cache_file, jet_cli_foreign_cache_files,
+    jet_cli_hold_root_chain, jet_cli_identity_key, jet_cli_read_held_source,
+    jet_cli_read_rooted_source, jet_cli_replace_source_budget, jet_cli_source_read_limit,
+    jet_cli_walk_held_sources, jet_cli_walk_sources,
+]
+
 fn snapshot_fixture_files(root: String) -> [JetDriverAuthorizedSourceFile] {
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
@@ -8,7 +18,7 @@ fn snapshot_fixture_files(root: String) -> [JetDriverAuthorizedSourceFile] {
     files
 }
 
-fn run() {
+#Test("source_snapshot") {
     root :: "{cli_sys.temp_dir()}/jet-source-snapshot-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/sub") ?? panic("source root")
     cli_files.create_dir_all("{root}/empty") ?? panic("empty directory")
