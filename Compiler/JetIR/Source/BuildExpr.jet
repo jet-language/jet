@@ -720,6 +720,7 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
                 if tuple < 0 || index < 0 || index >= members.len() -> return ir_fail_slot(&b, span, "tuple index {index} of {ir_type_name(base.ty)}")
                 return ir_member_read(&m, &b, tuple, members[index])
             }
+            if call == .NumericBounds(bound_ty, member) -> return ir_numeric_bound(&m, &b, expression.ty, bound_ty, member, span)
             return ir_fail_slot(&b, span, "host call {ir_host_call_name(call)}")
         }
         .EnumLit(enum_type, variant, payload) -> return ir_enum_value(&m, &p, &b, expression.ty, enum_type, variant, payload, span)

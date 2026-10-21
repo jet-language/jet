@@ -2,8 +2,8 @@
 // the old path's route table (argument and result carriers, payloads).
 
 use jet_foundation.[CoreCallRecord, Span, Type, TBuiltinOp, TClosureOp, TExpr, tir_builtin_mutates_receiver]
-use jet_backend.[LowerRouteCarrier, lower_runtime_handle, lower_runtime_route, runtime_abi_atom]
-use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type]
+use jet_backend.[LowerRouteCarrier, lower_float_constant_bits, lower_runtime_handle, lower_runtime_route, runtime_abi_atom]
+use jet_codegen.[jet_codegen_builtin_route_plan, jet_codegen_canonical_core_record, jet_codegen_failure_carrier_for_type, jet_codegen_numeric_bound_constant]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
 // when full, then stores the element at `len` (Lower lower_helper_list_push).
@@ -1265,13 +1265,39 @@ fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: Co
         .SourceOwned -> { return ir_fail_slot(&b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
     slots := [Int]{}
-    loop arg in args {
+    borrow_mask :: canonical.signature.borrow_mask
+    loop (index, arg) in args {
         slot :: ir_expr(&m, &p, &b, arg)
         if ir_failed(b) -> return -1
-        &slots.push(slot)
+        // Bounded Core slots take I64, but a volatile store writes the
+        // checked T through Ptr<T> and `keep<T>` returns its argument at the
+        // checked type: neither narrows exact Int.
+        typed_carrier_value :: (canonical.module_name == "core.mem" && canonical.member == "volatile_write" && index == 1) || (canonical.module_name == "core.prelude" && canonical.member == "keep")
+        if !typed_carrier_value && index < borrow_mask.len() && !borrow_mask[index] && ir_untag(arg.ty) == Type.Int {
+            &slots.push(ir_core_native_int(&m, &b, slot, span))
+            if ir_failed(b) -> return -1
+        } else {
+            &slots.push(slot)
+        }
     }
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
-    ir_route(&m, &p, &b, symbol, slots, canonical.signature.borrow_mask, result, span)
+    ir_route(&m, &p, &b, symbol, slots, borrow_mask, result, span)
+}
+
+// An exact Int Core operand narrowed to its I64 slot: the checked fixed
+// conversion (jet_int_checked_fixed, host kind I64) stops with E3010 when
+// the value does not fit.
+fn ir_core_native_int(m: &IRModule, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+    if value < 0 || ir_kind_of(m, b, value) != .Int -> return ir_fail_slot(&b, span, "checked I64 narrowing of a Core operand")
+    word_row :: ir_word_row(&m)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    kind_word :: ir_int_constant(&m, &b, int_row, 3)
+    args := [Int]{value, kind_word}
+    site :: b.line
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    narrowed :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_fixed"), args, word_row)
+    ir_release(&m, &b, value)
+    narrowed
 }
 
 // The C export of a Prelude route symbol (its last `::` segment when the
@@ -1280,4 +1306,27 @@ fn ir_route_export(symbol: String) -> String Never! {
     if lower_runtime_route(symbol) == .Val(route) -> return route.export
     parts :: symbol.split("::").to_list()
     parts[parts.len() - 1].copy()
+}
+
+// `Int.MAX`, `I32.MIN`, `Float.NAN`, ...: the checked bound as a constant
+// (codegen NumericBounds: jet_codegen_numeric_bound_constant).
+fn ir_numeric_bound(m: &IRModule, b: &IRBuilder, result: Type, ty: Type, member: String, span: Span) -> Int Never! {
+    constant :: jet_codegen_numeric_bound_constant(ty, member) ?? return ir_fail_slot(&b, span, "numeric bound {member} of {ir_type_name(ty)}")
+    row :: ir_type_row(&m, result) ?? return ir_type_fail(&b, span, result)
+    if constant == {
+        .Float(value, f32, _) -> {
+            slot :: ir_temp(&m, &b, row)
+            line :: b.line
+            ir_emit(&b.f, IROp.Const, slot, lower_float_constant_bits(value, f32), -1, -1, line)
+            return slot
+        }
+        .Int(value, _, _) -> {
+            if m.types[row].kind == .Int -> return ir_int_constant(&m, &b, row, value)
+            slot :: ir_temp(&m, &b, row)
+            line :: b.line
+            ir_emit(&b.f, IROp.Const, slot, value, -1, -1, line)
+            return slot
+        }
+        else -> return ir_fail_slot(&b, span, "numeric bound {member} of {ir_type_name(ty)}")
+    }
 }
