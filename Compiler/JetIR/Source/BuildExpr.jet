@@ -26,6 +26,7 @@ fn ir_build_function(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc
     loop param in function.params {
         if ir_param_slot(&m, p, &b, param.ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(&b, param.span, "parameter type {ir_type_name(param.ty)}")
     }
+    ir_arm_params(&m, &p, &b, function)
     b.cells = ir_mutable_captures(function.body)
     ir_cell_params(&m, &b)
     b.plain = ir_plain_return(function) != None
@@ -54,6 +55,36 @@ fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Boo
     slot :: ir_new_slot(&b, row, IRSlotKind.Param, ir_intern_name(&m, name))
     &b.bindings.push(IRBinding{name: name, slot: slot, owned: owned && m.types[row].drop != "", write: write})
     Val(slot)
+}
+
+// The variables a body owns from its start close what they still own when
+// the body ends: a move parameter and a move receiver, and the receiver of
+// a type's own close method, which closes only its parts.
+fn ir_arm_params(m: &IRModule, p: &IRProgram, b: &IRBuilder, function: TFunc) Never! {
+    receiver :: ir_receiver_access(function.kind)
+    at := 0
+    if receiver != "static" {
+        if b.bindings.len() == 0 -> return
+        self_slot :: b.bindings[0].slot
+        own_close := false
+        if function.name == "close" && b.bindings[0].indirect < 0 {
+            row :: p.rows.get(function.key) ?? -1
+            own_close = row >= 0 && ir_close_method(m, p, b.f.slot_type[self_slot]) == row
+        }
+        if own_close {
+            ir_close_arm(&m, &p, &b, self_slot, true, function.source_span)
+        } else if receiver == "move" && b.bindings[0].indirect < 0 {
+            ir_close_arm(&m, &p, &b, self_slot, false, function.source_span)
+        }
+        at = 1
+    }
+    loop param in function.params {
+        if at >= b.bindings.len() -> return
+        slot :: b.bindings[at].slot
+        indirect :: b.bindings[at].indirect
+        at += 1
+        if param.convention == .Move && indirect < 0 -> ir_close_arm(&m, &p, &b, slot, false, param.span)
+    }
 }
 
 // The parameters a closure of the body writes move into frame cells.
@@ -156,6 +187,8 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
                 return
             }
             ir_bind_local(&m, &b, local, value)
+            bound :: b.bindings[b.bindings.len() - 1].slot
+            ir_close_arm(&m, &p, &b, bound, false, span)
         }
         .Assign(place, op, value, line, span) -> {
             if line > 0 -> b.line = line
@@ -196,7 +229,10 @@ fn ir_stmt(m: &IRModule, p: &IRProgram, b: &IRBuilder, statement: TStmt) Never! 
                 b.fresh[owned] = false
                 return
             }
+            // A variable that closes its value closes the old one first.
+            ir_close_now(&b, binding.slot)
             ir_store(&m, &b, binding.slot, owned)
+            ir_close_rearm(&b, binding.slot)
         }
         .ExprStmt(value, _) -> {
             result :: ir_expr(&m, &p, &b, value)
@@ -568,6 +604,11 @@ fn ir_assign_place(m: &IRModule, p: &IRProgram, b: &IRBuilder, place: TExpr, op:
         if m.types[member.ty].drop != "" {
             old :: ir_member_read(&m, &b, base, member)
             ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        }
+        glue :: ir_close_glue(&m, &p, &b, member.ty, false, span)
+        if glue >= 0 {
+            old :: ir_member_value(&m, &b, base, member)
+            ir_close_call(&b, glue, old)
         }
         ir_member_write(&m, &b, base, member, result)
         return
@@ -1026,6 +1067,11 @@ fn ir_expr(m: &IRModule, p: &IRProgram, b: &IRBuilder, expression: TExpr) -> Int
 fn ir_drop_value(m: &IRModule, p: &IRProgram, b: &IRBuilder, value: TExpr, span: Span) -> Int Never! {
     if value.kind == .Local(local) {
         binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "drop of unknown local {local.name}")
+        if binding.indirect < 0 && ir_closes(b, binding.slot) {
+            // A value that closes closes now, and its scope no longer closes it.
+            ir_close_now(&b, binding.slot)
+            ir_close_disarm(&b, binding.slot)
+        }
         if !ir_has_drop(m, b, binding.slot) && binding.indirect < 0 -> return -1
         if !binding.owned || binding.indirect >= 0 -> return ir_fail_slot(&b, span, "drop of {local.name}, which the function does not own")
         ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
@@ -1575,6 +1621,7 @@ fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [
     moves := [Bool]{}
     backs := receiver_backs
     if receiver >= 0 {
+        if ir_receiver_access(p.functions[row].kind) == "move" -> ir_close_disarm(&b, receiver)
         &slots.push(if ir_receiver_access(p.functions[row].kind) == "move" -> ir_own(&m, &b, receiver) else -> receiver)
         &moves.push(ir_receiver_access(p.functions[row].kind) == "move")
     }
@@ -1595,6 +1642,7 @@ fn ir_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, key: String, type_args: [
         slot :: if arg.widen_to_union == .Val(union_ty) -> ir_widen_union(&m, &p, &b, arg.value, union_ty, span) else -> ir_value_as(&m, &p, &b, arg.value, param_row, span)
         if ir_failed(b) -> return -1
         if slot < 0 -> return ir_fail_slot(&b, span, "Unit call argument")
+        if params[index].convention == .Move -> ir_close_disarm(&b, slot)
         &slots.push(if params[index].convention == .Move -> ir_own(&m, &b, slot) else -> slot)
         &moves.push(params[index].convention == .Move)
     }
@@ -1673,6 +1721,18 @@ fn ir_place_address(m: &IRModule, p: &IRProgram, b: &IRBuilder, place: TExpr, ba
         address :: ir_temp(&m, &b, row)
         ir_emit(&b.f, IROp.Offset, address, element, 0, -1, b.line)
         return address
+    }
+    // `f(make())` into a write parameter: the call's fresh aggregate result is
+    // its own place, which the call releases after the callee wrote it.
+    temporary :: if place.kind == {
+        .Call(_, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> true
+        else -> false
+    }
+    if temporary {
+        value :: ir_expr(&m, &p, &b, place)
+        if ir_failed(b) || value < 0 -> return -1
+        if ir_kind_of(m, b, value) == .Aggregate -> return ir_own(&m, &b, value)
+        return ir_fail_slot(&b, span, "write place {ir_expr_kind_name(place.kind)} of {ir_type_name(place.ty)}")
     }
     ir_fail_slot(&b, span, "write place {ir_expr_kind_name(place.kind)}")
 }
@@ -2323,6 +2383,12 @@ fn ir_try_failure(m: &IRModule, p: &IRProgram, b: &IRBuilder, subject: Int, is_r
         ir_return_slot(&m, &p, &b, null, span)
         return
     }
+    // An infallible or diverging function's failure edge is dead (codegen
+    // jet_codegen_lower_try_value `.Infallible` / `.Diverges`).
+    if conversion != .ProtocolExit && (b.failure == .Infallible || b.failure == .Diverges(_)) {
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        return
+    }
     ir_fail(&b, span, "`?` without a matching failure carrier")
 }
 
@@ -2499,8 +2565,10 @@ fn ir_loop_jump(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, exit
 fn ir_list_literal(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, values: [TExpr], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     element_row := -1
-    if ir_untag(ty) == .List(element) {
-        element_row = ir_value_type(&m, p, element) ?? -1
+    // A `[T#N]` literal is the List of its N elements (codegen BuildList).
+    if ir_untag(ty) == {
+        .List(element) | .FixedList(element, _) -> element_row = ir_value_type(&m, p, element) ?? -1
+        else -> {}
     }
     if element_row < 0 -> return ir_fail_slot(&b, span, "list literal of {ir_type_name(ty)}")
     elements := [Int]{}
@@ -2903,7 +2971,9 @@ fn ir_build_lambda(m: &IRModule, p: &IRProgram, b: &IRBuilder, job: IRLambdaJob)
             pointer_row :: ir_pointer_row(&m)
             address :: ir_temp(&m, &b, if aggregate -> capture.row else -> pointer_row)
             ir_emit(&b.f, IROp.Load, address, env, capture.offset, -1, b.line)
-            &b.bindings.push(IRBinding{name: capture.name, slot: address, indirect: if aggregate -> -1 else -> capture.row})
+            // A captured aggregate is the outer variable's storage: a whole
+            // assignment in the body writes through it.
+            &b.bindings.push(IRBinding{name: capture.name, slot: address, indirect: if aggregate -> -1 else -> capture.row, write: aggregate})
         } else {
             pointer_row :: ir_pointer_row(&m)
             address :: ir_temp(&m, &b, if aggregate -> capture.row else -> pointer_row)

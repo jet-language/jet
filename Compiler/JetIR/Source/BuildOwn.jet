@@ -1,0 +1,402 @@
+// The IR builder's value ownership beyond a runtime drop: a copy that owns
+// every buffer of its own (Lower's clone glue, Lists.jet
+// lower_list_clone_glue and Places.jet lower_glue_clone_fields), and the
+// close of a Close value, or of a value holding one, when the variable that
+// owns it goes out of scope (Lower Values.jet lower_close_frame /
+// lower_close_drop_glue, PartialDrop.jet lower_contains_close).
+
+use jet_foundation.[Span, Type]
+
+// The element row of a type row whose value is a List-shaped buffer header
+// (a List, a View, a Map's entries), None for any other.
+fn ir_buffer_element(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
+    if m.types[row].kind != .Aggregate -> return None
+    ty :: ir_untag(m.types[row].ty)
+    element :: if ty == .List(element) -> Val(element.copy()) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
+    if element == .Val(element_ty) -> return ir_value_type(&m, p, element_ty)
+    None
+}
+
+// The inline members of a tuple or struct type row, None for any other.
+fn ir_inline_members(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
+    if m.types[row].kind != .Aggregate -> return None
+    ty :: ir_untag(m.types[row].ty)
+    if ty == .Tuple(fields) -> return ir_tuple_members(&m, p, fields)
+    if ir_native_carrier(ty) -> return None
+    name :: ir_nominal_name(ty) ?? return None
+    definition :: ir_type_def(p, name) ?? return None
+    if p.types[definition].kind == .Struct(_, _) -> return ir_struct_members(&m, p, definition, ir_type_args(ty))
+    None
+}
+
+// Whether a byte copy of a value of type row `row` still shares something
+// with its source: a buffer, or a value with a runtime clone.
+fn ir_copy_needs(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if m.types[row].clone != "" -> return true
+    if m.types[row].kind != .Aggregate -> return false
+    if ir_buffer_element(&m, p, row) != None -> return true
+    members :: ir_inline_members(&m, p, row) ?? return false
+    loop member in members {
+        if !member.boxed && ir_copy_needs(&m, p, member.ty) -> return true
+    }
+    false
+}
+
+// Gives the byte copy at `at` of a value of the aggregate type row `row`
+// storage of its own: each buffer is copied (its capacity is its length) and
+// each value with a runtime clone is cloned. `copying` holds the rows being
+// copied, so a type reaching itself copies through its helper function.
+fn ir_copy_fixup(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int, copying: [Int]) Never! {
+    if !ir_copy_needs(&m, p, row) -> return
+    if copying.contains(row) {
+        helper :: ir_copy_helper(&m, p, &b, row)
+        start :: ir_args(&b.f, [Int]{at})
+        ir_emit(&b.f, IROp.Call, -1, helper, start, 1, b.line)
+        return
+    }
+    inner := copying.copy()
+    &inner.push(row)
+    ir_copy_fixup_body(&m, p, &b, row, at, inner)
+}
+
+fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int, copying: [Int]) Never! {
+    if ir_buffer_element(&m, p, row) == .Val(element) {
+        length :: ir_load_word(&m, &b, at, 0)
+        stride :: ir_list_stride(m, element)
+        width :: ir_word_const(&m, &b, stride)
+        bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
+        ir_emit(&b.f, IROp.Store, -1, at, 8, length, b.line)
+        align :: ir_word_const(&m, &b, 8)
+        padded :: ir_word_op(&m, &b, IROp.Add, bytes, align)
+        word_row :: ir_word_row(&m)
+        data :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{padded, align}, word_row)
+        source :: ir_load_word(&m, &b, at, 16)
+        _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, source, bytes}, -1)
+        ir_emit(&b.f, IROp.Store, -1, at, 16, data, b.line)
+        if !ir_copy_needs(&m, p, element) -> return
+        index :: ir_word_const(&m, &b, 0)
+        done :: ir_open(&b.f, IROp.Block, b.line)
+        _ :: ir_open(&b.f, IROp.Loop, b.line)
+        more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
+        ir_exit_unless(&m, &b, more, done)
+        address :: ir_element_address(&m, &b, data, index, stride)
+        ir_copy_fixup_at(&m, p, &b, element, address, 0, copying)
+        one :: ir_word_const(&m, &b, 1)
+        ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_end(&b.f, b.line)
+        return
+    }
+    members :: ir_inline_members(&m, p, row) ?? return
+    loop member in members {
+        if member.boxed || !ir_copy_needs(&m, p, member.ty) -> next
+        ir_copy_fixup_at(&m, p, &b, member.ty, at, member.offset, copying)
+    }
+}
+
+// The value of type row `row` at byte `offset` of `base`: an aggregate gets
+// storage of its own in place, a value with a runtime clone is cloned.
+fn ir_copy_fixup_at(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, offset: Int, copying: [Int]) Never! {
+    if m.types[row].kind == .Aggregate {
+        address :: ir_load_at(&m, &b, base, offset, row)
+        ir_copy_fixup(&m, p, &b, row, address, copying)
+        return
+    }
+    clone :: m.types[row].clone
+    if clone == "" -> return
+    value :: ir_load_at(&m, &b, base, offset, row)
+    copied :: ir_runtime(&m, &b, clone, [Int]{value}, row)
+    ir_emit(&b.f, IROp.Store, -1, base, offset, copied, b.line)
+}
+
+// The IR function giving the byte copy at its parameter of a value of type
+// row `row` storage of its own (built on first use).
+fn ir_copy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
+    helper_key :: "#copy<{row}>"
+    known :: m.function_rows.get(helper_key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    source_file :: b.f.source_file
+    symbol :: "{b.f.symbol}__copy{id}"
+    &m.functions.push(ir_function_new("copy", helper_key, symbol, source_file, b.line))
+    m.function_rows[helper_key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    a.line = b.line
+    at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
+    ir_copy_fixup_body(&m, p, &a, row, at, [Int]{row})
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
+}
+
+// A variable whose value closes when its scope ends: `glue` closes the value
+// in `slot` while the Bool slot `armed` holds; a move out of the variable
+// clears `armed`.
+struct IRClose { slot: Int, armed: Int, glue: Int }
+
+// The selected Close method (a p.functions row) of type row `row`, -1 for none.
+fn ir_close_method(m: IRModule, p: IRProgram, row: Int) -> Int Never! {
+    key :: ir_render_type_key(p.type_rows, p.types, m.types[row].ty)
+    p.close_methods.get(key) ?? -1
+}
+
+// The type rows a value of type row `row` holds directly: tuple and struct
+// members, buffer elements, an Option's payload, a Result's two sides and
+// every enum variant's payload members.
+fn ir_close_part_rows(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
+    parts := [Int]{}
+    kind :: m.types[row].kind
+    ty :: ir_untag(m.types[row].ty)
+    if kind == .Aggregate {
+        if ir_buffer_element(&m, p, row) == .Val(element) {
+            &parts.push(element)
+            return parts
+        }
+        members :: ir_inline_members(&m, p, row) ?? return parts
+        loop member in members -> &parts.push(member.ty)
+        return parts
+    }
+    if kind != .Pointer -> return parts
+    if ty == .Option(inner) {
+        if ir_value_type(&m, p, inner) == .Val(inner_row) -> &parts.push(inner_row)
+        return parts
+    }
+    if ty == .Result(ok, err) {
+        if ir_value_type(&m, p, ok) == .Val(ok_row) -> &parts.push(ok_row)
+        if ir_value_type(&m, p, err) == .Val(err_row) -> &parts.push(err_row)
+        return parts
+    }
+    definition :: ir_enum_def(m, p, row) ?? return parts
+    if p.types[definition].kind == .Enum(variants, _) {
+        args :: ir_type_args(ty)
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition, args, index) ?? next
+            loop member in members -> &parts.push(member.ty)
+        }
+    }
+    parts
+}
+
+// Whether some part of a value of type row `row`, at any depth, has a Close
+// method (Lower lower_contains_close).
+fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    seen := [Int:Bool]{}
+    seen[row] = true
+    pending := ir_close_part_rows(&m, p, row)
+    loop pending.len() > 0 {
+        part :: &pending.pop() ?? break
+        if seen.get(part) != None -> next
+        seen[part] = true
+        if ir_close_method(m, p, part) >= 0 -> return true
+        loop next_row in ir_close_part_rows(&m, p, part) -> &pending.push(next_row)
+    }
+    false
+}
+
+// The IR function closing a value of type row `row` (its Close method, else
+// each part that closes, in declaration order), or only its parts when
+// `members_only` (the receiver of the type's own close method); -1 when
+// nothing in the value closes or its glue cannot be built.
+fn ir_close_glue(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
+    key :: if members_only -> "#close.members<{row}>" else -> "#close<{row}>"
+    known :: p.close_glue.get(key) ?? -3
+    if known == -2 {
+        ir_fail(&b, span, "close of {ir_type_name(m.types[row].ty)}")
+        return -1
+    }
+    if known != -3 -> return known
+    method :: if members_only -> -1 else -> ir_close_method(m, p, row)
+    if method < 0 && !ir_close_parts_reach(&m, p, row) {
+        p.close_glue[key] = -1
+        return -1
+    }
+    id :: m.functions.len()
+    source_file :: b.f.source_file
+    symbol :: "{b.f.symbol}__close{id}"
+    &m.functions.push(ir_function_new("close", key, symbol, source_file, b.line))
+    m.function_rows[key] = id
+    p.close_glue[key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    a.line = b.line
+    value :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
+    if method >= 0 {
+        method_key :: p.functions[method].key.copy()
+        generic :: p.functions[method].generic_params.len() > 0
+        args :: if generic -> ir_row_args(m, row) else -> [Type]{}
+        callee :: ir_function_id(&m, &p, method_key, args) ?? -1
+        if callee < 0 {
+            ir_fail(&a, span, "the Close method of {ir_type_name(m.types[row].ty)}")
+        } else {
+            start :: ir_args(&a.f, [Int]{value})
+            ir_emit(&a.f, IROp.Call, -1, callee, start, 1, a.line)
+        }
+    } else {
+        ir_close_parts(&m, &p, &a, row, value, span)
+    }
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        p.close_glue[key] = -2
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
+}
+
+// Closes each part of the value in `value` (type row `row`) that closes.
+fn ir_close_parts(m: &IRModule, p: &IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) Never! {
+    kind :: m.types[row].kind
+    ty :: ir_untag(m.types[row].ty)
+    if kind == .Aggregate {
+        if ir_buffer_element(&m, p, row) == .Val(element) {
+            glue :: ir_close_glue(&m, &p, &b, element, false, span)
+            if glue < 0 -> return
+            length :: ir_load_word(&m, &b, value, 0)
+            data :: ir_load_word(&m, &b, value, 16)
+            stride :: ir_list_stride(m, element)
+            index :: ir_word_const(&m, &b, 0)
+            done :: ir_open(&b.f, IROp.Block, b.line)
+            _ :: ir_open(&b.f, IROp.Loop, b.line)
+            more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
+            ir_exit_unless(&m, &b, more, done)
+            address :: ir_element_address(&m, &b, data, index, stride)
+            item :: ir_load_at(&m, &b, address, 0, element)
+            ir_close_call(&b, glue, item)
+            one :: ir_word_const(&m, &b, 1)
+            ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+            ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            ir_end(&b.f, b.line)
+            return
+        }
+        members :: ir_inline_members(&m, p, row) ?? return
+        loop member in members {
+            glue :: ir_close_glue(&m, &p, &b, member.ty, false, span)
+            if glue < 0 -> next
+            item :: ir_member_value(&m, &b, value, member)
+            ir_close_call(&b, glue, item)
+        }
+        return
+    }
+    if kind != .Pointer -> return
+    if ty == .Option(inner) {
+        inner_row :: ir_value_type(&m, p, inner) ?? return
+        glue :: ir_close_glue(&m, &p, &b, inner_row, false, span)
+        if glue < 0 -> return
+        some :: ir_option_is_some(&m, &b, value)
+        ir_open_if(&b.f, some, b.line)
+        payload :: ir_load_at(&m, &b, value, 0, inner_row)
+        ir_close_call(&b, glue, payload)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .Result(ok, err) {
+        ok_row :: ir_value_type(&m, p, ok) ?? return
+        err_row :: ir_value_type(&m, p, err) ?? return
+        ok_glue :: ir_close_glue(&m, &p, &b, ok_row, false, span)
+        err_glue :: ir_close_glue(&m, &p, &b, err_row, false, span)
+        if ok_glue < 0 && err_glue < 0 -> return
+        is_ok :: ir_result_is_ok(&m, &b, value)
+        ir_open_if(&b.f, is_ok, b.line)
+        if ok_glue >= 0 {
+            ok_value :: ir_load_at(&m, &b, value, 8, ok_row)
+            ir_close_call(&b, ok_glue, ok_value)
+        }
+        ir_else(&b.f, b.line)
+        if err_glue >= 0 {
+            err_value :: ir_load_at(&m, &b, value, 8, err_row)
+            ir_close_call(&b, err_glue, err_value)
+        }
+        ir_end(&b.f, b.line)
+        return
+    }
+    definition :: ir_enum_def(m, p, row) ?? return
+    if p.types[definition].kind == .Enum(variants, _) {
+        args :: ir_type_args(ty)
+        count :: variants.len()
+        discriminant :: ir_enum_tag_of(&m, &b, value)
+        loop index in 0..<count {
+            members :: ir_variant_members(&m, p, definition, args, index) ?? next
+            glues := [Int]{}
+            closing := false
+            loop member in members {
+                glue :: ir_close_glue(&m, &p, &b, member.ty, false, span)
+                &glues.push(glue)
+                if glue >= 0 -> closing = true
+            }
+            if !closing -> next
+            variant_word :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, discriminant, variant_word)
+            ir_open_if(&b.f, selected, b.line)
+            loop (at, member) in members {
+                if glues[at] < 0 -> next
+                item :: ir_member_value(&m, &b, value, member)
+                ir_close_call(&b, glues[at], item)
+            }
+            ir_end(&b.f, b.line)
+        }
+    }
+}
+
+fn ir_close_call(b: &IRBuilder, glue: Int, value: Int) Never! {
+    if value < 0 -> return
+    start :: ir_args(&b.f, [Int]{value})
+    ir_emit(&b.f, IROp.Call, -1, glue, start, 1, b.line)
+}
+
+// Arms the close of the variable in `slot` when its value closes.
+fn ir_close_arm(m: &IRModule, p: &IRProgram, b: &IRBuilder, slot: Int, members_only: Bool, span: Span) Never! {
+    if slot < 0 -> return
+    row :: b.f.slot_type[slot]
+    glue :: ir_close_glue(&m, &p, &b, row, members_only, span)
+    if glue < 0 -> return
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    armed :: ir_new_slot(&b, bool_row, IRSlotKind.Local, -1)
+    ir_emit(&b.f, IROp.Const, armed, 1, -1, -1, b.line)
+    &b.closes.push(IRClose{slot: slot, armed: armed, glue: glue})
+}
+
+// The value in `slot` moves out of its variable: its scope no longer closes it.
+fn ir_close_disarm(b: &IRBuilder, slot: Int) Never! {
+    if slot < 0 || b.closes.len() == 0 -> return
+    loop index in 0..<b.closes.len() {
+        close :: b.closes[index]
+        if close.slot == slot -> ir_emit(&b.f, IROp.Const, close.armed, 0, -1, -1, b.line)
+    }
+}
+
+// Re-arms the variable in `slot` after a new value is stored into it.
+fn ir_close_rearm(b: &IRBuilder, slot: Int) Never! {
+    if slot < 0 || b.closes.len() == 0 -> return
+    loop index in 0..<b.closes.len() {
+        close :: b.closes[index]
+        if close.slot == slot -> ir_emit(&b.f, IROp.Const, close.armed, 1, -1, -1, b.line)
+    }
+}
+
+// Closes the value of the variable in `slot` now if it still owns it (its
+// scope ends, or a new value replaces it).
+fn ir_close_now(b: &IRBuilder, slot: Int) Never! {
+    if slot < 0 || b.closes.len() == 0 -> return
+    index := b.closes.len() - 1
+    loop index >= 0 {
+        close :: b.closes[index]
+        index -= 1
+        if close.slot != slot -> next
+        ir_open_if(&b.f, close.armed, b.line)
+        ir_close_call(&b, close.glue, slot)
+        ir_end(&b.f, b.line)
+        return
+    }
+}
+
+// Whether the variable in `slot` closes its value.
+fn ir_closes(b: IRBuilder, slot: Int) -> Bool Never! {
+    loop close in b.closes {
+        if close.slot == slot -> return true
+    }
+    false
+}

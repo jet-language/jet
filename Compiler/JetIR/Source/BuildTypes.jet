@@ -512,10 +512,14 @@ fn ir_enum_def(m: IRModule, p: IRProgram, ty: Int) -> Int? Never! {
     None
 }
 
-// The index of variant `name` of the enum declaration `row`, by its name or
-// the last segment of its key.
+// The index of variant `name` of the enum declaration `row`, by its name,
+// its key's `:`-suffix (a grouped leaf's key ends `Msg:Net.Packet`), or the
+// last segment of its key.
 fn ir_variant_index(p: IRProgram, row: Int, name: String) -> Int? Never! {
     if p.types[row].kind == .Enum(variants, _) {
+        loop (index, variant) in variants {
+            if name == variant.name || name.ends_with(":{variant.name}") -> return Val(index)
+        }
         short := name
         separators :: [String]{"::", ".", ":"}
         loop separator in separators {
@@ -1927,9 +1931,117 @@ fn ir_numeric_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, recei
             ir_release(&m, &b, value)
             return result
         }
+        .CheckedIntToFloat(_, _, line) -> {
+            site :: if line > 0 -> line else -> b.line
+            result :: ir_checked_widen(&m, &b, value, target, site, span)
+            ir_release(&m, &b, value)
+            return result
+        }
         .FloatToInt(_, _, _, _, _) -> return ir_float_to_int(&m, p, &b, value, ty, span)
         else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
+}
+
+// `Float{n}` / `Float32{n}` of an integer (Lower Convert.jet
+// lower_convert_checked_widen): the integer crosses only when the target
+// holds it exactly, i.e. its magnitude without trailing zero bits is below
+// 2^53 (2^24 for Float32); otherwise the program stops with the shared
+// widening message. A fixed word is checked and converted inline (the
+// runtime's own widening converts such a word, so it must not call the
+// route). An exact Int calls jet_int_checked_widen(value, f32, file, line)
+// with the source file as a String; an F32 target gets an exact f64 back.
+fn ir_checked_widen(m: &IRModule, b: &IRBuilder, value: Int, target: Int, line: Int, span: Span) -> Int Never! {
+    source :: m.types[b.f.slot_type[value]]
+    single :: m.types[target].kind == .Float32
+    if !single && m.types[target].kind != .Float -> return ir_fail_slot(&b, span, "checked widening to {ir_type_name(m.types[target].ty)}")
+    float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "checked widening without a Float row")
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    if source.kind == .Int {
+        flag :: ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, IROp.Const, flag, if single -> 1 else -> 0, -1, -1, b.line)
+        string_row :: ir_string_row(&m)
+        file :: ir_temp(&m, &b, string_row)
+        path :: ir_intern_text(&m, b.f.source_file)
+        ir_emit(&b.f, IROp.ConstText, file, path, -1, -1, b.line)
+        site :: ir_word_const(&m, &b, line)
+        wide :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_widen"), [Int]{value, flag, file, site}, float_row)
+        if !single -> return wide
+        narrow :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, narrow, wide, -1, -1, b.line)
+        return narrow
+    }
+    if source.kind != .Word || source.bits > 64 -> return ir_fail_slot(&b, span, "checked widening of {ir_type_name(source.ty)}")
+    // A narrow word is extended by its own signedness and below 2^63, so
+    // only a 64-bit unsigned word needs the unsigned conversion.
+    unsigned_word :: !source.signed && source.bits == 64
+    u64_row :: ir_type_row(&m, Type.IntN{signed: false, bits: 64}) ?? 0
+    word_row :: ir_word_row(&m)
+    signed_word :: ir_copy_word(&m, &b, value, word_row)
+    magnitude :: ir_copy_word(&m, &b, value, u64_row)
+    zero :: ir_const_like(&m, &b, magnitude, 0)
+    if !unsigned_word {
+        signed_zero :: ir_const_like(&m, &b, signed_word, 0)
+        negative :: ir_bool_op(&m, &b, IROp.Lt, signed_word, signed_zero)
+        ir_open_if(&b.f, negative, b.line)
+        negated :: ir_temp_like(&m, &b, magnitude)
+        ir_emit(&b.f, IROp.Sub, negated, zero, magnitude, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Copy, magnitude, negated, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    // m & -m is the lowest set bit; m / lowbit has no trailing zeros.
+    negated_magnitude :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Sub, negated_magnitude, zero, magnitude, IR_OVERFLOW_WRAP, b.line)
+    lowest :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.BitAnd, lowest, magnitude, negated_magnitude, IR_OVERFLOW_WRAP, b.line)
+    divisor :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Copy, divisor, lowest, -1, -1, b.line)
+    is_zero :: ir_bool_op(&m, &b, IROp.Eq, lowest, zero)
+    ir_open_if(&b.f, is_zero, b.line)
+    ir_emit(&b.f, IROp.Const, divisor, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    odd :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Div, odd, magnitude, divisor, IR_OVERFLOW_WRAP, b.line)
+    limit :: ir_const_like(&m, &b, magnitude, if single -> 1 << 24 else -> 1 << 53)
+    inexact :: ir_bool_op(&m, &b, IROp.Ge, odd, limit)
+    ir_open_if(&b.f, inexact, b.line)
+    args := ir_location(&m, &b, line)
+    loop arg in ir_static_text(&m, &b, "whole number cannot cross into the decimal without losing precision") -> &args.push(arg)
+    _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", args, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result :: ir_temp(&m, &b, target)
+    if !unsigned_word {
+        // Convert reads the word as signed 64-bit; an accepted value is exact.
+        ir_emit(&b.f, IROp.Convert, result, signed_word, -1, -1, b.line)
+        return result
+    }
+    // An unsigned word at or above 2^63 converts its upper 63 bits, doubled,
+    // plus its low bit: exact, since the value was accepted.
+    wide :: ir_temp(&m, &b, float_row)
+    signed_zero :: ir_const_like(&m, &b, signed_word, 0)
+    low_range :: ir_bool_op(&m, &b, IROp.Ge, signed_word, signed_zero)
+    ir_open_if(&b.f, low_range, b.line)
+    ir_emit(&b.f, IROp.Convert, wide, signed_word, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    one :: ir_const_like(&m, &b, magnitude, 1)
+    half :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Shr, half, magnitude, one, IR_OVERFLOW_WRAP, b.line)
+    half_word :: ir_copy_word(&m, &b, half, word_row)
+    half_float :: ir_temp(&m, &b, float_row)
+    ir_emit(&b.f, IROp.Convert, half_float, half_word, -1, -1, b.line)
+    two :: ir_int_constant(&m, &b, float_row, 4611686018427387904)
+    doubled :: ir_temp(&m, &b, float_row)
+    ir_emit(&b.f, IROp.Mul, doubled, half_float, two, IR_OVERFLOW_WRAP, b.line)
+    low_bit :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.BitAnd, low_bit, magnitude, one, IR_OVERFLOW_WRAP, b.line)
+    low_word :: ir_copy_word(&m, &b, low_bit, word_row)
+    low_float :: ir_temp(&m, &b, float_row)
+    ir_emit(&b.f, IROp.Convert, low_float, low_word, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Add, wide, doubled, low_float, IR_OVERFLOW_WRAP, b.line)
+    ir_end(&b.f, b.line)
+    if !single -> return wide
+    ir_emit(&b.f, IROp.Convert, result, wide, -1, -1, b.line)
+    result
 }
 
 // The value of an integer literal expression (`5`, `-5`).
@@ -1980,7 +2092,29 @@ fn ir_numeric_cast(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target
             return result
         }
         if source.signed -> return ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{value}, target)
-        return ir_fail_slot(&b, span, "U64 to Int conversion")
+        // U64 (Lower lower_convert_u64_exact): a word below 2^63 is the I64
+        // widening; above it the exact value is (word & I64.MAX) + 2^63.
+        result :: ir_fresh_temp(&m, &b, target)
+        word_row :: ir_word_row(&m)
+        word :: ir_copy_word(&m, &b, value, word_row)
+        zero :: ir_const_like(&m, &b, word, 0)
+        small :: ir_bool_op(&m, &b, IROp.Ge, word, zero)
+        ir_open_if(&b.f, small, b.line)
+        widened :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{word}, target)
+        ir_emit(&b.f, IROp.Copy, result, widened, -1, -1, b.line)
+        b.fresh[widened] = false
+        ir_else(&b.f, b.line)
+        mask :: ir_const_like(&m, &b, word, 9223372036854775807)
+        low :: ir_temp_like(&m, &b, word)
+        ir_emit(&b.f, IROp.BitAnd, low, word, mask, IR_OVERFLOW_WRAP, b.line)
+        low_int :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{low}, target)
+        half :: ir_fresh_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.ConstBigInt, half, ir_intern_name(&m, "9223372036854775808"), -1, -1, b.line)
+        ir_emit(&b.f, IROp.Add, result, low_int, half, IR_OVERFLOW_TRAP, b.line)
+        ir_release(&m, &b, low_int)
+        ir_release(&m, &b, half)
+        ir_end(&b.f, b.line)
+        return result
     }
     if source.kind == .Char && destination.kind == .Int {
         result :: ir_temp(&m, &b, target)

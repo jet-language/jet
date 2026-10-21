@@ -3,7 +3,7 @@
 // and run on the IR evaluator (jet_eval_ir_comptime), and one trace span
 // `comptime.ir` records the item and whether both agree. The MIR result is
 // what the compile uses; this only observes it.
-use jet_foundation.[CompilerTraceSink, Diagnostic, Span, TComptimeValue, TConstantDef, TExpr, TFunc, TStmt, TTypeDef, TVisibility]
+use jet_foundation.[CompilerTraceSink, Diagnostic, Span, TComptimeValue, TConstantDef, TExpr, TFunc, TImplDef, TStmt, TTypeDef, TVisibility]
 use jet_sema.[SemaComptimeItemRequest, SemaComptimeItemValue, SemaGraphModuleResult]
 use jet_codegen.[jet_codegen_comptime_item_function]
 use jet_eval.[JetEvalConfig, JetEvalError, JetEvalInternalProblem, JetEvalIRResult, jet_eval_ir_comptime]
@@ -22,6 +22,7 @@ fn jet_driver_comptime_ir_differential(
     item := jet_codegen_comptime_item_function(request, request.module_identity)
     item.body = [TStmt]{TStmt.Return{value: Val(request.expression.copy()), span: request.span}}
     type_defs := [TTypeDef]{}
+    impls := [TImplDef]{}
     constants := [TConstantDef]{}
     // Landed values first: the builder keeps the first row of a key.
     loop value in values {
@@ -32,9 +33,10 @@ fn jet_driver_comptime_ir_differential(
     }
     loop checked in modules {
         loop definition in checked.declarations.type_defs -> &type_defs.push(definition.copy())
+        loop definition in checked.declarations.impls -> &impls.push(definition.copy())
         loop definition in checked.declarations.constants -> &constants.push(definition.copy())
     }
-    ir := jet_eval_ir_comptime(closure.copy(), ^item, ^type_defs, ^constants, config, request.span)
+    ir := jet_eval_ir_comptime(closure.copy(), ^item, ^type_defs, ^impls, ^constants, config, request.span)
     row :: jet_driver_comptime_ir_row(request.key, mir_value, mir_error, mir_problem, ir)
     if trace_sink == .Val(sink) {
         sink.begin("comptime.ir", row, -1, -1)

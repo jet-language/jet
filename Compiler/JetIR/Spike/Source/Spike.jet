@@ -13,7 +13,7 @@
 // default CLI (Compiler/JetCli), never instead of it.
 use core.files as cli_files
 use core.term as cli_term
-use jet_foundation.[CompilerThreads, SymbolKind, TConstantDef, TFunc, TTypeDef, compiler_transfer_rows, symbol_id]
+use jet_foundation.[CompilerThreads, SymbolKind, TConstantDef, TFunc, TImplDef, TTypeDef, compiler_transfer_rows, symbol_id]
 use jet_driver.[JetDriverCompileMode, JetDriverCompileTarget, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_lowering_inputs, jet_driver_present_diagnostics, jet_driver_report_problems]
 use jet_cli.[JetCLIAuthority, JetCLIOverlay, JetCLIPrepared, JetCLITraceSink, jet_cli_errors, jet_cli_ice, jet_cli_policy_authority, jet_cli_prepare_overlays, jet_cli_prepared_file_count, jet_cli_source_invocation, jet_cli_trace_boxed, jet_cli_trace_sink, jet_cli_with_invocation]
 use jet_ir.[IRBuildFailure, IRBuildResult, ir_build_all, ir_build_program, ir_function_text]
@@ -29,6 +29,7 @@ IR_SPIKE_EXIT_FAILURES :: 2
 struct IRSpikeInput {
     functions: [TFunc]
     type_defs: [TTypeDef]
+    impls: [TImplDef]
     constants: [TConstantDef]
     entry_key: String
     threads: CompilerThreads
@@ -125,15 +126,17 @@ fn ir_spike_front(file: String, trace_sink: JetCLITraceSink?) -> IRSpikeFront {
             }
             inputs := ^front.inputs ?? return IRSpikeFront.Stopped{output: jet_cli_ice("the Jet compiler stopped before lowering `{file}`")}
             type_defs := [TTypeDef]{}
+            impls := [TImplDef]{}
             constants := [TConstantDef]{}
             loop index in 0..<inputs.modules.len() {
                 compiler_transfer_rows<TTypeDef>(&type_defs, &inputs.modules[index].declarations.type_defs)
+                compiler_transfer_rows<TImplDef>(&impls, &inputs.modules[index].declarations.impls)
                 compiler_transfer_rows<TConstantDef>(&constants, &inputs.modules[index].declarations.constants)
             }
             entry_key :: symbol_id(SymbolKind.Function, inputs.entry_module_identity, "", "run").key
             authority := jet_cli_policy_authority(ir_spike_required_effects(inputs.functions, entry_key), front.compile.authority_policy)
             jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, None))
-            return IRSpikeFront.Ready{input: IRSpikeInput{functions: ^inputs.functions, type_defs: ^type_defs, constants: ^constants, entry_key: entry_key, threads: threads, root: root, source: source, authority: authority}}
+            return IRSpikeFront.Ready{input: IRSpikeInput{functions: ^inputs.functions, type_defs: ^type_defs, impls: ^impls, constants: ^constants, entry_key: entry_key, threads: threads, root: root, source: source, authority: authority}}
         }
     }
 }
@@ -167,7 +170,7 @@ fn ir_spike_required_effects(functions: [TFunc], entry_key: String) -> [String] 
 fn ir_spike_build_ir(input: ^IRSpikeInput, every_function: Bool, trace_sink: JetCLITraceSink?) -> IRBuildResult {
     owned := ^input
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    built :: if every_function -> ir_build_all(^owned.functions, ^owned.type_defs, ^owned.constants) else -> ir_build_program(^owned.functions, ^owned.type_defs, ^owned.constants, owned.entry_key)
+    built :: if every_function -> ir_build_all(^owned.functions, ^owned.type_defs, ^owned.impls, ^owned.constants) else -> ir_build_program(^owned.functions, ^owned.type_defs, ^owned.impls, ^owned.constants, owned.entry_key)
     if trace_sink == .Val(sink) -> sink.end("ir.build", built.program.functions.len())
     built
 }

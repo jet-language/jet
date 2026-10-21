@@ -5,7 +5,7 @@
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
 
-use jet_foundation.[Span, Type, TypeTupleField, TConstantDef, TExpr, TFailureCarrier, TFunc, TLambda, TLocal, TTypeDef, type_carrier_identity]
+use jet_foundation.[Span, Type, TypeTupleField, TConstantDef, TExpr, TFailureCarrier, TFunc, TImplDef, TLambda, TLocal, TTypeDef, type_carrier_identity]
 use jet_backend.[lower_int_inline]
 
 struct IRBuildFailure {
@@ -69,6 +69,8 @@ struct IRBuilder {
     // Calls emitted where the program is only read (display impls): their
     // callee ids are resolved when the function is done.
     deferred: [IRDeferredCall]
+    // The variables that close their values when their scopes end (BuildOwn.jet).
+    closes: [IRClose]
     // The open `#Transact` blocks (innermost last) an early exit unwinds.
     transactions: [IRTxFrame]
     // The open contract scopes (innermost last) whose `post` clauses a
@@ -103,6 +105,11 @@ struct IRProgram {
     // A selected Display (`display`) or Printable (`show`) implementation
     // method by "<trait>|<rendered type key>" (Lower Display.jet render rows).
     render_impls: [String:Int]
+    // The selected Close implementation method (`close`) by rendered type
+    // key (Lower Values.jet lower_close_index), and the close glue built per
+    // glue key (BuildOwn.jet; -1: the type closes nothing, -2: its glue failed).
+    close_methods: [String:Int]
+    close_glue: [String:Int]
 }
 
 // A function waiting to be built: its checked row, IR id and type
@@ -125,7 +132,7 @@ struct IRLambdaJob {
 // body writes) instead of its value.
 struct IRCaptureSlot { name: String, offset: Int, row: Int, by_ref: Bool }
 
-fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
+fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], impl_defs: ^[TImplDef], constant_defs: ^[TConstantDef]) -> IRProgram Never! {
     constants := [String:TConstantDef]{}
     loop definition in ^constant_defs {
         if constants.get(definition.key) == None -> constants[definition.key] = definition
@@ -150,18 +157,59 @@ fn ir_program_new(functions: ^[TFunc], type_defs: ^[TTypeDef], constant_defs: ^[
     loop (index, definition) in types {
         if type_rows.get(definition.name) == None -> type_rows[definition.name] = index
     }
+    // An implementation method is checked as its owner's method of that name
+    // (a TraitMethod when its trait resolves in the implementing module,
+    // else a plain Method, as codegen jet_codegen_impl_method_matches reads it).
+    owner_methods := [String:Int]{}
     render_impls := [String:Int]{}
     loop (index, function) in owned {
-        if function.kind == .TraitMethod(_, _, owner_type, trait_name, _) {
-            trait_short :: ir_short_name(trait_name.key)
-            selected :: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
-            if selected {
-                key :: "{trait_short}|{ir_render_type_key(type_rows, types, owner_type)}"
-                if render_impls.get(key) == None -> render_impls[key] = index
+        if function.name != "display" && function.name != "show" && function.name != "close" -> next
+        if function.kind == {
+            .TopLevel -> {}
+            .Method(_, owner_type) -> {
+                key :: "{function.name}||{ir_render_type_key(type_rows, types, owner_type)}"
+                if owner_methods.get(key) == None -> owner_methods[key] = index
+            }
+            .TraitMethod(_, _, owner_type, trait_name, _) -> {
+                trait_short :: ir_short_name(trait_name.key)
+                owner_key :: ir_render_type_key(type_rows, types, owner_type)
+                key :: "{function.name}|{trait_short}|{owner_key}"
+                if owner_methods.get(key) == None -> owner_methods[key] = index
+                selected :: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
+                if selected {
+                    render_key :: "{trait_short}|{owner_key}"
+                    if render_impls.get(render_key) == None -> render_impls[render_key] = index
+                }
             }
         }
     }
-    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls}
+    // The Display, Printable and Close implementations of the host target
+    // (Lower lower_render_impl_applies, lower_close_index).
+    close_methods := [String:Int]{}
+    loop implementation in ^impl_defs {
+        trait_name :: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
+        trait_short :: ir_short_name(trait_name)
+        method :: if trait_short == {
+            "Display" -> "display"
+            "Printable" -> "show"
+            "Close" -> "close"
+            else -> ""
+        }
+        if method == "" -> next
+        if implementation.target_os == .Val(os) {
+            if os != .Linux -> next
+        }
+        owner_key :: ir_render_type_key(type_rows, types, implementation.self_type)
+        row :: owner_methods.get("{method}|{trait_short}|{owner_key}") ?? owner_methods.get("{method}||{owner_key}") ?? -1
+        if row < 0 -> next
+        if trait_short == "Close" {
+            if close_methods.get(owner_key) == None -> close_methods[owner_key] = row
+        } else {
+            render_key :: "{trait_short}|{owner_key}"
+            if render_impls.get(render_key) == None -> render_impls[render_key] = row
+        }
+    }
+    IRProgram{functions: ^owned, rows: rows, ids: ids, instances: [String:Int]{}, queue: [IRQueued]{}, types: ^types, type_rows: type_rows, subst_names: [String]{}, subst_types: [Type]{}, constants: constants, lambdas: [IRLambdaJob]{}, render_impls: render_impls, close_methods: close_methods, close_glue: [String:Int]{}}
 }
 
 // The last segment of a qualified key (`trait:<m>::Display` is `Display`).
@@ -279,11 +327,11 @@ fn ir_symbol_name(function: TFunc) -> String Never! {
 }
 
 // Builds the entry `entry_key` and every function it reaches.
-// `type_defs` and `constants` are the checked modules' type and constant
-// declarations, in module order.
-fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], constants: ^[TConstantDef], entry_key: String) -> IRBuildResult Never! {
+// `type_defs`, `impls` and `constants` are the checked modules' type,
+// implementation and constant declarations, in module order.
+fn ir_build_program(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], entry_key: String) -> IRBuildResult Never! {
     m := ir_module_new()
-    p := ir_program_new(^functions, ^type_defs, ^constants)
+    p := ir_program_new(^functions, ^type_defs, ^impls, ^constants)
     failures := [IRBuildFailure]{}
     entry := ir_function_id(&m, &p, entry_key, [Type]{}) ?? {
         &failures.push(IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
@@ -365,9 +413,9 @@ fn ir_entry_function(m: &IRModule, p: &IRProgram, entry: Int, failures: &[IRBuil
 
 // Builds every checked non-generic function (a library or a coverage
 // census); generic functions are built per instance their callers reach.
-fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], constants: ^[TConstantDef]) -> IRBuildResult Never! {
+fn ir_build_all(functions: ^[TFunc], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef]) -> IRBuildResult Never! {
     m := ir_module_new()
-    p := ir_program_new(^functions, ^type_defs, ^constants)
+    p := ir_program_new(^functions, ^type_defs, ^impls, ^constants)
     failures := [IRBuildFailure]{}
     loop row in 0..<p.functions.len() {
         if p.functions[row].generic_params.len() > 0 -> next
@@ -414,7 +462,7 @@ fn ir_build_queue(m: &IRModule, p: &IRProgram, failures: &[IRBuildFailure], from
 }
 
 fn ir_builder_new(f: ^IRFunction) -> IRBuilder Never! {
-    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
+    IRBuilder{f: ^f, bindings: [IRBinding]{}, scopes: [Int]{}, loops: [IRLoopFrame]{}, fresh: [Bool]{}, subjects: [Int]{}, pending: [IRPending]{}, line: 0, error: "", error_span: Span{start: 0, end: 0}, ret: None, failure: TFailureCarrier.Infallible, plain: false, cells: [String]{}, deferred: [IRDeferredCall]{}, closes: [IRClose]{}, transactions: [IRTxFrame]{}, contracts: [IRContractFrame]{}}
 }
 
 fn ir_resolve_deferred(m: &IRModule, p: &IRProgram, b: &IRBuilder) Never! {
@@ -466,16 +514,19 @@ fn ir_failed(b: IRBuilder) -> Bool Never! { b.error != "" }
 // Returns `slot` (-1: nothing) after dropping every owned variable.
 fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
     if slot >= 0 -> b.fresh[slot] = false
+    ir_close_disarm(&b, slot)
     ir_drop_bindings(&m, &b, 0)
     ir_emit(&b.f, IROp.Return, -1, slot, -1, -1, b.line)
 }
 
-// Drops the owned variables among bindings[mark..], latest first.
+// Drops the owned variables among bindings[mark..], latest first; a
+// variable that still owns a value that closes closes it first.
 fn ir_drop_bindings(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
     index := b.bindings.len() - 1
     loop index >= mark {
         binding :: b.bindings[index]
         index -= 1
+        if binding.indirect < 0 -> ir_close_now(&b, binding.slot)
         if !binding.owned -> next
         value :: ir_read_binding(&m, &b, binding)
         ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
@@ -587,6 +638,7 @@ fn ir_read_binding(m: &IRModule, b: &IRBuilder, binding: IRBinding) -> Int Never
 
 // Writes `value` into `slot`: a move for a type with a drop, else a copy.
 fn ir_store(m: &IRModule, b: &IRBuilder, slot: Int, value: Int) Never! {
+    ir_close_disarm(&b, value)
     if ir_kind_of(m, b, value) == .Aggregate && !b.fresh[value] {
         // An aggregate read from another place gets storage of its own.
         row :: m.types[b.f.slot_type[value]]
@@ -813,6 +865,7 @@ fn ir_store_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, value: Int) 
     if value < 0 -> return
     kind :: ir_kind_of(m, b, value)
     if kind == .Unit -> return
+    ir_close_disarm(&b, value)
     if kind == .Aggregate {
         address :: ir_temp_like(&m, &b, value)
         ir_emit(&b.f, IROp.Offset, address, base, offset, -1, b.line)
@@ -1004,31 +1057,19 @@ fn ir_checked_address(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row: 
 }
 
 // A copy of the value in `slot` that owns its own storage: a value with a
-// runtime clone through it, a List with a buffer of its own, any other
-// aggregate byte for byte.
+// runtime clone through it, an aggregate byte for byte with every buffer and
+// cloned part of its own at any depth (BuildOwn.jet ir_copy_fixup).
 fn ir_copy_value(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Int Never! {
     row :: b.f.slot_type[slot]
     kind :: m.types[row].kind
     clone :: m.types[row].clone
+    ir_close_disarm(&b, slot)
     if clone != "" -> return ir_runtime(&m, &b, clone, [Int]{slot}, row)
     if kind == .Aggregate {
         storage :: ir_fresh_temp(&m, &b, row)
         ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
         ir_emit(&b.f, IROp.CopyBytes, -1, storage, slot, m.types[row].size, b.line)
-        if ir_list_element(&m, p, b, slot) == .Val(element_row) {
-            length :: ir_load_word(&m, &b, slot, 0)
-            stride :: ir_list_stride(m, element_row)
-            width :: ir_word_const(&m, &b, stride)
-            bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
-            ir_emit(&b.f, IROp.Store, -1, storage, 8, length, b.line)
-            align :: ir_word_const(&m, &b, 8)
-            padded :: ir_word_op(&m, &b, IROp.Add, bytes, align)
-            word_row :: ir_word_row(&m)
-            data :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{padded, align}, word_row)
-            source :: ir_load_word(&m, &b, slot, 16)
-            _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, source, bytes}, -1)
-            ir_emit(&b.f, IROp.Store, -1, storage, 16, data, b.line)
-        }
+        ir_copy_fixup(&m, p, &b, row, storage, [Int]{})
         return storage
     }
     duplicate :: ir_temp_like(&m, &b, slot)
