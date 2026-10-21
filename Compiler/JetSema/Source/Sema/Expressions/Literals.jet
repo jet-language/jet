@@ -468,7 +468,22 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
             else -> {}
         }
     }
-    checked :: sema_expression_list_elements(elements, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // `ViewMut` elements coexist in the list: their overlap is the list's
+    // alias check below, not the window each element opens.
+    deferred_before :: state.deferred_view_opens.len()
+    mutable_view_elements :: if expected_element == {
+        .Val(element_ty) -> if element_ty == {
+            .Apply(name, _) -> name == "ViewMut"
+            else -> false
+        }
+        .None -> false
+    }
+    if mutable_view_elements {
+        loop element_span in sema_ownership_list_view_element_spans(elements) -> &state.deferred_view_opens.push(element_span)
+    }
+    checked_elements := sema_expression_list_elements(elements, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    loop state.deferred_view_opens.len() > deferred_before -> _ := &state.deferred_view_opens.pop()
+    checked :: checked_elements ?? return None
     if result_ty == None {
         if checked.parts.len() == 0 {
             &diagnostics.push(sema_error("E0501", span, "an empty list needs a type", "write `[]` only where the list type is already known from around it", "name the element type on the literal, such as `[Int]{{}}`"))
@@ -476,6 +491,7 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
         }
         result_ty = Val(Type.List{element: checked.element_types[0]})
     }
+    if !has_spread -> sema_ownership_check_list_view_element_aliases(&state, elements, expected_element ?? checked.element_types[0], scopes, &diagnostics)
     ty :: result_ty ?? Type.List{element: Type.Named{name: "Unit"}}
     if has_spread {
         element_type :: if ty == {

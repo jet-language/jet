@@ -1674,15 +1674,18 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             index :: parser_parse_expression(&state, 1, depth + 1)
             close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after the index")
             span := parser_cover(expression.span, close.span)
+            // An index or slice is spanned at its brackets, as in the
+            // reference; `span` covers the base too.
+            bracket_span :: parser_cover(open.span, close.span)
             if index.expr == {
                 .Range(start, end, exclusive, _) -> {
                     range_expr := index.expr
                     expression = ParsedExpr{
-                        expr: Expr.Slice{base: expression.expr, start: start, end: end, range: Val(range_expr), span: span},
+                        expr: Expr.Slice{base: expression.expr, start: start, end: end, range: Val(range_expr), span: bracket_span},
                         span: span,
                     }
                 }
-                else -> expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: index.expr, span: span, kind: IndexKind.Unknown}, span: span}
+                else -> expression = ParsedExpr{expr: Expr.Index{base: expression.expr, index: index.expr, span: bracket_span, kind: IndexKind.Unknown}, span: span}
             }
             next
         }
@@ -1727,7 +1730,9 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             member :: if parser_current_kind(&state) == TOKEN_KW_COPY || parser_current_kind(&state) == TOKEN_KW_MOVE -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
             member_name :: if member.kind == TOKEN_KW_COPY || member.kind == TOKEN_KW_MOVE -> parser_text(state, member) else -> parser_value(state, member)
             span := parser_cover(expression.span, member.span)
-            expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: expression.expr, member: member_name, member_span: member.span, flatten: false, span: span}, span: span} else -> ParsedExpr{expr: Expr.Field{base: expression.expr, member: member_name, span: span}, span: span}
+            // A field access is spanned at its member name, as in the
+            // reference; `span` covers the base too.
+            expression = if operator.kind == TOKEN_QUESTION_DOT -> ParsedExpr{expr: Expr.OptField{base: expression.expr, member: member_name, member_span: member.span, flatten: false, span: span}, span: span} else -> ParsedExpr{expr: Expr.Field{base: expression.expr, member: member_name, span: member.span}, span: span}
             next
         }
         if kind == TOKEN_QUESTION {

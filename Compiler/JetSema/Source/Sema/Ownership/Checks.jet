@@ -235,6 +235,10 @@ struct SemaOwnershipState {
     // sema_expression_pattern_binding_sources): an explicit `^p` takes the
     // payload out of that subject (sema_ownership_move_pattern_payload).
     pattern_sources: [String:[Expr]]{[String:[Expr]]{}}
+    // Spans of the windows whose overlap is judged where the value lands —
+    // a binding statement's whole initializer, the elements of a `ViewMut`
+    // list literal (sema_ownership_view_open_deferred).
+    deferred_view_opens: [Span]{[Span]{}}
 }
 
 // First/last declaration rows and total reference/write counts for one key.
@@ -1303,9 +1307,14 @@ fn sema_ownership_places_overlap(left: SemaOwnershipPlace, right: SemaOwnershipP
     true
 }
 
+// Rust `place_name`: a field projection keeps its name; an element index or a
+// range window is `[…]`, whatever its bounds.
 fn sema_ownership_place_name(place: SemaOwnershipPlace) -> String Never! {
     name := place.root
-    loop projection in place.projections -> name = "{name}{projection}"
+    loop projection in place.projections {
+        shown :: if projection.starts_with("[") && projection != "[fresh]" -> "[…]" else -> projection
+        name = "{name}{shown}"
+    }
     name
 }
 
@@ -1810,13 +1819,30 @@ fn sema_ownership_diag_live_reference(place: String, span: Span) -> Diagnostic {
     sema_error("E0212", span, "`{place}` already has a live reference that conflicts with this access", "an exclusive write window cannot overlap another live reference to the same place", "finish using the earlier reference before opening this one")
 }
 
-// Rust `check_place_change`: changing a place a live view looks into. A pin
-// promises its storage keeps its address, so it reports E0219 with the change
-// it forbids; every other view keeps the general E0212.
+// Rust `check_place_change_with_view_exemption`: changing a place a live
+// view looks into. A pin promises its storage keeps
+// its address, so it reports E0219 with the change it forbids; every other
+// view reports E0212 naming the view and the change. Without a change
+// wording (a receiver hook that knows no method) the general E0212 stays.
 fn sema_ownership_diag_view_change(fact: SemaOwnershipViewFact, changed: SemaOwnershipPlace, action: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     changed_name :: sema_ownership_place_name(changed)
-    if action == "" || !sema_pin_view_fact(fact, scopes) -> return sema_ownership_diag_live_reference(changed_name, span)
-    sema_error("E0219", span, "`{changed_name}` cannot {action} while it is pinned", "`{fact.carrier}` pinned `{sema_ownership_place_name(fact.source)}`, which promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place", "finish using `{fact.carrier}` before changing `{changed_name}`, or narrow the pin's scope")
+    if action == "" -> return sema_ownership_diag_live_reference(changed_name, span)
+    view :: fact.carrier
+    place :: sema_ownership_place_name(fact.source)
+    if sema_pin_view_fact(fact, scopes) -> return sema_error("E0219", span, "`{changed_name}` cannot {action} while it is pinned", "`{view}` pinned `{place}`, which promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place", "finish using `{view}` before changing `{changed_name}`, or narrow the pin's scope")
+    access :: if fact.access == AccessConvention.Write -> "exclusive mutable view" else -> "read view"
+    sema_error("E0212", span, "`{changed_name}` cannot {action} while `{view}` is still looking into it", "`{view}` is a live {access} into `{place}`; changing or moving the owner could invalidate that view", "finish using `{view}` before changing `{changed_name}`, narrow the view's scope, or make an owned copy")
+}
+
+// A loan a named view carries is that view's fact (Rust keeps only the
+// fact); an anonymous statement window has no view to name.
+fn sema_ownership_diag_loan_change(state: &SemaOwnershipState, loan: SemaOwnershipLoan, changed: SemaOwnershipPlace, action: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
+    if loan.carrier_fact_seq >= 0 {
+        loop fact in state.views {
+            if fact.seq == loan.carrier_fact_seq && fact.carrier_key == loan.carrier_key -> return sema_ownership_diag_view_change(fact, changed, action, span, scopes)
+        }
+    }
+    sema_ownership_diag_live_reference(sema_ownership_place_name(changed), span)
 }
 
 // Rust `check_place_read` (card #1361 / I2): reading a place beside a live
@@ -1848,14 +1874,16 @@ fn sema_ownership_open_reference(state: &SemaOwnershipState, place: SemaOwnershi
         sema_ownership_report_static_write(&state, place, span, &diagnostics)
         return false
     }
-    if sema_ownership_active_view_conflict(&state, place, access) {
-        &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
-        return false
-    }
-    conflict :: sema_ownership_active_loan_conflict(&state, place, access)
-    if conflict != None {
-        &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
-        return false
+    if !sema_ownership_view_open_deferred(state, span) {
+        if sema_ownership_active_view_conflict(&state, place, access) {
+            &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
+            return false
+        }
+        conflict :: sema_ownership_active_loan_conflict(&state, place, access)
+        if conflict != None {
+            &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
+            return false
+        }
     }
     loan_seq := sema_ownership_next_sequence(&state)
     &state.loans.push(SemaOwnershipLoan{place: place, access: access, span: span, scope_depth: state.scope_depth, seq: loan_seq, carrier_fact_seq: -1, carrier_key: ""})
@@ -1873,6 +1901,7 @@ fn sema_ownership_open_reference_for_expr(state: &SemaOwnershipState, expr: Expr
             sema_ownership_report_static_write(&state, place, expr_span(expr), &diagnostics)
             return false
         }
+        if sema_ownership_view_open_deferred(state, span) -> next
         if sema_ownership_active_view_conflict_for_expr(&state, place, access, expr, scopes) {
             &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
             return false
@@ -1897,6 +1926,82 @@ fn sema_ownership_open_reference_for_expr(state: &SemaOwnershipState, expr: Expr
     true
 }
 
+// The windows a binding statement's initializer (`right :: &xs[1..2]`) or a
+// `ViewMut` list literal's elements open are checked against the other
+// views where the value lands (Rust `record_view_with_exemptions`, Rust
+// `check_list_view_element_aliases`), which name the binding or the
+// element; the open itself does not report that overlap.
+fn sema_ownership_view_open_deferred(state: SemaOwnershipState, span: Span) -> Bool Never! {
+    loop deferred in state.deferred_view_opens {
+        if sema_ownership_span_same(deferred, span) -> return true
+    }
+    false
+}
+
+// Rust `record_view_with_exemptions`: a new view conflicts with a live view
+// over an overlapping place when either of them writes; the binding being
+// recorded and its own earlier facts for the same slot are alternatives.
+fn sema_ownership_check_binding_view_conflicts(state: &SemaOwnershipState, carrier: String, carrier_span: Span, places: [SemaOwnershipPlace], access: AccessConvention, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    key :: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return
+    loop place in places {
+        loop fact in state.views {
+            if !fact.active || fact.invalidated || fact.carrier_key == key -> next
+            if (fact.access == AccessConvention.Write || access == AccessConvention.Write) && sema_ownership_places_overlap(fact.source, place) {
+                &diagnostics.push(sema_error("E0212", carrier_span, "`{sema_ownership_place_name(place)}` already has a live view that conflicts with `{carrier}`", "many read views may overlap, but an exclusive mutable view cannot overlap any other live view", "finish using the earlier view before creating this one, or make an owned copy"))
+                return
+            }
+        }
+    }
+}
+
+// The `&place` elements of a list literal whose element type is `ViewMut`:
+// their windows coexist in the list, so each one is judged against the
+// earlier elements (sema_ownership_check_list_view_element_aliases).
+fn sema_ownership_list_view_element_spans(elements: [Expr]) -> [Span] Never! {
+    spans := [Span]{}
+    loop element in elements {
+        if element == .Place(_, access, span) && access == PlaceAccess.Write -> &spans.push(span)
+    }
+    spans
+}
+
+// Rust `check_list_view_element_aliases`: list elements coexist, so an
+// exclusive mutable view cannot overlap another element's view.
+fn sema_ownership_check_list_view_element_aliases(state: &SemaOwnershipState, elements: [Expr], element_ty: Type, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    direct_mutable :: if element_ty == {
+        .Apply(name, _) -> name == "ViewMut"
+        else -> false
+    }
+    previous := [SemaOwnershipPlace]{}
+    previous_access := [AccessConvention]{}
+    loop element in elements {
+        sources := [SemaOwnershipPlace]{}
+        access := AccessConvention.Read
+        if element == .MethodCall(receiver, method, _, _, _, _, _, _) && method == "view" {
+            loop place in sema_ownership_places_from_expr_in_state(receiver, scopes, &state) {
+                windowed := place
+                &windowed.projections.push("[..]")
+                &windowed.typed_projections.push(SemaOwnershipProjection.Range{start: None, end: None, span: expr_span(element)})
+                &sources.push(windowed)
+            }
+        }
+        if sources.len() == 0 && direct_mutable {
+            sources = sema_ownership_places_from_expr_in_state(element, scopes, &state)
+            access = AccessConvention.Write
+        }
+        loop place in sources {
+            loop index in 0..<previous.len() {
+                if (previous_access[index] == AccessConvention.Write || access == AccessConvention.Write) && sema_ownership_places_overlap(previous[index], place) {
+                    &diagnostics.push(sema_error("E0212", expr_span(element), "list elements create overlapping views of `{sema_ownership_place_name(place)}`", "list elements coexist, so an exclusive mutable view cannot overlap another element's view", "use disjoint ranges, keep only one mutable view, or store owned values"))
+                    break
+                }
+            }
+            &previous.push(place)
+            &previous_access.push(access)
+        }
+    }
+}
+
 // Open a mutable place window in one ownership transaction.  This is distinct
 // from check_write: a write borrow keeps a live loan until its lexical scope
 fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Expr, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
@@ -1912,6 +2017,7 @@ fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Expr, s
             sema_ownership_report_static_write(&state, place, expr_span(expr), &diagnostics)
             return false
         }
+        if sema_ownership_view_open_deferred(state, span) -> next
         if sema_ownership_active_view_conflict_for_expr(&state, place, AccessConvention.Write, expr, scopes) {
             &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
             return false
@@ -2362,8 +2468,8 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
             return false
         }
         conflict :: sema_ownership_active_loan_conflict_for_expr(&state, place, AccessConvention.Write, expr, scopes)
-        if conflict != None {
-            &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), expr_span(expr)))
+        if conflict == .Val(loan) {
+            &diagnostics.push(sema_ownership_diag_loan_change(&state, loan, place, action, expr_span(expr), scopes))
             return false
         }
     }
@@ -2597,8 +2703,8 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
             return false
         }
         conflict :: sema_ownership_active_loan_conflict(&state, place, AccessConvention.Move)
-        if conflict != None {
-            &diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), expr_span(expr)))
+        if conflict == .Val(loan) {
+            &diagnostics.push(sema_ownership_diag_loan_change(&state, loan, place, "be moved", expr_span(expr), scopes))
             return false
         }
     }

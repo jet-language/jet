@@ -851,10 +851,28 @@ fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostic
         if type_identity_equal(lhs, rhs) && sema_expr_is_numeric(lhs) -> return Val(lhs)
         if sema_expr_precise_name(lhs) != None && type_identity_equal(lhs, rhs) -> return Val(lhs)
         if sema_expr_is_numeric(lhs) && sema_expr_is_numeric(rhs) -> return None
-        &diagnostics.push(sema_error("E0109", span, "arithmetic needs matching number types", "arithmetic operands must share a supported numeric type", "make both operands the same number type"))
+        if op == BinOp.FloorDiv || (op == BinOp.Add && lhs == Type.String) {
+            &diagnostics.push(sema_error("E0109", span, "arithmetic needs matching number types", "arithmetic operands must share a supported numeric type", "make both operands the same number type"))
+            return None
+        }
+        &diagnostics.push(sema_expr_op_mismatch(op, lhs, rhs, span))
         return None
     }
     None
+}
+
+// Rust `operator_label`: the operator as written, in backticks.
+fn sema_expr_operator_label(op: BinOp) -> String Never! {
+    "`{sema_expr_binary_name(op)}`"
+}
+
+// Rust `op_mismatch`: an operator with no rule for this operand pair.
+fn sema_expr_op_mismatch(op: BinOp, lhs: Type, rhs: Type, span: Span) -> Diagnostic Never! {
+    label :: sema_expr_operator_label(op)
+    if type_identity_equal(lhs, rhs) {
+        return sema_error("E0109", span, "{label} can't compare or combine {sema_type_show(lhs)} and {sema_type_show(rhs)}", "{label} is not defined for {sema_type_show(lhs)}", "use an operation supported by {sema_type_show(lhs)}, or call a named method")
+    }
+    sema_error("E0109", span, "{label} can't compare or combine {sema_type_show(lhs)} and {sema_type_show(rhs)}", "the operator has no built-in rule and no user-defined `impl Type.Trait` hook for this operand pair", "use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair")
 }
 
 fn sema_expr_tir_unit_format(format: UnitFormat) -> TUnitFormat Never! {

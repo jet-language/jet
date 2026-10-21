@@ -1224,6 +1224,46 @@ fn sema_stmt_for_in_can_consume_collection(expression: Expr) -> Bool Never! {
     }
 }
 
+fn sema_stmt_for_in_is_list(collection_type: Type) -> Bool Never! {
+    if collection_type == {
+        .List(_) | .FixedList(_, _) -> true
+        else -> false
+    }
+}
+
+// Rust `frame_owns_place`: a bare name this frame owns outright. A read or
+// write parameter and a live view name storage the caller still owns.
+fn sema_stmt_for_in_frame_owns(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
+    if expression == {
+        .Paren(value, _) | .Copy(value, _) -> return sema_stmt_for_in_frame_owns(value, scopes, &state)
+        .Ident(_, _) -> {}
+        else -> return true
+    }
+    if sema_ownership_view_exists_for_expr(&state, expression, scopes) -> return false
+    binding :: sema_ownership_binding_for_expr(&state, expression, scopes) ?? return true
+    !(binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write))
+}
+
+// Rust `report_borrowed_loop_consume`: a loop over task handles hands out
+// each handle itself, which takes the list; a borrowed name, a field or an
+// index cannot give the list away.
+fn sema_stmt_for_in_borrowed_task_list(collection: Expr, collection_type: Type, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Diagnostic {
+    why :: "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`"
+    place :: if collection == {
+        .Paren(inner, _) | .Copy(inner, _) -> inner
+        else -> collection
+    }
+    if place == .Ident(name, _) {
+        is_param :: if sema_ownership_binding_for_expr(&state, place, scopes) == {
+            .Val(binding) -> binding.symbol.kind == SymbolKind.Parameter
+            .None -> false
+        }
+        fix :: if is_param -> "take the list with the move marker `^`: `{name}: ^{sema_type_show(collection_type)}`, or collect the work in a canonical `task.all` or `task.group` block" else -> "move the list into a local this scope owns before the loop consumes its task handles"
+        return sema_error("E0120", expr_span(collection), "`{name}` was not moved here, so this loop can't take its handles", why, fix)
+    }
+    sema_error("E0120", expr_span(collection), "this loop can't take handles out of a field or index", why, "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs {{ … }}`")
+}
+
 // Rust `collection_root_name`: the local a loop reads, through `.chars()`.
 fn sema_stmt_for_in_collection_root(expression: Expr) -> String? {
     if expression == {
@@ -2311,13 +2351,17 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
         return valid
     }
     access :: sema_stmt_view_access(init_ty) ?? return true
-    if sema_stmt_binding_is_place_view(binding.init) -> return sema_ownership_record_binding_view(&state, binding, scopes)
+    if sema_stmt_binding_is_place_view(binding.init) {
+        if sema_ownership_view_producer(binding.init) == .Val(producer) -> sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, sema_ownership_places_from_expr_in_state(producer.source, scopes, &state), producer.access, scopes, &diagnostics)
+        return sema_ownership_record_binding_view(&state, binding, scopes)
+    }
     places := sema_ownership_places_from_expr_in_state(binding.init, scopes, &state)
     if places.len() == 0 {
         empty_provenance := ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
         _ := sema_ownership_record_view_returns(&state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, &empty_provenance, expr_span(binding.init), &diagnostics)
         return false
     }
+    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) -> sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, places, access, scopes, &diagnostics)
     fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: access, places: places}
     sema_ownership_record_call_view_batch(&state, binding.name, binding.name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
 }
@@ -3203,7 +3247,12 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // initializer records its binding for the `.detach()` refusals.
     previous_binding_name :: context.taskgroups.binding_name
     context.taskgroups.binding_name = Val(binding.name)
+    // A place-view initializer's overlap with the live views is checked when
+    // the binding records its view, naming the binding (Rust `record_view`).
+    deferred_before :: state.deferred_view_opens.len()
+    if sema_stmt_binding_is_place_view(binding_expr) -> &state.deferred_view_opens.push(expr_span(binding_expr))
     checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, binding.ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, binding.ty, environment, program, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
+    loop state.deferred_view_opens.len() > deferred_before -> _ := &state.deferred_view_opens.pop()
     context.binding_initializer = previous_binding_initializer
     context.taskgroups.binding_name = previous_binding_name
     init :: checked_init ?? {
@@ -5544,9 +5593,14 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             }
                         }
                         consumes_collection := sema_stmt_for_in_consumes_collection(collection.ty, item_type)
-                        owns_collection := !consumes_collection || sema_stmt_for_in_can_consume_collection(collection_expr)
+                        task_list_consume :: consumes_collection && sema_stmt_for_in_is_list(collection.ty)
+                        owns_collection := !consumes_collection || (sema_stmt_for_in_can_consume_collection(collection_expr) && (!task_list_consume || sema_stmt_for_in_frame_owns(collection_expr, scopes, &state)))
                         if !owns_collection {
-                            &diagnostics.push(sema_error("E0120", expr_source_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first, then loop over that local"))
+                            if task_list_consume {
+                                &diagnostics.push(sema_stmt_for_in_borrowed_task_list(collection_expr, collection.ty, scopes, &state))
+                            } else {
+                                &diagnostics.push(sema_error("E0120", expr_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first (`src := …`), then write `loop x in src {{ … }}`"))
+                            }
                             valid = false
                         }
                         loop_fork :: sema_ownership_mark(&state)
