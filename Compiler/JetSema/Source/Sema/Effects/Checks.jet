@@ -1166,7 +1166,9 @@ fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffec
 fn sema_effect_record_close(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, value: TExpr) Never! {
     owner :: if sema_expr_unwrap_tag(value.ty) == {
         .Named(name) | .Apply(name, _) -> sema_effect_symbol_leaf(name)
-        else -> return
+        else -> {
+            return
+        }
     }
     loop key in facts.close_methods.get(owner) ?? [String]{} -> sema_effect_node_add_edge(&nodes, node_index, key)
 }
