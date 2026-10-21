@@ -1,6 +1,6 @@
 // Realtime's producer boundary is Jet-owned (Realtime.jet). Callback storage
 // moves once; each invocation borrows the worker's reusable List24<Float>.
-use jet_foundation.[MIRAccess, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_nominal_ref, mir_type_from_kind]
+use jet_foundation.[MIRAccess, MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_nominal_ref, mir_type_from_kind]
 
 fn lower_realtime_callback_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
     params := [MIRType]{}
@@ -61,6 +61,26 @@ fn lower_realtime_start(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     // The runtime owns env even on validation/spawn failure and releases it
     // exactly once. Never release it here or clone/drop the borrowed inputs.
     if instruction.result == None -> lower_emit(&f, LIRInst.Drop{value: dst})
+}
+
+// Core's source `rt.callback` hands its checked rate, frame count and
+// callback to `core.rt.__callback`: one CoreCall that moves all three into the
+// same Jet-owned producer as the closure form.
+fn lower_realtime_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, m, call) ?? return false
+    if lower_runtime_symbol(row) != "jet_rt_callback" -> return false
+    if args.len() != 3 {
+        lower_fail(&m, &f, "Realtime must supply rate, frame count and callback")
+        return true
+    }
+    loop arg in args {
+        if arg.access == .Write {
+            lower_fail(&m, &f, "Realtime takes its rate, frame count and callback by value")
+            return true
+        }
+    }
+    lower_realtime_start(p, c, &m, &f, instruction, call, [MIRValueID]{args[0].value, args[1].value}, Val(args[2].value))
+    true
 }
 
 fn lower_helper_realtime_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {

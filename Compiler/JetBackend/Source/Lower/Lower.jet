@@ -4830,6 +4830,7 @@ fn lower_instruction_operation(p: MIRProgram, c: LowerContext, m: &LowerModule, 
         .Semantic(semantic) -> lower_semantic(p, c, &m, &f, instruction, semantic)
         .CoreCall(_, route, args, type_args, _, _) -> {
             if lower_lazy_call(p, c, &m, &f, instruction, route, args) -> return
+            if lower_realtime_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_channel_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_atexit_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_codec_call(p, c, &m, &f, instruction, route, args, type_args) -> return

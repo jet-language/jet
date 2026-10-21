@@ -1,4 +1,7 @@
-// CommandSuite.rs:8-49: a 24B snapshot [iteration0,result8,runner16].
+// CommandSuite.rs:8-49: a 24B snapshot [iteration0,result8,runner16]. The
+// harness TLS state keeps the runner's raw I64 pair; a snapshot holds both as
+// owned exact-Int words, so `t.iteration` / `t.result` read in place and
+// `run` returns its exact Int, as CAbiRoutes.rs jet_int_from_i64 did.
 // The runner is a named-fn box using Lower/Closures.jet:3-16,291-315:
 // [refs0,code8,release16], called with box first and inline pair output second.
 // TLS uses the one dynamic-key mechanism, with detach owning its state free.
@@ -50,8 +53,8 @@ fn test_suite_state_ensure() -> I64 {
     if (state == I64{0}) {
         thread_zero(suite, I64{24})
     } else {
-        trap_store(suite, trap_word(state))
-        trap_store(suite + I64{8}, trap_word(state + I64{8}))
+        trap_store(suite, jet_int_owned_from_i64(trap_word(state)))
+        trap_store(suite + I64{8}, jet_int_owned_from_i64(trap_word(state + I64{8})))
         trap_store(suite + I64{16}, trap_word(state + I64{16}))
     }
     suite
@@ -59,19 +62,21 @@ fn test_suite_state_ensure() -> I64 {
 
 #Export(c) fn jet_rt_handle_clone_jet_test_suite(suite: I64) -> I64 {
     cloned :: jet_rt_alloc(I64{24}, I64{8})
-    trap_store(cloned, trap_word(suite))
-    trap_store(cloned + I64{8}, trap_word(suite + I64{8}))
+    trap_store(cloned, jet_rt_int_clone(trap_word(suite)))
+    trap_store(cloned + I64{8}, jet_rt_int_clone(trap_word(suite + I64{8})))
     trap_store(cloned + I64{16}, trap_word(suite + I64{16}))
     cloned
 }
 
 #Export(c) fn jet_rt_handle_drop_jet_test_suite(suite: I64) {
+    jet_rt_int_drop(trap_word(suite))
+    jet_rt_int_drop(trap_word(suite + I64{8}))
     jet_rt_free(suite, I64{24}, I64{8})
 }
 
 #Export(c) fn jet_test_suite_run(suite: I64) -> I64 {
     runner :: trap_word(suite + I64{16})
-    if (runner == I64{0}) { return trap_word(suite + I64{8}) }
+    if (runner == I64{0}) { return jet_rt_int_clone(trap_word(suite + I64{8})) }
     state :: test_suite_state_ensure()
     // The two inline result words go directly to TLS, never to the receiver.
     // Tuple result stores happen on return, after the runner's user code, so
@@ -79,7 +84,7 @@ fn test_suite_state_ensure() -> I64 {
     #Unsafe("the pinned named-fn box code takes its box and writable inline 16B result storage") {
         _ := os_call_address_two_i64(trap_word(runner + I64{8}), runner, state)
     }
-    trap_word(state + I64{8})
+    jet_int_owned_from_i64(trap_word(state + I64{8}))
 }
 
 #Export(c) fn jet_test_suite_status() -> I64 {
@@ -99,10 +104,10 @@ fn test_suite_state_ensure() -> I64 {
     rt_text_push_word(text, I64{0x69207b2074736554}, I64{8})
     rt_text_push_word(text, I64{0x6e6f697461726574}, I64{8})
     rt_text_push_word(text, I64{0x203a}, I64{2})
-    rt_text_push_number(text, trap_word(suite))
+    rt_text_push_number(text, jet_int_owned_to_i64(trap_word(suite)))
     rt_text_push_word(text, I64{0x746c75736572202c}, I64{8})
     rt_text_push_word(text, I64{0x203a}, I64{2})
-    rt_text_push_number(text, trap_word(suite + I64{8}))
+    rt_text_push_number(text, jet_int_owned_to_i64(trap_word(suite + I64{8})))
     rt_text_push_word(text, I64{0x7d20}, I64{2})
     text
 }

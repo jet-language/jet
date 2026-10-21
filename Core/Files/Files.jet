@@ -1110,10 +1110,10 @@ fn copy(from: String | Path, to: String | Path) IOError! -[FS]> {
 
 
 fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
-    bytes :: core.files.read_bytes(from)
+    bytes :: read_bytes(from)
     parent :: dirname_impl(to)
-    if parent.bytes().len() > 0 -> core.files.create_dir_all(parent)
-    core.files.write_bytes(to.copy(), bytes)
+    if parent.bytes().len() > 0 -> create_dir_all(parent)
+    write_bytes(to.copy(), bytes)
 }
 
 
@@ -1827,8 +1827,8 @@ fn touch(path: String) IOError! -[FS]> {
         return Ok()
     }
     parent :: dirname_impl(path)
-    if parent.bytes().len() > 0 -> core.files.create_dir_all(parent)
-    core.files.write_bytes(path, [U8]{})
+    if parent.bytes().len() > 0 -> create_dir_all(parent)
+    write_bytes(path, [U8]{})
 }
 
 
@@ -1859,8 +1859,8 @@ fn copyfile(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
 
 /// Create one directory, or all missing parents when `parents` is true.
 fn mkdir(path: String, parents: Bool) IOError! -[FS]> {
-    if parents -> return core.files.create_dir_all(path)
-    core.files.create_dir(path)
+    if parents -> return create_dir_all(path)
+    create_dir(path)
 }
 
 
@@ -1890,7 +1890,7 @@ fn getenv(name: String) -[Env]> String? Never! { sys.get(name) }
 
 
 fn read_lines(path: String) -[FS]> [String] IOError! {
-    text :: core.files.read(path)
+    text :: read(path)
     Ok(split_lines(text))
 }
 
@@ -1898,7 +1898,7 @@ fn read_lines(path: String) -[FS]> [String] IOError! {
 fn write_lines(path: String, lines: [String]) IOError! -[FS]> {
     s := ""
     loop line in lines -> s = "{s}{line}\n"
-    core.files.write(path, s)
+    write(path, s)
 }
 
 
@@ -2082,7 +2082,7 @@ fn move(from: String, to: String) IOError! -[FS]> { rename(from, to) }
 fn rmtree(path: String) IOError! -[FS]> { core.files.remove_all(path) }
 
 
-fn makedirs(path: String) IOError! -[FS]> { core.files.create_dir_all(path) }
+fn makedirs(path: String) IOError! -[FS]> { create_dir_all(path) }
 
 
 fn listdir(path: String) -[FS]> [String] IOError! {
@@ -2113,7 +2113,7 @@ fn is_mount(path: String) -[FS]> Bool Never! {
 }
 
 
-fn ensure_parent(path: String) IOError! -[FS]> { core.files.create_dir_all(dirname_impl(path)) }
+fn ensure_parent(path: String) IOError! -[FS]> { create_dir_all(dirname_impl(path)) }
 
 
 fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -2135,18 +2135,18 @@ fn walkdir(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! { walk_imp
 
 fn truncate(path: String, size: Int) IOError! -[FS]> {
     if size < 0 -> return Err(io_err("truncate", path, "negative size"))
-    bytes :: core.files.read_bytes(path.copy())
+    bytes :: read_bytes(path.copy())
     if size < bytes.len() {
-        core.files.write_bytes(path.copy(), slice_bytes(bytes, 0, size))
+        write_bytes(path.copy(), slice_bytes(bytes, 0, size))
     } else {
         out := bytes
         loop out.len() < size -> &out.push(U8{0})
-        core.files.write_bytes(path.copy(), out)
+        write_bytes(path.copy(), out)
     }
 }
 
 
-fn createdirectory(path: String) IOError! -[FS]> { core.files.create_dir(path) }
+fn createdirectory(path: String) IOError! -[FS]> { create_dir(path) }
 
 
 fn filesize(path: String) -[FS]> Int IOError! {
@@ -2356,12 +2356,12 @@ fn trim_file_line(bytes: &[U8]) Never! {
 #Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
     directory :: core.files.temp_dir("walk_source").expect("temporary walk directory")
     child :: join(directory.path, "nested")
-    core.files.create_dir(child).expect("nested directory")
-    core.files.write(join(directory.path, "visible"), "root").expect("root file")
-    core.files.write(join(directory.path, "hidden"), "hidden").expect("ignored file")
-    core.files.write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
-    core.files.write(join(child, "visible"), "nested").expect("nested file")
-    core.files.write(join(child, "hidden"), "hidden").expect("inherited ignored file")
+    create_dir(child).expect("nested directory")
+    write(join(directory.path, "visible"), "root").expect("root file")
+    write(join(directory.path, "hidden"), "hidden").expect("ignored file")
+    write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
+    write(join(child, "visible"), "nested").expect("nested file")
+    write(join(child, "hidden"), "hidden").expect("inherited ignored file")
     rows :: walk(directory.path, Val(".gitignore")).expect("walk")
     assert_eq(rows.len(), 3)
     assert_eq(rows[0].relative, "nested")

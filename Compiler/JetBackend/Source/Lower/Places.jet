@@ -329,12 +329,22 @@ fn lower_native_runtime_carrier(handle: LowerRuntimeHandle, name: String) -> Boo
 
 fn lower_native_process_place(p: MIRProgram, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
     runtime :: lower_runtime_handle_type(p, ty) ?? return None
-    if runtime.runtime != "ProcessReceipt" && runtime.runtime != "ProcessPlan" -> return None
+    if runtime.runtime != "ProcessReceipt" && runtime.runtime != "ProcessPlan" && runtime.runtime != "JetTestSuite" -> return None
     definition :: lower_type_def(p, ty) ?? return None
     if definition.key != runtime.jet_name && !definition.key.starts_with("<corelib>/") -> return None
     fields :: if definition.kind == { .Struct(stored, _) -> { stored } else -> { return None } }
     loop field in lower_stored_fields(fields) {
         if field.id != id -> next
+        // The Test snapshot owns its iteration and result as exact-Int words.
+        if runtime.runtime == "JetTestSuite" {
+            offset :: if field.name == {
+                "iteration" -> { 0 }
+                "result" -> { 8 }
+                else -> { return None }
+            }
+            if !lower_is_exact_int(field.ty) -> return None
+            return Val(LowerPlaceAddress{address: LowerFieldAddress{base: handle, offset: offset}, ty: field.ty, borrowed: true})
+        }
         offset :: if runtime.runtime == "ProcessReceipt" -> {
             if field.name == {
                 "code" -> { 0 }
