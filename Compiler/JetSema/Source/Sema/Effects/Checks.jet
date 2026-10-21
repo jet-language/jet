@@ -894,10 +894,9 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: [String:Int], 
         nodes[node_index].maximal_detail = "a call with no resolved callee"
         sema_effect_record_memory_open(&nodes, node_index, fact.span, "foreign or dynamically selected function body")
     }
+    // A callee with no body in this program has no effects: only its declared
+    // row, recorded above, contributes. Its memory behavior stays unproven.
     if callee_key != "" && !known_callee && !row_known {
-        nodes[node_index].maximal = true
-        nodes[node_index].maximal_span = Val(fact.span)
-        nodes[node_index].maximal_detail = "`{callee_key}` has no body in this program"
         sema_effect_record_memory_open(&nodes, node_index, fact.span, "callee body is unavailable and has no verified signed memory summary")
     }
 }
@@ -1082,10 +1081,12 @@ fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_by_key: [St
     }
     if {
         callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
+        // A named callee with no body in this program has no effects.
+        callee_key != "" -> sema_effect_record_memory_open(&nodes, node_index, expression.span, "callee body is unavailable and has no verified signed memory summary")
         else -> {
             nodes[node_index].maximal = true
             nodes[node_index].maximal_span = Val(expression.span)
-            nodes[node_index].maximal_detail = if callee_key == "" -> "a call with no call-site fact" else -> "`{callee_key}` has no call-site fact or body in this program"
+            nodes[node_index].maximal_detail = "a call with no call-site fact"
             sema_effect_record_memory_open(&nodes, node_index, expression.span, "foreign or dynamically selected function body")
         }
     }

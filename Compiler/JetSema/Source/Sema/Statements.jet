@@ -4373,6 +4373,8 @@ fn sema_stmt_dyn_path_root(place: ^TExpr, keys: &[Bool], steps: &[TExpr]) -> TEx
 }
 
 fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    exit_diagnostics :: diagnostics.len()
+    exit_reasons :: context.incomplete_reasons.len()
     // Keep nested fields and indexes below the cell inside its locked edit.
     projected := sema_shared_access_write_place(target, environment, program, &scopes)
     if projected == .Val(place) -> return sema_stmt_check_shared_place_assignment(place.handle, place.target, op, op_span, expr, place.span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4381,7 +4383,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
             if op != None {
                 operator :: op
                 &diagnostics.push(sema_error("E0164", span, "compound assignment `{sema_expr_binary_name(operator)}` can't target an indexed slot", "a compound update reads an indexed slot before it writes, so a missing map key or checked index would make the update partial", "write a total update such as `map[key] = (map.get(key) ?? 0) {sema_expr_binary_name(operator)} 1`"))
-                return None
+                return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 1")
             }
         }
         else -> {}
@@ -4392,14 +4394,14 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         root_type :: sema_stmt_return_known_type(Expr.Ident{name: root, span: field_span}, environment, scopes)
         if root_type == .Val(root_ty) && sema_columnar_list_element(environment, program, root_ty) == .Val(element) {
             &diagnostics.push(sema_error("E1108", field_span, "writing `{root}[i].{field}` isn't supported on a columnar list yet", "`#Layout(columnar)` lists support reading a field (`xs[i].f`) in v1; writing one is deferred", "drop `#Layout(columnar)` from `{element}` to write fields in place, or rebuild the element with `push`"))
-            return None
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 2")
         }
     }
     place_diagnostics :: diagnostics.len()
     place_reasons :: context.incomplete_reasons.len()
     place :: sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
         if !sema_has_error_since(diagnostics, place_diagnostics) && context.incomplete_reasons.len() == place_reasons -> sema_check_unsupported(&context, "the assignment place at offset {op_span.start} checked to no place without a report")
-        return None
+        return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 3")
     }
     // This rule on a field of a local: the type of the place just checked
     // decides the route, so the field expression is checked once.
@@ -4410,13 +4412,15 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
 
 // The write of `expr` (combined by `op`) through the checked `place` of `target`.
 fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    exit_diagnostics :: diagnostics.len()
+    exit_reasons :: context.incomplete_reasons.len()
     place := ^checked_place
     // (Rust `check_stmt` __dyn_set_path): a plain write
     // through a Dyn member/index chain sets the path on the root in place.
     if place.kind == .HandleMethod(_, operation, _) && sema_stmt_is_dyn_index(operation) {
         if op != None {
             &diagnostics.push(sema_error("E0164", place.span, "compound assignment can't target a Dyn path", "a compound update reads the path before it writes", "write the Dyn path assignment explicitly"))
-            return None
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 12")
         }
         keys := [Bool]{}
         steps := [TExpr]{}
@@ -4426,10 +4430,10 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
             else -> "…"
         }
         root :: sema_stmt_dyn_path_root(^place, &keys, &steps)
-        checked :: sema_check_expression(expr, Val(sema_dyn_type()), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        if sema_copy_site_check_assignment(expr, environment, program, scopes, context, &diagnostics) -> return None
-        if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None
-        if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
+        checked :: sema_check_expression(expr, Val(sema_dyn_type()), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 8")
+        if sema_copy_site_check_assignment(expr, environment, program, scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 1")
+        if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 2")
+        if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 3")
         &steps.push(checked)
         set :: THandleOp.DynSetPath{keys: keys, site: site, location: sema_expression_panic_location(environment, program, scopes, span)}
         value :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, span)
@@ -4441,13 +4445,13 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         if sema_stmt_compound_nested_hook(op, field_base, place.ty, environment, program) {
             &diagnostics.push(sema_error("E0362", field_span, "compound assignment can't target a nested operator field", "the current operator-place lowering supports one named owner and one field", "bind the inner value, update it, then assign the whole inner value back"))
             _ := sema_check_expression(expr, Val(place.ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            return None
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 13")
         }
     }
     if target == .Index(index_base, _, index_span, _) && place.kind == .Index(checked_base, _, _, _, _, _) {
         if sema_columnar_list_element(environment, program, checked_base.ty) == .Val(element) {
             &diagnostics.push(sema_error("E1108", index_span, "writing through `[ ]` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(checked_base.ty))}` yet", "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred", "drop `#Layout(columnar)` from `{element}` to assign through `[ ]`, or rebuild the list with `push`"))
-            return None
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 14")
         }
         if sema_stmt_index_write_is_collection(checked_base.ty) && sema_expr_place_root_ident(index_base) == .Val(root) && context.iter_borrowed.contains(root) {
             &diagnostics.push(sema_collection_changed_in_loop(root, "a mutation of `{root}`", index_span))
@@ -4462,36 +4466,36 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     value_reasons :: context.incomplete_reasons.len()
     checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
         if !sema_has_error_since(diagnostics, value_diagnostics) && context.incomplete_reasons.len() == value_reasons -> sema_check_unsupported(&context, "the assigned value at offset {expr_span(expr).start} checked to no value without a report")
-        return None
+        return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 15")
     }
-    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     checked := checked_value
     if op != None && sema_stmt_compound_widens(checked.ty, place.ty) {
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
-        checked = sema_expr_numeric_literal_conversion(checked, place.ty, checked.span, widen_line, &diagnostics) ?? return None
+        checked = sema_expr_numeric_literal_conversion(checked, place.ty, checked.span, widen_line, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 9")
     }
-    if plain_self_typed -> checked = sema_stmt_numeric_slot_value(checked, place.ty, environment, program, &diagnostics) ?? return None
-    if op == None && sema_copy_site_check_assignment(expr, environment, program, scopes, context, &diagnostics) -> return None
+    if plain_self_typed -> checked = sema_stmt_numeric_slot_value(checked, place.ty, environment, program, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 10")
+    if op == None && sema_copy_site_check_assignment(expr, environment, program, scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 5")
     tir_op := TBinaryOp?{None}
     if op != None {
         operator :: op
-        result :: sema_stmt_compound_result(operator, place.ty, checked.ty, op_span, &diagnostics) ?? return None
+        result :: sema_stmt_compound_result(operator, place.ty, checked.ty, op_span, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
         if !sema_type_assignable(place.ty, result) {
             &diagnostics.push(sema_type_mismatch(place.ty, result, op_span))
-            return None
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 16")
         }
         tir_op = Val(sema_stmt_binary_type(operator))
     }
     sema_ownership_release_value_only_views(&state, target, &tail_store, &context)
-    if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None
-    if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
+    if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 6")
+    if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 7")
     if place.kind == {
         .Index(base, index, kind, _, checked_call, location) -> place.kind = TExprKind.Index{base: base, index: index, kind: kind, access: AccessConvention.Write, checked_call: checked_call, location: location}
         else -> {}
     }
     line :: sema_source_line_at(environment.source_segments, place.span) ?? {
         sema_check_unsupported(&context, "the assignment place span {place.span.start}..{place.span.end} has no source line in this module")
-        return None
+        return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 17")
     }
     Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tir_op, value: checked, line: line, span: Span{start: place.span.start, end: expr_span(expr).end}})
 }
@@ -4568,6 +4572,14 @@ fn sema_stmt_compound_hooked_place(ty: Type) -> Bool {
     sema_stmt_compound_nominal(ty) && !sema_expr_is_numeric(ty) && sema_expr_precise_name(ty) == None && ty != Type.String
 }
 
+// A silent exit of an assignment check: when nothing since `diagnostics`/
+// `reasons` explains it, record which exit it was, so a collect-all census
+// names the step instead of the generic assignment report.
+fn sema_stmt_assign_exit(context: &SemaCheckContext, diagnostics: [Diagnostic], diagnostics_start: Int, reasons_start: Int, label: String) -> TStmt? {
+    if !sema_has_error_since(diagnostics, diagnostics_start) && context.incomplete_reasons.len() == reasons_start -> sema_check_unsupported(&context, "assignment: {label} without a report")
+    None
+}
+
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     diagnostics_before :: diagnostics.len()
     reasons_before :: context.incomplete_reasons.len()
@@ -4581,7 +4593,9 @@ fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: E
 }
 
 fn sema_stmt_check_assignment_target(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
-    if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return None
+    exit_diagnostics :: diagnostics.len()
+    exit_reasons :: context.incomplete_reasons.len()
+    if sema_ownership_report_lending_view_escape(expr, "replace another value", scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "assignment_target exit 1")
     hooked :: sema_stmt_compound_hook_value(target, op, op_span, expr, environment, scopes)
     if hooked == .Val(binary) -> return sema_stmt_check_assignment_target(target, None, op_span, binary, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if target == {
