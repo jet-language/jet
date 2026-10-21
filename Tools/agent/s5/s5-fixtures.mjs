@@ -84,7 +84,7 @@ for (const runner of ['run-cabi-driver','run-alloc-parity','run-compiler-needed-
 add('run-main-fixtures', ['link','run'].map(mode => r('run-main-fixtures', out('main-fixtures'), mode, object)), runtime);
 add('check-object', [r('check-object', object, out('object-audit'))], runtime);
 add('check-runtime', [r('check-runtime', out('check-runtime'), '--assemble-only'), r('check-runtime', out('check-runtime-full'))], front);
-for (const runner of ['check-lists-native','check-collections-census','check-int-hazard-cutover','test-route-abi','test-generic-route-schema','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
+for (const runner of ['check-lists-native','check-collections-census','check-int-hazard-cutover','test-route-abi','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
 for (const runner of ['run-text-goldens','run-collections-goldens','run-trap-goldens']) add(runner, [r(runner, out(runner), baseline, '--results', results)], nativeGoldens);
 for (const runner of ['run-int-goldens','run-unicode-goldens']) add(runner, [r(runner, out(runner), '--results', results)], nativeGoldens);
 add('run-host-goldens', [{prepared: 'host', directory: out('host-goldens')}, r('run-host-goldens', out('host-goldens'), 'native', '--results', results)], nativeGoldens);

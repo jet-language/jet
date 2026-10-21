@@ -19,7 +19,7 @@
 # Usage:
 #   Tools/agent/lane-check.sh                 # whole workspace, all targets
 #   Tools/agent/lane-check.sh -p jet-sema     # one crate while iterating
-#   Tools/agent/lane-check.sh --runtime-generators <allparts.rs>
+#   Tools/agent/lane-check.sh --runtime-generators
 #     Runtime-only freshness gate (no Cargo); invoke through cheap.sh.
 #
 # Reading the output: errors are grouped by file. An error in a file YOU did not
@@ -30,11 +30,11 @@ set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
 
 if [ "${1:-}" = "--runtime-generators" ]; then
-  if [ "$#" -ne 2 ]; then
-    echo "usage: lane-check.sh --runtime-generators <allparts.rs>" >&2
+  if [ "$#" -ne 1 ]; then
+    echo "usage: lane-check.sh --runtime-generators" >&2
     exit 64
   fi
-  Tools/agent/jet-env node Tools/agent/gen-runtime.mjs "$2" --check
+  Tools/agent/jet-env jet run Tools/agent/RuntimeGenerators -- --check
   code=$?
   if [ "$code" -eq 0 ]; then echo "CHECK OK"
   else echo "CHECK FAILED — runtime generators exited $code"

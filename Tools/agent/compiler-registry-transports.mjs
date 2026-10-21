@@ -48,7 +48,6 @@ function specification(id) {
         if (['FilesWalk', 'HostParallelism'].includes(name)) return { type: 'native-suite', name, runner: rt + (name === 'FilesWalk' ? 'run-files-walk-fixtures.mjs' : 'run-host-parallelism-fixtures.mjs'), witness: rt + name + 'Witness.c', modes: ['assemble', 'lower', 'audit', 'link', 'run'] };
         if (suites[name]) return { type: 'suite', runner: rt + suites[name][0], modes: suites[name][1], name };
         if (['EnvironmentLeaves', 'FaultSchedule', 'IterCharge', 'ProgressState', 'HostFault', 'FloatBits', 'TerminalColor', 'TrapReport', 'VaultHooks', 'VaultProvider', 'Thread', 'HostSpawn', 'CompilerEnv', 'CompilerRoutes', 'CompilerNeededJSON', 'CompilerNeededURL', 'CompilerNeededMathText', 'DynNative'].includes(name)) return { type: 'c', name, runner: be + 'run-runtime.mjs' };
-        if (name === 'GenericRouteSchema') return { type: 'direct', runner: 'Compiler/JetRuntime/Tests/GenericRouteSchema.jet', expected: '' };
         return { blocked: `No registered transport for ${id}; the source must not be counted without an exact native verdict` };
     }
     if (id === 'JetOptimizer/Tests/LintCorpus') return { type: 'corpus', runner: 'Compiler/JetOptimizer/Tests/run-lint-corpus.mjs' };

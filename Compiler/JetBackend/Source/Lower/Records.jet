@@ -16,8 +16,8 @@
 // borrows String handles and Option boxes of a String or Int (null is None;
 // the payload is the box's first word) and takes nested record handles. A
 // fieldless Core enum inside a record crosses as its variant index. The rows
-// below have hand exports in CAbi.rs; every other record's schema and exports
-// are generated (RuntimeRoutes.jet LOWER_GENERATED_RECORDS, CAbiRoutes.rs).
+// below have hand exports in CAbi.rs; every other record's schema is a
+// RuntimeRoutes.jet LOWER_GENERATED_RECORDS row.
 use jet_foundation.[MIRProgram, MIRType, MIRTypeDef, MIRTypeKind, core_source_owns_type, mir_nominal_ref, mir_type_from_kind, mir_type_display_name]
 
 // The shape the runtime's exports were written for. A MIR definition of the
@@ -237,8 +237,8 @@ fn lower_record_entry_kind(entry: String) -> String Never! {
     parts[1]
 }
 
-// Whether a member of `ty` crosses as the runtime's member `kind`
-// (gen-c-abi-routes.mjs recordMember); "" (a hand row) checks names only.
+// Whether a member of `ty` crosses as the runtime's member `kind` (the
+// record row's member kind); "" (a hand row) checks names only.
 fn lower_record_kind_matches(p: MIRProgram, ty: MIRType, kind: String) -> Bool Never! {
     if kind == "" -> return true
     if kind == "Text" -> return ty.kind == .String
