@@ -10,9 +10,8 @@ use jet_backend.[
     LIRFunctionID,
     LIRLowering,
     LIRModule,
-    X64ExecutableResult,
-    x64_execution_service,
-    lir_lower_entry_in_place, lir_lower_entry_keep_going_in_place,
+    lir_lower_entry_in_place,
+    lir_lower_entry_keep_going_in_place,
     x64_link_executable,
     x64_relocatable_object_owned,
 ]
@@ -51,8 +50,6 @@ use jet_foundation.[
     Diagnostic,
     MIRFunctionID,
     MIRProgram,
-    MIRTestCase,
-    MIROutputCheck,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     GateLedger,
@@ -70,12 +67,14 @@ use jet_foundation.[
     CompilerThreads,
 ]
 use jet_parser.[
-    JetFormatResult,
     jet_format_source,
 ]
-use jet_sema.sema_user_template_ct_value
+use jet_sema.[sema_user_template_ct_value]
 use jet_pkg_model.[
-    ManifestEntry, PackageFacts, eval, pkg_format_source, pkg_manifest_diagnostic_from_row,
+    ManifestEntry,
+    PackageFacts,
+    pkg_format_source,
+    pkg_manifest_diagnostic_from_row,
     pkg_manifest_parse_diagnostic,
 ]
 use jetpack_foundation.[ENV_FILE, PACKAGE_FILE]
@@ -617,7 +616,6 @@ fn jet_cli_build_native(file: String, command: String, release: Bool, result: &J
     }
 }
 
-
 enum JetCLIBuilt {
     // The executable at this path.
     Binary(path: String)
@@ -803,7 +801,6 @@ fn jet_cli_native_test_unrun_check_report() -> String Never! {
     diagnostic :: diagnostic_from_registry(row.code, None, row.what, row.why, row.fix)
     diagnostic_render_all("", "", [Diagnostic]{diagnostic}, false)
 }
-
 
 // `jet test <file>`: native O0/O2 dispatch consumes the NativeTests module API.
 // ProcessSpec retains the project/snapshot/filter/shuffle/serial/capture policy;

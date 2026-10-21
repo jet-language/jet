@@ -77,7 +77,6 @@ fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, program: JetCodegenP
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: variant, args: args})
 }
 
-
 fn jet_codegen_data_pair_type() -> Type Never! {
     Type.Tuple{fields: [TypeTupleField]{
         {name: "key", ty: Type.String},
@@ -343,7 +342,6 @@ fn jet_codegen_data_decode_function(builder: JetCodegenBuilder, program: JetCode
     jet_codegen_data_codec_function(builder, program, ty, "Decode", "decode")
 }
 
-
 fn jet_codegen_data_encode_variant(ty: Type) -> String? {
     if jet_codegen_unwrap_pattern_tags(ty) == {
         .Int | .IntN(_, _) -> return Val("Int")
@@ -353,7 +351,6 @@ fn jet_codegen_data_encode_variant(ty: Type) -> String? {
         else -> return None
     }
 }
-
 
 fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr) -> MIRValueID {
     ty := jet_codegen_unwrap_pattern_tags(receiver.ty)
@@ -410,7 +407,6 @@ fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, program: JetCodeg
         MIROperation.Enum{type_id: tree_type_id, variant: variant, args: [MIREnumArg]{MIREnumArg{field: None, value: value, boxed: false}}},
     )
 }
-
 
 fn jet_codegen_lower_dyn_decode(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, target_type: Type) -> MIRValueID {
     target := jet_codegen_unwrap_pattern_tags(target_type)
@@ -483,8 +479,6 @@ fn jet_codegen_lower_dyn_decode(builder: &JetCodegenBuilder, program: JetCodegen
     }
     panic("checked Serde decode target has no Dyn codec or decode method")
 }
-
-
 
 fn jet_codegen_data_mir_db_metadata(metadata: TDBQueryMetadata?) -> MIRDBQueryMetadata? {
     if metadata == None -> return None
@@ -795,5 +789,4 @@ fn jet_codegen_lower_data_handle_method(builder: &JetCodegenBuilder, program: Je
         MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: route, receiver: receiver_value, args: lowered_args, frame_schedule: None, frame_schedule_derivation: None}},
     )
 }
-
 

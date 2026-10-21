@@ -34,7 +34,6 @@ use jet_foundation.[
     MIRProgram,
     MIRSemanticOp,
     MIRType,
-    MIRTypeDef,
     MIRTypeID,
     MIRValueID,
     MIRVariant,
@@ -1536,8 +1535,6 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
     }
 }
 
-
-
 // This only resolves checked route metadata; Foundation owns consumption.
 fn mir_lint_consumption_borrow_mask(ctx: MIRLintContext, operation: MIROperation) -> [Bool] Never! {
     if mir_operation_consumption_route(operation) == Val(call) -> return ctx.index.borrow_masks.get(call.value) ?? [Bool]{}
@@ -2733,7 +2730,6 @@ struct MIRLintSafety {
     task_holders: [String:[Int]]
     task_holder_loans: [Int]
 }
-
 
 // Whether the result of `operation` is a fresh view of an operand's place,
 // rather than one carried over (a move, join, or read) or materialized (a copy).

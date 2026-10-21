@@ -6,6 +6,8 @@
 // selector parsing (the command surface) live in TrustCommandText.jet.
 use jet_foundation.[Pattern]
 use jetpack_foundation.[CONFIG_DEFAULT_DIR, TRUST_FILE]
+use core.sys as sys
+use core.files as files
 
 TRUST_HASH_PREFIX :: prep { "hash:" }
 TRUST_PATTERN_PREFIX :: prep { "pattern:" }
@@ -172,7 +174,6 @@ fn trust_store_add_line(store: String, line: String) -[FS]> Bool Never! {
     trust_store_append(store, line)
     true
 }
-
 
 // `jetpack config trust list`: every stored line.
 fn trust_list_entries(store: String) -[FS]> [String] {

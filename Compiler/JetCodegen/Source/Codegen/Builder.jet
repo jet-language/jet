@@ -354,7 +354,6 @@ fn jet_codegen_function_index_append(index: &JetCodegenFunctionIndex, functions:
     }
 }
 
-
 // The program-wide inputs of lowering, read-only while functions lower: every
 // function taking a builder takes this beside it, so compiler threads can
 // share one program while each lowers on its own builder.
@@ -582,7 +581,6 @@ fn jet_codegen_assignment_panic_location(builder: &JetCodegenBuilder, program: J
     }
 }
 
-
 // Original checked source, deliberately separate from MIR. The execution host
 // pins these rows under its checked snapshot identity before admitting code.
 struct JetCodegenClosureSource {
@@ -607,7 +605,6 @@ struct JetCodegenLambdaValue {
     value: MIRValueID
     function: MIRFunctionID
 }
-
 
 fn jet_codegen_identity(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: String, span: Span, role: String, detail: String) -> String Never! {
     index := builder.next_identity
@@ -1672,7 +1669,6 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, program: JetCodegenProgram
     at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen tried to terminate a missing MIR block")
     builder.blocks[at].terminator = terminator
 }
-
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
 fn jet_codegen_operation_can_stop(builder: JetCodegenBuilder, operation: MIROperation) -> Bool Never! {
@@ -2844,7 +2840,6 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, program: JetCodegenProgr
     }
 }
 
-
 // A local's MIR identity is its sema symbol, except a `_` discard: sema
 // never declares one, so every `_` in a frame shares one symbol id. Like
 // Rust's `reserve_identity`, a symbol bound again in the same function gets
@@ -3107,7 +3102,6 @@ fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, program: JetCode
     place_id
 }
 
-
 fn jet_codegen_find_function(function_index: JetCodegenFunctionIndex, key: String) -> TFunc? {
     row :: jet_codegen_find_function_row(function_index, key) ?? return None
     Val(function_index.rows[row])
@@ -3124,7 +3118,6 @@ fn jet_codegen_find_function_by_key(function_index: JetCodegenFunctionIndex, key
     if row < 0 -> panic("ambiguous checked function key in Codegen input")
     Val(function_index.rows[row])
 }
-
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::registry_function_identity
 // (function_identity / synthetic_function_identity): byte-identical framing, so

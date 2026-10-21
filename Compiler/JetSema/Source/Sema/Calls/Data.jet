@@ -322,7 +322,6 @@ fn sema_data_try_dbvalue_accessor(receiver: Expr, receiver_value: TExpr, method:
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-
 fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     resolved_ty := sema_call_resolved_type(receiver_value.ty, environment, program)
     if resolved_ty == .Apply(name, parameters) {
@@ -846,7 +845,6 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     result :: sema_data_core_emit(record, "{module_name}.{member}", updated_args, checked_types, typed, effective_type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
     Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
 }
-
 
 fn sema_data_core_reader_writer_params(module_name: String, member: String, record: CoreCallRecord, span: Span, diagnostics: &[Diagnostic]) -> [SemaCallParam]? {
     reader := member == "reader"

@@ -256,7 +256,6 @@ fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites
     Val([String]{})
 }
 
-
 // A declared `$companion` site; `site` is None when the rule declares none.
 struct SemaMarkerRulesCompanion {
     site: TAppliedRuleCompanionSite?
@@ -864,7 +863,6 @@ fn sema_marker_rules_append_comptime_requests(requests: &[SemaComptimeRequest], 
     }
 }
 
-
 fn sema_marker_rules_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu) -> String Never! {
     segments := path.split(".").to_list()
     start := 0
@@ -1272,7 +1270,6 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
     diagnostic := sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.", fix)
     if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
-
 
 fn sema_marker_rules_repeated_error(marker: Marker) -> Diagnostic {
     sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")

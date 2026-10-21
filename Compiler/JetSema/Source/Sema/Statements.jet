@@ -84,7 +84,6 @@ use jet_foundation.[
     type_identity_equal,
     type_identity_key,
     type_name,
-    type_with_effective_fn_returns,
     TIfCond,
     TextEdit,
     UnOp,
@@ -101,7 +100,6 @@ struct SemaStatementRollbackMethods {
     snapshot: TMethodRef
     restore: TMethodRef
 }
-
 
 fn sema_stmt_binary_type(op: BinOp) -> TBinaryOp Never! {
     sema_expr_tir_binary_op(op)
@@ -216,7 +214,6 @@ fn sema_stmt_loop_value_break_missing_payload(frame: SemaLoopValueFrame, span: S
     &diagnostics.push(sema_error("E0076", span, "this loop break needs a value", "an ordinary loop used as a value needs a payload on every matching break", "write `break value`"))
     false
 }
-
 
 fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Span, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if label == .Val(name) && !sema_scope_has_loop_label(scopes, name) {
@@ -942,10 +939,6 @@ fn sema_stmt_switch_chain(conditions: ^[SemaCheckedCondition?], branches: ^[Sema
     }
     chain
 }
-
-
-
-
 
 fn sema_stmt_range_integer_type(ty: Type) -> Bool Never! {
     if ty == {
@@ -1723,8 +1716,6 @@ fn sema_stmt_for_in_by_value(collection_type: Type, item_type: Type) -> Bool Nev
     }
 }
 
-
-
 fn sema_stmt_for_in_columnar_list_type(collection_type: Type) -> Bool Never! {
     if collection_type == {
         .List(_) | .FixedList(_, _) -> true
@@ -1894,7 +1885,6 @@ fn sema_stmt_move_direct(expr: Expr, state: &SemaOwnershipState, scopes: SemaSco
     }
     sema_ownership_mark_unmarked_move(&state, expr, scopes, consumer, &diagnostics)
 }
-
 
 fn sema_stmt_view_access(ty: Type) -> AccessConvention? {
     if ty == {
@@ -2676,7 +2666,6 @@ fn sema_stmt_refutable_capture_payload(pattern: TPattern, subject_ty: Type) -> T
     None
 }
 
-
 fn sema_stmt_refutable_assign_capture_identity(pattern: &TPattern, name: BindName, local: TLocal) Never! {
     local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
     loop index in 0..<pattern.bindings.len() {
@@ -3166,7 +3155,6 @@ fn sema_stmt_install_binding_loop_label(expr: Expr, name: String, name_span: Spa
     // caller's AST node (a read parameter), which the caller keeps.
     expr.copy()
 }
-
 
 // A binding whose initializer produced no checked value stays in scope with
 // only its written type. Without one, reads of the name check to nothing and
@@ -4148,7 +4136,6 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
     }
 }
 
-
 fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
     forbidden := scopes.comptime_execution_depth > 0
     if forbidden {
@@ -4285,7 +4272,6 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
     member :: kind ?? return None
     Val(TStmt.ScopeMember{kind: member, body: nested.value, span: span})
 }
-
 
 fn sema_stmt_check_shared_transaction(transaction: Stmt, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if transaction == {
@@ -4615,7 +4601,6 @@ fn sema_stmt_check_loop_step(step: Stmt, environment: SemaScopeEnvironment, prog
         else -> None
     }
 }
-
 
 // Leave a statement list: drop its lambda tail frames and its tail body (and
 // any a nested list left; bodies are added and dropped in stack order, and no
@@ -5880,7 +5865,6 @@ fn sema_stmt_check_unreachable_statement(statement: Stmt, index: Int, statements
     context.failure_union_general = dead_general
     complete
 }
-
 
 // sema_check_statements's expression statement. False when it is incomplete.
 fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {

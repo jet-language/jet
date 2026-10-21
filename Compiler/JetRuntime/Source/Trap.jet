@@ -4,7 +4,6 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
-
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
         return os_load_i64(address)
@@ -87,7 +86,6 @@ fn rt_trap_invalid_box_layout() {
 fn trap_write_handle(handle: I64) {
     trap_write(trap_word(handle), trap_word(handle + I64{8}))
 }
-
 
 fn trap_exit(status: I64) {
     if (scheduler_report_domain() == I64{1}) {
@@ -426,7 +424,6 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
     alloc_write_word(I64{10}, I64{1})
     trap_defect_exit(I64{101})
 }
-
 
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))

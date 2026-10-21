@@ -1,6 +1,14 @@
 use jet_ast.[Stmt, Expr, Item, Func, StructDef, CtValue, CtReport, PlaceAccess, Program, ProgramBundle, LoadedModule, DevtoolsRegistry, CFfi, NameLedger]
 use jet_foundation.[
-    Diagnostic, Span, Severity, CtValue, Func, Item, NameLedger, Program, Stmt, StructDef,
+    Diagnostic,
+    Span,
+    CtValue,
+    Func,
+    Item,
+    NameLedger,
+    Program,
+    Stmt,
+    StructDef,
 ]
 use jet_lexer as Lexer
 use jet_parser as Parser
@@ -14,14 +22,13 @@ use core.files.host.retained_descriptor as repl_turn_files
 use core.term.host.stdio as repl_turn_stdio
 use core.term.host.stdio.[Write]
 use core.sys.target as repl_turn_target
-use jet_driver.[boot_mir_eval]
 use jetpack_foundation.[ColorChoice]
 use core.term.host.stdio.[BufRead] // GATE #4494: retained buffered input ABI.
 use core.text.runtime.kernel_unicode_string.[from_utf8_lossy]
 use jet_foundation as Diagnostics
 use jet_foundation as Syntax
 use jet_driver as Manifest
-use jet_pkg_model.[Manifest, checked, main]
+use jet_pkg_model.[Manifest]
 
 // Rust: crates/jet-repl/src/lib.rs:1805
 fn repl_completeness_probe(prefix: String, input: String, suffix: String) -> Bool {

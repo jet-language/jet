@@ -52,7 +52,6 @@ fn sema_game_check_first_string_discard_rest(args: [CallArg], environment: SemaS
     if args.len() > 1 -> loop index in 1..<args.len() -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-
 fn sema_game_literal_string(expression: Expr) -> String? {
     if expression == {
         .Str(parts, _) -> {
@@ -163,7 +162,6 @@ fn sema_game_report_arity(method: String, expected: Int, actual: Int, span: Span
     &diagnostics.push(sema_call_arity_diagnostic(method, expected, actual, false, span))
 }
 
-
 fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     facts := SemaCallFacts{
         return_type: result_type,
@@ -178,7 +176,6 @@ fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRo
 fn sema_game_string_value(text: String, span: Span) -> TExpr Never! {
     sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
 }
-
 
 fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if method == "on_frame" {

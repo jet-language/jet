@@ -32,6 +32,7 @@ use jet_foundation.[
     THandleOp,
     TNumericOp,
     Type,
+    type_name,
 ]
 
 struct JetCodegenHandleRoute {
@@ -52,7 +53,6 @@ fn jet_codegen_handle_h(member: String, symbol: String, borrow_mask: [Bool], rou
 fn jet_codegen_handle_core(module_name: String, member: String, symbol: String, borrow_mask: [Bool], route_effect: Effect?) -> JetCodegenHandleRoute Never! {
     jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, module_name, member, symbol, borrow_mask, route_effect, MIRPreludeABI.Value)
 }
-
 
 fn jet_codegen_handle_type_without_tags(ty: Type) -> Type Never! {
     if ty == {
@@ -403,7 +403,6 @@ fn jet_codegen_handle_math_route(type_name: String, method: String, reduce_op: S
     Val(jet_codegen_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
-
 fn jet_codegen_handle_layout_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
         "h" | "v" | "suggest" -> return Val(jet_codegen_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true, false, false}, None))
@@ -463,7 +462,6 @@ fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> JetCodegenHand
     }
     Val(jet_codegen_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
 }
-
 
 fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     symbol := ""

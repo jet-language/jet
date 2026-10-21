@@ -37,7 +37,6 @@ use jet_foundation.[
     PrepParam,
     RustConstKind,
     Span,
-    SemaNameCase,
     StateDecl,
     Stmt,
     StructDef,
@@ -69,7 +68,6 @@ use jet_foundation.[
 ]
 use jet_lexer.[
     TOKEN_AMP,
-    TOKEN_AT,
     TOKEN_BANG,
     TOKEN_CARET,
     TOKEN_COLON,
@@ -86,8 +84,6 @@ use jet_lexer.[
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
-    TOKEN_KW_COMPTIME,
-    TOKEN_KW_CONST,
     TOKEN_KW_COPY,
     TOKEN_KW_DERIVE,
     TOKEN_KW_EFFECT,
@@ -194,8 +190,6 @@ fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     value := UserPolicyDecl{is_pub: true, name: parser_value(state, name), name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
     ParsedUserPolicy{value: value, valid: valid}
 }
-
-
 
 fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
     // Foreign module heads own their markers; do not replay them as ordinary
@@ -513,7 +507,6 @@ fn parser_marker_first_expr(marker: Marker) -> Expr? {
         else -> return None
     }
 }
-
 
 fn parser_parse_import(state: &JetParserState) -> ImportDecl {
     start :: parser_bump(&state)

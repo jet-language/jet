@@ -1,6 +1,7 @@
 // Lossless native value transport. Only canonical compiler-owned descriptors
 // may reach these readers; addresses are child-local borrowed storage.
-use jet_foundation.foundation_json_quote
+use jet_foundation.[foundation_json_quote]
+use core.encoding.json as execution_json
 
 struct X64ClosureValueLayout {
     snapshot: String
@@ -189,7 +190,6 @@ fn x64_value_receive(fd: Int, first: String) -> X64NativeValue? {
     }
     Val(X64NativeValue{kind: kind, attributes: attributes, text: text, children: children})
 }
-
 
 fn x64_value_member_json(member: X64ValueMember) -> String Never! {
     "[{foundation_json_quote(member.name)},{member.offset},{member.descriptor},{member.boxed}]"

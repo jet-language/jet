@@ -27,13 +27,10 @@ use jet_foundation.[
     MIRConstant,
     MIRDropKind,
     MIRField,
-    MIREnumArg,
     MIRFieldID,
-    MIRFieldValue,
     MIRFunction,
     MIRFunctionID,
     MIRFunctionKind,
-    MIRTestCase,
     MIRInstruction,
     MIRReflectField,
     MIRLayout,
@@ -50,7 +47,6 @@ use jet_foundation.[
     MIRPreludeCall,
     MIRPreludeCallID,
     MIRProgram,
-    MIRProjection,
     MIRScopeID,
     MIRTestScopeMember,
     MIRSemanticOp,
@@ -92,6 +88,7 @@ use jet_foundation.[
     mir_operation_place_uses,
     mir_runtime_owned_ownership,
     mir_type_identity_key,
+    type_name,
 ]
 use core.math as math
 
@@ -2037,7 +2034,6 @@ fn lower_comptime_site(m: &LowerModule, f: &LowerFunction, symbol: String, start
 fn lower_comptime_leave(m: &LowerModule, f: &LowerFunction) Never! {
     if m.comptime_budget -> lower_call_runtime(&m, &f, "jet_rt_comptime_leave", [LIRValueID]{}, None)
 }
-
 
 // A static string's address and byte length, for runtime calls.
 fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRValueID] Never! {
@@ -4968,7 +4964,6 @@ fn lower_range_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_write_at(p, &f, dst, members[2].offset, flag, members[2].ty)
 }
 
-
 // Scopes whose meaning is fully checked before lowering emit nothing, as in
 // the Rust emitter (MIRRust.rs `scope_operation_expression`), which calls the
 // runtime only for Shield, a Context with a deadline, Unsafe/Policy sentry
@@ -5598,7 +5593,6 @@ fn lower_variant(definition: MIRTypeDef, name: String) -> (index: Int, variant: 
 fn lower_discriminant(index: Int) -> Int Never! {
     index
 }
-
 
 fn lower_enum_is(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, owner: MIRTypeID, variant: String) Never! {
     ty :: lower_value_type(c, subject) ?? return lower_fail(&m, &f, "enum subject has no checked type")

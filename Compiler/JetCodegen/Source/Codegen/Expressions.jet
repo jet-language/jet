@@ -94,7 +94,6 @@ use jet_foundation.[
     TCapture,
     TCaptureFacts,
     TClosureOp,
-    TCompilerBuiltin,
     TComptimeKey,
     TComptimeValue,
     TCoreClosureKind,
@@ -156,7 +155,6 @@ use jet_foundation.[
     mir_module_id,
     mir_ownership_from_access,
     mir_source_file_id,
-    mir_trait_ref,
     mir_type_id,
     mir_type_identity_key,
     tir_pattern_key_identity,
@@ -177,7 +175,6 @@ use jet_foundation.[
 ]
 use jet_sema.[
     SemaCheckedForeignParam,
-    SemaGraphModuleResult,
     SemaRegistrationNominalKind,
     SemaRegistrationVariant,
     sema_inference_substitute_type,
@@ -505,12 +502,10 @@ fn jet_codegen_local_read_type(builder: JetCodegenBuilder, program: JetCodegenPr
     ty.copy()
 }
 
-
 fn jet_codegen_is_copy_type(ty: Type) -> Bool Never! {
     if ty == .Int | .Float | .Float32 | .Bool | .Char -> return true
     false
 }
-
 
 fn jet_codegen_lower_call_args(builder: &JetCodegenBuilder, program: JetCodegenProgram, args: [TCallArg], params: [TParameter]) -> [MIRCallArg] {
     variadic := [Bool]{}
@@ -1105,7 +1100,6 @@ fn jet_codegen_lower_registered_math_constructor(builder: &JetCodegenBuilder, pr
     function := if record.member == "fraction" -> "new" else -> "from_str"
     Val(jet_codegen_lower_precise_builtin(&builder, program, expression, type_name, function, args, failure))
 }
-
 
 fn jet_codegen_failure_carrier_for_type(ty: Type) -> TFailureCarrier Never! {
     if ty == {
@@ -1985,7 +1979,6 @@ fn jet_codegen_lower_optional_method_call(builder: &JetCodegenBuilder, program: 
     jet_codegen_switch_block(&builder, program, join_block)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
-
 
 fn jet_codegen_lower_struct_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, fields: [TStructFieldValue], extra: TStructExtra?) -> MIRValueID {
     owner :: jet_codegen_mir_type_id_for_type(program.nominals, builder.function.module_identity, builder.generic_type_names, expression.ty)
@@ -4041,7 +4034,6 @@ fn jet_codegen_unit_rounding_code(mode: TUnitRoundingMode) -> Int Never! {
     }
 }
 
-
 fn jet_codegen_unit_distinct_base(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> Type? {
     name := ""
     if ty == {
@@ -4508,7 +4500,6 @@ fn jet_codegen_lower_try_value(builder: &JetCodegenBuilder, program: JetCodegenP
     jet_codegen_switch_block(&builder, program, join_block)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
-
 
 fn jet_codegen_lower_range_checked_ctor(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, owner: SymbolID, argument: TExpr, failure: TFailureCarrier) -> MIRValueID {
     definition := jet_codegen_find_distinct_definition(builder, program, owner)
@@ -5116,7 +5107,6 @@ fn jet_codegen_emit_host_route_call(builder: &JetCodegenBuilder, program: JetCod
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HostCall{call: call, args: routed_args}})
 }
 
-
 fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_field_owner_type(inner)
@@ -5284,7 +5274,6 @@ fn jet_codegen_canonical_nan() -> Float Never! {
     math.from_bits(0x7FF8000000000000)
 }
 
-
 fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? {
     if ty == Type.Float32 {
         if member == "MAX" -> return Val(MIRConstant.Float{value: 3.4028234663852886e38, f32: true, spelling: None})
@@ -5382,7 +5371,6 @@ fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, program: JetCodegen
     jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false, false})
 }
 
-
 fn jet_codegen_lower_cell_guard_project(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, recv: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool) -> MIRValueID {
     guard := jet_codegen_lower_expr(&builder, program, recv)
     field_paths := [[MIRFieldID]]{}
@@ -5427,7 +5415,6 @@ fn jet_codegen_lower_expect_snapshot(builder: &JetCodegenBuilder, program: JetCo
     }
     jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false, false})
 }
-
 
 fn jet_codegen_lower_ambient_input(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, prompt: TExpr?) -> MIRValueID {
     prompt_value := MIRValueID?{None}
@@ -5994,7 +5981,6 @@ fn jet_codegen_lower_short_circuit(builder: &JetCodegenBuilder, program: JetCode
     jet_codegen_switch_block(&builder, program, join_block)
     jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.Phi{incoming: incoming})
 }
-
 
 struct JetCodegenPatternTest {
     value: MIRValueID

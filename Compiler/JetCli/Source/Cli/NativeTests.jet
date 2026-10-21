@@ -4,7 +4,7 @@
 // children, which attributes a process-fatal failure to its exact checked test.
 use core.files as native_test_files
 use jet_backend.[lir_lower_tests, lir_optimize_module, x64_relocatable_object, x64_link_executable]
-use jet_foundation.[MIRProgram, MIRHarnessPlan, MIRTestCase, MIRFunctionID, MIROutputCheck]
+use jet_foundation.[MIRProgram, MIRHarnessPlan, MIRTestCase, MIROutputCheck]
 
 struct JetNativeTestRecord { function: U64, wire: String }
 struct JetNativeTestCursor { bytes: [U8], at: Int }
@@ -28,7 +28,6 @@ fn jet_native_test_byte_count(text: String) -> Int Err! {
     if count < 0 -> return Err("native test outcome byte count is negative")
     Ok(count)
 }
-
 
 // A killed writer can leave one incomplete final record. It contributes no
 // outcome; all complete records remain authoritative. Malformed complete

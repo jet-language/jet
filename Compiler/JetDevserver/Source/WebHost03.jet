@@ -7,7 +7,7 @@ use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
 use std.time.[Duration, Instant]
 use std.thread as thread
 use core.files.[OSPath]
-use jet_devserver.[Request, MAX_REQUEST_BODY_BYTES, ResidentDevSession, query_param, write_response]
+use jet_devserver.[MAX_REQUEST_BODY_BYTES, ResidentDevSession]
 use jet_devserver.Canvas as Canvas
 use jet_devserver.BrowserWebAdapter as browser_web_adapter
 use jet_devserver.BrowserHost as BrowserHost
@@ -21,6 +21,7 @@ use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 // Canonical WebPending implementation, not the Rust include bridge.
 use jet_codegen.Prelude.Core.WebPending as web_stream_bridge
 use jet_foundation.[foundation_json_escape]
+use core.encoding.[Dyn]
 // Rust: crates/jet-devserver/src/WebHost.rs:3589
 fn canvas_api_path(path: String, target: String) -> Bool {
     return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/__jet_canvas/session").bit_or("/__jet_canvas/live").bit_or("/__jet_canvas/graph").bit_or("/__jet_canvas/project").bit_or("/__jet_canvas/source-control").bit_or("/__jet_canvas/core-catalog").bit_or("/__jet_canvas/proof").bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction").bit_or("/__jet_canvas/project/transaction").bit_or("/__jet_canvas/query").bit_or("/__jet_canvas/debug").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/canvas/session").bit_or("/canvas/graph").bit_or("/canvas/project").bit_or("/canvas/source-control").bit_or("/canvas/core-catalog").bit_or("/canvas/proof").bit_or("/canvas/source").bit_or("/canvas/command").bit_or("/canvas/transaction").bit_or("/canvas/project/transaction").bit_or("/canvas/query").bit_or("/canvas/debug").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/panel/session").bit_or("/panel/graph").bit_or("/panel/project").bit_or("/panel/source-control").bit_or("/panel/core-catalog").bit_or("/panel/proof").bit_or("/panel/source").bit_or("/panel/command").bit_or("/panel/transaction").bit_or("/panel/project/transaction").bit_or("/panel/query").bit_or("/panel/debug").bit_or("/__jet_dev_version").bit_or("/__jet_dev_status").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser").bit_or("/__jet_web/stream")

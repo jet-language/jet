@@ -10,6 +10,7 @@ use jet_foundation.[
     TComptimeField,
     TComptimeValue,
     mir_symbol_name,
+    type_name,
 ]
 
 fn jet_eval_compiler_value_method_owner(member: String) -> [String]? {
@@ -53,7 +54,6 @@ fn jet_eval_compiler_value_method_borrow_mask(arity: Int) -> [Bool] Never! {
     mask
 }
 
-
 fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String, method: String, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     loop field in fields {
         if field.name == method -> return Val(field.value)
@@ -61,7 +61,6 @@ fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String,
     jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection is missing from its checked value")
     None
 }
-
 
 fn jet_eval_compiler_value_method_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> [TComptimeField]? {
     if value == {

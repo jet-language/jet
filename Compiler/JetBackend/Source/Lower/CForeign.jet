@@ -1,7 +1,7 @@
 // C FFI is a System V call, not a runtime-handle call. Float values already
 // use the selector's xmm argument/result plan; narrow integers live as words
 // in Jet and normalize exactly the bits the C ABI defines.
-use jet_foundation.[MIRProgram, MIRInstruction, MIRCallArg, MIRForeign, MIRType, MIRLinkArtifactKind, MIRPreludeCallID, MIRValueID]
+use jet_foundation.[MIRProgram, MIRInstruction, MIRCallArg, MIRForeign, MIRType, MIRPreludeCallID, MIRValueID]
 
 fn lower_c_scalar(ty: MIRType) -> Bool Never! {
     kind :: lower_convert_type(ty).kind
@@ -11,7 +11,6 @@ fn lower_c_scalar(ty: MIRType) -> Bool Never! {
         else -> lower_ptr_element(ty) != None
     }
 }
-
 
 fn lower_c_link_valid(p: MIRProgram, id: U64) -> Bool Never! {
     loop link in p.links {

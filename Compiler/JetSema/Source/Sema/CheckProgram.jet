@@ -217,7 +217,6 @@ fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [S
     complete
 }
 
-
 struct SemaResult {
     module_name: String
     functions: [TFunc]
@@ -1093,7 +1092,6 @@ fn sema_incremental_accept_packet(query: SemaBodyMemoQuery?, body: SemaParallelB
     if body.cache_hit -> return
     sema_incremental_accept(descriptor, body)
 }
-
 
 struct SemaFunctionResult {
     value: TFunc?
@@ -2037,7 +2035,6 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     contract :: sema_contract_check_function(func, updated, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if !contract.complete -> complete = false
 
-
     // With no written return type the function returns
     // nothing, so a value on its last line is lost (E0433). With a value
     // return (not a generator; written, or projected by the bundle failure
@@ -2290,7 +2287,6 @@ fn sema_comptime_method_kind(function: Func, owner_type: Type, trait_symbol: Sym
         .None -> return TFuncKind.Method{self_convention: self_convention, owner_type: owner_type}
     }
 }
-
 
 fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_identity: String, function_key: String) -> SemaComptimeFunctionSource? {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
@@ -2602,7 +2598,6 @@ fn sema_check_method_input(job: SemaBodyJob, module_index: Int, memory_plan: Sem
     }
     panic("a registered Jet method lost its owning graph")
 }
-
 
 // Existing scalar body descriptors survive preparation writes; declarations do
 // not escape their read-only thunks. Serial callers construct these descriptors
@@ -3757,7 +3752,6 @@ enum SemaBodyJob {
     NominalMethod(ordinal: Int, nominal_index: Int, method_index: Int)
     ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int)
 }
-
 
 fn sema_check_prepared_checked_count(bodies: [SemaPreparedBody]) -> Int Never! {
     count := 0

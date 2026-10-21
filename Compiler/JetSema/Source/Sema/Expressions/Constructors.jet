@@ -24,7 +24,6 @@ use jet_foundation.[
     TEnumPayload,
     TExpr,
     TExprKind,
-    TFailureCarrier,
     TFieldRef,
     THostCall,
     TNamedEnumArg,
@@ -42,7 +41,6 @@ use jet_foundation.[
     core_module_enum_variants,
     core_record_literal_fields,
     core_record_literal_is_core_only,
-    core_call,
     expr_span,
     mir_typed_head_kind,
     regex_syntax_validate,
@@ -802,7 +800,6 @@ struct SemaExpressionTypedTextParts {
     trusted_html: [Bool]
 }
 
-
 fn sema_expression_typed_literal_printable_bound(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) -> return sema_type_bound_satisfied_with_generics(graph, ty, "Printable", environment.module_identity, environment.generic_params) ?? false
     false
@@ -1151,7 +1148,6 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
     }
     SemaExpressionCheckedTextLiteral{handled: true, value: None}
 }
-
 
 // The bytes a `[U8]{"…"}` body spells. ASCII text contributes
 // one byte per character and `\xNN` the written byte; non-ASCII text is E0119.

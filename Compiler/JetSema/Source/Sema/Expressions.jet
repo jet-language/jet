@@ -890,7 +890,6 @@ fn sema_expr_byte_text(value: U8) -> String Never! {
     String.from_bytes([U8]{first, second}) ?? ""
 }
 
-
 fn sema_expr_expected_type(value: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
     if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared_with_generics(graph, value, environment.module_identity, environment.generic_params)
     // copy: the expected type is a new owned Type. When nothing resolves it equals `value`, the
@@ -904,7 +903,6 @@ fn sema_expr_expected_assignable(required: Type, offered: Type, environment: Sem
     }
     Val(sema_type_assignable(required, offered))
 }
-
 
 fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
     updated := value
@@ -1498,7 +1496,6 @@ fn sema_expr_unit_fact(ty: Type, environment: SemaScopeEnvironment, program: Sem
     if program.registration_graph == .Val(graph) -> return sema_registration_unit_fact_for_type(graph, ty)
     None
 }
-
 
 fn sema_expr_unit_ratio_sub(left: UnitRatio, right: UnitRatio) -> UnitRatio Never! {
     UnitRatio{numerator: left.numerator * right.denominator - right.numerator * left.denominator, denominator: left.denominator * right.denominator}
@@ -2926,7 +2923,6 @@ fn sema_expr_try_hardware_pre_receiver(receiver: Expr, method: String, args: [Ca
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-
 fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     debug := sema_call_try_debug_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &diagnostics)
     if debug.handled -> return debug
@@ -3237,7 +3233,6 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, value, &diagnostics) -> return None
     Val(value.value)
 }
-
 
 fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     diagnostics_before :: diagnostics.len()

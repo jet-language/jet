@@ -1,5 +1,6 @@
 // Source/ReceiptSections.rs append-only section record codec and field diff.
 use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, canonical_json_bytes, canonical_json_equal]
+use core.crypto as receipt_crypto
 
 struct JetCLIReceiptSectionRecord {
     claim_key: String
@@ -15,7 +16,6 @@ struct JetCLIReceiptFieldDiff {
 }
 
 JET_CLI_RECEIPT_SECTION_RECORD_MAX :: prep { 67112960 }
-
 
 fn jet_cli_receipt_section_record_validate(record: JetCLIReceiptSectionRecord) JetCLIReadError! {
     if !jet_cli_receipt_is_digest(record.claim_key) {

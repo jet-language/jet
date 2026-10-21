@@ -31,7 +31,6 @@ SEMA_TAINT_ORIGIN_ENV :: prep { "$origin.env" }
 SEMA_TAINT_ORIGIN_PROCESS :: prep { "$origin.process" }
 SEMA_TAINT_ORIGIN_FFI :: prep { "$origin.ffi" }
 
-
 struct SemaTaintTagFact {
     name: String
     module_identity: String
@@ -305,7 +304,6 @@ fn sema_taint_known_source(source: String, catalog: SemaTaintCatalog) -> Bool Ne
     sema_effect_parse_name(source) != None || sema_taint_has(catalog.known_sources, source)
 }
 
-
 fn sema_taint_push_invalid_path(diagnostics: &[Diagnostic], name: String, span: Span, destination: Bool, catalog: SemaTaintCatalog) {
     candidates := [String]{}
     if {
@@ -360,7 +358,6 @@ fn sema_taint_collect_tag_declarations(catalog: &SemaTaintCatalog, graph: SemaRe
         loop diagnostic in module_diagnostics -> &diagnostics.push(diagnostic)
     }
 }
-
 
 fn sema_taint_callable_key(module_identity: String, owner: String, name: String) -> String Never! {
     if owner == "" -> return "{module_identity}:{name}"
@@ -421,7 +418,6 @@ fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationG
         }
     }
 }
-
 
 fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
@@ -527,7 +523,6 @@ fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, program
     }
     false
 }
-
 
 fn sema_taint_validate_type_tags(graph: SemaRegistrationGraph, ty: Type, module_identity: String, state: &SemaTaintFlowState, span: Span) {
     if ty == {
@@ -665,7 +660,6 @@ fn sema_taint_is_credential_verify(state: SemaTaintFlowState, receiver: Expr, me
     module_row := sema_taint_core_module_for_receiver(state, receiver)
     module_row == "core.auth" && (method == "verify_jwt" || method == "verify_paseto")
 }
-
 
 fn sema_taint_type_of_expr(state: SemaTaintFlowState, expression: Expr) -> String? {
     if expression == {
@@ -1417,7 +1411,6 @@ fn sema_taint_function_for_key(graph: SemaRegistrationGraph, module_identity: St
     None
 }
 
-
 fn sema_taint_check_body_graph(body: [Stmt], module_identity: String, owner_key: String, graph: SemaRegistrationGraph, initial_bindings: [SemaTaintBindingFact], existing_diagnostics: [Diagnostic]) -> SemaTaintFlowResult {
     catalog := sema_taint_catalog_init()
     diagnostics := [Diagnostic]{}
@@ -1451,8 +1444,6 @@ fn sema_taint_check_body_graph(body: [Stmt], module_identity: String, owner_key:
     value := SemaTaintFlowValue{tags: [String]{}, type_name: None}
     SemaTaintFlowResult{value: value, bindings: state.bindings, diagnostics: diagnostics, complete: true}
 }
-
-
 
 fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics: [Diagnostic]) -> SemaTaintResult {
     catalog := sema_taint_catalog_init()

@@ -21,7 +21,6 @@ use jet_foundation.[
     MIRPreludeFamily,
     MIRPreludeTypeArg,
     MIRSemanticOp,
-    MIRSourceFile,
     MIRStringFormat,
     MIRStringPart,
     MIRStringPartKind,
@@ -1095,7 +1094,6 @@ fn jet_codegen_lower_builtin_dynamic_priority_queue_remove(builder: &JetCodegenB
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Phi{incoming: incoming})
 }
 
-
 fn jet_codegen_lower_builtin_unzip(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr) -> MIRValueID {
     tuple_fields := if jet_codegen_builtin_untag(expression.ty) == { .Tuple(fields) -> fields else -> panic("checked unzip result is not a tuple") }
     item_type := if jet_codegen_builtin_untag(receiver.ty) == {
@@ -1487,7 +1485,6 @@ fn jet_codegen_lower_builtin_zip(builder: &JetCodegenBuilder, program: JetCodege
     }
     left
 }
-
 
 fn jet_codegen_lower_builtin_tuple_projection(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: TBuiltinOp, args: [TExpr]) -> MIRValueID {
     indexed := if operation == { .Indexed(_) -> true else -> false }

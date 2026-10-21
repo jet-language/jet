@@ -2,9 +2,21 @@
 // boundary; evaluation/sema/replay are the adjoining TurnFacts02 owner.
 use jet_ast.[Stmt, Expr, CallArg, AccessConvention, Func, StructDef, Type, CtValue, ProgramBundle, ImportKind]
 use jet_foundation.[
-    Diagnostic, Span, name_ledger_effective_alias, is_known_core_module, authority_ascii_lower,
-    ApplicationAuthority, AuthorityVerdict, authority_parse_right, authority_answer,
-    AccessConvention, CallArg, CtValue, Expr, Func, Item, Stmt, StructDef, Type,
+    Diagnostic,
+    Span,
+    authority_ascii_lower,
+    ApplicationAuthority,
+    authority_parse_right,
+    authority_answer,
+    AccessConvention,
+    CallArg,
+    CtValue,
+    Expr,
+    Func,
+    Item,
+    Stmt,
+    StructDef,
+    Type,
 ]
 use jetpack_foundation.[ColorChoice, TerminalPalette]
 use core.files.runtime.kernel_path_components as repl_paths
@@ -24,7 +36,6 @@ use core.text.runtime.kernel_unicode_string.[from_utf8_lossy, utf8_width_at]
 // sink; write failures are intentionally ignored at Rust's presentation sites.
 use core.term.host.stdio.[Write]
 use jet_lexer.[lex]
-use jet_parser.[parse_with_source]
 use jet_ast.[import_alias, import_walk_bindings]
 use core.sys.host.unix_fd as repl_unix
 use core.sys.host.retained_buffers as repl_buffers
@@ -33,7 +44,6 @@ use c.c as repl_libc
 // pending jet-comptime owner ABI reconciliation: no local evaluator/interrupt.
 use jet_comptime.[ReplAuthorizer, ReplEffectRequest, DevSink, run_repl_main_with_fuel]
 // pending Authority owner ABI reconciliation: canonical Rust-name producer.
-use jetpack_foundation.[repl_refusal_why]
 // pending Wave-0808 ABI reconciliation: rebuild_funcs and sema helpers.
 
 // Canonical notebook-control turn facts: crates/jet-repl/src/lib.rs:838–866.

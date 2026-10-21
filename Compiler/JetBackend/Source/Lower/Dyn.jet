@@ -4,8 +4,17 @@
 // Requested checked codec implementations are lowered by Codecs.jet.
 // No unwired runtime/container codec policy is retained here.
 use jet_foundation.[
-    MIRCallArg, MIRInstruction, MIRLocalID, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID,
-    mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type,
+    MIRCallArg,
+    MIRInstruction,
+    MIRNominalRef,
+    MIRPreludeCallID,
+    MIRProgram,
+    MIRType,
+    MIRTypeKind,
+    MIRValueID,
+    mir_type_display_name,
+    mir_type_from_kind,
+    mir_type_same_checked_type,
 ]
 
 fn lower_dyn_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
@@ -22,7 +31,6 @@ fn lower_dyn_program_type(p: MIRProgram) -> MIRType? Never! {
     }
     None
 }
-
 
 // Two header words [node bytes, row count], followed by rows indexed by the
 // runtime variant's semantic identity, not by the checked declaration order.
@@ -218,7 +226,6 @@ fn lower_dyn_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if dst == None -> lower_map_drop_value(p, &m, &f, joined, result_ty)
     true
 }
-
 
 // `tree.to_text()` (JetStd/Dyn.rs to_text): Null, Array and Object are None
 // without touching the tree; a scalar leaf (O(1) to build) asks the runtime

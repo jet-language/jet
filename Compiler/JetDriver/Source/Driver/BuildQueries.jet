@@ -1,10 +1,15 @@
 // Read-only fn-build staging: ordinary Driver checking and MIR execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
-use jet_foundation.[Diagnostic, EffectRowEntry, Item, MIRFunctionID, Span, TComptimeValue, mir_sha256_hex]
+use jet_foundation.[Diagnostic, EffectRowEntry, Span, TComptimeValue, mir_sha256_hex]
 use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place, jet_eval_runtime_config]
-use jet_eval.jet_eval_build_failed_diagnostic
+use jet_eval.[jet_eval_build_failed_diagnostic]
 use core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
 use jet_sema.[SemaGraphResult, SemaSourceOrigin]
+use jet_build_session.[
+    BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_graph,
+    build_plan_selected_generated, build_session_abort, build_session_append_unique,
+    build_session_compiler_node, build_session_finish, build_session_new,
+]
 
 // Rust Driver::compiler_nodes_for_bundle_with_outputs. These are static
 // identities, not BuildNodeRecords: no duration or why-ran observation exists

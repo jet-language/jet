@@ -57,6 +57,7 @@ use jet_foundation.[
     stable_id,
     mir_source_value_hook,
     Effect,
+    type_name,
 ]
 use jet_sema.[
     SemaRegistrationHostHooks,
@@ -168,7 +169,6 @@ struct JetEvalTaskRoot {
 }
 // Outcome of discharging one owned alias of a registry entry.
 enum JetEvalAliasRelease { Remaining Last Detached }
-
 
 struct JetEvalRuntimeMapEntry {
     key: JetEvalRuntimeValue
@@ -351,7 +351,6 @@ struct JetEvalPreparedValues {
     owned: [Bool]
 }
 
-
 struct JetEvalHostCoreOwner {
     fact: MIRCoreOwner
     ty: MIRType
@@ -520,7 +519,6 @@ struct JetEvalTaskCallbackInvokeResult {
     cleanup_root: JetEvalOwnedRoot
 }
 
-
 // The evaluator's host boundary. Compile-time evaluation holds the canonical
 // comptime rights row (c3): memory-only work plus the embed
 // reads, so every call declares `FS.Read`. An undeclared dynamic dispatch
@@ -590,7 +588,6 @@ struct JetEvalOwnedRootDropResult {
     stdout: String
     stderr: String
 }
-
 
 struct JetEvalCallerSite { frame: Int, block: MIRBlockID, ip: Int }
 
@@ -673,8 +670,6 @@ struct JetEvalDeoptRequest {
 fn jet_eval_deopt_request(function: MIRFunctionID, argc: Int, args: ^[Int]) -> JetEvalDeoptRequest Never! {
     JetEvalDeoptRequest{function: function, argc: argc, args: args}
 }
-
-
 
 struct JetEvalResult {
     complete: Bool
@@ -923,8 +918,6 @@ fn jet_eval_program_shape_rows(program: MIRProgram) -> JetEvalProgramRows Never!
         source_debug_hooks: [U64:MIRFunctionID]{},
     }
 }
-
-
 
 fn jet_eval_registry_new() -> JetEvalRegistry Never! {
     storage := shared JetEvalRegistryData{shared_cells: [JetEvalSharedCell]{}, foreign_tokens: [Int:JetEvalForeignToken]{}, next_foreign_token: 1, next_callback_lease: 1, next_machine_identity: 1}
@@ -1470,7 +1463,6 @@ fn jet_eval_foreign_token_replace_payload(machine: JetEvalMachine, token: Int, p
     true
 }
 
-
 fn jet_eval_foreign_handle_transfer_retire(machine: &JetEvalMachine, token: Int, span: Span) -> Bool {
     if jet_eval_foreign_token_is_borrowed(machine, token) {
         jet_eval_ownership_fail(&machine, span, "MIR cannot transfer a borrowed foreign handle outside its Source entry frame")
@@ -1483,7 +1475,6 @@ fn jet_eval_foreign_handle_transfer_retire(machine: &JetEvalMachine, token: Int,
     payload := jet_eval_foreign_token_take_payload(machine, token)
     jet_eval_drop_value(&machine, payload, span)
 }
-
 
 fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool Never! {
     if value == {
@@ -1616,8 +1607,6 @@ fn jet_eval_value_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeVa
     }
     true
 }
-
-
 
 fn jet_eval_has_failure(machine: JetEvalMachine) -> Bool Never! { machine.failure != None || machine.internal_problem != None }
 
@@ -1973,7 +1962,6 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
     }
 }
 
-
 fn jet_eval_bool(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> Bool? {
     data :: jet_eval_data(value, &machine, span) ?? return None
     if data == .Bool(flag) -> return Val(flag)
@@ -2020,8 +2008,6 @@ fn jet_eval_decimal_abs(value: String) -> String Never! {
 
 fn jet_eval_decimal_negative(value: String) -> Bool Never! { value.starts_with("-") && value != "0" }
 
-
-
 fn jet_eval_decimal_value(value: String) -> TComptimeValue Never! {
     normalized_option := jet_eval_decimal_normalize(value)
     if normalized_option == None -> return TComptimeValue.BigInt{decimal: value}
@@ -2034,7 +2020,6 @@ fn jet_eval_decimal_value(value: String) -> TComptimeValue Never! {
     }
 }
 
-
 fn jet_eval_decimal_text(value: TComptimeValue) -> String? {
     if value == {
         .Int(number) -> return Val("{number}")
@@ -2042,7 +2027,6 @@ fn jet_eval_decimal_text(value: TComptimeValue) -> String? {
         else -> None
     }
 }
-
 
 fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeKey? {
     if value == {
@@ -2070,7 +2054,6 @@ fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span
     jet_eval_compiler_fail(&machine, span, "MIR map key is not a canonical constant key")
     None
 }
-
 
 // Canonical value equality: a byte string equals the U8 list with the same
 // items, and exact integers compare by value across Int and BigInt carriers.
@@ -2159,7 +2142,6 @@ fn jet_eval_key_compare(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
     }
     0
 }
-
 
 fn jet_eval_key_rank(key: TComptimeKey) -> Int Never! {
     if key == {

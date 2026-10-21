@@ -15,7 +15,6 @@ use jet_foundation.[
     MIRComponentSignatureDescriptor,
     MIRConstant,
     MIRConstantDef,
-    MIRSharedLifetime,
     MIRCopyFact,
     MIRCoreCall,
     MIRCoreClosureKind,
@@ -100,6 +99,7 @@ use jet_foundation.[
     mir_type_with_identity,
     mir_view_copy_kind,
     mir_view_copy_target_matches,
+    type_name,
 ]
 
 enum JetEvalStep { Continue Return(value: JetEvalRuntimeValue) }
@@ -144,7 +144,6 @@ fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         host_hooks: config.host_hooks,
     }
 }
-
 
 fn jet_eval_machine(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalMachine {
     active_config := jet_eval_new_session_config(^config)
@@ -244,7 +243,6 @@ fn jet_eval_owned_root_drop_value(root: JetEvalOwnedRoot, value: JetEvalRuntimeV
     cleaned := jet_eval_drop_value(&machine, value, span)
     jet_eval_owned_root_drop_result(&machine, valid && cleaned, span)
 }
-
 
 fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
@@ -719,7 +717,6 @@ fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeValue
     Val(data)
 }
 
-
 fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
     machine := jet_eval_machine(^program, ^config)
     value := jet_eval_function_in(&machine, function_id, args)
@@ -925,7 +922,6 @@ fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctio
     if jet_eval_has_failure(machine) || machine.soft_stop || machine.stdout != "" || machine.stderr != "" -> data = None
     data
 }
-
 
 // A pure evaluation's data value and the program its machine ran on.
 struct JetEvalProgramData {
@@ -1290,7 +1286,6 @@ fn jet_eval_session_entry_writebacks(session: &JetEvalRuntimeSession, function_i
     Val(JetEvalEntryWritebackBatch{installed: true, writebacks: writebacks})
 }
 
-
 // A callee frame owns Move arguments and any retained closure captures. Read
 // arguments and borrowed closure captures remain owned by their caller.
 fn jet_eval_drop_invoke_inputs(machine: &JetEvalMachine, function: Int, args: [JetEvalRuntimeValue], captures: [JetEvalRuntimeValue], captures_borrowed: Bool, span: Span) {
@@ -1629,8 +1624,6 @@ fn jet_eval_task_root_cleanup_root(root: &JetEvalTaskRoot) -> JetEvalOwnedRoot N
     jet_eval_owned_root_cleanup_clone(&root.origin)
 }
 
-
-
 fn jet_eval_task_root_sync_origin(root: &JetEvalTaskRoot, machine: JetEvalMachine) Never! {
     root.origin.config.host_adapter = None
     root.origin.config.output_context = machine.config.output_context
@@ -1678,7 +1671,6 @@ fn jet_eval_task_callback_invoke(task_root: ^JetEvalTaskRoot, args: ^[JetEvalRun
     reusable :: root.callback.reusable
     JetEvalTaskCallbackInvokeResult{root: root, result: result, reusable: reusable, cleanup_root: cleanup_root}
 }
-
 
 fn jet_eval_task_start(root: ^JetEvalTaskRoot, config: ^JetEvalConfig, args: [JetEvalRuntimeValue], span: Span) -> JetEvalResult {
     lease := root.callback_lease
@@ -2570,7 +2562,6 @@ fn jet_eval_call(machine: &JetEvalMachine, frame_index: Int, callee: MIRCallee, 
         }
     }
 }
-
 
 fn jet_eval_loop_cursor(machine: &JetEvalMachine, frame_index: Int, id: MIRValueID, span: Span) -> JetEvalRuntimeValue? {
     value :: machine.frames[frame_index].values.get(id.value) ?? {
@@ -4812,7 +4803,6 @@ fn jet_eval_result_host_shared_transfer_validate_leaf(machine: &JetEvalMachine, 
     false
 }
 
-
 fn jet_eval_result_host_transfer_shared_stage_dispose(machine: &JetEvalMachine, transfers: &[JetEvalResultHostSharedTransfer], span: Span) -> Bool {
     ok := true
     loop index in 0..<transfers.len() {
@@ -5646,7 +5636,6 @@ fn jet_eval_host_enum_arg_type(machine: &JetEvalMachine, ty: MIRType?, variant_n
     None
 }
 
-
 fn jet_eval_core_owner_check(program: MIRProgram, rows: JetEvalProgramRows, ty: MIRType) -> JetEvalHostCoreOwnerCheck Never! {
     nominal :: if ty.kind == {
         // copy: `name` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
@@ -5880,7 +5869,6 @@ fn jet_eval_host_handle_new_mode(machine: &JetEvalMachine, row: MIRPreludeCall?,
     token := jet_eval_registry_insert_token(machine, handle, raw, token_kind, payload_value, false)
     Val(JetEvalRuntimeValue.ForeignHandle{handle: handle, raw: raw, token: token})
 }
-
 
 fn jet_eval_host_handle_is_loop(row: MIRPreludeCall) -> Bool Never! {
     row.module_name == "core.prelude" && row.member == "loop_iter_init" && mir_symbol_name(row.symbol) == "jet_loop_iter_init" && row.signature.arity == 5 && row.signature.max_arity == 5
@@ -6263,7 +6251,6 @@ fn jet_eval_discharge_call_boundary(machine: &JetEvalMachine, args: [JetEvalRunt
     None
 }
 
-
 fn jet_eval_host_target_exchange(machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalRuntimeValue], result_ty: MIRType?, arg_shapes: [JetEvalHostTypeShape], move_permissions: [Bool], static_operand: JetEvalHostStaticOperand?, span: Span) -> JetEvalRuntimeValue? {
     // A fn-build invocation's Build calls go to its build adapter alone; every other host
     // route needs the invocation's general host adapter.
@@ -6317,7 +6304,6 @@ fn jet_eval_host_row_with_shapes(machine: &JetEvalMachine, row: MIRPreludeCall, 
     if jet_eval_shared_runtime_owns_row(row) -> return jet_eval_shared_runtime_route(&machine, row, args, [MIRType]{}, result_ty, span)
     jet_eval_host_row_exchange(&machine, row, args, result_ty, arg_shapes, move_permissions, None, span)
 }
-
 
 fn jet_eval_host_row_with_moves(machine: &JetEvalMachine, row: MIRPreludeCall, args: [JetEvalRuntimeValue], result_ty: MIRType?, move_permissions: [Bool], span: Span) -> JetEvalRuntimeValue? {
     jet_eval_host_row_with_shapes(&machine, row, args, result_ty, [JetEvalHostTypeShape]{}, move_permissions, span)
@@ -6376,7 +6362,6 @@ fn jet_eval_foreign_return_value(machine: &JetEvalMachine, row: MIRForeign, valu
     jet_eval_compiler_fail(&machine, span, "MIR foreign handle call returned a non-integer native value")
     None
 }
-
 
 fn jet_eval_host_writeback_value(machine: &JetEvalMachine, target: JetEvalRuntimeValue, value: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
     current := JetEvalRuntimeValue?{None}
@@ -6704,7 +6689,6 @@ fn jet_eval_fixed_backing_access(machine: &JetEvalMachine, root_value: JetEvalRu
     Val(result)
 }
 
-
 fn jet_eval_fixed_backing_array(machine: &JetEvalMachine, root_value: JetEvalRuntimeValue, take_array: Bool, span: Span) -> JetEvalRuntimeValue? {
     operation := if take_array -> JetEvalHostFixedBackingOperation.TakeArray else -> JetEvalHostFixedBackingOperation.ReadArray
     result :: jet_eval_fixed_backing_access(&machine, root_value, operation, span) ?? return None
@@ -6876,8 +6860,6 @@ fn jet_eval_retire_foreign_close_result(machine: &JetEvalMachine, row: MIRForeig
     ok
 }
 
-
-
 // Exchange with the native foreign adapter. `host_args` are borrowed here;
 // the caller discharges them after the reply is applied.
 fn jet_eval_foreign_call_exchange(machine: &JetEvalMachine, row: MIRForeign, host_args: [JetEvalRuntimeValue], targets: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
@@ -7039,7 +7021,6 @@ fn jet_eval_foreign_call(machine: &JetEvalMachine, frame_index: Int, id: MIRFore
     }
     result
 }
-
 
 fn jet_eval_host_handle_method(machine: &JetEvalMachine, frame_index: Int, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID], frame_schedule: MIRFrameSchedule?, frame_schedule_derivation: MIRDerivationRef?, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     if row.family != MIRPreludeFamily.HandleMethod || row.abi != MIRPreludeABI.Value {
@@ -8275,7 +8256,6 @@ fn jet_eval_host_alloc_new(
     jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, ^result, span)
 }
 
-
 fn jet_eval_cell_guard_route_valid(row: MIRPreludeCall, editable: Bool, split: Bool) -> Bool Never! {
     member :: if {
         split -> {
@@ -8521,9 +8501,6 @@ fn jet_eval_gc_edit(
     result := jet_eval_host_static_row(&machine, row, args, result_ty, [JetEvalHostTypeShape]{}, move_permissions, static_operand, span)
     jet_eval_discharge_call_boundary(&machine, args, owned, ^result, span)
 }
-
-
-
 
 fn jet_eval_semantic_prelude(machine: &JetEvalMachine, frame_index: Int, call: MIRPreludeCallID, values: [MIRValueID], type_args: [MIRType], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     prepared :: jet_eval_semantic_values_prepared(&machine, frame_index, values, span) ?? return None
@@ -8903,8 +8880,6 @@ fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: 
     }
     output.join(", ")
 }
-
-
 
 fn jet_eval_apply_scheduler_reply(machine: &JetEvalMachine, reply: JetEvalHostResult, row: MIRPreludeCall, args: [JetEvalRuntimeValue], move_permissions: [Bool], result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     jet_eval_apply_host_reply(&machine, reply, Val(row), args, move_permissions, result_ty, span)
@@ -9480,7 +9455,6 @@ fn jet_eval_materialize_bytes_window(value: [U8]) -> [U8] Never! {
     window :: value[0..<value.len()]
     window.copy()
 }
-
 
 fn jet_eval_materialize_view_value(value: JetEvalRuntimeValue, source_ty: MIRType, result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     kind :: mir_view_copy_kind(source_ty) ?? {
@@ -10122,7 +10096,6 @@ fn jet_eval_run_drops(machine: &JetEvalMachine, frame_index: Int, edge: MIRDropE
     }
     !jet_eval_has_failure(machine)
 }
-
 
 fn jet_eval_jump(machine: &JetEvalMachine, frame_index: Int, target: MIRBlockID) -> Bool Never! {
     machine.frames[frame_index].predecessor = Val(machine.frames[frame_index].block)

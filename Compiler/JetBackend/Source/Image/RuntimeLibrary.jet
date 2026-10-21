@@ -2,7 +2,7 @@
 // the checked NativeLibrary artifact's `#Export(c)` rows; no list, name
 // heuristic or source scan selects them. Compiler/JetRuntime/lifecycle.list
 // only orders the constructor/destructor hooks among those exports.
-use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, MIRCPrimitive, mir_c_primitive, mir_c_void, mir_type_display_name, foundation_json_quote]
+use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType, mir_c_primitive, mir_c_void, mir_type_display_name, foundation_json_quote]
 
 struct CoreSharedRuntimeExportABI {
     symbol: String
@@ -35,7 +35,6 @@ struct RuntimeExportSpec {
     init_priority: Int
     fini_priority: Int
 }
-
 
 fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
     runtime_export_errors([String]{message})
@@ -152,7 +151,6 @@ fn runtime_static_text_signature(function: MIRFunction) -> Bool Never! {
     if function.return_type.kind == .IntN(signed, bits) -> return signed && bits == 64
     false
 }
-
 
 fn runtime_address_target_signature(function: MIRFunction, arity: Int) -> Bool Never! {
     if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != arity {

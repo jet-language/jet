@@ -474,7 +474,6 @@ fn jet_codegen_lower_conditional_stop(builder: &JetCodegenBuilder, program: JetC
     jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Constant{value: MIRConstant.Unit})
 }
 
-
 // An else-if chain (an `else` that is exactly one `if`, the shape sema gives
 // every N-arm decision table) is lowered by direct recursion: one frame per
 // arm. The chain is read in place through read parameters, so no link is
@@ -584,7 +583,6 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCode
     builder.pattern_lookup_head = saved_lookup_head
 }
 
-
 fn jet_codegen_find_loop_target(builder: JetCodegenBuilder, program: JetCodegenProgram, label: String?, breaking: Bool) -> MIRBlockID Never! {
     index := builder.loops.len() - 1
     loop index >= 0 {
@@ -644,7 +642,6 @@ fn jet_codegen_add_loop_prelude_call(builder: &JetCodegenBuilder, program: JetCo
     }
     jet_codegen_intern_prelude_call(&builder, program, row)
 }
-
 
 fn jet_codegen_has_loop_block(blocks: [MIRBlockID], target: MIRBlockID) -> Bool Never! {
     loop block in blocks {
@@ -1287,14 +1284,12 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, program: JetCodegenProg
     jet_codegen_leave_lexical(&builder, program)
 }
 
-
 fn jet_codegen_lower_range_loop(builder: &JetCodegenBuilder, program: JetCodegenProgram, label: String?, local: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span) {
     if source == {
         None -> jet_codegen_lower_numeric_range_loop(&builder, program, label, local, start, end, step, exclusive, vectorization, body, span)
         Val(collection) -> jet_codegen_lower_iter_range_loop(&builder, program, label, local, collection, start.ty, step, vectorization, body, span)
     }
 }
-
 
 fn jet_codegen_assignment_place_type(builder: JetCodegenBuilder, program: JetCodegenProgram, place: TPlace) -> Type Never! {
     if place == {
@@ -1439,7 +1434,6 @@ fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: J
         index += 1
     }
 }
-
 
 // Scalar row chains retain catalog order and duplicate candidates without
 // copying owning nominal, impl, or trait declaration records at each query.
@@ -1782,8 +1776,6 @@ fn jet_codegen_lower_index_hook_assign(builder: &JetCodegenBuilder, program: Jet
     _ := jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Call{callee: callee, args: lowered_args, type_args: [MIRType]{}})
 }
 
-
-
 fn jet_codegen_contract_same_local(left: TLocal, right: TLocal) -> Bool Never! {
     if left.symbol_id != None && right.symbol_id != None -> return (left.symbol_id ?? SymbolID{key: ""}).key == (right.symbol_id ?? SymbolID{key: ""}).key
     left.name == right.name
@@ -1999,7 +1991,6 @@ fn jet_codegen_lower_loop_value(builder: &JetCodegenBuilder, program: JetCodegen
     jet_codegen_emit_value(&builder, program, span, result_type, MIROperation.Phi{incoming: incoming})
 }
 
-
 // Rust tir_to_mir_expr.rs lower_inline_block: the prefix lowers as nested
 // statements of the enclosing scope (no lexical scope of its own), so a local
 // the block declares lives until the enclosing scope ends. A scope here would
@@ -2048,7 +2039,6 @@ fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, program: JetCodeg
     }
     result
 }
-
 
 fn jet_codegen_transaction_call_arg(value: TExpr) -> TCallArg Never! {
     TCallArg{

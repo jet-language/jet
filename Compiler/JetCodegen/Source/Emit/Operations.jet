@@ -73,7 +73,6 @@ use jet_foundation.[
     MIRUnsafeGate,
     MIRValueID,
     MIRVariantPayload,
-    MIRViewCopyKind,
     Span,
     Type,
     core_call_symbol_name,
@@ -3189,7 +3188,6 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     expression
 }
 
-
 fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MIRFunction, index: MIRValueID, location: MIRPanicLoc) -> String Never! {
     ty := jet_rust_emit_value_type(ctx, function, index)
     loop {
@@ -3888,7 +3886,6 @@ fn jet_rust_emit_primitive_dispatch(dispatch: MIRBinaryDispatch) -> Bool Never! 
 fn jet_rust_emit_string_value(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
     jet_rust_emit_value_type(ctx, function, value).kind == MIRTypeKind.String
 }
-
 
 fn jet_rust_emit_append_place_row(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> MIRPlace? Never! {
     if ctx.body_index.function == (Val(function.id)) {
@@ -4831,7 +4828,6 @@ fn jet_rust_emit_constant_place(ctx: &JetRustEmitContext, name: String) -> Strin
     }
     None
 }
-
 
 fn jet_rust_emit_scope_fact(scope: MIRScope, key: String) -> String? {
     loop fact in scope.facts { if fact.key == key -> return Val(fact.value) }

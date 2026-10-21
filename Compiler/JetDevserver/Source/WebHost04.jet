@@ -1,6 +1,6 @@
 // Private continuation of jet_devserver.WebHost.
 use jet_devserver.WebHost.[LIVE_RELOAD_POLL_MS, MAX_STATIC_RESPONSE_BYTES, WebHost]
-use jet_devserver.[CanvasAsset, ResidentDevSession, static_relative_path, content_type_for, read_static_file_bounded, write_response]
+use jet_devserver.[ResidentDevSession]
 use jet_devserver.Canvas as Canvas
 use jet_devserver.PausedEvaluate.[PausedEvaluateHostError]
 use jet_foundation.Dyn.[Dyn]
@@ -8,6 +8,7 @@ use jet_foundation.JSON.[parse_json]
 use std.io.[Write, Error, ErrorKind]
 use std.sync.atomic.[AtomicU64, Ordering]
 use core.files.[OSPath]
+use core.encoding.[Dyn]
 // Rust: crates/jet-devserver/src/WebHost.rs:5926
 fn inject_canvas_session(asset: CanvasAsset, session_secret: String) -> CanvasAsset {
     asset := ^asset

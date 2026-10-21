@@ -25,6 +25,7 @@ const packageSource = [
 ].join("\n");
 const sourceRoots = [
   "Compiler/JetLexer/Source",
+  "Compiler/JetBuildSession/Source",
   "Compiler/JetFoundation/Source",
   "Compiler/JetBackend/Source",
   "Compiler/JetOptimizer/Source",
@@ -83,7 +84,7 @@ async function jetFilesUnder(directory) {
 // Repeated Core imports share one binding inside the aggregate. Grouped
 // member imports are deduplicated per member, including overlapping groups,
 // without shifting any surviving token, byte offset, or source line.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jet_build_session|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
 const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();

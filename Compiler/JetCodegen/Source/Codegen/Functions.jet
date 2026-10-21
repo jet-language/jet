@@ -163,7 +163,6 @@ use jet_foundation.[
     TTraitDef,
     TTraitMethod,
     TTypeDef,
-    TTypeDefKind,
     TUnsafeGate,
     TVisibility,
     TWebParamReconstruction,
@@ -185,7 +184,6 @@ use jet_foundation.[
     mir_nominal_ref,
     mir_owned_ownership,
     mir_ownership_from_access,
-    mir_refine_function_ownership,
     mir_source_file_id,
     mir_trait_id,
     mir_type_canonical_key,
@@ -198,12 +196,12 @@ use jet_foundation.[
     stable_id,
     tir_symbol_local,
     type_identity_key,
-    type_is_unit_callable_return,
     type_union_member_tag_name,
     type_unqualified_name,
     CoreCallSymbol,
     compiler_threads_heaviest_first,
     symbol_id,
+    type_name,
 ]
 use jet_sema.[
     SemaCheckedForeignFunction,
@@ -581,7 +579,6 @@ fn jet_codegen_lower_type_definition(definition: TTypeDef, functions: JetCodegen
         kind: kind,
     }
 }
-
 
 fn jet_codegen_lower_declaration_failure(failure: TFailureCarrier, nominals: JetCodegenNominalIndex, module_identity: String) -> MIRFailureCarrier Never! {
     return if failure == {
@@ -1085,7 +1082,7 @@ fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, program: Je
     if jet_codegen_constant_place(&builder, program, expression, symbol) == .Val(place) {
         return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
     }
-    row :: program.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference has no declaration or function target")
+    row :: program.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference `{symbol.key}` has no declaration or function target")
     // A view: `program` is read-only here; the emits below write only the builder.
     definition :: program.modules[row.module_index].declarations.constants[row.definition_index]
     copies := builder.constant_copies.get(symbol.key)
@@ -1528,7 +1525,6 @@ fn jet_codegen_authority_decisions_equal(left: MIRAuthorityDecision?, right: MIR
         && first.inherited == second.inherited
 }
 
-
 fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
     if left.module_name != right.module_name || left.member != right.member || !jet_codegen_string_rows_equal(left.receiver_types, right.receiver_types) -> return false
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !jet_codegen_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
@@ -1672,7 +1668,6 @@ fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, program: Je
     }
     lowered
 }
-
 
 // Sort scalar index keys, then move whole rows through empty slots into their
 // canonical positions. The original receiver allocation is retained.
@@ -1842,7 +1837,6 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, program: JetCod
 fn jet_codegen_lowering_error_message(function: TFunc, span: Span, message: String) -> String Never! {
     "checked TIR cannot lower to MIR at {span.start}..{span.end}: {function.source_file} (module {function.module_identity}), {function.name}: {message}"
 }
-
 
 // Lowers `function` on `builder`, which holds the program-wide inputs; the
 // builder's per-function state is reset first (jet_codegen_begin_function).
@@ -3045,7 +3039,6 @@ fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFu
     }
 }
 
-
 fn jet_codegen_sort_trait_definitions(rows: &[MIRTraitDef]) Never! {
     keys := [U64]{}
     loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
@@ -3590,7 +3583,6 @@ fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], sourc
     compiler_transfer_rows<SemaGraphModuleResult>(&modules, &program.modules)
     lowered
 }
-
 
 // A compiler thread is admitted for at least this many bytes of function
 // source, so a small program lowers on the calling thread.

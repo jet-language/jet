@@ -2,7 +2,7 @@
 // BackendBoost2 (52f103e67), not its unwired runtime/container policy. User and
 // compiler-generated implementations remain ordinary monomorphic Jet methods;
 // scalar adapters invoke the canonical runtime traits without a second codec.
-use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRMeasure, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_measure_literal_value, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type]
+use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRMeasure, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_measure_literal_value, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type]
 
 struct LowerCodecMethod { function: MIRFunctionID, owner: MIRType }
 
@@ -74,7 +74,6 @@ fn lower_codec_scalar(ty: MIRType) -> String? Never! {
         else -> None
     }
 }
-
 
 fn lower_codec_method_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, method: LowerCodecMethod, source: LIRValueID, dst: LIRValueID) Never! {
     target :: lower_instance_id(method.function, lower_call_bindings(Val(method.owner), [MIRType]{}))

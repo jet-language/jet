@@ -1,6 +1,6 @@
 // Rust: crates/jet-devserver/src/WebHost.rs:1809
 use jet_devserver.WebHost.[WebHost, CanvasHostOptions, DevStatus, DevRevisionFacts, terminal_style_adapter, LIVE_RELOAD_POLL_MS, PUBLICATION_COUNTER, APPLICATION_PORT_RANGE, CANVAS_SESSION_BYTES]
-use jet_devserver.[ResidentDevSession, lock_static_publication]
+use jet_devserver.[ResidentDevSession]
 use jet_devserver.Canvas as Canvas
 use jet_devserver.BrowserWebAdapter as browser_web_adapter
 use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
@@ -21,8 +21,7 @@ use std.path.[Component]
 use core.files.[OSPath]
 use core.sys.target.[selected_os, selected_family]
 use jet_repl.Term.[RawGuard, KeyReader, Key]
-use jet_pkg_model.[open]
-use jet_repl.[unique_temp_name]
+use core.sys.host.unix_fd.[mkdirat, openat, renameat, unlinkat]
 // GATE #4494: native threads, locks, retained handles, raw FFI and terminal IO.
 // GATE #4483: dispatch uses selected target facts, including native flag/layout widths.
 // GATE #4409: IO errors retain their source kinds.

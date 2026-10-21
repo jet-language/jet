@@ -236,7 +236,6 @@ fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int)
     """
 }
 
-
 #[Unsafe("calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"), FFI(asm)]
 fn os_call_address_one_unit(address: Int, first: Int) {
     """
@@ -262,7 +261,6 @@ fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
     ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
     """
 }
-
 
 #[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
 fn os_dl_open(path: Int) -> Int {
@@ -834,7 +832,6 @@ fn os_call5_i64(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
     """
 }
 
-
 // Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
 // reopens an old pathname. The borrowed empty path is one stack-local zero.
 #[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
@@ -858,7 +855,6 @@ fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
     """
 }
 
-
 #[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
 fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
     """
@@ -877,7 +873,6 @@ fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
     ; clobbers rcx, r11, rdi, rsi, rdx
     """
 }
-
 
 // Translate Linux stat144 to the portable 128-byte scalar StatFacts row.
 // Offsets: dev0 ino8 mode16 nlink24 uid32 gid40 rdev48 size56;
@@ -983,7 +978,6 @@ fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
     }
 }
 
-
 // Lower/Closures.jet:291-315 indirect calls require a closure header and pass
 // it as argument zero; a C void(void) entry address is not that representation.
 #[Unsafe("calls a checked System V void(void) process entry that remains executable for the entire call"), FFI(asm)]
@@ -995,7 +989,6 @@ fn os_call0_unit(address: I64) {
     ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
     """
 }
-
 
 #[Unsafe("directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"), FFI(asm)]
 fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I64 {

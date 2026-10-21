@@ -7,7 +7,7 @@ use core.sys as cli_sys
 use core.term as cli_term
 use core.time as cli_time
 use jet_driver.[JetDriverCompileMode, JetDriverCompileResult, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.diagnostic_render_all
+use jet_foundation.[diagnostic_render_all]
 
 fn jet_cli_maintainer_error(code: String, what: String, why: String?, fix: String?, color: Bool, json: Bool, status: Int) -> JetDriverVerbOutput Never! {
     diagnostic_copy :: jet_cli_diagnostic_copy(code)
@@ -219,7 +219,6 @@ fn jet_cli_bless_targets(requested: [String]) -> (targets: [String], unknown: [S
     }
     (targets: targets, unknown: unknown)
 }
-
 
 fn jet_cli_devtools_bless(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     dry := false

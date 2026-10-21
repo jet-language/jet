@@ -97,7 +97,7 @@
 // - Exact try human/JSON output, receipt identity and keep/no-keep transaction
 //   behavior use real item-counter deltas. Source approval requires the full
 //   typed input/replay/caller packet; parser success is not semantic proof.
-use jet_sema.sema_output_resolve
+use jet_sema.[sema_output_resolve]
 use jet_foundation.[
     Diagnostic,
     MIRSourceFile,
@@ -233,7 +233,6 @@ fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriver
     JetDriverCompilerCheckResult{product: .Failed, diagnostics: load.diagnostics, failed_stage: Val(stage), complete: false, internal_problem: problem}
 }
 
-
 fn jet_driver_compiler_check_package_policies(load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] Never! {
     policies := [SemaRegistrationPackagePolicy]{ }
     loop package in load.packages {
@@ -302,7 +301,6 @@ fn jet_driver_compiler_check_module_sources(load: JetDriverLoadResult, canonical
     Val(rows)
 }
 
-
 fn jet_driver_compiler_check_result(input: JetDriverCompilerCheckInput, registration: ^SemaRegistrationGraph, graph: ^SemaGraphResult, module_sources: [SemaCompilerModuleSource], diagnostics: [Diagnostic]) -> JetDriverCompilerCheckResult {
     graph_complete :: graph.complete
     checked := jet_eval_compiler_services_checked(JetCompilerServicesCheckedInput{
@@ -334,7 +332,6 @@ fn jet_driver_compiler_check_parse_only(load: JetDriverLoadResult) -> Bool Never
     if load.failed_stage == .Val(stage) -> return stage == JetDriverStage.Parse
     false
 }
-
 
 fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCompilerCheckResult {
     load := jet_driver_load(input.request)

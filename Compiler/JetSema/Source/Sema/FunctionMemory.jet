@@ -627,7 +627,6 @@ fn sema_function_memory_propagate_transfers(function: &Func, promoted: [String])
     changed
 }
 
-
 fn sema_function_memory_binding_may_own_heap(binding: Binding) -> Bool Never! {
     if binding.ty != None -> return sema_function_memory_type_may_own_heap(binding.ty ?? Type.Named{name: "Unit"})
     sema_function_memory_expr_may_own_heap(binding.init)
@@ -872,7 +871,6 @@ fn sema_function_memory_sort_and_deduplicate_edges(edges: &[GCPromotionEdge]) Ne
     loop edges.len() > 0 -> _ := &edges.pop()
     loop edge in unique -> &edges.push(edge)
 }
-
 
 fn sema_function_memory_collection_len(expression: Expr) -> Int? {
     return if expression == {

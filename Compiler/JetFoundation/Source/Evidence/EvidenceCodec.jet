@@ -24,7 +24,6 @@ struct EvidenceDecoded {
     derivations: [DerivationRecord]
 }
 
-
 fn evidence_get_number(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCodecError! {
     // read_byte checks only bounds; read_u16/u32/u64 check addition first.
     end :: if width == 1 -> cursor.at + 1 else -> Int.from_u64(evidence_checked_offset(U64{cursor.at}, U64{width}, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report offset overflow")))
@@ -40,7 +39,6 @@ fn evidence_get_number(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCodec
 fn evidence_get_byte(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
     Ok(Int.from_u64(evidence_get_number(&cursor, 1)))
 }
-
 
 fn evidence_get_string(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
     length :: evidence_get_number(&cursor, 8)
@@ -61,7 +59,6 @@ fn evidence_get_string(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
     Ok(text)
 }
 
-
 fn evidence_get_len(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
     raw_length :: evidence_get_number(&cursor, 4)
     if raw_length > cursor.usize_max {
@@ -73,7 +70,6 @@ fn evidence_get_len(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
     Ok(Int.from_u64(raw_length))
 }
 
-
 fn evidence_get_optional(cursor: &EvidenceCursor) -> String? EvidenceCodecError! {
     marker :: evidence_get_byte(&cursor)
     if marker == {
@@ -82,9 +78,6 @@ fn evidence_get_optional(cursor: &EvidenceCursor) -> String? EvidenceCodecError!
         else -> Err(evidence_codec_error("unknown optional string marker {marker}"))
     }
 }
-
-
-
 
 fn evidence_decode_derivation(cursor: &EvidenceCursor) -> DerivationRecord EvidenceCodecError! {
     id :: evidence_get_string(&cursor)
@@ -269,7 +262,6 @@ fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDecoded 
     }
     Ok(EvidenceDecoded{records: records, derivations: derivations})
 }
-
 
 fn evidence_report_from_bytes(bytes: [U8], usize_max: U64) -> EvidenceReport EvidenceCodecError! {
     decoded :: evidence_decode_report_bytes(bytes, usize_max)
