@@ -323,13 +323,15 @@ fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, program: JetCodeg
     selected := TFunc?{None}
     key :: jet_codegen_hook_method_key(target_key, codec, method_name)
     row := program.owners.hooks.exact_methods.get(key) ?? -1
+    // As in Rust (`function_id_for` missing target), a codec method whose
+    // body this program does not lower leaves the builtin codec routes.
     loop row >= 0 {
-        if selected != None -> panic("ambiguous checked Serde {codec} implementation")
         candidate :: program.owners.hooks.implementation_rows[row]
-        selected = Val(
-            jet_codegen_find_function(program.function_index, program.modules[candidate.module_index].impls[candidate.implementation_index].methods[candidate.method_index].symbol.id.key)
-                ?? panic("checked Serde {codec}::{method_name} method is not reachable")
-        )
+        found :: jet_codegen_find_function(program.function_index, program.modules[candidate.module_index].impls[candidate.implementation_index].methods[candidate.method_index].symbol.id.key)
+        if found != None {
+            if selected != None -> panic("ambiguous checked Serde {codec} implementation")
+            selected = found
+        }
         row = candidate.next_exact
     }
     selected

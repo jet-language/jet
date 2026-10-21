@@ -1509,15 +1509,23 @@ fn jet_codegen_hook_index(modules: [SemaGraphModuleResult]) -> JetCodegenHookInd
         }
         implementation_index := modules[module_index].impls.len() - 1
         loop implementation_index >= 0 {
+            // A compiler-owned trait (Encode, Decode, Index, ...) has no
+            // declaring module, so its impl carries only the written name.
+            hook_trait := String?{None}
             if modules[module_index].impls[implementation_index].trait_symbol == .Val(trait_symbol) {
+                hook_trait = Val(trait_symbol.name.copy())
+            } else if modules[module_index].impls[implementation_index].trait_name == .Val(written) {
+                if jet_codegen_is_compiler_owned_trait_name(written) -> hook_trait = Val(written.copy())
+            }
+            if hook_trait == .Val(trait_name) {
                 method_index := modules[module_index].impls[implementation_index].methods.len() - 1
                 loop method_index >= 0 {
                     method_name :: modules[module_index].impls[implementation_index].methods[method_index].symbol.name
-                    exact_key :: jet_codegen_hook_method_key(modules[module_index].impls[implementation_index].target_identity_key, trait_symbol.name, method_name)
+                    exact_key :: jet_codegen_hook_method_key(modules[module_index].impls[implementation_index].target_identity_key, trait_name, method_name)
                     fallback_key := String?{None}
                     if modules[module_index].impls[implementation_index].target_module_identity == .Val(target_module) {
                         owner_key :: jet_codegen_qualified_function_key(target_module, modules[module_index].impls[implementation_index].target_type_name)
-                        fallback_key = Val(jet_codegen_hook_method_key(owner_key, trait_symbol.name, method_name))
+                        fallback_key = Val(jet_codegen_hook_method_key(owner_key, trait_name, method_name))
                     }
                     row := implementation_rows.len()
                     &implementation_rows.push(JetCodegenHookImplMethodRow{
