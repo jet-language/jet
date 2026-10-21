@@ -8,6 +8,7 @@ fn xp_source(name: String) -> String {
         "control" -> xp_source_control()
         "div_zero" -> xp_source_div_zero()
         "exact_int" -> xp_source_exact_int()
+        "exact_ops" -> xp_source_exact_ops()
         "floats" -> xp_source_floats()
         "hello" -> xp_source_hello()
         "ownership" -> xp_source_ownership()
@@ -17,6 +18,42 @@ fn xp_source(name: String) -> String {
         "words" -> xp_source_words()
         else -> ""
     }
+}
+
+fn xp_source_exact_ops() -> String {
+    [String]{
+        "fn show(n: Int) {{",
+        "    print(\"{{n}}\")",
+        "}}",
+        "",
+        "fn run() {{",
+        "    least := -4611686018427387904",
+        "    big := least * 4",
+        "    show(1000003 /% -77)",
+        "    show(1000003 % -77)",
+        "    show(1000003 %% -77)",
+        "    show(-1000003 /% 10)",
+        "    show(-1000003 % 10)",
+        "    show(-1000003 %% 10)",
+        "    show(999 /% 3)",
+        "    show(least /% -1)",
+        "    show(least % -1)",
+        "    show(big /% 7)",
+        "    show(1000003.bit_and(15790320))",
+        "    show(1000003.bit_or(-77))",
+        "    show(1000003.bit_xor(-77))",
+        "    show(big.bit_and(15790320))",
+        "    show(1000003 << 20)",
+        "    show(1000003 << 61)",
+        "    show(-77 << 3)",
+        "    show(1 << 62)",
+        "    show(-77 >> 3)",
+        "    show(-77 >> 100)",
+        "    show(1000003 >> 63)",
+        "    show(big >> 3)",
+        "}}",
+        "",
+    }.join("\n")
 }
 
 fn xp_source_calls() -> String {

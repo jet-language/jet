@@ -7,11 +7,11 @@
 // decimals); one shell function per IR function, with no blocks, carrying
 // its name, file, line and debug variables.
 
-use jet_foundation.[CompilerThreads]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
 use jet_backend.[
     LIRBlock, LIRData, LIRDataID, LIRDataReloc, LIRDebugBinding, LIRDebugEncoding, LIRDebugType, LIRDebugTypeKind, LIRDebugVariable, LIRFunction, LIRFunctionDebug, LIRFunctionID,
     LIRModule, LIRModuleDebug, LIRSignature, LIRSignatureID, LIRValue,
-    X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64RuntimeExport,
+    X64CompiledFunction, X64ExecutableResult, X64FunctionDebug, X64LineRow, X64Reloc, X64RuntimeExport, X64VariableRange,
     x64_object_functions_threads, x64_object_main, x64_object_main_debug,
 ]
 
@@ -33,7 +33,10 @@ struct IRX64Tables {
     type_debug: [Int]
 }
 
+// The module moves in and comes back in `program`, so the object writer
+// reads the same rows the selection read without a copy.
 struct IRX64Result {
+    program: IRModule
     functions: [X64CompiledFunction]
     debug: [X64FunctionDebug]
     // Per function: the debug variables its ranges index.
@@ -61,7 +64,7 @@ fn ir_x64_debug_type(ty: IRType) -> LIRDebugType Never! {
         .Bool -> LIRDebugType{name: "Bool", size: 1, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Bool}}
         .Int -> LIRDebugType{name: "Int", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Signed}}
         .Word -> {
-            bits :: ir_x64_bits(ty)
+            bits :: ir_x64_bits(ir_x64_shape(ty))
             LIRDebugType{name: "{if ty.signed -> "I" else -> "U"}{bits}", size: bits /% 8, kind: LIRDebugTypeKind.Base{encoding: if ty.signed -> LIRDebugEncoding.Signed else -> LIRDebugEncoding.Unsigned}}
         }
         .Float -> LIRDebugType{name: "Float", size: 8, kind: LIRDebugTypeKind.Base{encoding: LIRDebugEncoding.Float}}
@@ -116,42 +119,212 @@ fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
     tables
 }
 
-// Compiles every function of `m` (function row = X64CompiledFunction id),
-// collecting every function's selection errors.
-fn ir_x64_compile_module(m: IRModule, threads: CompilerThreads) -> IRX64Result Never! {
-    tables :: ir_x64_tables(m)
-    result := IRX64Result{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, variables: [[LIRDebugVariable]]{}, errors: [String]{}, tables: tables, threads: threads}
-    loop row in 0..<m.functions.len() {
-        compiled :: ir_x64_compile_function(m, result.tables, row)
-        loop error in compiled.errors -> &result.errors.push(error)
-        &result.functions.push(compiled.function)
-        &result.debug.push(compiled.debug)
-        &result.variables.push(compiled.variables)
+// Selecting threads (compiler_threads_admit): a thread is admitted for at
+// least this many IR instructions, so a small module selects on the calling
+// thread.
+IR_X64_MIN_INSTRUCTIONS_PER_THREAD :: 20000
+
+// Compiles every function of `program` (function row = X64CompiledFunction
+// id), collecting every function's selection errors, on as many threads as
+// `threads` admits for its instructions. Threads claim functions heaviest
+// first and each result lands in its function's row, so the rows, errors and
+// bytes are those of the one-thread loop for any thread count. A thread that
+// stops (an internal panic) costs only the function it was selecting: that
+// function gets an error row and fresh threads select the rest.
+fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64Result {
+    m := ^program
+    tables := ir_x64_tables(m)
+    count :: m.functions.len()
+    weights := [Int]{}
+    total := 0
+    loop f in m.functions {
+        weight :: 1 + f.op.len()
+        &weights.push(weight)
+        total += weight
     }
-    result
+    workers :: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    variables := [[LIRDebugVariable]]{}
+    errors := [String]{}
+    if workers <= 1 {
+        loop row in 0..<count {
+            compiled := ir_x64_compile_function(m, tables, row)
+            &errors.extend(compiler_take_rows<String>(&compiled.errors))
+            &functions.push(^compiled.function)
+            &debug.push(^compiled.debug)
+            &variables.push(^compiled.variables)
+        }
+        return IRX64Result{program: ^m, functions: ^functions, debug: ^debug, variables: ^variables, errors: ^errors, tables: ^tables, threads: threads}
+    }
+    outputs := [[IRX64FunctionResult]]{}
+    stops := [String]{}
+    loop _ in 0..<count {
+        &outputs.push([IRX64FunctionResult]{})
+        &stops.push("")
+    }
+    seats := [Int]{}
+    loop _ in 0..<workers -> &seats.push(-1)
+    inputs :: shared IRX64Inputs{programs: [IRModule]{^m}, tables: [IRX64Tables]{^tables}}
+    store :: shared IRX64Store{order: compiler_threads_heaviest_first(weights), next: 0, seats: ^seats, outputs: ^outputs, stops: ^stops}
+    _ := ir_x64_claimers(inputs, store, 0, workers)
+    loop ir_x64_unclaimed(store) -> _ := ir_x64_claimers(inputs, store, 0, workers)
+    shells := ir_x64_take_inputs(inputs)
+    results := ir_x64_take_store(store)
+    // The rows leave their lists last-first (moved, never copied) and are
+    // reversed into function order.
+    row_errors := [[String]]{}
+    row := count - 1
+    loop row >= 0 {
+        taken := &results.outputs.pop() ?? panic("the x64 selection store lost a function row")
+        stop :: &results.stops.pop() ?? ""
+        if (&taken.pop()) == .Val(compiled) {
+            selected := ^compiled
+            &row_errors.push(compiler_take_rows<String>(&selected.errors))
+            &functions.push(^selected.function)
+            &debug.push(^selected.debug)
+            &variables.push(^selected.variables)
+        } else {
+            &row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
+            &functions.push(X64CompiledFunction{id: LIRFunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}})
+            &debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
+            &variables.push([LIRDebugVariable]{})
+        }
+        row -= 1
+    }
+    &functions.reverse()
+    &debug.reverse()
+    &variables.reverse()
+    loop row_errors.len() > 0 {
+        listed := &row_errors.pop() ?? { break }
+        &errors.extend(^listed)
+    }
+    program_back := &shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
+    tables_back := &shells.tables.pop() ?? panic("the x64 selection inputs lost the tables")
+    IRX64Result{program: ^program_back, functions: ^functions, debug: ^debug, variables: ^variables, errors: ^errors, tables: ^tables_back, threads: threads}
 }
 
-// The relocatable object of `compiled`: its functions behind a global
-// `main` that runs function row `entry` (no parameters, no result) through
-// the runtime's jet_rt_main, as the old native route's object.
-fn ir_x64_object(m: IRModule, compiled: IRX64Result, entry: Int) -> X64ExecutableResult Never! {
-    if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
-    if entry < 0 || entry >= m.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
-    if m.functions[entry].param_count != 0 || m.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {m.functions[entry].name} must take no parameters and return nothing"}}
+// The selecting threads' read-only inputs: the module and its tables, moved
+// in and taken back after the join.
+struct IRX64Inputs {
+    programs: [IRModule]
+    tables: [IRX64Tables]
+}
+
+// The claim queue and the results: `order` is the claim order (heaviest
+// first) and `next` its next rank; `seats[s]` the function thread `s` is
+// selecting (-1 none); per function row, its result once selected and the
+// panic text of a thread that stopped on it ("" none).
+struct IRX64Store {
+    order: [Int]
+    next: Int
+    seats: [Int]
+    outputs: [[IRX64FunctionResult]]
+    stops: [String]
+}
+
+// Runs `tasks` claiming threads from seat `seat` on, one task each; returns
+// how many functions they selected. A stopped thread's function keeps its
+// panic text (ir_x64_stopped).
+fn ir_x64_claimers(inputs: Shared<IRX64Inputs>, store: Shared<IRX64Store>, seat: Int, tasks: Int) -> Int {
+    if tasks <= 0 -> return 0
+    selected := 0
+    task.group ir_x64_threads {
+        head :: task ir_x64_claimed(inputs, store, seat)
+        selected = ir_x64_claimers(inputs, store, seat + 1, tasks - 1)
+        selected += head.join() ?? ir_x64_stopped(store, seat, err)
+    }
+    selected
+}
+
+// One thread at `seat`: claims and selects functions until none is left.
+fn ir_x64_claimed(inputs: Shared<IRX64Inputs>, store: Shared<IRX64Store>, seat: Int) -> Int {
+    reads :: inputs.guard_read()
+    selected := 0
+    loop {
+        row :: ir_x64_claim(store, seat)
+        if row < 0 -> break
+        compiled := ir_x64_compile_function(reads.value.programs[0], reads.value.tables[0], row)
+        ir_x64_settle(store, seat, row, ^compiled)
+        selected += 1
+    }
+    selected
+}
+
+// The next function row in claim order for `seat`, or -1 when none is left.
+fn ir_x64_claim(store: Shared<IRX64Store>, seat: Int) -> Int {
+    permit := store.guard_edit()
+    rank :: permit.value.next
+    if rank >= permit.value.order.len() -> return -1
+    row :: permit.value.order[rank]
+    permit.value.next = rank + 1
+    permit.value.seats[seat] = row
+    row
+}
+
+fn ir_x64_settle(store: Shared<IRX64Store>, seat: Int, row: Int, compiled: ^IRX64FunctionResult) {
+    permit := store.guard_edit()
+    &permit.value.outputs[row].push(^compiled)
+    permit.value.seats[seat] = -1
+}
+
+// A thread at `seat` stopped: the function it was selecting keeps the panic text.
+fn ir_x64_stopped(store: Shared<IRX64Store>, seat: Int, failure: TaskFailure) -> Int {
+    permit := store.guard_edit()
+    row :: permit.value.seats[seat]
+    if row >= 0 {
+        permit.value.stops[row] = compiler_threads_failure_text(failure)
+        permit.value.seats[seat] = -1
+    }
+    0
+}
+
+fn ir_x64_unclaimed(store: Shared<IRX64Store>) -> Bool {
+    permit :: store.guard_read()
+    permit.value.next < permit.value.order.len()
+}
+
+fn ir_x64_take_inputs(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
+    permit := inputs.guard_edit()
+    IRX64Inputs{programs: compiler_take_rows<IRModule>(&permit.value.programs), tables: compiler_take_rows<IRX64Tables>(&permit.value.tables)}
+}
+
+fn ir_x64_take_store(store: Shared<IRX64Store>) -> IRX64Store {
+    permit := store.guard_edit()
+    IRX64Store{order: [Int]{}, next: 0, seats: [Int]{}, outputs: compiler_take_rows<[IRX64FunctionResult]>(&permit.value.outputs), stops: compiler_take_rows<String>(&permit.value.stops)}
+}
+
+// The relocatable object of `compiled` (moved in, every row moved on): its
+// functions behind a global `main` that runs the module's entry function
+// (no parameters, no result) through the runtime's jet_rt_main, as the old
+// native route's object.
+fn ir_x64_object(compiled: ^IRX64Result) -> X64ExecutableResult Never! {
+    owned := ^compiled
+    if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
+    entry :: owned.program.entry
+    if entry < 0 || entry >= owned.program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
+    if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
+    // Popped in function order.
+    variables := compiler_take_rows<[LIRDebugVariable]>(&owned.variables)
+    &variables.reverse()
     shells := [LIRFunction]{}
-    loop (row, f) in m.functions {
-        file :: compiled.tables.file_rows.get(f.source_file) ?? -1
+    loop (row, f) in owned.program.functions {
+        file :: owned.tables.file_rows.get(f.source_file) ?? -1
+        listed := &variables.pop() ?? [LIRDebugVariable]{}
         &shells.push(LIRFunction{
-            id: LIRFunctionID{value: row}, name: compiled.functions[row].name, signature: LIRSignatureID{value: 0},
+            id: LIRFunctionID{value: row}, name: owned.functions[row].name, signature: LIRSignatureID{value: 0},
             values: [LIRValue]{}, blocks: [LIRBlock]{},
-            debug: LIRFunctionDebug{name: f.name, file: file, line: f.line, variables: compiled.variables[row], bindings: [LIRDebugBinding]{}},
+            debug: LIRFunctionDebug{name: f.name, file: file, line: f.line, variables: ^listed, bindings: [LIRDebugBinding]{}},
         })
     }
-    program :: LIRModule{signatures: [LIRSignature]{}, functions: shells, data: compiled.tables.data, debug: LIRModuleDebug{directory: "", files: compiled.tables.files, types: compiled.tables.debug_types}}
+    program :: LIRModule{
+        signatures: [LIRSignature]{}, functions: ^shells, data: compiler_take_rows<LIRData>(&owned.tables.data),
+        debug: LIRModuleDebug{directory: "", files: compiler_take_rows<String>(&owned.tables.files), types: compiler_take_rows<LIRDebugType>(&owned.tables.debug_types)},
+    }
     main :: x64_object_main(LIRFunctionID{value: entry})
-    functions := [X64CompiledFunction]{main}
-    loop function in compiled.functions -> &functions.push(function)
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
-    loop row in compiled.debug -> &debug.push(row)
-    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, compiled.threads)
+    &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
+    functions := [X64CompiledFunction]{^main}
+    &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
+    x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}}, owned.threads)
 }

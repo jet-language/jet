@@ -15,7 +15,7 @@ use jet_ir.[
     ir_x64_compile_function, ir_x64_compile_module, ir_x64_object, ir_x64_tables,
 ]
 use jet_backend.[x64_link_executable]
-use jet_foundation.[Type, compiler_threads_single]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_single]
 use core.files as files
 use core.process as process
 use core.time as time
@@ -511,6 +511,69 @@ fn xp_div_zero() -> IRModule {
     m
 }
 
+// Exact Int division, bitwise and shift operators: inline operands select
+// natively, a big operand, a 0 / -1 divisor, a large count or a growing left
+// shift takes the runtime route.
+fn xp_exact_ops() -> IRModule {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    show := xp_fn("show", "exact_ops.jet", 1)
+    n :: xp_param(&m, &show, t.int, "n")
+    xp_print_int(&m, &show, t, n)
+    xp_return(&show, -1)
+    show_row :: xp_add(&m, show)
+    f := xp_fn("run", "exact_ops.jet", 5)
+    smallest :: -4611686018427387904
+    big :: xp_temp(&f, t.int)
+    four :: xp_const(&f, t.int, 4)
+    least :: xp_const(&f, t.int, smallest)
+    xp_op(&f, IROp.Mul, big, least, four)
+    // (operator, left, right); `big` reads the big integer as the left operand.
+    rows :: [XPRow]{
+        XPRow{op: IROp.FloorDiv, left: 1000003, right: -77, big: false},
+        XPRow{op: IROp.Mod, left: 1000003, right: -77, big: false},
+        XPRow{op: IROp.Rem, left: 1000003, right: -77, big: false},
+        XPRow{op: IROp.FloorDiv, left: -1000003, right: 10, big: false},
+        XPRow{op: IROp.Mod, left: -1000003, right: 10, big: false},
+        XPRow{op: IROp.Rem, left: -1000003, right: 10, big: false},
+        XPRow{op: IROp.FloorDiv, left: 999, right: 3, big: false},
+        XPRow{op: IROp.FloorDiv, left: smallest, right: -1, big: false},
+        XPRow{op: IROp.Mod, left: smallest, right: -1, big: false},
+        XPRow{op: IROp.FloorDiv, left: 0, right: 7, big: true},
+        XPRow{op: IROp.BitAnd, left: 1000003, right: 15790320, big: false},
+        XPRow{op: IROp.BitOr, left: 1000003, right: -77, big: false},
+        XPRow{op: IROp.BitXor, left: 1000003, right: -77, big: false},
+        XPRow{op: IROp.BitAnd, left: 0, right: 15790320, big: true},
+        XPRow{op: IROp.Shl, left: 1000003, right: 20, big: false},
+        XPRow{op: IROp.Shl, left: 1000003, right: 61, big: false},
+        XPRow{op: IROp.Shl, left: -77, right: 3, big: false},
+        XPRow{op: IROp.Shl, left: 1, right: 62, big: false},
+        XPRow{op: IROp.Shr, left: -77, right: 3, big: false},
+        XPRow{op: IROp.Shr, left: -77, right: 100, big: false},
+        XPRow{op: IROp.Shr, left: 1000003, right: 63, big: false},
+        XPRow{op: IROp.Shr, left: 0, right: 3, big: true},
+    }
+    loop (index, row) in rows {
+        left :: if row.big -> big else -> xp_const(&f, t.int, row.left)
+        right :: xp_const(&f, t.int, row.right)
+        result :: xp_temp(&f, t.int)
+        xp_op_at(&f, row.op, result, left, right, 6 + index)
+        xp_call(&f, show_row, [Int]{result}, -1)
+        xp_drop(&f, result)
+    }
+    xp_drop(&f, big)
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    m
+}
+
+struct XPRow {
+    op: IROp
+    left: Int
+    right: Int
+    big: Bool
+}
+
 fn xp_words() -> IRModule {
     m := ir_module_new()
     t :: xp_types(&m)
@@ -700,6 +763,7 @@ fn xp_programs() -> [XPProgram] {
     [XPProgram]{
         XPProgram{name: "hello", ir: xp_hello()},
         XPProgram{name: "exact_int", ir: xp_exact_int()},
+        XPProgram{name: "exact_ops", ir: xp_exact_ops()},
         XPProgram{name: "control", ir: xp_control()},
         XPProgram{name: "calls", ir: xp_calls()},
         XPProgram{name: "strings", ir: xp_strings()},
@@ -747,8 +811,8 @@ fn xp_status(args: [String]) -> Int {
             if spent > max_ns -> max_ns = spent
             code_bytes += one.function.code.len()
         }
-        compiled :: ir_x64_compile_module(m, compiler_threads_single())
-        object :: ir_x64_object(m, compiled, m.entry)
+        compiled := ir_x64_compile_module(m.copy(), compiler_threads_single())
+        object :: ir_x64_object(^compiled)
         if object.errors.len() > 0 {
             loop error in object.errors -> print("{program.name}: {error}")
             failures += 1
@@ -801,8 +865,45 @@ fn xp_status(args: [String]) -> Int {
             print("  old: exit {theirs.code} out `{xp_quote(theirs.output)}` err `{xp_quote(theirs.errors)}`")
         }
     }
+    failures += xp_threads()
     print(if failures == 0 -> "X64 PROGRAMS PASS" else -> "X64 PROGRAMS FAIL ({failures})")
     if failures == 0 -> 0 else -> 1
+}
+
+// A module of many heavy functions selected on one thread and on eight: the
+// object bytes must be identical. Returns the failure count (0 or 1).
+fn xp_threads() -> Int {
+    m := ir_module_new()
+    t :: xp_types(&m)
+    loop k in 0..<160 {
+        w := xp_fn("w{k}", "wide.jet", k + 1)
+        n :: xp_param(&m, &w, t.int, "n")
+        w.result = t.int
+        acc :: xp_local(&m, &w, t.int, "acc")
+        _ := ir_emit(&w, IROp.Copy, acc, n, -1, -1, 0)
+        loop step in 0..<600 {
+            c :: xp_const(&w, t.int, step + k)
+            xp_op(&w, IROp.Add, acc, acc, c)
+        }
+        xp_return(&w, acc)
+        _ := xp_add(&m, w)
+    }
+    f := xp_fn("run", "wide.jet", 1)
+    xp_print_text(&m, &f, t, "wide")
+    xp_return(&f, -1)
+    xp_entry(&m, f)
+    started :: time.instant()
+    one := ir_x64_compile_module(m.copy(), compiler_threads_single())
+    one_ns :: started.elapsed().ns
+    resumed :: time.instant()
+    eight := ir_x64_compile_module(^m, CompilerThreads{cap: Val(8), cores: 8, memory_available: None})
+    eight_ns :: resumed.elapsed().ns
+    errors :: one.errors.len() + eight.errors.len()
+    one_object :: ir_x64_object(^one)
+    eight_object :: ir_x64_object(^eight)
+    same :: errors == 0 && one_object.errors.len() == 0 && one_object.bytes == eight_object.bytes
+    print("threads\t161\tone {one_ns /% 1000} us\teight {eight_ns /% 1000} us\t{one_object.bytes.len()} B\t{if same -> "IDENTICAL" else -> "DIFFERENT"}")
+    if same -> 0 else -> 1
 }
 
 fn run() {
