@@ -460,6 +460,7 @@ fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, a
         }
         &facts.push(SemaCallReturnViewFact{slot: slots[index], access: AccessConvention.Write, places: places, sources: [ViewSourcePath]{}, temporaries: [Span]{}})
     }
+    sema_ownership_note_call_views(&state, span, facts)
     &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }
 

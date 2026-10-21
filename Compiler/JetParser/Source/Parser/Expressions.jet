@@ -1536,6 +1536,14 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
     loop {
         kind :: parser_current_kind(&state)
         if kind == TOKEN_LT {
+            // Rust `ptr_from_addr`: `alias.Ptr<T>.from_addr(addr)` reads its
+            // `<…>` as the element type, not a comparison.
+            if expression.expr == .Field(base, member, _) && member == "Ptr" {
+                if base == .Ident(alias, alias_span) {
+                    expression = parser_parse_ptr_from_addr(&state, alias, alias_span, depth)
+                    next
+                }
+            }
             literal_name :: if expression.expr == {
                 .Ident(name, _) -> name
                 .Field(_, member, _) -> if parser_turbofish_ahead(&state, TOKEN_LBRACE) -> member else -> ""
@@ -1773,6 +1781,36 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
     expression
 }
 
+// Rust `ptr_from_addr`: the tail of `alias.Ptr<T>.from_addr(addr)`, with the
+// cursor at the `<`.
+fn parser_parse_ptr_from_addr(state: &JetParserState, alias: String, alias_span: Span, depth: Int) -> ParsedExpr {
+    parser_bump(&state)
+    elem :: parser_parse_type(&state, depth + 1).ty
+    absent :: ParsedExpr{expr: Expr.Absent{span: alias_span}, span: alias_span}
+    if parser_current_kind(&state) == TOKEN_COMMA {
+        comma_span :: parser_current(&state).span
+        parser_add_fatal_code(&state, "E0003", comma_span, "`Ptr<…>` takes exactly one element type", "a pointer points at a single element type", "write `{alias}.Ptr<Int>.from_addr(addr)`")
+        return absent
+    }
+    if !parser_type_close_here(&state) {
+        parser_add_error_here(&state, "expected `>` after `Ptr<…>`", "generic type arguments must be closed", "add `>`")
+        return absent
+    }
+    _ := parser_type_gt_span(&state)
+    parser_expect(&state, TOKEN_DOT, "`.` after `Ptr<…>`")
+    method :: parser_expect_name(&state, "after `Ptr<…>.`")
+    method_name :: parser_value(state, method)
+    if method_name != "from_addr" {
+        parser_add_fatal_code(&state, "E0003", method.span, "`Ptr<…>` has no static method `{method_name}`", "a typed pointer is built from an address", "write `{alias}.Ptr<Int>.from_addr(addr)`")
+        return absent
+    }
+    parser_expect(&state, TOKEN_LPAREN, "`(` after `from_addr`")
+    address :: parser_parse_expression(&state, 1, depth + 1)
+    close :: parser_expect(&state, TOKEN_RPAREN, "`)` to finish the call")
+    span :: parser_cover(alias_span, close.span)
+    ParsedExpr{expr: Expr.PtrFromAddr{alias: alias, alias_span: alias_span, elem: elem, addr: address.expr, span: span}, span: span}
+}
+
 // Adjacent generic heads before calls or qualified literals; spaced
 // `f < T > (x)` stays a comparison.
 fn parser_turbofish_ahead(state: &JetParserState, following: Int) -> Bool Never! {
@@ -2007,7 +2045,7 @@ fn parser_parse_or_fallback(state: &JetParserState, depth: Int, allow_struct_lit
     if token.kind == TOKEN_RETURN {
         parser_bump(&state)
         value := Expr?{None}
-        if parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_SEMI && parser_current_kind(&state) != TOKEN_EOF {
+        if parser_starts_expression(parser_current_kind(&state)) {
             value = Val(parser_parse_expression_restricted(&state, 1, depth + 1, allow_struct_lit, stop_before_comparison).expr)
         }
         return OrFallback.Return{value: value, span: token.span}

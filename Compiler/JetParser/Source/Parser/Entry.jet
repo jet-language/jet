@@ -1065,24 +1065,11 @@ fn parser_html_page_path(page: Expr) -> String? {
 fn parser_apply_file_target(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
     values :: parser_bind_marker_arguments(&state, marker, [String]{"target"}, 1) ?? return
     target :: values[0] ?? return
-    written :: parser_marker_ident_path(target) ?? {
+    name :: parser_marker_target_path(target) ?? {
         parser_marker_shape_error(&state, marker)
         return
     }
-    // Rust `strip_marker_enum_prefix`: the path after the first `Target`
-    // segment, when one follows it.
-    segments :: written.split(".").to_list()
-    kept := [String]{}
-    stripped := false
-    loop (index, segment) in segments {
-        if !stripped && segment == "Target" && index + 1 < segments.len() {
-            stripped = true
-            kept = [String]{}
-            next
-        }
-        &kept.push(segment)
-    }
-    name :: kept.join(".")
+    kept :: name.split(".").to_list()
     here :: parser_current(&state).span
     if kept.len() == 2 && kept[0] == "OS" {
         os :: kept[1]

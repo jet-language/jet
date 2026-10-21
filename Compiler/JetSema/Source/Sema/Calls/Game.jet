@@ -181,13 +181,12 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
     if method == "on_frame" {
         if args.len() != 1 {
             sema_game_report_arity("GameScene.on_frame", 1, args.len(), span, &diagnostics)
-            _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics)
             sema_game_check_untyped_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         callback_type := Type.Fn{params: [Type]{Type.Named{name: "GameFrame"}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         callback :: sema_expression_lambda_host_callback_stored(args[0].expr, Val(callback_type), true, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
         schedule := FrameSchedule?{None}
         derivation := DerivationRef?{None}
         if callback.kind == {
@@ -216,13 +215,11 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
         }
         else -> {
             sema_game_report_arity("GameScene.{method}", 1, args.len(), span, &diagnostics)
-            if method == "component" -> _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics)
             sema_game_check_first_string_discard_rest(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
     }
-    access := if method == "component" -> AccessConvention.Write else -> AccessConvention.Read
-    if !sema_ownership_check_call_receiver(&state, receiver, access, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     result_type := if method == "query" -> Type.List{element: Type.String} else -> Type.Named{name: "Unit"}
     operation := if method == "query" -> THandleOp.GameSceneQuery else -> THandleOp.GameSceneComponent
     tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{argument}}, span)
@@ -234,12 +231,11 @@ fn sema_game_check_assets_method(receiver: Expr, receiver_value: TExpr, method: 
     if method != "image" && method != "sound" -> return None
     if args.len() != 1 {
         sema_game_report_arity("GameAssets.{method}", 1, args.len(), span, &diagnostics)
-        _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics)
         sema_game_check_first_string_discard_rest(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     asset_path :: sema_game_check_typed_argument(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     asset_type := if method == "image" -> Type.Named{name: "GameImage"} else -> Type.Named{name: "GameSound"}
     result_type := Type.Result{ok: asset_type, err: Type.String}
     operation := if method == "image" -> THandleOp.GameAssetsImage else -> THandleOp.GameAssetsSound
@@ -255,7 +251,6 @@ fn sema_game_check_input_method(receiver: Expr, receiver_value: TExpr, method: S
     wanted := if method == "bind" -> 2 else -> 1
     if args.len() != wanted {
         sema_game_report_arity("GameInput.{method}", wanted, args.len(), span, &diagnostics)
-        if method == "bind" -> _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics)
         loop (index, argument) in args {
             checked :: if index < wanted -> sema_check_expression(argument.expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             _ := checked
@@ -271,8 +266,7 @@ fn sema_game_check_input_method(receiver: Expr, receiver_value: TExpr, method: S
         }
     }
     if !valid -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    access := if method == "bind" -> AccessConvention.Write else -> AccessConvention.Read
-    if !sema_ownership_check_call_receiver(&state, receiver, access, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     operation := if method == "bind" -> THandleOp.GameInputBind else -> THandleOp.GameInputPressed
     result_type := if method == "bind" -> Type.Named{name: "Unit"} else -> Type.Bool
     tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
@@ -284,12 +278,10 @@ fn sema_game_check_backend_method(receiver: Expr, receiver_value: TExpr, method:
     if method != "should_continue" && method != "present" -> return None
     if args.len() != 0 {
         sema_game_report_arity("GameBackend.{method}", 0, args.len(), span, &diagnostics)
-        if method == "present" -> _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics)
         sema_game_check_untyped_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
-    access := if method == "present" -> AccessConvention.Write else -> AccessConvention.Read
-    if !sema_ownership_check_call_receiver(&state, receiver, access, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     operation := if method == "present" -> THandleOp.GameBackendPresent else -> THandleOp.GameBackendShouldContinue
     result_type := if method == "present" -> Type.Named{name: "Unit"} else -> Type.Bool
     tir := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
@@ -297,12 +289,33 @@ fn sema_game_check_backend_method(receiver: Expr, receiver_value: TExpr, method:
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)})
 }
 
-// Scene setup is editable; frame/input queries are read-only. on_frame carries
-// only the callback's checked schedule and derivation, never a fabricated one.
+// Scene setup needs an editable scene binding (Rust `needs_edit`: the root
+// local is mutable); the handle receiver itself is only read, so these calls
+// take no `&` mark. on_frame carries only the callback's checked schedule and
+// derivation, never a fabricated one.
 fn sema_call_try_game_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    edit_api :: if receiver_value.ty == {
+        .Named(name) -> if {
+            name == "GameScene" && (method == "on_frame" || method == "component") -> method
+            name == "GameAssets" && (method == "image" || method == "sound") -> method
+            name == "GameInputMap" && method == "bind" -> "input.bind"
+            name == "GameBackend" && method == "present" -> method
+            else -> ""
+        }
+        else -> ""
+    }
+    if edit_api != "" -> sema_game_needs_edit(receiver, edit_api, scopes, &diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameScene"}) -> return sema_game_check_scene_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameAssets"}) -> return sema_game_check_assets_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameInputMap"}) || receiver_value.ty == (Type.Named{name: "GameInputSnapshot"}) -> return sema_game_check_input_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameBackend"}) -> return sema_game_check_backend_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     None
+}
+
+fn sema_game_needs_edit(receiver: Expr, api: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    root :: sema_receiver_mark_place_root(receiver) ?? return
+    index :: sema_scope_resolve_index(scopes, root) ?? return
+    if !scopes.bindings[index].mutable {
+        &diagnostics.push(sema_error("E0202", expr_span(receiver), "`{api}` needs edit access to `{root}`", "game scene setup changes durable scene state", "declare `{root} := game.Scene.new(...)` before calling `{api}`"))
+    }
 }

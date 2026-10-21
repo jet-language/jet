@@ -74,7 +74,50 @@ fn parser_policy_retired_memory(state: &JetParserState, name: String, span: Span
             return false
         }
     }
-    parser_add_error_code(&state, "E0355", span, "`{name}` is not a memory policy", "memory floors are rights-tree prohibitions, not policy-marker arguments", "write {replacement} on the function signature")
+    parser_add_fatal_code(&state, "E0355", span, "`{name}` is a retired memory policy", "memory floors are rights-tree prohibitions, not policy-marker arguments", "write {replacement} on the function signature")
+    true
+}
+
+// Rust `retired_memory_policy_marker_diagnostic`: the first argument naming a
+// retired memory policy (`no_alloc`, `zero_rc`, `arena_bounded(N)`) ends the
+// declaration. True when one was reported.
+fn parser_policy_retired_marker(state: &JetParserState, marker: Marker) -> Bool {
+    loop index in 0..<marker.args.len() {
+        expr :: parser_marker_expression(marker, index) ?? next
+        if expr == .Ident(name, span) {
+            if parser_policy_retired_memory(&state, name, span, None) -> return true
+        } else if expr == .Call(call) {
+            limit := Int?{None}
+            if call.args.len() == 1 {
+                argument :: call.args[0]
+                if argument.label != None || argument.spread -> next
+                if argument.expr == .Int(value, _, _, _) {
+                    limit = Val(value)
+                } else {
+                    next
+                }
+            } else if call.args.len() > 1 {
+                next
+            }
+            if parser_policy_retired_memory(&state, call.name, call.name_span, limit) -> return true
+        }
+    }
+    false
+}
+
+// Rust `CallablePolicyChain::parse(..).is_ok()`: every argument is a policy
+// call (`retry(3)`) whose own arguments are plain positional values.
+fn parser_callable_policy_marker(marker: Marker) -> Bool Never! {
+    loop index in 0..<marker.args.len() {
+        expr :: parser_marker_expression(marker, index) ?? return false
+        if expr == .Call(call) {
+            loop argument in call.args {
+                if argument.label != None || argument.spread -> return false
+            }
+        } else {
+            return false
+        }
+    }
     true
 }
 

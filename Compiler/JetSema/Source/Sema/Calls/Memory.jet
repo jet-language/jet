@@ -422,7 +422,9 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
         condition :: sema_check_expression(args[0].expr, Val(Type.Named{name: "Condition"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         predicate :: sema_call_memory_guard_check_lambda(args[1], guard.value_type, Val(Type.Bool), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if predicate.kind == .Lambda(lambda) {
-            if !sema_ownership_check_call_receiver(&state, receiver, if guard.editable -> AccessConvention.Write else -> AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+            // Rust `finish_shared_guard_method` records no receiver convention for `wait`: the
+            // edit guard is required (E0205 above), but the guard binding takes no `&` mark.
+            if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
             if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "SharedGuard.wait", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
             value := sema_tir_node(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String}, TExprKind.SharedGuardWait{guard: receiver_value, condition: condition, predicate: lambda}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}

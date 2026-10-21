@@ -697,6 +697,9 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
                     if parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_COMMA || parser_kind_at(&state, 1) == TOKEN_RBRACE) {
                         local :: parser_bump(&state)
                         &fields.push(StructPatField.Bind{field: parser_value(state, field), field_span: field.span, local: parser_value(state, local), local_span: local.span})
+                    } else if parser_struct_field_nested_pattern_ahead(&state) {
+                        nested :: parser_parse_struct_field_nested_pattern(&state, depth + 1)
+                        &fields.push(StructPatField.Nested{field: parser_value(state, field), field_span: field.span, pattern: nested.pattern})
                     } else {
                         value :: parser_parse_expression_no_struct_lit(&state, depth + 1)
                         &fields.push(StructPatField.Value{field: parser_value(state, field), field_span: field.span, value: value.expr})
@@ -715,6 +718,39 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct pattern fields")
     span :: parser_cover(type_span, close.span)
     ParsedPattern{pattern: Pattern.Struct{fields: ^fields, rest: ^rest, span: span, type_name: type_name}, span: span}
+}
+
+// Rust `nested_pattern_ahead(false)`: a struct field holds a nested pattern
+// rather than a compared value. A bare unit case `.Red` stays a value.
+fn parser_struct_field_nested_pattern_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) == {
+        TOKEN_DOT -> {
+            next :: parser_lookahead(&state, 1)
+            variant :: next.kind == TOKEN_NULL || (next.kind == TOKEN_IDENT && (parser_pascal_name(parser_value(state, next)) || parser_value(state, next).starts_with("$")))
+            after :: parser_kind_at(&state, 2)
+            variant && (after == TOKEN_LPAREN || after == TOKEN_LBRACE || after == TOKEN_PIPE)
+        }
+        TOKEN_LBRACE -> parser_literal_fields_ahead(&state)
+        TOKEN_LBRACKET -> !parser_typed_literal_head_ahead(&state)
+        TOKEN_IDENT -> parser_named_struct_pattern_ahead(&state)
+        else -> false
+    }
+}
+
+// Rust `nested_pattern`: the nested pattern
+// `parser_struct_field_nested_pattern_ahead` found.
+fn parser_parse_struct_field_nested_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
+    start :: parser_current(&state)
+    if start.kind == {
+        TOKEN_LBRACE -> parser_parse_struct_pattern(&state, start.span, depth + 1, None)
+        TOKEN_LBRACKET -> parser_parse_bracket_pattern(&state, depth + 1)
+        TOKEN_IDENT -> {
+            parser_bump(&state)
+            head :: PatternTypeHead{name: parser_value(state, start), span: start.span}
+            parser_parse_struct_pattern(&state, start.span, depth + 1, Val(head))
+        }
+        else -> parser_parse_pattern(&state, depth + 1, true)
+    }
 }
 
 fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {

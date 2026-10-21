@@ -250,6 +250,10 @@ struct SemaOwnershipState {
     lambda_facts: [Int:SemaOwnershipLambdaFacts]{[Int:SemaOwnershipLambdaFacts]{}}
     receiver_accesses: [Int:SemaOwnershipReceiverAccess]{[Int:SemaOwnershipReceiverAccess]{}}
     place_types: [Int:Type]{[Int:Type]{}}
+    // Each checked call's returned-view facts by the span its return views
+    // are published under: a nested call's View result keeps its source
+    // lent as an argument of the enclosing call.
+    call_views: [Int:[SemaCallReturnViewFact]]{[Int:[SemaCallReturnViewFact]]{}}
 }
 
 // First/last declaration rows and total reference/write counts for one key.
@@ -3598,6 +3602,135 @@ fn sema_ownership_note_place_type(state: &SemaOwnershipState, span: Span, ty: Ty
     state.place_types[sema_ownership_span_key(span)] = ty.copy()
 }
 
+// A checked call publishes its returned-view facts under its call span.
+fn sema_ownership_note_call_views(state: &SemaOwnershipState, span: Span, facts: [SemaCallReturnViewFact]) Never! {
+    // copy: the facts stay with the checked call that publishes them.
+    state.call_views[sema_ownership_span_key(span)] = facts.copy()
+}
+
+// Rust `view_call_sources` for an evaluated call argument: the source places
+// a nested call's returned View keeps lent, each with the output slot it
+// fills. A copy of a plain read-only View is an owned value again.
+fn sema_ownership_call_result_views(state: SemaOwnershipState, expr: Expr) -> [SemaCallReturnViewFact] {
+    none := [SemaCallReturnViewFact]{}
+    if expr == {
+        .Call(call) -> return state.call_views.get(sema_ownership_span_key(call.name_span)) ?? none
+        .MethodCall(_, _, method_span, _, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _) -> return state.call_views.get(sema_ownership_span_key(method_span)) ?? none
+        .CallValue(_, _, span) -> return state.call_views.get(sema_ownership_span_key(span)) ?? none
+        .Paren(value, _) | .Try(value, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) | .Tainted(value, _, _) -> return sema_ownership_call_result_views(state, value)
+        .Copy(value, _) -> {
+            sources :: sema_ownership_call_result_views(state, value)
+            plain := sources.len() > 0
+            loop fact in sources {
+                if fact.slot.len() > 0 || fact.access != AccessConvention.Read -> plain = false
+            }
+            return if plain -> none else -> sources
+        }
+        .If(_, _, then_value, _, else_value, _) -> {
+            sources := sema_ownership_call_result_views(state, then_value)
+            loop fact in sema_ownership_call_result_views(state, else_value) -> &sources.push(fact)
+            return sources
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            sources := sema_ownership_call_result_views(state, value)
+            if fallback == .Value(other) {
+                loop fact in sema_ownership_call_result_views(state, other) -> &sources.push(fact)
+            }
+            return sources
+        }
+        .ListLit(elements, _) -> {
+            sources := [SemaCallReturnViewFact]{}
+            loop element in elements {
+                loop fact in sema_ownership_call_result_views(state, element) -> &sources.push(sema_ownership_call_view_prefixed(fact, [String]{"[]"}))
+            }
+            return sources
+        }
+        .TupleLit(fields, _, _) -> {
+            sources := [SemaCallReturnViewFact]{}
+            loop field in fields {
+                loop fact in sema_ownership_call_result_views(state, field.value) -> &sources.push(sema_ownership_call_view_prefixed(fact, [String]{field.name}))
+            }
+            return sources
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> {
+            sources := [SemaCallReturnViewFact]{}
+            loop field in fields {
+                loop fact in sema_ownership_call_result_views(state, field.value) -> &sources.push(sema_ownership_call_view_prefixed(fact, [String]{field.name}))
+            }
+            return sources
+        }
+        .EnumLit(_, variant, _, args, _, _) -> {
+            sources := [SemaCallReturnViewFact]{}
+            loop index in 0..<args.len() {
+                slot :: if args[index] == {
+                    .Positional(_) -> "{index}"
+                    .Named(label, _) -> label
+                }
+                value :: if args[index] == {
+                    .Positional(positional) -> positional
+                    .Named(_, named) -> named
+                }
+                loop fact in sema_ownership_call_result_views(state, value) -> &sources.push(sema_ownership_call_view_prefixed(fact, [String]{variant, slot}))
+            }
+            return sources
+        }
+        .Index(base, _, _, _) -> return sema_ownership_call_view_projected(sema_ownership_call_result_views(state, base), "[]")
+        .Field(base, member, _) -> return sema_ownership_call_view_projected(sema_ownership_call_result_views(state, base), member)
+        else -> return none
+    }
+}
+
+fn sema_ownership_call_view_prefixed(fact: SemaCallReturnViewFact, prefix: [String]) -> SemaCallReturnViewFact Never! {
+    slot := prefix
+    loop part in fact.slot -> &slot.push(part)
+    // copy: the source fact keeps its places for its other readers.
+    SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places.copy(), sources: fact.sources.copy(), temporaries: fact.temporaries.copy()}
+}
+
+// The facts filling output slot `member`, re-rooted at that slot.
+fn sema_ownership_call_view_projected(sources: [SemaCallReturnViewFact], member: String) -> [SemaCallReturnViewFact] Never! {
+    dotted :: ".{member}"
+    projected := [SemaCallReturnViewFact]{}
+    loop fact in sources {
+        if fact.slot.len() == 0 || (fact.slot[0] != member && fact.slot[0] != dotted) -> next
+        slot := [String]{}
+        loop index in 1..<fact.slot.len() -> &slot.push(fact.slot[index])
+        // copy: the source fact keeps its places for its other readers.
+        &projected.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places.copy(), sources: fact.sources.copy(), temporaries: fact.temporaries.copy()})
+    }
+    projected
+}
+
+// Rust `record_call_result_views`: a nested call's own accesses end when it
+// returns, but a returned View keeps its source lent as an argument of the
+// enclosing call.
+fn sema_ownership_record_call_result_views(state: SemaOwnershipState, accesses: &[SemaOwnershipCallAccess], expr: Expr, diagnostics: &[Diagnostic]) -> Bool {
+    span :: expr_span(expr)
+    loans := [SemaOwnershipCallAccess]{}
+    loop fact in sema_ownership_call_result_views(state, expr) {
+        loop place in fact.places {
+            seen := false
+            loop index in 0..<loans.len() {
+                if sema_ownership_place_exact(loans[index].place, place) {
+                    if fact.access == AccessConvention.Write -> loans[index].access = AccessConvention.Write
+                    seen = true
+                    break
+                }
+            }
+            if !seen -> &loans.push(SemaOwnershipCallAccess{place: sema_ownership_place_snapshot(place), access: fact.access, span: span, reserved: false, retained: true})
+        }
+    }
+    accepted := true
+    loop loan in loans {
+        if sema_ownership_call_access_conflict(accesses, loan.place, loan.access, false) == .Val(active) {
+            accepted = false
+            &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(loan.place), active == AccessConvention.Write, span))
+        }
+        &accesses.push(SemaOwnershipCallAccess{place: sema_ownership_place_snapshot(loan.place), access: loan.access, span: span, reserved: false, retained: true})
+    }
+    accepted
+}
+
 // Rust `place_from_expr`: a local, parameter or constant and its field,
 // index and range projections.
 fn sema_ownership_walk_place_shape(expr: Expr, scopes: SemaScopeTable) -> Bool {
@@ -4410,6 +4543,7 @@ fn sema_ownership_check_argument_captures(state: &SemaOwnershipState, accesses: 
             sema_ownership_mark_capture_move(&state, event.place, expr_span(event.site))
         }
     }
+    if !sema_ownership_record_call_result_views(state, &accesses, arg.expr, &diagnostics) -> accepted = false
     accepted
 }
 

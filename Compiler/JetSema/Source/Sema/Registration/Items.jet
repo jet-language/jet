@@ -2275,6 +2275,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
+    // Each `protocol` becomes its generated `.Client`/`.Server` handle types
+    // and transition methods before any declaration is registered.
+    sema_protocols_expand(&module_row.program.items, &diagnostics)
     // Reject reserved type declarations before automatic capability expansion:
     // an invalid nominal must not produce methods that cascade from E0106.
     item_index := 0

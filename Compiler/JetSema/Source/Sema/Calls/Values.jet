@@ -58,12 +58,18 @@ fn sema_call_local_value_defaults(callee: Expr, binding: SemaCallBinding, enviro
 
 fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, callee_value: TExpr, signature: Type, args: [CallArg], span: Span, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     resolved_signature :: sema_call_resolved_type(signature, environment, program)
-    params :: sema_call_params_from_value_type(resolved_signature) ?? {
+    // A callee that names a function declaration (directly, parenthesized or
+    // as every branch of an `if`) binds like a direct call of that function:
+    // its declaration names are labels. Any other function value is bound by
+    // its type's contract alone.
+    declared :: sema_call_value_is_declaration(callee, scopes)
+    value_params :: if declared -> sema_call_params_from_type(resolved_signature) else -> sema_call_params_from_value_type(resolved_signature)
+    params :: value_params ?? {
         &diagnostics.push(sema_call_not_callable("this function value", resolved_signature, span))
         return None
     }
     checked_args := args
-    binding :: sema_call_bind_value(resolved_signature, &checked_args, span, &diagnostics) ?? return None
+    binding :: sema_call_bind_args("this function value", params, &checked_args, span, &diagnostics) ?? return None
     resolved_defaults := defaults
     resolved_binding := binding
     if binding.default_refs.len() > 0 {
@@ -152,6 +158,18 @@ fn sema_call_value_is_parameter(callee: Expr, scopes: SemaScopeTable) -> Bool Ne
             symbol :: sema_scope_resolve(scopes, name) ?? return false
             symbol.kind == SymbolKind.Parameter
         }
+        else -> false
+    }
+}
+
+fn sema_call_value_is_declaration(callee: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if callee == {
+        .Ident(name, _) -> {
+            symbol :: sema_scope_resolve(scopes, name) ?? return false
+            symbol.kind == SymbolKind.Function
+        }
+        .Paren(value, _) -> sema_call_value_is_declaration(value, scopes)
+        .If(_, then_body, then_value, else_body, else_value, _) -> then_body.len() == 0 && else_body.len() == 0 && sema_call_value_is_declaration(then_value, scopes) && sema_call_value_is_declaration(else_value, scopes)
         else -> false
     }
 }

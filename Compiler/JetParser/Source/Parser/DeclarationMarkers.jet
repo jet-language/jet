@@ -2,6 +2,7 @@
 // marker list on each AST node and return its newly computed typed projections.
 use jet_foundation.[
     Call,
+    CallLabel,
     EnumDef,
     EveryArg,
     EveryMarker,
@@ -12,6 +13,9 @@ use jet_foundation.[
     JobScope,
     JobSkip,
     Marker,
+    MaturityTag,
+    MetaAttr,
+    MetaField,
     NamedSpan,
     Span,
     StringMapEntry,
@@ -20,6 +24,7 @@ use jet_foundation.[
     UnOp,
     ast_job_metadata,
     expr_span,
+    marker_registered_signature,
 ]
 
 fn parser_marker_is_signed_auto_derive(name: String) -> Bool Never! {
@@ -72,8 +77,11 @@ fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
     }
 }
 
+// Policy.rs `marker_argument_shape_error`: E0930 names the rule's registered
+// signature.
 fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
-    parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
+    expected :: "{marker.name}{marker_registered_signature(marker.name)}"
+    parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
 
 // The layout fact of a
@@ -224,44 +232,48 @@ fn parser_layout_marker_span(markers: [Marker], grouped: Bool, layout: StructLay
     None
 }
 
-// Rust `marker_argument_bindings`: the argument bound to each named
-// parameter, positional ones first and labeled ones by name. None when the
-// arguments do not fit the parameter list; no diagnostic is reported here.
-fn parser_marker_bindings(marker: Marker, names: [String]) -> [Expr?]? {
-    values := [Expr?]{}
-    loop _ in 0..<names.len() -> &values.push(None)
+// Rust `BoundRuleArguments::parameter_for_source`: the parameter each written
+// argument binds, positional ones first and labeled ones by name. None when
+// the arguments do not fit the parameter list; no diagnostic is reported here.
+fn parser_marker_binding_slots(marker: Marker, names: [String]) -> [Int]? {
+    taken := [Bool]{}
+    loop _ in 0..<names.len() -> &taken.push(false)
+    slots := [Int]{}
     positional := 0
     saw_named := false
-    index := 0
-    loop index < marker.args.len() {
-        label := parser_marker_label(marker, index)
+    loop index in 0..<marker.args.len() {
+        label :: parser_marker_label(marker, index)
         parameter := -1
-        if {
-            label != "" -> {
-                saw_named = true
-                parameter_index := 0
-                loop parameter_index < names.len() {
-                    if names[parameter_index] == label {
-                        parameter = parameter_index
-                        break
-                    }
-                    parameter_index += 1
+        if label != "" {
+            saw_named = true
+            loop (parameter_index, name) in names {
+                if name == label {
+                    parameter = parameter_index
+                    break
                 }
-                if parameter < 0 -> return None
             }
-            else -> {
-                if saw_named -> return None
-                loop positional < values.len() && values[positional] != None -> positional += 1
-                if positional >= values.len() -> return None
-                parameter = positional
-                positional += 1
-            }
+            if parameter < 0 -> return None
+        } else {
+            if saw_named -> return None
+            loop positional < names.len() && taken[positional] -> positional += 1
+            if positional >= names.len() -> return None
+            parameter = positional
+            positional += 1
         }
-        if values[parameter] != None -> return None
-        argument :: parser_marker_expression(marker, index) ?? return None
-        values[parameter] = Val(argument)
-        index += 1
+        if taken[parameter] || parser_marker_expression(marker, index) == None -> return None
+        taken[parameter] = true
+        &slots.push(parameter)
     }
+    Val(slots)
+}
+
+// Rust `marker_argument_bindings`: the argument bound to each named
+// parameter. None when the arguments do not fit the parameter list.
+fn parser_marker_bindings(marker: Marker, names: [String]) -> [Expr?]? {
+    slots :: parser_marker_binding_slots(marker, names) ?? return None
+    values := [Expr?]{}
+    loop _ in 0..<names.len() -> &values.push(None)
+    loop (index, parameter) in slots -> values[parameter] = parser_marker_expression(marker, index)
     Val(values)
 }
 
@@ -302,6 +314,80 @@ fn parser_marker_ident_path(value: Expr) -> String? {
         }
         else -> None
     }
+}
+
+// Rust `marker_enum_path(target, "Target")`: a `#Target` argument as written,
+// without a leading `Target.` segment when another segment follows it.
+fn parser_marker_target_path(target: Expr) -> String? {
+    written :: parser_marker_ident_path(target) ?? return None
+    segments :: written.split(".").to_list()
+    kept := [String]{}
+    stripped := false
+    loop (index, segment) in segments {
+        if !stripped && segment == "Target" && index + 1 < segments.len() {
+            stripped = true
+            kept = [String]{}
+            next
+        }
+        &kept.push(segment)
+    }
+    Val(kept.join("."))
+}
+
+// A marker whose arguments do not bind ends its declaration (Rust returns the
+// `marker_argument_shape_error` from the applicator).
+fn parser_marker_shape_fatal(state: &JetParserState, marker: Marker) {
+    expected :: "{marker.name}{marker_registered_signature(marker.name)}"
+    parser_add_fatal_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
+}
+
+// Rust `MetaAttr::maturity`: the closed maturity scale a `maturity:` value names.
+fn parser_maturity_tag(value: Expr) -> MaturityTag? Never! {
+    if value == .EnumLit(type_name, variant, _, args, _, _) && type_name == "" && args.len() == 0 {
+        if variant == "Experimental" -> return Val(MaturityTag.Experimental)
+        if variant == "Tested" -> return Val(MaturityTag.Tested)
+        if variant == "Hardened" -> return Val(MaturityTag.Hardened)
+    }
+    None
+}
+
+// Rust `meta_attr_from_marker`: `#Meta(category:, tunable:, maturity:)` as typed
+// fields. A bare `tunable` is the flag; a maturity outside the closed scale is
+// E0352. None after arguments that do not bind (fatal E0930).
+fn parser_meta_attr_from_marker(state: &JetParserState, marker: Marker) -> MetaAttr? {
+    names :: [String]{"category", "tunable", "maturity"}
+    slots :: parser_marker_binding_slots(marker, names) ?? {
+        parser_marker_shape_fatal(&state, marker)
+        return None
+    }
+    fields := [MetaField]{}
+    loop (index, parameter) in slots {
+        value :: parser_marker_expression(marker, index) ?? next
+        value_span :: expr_span(value)
+        written :: if index < marker.arg_labels.len() -> marker.arg_labels[index] else -> CallLabel?{None}
+        if written == None && value == .Ident(word, _) && word == "tunable" {
+            &fields.push(MetaField.Tunable{span: value_span})
+            next
+        }
+        name := names[parameter]
+        field_span := value_span
+        if written == .Val(label) {
+            name = label.name
+            field_span = label.span
+        }
+        span :: Span{start: field_span.start, end: value_span.end}
+        if name == "category" {
+            &fields.push(MetaField.Category{value: value, span: span})
+        } else if name == "maturity" {
+            if parser_maturity_tag(value) == None -> parser_add_error_code(&state, "E0352", value_span, "`#Meta` maturity needs a known maturity value", "maturity metadata is a closed documentation scale", "write `maturity: .Experimental`, `.Tested`, or `.Hardened`")
+            &fields.push(MetaField.Maturity{value: value, span: span})
+        } else if name == "tunable" && value == .Bool(flag, _) {
+            if flag -> &fields.push(MetaField.Tunable{span: span})
+        } else {
+            &fields.push(MetaField.Unknown{name: name, value: Val(value), span: field_span})
+        }
+    }
+    Val(MetaAttr{fields: fields, span: marker.span})
 }
 
 fn parser_job_metadata_error(state: &JetParserState, field: String, expected: String, span: Span) {

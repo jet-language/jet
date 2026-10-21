@@ -1,5 +1,5 @@
 // Canonical identity is (declaring module, name span).
-use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
+use jet_foundation.[Diagnostic, Func, Item, MARKER_SOURCE, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
 use jet_parser.[parse_generated_source]
 
 struct SemaMarkerModuleResolution {
@@ -389,10 +389,10 @@ fn sema_marker_module_argument_menus(graph: SemaRegistrationGraph) -> [TAppliedR
 }
 
 fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
-    parsed :: parse_generated_source(SEMA_PRELUDE_MARKER_SOURCE.bytes())
+    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return None
     argument_menus :: sema_marker_module_argument_menus(graph) ?? return None
-    applied :: sema_marker_rules_build_catalog(parsed.program, SEMA_PRELUDE_MARKER_SOURCE, argument_menus) ?? return None
+    applied :: sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, argument_menus) ?? return None
     catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
     if !sema_scope_members_registry_add_applied_catalog(&catalog, applied) -> return None
     diagnostics := [Diagnostic]{}
@@ -437,11 +437,11 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
 // one marker vocabulary source; empty when that source does not parse.
 fn sema_marker_module_prelude_rules() -> [TAppliedRule] {
     rows := [TAppliedRule]{}
-    parsed :: parse_generated_source(SEMA_PRELUDE_MARKER_SOURCE.bytes())
+    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return rows
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) {
-            if sema_marker_rules_applied_row(declaration, SEMA_PRELUDE_MARKER_SOURCE) == .Val(row) -> &rows.push(row)
+            if sema_marker_rules_applied_row(declaration, MARKER_SOURCE) == .Val(row) -> &rows.push(row)
         }
     }
     rows

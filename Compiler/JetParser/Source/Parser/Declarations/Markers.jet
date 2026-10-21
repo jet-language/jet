@@ -69,12 +69,12 @@ fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
     if label == { .Val(value) -> value.name else -> "" }
 }
 
-// A canonical `marker Name(…)`, or the
+// A canonical `marker Name(…)`, a fixed `marker Name = #[…]` group, or the
 // retired checked-text `marker Name on …` so the parser can teach it.
 fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
     if !(parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT) -> return false
     third :: parser_lookahead(&state, 2)
-    third.kind == TOKEN_LPAREN || (third.kind == TOKEN_IDENT && parser_value(state, third) == "on")
+    third.kind == TOKEN_LPAREN || third.kind == TOKEN_EQ || (third.kind == TOKEN_IDENT && parser_value(state, third) == "on")
 }
 
 fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {

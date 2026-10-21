@@ -25,6 +25,8 @@ use jet_foundation.[
     InlineForeign,
     InlineVersion,
     Item,
+    KernelMarker,
+    KernelMode,
     Marker,
     MarkerCallArg,
     NamedSpan,
@@ -32,12 +34,15 @@ use jet_foundation.[
     OperatorMarker,
     Param,
     ParamZone,
+    PolicyDeclaration,
+    PolicyScope,
     PatSlot,
     Pattern,
     PrepParam,
     RustConstKind,
     Span,
     StateDecl,
+    StateTransition,
     Stmt,
     StructDef,
     TagDef,
@@ -58,6 +63,7 @@ use jet_foundation.[
     ViewSource,
     ViewSourcePath,
     ViewSourceProjection,
+    WebPartitionMarker,
     ast_const,
     ast_enum,
     ast_func,
@@ -1098,7 +1104,6 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     }
     func.head_pattern = head_pattern
     func.markers = modifiers.markers
-    parser_apply_function_markers(&state, &func, modifiers.markers)
     has_body := false
     if {
         is_ffi -> {
@@ -1125,6 +1130,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
             func.span = parser_cover(modifiers.start_span, signature_end)
         }
     }
+    parser_apply_function_markers(&state, &func, modifiers.markers)
     if guest_import && !is_ffi -> parser_bind_guest_import_symbol(&state, &func)
     ParsedFunction{value: func, has_body: has_body}
 }
@@ -1291,9 +1297,10 @@ fn parser_expect_effect_path_name(state: &JetParserState) -> NamedSpan {
     NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
 }
 
+// Rust `type_starts_here`, with the `#Tag Type` value-tag prefix.
 fn parser_type_starts_here(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
-    parser_type_starts(kind)
+    parser_type_starts(kind) || parser_type_tag_ahead(&state)
 }
 
 fn parser_is_unit_fallible(ty: Type) -> Bool Never! {
@@ -1420,7 +1427,7 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker]) -
         }
     }
     if lang == "" {
-        parser_add_fatal_code(&state, "E0930", ffi.span, "`#FFI` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
+        parser_marker_shape_fatal(&state, ffi)
         return None
     }
     if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
@@ -1566,11 +1573,18 @@ fn parser_return_type_has_value(return_type: Type?) -> Bool Never! {
     }
 }
 
-// Rust `apply_callable_markers`: the typed projections of the function rules.
-// The marker list itself stays on the function. Retired spellings (`#Pure`,
-// `#Sanitizer`, `#InlineAlways`) project nothing; sema teaches their
-// replacement (E0927).
+// Rust `apply_callable_markers`: the typed projections of the function rules,
+// applied once the function is parsed. The marker list itself stays on the
+// function. Retired spellings (`#Pure`, `#Sanitizer`, `#InlineAlways`) project
+// nothing; sema teaches their replacement (E0927). A refused rule ends the
+// function (a fatal diagnostic), as Rust's applicator returns its error.
 fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [Marker]) {
+    policy := [PolicyDeclaration]{}
+    callable_policy_seen := false
+    guest_import :: loop applied in markers {
+        if parser_marker_is_c_guest_import(applied) -> break true
+    } ?? false
+    foreign :: guest_import || func.inline_foreign != None
     loop marker in markers {
         if marker.name == {
             "Unsafe" -> {
@@ -1593,6 +1607,9 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
                     func.is_must_use = true
                     func.must_use_span = Val(marker.span)
                 }
+            }
+            "WasmExport" -> {
+                if marker.args.len() == 0 -> func.web_marker = Val(WebPartitionMarker.WasmExport)
             }
             // `#Scrub(Tag)` names the one fact tag removed.
             "Scrub" -> {
@@ -1625,11 +1642,136 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             // arguments are required.
             "Pre" -> parser_project_contract_marker(&state, &func, marker, true)
             "Post" -> parser_project_contract_marker(&state, &func, marker, false)
+            // A callable chain (`#Policy(retry(3))`) stays a marker; the scoped
+            // form declares function-scoped policies targeting the function.
+            "Policy" -> {
+                if parser_policy_retired_marker(&state, marker) -> return
+                if parser_callable_policy_marker(marker) {
+                    if callable_policy_seen {
+                        parser_add_fatal_code(&state, "E0355", marker.span, "a function can have only one `#Policy` callable chain", "the declaration marker supplies one default chain; a call-site `apply(...)` supplies replacements", "merge the policies into one `#Policy(...)` marker")
+                        return
+                    }
+                    callable_policy_seen = true
+                } else {
+                    declarations :: parser_policy_declarations_from_marker(&state, marker, PolicyScope.Function) ?? return
+                    loop declaration in declarations -> &policy.push(declaration)
+                }
+            }
+            "Meta" -> {
+                if func.meta != None {
+                    parser_add_fatal_code(&state, "E0355", marker.span, "a function can have only one `#Meta` rule", "metadata fields belong in one function marker", "merge the fields into one `#Meta(...)` entry")
+                    return
+                }
+                meta :: parser_meta_attr_from_marker(&state, marker) ?? return
+                loop field in meta.fields {
+                    if field == .Maturity(value, span) && parser_maturity_tag(value) == .Val(maturity) {
+                        func.maturity = Val(maturity)
+                        func.maturity_span = Val(span)
+                        break
+                    }
+                }
+                func.meta = Val(meta)
+            }
+            // The explicit kernel declaration; sema attaches the proof after
+            // it has checked the body.
+            "Kernel" -> {
+                if func.kernel != None {
+                    parser_add_fatal_code(&state, "E0003", marker.span, "a function may have only one `#Kernel` marker", "the kernel mode is a single declaration, not a stack of execution policies", "keep one `#Kernel(.parallel)` marker")
+                    return
+                }
+                values :: parser_marker_bindings(marker, [String]{"mode"}) ?? [Expr?]{None}
+                if values[0] == .Val(mode) && parser_marker_enum_variant(mode) == "parallel" {
+                    func.kernel = Val(KernelMarker{mode: KernelMode.Parallel, span: marker.span, proof: None})
+                } else {
+                    parser_marker_shape_fatal(&state, marker)
+                    return
+                }
+            }
+            "State" -> {
+                paths :: parser_marker_path_arguments(marker, [String]{"state"}) ?? {
+                    parser_marker_shape_fatal(&state, marker)
+                    return
+                }
+                func.state_requires = Val(NamedSpan{name: paths[0], span: marker.span})
+            }
+            // `_` as the source state is the entry transition.
+            "Transition" -> {
+                paths :: parser_marker_path_arguments(marker, [String]{"from", "to"}) ?? {
+                    parser_marker_shape_fatal(&state, marker)
+                    return
+                }
+                from :: if paths[0] == "_" -> String?{None} else -> Val(paths[0])
+                func.state_transition = Val(StateTransition{from: from, to: paths[1], span: marker.span})
+            }
+            "Undo" -> {
+                values :: parser_marker_bindings(marker, [String]{"inverse"}) ?? [Expr?]{None}
+                if values[0] == .Val(written) && written == .Ident(inverse, span) {
+                    func.undo = Val(NamedSpan{name: inverse, span: span})
+                } else {
+                    parser_marker_shape_fatal(&state, marker)
+                    return
+                }
+            }
+            "Target" -> {
+                partition :: parser_function_web_partition(&state, marker) ?? return
+                func.web_marker = Val(partition)
+            }
+            // C declarations select their calling convention; foreign bodies
+            // never reach this applicator in Rust.
+            "ABI" -> {
+                if !foreign {
+                    parser_add_fatal_code(&state, "E3212", marker.span, "`#ABI` only applies to C declarations", "ordinary Jet functions do not select a native C calling convention", "move the function into a `#Import module c.<library> {{ … }}` declaration or remove `#ABI`")
+                    return
+                }
+            }
             else -> {}
         }
     }
     // `#Job` metadata and its `#Every` schedule (E0925).
     _ := parser_project_function_job_markers(&state, &func, markers)
+    loop index in 0..<policy.len() -> policy[index].target = Val(func.span)
+    loop declaration in policy -> &state.block_policy_declarations.push(declaration)
+}
+
+// The `#State` / `#Transition` arguments: one written state path per
+// parameter, all required. None when any is missing or not a path.
+fn parser_marker_path_arguments(marker: Marker, names: [String]) -> [String]? {
+    values :: parser_marker_bindings(marker, names) ?? return None
+    paths := [String]{}
+    loop value in values {
+        written :: value ?? return None
+        &paths.push(parser_marker_ident_path(written) ?? return None)
+    }
+    Val(paths)
+}
+
+// Rust `web_target_from_marker` at a function: `#Target(Wasm)` or
+// `#Target(JS)` selects its web partition; any other target ends the function.
+fn parser_function_web_partition(state: &JetParserState, marker: Marker) -> WebPartitionMarker? {
+    values :: parser_marker_bindings(marker, [String]{"target"}) ?? [Expr?]{None}
+    target :: values[0] ?? {
+        parser_marker_shape_fatal(&state, marker)
+        return None
+    }
+    name :: parser_marker_target_path(target) ?? {
+        parser_marker_shape_fatal(&state, marker)
+        return None
+    }
+    if name == "Wasm" -> return Val(WebPartitionMarker.Wasm)
+    if name == "JS" -> return Val(WebPartitionMarker.JS)
+    segments :: name.split(".").to_list()
+    if segments.len() > 1 && segments[0] == "OS" {
+        os :: segments[1..<segments.len()].join(".")
+        if os != "Linux" && os != "MacOS" && os != "Windows" {
+            parser_add_fatal_code(&state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known native OS", "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`", "write `#Target(OS.Linux)`, `#Target(OS.MacOS)`, or `#Target(OS.Windows)`")
+            return None
+        }
+    } else if name != "Web" {
+        parser_add_fatal_code(&state, "E0003", expr_span(target), "`#Target({name})` is not a known web partition", "web targets are `Wasm` (compute), `JS` (DOM/view), `Web` (default CLI backend), or `OS.Linux`/`OS.MacOS`/`OS.Windows` (native platform gating)", "write `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, or `#Target(OS.{{Linux|MacOS|Windows}})`")
+        return None
+    }
+    parser_add_fatal_code(&state, "E0003", marker.span, "`#Target` on a function needs `Wasm` or `JS`", "function target rules select one web partition", "write `#Target(Wasm)` or `#Target(JS)`")
+    None
 }
 
 fn parser_project_contract_marker(state: &JetParserState, func: &Func, marker: Marker, pre: Bool) {
