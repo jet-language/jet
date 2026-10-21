@@ -684,7 +684,8 @@ fn sema_type_resolve_member_type(graph: SemaRegistrationGraph?, nominal: SemaReg
         owner_params :: loop parameter in nominal.generic_params -> TGenericParam{name: parameter.name, bounds: [SymbolID]{}}
         return sema_type_resolve_declared_with_generics(registered, ty, nominal.symbol.module_name, owner_params)
     }
-    ty
+    // copy: `ty` is a read parameter; the caller keeps its own.
+    ty.copy()
 }
 
 fn sema_type_graph_lookup_symbol(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
