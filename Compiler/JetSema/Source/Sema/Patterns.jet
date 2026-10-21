@@ -128,13 +128,17 @@ fn sema_pattern_nominal_row(graph: SemaRegistrationGraph, module_identity: Strin
     sema_type_resolve_nominal_row(graph, sema_pattern_nominal_type(ty) ?? return None, module_identity)
 }
 
-fn sema_pattern_variant_types(payload: VariantPayload, nominal: SemaRegistrationNominal, subject_ty: Type) -> [Type] Never! {
+// A variant's payload types for a subject of `subject_ty`. Each payload type is
+// resolved in the enum's own module, where it is spelled (a binding in another
+// package must not keep the declaring module's bare name), then takes the
+// subject's generic arguments.
+fn sema_pattern_variant_types(graph: SemaRegistrationGraph?, payload: VariantPayload, nominal: SemaRegistrationNominal, subject_ty: Type) -> [Type] Never! {
     names :: loop parameter in nominal.generic_params -> parameter.name
     actuals :: sema_pattern_subject_args(subject_ty)
     if payload == {
         .Unit -> [Type]{}
-        .Single(ty, _) -> [sema_inference_substitute_type(ty, names, actuals)]
-        .Named(fields) -> loop field in fields -> sema_inference_substitute_type(field.ty, names, actuals)
+        .Single(ty, _) -> [sema_inference_substitute_type(sema_type_resolve_member_type(graph, nominal, ty), names, actuals)]
+        .Named(fields) -> loop field in fields -> sema_inference_substitute_type(sema_type_resolve_member_type(graph, nominal, field.ty), names, actuals)
     }
 }
 
@@ -303,7 +307,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
     loop row in nominal.variants {
         if row.symbol.name == variant {
             result.payload = Val(row.payload)
-            result.types = sema_pattern_variant_types(row.payload, nominal, normalized)
+            result.types = sema_pattern_variant_types(program.registration_graph, row.payload, nominal, normalized)
             result.known = true
             return result
         }
