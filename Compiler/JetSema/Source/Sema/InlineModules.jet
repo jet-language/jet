@@ -301,19 +301,37 @@ fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
     true
 }
 
-// A module lowers unless it imports Core or a foreign namespace: those
-// bindings stay with the module body (Rust `inline_core_imports`).
-fn sema_inline_module_lowerable(definition: CodeModule) -> Bool Never! {
+// A module lowers unless it imports a foreign namespace, or a Core module
+// under a binding the enclosing file does not make the same way: those
+// bindings stay with the module body (Rust `inline_core_imports`). An inline
+// body sees the file's imports overlaid with its own (Rust BodyCheck.rs
+// `check_func_body`), so an inline Core import that repeats a file import's
+// alias and module binds nothing new and the lifted members resolve it
+// through the file's binding.
+fn sema_inline_module_lowerable(definition: CodeModule, file_imports: [ImportDecl]) -> Bool Never! {
     if definition.body == None -> return false
     loop declaration in definition.imports {
         if declaration.kind == {
             .Unqualified(module_alias, _, _, _, _) -> {
                 if module_alias == "core" || module_alias.starts_with("core.") -> return false
             }
+            .Module(name, _) -> {
+                if name != "core" && !name.starts_with("core.") -> return false
+                if !sema_inline_file_binds_module(file_imports, declaration.alias, name) -> return false
+            }
             else -> return false
         }
     }
     true
+}
+
+fn sema_inline_file_binds_module(file_imports: [ImportDecl], alias: String, name: String) -> Bool Never! {
+    loop declaration in file_imports {
+        if declaration.alias != alias -> next
+        if declaration.kind == .Module(bound, _) -> return bound == name
+        return false
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -1306,12 +1324,14 @@ fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index
 }
 
 // Rust registers only a top-level module's functions, and never a module
-// constant: nested functions and constants leave the lowered program.
+// constant or test (CheckInner.rs registers an inline body's `Item::Func`
+// members only): nested functions, constants and tests leave the lowered
+// program.
 fn sema_inline_strip_members(body: [Item]) -> [Item] Never! {
     kept := [Item]{}
     loop item in body {
         if item == {
-            .Func(_) | .Const(_) -> next
+            .Func(_) | .Const(_) | .Test(_) -> next
             .CodeModule(child) -> {
                 updated := child
                 if child.body == .Val(child_body) -> updated.body = Val(sema_inline_strip_members(child_body))
@@ -1412,7 +1432,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
-                if sema_inline_module_lowerable(definition) {
+                if sema_inline_module_lowerable(definition, program.imports) {
                     surface := SemaInlineModuleSurface{name: definition.name, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
                     loop inner in body {
                         if inner == .Func(function) -> surface.functions[function.name] = true
@@ -1427,7 +1447,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
         item :: hoisted_items[item_index]
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
-                if sema_inline_module_lowerable(definition) {
+                if sema_inline_module_lowerable(definition, program.imports) {
                     siblings := sema_inline_rewrite_empty()
                     siblings.sibling_module = definition.name
                     surface_index := -1
