@@ -161,6 +161,8 @@ fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String])
         if ir_map_key_kind(m, key) == "" -> return None
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
     }
+    if ir_task_element(ty) != None -> return Val(ir_task_row(&m, ty))
+    if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
     name :: ir_nominal_name(ty) ?? return None
     args :: ir_type_args(ty)
     if args.len() == 0 {
@@ -1773,10 +1775,10 @@ fn ir_set_element(ty: Type) -> Type? Never! {
     None
 }
 
-// Whether `ty` is a native carrier Lower lays out itself (a Set, Rank, Iter
-// or Shared handle), not as its declared fields.
+// Whether `ty` is a native carrier Lower lays out itself (a Set, Rank, Iter,
+// Task, ScopeGuard or Shared handle), not as its declared fields.
 fn ir_native_carrier(ty: Type) -> Bool Never! {
-    ir_set_element(ty) != None || ir_iter_element(ty) != None || ir_untag(ty) == .Shared(_)
+    ir_set_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
 }
 
 // The Bool test of a text pattern on the String `subject` (Lower

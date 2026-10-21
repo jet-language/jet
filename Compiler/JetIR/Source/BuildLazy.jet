@@ -1,0 +1,881 @@
+// The IR builder's Iter<T> (Lower LazyIter.jet): an owned runtime JetIter
+// handle, distinct from the List walk. Adapters hand the handle to the
+// runtime; `next` borrows it, so later pulls see the remainder. The runtime
+// kernels own adapter semantics; the builder only marshals typed slots
+// through a nine-word element descriptor and helper functions built once per
+// type (lazy.clone, lazy.drop, lazy.equal, lazy.show, lazy.compare,
+// lazy.callback), as Lower's lazy glue helpers are.
+
+use jet_foundation.[AccessConvention, Span, Type, TClosureOp, TExpr, TLocal, TStmt, TypeTupleField, type_carrier_identity]
+use jet_backend.[runtime_abi_atom]
+use jet_codegen.[jet_codegen_closure_route]
+
+// The C export of an Iter route symbol: `jet_iter_take` is
+// jet_rt_native_iter_take (LazyIter.jet:352 lower_lazy_runtime_symbol).
+fn ir_lazy_runtime_symbol(symbol: String) -> String Never! {
+    bytes :: symbol.bytes()
+    tail :: String.from_bytes(bytes.slice(4, bytes.len())) ?? panic("runtime symbol is not UTF-8")
+    "jet_rt_native_{runtime_abi_atom(tail)}"
+}
+
+// The declaration row a nominal type names.
+fn ir_lazy_definition(p: IRProgram, ty: Type) -> Int? Never! {
+    name :: ir_nominal_name(ty) ?? return None
+    ir_type_def(p, name)
+}
+
+// `ty` without its tags and through distinct types and aliases
+// (LazyIter.jet:901 lower_lazy_storage_type).
+fn ir_lazy_storage(p: IRProgram, ty: Type) -> Type Never! {
+    if ty == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_storage(p, inner)
+        else -> {}
+    }
+    if ir_lazy_definition(p, ty) == .Val(row) {
+        if p.types[row].kind == {
+            .Distinct(base, _) | .Alias(base) -> return ir_lazy_storage(p, base)
+            else -> {}
+        }
+    }
+    ty.copy()
+}
+
+// The descriptor kind word the runtime dispatches show, equality and
+// ordering on (LazyIter.jet:183 lower_lazy_kind). A fixed-width integer
+// carries its bit width in the high 32 bits; 11 is a zero-size payload.
+fn ir_lazy_kind(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+    if ir_type_size(&m, p, ty) == 0 -> return 11
+    if ty == {
+        .Int -> return 1
+        .IntN(signed, bits) -> return (if signed -> 2 else -> 3) + bits * 4294967296
+        .Float -> return 4
+        .String -> return 5
+        .List(_) -> return 6
+        .Option(_) -> return 7
+        .Result(_, _) -> return 8
+        .Bool -> return 9
+        .Char -> return 10
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_kind(&m, p, inner)
+        else -> {}
+    }
+    if ir_lazy_definition(p, ty) == .Val(row) {
+        if p.types[row].kind == {
+            .Distinct(base, _) | .Alias(base) -> return ir_lazy_kind(&m, p, base)
+            else -> {}
+        }
+    }
+    0
+}
+
+// Whether the descriptor of `ty` has clone glue (LazyIter.jet:927
+// lower_lazy_can_clone): a single-use declaration, an Iter or a handle
+// without a clone does not. One `seen` set shared by the whole walk visits
+// each type once; a type already seen adds nothing to the conjunction.
+fn ir_lazy_can_clone(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]) -> Bool Never! {
+    if ir_lazy_definition(p, ty) == .Val(row) {
+        if p.types[row].single_use -> return false
+        if p.types[row].kind == {
+            .Distinct(base, _) | .Alias(base) -> return ir_lazy_can_clone(&m, p, base, &seen)
+            else -> {}
+        }
+    }
+    if ty == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_can_clone(&m, p, inner, &seen)
+        else -> {}
+    }
+    if ir_iter_element(ty) != None -> return false
+    if ir_value_type(&m, p, ty) == .Val(row) {
+        if ir_is_handle(m, row) -> return m.types[row].clone != ""
+    }
+    key :: type_carrier_identity(ty)
+    if seen.get(key) != None -> return true
+    seen[key] = true
+    storage :: ir_lazy_storage(p, ty)
+    if storage == {
+        .List(inner) | .Option(inner) -> return ir_lazy_can_clone(&m, p, inner, &seen)
+        .Map(key_ty, _, value_ty) -> return ir_lazy_can_clone(&m, p, key_ty, &seen) && ir_lazy_can_clone(&m, p, value_ty, &seen)
+        .Result(ok, err) -> return ir_lazy_can_clone(&m, p, ok, &seen) && ir_lazy_can_clone(&m, p, err, &seen)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !ir_lazy_can_clone(&m, p, field.ty, &seen) -> return false
+            }
+        }
+        else -> {}
+    }
+    if ir_lazy_definition(p, storage) == .Val(row) {
+        if p.types[row].kind == {
+            .Struct(fields, _) -> {
+                loop field in fields {
+                    if !field.computed && !ir_lazy_can_clone(&m, p, field.ty, &seen) -> return false
+                }
+            }
+            .Enum(variants, _) -> {
+                loop variant in variants {
+                    if variant.payload == {
+                        .Single(inner) -> { if !ir_lazy_can_clone(&m, p, inner, &seen) -> return false }
+                        .Named(fields) -> {
+                            loop field in fields {
+                                if !field.computed && !ir_lazy_can_clone(&m, p, field.ty, &seen) -> return false
+                            }
+                        }
+                        .Unit -> {}
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    true
+}
+
+fn ir_lazy_type_can_clone(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    seen := [String:Bool]{}
+    ir_lazy_can_clone(&m, p, ty, &seen)
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions (LazyIter.jet:37-181). Each takes the addresses of native
+// element slots, not the values.
+
+// The id of lazy helper `role` for `ty`, built on first use; -1 with `b`
+// failed when its body cannot be built.
+fn ir_lazy_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
+    key :: "lazy.{role}<{type_carrier_identity(ty)}>"
+    if m.function_rows.get(key) == .Val(known) {
+        if known < 0 -> return ir_fail_slot(&b, span, "lazy.{role} of {ir_type_name(ty)}")
+        return known
+    }
+    id :: m.functions.len()
+    &m.functions.push(ir_function_new("lazy.{role}", key, "jet_ir_lazy_{role}_{id}", "", 0))
+    m.function_rows[key] = id
+    a := ir_builder_new(m.functions[id].copy())
+    if role == "clone" {
+        ir_lazy_clone_body(&m, p, &a, ty, span)
+    } else if role == "drop" {
+        ir_lazy_drop_body(&m, p, &a, ty, span)
+    } else if role == "equal" {
+        ir_lazy_equal_body(&m, p, &a, ty, span)
+    } else if role == "show" {
+        ir_lazy_show_body(&m, p, &a, ty, IRRender.Show, span)
+    } else if role == "debug" {
+        ir_lazy_show_body(&m, p, &a, ty, IRRender.Debug, span)
+    } else if role == "release" {
+        ir_task_release_body(&m, &a)
+    } else if role == "compare" {
+        ir_lazy_compare_body(&m, p, &a, ty, span)
+    } else {
+        ir_lazy_callback_body(&m, p, &a, ty, span)
+    }
+    failed :: ir_failed(a)
+    message :: a.error.copy()
+    m.functions[id] = ^a.f
+    if failed {
+        m.function_rows[key] = -1
+        return ir_fail_slot(&b, span, message)
+    }
+    id
+}
+
+fn ir_lazy_address(m: &IRModule, b: &IRBuilder, id: Int) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    address :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.FunctionAddress, address, id, -1, -1, b.line)
+    address
+}
+
+// lazy.clone(source, target): a copy of the stored value that owns its own
+// storage (LazyIter.jet:37 lower_lazy_slot_helper).
+fn ir_lazy_clone_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    source :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "source"))
+    target :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "target"))
+    row :: ir_value_type(&m, p, ty) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+    value :: ir_load_at(&m, &a, source, 0, row)
+    if value >= 0 {
+        copied :: ir_copy_value(&m, p, &a, value, span)
+        ir_store_at(&m, &a, target, 0, copied)
+    }
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// lazy.drop(slot): drops the stored value (LazyIter.jet:53).
+fn ir_lazy_drop_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    source :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "slot"))
+    row :: ir_value_type(&m, p, ty) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+    value :: ir_load_at(&m, &a, source, 0, row)
+    if value >= 0 && ir_has_drop(m, a, value) -> ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// lazy.equal(left, right) -> Bool (LazyIter.jet:59).
+fn ir_lazy_equal_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    a.f.result = bool_row
+    left_slot :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "left"))
+    right_slot :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "right"))
+    row :: ir_value_type(&m, p, ty) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+    left :: ir_load_at(&m, &a, left_slot, 0, row)
+    right :: ir_load_at(&m, &a, right_slot, 0, row)
+    same := -1
+    if left < 0 {
+        same = ir_int_constant(&m, &a, bool_row, 1)
+    } else {
+        same = ir_equal(&m, p, &a, left, right, span)
+    }
+    ir_emit(&a.f, IROp.Return, -1, same, -1, -1, a.line)
+}
+
+// lazy.show(slot) -> String: the value rendered for display in an owned
+// String (LazyIter.jet:70); lazy.debug renders it through Debug (Lower
+// Tasks.jet:483 lower_helper_task_debug).
+fn ir_lazy_show_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, mode: IRRender, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    string_row :: ir_string_row(&m)
+    a.f.result = string_row
+    slot :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "slot"))
+    row :: ir_value_type(&m, p, ty) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+    value :: ir_load_at(&m, &a, slot, 0, row)
+    text :: ir_render(&m, p, &a, ty, value, mode, span)
+    if ir_failed(a) || text < 0 -> return
+    fresh :: a.fresh[text]
+    owned :: if fresh -> text else -> ir_runtime(&m, &a, "jet_rt_string_clone", [Int]{text}, string_row)
+    ir_emit(&a.f, IROp.Return, -1, owned, -1, -1, a.line)
+}
+
+// lazy.compare(left, right) -> -1, 0 or 1 (LazyIter.jet:290).
+fn ir_lazy_compare_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    left_slot :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "left"))
+    right_slot :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "right"))
+    row :: ir_value_type(&m, p, ty) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+    left :: ir_load_at(&m, &a, left_slot, 0, row)
+    if left < 0 {
+        zero :: ir_word_const(&m, &a, 0)
+        ir_emit(&a.f, IROp.Return, -1, zero, -1, -1, a.line)
+        return
+    }
+    kind :: ir_kind_of(m, a, left)
+    if kind == .Pointer || kind == .Aggregate -> return ir_fail(&a, span, "ordering of {ir_type_name(ty)} is not lowered at O0 yet")
+    right :: ir_load_at(&m, &a, right_slot, 0, row)
+    less := -1
+    greater := -1
+    if kind == .String {
+        order :: ir_runtime(&m, &a, "jet_rt_string_compare", [Int]{left, right}, word_row)
+        zero :: ir_word_const(&m, &a, 0)
+        less = ir_bool_op(&m, &a, IROp.Lt, order, zero)
+        greater = ir_bool_op(&m, &a, IROp.Gt, order, zero)
+    } else {
+        less = ir_bool_op(&m, &a, IROp.Lt, left, right)
+        greater = ir_bool_op(&m, &a, IROp.Gt, left, right)
+    }
+    ir_open_if(&a.f, less, a.line)
+    minus :: ir_word_const(&m, &a, -1)
+    ir_emit(&a.f, IROp.Return, -1, minus, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_open_if(&a.f, greater, a.line)
+    plus :: ir_word_const(&m, &a, 1)
+    ir_emit(&a.f, IROp.Return, -1, plus, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    equal :: ir_word_const(&m, &a, 0)
+    ir_emit(&a.f, IROp.Return, -1, equal, -1, -1, a.line)
+}
+
+// The checked convention of parameter `index` of the function type `ty`;
+// Read when none is set (LazyIter.jet:1022 lower_lazy_callback_access).
+fn ir_lazy_access(ty: Type, index: Int) -> AccessConvention Never! {
+    if ir_untag(ty) == .Fn(_, _, _, _, metadata, _) {
+        if metadata == .Val(known) {
+            if index < known.conventions.len() -> return known.conventions[index]
+        }
+    }
+    AccessConvention.Read
+}
+
+// lazy.callback(env, one slot per parameter, out) -> consumed mask: reads
+// each argument from its slot, calls the closure box and writes the result
+// into `out` (LazyIter.jet:85 lower_lazy_callback_helper). An IR closure
+// never owns its parameters, so the kernel keeps every input: the mask is 0.
+fn ir_lazy_callback_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    params := [Type]{}
+    returned := Type?{None}
+    if ir_untag(ty) == .Fn(fn_params, fn_ret, _, _, _, _) {
+        params = fn_params
+        returned = fn_ret
+    } else {
+        return ir_fail(&a, span, "lazy callback through {ir_type_name(ty)}")
+    }
+    env :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "env"))
+    inputs := [Int]{}
+    loop index in 0..<params.len() {
+        &inputs.push(ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "_{index}")))
+    }
+    out :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "out"))
+    args := [Int]{}
+    loop (index, param) in params {
+        // The kernels lend their inputs as shared slots: no mutable cell.
+        if ir_lazy_access(ty, index) == .Write -> return ir_fail(&a, span, "Iter borrowed callback argument {index} requires a mutable host input")
+        row :: ir_value_type(&m, p, param) ?? return ir_fail(&a, span, "type {ir_type_name(param)}")
+        value :: ir_load_at(&m, &a, inputs[index], 0, row)
+        if value < 0 -> return ir_fail(&a, span, "Unit argument of a lazy callback")
+        &args.push(value)
+    }
+    result_row := -1
+    if returned == .Val(ret) {
+        if !ir_unit_type(ret) && !ir_never_type(ret) {
+            result_row = ir_value_type(&m, p, ret) ?? return ir_fail(&a, span, "type {ir_type_name(ret)}")
+        }
+    }
+    result :: ir_call_closure(&m, &a, env, args, result_row)
+    if result >= 0 -> ir_store_at(&m, &a, out, 0, result)
+    mask :: ir_word_const(&m, &a, 0)
+    ir_emit(&a.f, IROp.Return, -1, mask, -1, -1, a.line)
+}
+
+// ---------------------------------------------------------------------------
+// Descriptors.
+
+fn ir_lazy_store_word(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, value: Int) Never! {
+    word :: ir_word_const(&m, &b, value)
+    ir_emit(&b.f, IROp.Store, -1, base, offset, word, b.line)
+}
+
+// The element descriptor of `ty` in frame storage: nine words stride, clone,
+// drop, show, eq, cmp, kind, child0, child1 (LazyIter.jet:245
+// lower_lazy_meta); a List or Option names its element's descriptor, a
+// Result its Ok and Err ones. The runtime copies the tree before the frame
+// goes away. -1 with `b` failed when `ty` has no layout.
+fn ir_lazy_meta(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    pointer_row :: ir_pointer_row(&m)
+    descriptor :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, descriptor, 72, 8, -1, b.line)
+    stride :: ir_list_stride(m, row)
+    has_drop :: m.types[row].drop != ""
+    kind :: ir_lazy_kind(&m, p, ty)
+    zero :: ir_word_const(&m, &b, 0)
+    clone := zero
+    if ir_lazy_type_can_clone(&m, p, ty) {
+        id :: ir_lazy_helper(&m, p, &b, "clone", ty, span)
+        if id < 0 -> return -1
+        clone = ir_lazy_address(&m, &b, id)
+    }
+    // A value the IR never drops has no drop glue for the runtime either.
+    drop := zero
+    if has_drop {
+        id :: ir_lazy_helper(&m, p, &b, "drop", ty, span)
+        if id < 0 -> return -1
+        drop = ir_lazy_address(&m, &b, id)
+    }
+    line :: b.line
+    ir_lazy_store_word(&m, &b, descriptor, 0, stride)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 8, clone, line)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 16, drop, line)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 24, zero, line)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 32, zero, line)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 40, zero, line)
+    ir_lazy_store_word(&m, &b, descriptor, 48, kind)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 56, zero, line)
+    ir_emit(&b.f, IROp.Store, -1, descriptor, 64, zero, line)
+    storage :: ir_lazy_storage(p, ty)
+    if storage == {
+        .List(inner) | .Option(inner) -> {
+            child :: ir_lazy_meta(&m, p, &b, inner, span)
+            if child < 0 -> return -1
+            ir_emit(&b.f, IROp.Store, -1, descriptor, 56, child, line)
+        }
+        .Result(ok, err) -> {
+            ok_meta :: ir_lazy_meta(&m, p, &b, ok, span)
+            if ok_meta < 0 -> return -1
+            err_meta :: ir_lazy_meta(&m, p, &b, err, span)
+            if err_meta < 0 -> return -1
+            ir_emit(&b.f, IROp.Store, -1, descriptor, 56, ok_meta, line)
+            ir_emit(&b.f, IROp.Store, -1, descriptor, 64, err_meta, line)
+        }
+        else -> {}
+    }
+    descriptor
+}
+
+// Registers the `role` trait bridge (show, equal or compare) of descriptor
+// `meta`; only a checked operation requiring it does (LazyIter.jet:284).
+fn ir_lazy_meta_trait(m: &IRModule, p: IRProgram, b: &IRBuilder, meta: Int, ty: Type, role: String, span: Span) Never! {
+    offset :: if role == "show" || role == "debug" -> 24 else if role == "equal" -> 32 else -> 40
+    id :: ir_lazy_helper(&m, p, &b, role, ty, span)
+    if id < 0 -> return
+    callback :: ir_lazy_address(&m, &b, id)
+    ir_emit(&b.f, IROp.Store, -1, meta, offset, callback, b.line)
+}
+
+// ---------------------------------------------------------------------------
+// Operands.
+
+// The runtime took over the Iter in `slot`: a fresh temporary is no longer
+// the frame's to drop; a variable moved into the route is cleared, so its
+// scope-end drop (jet_rt_native_iter_drop, null-safe) does nothing.
+fn ir_lazy_consumed(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+    if slot < 0 -> return
+    if b.fresh[slot] {
+        b.fresh[slot] = false
+        return
+    }
+    if ir_has_drop(m, b, slot) -> ir_emit(&b.f, IROp.Const, slot, 0, -1, -1, b.line)
+}
+
+// A count operand as a native word: an exact Int narrowed (LazyIter.jet:336
+// lower_lazy_native_int); the List receiver of `indexes()` gives its length
+// (codegen jet_codegen_lower_builtin_indexes).
+fn ir_lazy_count(m: &IRModule, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+    if value < 0 -> return ir_fail_slot(&b, span, "Iter count without a value")
+    kind :: ir_kind_of(m, b, value)
+    if kind == .Aggregate {
+        length :: ir_load_word(&m, &b, value, 0)
+        ir_release(&m, &b, value)
+        return length
+    }
+    native :: ir_native_index(&m, &b, value, span)
+    ir_release(&m, &b, value)
+    native
+}
+
+// The address of a value the runtime reads by address: an aggregate is its
+// own, any other value is written into frame storage (LazyIter.jet:345
+// lower_lazy_value_slot).
+fn ir_lazy_value_slot(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+    if value >= 0 && ir_kind_of(m, b, value) == .Aggregate -> return value
+    size :: if value >= 0 -> m.types[b.f.slot_type[value]].size else -> 0
+    pointer_row :: ir_pointer_row(&m)
+    slot :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, slot, ir_align8(size), 8, -1, b.line)
+    if value >= 0 -> ir_emit(&b.f, IROp.Store, -1, slot, 0, value, b.line)
+    slot
+}
+
+// The `by_value` flag for an owned operand: 1 for a fresh value the runtime
+// takes over (no longer the frame's to drop), 0 for one it copies
+// (LazyIter.jet:358 lower_lazy_list_moved).
+fn ir_lazy_moved(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+    fresh :: value >= 0 && b.fresh[value]
+    flag :: ir_word_const(&m, &b, if fresh -> 1 else -> 0)
+    if fresh -> b.fresh[value] = false
+    flag
+}
+
+fn ir_lazy_slot_type(m: IRModule, b: IRBuilder, slot: Int) -> Type Never! {
+    if slot < 0 -> return Type.Named{name: "Unit"}
+    m.types[b.f.slot_type[slot]].ty.copy()
+}
+
+// `list.lazy()`: an Iter over the List's elements; a fresh List's header is
+// taken over, any other's elements are cloned (LazyIter.jet:398).
+fn ir_lazy_from_list(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, span: Span) -> Int Never! {
+    list_ty :: ir_lazy_slot_type(m, b, list)
+    element := Type?{None}
+    if ir_untag(list_ty) == .List(inner) -> element = Val(inner)
+    elem :: element ?? return ir_fail_slot(&b, span, "Iter source {ir_type_name(list_ty)} is not a List")
+    meta :: ir_lazy_meta(&m, p, &b, elem, span)
+    if meta < 0 -> return -1
+    moved :: ir_lazy_moved(&m, &b, list)
+    ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{list, meta, moved}, row)
+}
+
+// ---------------------------------------------------------------------------
+// Routes.
+
+fn ir_lazy_plain(symbol: String) -> Bool Never! {
+    symbol == "jet_iter_to_list" || symbol == "jet_iter_collect" || symbol == "jet_iter_first" || symbol == "jet_iter_next" || symbol == "jet_iter_len" || symbol == "jet_iter_is_empty" || symbol == "jet_iter_shuffle" || symbol == "jet_iter_average_int" || symbol == "jet_iter_average_float"
+}
+
+fn ir_lazy_counted(symbol: String) -> Bool Never! {
+    symbol == "jet_iter_take" || symbol == "jet_iter_skip" || symbol == "jet_iter_step_by" || symbol == "jet_iter_drop_last" || symbol == "jet_iter_repeat" || symbol == "jet_iter_cycle"
+}
+
+fn ir_lazy_nested(symbol: String) -> Bool Never! {
+    symbol == "jet_iter_chunks" || symbol == "jet_iter_windows" || symbol == "jet_iter_flatten" || symbol == "jet_iter_some"
+}
+
+fn ir_lazy_compared(symbol: String) -> Bool Never! {
+    symbol == "jet_iter_dedup" || symbol == "jet_iter_is_sorted" || symbol == "jet_iter_join" || symbol == "jet_iter_compare" || symbol == "jet_iter_last_index_of" || symbol == "jet_iter_intersperse"
+}
+
+// Whether ir_lazy_route builds the route `symbol` over a first operand of
+// type `source_ty` (LazyIter.jet:370-391, :529-535).
+fn ir_lazy_symbol(symbol: String, source_ty: Type) -> Bool Never! {
+    if symbol == "jet_iter_empty" || symbol == "jet_iter_indexes" || symbol == "jet_iter_enumerate" -> return true
+    if symbol == "jet_iter_from_vec" || symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" -> return true
+    if symbol == "jet_list_try_collect" && ir_untag(source_ty) == .List(_) -> return true
+    if ir_iter_element(source_ty) == None -> return false
+    symbol == "jet_list_sum" || symbol == "jet_list_product" || ir_lazy_plain(symbol) || ir_lazy_counted(symbol) || ir_lazy_nested(symbol) || ir_lazy_compared(symbol) || symbol == "jet_std_io_progress_iter" || symbol == "jet_list_try_collect" || symbol == "jet_iter_split_at"
+}
+
+// A static Core call of an Iter route: its arguments as checked, without the
+// I64 narrowing of other Core operands (ir_lazy_route narrows counts). None
+// when `symbol` is not one.
+fn ir_lazy_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty: Type, args: [TExpr], span: Span) -> Int? Never! {
+    source_ty :: if args.len() > 0 -> ir_subst(p, args[0].ty) else -> Type.Named{name: "Unit"}
+    if !ir_lazy_symbol(symbol, source_ty) -> return None
+    operands := [Int]{}
+    loop arg in args {
+        slot :: ir_expr(&m, &p, &b, arg)
+        if ir_failed(b) -> return Val(-1)
+        &operands.push(slot)
+    }
+    Val(ir_lazy_route(&m, &p, &b, symbol, ty, operands, span))
+}
+
+// An Iter route over evaluated operands, the source first (LazyIter.jet:370
+// lower_lazy_route, :529 lower_lazy_reduce, :836 lower_lazy_source_route).
+// Every route takes the source Iter over; other owned operands go by value
+// when fresh, borrowed ones are released afterwards.
+fn ir_lazy_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, symbol: String, ty: Type, operands: [Int], span: Span) -> Int Never! {
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    if symbol == "jet_iter_empty" || symbol == "jet_iter_indexes" || symbol == "jet_iter_enumerate" {
+        elem :: ir_iter_element(ir_subst(p, ty)) ?? return ir_fail_slot(&b, span, "Iter route {symbol} has no checked element type")
+        meta :: ir_lazy_meta(&m, p, &b, elem, span)
+        if meta < 0 -> return -1
+        call_args := [Int]{}
+        if symbol == "jet_iter_indexes" {
+            if operands.len() != 1 -> return ir_fail_slot(&b, span, "Iter indexes has no checked count")
+            count :: ir_lazy_count(&m, &b, operands[0], span)
+            if ir_failed(b) -> return -1
+            &call_args.push(count)
+        } else if symbol == "jet_iter_enumerate" {
+            if operands.len() != 2 || operands[0] < 0 || operands[1] < 0 -> return ir_fail_slot(&b, span, "Iter enumerate has no checked callback")
+            closure_ty :: ir_lazy_slot_type(m, b, operands[1])
+            id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
+            if id < 0 -> return -1
+            callback :: ir_lazy_address(&m, &b, id)
+            release :: ir_word_const(&m, &b, 0)
+            &call_args.push(operands[0])
+            &call_args.push(operands[1])
+            &call_args.push(callback)
+            &call_args.push(release)
+        }
+        &call_args.push(meta)
+        out :: ir_runtime(&m, &b, ir_lazy_runtime_symbol(symbol), call_args, result_row)
+        if symbol == "jet_iter_enumerate" -> ir_lazy_consumed(&m, &b, operands[0])
+        return out
+    }
+    if operands.len() == 0 || operands[0] < 0 -> return ir_fail_slot(&b, span, "Iter route {symbol} has no checked source")
+    source :: operands[0]
+    if symbol == "jet_iter_from_vec" -> return ir_lazy_from_list(&m, p, &b, source, result_row, span)
+    if symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" {
+        if operands.len() != 2 -> return ir_fail_slot(&b, span, "String Iter source {symbol} has no checked separator")
+        elem :: ir_iter_element(ir_subst(p, ty)) ?? return ir_fail_slot(&b, span, "String Iter source {symbol} has no checked element type")
+        meta :: ir_lazy_meta(&m, p, &b, elem, span)
+        if meta < 0 -> return -1
+        out :: ir_runtime(&m, &b, ir_lazy_runtime_symbol(symbol), [Int]{source, operands[1], meta}, result_row)
+        ir_release(&m, &b, source)
+        ir_release(&m, &b, operands[1])
+        return out
+    }
+    source_ty :: ir_lazy_slot_type(m, b, source)
+    list_collects :: symbol == "jet_list_try_collect" && ir_untag(source_ty) == .List(_)
+    element := ir_iter_element(source_ty)
+    handle := source
+    if list_collects {
+        if ir_untag(source_ty) == .List(inner) -> element = Val(inner)
+        handle = ir_lazy_from_list(&m, p, &b, source, pointer_row, span)
+        if handle < 0 -> return -1
+    }
+    elem :: element ?? return ir_fail_slot(&b, span, "Iter route {symbol} over {ir_type_name(source_ty)}")
+    if symbol == "jet_list_sum" || symbol == "jet_list_product" {
+        // The remaining items drain into a List the List reduction folds in
+        // order (LazyIter.jet:529 lower_lazy_reduce).
+        if operands.len() != 1 -> return ir_fail_slot(&b, span, "Iter {symbol} with arguments")
+        list_row :: ir_value_type(&m, p, Type.List{element: elem}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(elem)}]")
+        list :: ir_list_empty(&m, &b, list_row)
+        _ :: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{handle, list}, -1)
+        ir_lazy_consumed(&m, &b, handle)
+        return ir_route(&m, &p, &b, symbol, [Int]{list}, [Bool]{true}, ty, span)
+    }
+    if symbol == "jet_iter_to_list" || symbol == "jet_iter_collect" {
+        out :: ir_list_empty(&m, &b, result_row)
+        _ :: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{handle, out}, -1)
+        ir_lazy_consumed(&m, &b, handle)
+        return out
+    }
+    splits :: symbol == "jet_iter_split_at"
+    compared :: ir_lazy_compared(symbol)
+    collects :: symbol == "jet_list_try_collect"
+    by_address :: symbol == "jet_iter_intersperse" || symbol == "jet_iter_last_index_of"
+    call_args := [Int]{handle}
+    if ir_lazy_counted(symbol) || symbol == "jet_iter_chunks" || symbol == "jet_iter_windows" || splits {
+        if operands.len() != 2 -> return ir_fail_slot(&b, span, "Iter route {symbol} has no checked count")
+        count :: ir_lazy_count(&m, &b, operands[1], span)
+        if ir_failed(b) -> return -1
+        &call_args.push(count)
+    } else {
+        loop index in 1..<operands.len() {
+            value :: operands[index]
+            if value < 0 -> return ir_fail_slot(&b, span, "Iter route {symbol} operand without a value")
+            slot :: if by_address -> ir_lazy_value_slot(&m, &b, value) else -> value
+            &call_args.push(slot)
+        }
+    }
+    if ir_lazy_nested(symbol) {
+        output :: ir_iter_element(ir_subst(p, ty)) ?? return ir_fail_slot(&b, span, "Iter adapter {symbol} has no checked output element")
+        output_meta :: ir_lazy_meta(&m, p, &b, output, span)
+        if output_meta < 0 -> return -1
+        &call_args.push(output_meta)
+    } else if compared {
+        meta :: ir_lazy_meta(&m, p, &b, elem, span)
+        if meta < 0 -> return -1
+        if symbol == "jet_iter_join" -> ir_lazy_meta_trait(&m, p, &b, meta, elem, "show", span)
+        if symbol == "jet_iter_dedup" || symbol == "jet_iter_last_index_of" -> ir_lazy_meta_trait(&m, p, &b, meta, elem, "equal", span)
+        if symbol == "jet_iter_is_sorted" || symbol == "jet_iter_compare" -> ir_lazy_meta_trait(&m, p, &b, meta, elem, "compare", span)
+        if ir_failed(b) -> return -1
+        &call_args.push(meta)
+        if symbol == "jet_iter_compare" {
+            // The runtime snapshots the other operand from a List header; an
+            // Iter operand is drained into a fresh List the runtime takes over.
+            if operands.len() != 2 -> return ir_fail_slot(&b, span, "Iter compare has no checked operand")
+            other :: operands[1]
+            other_ty :: ir_lazy_slot_type(m, b, other)
+            if ir_iter_element(other_ty) == .Val(other_elem) {
+                list_row :: ir_value_type(&m, p, Type.List{element: other_elem}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(other_elem)}]")
+                drained :: ir_list_empty(&m, &b, list_row)
+                _ :: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{other, drained}, -1)
+                ir_lazy_consumed(&m, &b, other)
+                call_args[1] = drained
+                taken :: ir_word_const(&m, &b, 1)
+                &call_args.push(taken)
+            } else {
+                &call_args.push(ir_lazy_moved(&m, &b, other))
+            }
+        } else if by_address {
+            if operands.len() != 2 -> return ir_fail_slot(&b, span, "Iter route {symbol} has no checked value")
+            &call_args.push(ir_lazy_moved(&m, &b, operands[1]))
+        }
+    } else if collects {
+        result_ty :: ir_untag(ir_subst(p, ty))
+        if result_ty == .Result(ok, err) {
+            ok_meta :: ir_lazy_meta(&m, p, &b, ok, span)
+            if ok_meta < 0 -> return -1
+            err_meta :: ir_lazy_meta(&m, p, &b, err, span)
+            if err_meta < 0 -> return -1
+            &call_args.push(ok_meta)
+            &call_args.push(err_meta)
+        } else if result_ty == .Option(ok) {
+            ok_meta :: ir_lazy_meta(&m, p, &b, ok, span)
+            if ok_meta < 0 -> return -1
+            &call_args.push(ok_meta)
+            &call_args.push(ir_word_const(&m, &b, 0))
+        } else {
+            return ir_fail_slot(&b, span, "Iter try_collect has no checked failure carrier output")
+        }
+    } else if splits {
+        fields := [TypeTupleField]{}
+        if ir_untag(ir_subst(p, ty)) == .Tuple(pair) -> fields = pair
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, ty)
+        if members.len() != 2 -> return ir_fail_slot(&b, span, "Iter split_at has no checked pair of Lists")
+        size :: m.types[result_row].size
+        out :: ir_fresh_temp(&m, &b, result_row)
+        ir_emit(&b.f, IROp.StackAddress, out, size, 8, -1, b.line)
+        &call_args.push(out)
+        &call_args.push(ir_word_const(&m, &b, members[0].offset))
+        &call_args.push(ir_word_const(&m, &b, members[1].offset))
+        _ :: ir_runtime(&m, &b, "jet_rt_native_iter_split_at", call_args, -1)
+        ir_lazy_consumed(&m, &b, handle)
+        return out
+    }
+    runtime :: if symbol == "jet_std_io_progress_iter" -> "jet_rt_native_iter_progress" else if collects -> "jet_rt_native_iter_try_collect" else -> ir_lazy_runtime_symbol(symbol)
+    out := -1
+    if symbol == "jet_iter_len" || symbol == "jet_iter_compare" {
+        native :: ir_runtime(&m, &b, runtime, call_args, word_row)
+        out = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{native}, result_row)
+    } else {
+        out = ir_runtime(&m, &b, runtime, call_args, result_row)
+    }
+    ir_lazy_consumed(&m, &b, handle)
+    loop index in 1..<operands.len() -> ir_release(&m, &b, operands[index])
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Closure adapters.
+
+// The single-callback Iter adapters over an Iter source (LazyIter.jet:605).
+fn ir_lazy_callback_route(symbol: String) -> Bool Never! {
+    symbol == "jet_iter_map" || symbol == "jet_iter_map_mut" || symbol == "jet_iter_try_map" || symbol == "jet_iter_try_filter" || symbol == "jet_iter_filter" || symbol == "jet_iter_take_while" || symbol == "jet_iter_skip_while" || symbol == "jet_iter_flat_map" || symbol == "jet_iter_filter_map" || symbol == "jet_iter_dedup_by" || symbol == "jet_iter_chunk_while" || symbol == "jet_iter_is_sorted_by"
+}
+
+// The List routes built as an Iter adapter over the List (LazyIter.jet:611).
+fn ir_lazy_list_callback_route(symbol: String) -> Bool Never! {
+    symbol == "jet_list_take_while_iter" || symbol == "jet_list_skip_while_iter" || symbol == "jet_list_filter_map_iter"
+}
+
+// Whether ir_lazy_closure_method builds `operation` on a receiver of
+// `receiver_ty`: any operation on an Iter, and the List operations whose
+// route makes an Iter (LazyIter.jet:553).
+fn ir_lazy_closure_receiver(receiver_ty: Type, operation: TClosureOp) -> Bool Never! {
+    if ir_iter_element(receiver_ty) != None -> return true
+    if ir_untag(receiver_ty) == {
+        .List(_) | .FixedList(_, _) -> {}
+        else -> return false
+    }
+    operation == .TakeWhile || operation == .SkipWhile || operation == .FilterMap || operation == .IsSortedBy
+}
+
+// `iter.map(f)`, `list.filter_map(f)`, ...: the runtime adapter over the
+// source Iter (a List source first becomes one) with the closure box, its
+// lazy.callback and the output descriptor (LazyIter.jet:547
+// lower_lazy_closure_method, :871 lower_lazy_scan). An IR closure box is
+// never freed, so the adapter gets no release helper.
+fn ir_lazy_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
+    receiver_ty :: ir_subst(p, receiver.ty)
+    route :: jet_codegen_closure_route(operation, receiver_ty)
+    symbol :: route.symbol
+    scans :: symbol == "jet_iter_scan"
+    list_source :: ir_lazy_list_callback_route(symbol) || (symbol == "jet_iter_is_sorted_by" && ir_iter_element(receiver_ty) == None)
+    if !scans && !ir_lazy_callback_route(symbol) && !list_source -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver.ty)}")
+    expected :: if scans -> 2 else -> 1
+    if args.len() != expected -> return ir_fail_slot(&b, span, "Iter closure adapter {symbol} has no single checked callback")
+    closure_expr :: args[args.len() - 1]
+    closure_ty :: ir_subst(p, closure_expr.ty)
+    result_ty :: ir_subst(p, ty)
+    result_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, ty)
+    pointer_row :: ir_pointer_row(&m)
+    source := ir_expr(&m, &p, &b, receiver)
+    if ir_failed(b) || source < 0 -> return -1
+    seed_slot := -1
+    seed_meta := -1
+    seed_moved := -1
+    if scans {
+        seed :: ir_expr(&m, &p, &b, args[0])
+        if ir_failed(b) -> return -1
+        seed_slot = ir_lazy_value_slot(&m, &b, seed)
+        seed_meta = ir_lazy_meta(&m, p, &b, ir_subst(p, args[0].ty), span)
+        if seed_meta < 0 -> return -1
+        seed_moved = ir_lazy_moved(&m, &b, seed)
+    }
+    if list_source {
+        source = ir_lazy_from_list(&m, p, &b, source, pointer_row, span)
+        if source < 0 -> return -1
+    }
+    closure :: ir_expr(&m, &p, &b, closure_expr)
+    if ir_failed(b) || closure < 0 -> return -1
+    id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
+    if id < 0 -> return -1
+    callback :: ir_lazy_address(&m, &b, id)
+    release :: ir_word_const(&m, &b, 0)
+    if scans {
+        elem :: ir_iter_element(result_ty) ?? return ir_fail_slot(&b, span, "Iter scan has no checked output element")
+        output_meta :: ir_lazy_meta(&m, p, &b, elem, span)
+        if output_meta < 0 -> return -1
+        out :: ir_runtime(&m, &b, "jet_rt_native_iter_scan", [Int]{source, seed_slot, seed_meta, seed_moved, closure, callback, release, output_meta}, result_row)
+        ir_lazy_consumed(&m, &b, source)
+        return out
+    }
+    returned := Type?{None}
+    if ir_untag(closure_ty) == .Fn(_, fn_ret, _, _, _, _) -> returned = fn_ret
+    output := ir_iter_element(result_ty)
+    if returned != None -> output = returned
+    output_ty :: output ?? return ir_fail_slot(&b, span, "Iter closure adapter {symbol} has no checked callback result")
+    meta :: ir_lazy_meta(&m, p, &b, output_ty, span)
+    if meta < 0 -> return -1
+    if symbol == "jet_iter_dedup_by" -> ir_lazy_meta_trait(&m, p, &b, meta, output_ty, "equal", span)
+    if symbol == "jet_iter_is_sorted_by" -> ir_lazy_meta_trait(&m, p, &b, meta, output_ty, "compare", span)
+    if ir_failed(b) -> return -1
+    runtime :: if symbol == "jet_list_take_while_iter" -> "jet_rt_native_iter_take_while" else if symbol == "jet_list_skip_while_iter" -> "jet_rt_native_iter_skip_while" else if symbol == "jet_list_filter_map_iter" -> "jet_rt_native_iter_filter_map" else -> ir_lazy_runtime_symbol(symbol)
+    call_args := [Int]{source, closure, callback, release, meta}
+    if symbol == "jet_iter_chunk_while" {
+        chunk :: ir_iter_element(result_ty) ?? return ir_fail_slot(&b, span, "Iter chunk_while has no checked output element")
+        chunk_meta :: ir_lazy_meta(&m, p, &b, chunk, span)
+        if chunk_meta < 0 -> return -1
+        &call_args.push(chunk_meta)
+    }
+    out :: ir_runtime(&m, &b, runtime, call_args, result_row)
+    ir_lazy_consumed(&m, &b, source)
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Pulls and loops.
+
+// The place under the borrows and moves of a receiver.
+fn ir_lazy_place(value: TExpr) -> TExpr Never! {
+    if value.kind == .Borrow(place, _) -> return ir_lazy_place(place)
+    if value.kind == .Move(inner) -> return ir_lazy_place(inner)
+    value.copy()
+}
+
+// `&iter.next()`: the next item in an Option box, pulled through the shared
+// handle the variable keeps (LazyIter.jet:988 lower_lazy_call). The pull
+// changes the handle's state, not the owner's pointer: nothing is written back.
+fn ir_lazy_next(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, span: Span) -> Int Never! {
+    place :: ir_lazy_place(receiver)
+    if ir_iter_element(ir_subst(p, place.ty)) == None -> return ir_fail_slot(&b, span, "next on {ir_type_name(place.ty)}")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    handle :: ir_expr(&m, &p, &b, place)
+    if ir_failed(b) || handle < 0 -> return -1
+    out :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{handle}, row)
+    ir_release(&m, &b, handle)
+    out
+}
+
+// `loop x in iter` / `loop (i, x) in iter` (LazyIter.jet:685-834,
+// lower_lazy_cursor_*): the runtime cursor takes the Iter over and is an
+// owned binding of the loop's scope, dropped when the scope closes or the
+// function returns. Each step copies the current item into frame storage the
+// body borrows; the advance drops it.
+fn ir_lazy_walk(m: &IRModule, p: &IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, body: [TStmt], span: Span) Never! {
+    element_ty :: ir_iter_element(ir_subst(p, collection.ty)) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection.ty)}")
+    row :: ir_value_type(&m, p, element_ty) ?? return ir_fail(&b, span, "type {ir_type_name(element_ty)}")
+    source :: ir_expr(&m, &p, &b, collection)
+    if ir_failed(b) || source < 0 -> return
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    cursor_row :: ir_intern_type(&m, "iter_cursor", ir_owned_layout(IRTypeKind.Pointer, Type.Named{name: "IterCursor"}, "jet_rt_native_iter_cursor_drop", ""))
+    storage_size :: ir_align8(m.types[row].size)
+    has_value :: m.types[row].kind != .Unit
+    ir_scope_open(&b)
+    one :: ir_word_const(&m, &b, 1)
+    zero :: ir_word_const(&m, &b, 0)
+    cursor :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_init", [Int]{source, one, zero}, cursor_row)
+    ir_lazy_consumed(&m, &b, source)
+    b.fresh[cursor] = false
+    &b.bindings.push(IRBinding{name: "", slot: cursor, owned: true})
+    index :: ir_word_const(&m, &b, 0)
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    present :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_test", [Int]{cursor}, word_row)
+    more :: ir_bool_op(&m, &b, IROp.Ne, present, zero)
+    ir_exit_unless(&m, &b, more, exit)
+    step_block :: ir_open(&b.f, IROp.Block, b.line)
+    mark :: b.bindings.len()
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark})
+    item := -1
+    if has_value {
+        slot :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, slot, storage_size, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_value", [Int]{cursor, slot, zero}, -1)
+        item = ir_load_at(&m, &b, slot, 0, row)
+    }
+    if variable_two == .Val(second) {
+        position :: ir_new_slot(&b, int_row, IRSlotKind.Local, ir_intern_name(&m, variable.name))
+        ir_emit(&b.f, IROp.Copy, position, index, -1, -1, b.line)
+        &b.bindings.push(IRBinding{name: variable.name, slot: position})
+        if item >= 0 -> &b.bindings.push(IRBinding{name: second.name, slot: item})
+    } else if item >= 0 {
+        &b.bindings.push(IRBinding{name: variable.name, slot: item})
+    }
+    ir_stmts(&m, &p, &b, body)
+    _ :: &b.loops.pop()
+    ir_end(&b.f, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_advance", [Int]{cursor}, -1)
+    ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_scope_close(&m, &b)
+}

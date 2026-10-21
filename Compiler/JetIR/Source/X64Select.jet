@@ -1128,6 +1128,9 @@ fn ir_x64_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
         ir_x64_load(&e, m, f, al, slot, X64_RAX)
         return ir_x64_int_route(&e, drop)
     }
+    // A drop routine the module builds itself (the ScopeGuard drop) is
+    // registered under its symbol.
+    if m.function_rows.get(drop) == .Val(id) -> return ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: LIRFunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
     ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: drop}, -1, [Int]{slot}, 0, 1, -1, 0)
 }
 

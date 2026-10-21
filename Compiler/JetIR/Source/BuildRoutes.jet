@@ -185,6 +185,7 @@ fn ir_route_equal(m: &IRModule, b: &IRBuilder, left: Int, right: Int, span: Span
 // Builtin methods (codegen jet_codegen_builtin_route_plan): Lists inline,
 // Strings through the runtime routes the old path calls.
 fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TBuiltinOp, args: [TExpr], span: Span) -> Int Never! {
+    if operation == .IterNext -> return ir_lazy_next(&m, &p, &b, ty, receiver, span)
     subject :: ir_expr(&m, &p, &b, receiver)
     if ir_failed(b) || subject < 0 -> return -1
     kind :: ir_kind_of(m, b, subject)
@@ -198,6 +199,11 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
     }
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     int_row :: ir_type_row(&m, Type.Int) ?? 0
+    if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(ir_subst(p, receiver.ty)) != None {
+        set_route :: jet_codegen_builtin_route_plan(operation, receiver.ty, ty, jet_codegen_failure_carrier_for_type(ty))
+        if ir_set_builtin(&m, p, &b, ty, set_route.symbol, subject, operands, span) == .Val(result) -> return result
+        return ir_fail_slot(&b, span, "set builtin {set_route.symbol}")
+    }
     if ir_map_entry_type(receiver.ty) != None {
         map_route :: jet_codegen_builtin_route_plan(operation, receiver.ty, ty, jet_codegen_failure_carrier_for_type(ty))
         if ir_map_builtin(&m, p, &b, map_route.symbol, subject, operands, span) == .Val(result) -> return result
@@ -279,13 +285,14 @@ fn ir_builtin(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TE
 // jet_codegen_builtin_route_plan, Lower lower_route_call).
 fn ir_builtin_route(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, operands: [Int], span: Span) -> Int Never! {
     if operation == {
-        .OptionZip(_, _) | .Zip(_, _, _, _, _, _, _) | .Unzip(_) | .Indexes | .ListMinMax(_) | .Indexed(_) | .MapToList(_) | .IterSplit(_) | .ToString
+        .OptionZip(_, _) | .Zip(_, _, _, _, _, _, _) | .Unzip(_) | .ListMinMax(_) | .Indexed(_) | .MapToList(_) | .IterSplit(_) | .ToString
         | .RemoveList(_, _) | .PriorityQueueRemove(_, _) | .MapNew | .SetCopy | .BitSetNew | .ByteBufferNew | .BagLen | .AtomicMethod(_) | .ViewNew(_) | .ViewMutNew(_) | .ComputeViewNew(_) | .ComputeViewMutNew(_) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
         else -> {}
     }
     if tir_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
     route :: jet_codegen_builtin_route_plan(operation, receiver_ty, ty, jet_codegen_failure_carrier_for_type(ty))
     if route.arity != operands.len() -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
+    if ir_lazy_symbol(route.symbol, ir_subst(p, receiver_ty)) -> return ir_lazy_route(&m, &p, &b, route.symbol, ty, operands, span)
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     ir_route(&m, &p, &b, route.symbol, operands, route.borrow_mask, result, span)
 }
@@ -308,6 +315,7 @@ fn ir_call_closure(m: &IRModule, b: &IRBuilder, boxed: Int, args: [Int], result_
 }
 
 fn ir_closure_method(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, receiver: TExpr, operation: TClosureOp, args: [TExpr], span: Span) -> Int Never! {
+    if ir_lazy_closure_receiver(ir_subst(p, receiver.ty), operation) -> return ir_lazy_closure_method(&m, &p, &b, ty, receiver, operation, args, span)
     list :: ir_expr(&m, &p, &b, receiver)
     if ir_failed(b) || list < 0 -> return -1
     element :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver.ty)}")
@@ -1247,6 +1255,7 @@ fn ir_core_call(m: &IRModule, p: &IRProgram, b: &IRBuilder, ty: Type, record: Co
         .Rust(name) -> name
         .SourceOwned -> { return ir_fail_slot(&b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
+    if ir_lazy_core_call(&m, &p, &b, symbol, ty, args, span) == .Val(result) -> return result
     slots := [Int]{}
     borrow_mask :: canonical.signature.borrow_mask
     loop (index, arg) in args {
