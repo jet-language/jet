@@ -1309,7 +1309,7 @@ fn lower_list_counts(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(counted, [LIRValueID]{})})
     lower_start(&f, counted, [LIRValueID]{})
     lower_each_end(&f, each, [LIRValueID]{})
-    if lower_value_owned(c, receiver) -> lower_map_drop_value(p, &m, &f, list, ty)
+    if lower_value_takeable(c, receiver) -> lower_map_drop_value(p, &m, &f, list, ty)
     true
 }
 
@@ -2005,7 +2005,7 @@ fn lower_list_method_shape(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
         lower_emit(&f, LIRInst.Binary{dst: written, op: LIRBinaryOp.Add, left: inner.state[0], right: one})
         lower_each_end(&f, inner, [LIRValueID]{written})
         lower_each_end(&f, outer, [LIRValueID]{inner.exit[0]})
-        if lower_value_owned(c, receiver) -> lower_map_drop_value(p, &m, &f, list, ty)
+        if lower_value_takeable(c, receiver) -> lower_map_drop_value(p, &m, &f, list, ty)
         return true
     }
     // Map.from_keys(keys, default): every key, in List order, set to a copy
@@ -2032,7 +2032,7 @@ fn lower_list_method_shape(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_clone_into(p, &m, &f, fallback, owned_value, shape.value)
     lower_call_helper(&m, &f, "map.set", result_ty, [LIRValueID]{dst, owned_key, owned_value}, None)
     lower_each_end(&f, each, [LIRValueID]{})
-    if lower_value_owned(c, receiver) -> lower_map_drop_value(p, &m, &f, list, ty)
+    if lower_value_takeable(c, receiver) -> lower_map_drop_value(p, &m, &f, list, ty)
     if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, fallback, shape.value)
     true
 }

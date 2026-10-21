@@ -43,7 +43,7 @@ fn lower_queue_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     source :: lower_use(&m, &f, source_id) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_storage_into(p, &f, dst, ty)
-    if lower_value_owned(c, source_id) {
+    if lower_value_takeable(c, source_id) {
         lower_copy_bytes(&f, dst, 0, source, 0, 24)
         zero :: lower_const(&f, 0)
         lower_emit(&f, LIRInst.Store{base: source, offset: 0, value: zero})

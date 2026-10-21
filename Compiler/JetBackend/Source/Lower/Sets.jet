@@ -76,7 +76,7 @@ fn lower_set_from(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     source :: lower_use(&m, &f, source_id) ?? return
     source_elem := lower_list_element(source_ty)
     input := source
-    moved := lower_value_owned(c, source_id)
+    moved := lower_value_takeable(c, source_id)
     if source_elem == None {
         source_elem = lower_lazy_element(source_ty)
         if source_elem == None -> return lower_fail(&m, &f, "Set construction source is neither List nor Iter")

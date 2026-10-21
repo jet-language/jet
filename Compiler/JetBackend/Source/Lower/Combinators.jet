@@ -381,7 +381,7 @@ fn lower_closure_search_iter(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
         if !lower_is_exact_int(found_ty) -> return lower_fail(&m, &f, unsupported)
     } else if result_ty.kind != .Bool -> return lower_fail(&m, &f, unsupported)
     if lower_repr(p, elem) == .Absent -> return lower_fail(&m, &f, unsupported)
-    owned :: lower_value_owned(c, receiver)
+    owned :: lower_value_takeable(c, receiver)
     handle :: lower_use(&m, &f, receiver) ?? return
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     slot_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: elem})

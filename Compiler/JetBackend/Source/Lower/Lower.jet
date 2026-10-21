@@ -343,6 +343,9 @@ struct LowerContext {
     local_slots: [U64:Int]
     // MIR value read or moved out of a root place -> its slot.
     read_slots: [U64:Int]
+    // MIR values a ReadPlace defines (root or projected): the place keeps its
+    // value unless the read is sunk (lower_value_takeable).
+    place_reads: [U64:Bool]
     // MIR value a parameter or temporary place stands for -> its slot.
     defined_slots: [U64:Int]
     // MIR values written into a place, stored into a new aggregate (List,
@@ -1889,6 +1892,16 @@ fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
     lower_is_owned(c.mir.values[index].ownership)
 }
 
+// Whether a consuming builtin may take `value`'s storage: an owned value that
+// is not a place read the operation leaves with its place. MIR never consumes
+// a BuiltinMethod receiver (mir_operation_value_consumption), so a `read`
+// receiver is not sunk (no cloning read) and is still the live place's value;
+// only a `move-out`, a sunk read or a fresh owner can be taken over.
+fn lower_value_takeable(c: LowerContext, value: MIRValueID) -> Bool Never! {
+    if !lower_value_owned(c, value) -> return false
+    c.place_reads.get(value.value) == None || c.sunk.get(value.value) != None
+}
+
 fn lower_set_slot(f: &LowerFunction, slot: Int, value: LIRValueID?) Never! {
     f.current[slot] = value
     if value == .Val(carried) -> lower_debug_bind(&f, slot, carried)
@@ -2382,6 +2395,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         }
     }
     read_slots := [U64:Int]{}
+    place_reads := [U64:Bool]{}
     sunk := [U64:Bool]{}
     moves := [U64:U64]{}
     // A Move only variant tests and payload reads use does not land its
@@ -2401,6 +2415,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
+                    if instruction.operation == .ReadPlace(_) -> _ := &place_reads.add(result_value.value, true)
                     if lower_place_row(function, place_rows, place) == .Val(row) {
                         if row.projections.len() == 0 {
                             if place_slots.get(place.value) == .Val(slot) -> _ := &read_slots.add(result_value.value, slot)
@@ -2471,6 +2486,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         place_rows: place_rows,
         local_slots: local_slots,
         read_slots: read_slots,
+        place_reads: place_reads,
         defined_slots: defined_slots,
         sunk: sunk,
         moves: moves,

@@ -1,0 +1,17 @@
+// Building a collection from a List reads the List: `Set.from(xs)`,
+// `xs.to_set()` and `PriorityQueue.from(xs)` copy the elements, and the
+// source binding keeps every one of them.
+fn run() {
+    xs :: [String]{"a", "b"}
+    s :: Set.from(xs)
+    print("{s.len()} {xs.len()} {xs[0]}")
+    ys :: [String]{"c", "d", "c"}
+    t :: ys.to_set()
+    print("{t.len()} {ys.len()}")
+    zs :: [Int]{3, 1, 2}
+    q :: PriorityQueue.from(zs)
+    print("{q.len()} {zs.len()} {zs[0]}")
+    // A source whose last use is the call is taken over, not copied.
+    last :: [String]{"g"}
+    print(Set.from(last).len())
+}

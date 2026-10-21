@@ -550,7 +550,7 @@ fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
         elem :: lower_list_element(receiver_ty) ?? return true
         meta :: lower_lazy_meta(p, &m, &f, elem)
         handle :: lower_pointer(&f)
-        moved :: lower_const_flag(&f, if lower_value_owned(c, receiver) -> 1 else -> 0)
+        moved :: lower_const_flag(&f, if lower_value_takeable(c, receiver) -> 1 else -> 0)
         lower_call_runtime(&m, &f, "jet_rt_native_iter_from_list", [LIRValueID]{source, meta, moved}, Val(handle))
         source = handle
     }
