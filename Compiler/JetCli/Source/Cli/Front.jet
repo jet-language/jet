@@ -144,6 +144,9 @@ enum JetCLIPlan {
     // `jet inspect output <file> [<address>]` (CmdInspect.rs `run_output`):
     // the sema-selected Output of the authorized request of `file`.
     Output(file: String, address: String?, color: Bool, json: Bool)
+    // `jet self doctor` (Doctor.jet): environment self-diagnosis; `apply` is
+    // `--fix`, `cross_target` the rustc triple `--target` selects.
+    Doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
     // `jet __jetpack <op>` (JetpackService.jet): the internal compiler
     // service `jetpack` speaks over stdin/stdout; never in help.
     CompilerService(op: String)
@@ -1616,6 +1619,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "remote" -> return JetCLIPlan.Remote{argv: argv, json: json, color: color}
         // `jet self toolchain` (main.rs `run_toolchain`): read-only pin report.
         "toolchain" -> return jet_cli_self_toolchain(json)
+        "doctor" -> return jet_cli_doctor_plan(raw, jet_argv, color)
         // CmdTest.rs `run_test_compare(target, jet_argv, mode)`.
         "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
         "try" -> {

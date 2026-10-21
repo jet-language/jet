@@ -1,0 +1,84 @@
+// The publish registry's identity (Source/Publish/Registry.rs:29-143 and
+// Tier.rs tier carriers): which registry, its tier, and the one credential
+// redaction. Publication's transport and `jet self doctor` both read it here.
+use core.sys as sys
+
+enum PublicationRegistryTier {
+    Core
+    Community
+}
+
+fn publication_tier_label(tier: PublicationRegistryTier) -> String Never! {
+    if tier == {
+        .Core -> "core"
+        .Community -> "community"
+    }
+}
+fn publication_parse_tier(value: String) -> PublicationRegistryTier? Never! {
+    if value.trim().to_ascii_lower() == {
+        "core" -> Val(PublicationRegistryTier.Core)
+        "community" -> Val(PublicationRegistryTier.Community)
+        else -> None
+    }
+}
+fn publication_tier_from_environment() -[Env]> PublicationRegistryTier Never! {
+    publication_parse_tier(sys.get("JET_REGISTRY_TIER") ?? "") ?? PublicationRegistryTier.Core
+}
+
+struct PublicationRegistryConfig {
+    name: String
+    url: String
+    mirror: Bool
+    require_signed: Bool
+    tier: PublicationRegistryTier
+
+    fn public_default() -> PublicationRegistryConfig Never! {
+        PublicationRegistryConfig{name: "jet", url: "https://github.com/jet-lang/registry", mirror: false, require_signed: false, tier: .Core}
+    }
+    fn private(name: String, url: String, mirror: Bool) -> PublicationRegistryConfig Never! {
+        PublicationRegistryConfig{name: name, url: url, mirror: mirror, require_signed: false, tier: .Core}
+    }
+}
+
+fn publication_parse_registries_from_env(env: [String: String]) -> [PublicationRegistryConfig] Never! {
+    result := [PublicationRegistryConfig]{}
+    loop entry in env {
+        if !entry.key.starts_with("JET_REGISTRY_") -> next
+        suffix :: entry.key.removeprefix("JET_REGISTRY_")
+        if !suffix.ends_with("_URL") -> next
+        name :: suffix.removesuffix("_URL")
+        mirror :: (env.get("JET_REGISTRY_{name}_MIRROR") ?? "") == "true"
+        &result.push(PublicationRegistryConfig.private(name.to_lower(), entry.value, mirror))
+    }
+    if result.len() == 0 -> &result.push(PublicationRegistryConfig.public_default())
+    result
+}
+fn publication_resolve_publish_registry() -[Env]> PublicationRegistryConfig Never! {
+    registry := PublicationRegistryConfig.public_default()
+    url :: sys.get("JET_REGISTRY_URL") ?? ""
+    if url != "" -> registry.url = url
+    registry.tier = publication_tier_from_environment()
+    registry.require_signed = registry.tier == .Community
+    registry
+}
+
+// Rust redact_registry_url (:123-143): the LAST `@` of the authority ends
+// its userinfo; query and fragment text never survives.
+fn publication_redact_registry_url(value: String) -> String Never! {
+    safe := value.copy()
+    loop delimiter in ([String]{"?", "#"}) {
+        if safe.split_once(delimiter) == .Val(pair) -> safe = pair.before
+    }
+    scheme :: safe.split_once("://") ?? return safe
+    path :: scheme.after.split_once("/")
+    authority :: if path == .Val(pair) -> pair.before else -> scheme.after
+    credentials :: authority.cut_last("@") ?? return safe
+    suffix :: if path == .Val(pair) -> "/{pair.after}" else -> ""
+    "{scheme.before}://{credentials.after}{suffix}"
+}
+fn publication_registry_url_has_credentials(value: String) -> Bool Never! {
+    if value.contains("?") || value.contains("#") -> return true
+    scheme :: value.split_once("://") ?? return false
+    authority :: if scheme.after.split_once("/") == .Val(pair) -> pair.before else -> scheme.after
+    authority.contains("@")
+}
