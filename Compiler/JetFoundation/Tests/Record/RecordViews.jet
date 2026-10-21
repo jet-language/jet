@@ -1,0 +1,77 @@
+// Record value views, the schema-checked reader, the digest helpers and the
+// debugging JSON rendering of the canonical record codec.
+use jet_foundation.[
+    RecordField, RecordSection, RecordValue, record_digest, record_digest_hex, record_element,
+    record_elements, record_encode, record_json, record_open_schema, record_parse_digest_hex,
+    record_value_as_bool, record_value_as_digest, record_value_as_int, record_value_as_list,
+    record_value_as_optional_str, record_value_as_str, record_value_as_usize, record_value_field,
+    record_value_is_null, record_value_list_of_str, record_value_optional_str, record_value_str_list,
+]
+
+fn record_views_test_sample() -> [RecordSection] Never! {
+    digest := [U8]{}
+    loop _ in 0..<32 -> &digest.push(U8{7})
+    [RecordSection]{
+        RecordSection{id: 7, elements: [RecordValue]{
+            RecordValue.Map{fields: [RecordField]{
+                RecordField{name: "name", value: RecordValue.Str{value: "core.text"}},
+                RecordField{name: "count", value: RecordValue.Int{value: -3}},
+                RecordField{name: "digest", value: RecordValue.Digest{value: digest}},
+            }},
+            RecordValue.List{values: [RecordValue]{RecordValue.Null, RecordValue.Bool{value: true}, RecordValue.Str{value: "é"}}},
+        }},
+        RecordSection{id: 1, elements: [RecordValue]{RecordValue.Str{value: "core.text"}}},
+    }
+}
+
+#Test("record views read typed values and name the expected shape") {
+    text :: RecordValue.Str{value: "core.text"}
+    assert_eq(record_value_as_str(text).value, Val("core.text"))
+    assert_eq(record_value_as_int(text).problem, Val("record is malformed: expected integer, found string"))
+    assert_eq(record_value_as_optional_str(RecordValue.Null).value, None)
+    assert_eq(record_value_as_optional_str(RecordValue.Null).problem, None)
+    assert_eq(record_value_as_bool(RecordValue.Bool{value: true}).value, Val(true))
+    assert_eq(record_value_as_usize(RecordValue.Int{value: -1}).problem, Val("record is malformed: negative or oversized count"))
+    assert_eq(record_value_as_usize(RecordValue.Int{value: 12}).value, Val(12))
+    assert(record_value_is_null(RecordValue.Null))
+    assert_eq(record_value_as_list(RecordValue.Null).problem, Val("record is malformed: expected list, found null"))
+    assert_eq(record_value_as_digest(RecordValue.Int{value: 1}).problem, Val("record is malformed: expected digest, found integer"))
+    names :: record_value_list_of_str([String]{"a", "b"})
+    assert_eq(record_value_str_list(names).value, Val([String]{"a", "b"}))
+    assert_eq(record_value_optional_str(None), RecordValue.Null)
+    assert_eq(record_value_optional_str(Val("x")), RecordValue.Str{value: "x"})
+}
+
+#Test("record reader opens with a required schema and reads one element lazily") {
+    encoded :: record_encode("jet.test/v1", record_views_test_sample())
+    bytes :: encoded.bytes ?? panic("encodes: {encoded.problem ?? ""}")
+    opened :: record_open_schema(bytes, "jet.test/v1")
+    reader :: opened.reader ?? panic("opens")
+    element :: record_element(reader, 7, 0).value ?? panic("element")
+    name :: record_value_field(element, "name").value ?? panic("name field")
+    assert_eq(record_value_as_str(name).value, Val("core.text"))
+    assert_eq(record_value_field(element, "missing").problem, Val("record is malformed: field `missing` is missing"))
+    assert_eq((record_elements(reader, 7).value ?? panic("elements")).len(), 2)
+    assert_eq(record_elements(reader, 2).problem, Val("record section 2 is missing"))
+    assert_eq(record_open_schema(bytes, "jet.other/v1").problem, Val("record schema is `jet.test/v1`, expected `jet.other/v1`"))
+    digest :: record_digest("jet.test/v1", record_views_test_sample()).value ?? panic("digest")
+    assert_eq(digest, reader.digest)
+    hex :: record_digest_hex(digest)
+    assert_eq(record_parse_digest_hex(hex), Val(digest))
+    upper := ""
+    loop _ in 0..<32 -> upper = "{upper}AB"
+    assert_eq(record_parse_digest_hex(upper), [U8]?{None})
+    assert_eq(record_parse_digest_hex("00"), [U8]?{None})
+}
+
+#Test("record JSON renders the decoded tree") {
+    encoded :: record_encode("jet.test/v1", [RecordSection]{RecordSection{id: 1, elements: [RecordValue]{RecordValue.Map{fields: [RecordField]{
+        RecordField{name: "b", value: RecordValue.Bytes{value: [U8]{U8{1}, U8{2}}}},
+        RecordField{name: "n", value: RecordValue.Null},
+        RecordField{name: "s", value: RecordValue.Str{value: "q\""}},
+    }}}}})
+    bytes :: encoded.bytes ?? panic("encodes")
+    json :: record_json(bytes).value ?? panic("renders")
+    expected :: "\"sections\":{{\"1\":[{{\"b\":{{\"bytes\":\"0102\"}},\"n\":null,\"s\":\"q\\\"\"}}]}}}}"
+    assert(json.ends_with(expected))
+}

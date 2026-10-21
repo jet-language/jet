@@ -5,6 +5,55 @@
 MIR_ACCELERATION_RECEIPT_TYPE_NAME :: "AccelerationDecision"
 MIR_ACCELERATION_RECEIPT_SECTION_PREFIX :: "jet.acceleration."
 MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST :: "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388"
+// The `#Receipt` schema identity of the runtime envelope: the shared
+// `type<NUL>field:type;` framing over the nested decision and source fields.
+MIR_ACCELERATION_RECEIPT_SCHEMA :: prep { "AccelerationDecision{JETLIB_NUL}decision:(measurement: (bandwidth_floor_nanos: Int, floor_nanos: Int, items: Int, projected_serial_nanos: Int?, required_serial_nanos: Int?, sample_items: Int, sample_nanos: Int, spawn_nanos: Int), pin: String?, status: String, transform: String);function:String;loop_header:Int;source:(end: Int, start: Int);" }
+
+fn mir_acceleration_status_is_selected(status: MIRAccelerationGateStatus) -> Bool Never! {
+    status == .Selected
+}
+
+fn mir_acceleration_decision_selected(decision: MIRAccelerationDecision) -> Bool Never! {
+    mir_acceleration_status_is_selected(decision.status)
+}
+
+fn mir_acceleration_integer(value: U64) -> CanonicalJSON Never! {
+    CanonicalJSON.Integer("{value}")
+}
+
+fn mir_acceleration_optional_integer(value: U64?) -> CanonicalJSON Never! {
+    if value == {
+        .Val(found) -> mir_acceleration_integer(found)
+        .None -> CanonicalJSON.Null
+    }
+}
+
+// The canonical nested decision object a runtime acceleration receipt section
+// carries. Source identity and the append-only sequence live in the receipt
+// envelope; keys are written in canonical (sorted) order.
+fn mir_acceleration_decision_to_json(decision: MIRAccelerationDecision) -> CanonicalJSON Never! {
+    m :: decision.measurement
+    pin :: if decision.status == {
+        .Pinned(value) -> CanonicalJSON.String(mir_acceleration_pin_name(value))
+        else -> CanonicalJSON.Null
+    }
+    measurement :: CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "bandwidth_floor_nanos", value: mir_acceleration_integer(m.bandwidth_floor_nanos)},
+        CanonicalJSONField{key: "floor_nanos", value: mir_acceleration_integer(m.floor_nanos)},
+        CanonicalJSONField{key: "items", value: mir_acceleration_integer(m.items)},
+        CanonicalJSONField{key: "projected_serial_nanos", value: mir_acceleration_optional_integer(m.projected_serial_nanos)},
+        CanonicalJSONField{key: "required_serial_nanos", value: mir_acceleration_optional_integer(m.required_serial_nanos)},
+        CanonicalJSONField{key: "sample_items", value: mir_acceleration_integer(m.sample_items)},
+        CanonicalJSONField{key: "sample_nanos", value: mir_acceleration_integer(m.sample_nanos)},
+        CanonicalJSONField{key: "spawn_nanos", value: mir_acceleration_integer(m.spawn_nanos)},
+    })
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "measurement", value: measurement},
+        CanonicalJSONField{key: "pin", value: pin},
+        CanonicalJSONField{key: "status", value: CanonicalJSON.String(mir_acceleration_status_name(decision.status))},
+        CanonicalJSONField{key: "transform", value: CanonicalJSON.String(mir_acceleration_transform_name(decision.transform))},
+    })
+}
 
 fn mir_acceleration_json_object(value: CanonicalJSON, label: String, keys: [String]) -> [CanonicalJSONField] CanonicalJSONError! {
     fields :: if value == .Object(found) -> found else -> { return Err(canonical_json_error("{label} must be a canonical object")) }

@@ -108,6 +108,169 @@ struct RecordValueResult {
     problem: String?
 }
 
+// Typed views carry the same explicit problem as the binary reader.
+struct RecordStringResult {
+    value: String?
+    problem: String?
+}
+
+struct RecordOptionalStringResult {
+    value: String?
+    problem: String?
+}
+
+struct RecordIntResult {
+    value: Int?
+    problem: String?
+}
+
+struct RecordBoolResult {
+    value: Bool?
+    problem: String?
+}
+
+struct RecordListResult {
+    value: [RecordValue]?
+    problem: String?
+}
+
+struct RecordMapResult {
+    value: [RecordField]?
+    problem: String?
+}
+
+struct RecordDigestResult {
+    value: [U8]?
+    problem: String?
+}
+
+struct RecordCountResult {
+    value: Int?
+    problem: String?
+}
+
+struct RecordStringsResult {
+    value: [String]?
+    problem: String?
+}
+
+struct RecordElementsResult {
+    value: [RecordValue]?
+    problem: String?
+}
+
+fn record_value_kind(value: RecordValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "boolean"
+        .Int(_) -> "integer"
+        .Str(_) -> "string"
+        .Bytes(_) -> "bytes"
+        .List(_) -> "list"
+        .Map(_) -> "map"
+        .Digest(_) -> "digest"
+    }
+}
+
+fn record_value_shape(expected: String, value: RecordValue) -> String Never! {
+    "record is malformed: expected {expected}, found {record_value_kind(value)}"
+}
+
+fn record_value_is_null(value: RecordValue) -> Bool Never! {
+    value == .Null
+}
+
+fn record_value_as_str(value: RecordValue) -> RecordStringResult Never! {
+    if value == {
+        .Str(text) -> RecordStringResult{value: Val(text), problem: None}
+        else -> RecordStringResult{value: None, problem: Val(record_value_shape("string", value))}
+    }
+}
+
+fn record_value_as_optional_str(value: RecordValue) -> RecordOptionalStringResult Never! {
+    if value == .Null -> return RecordOptionalStringResult{value: None, problem: None}
+    decoded :: record_value_as_str(value)
+    RecordOptionalStringResult{value: decoded.value, problem: decoded.problem}
+}
+
+fn record_value_as_int(value: RecordValue) -> RecordIntResult Never! {
+    if value == {
+        .Int(number) -> RecordIntResult{value: Val(number), problem: None}
+        else -> RecordIntResult{value: None, problem: Val(record_value_shape("integer", value))}
+    }
+}
+
+// A count: a non-negative integer that fits a 64-bit unsigned word.
+fn record_value_as_usize(value: RecordValue) -> RecordCountResult Never! {
+    decoded :: record_value_as_int(value)
+    number :: decoded.value ?? return RecordCountResult{value: None, problem: decoded.problem}
+    if number < 0 || number > 18446744073709551615 -> return RecordCountResult{value: None, problem: Val("record is malformed: negative or oversized count")}
+    RecordCountResult{value: Val(number), problem: None}
+}
+
+fn record_value_as_bool(value: RecordValue) -> RecordBoolResult Never! {
+    if value == {
+        .Bool(flag) -> RecordBoolResult{value: Val(flag), problem: None}
+        else -> RecordBoolResult{value: None, problem: Val(record_value_shape("boolean", value))}
+    }
+}
+
+fn record_value_as_list(value: RecordValue) -> RecordListResult Never! {
+    if value == {
+        .List(values) -> RecordListResult{value: Val(values), problem: None}
+        else -> RecordListResult{value: None, problem: Val(record_value_shape("list", value))}
+    }
+}
+
+fn record_value_as_map(value: RecordValue) -> RecordMapResult Never! {
+    if value == {
+        .Map(fields) -> RecordMapResult{value: Val(fields), problem: None}
+        else -> RecordMapResult{value: None, problem: Val(record_value_shape("map", value))}
+    }
+}
+
+fn record_value_as_digest(value: RecordValue) -> RecordDigestResult Never! {
+    if value == {
+        .Digest(digest) -> RecordDigestResult{value: Val(digest), problem: None}
+        else -> RecordDigestResult{value: None, problem: Val(record_value_shape("digest", value))}
+    }
+}
+
+// A required map field.
+fn record_value_field(value: RecordValue, name: String) -> RecordValueResult Never! {
+    decoded :: record_value_as_map(value)
+    fields :: decoded.value ?? return RecordValueResult{value: None, problem: decoded.problem}
+    loop field in fields {
+        if field.name == name -> return RecordValueResult{value: Val(field.value), problem: None}
+    }
+    RecordValueResult{value: None, problem: Val("record is malformed: field `{name}` is missing")}
+}
+
+fn record_value_str_list(value: RecordValue) -> RecordStringsResult Never! {
+    decoded :: record_value_as_list(value)
+    items :: decoded.value ?? return RecordStringsResult{value: None, problem: decoded.problem}
+    texts := [String]{}
+    loop item in items {
+        text :: record_value_as_str(item)
+        if text.problem != None -> return RecordStringsResult{value: None, problem: text.problem}
+        &texts.push(text.value ?? "")
+    }
+    RecordStringsResult{value: Val(texts), problem: None}
+}
+
+fn record_value_optional_str(value: String?) -> RecordValue Never! {
+    if value == {
+        .Val(text) -> RecordValue.Str{value: text}
+        .None -> RecordValue.Null
+    }
+}
+
+fn record_value_list_of_str(values: [String]) -> RecordValue Never! {
+    items := [RecordValue]{}
+    loop text in values -> &items.push(RecordValue.Str{value: text})
+    RecordValue.List{values: items}
+}
+
 // ---------------------------------------------------------------- encoding
 
 fn record_put_uvarint(out: &[U8], value: Int) Never! {
@@ -524,6 +687,15 @@ fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     }
 }
 
+// Open and require `schema`: the checksum and framing are verified before the
+// schema is compared; element payloads still decode on demand.
+fn record_open_schema(bytes: [U8], schema: String) -> RecordReaderResult Never! {
+    opened :: record_open(bytes)
+    reader :: opened.reader ?? return opened
+    if reader.schema != schema -> return record_reader_failure("record schema is `{reader.schema}`, expected `{schema}`")
+    opened
+}
+
 // Rust: crates/jet-foundation/src/RecordCodec.rs::RecordReader::slices
 fn record_section_index(reader: RecordReader, id: Int) -> Int? Never! {
     reader.section_positions.get(id)
@@ -615,6 +787,18 @@ fn record_element(reader: RecordReader, id: Int, index: Int) -> RecordValueResul
     record_section_element(reader, section, index)
 }
 
+// Decode every element of one section.
+fn record_elements(reader: RecordReader, id: Int) -> RecordElementsResult Never! {
+    section :: record_section_index(reader, id) ?? return RecordElementsResult{value: None, problem: Val("record section {id} is missing")}
+    values := [RecordValue]{}
+    loop index in 0..<record_section_elements(reader, section) {
+        decoded :: record_section_element(reader, section, index)
+        value :: decoded.value ?? return RecordElementsResult{value: None, problem: decoded.problem}
+        &values.push(value)
+    }
+    RecordElementsResult{value: Val(values), problem: None}
+}
+
 // Decode a whole record.
 fn record_decode(bytes: [U8]) -> RecordDecodeResult Never! {
     opened :: record_open(bytes)
@@ -630,6 +814,84 @@ fn record_decode(bytes: [U8]) -> RecordDecodeResult Never! {
         &sections.push(RecordSection{id: reader.ids[section], elements: elements})
     }
     RecordDecodeResult{record: Val(Record{schema: reader.schema, sections: sections, digest: reader.digest}), problem: None}
+}
+
+// The content digest a record would have, without keeping the bytes.
+fn record_digest(schema: String, sections: [RecordSection]) -> RecordDigestResult Never! {
+    encoded :: record_encode(schema, sections)
+    bytes :: encoded.bytes ?? return RecordDigestResult{value: None, problem: encoded.problem}
+    RecordDigestResult{value: Val(bytes.slice(bytes.len() - RECORD_CHECKSUM_BYTES, bytes.len())), problem: None}
+}
+
+// Lowercase hex of a digest.
+fn record_digest_hex(digest: [U8]) -> String Never! {
+    mir_sha256_hex_bytes(digest)
+}
+
+// Parse a 64-character lowercase hex digest.
+fn record_parse_digest_hex(text: String) -> [U8]? Never! {
+    raw :: text.bytes()
+    if raw.len() != 64 -> return None
+    digest := [U8]{}
+    loop index in 0..<32 {
+        high :: record_hex_value(Int.from_u8(raw[index * 2])) ?? return None
+        low :: record_hex_value(Int.from_u8(raw[index * 2 + 1])) ?? return None
+        &digest.push(U8.from_int(high * 16 + low) ?? return None)
+    }
+    Val(digest)
+}
+
+fn record_hex_value(byte: Int) -> Int? Never! {
+    if byte >= 48 && byte <= 57 -> return Val(byte - 48)
+    if byte >= 97 && byte <= 102 -> return Val(byte - 87)
+    None
+}
+
+// Any record rendered as JSON for tests and debugging; not a user surface.
+fn record_json(bytes: [U8]) -> RecordStringResult Never! {
+    decoded :: record_decode(bytes)
+    record :: decoded.record ?? return RecordStringResult{value: None, problem: decoded.problem}
+    out := [U8]{}
+    foundation_json_append(&out, "{{\"schema\":\"{foundation_json_escape(record.schema)}\",\"digest\":\"{record_digest_hex(record.digest)}\",\"sections\":{{")
+    loop (index, section) in record.sections {
+        if index > 0 -> foundation_json_append(&out, ",")
+        foundation_json_append(&out, "\"{section.id}\":[")
+        loop (element, value) in section.elements {
+            if element > 0 -> foundation_json_append(&out, ",")
+            record_value_json(&out, value)
+        }
+        foundation_json_append(&out, "]")
+    }
+    foundation_json_append(&out, "}}}}")
+    RecordStringResult{value: Val(String.from_bytes(out) ?? panic("record JSON is UTF-8")), problem: None}
+}
+
+fn record_value_json(out: &[U8], value: RecordValue) Never! {
+    if value == {
+        .Null -> foundation_json_append(&out, "null")
+        .Bool(flag) -> foundation_json_append(&out, if flag -> "true" else -> "false")
+        .Int(number) -> foundation_json_append(&out, "{number}")
+        .Str(text) -> foundation_json_append(&out, "\"{foundation_json_escape(text)}\"")
+        .Bytes(raw) -> foundation_json_append(&out, "{{\"bytes\":\"{mir_sha256_hex_bytes(raw)}\"}}")
+        .List(values) -> {
+            foundation_json_append(&out, "[")
+            loop (index, item) in values {
+                if index > 0 -> foundation_json_append(&out, ",")
+                record_value_json(&out, item)
+            }
+            foundation_json_append(&out, "]")
+        }
+        .Map(fields) -> {
+            foundation_json_append(&out, "{{")
+            loop (index, field) in fields {
+                if index > 0 -> foundation_json_append(&out, ",")
+                foundation_json_append(&out, "\"{foundation_json_escape(field.name)}\":")
+                record_value_json(&out, field.value)
+            }
+            foundation_json_append(&out, "}}")
+        }
+        .Digest(digest) -> foundation_json_append(&out, "{{\"digest\":\"{mir_sha256_hex_bytes(digest)}\"}}")
+    }
 }
 
 // ---------------------------------------------------------------- key hashing
