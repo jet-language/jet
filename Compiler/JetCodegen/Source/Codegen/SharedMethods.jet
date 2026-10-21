@@ -1,8 +1,9 @@
 // Shared owner host routes: `Shared<T>` capture/try_replace/same/guard_read/
-// guard_edit/downgrade/strong_count, `SharedSnapshot<T, U>.value()` and
-// `Shared.Weak<T>.upgrade()`. The checked receiver type selects the canonical
-// core.host row, the same table the evaluator and the native Prelude own.
-// The read/edit callback seam stays in jet_codegen_lower_host_method.
+// guard_edit/downgrade/strong_count, `SharedSnapshot<T, U>.value()`,
+// `Shared.Weak<T>.upgrade()` and the local `Cell<T>` value/guard methods. The
+// checked receiver type selects the canonical core.host row, the same table the
+// evaluator and the native Prelude own. The read/edit callback seam stays in
+// jet_codegen_lower_host_method.
 use jet_foundation.[
     MIRAccess,
     MIRCallArg,
@@ -50,6 +51,21 @@ fn jet_codegen_shared_owner_route(receiver: Type, method: String, arg_count: Int
             if method == "strong_count" -> return jet_codegen_shared_owner_route_row("Shared.strong_count", "jet_shared_strong_count", [Bool]{true})
         }
         .Apply(name, type_args) -> {
+            if name == "Cell" && type_args.len() == 1 {
+                if method == "get" && arg_count == 0 -> return jet_codegen_shared_owner_route_row("Cell.get", "jet_cell_get", [Bool]{true})
+                if method == "guard_read" && arg_count == 0 -> return jet_codegen_shared_owner_route_row("Cell.guard_read", "jet_cell_guard_read", [Bool]{true})
+                if method == "guard_edit" && arg_count == 0 -> return jet_codegen_shared_owner_route_row("Cell.guard_edit", "jet_cell_guard_edit", [Bool]{true})
+                if method == "set" && arg_count == 1 -> return jet_codegen_shared_owner_route_row("Cell.set", "jet_cell_set", [Bool]{true, false})
+                if method == "replace" && arg_count == 1 -> return jet_codegen_shared_owner_route_row("Cell.replace", "jet_cell_replace", [Bool]{true, false})
+                if method == "get_or_set" && arg_count == 1 -> return jet_codegen_shared_owner_route_row("Cell.get_or_set", "jet_cell_get_or_set", [Bool]{true, false})
+                return None
+            }
+            if name == "CellReadGuard" && type_args.len() == 1 && method == "get" && arg_count == 0 -> return jet_codegen_shared_owner_route_row("CellReadGuard.get", "jet_cell_read_guard_get", [Bool]{true})
+            if name == "CellEditGuard" && type_args.len() == 1 {
+                if method == "get" && arg_count == 0 -> return jet_codegen_shared_owner_route_row("CellEditGuard.get", "jet_cell_edit_guard_get", [Bool]{true})
+                if method == "set" && arg_count == 1 -> return jet_codegen_shared_owner_route_row("CellEditGuard.set", "jet_cell_edit_guard_set", [Bool]{true, false})
+                return None
+            }
             if arg_count != 0 -> return None
             if name == "SharedSnapshot" && type_args.len() == 2 && method == "value" -> return jet_codegen_shared_owner_route_row("SharedSnapshot.value", "jet_shared_snapshot_value", [Bool]{true})
             if name == "Shared.Weak" && type_args.len() == 1 && method == "upgrade" -> return jet_codegen_shared_owner_route_row("Shared.Weak.upgrade", "jet_shared_weak_upgrade", [Bool]{true})

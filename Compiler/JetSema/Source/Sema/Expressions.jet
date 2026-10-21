@@ -1093,6 +1093,13 @@ fn sema_expr_precise_error(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnost
     &diagnostics.push(sema_error("E0133", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs)}` and `{type_name(rhs)}`", "`Decimal` supports `+`, `-`, `*`, and `==`/`!=`; `Fraction` and `Complex` support only their declared exact operations", "use a named exact constructor or make both operands the same precise type"))
 }
 
+fn sema_expr_precise_orders_by_compare(op: BinOp, lhs: Type, rhs: Type) -> Bool Never! {
+    if op != BinOp.Compare && op != BinOp.Lt && op != BinOp.Le && op != BinOp.Gt && op != BinOp.Ge -> return false
+    name :: sema_expr_precise_name(lhs) ?? return false
+    if sema_expr_precise_name(rhs) != (Val(name)) -> return false
+    name == "Decimal" || name == "Fraction"
+}
+
 fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
     left_name := sema_expr_precise_name(lhs.ty)
     right_name := sema_expr_precise_name(rhs.ty)
@@ -3864,6 +3871,16 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
     if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, program, &diagnostics)
     if geometry_present -> return None
+    // Rust binary.rs operator hooks: a same-typed exact number that implements
+    // `Comparable` (`Decimal`, `Fraction`) orders through its `compare` method;
+    // the arithmetic and equality operators stay on the precise route below.
+    if sema_expr_precise_orders_by_compare(op, lhs.ty, rhs.ty) {
+        argument :: CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        call :: Expr.MethodCall{receiver: left, method: "compare", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, recv_type: None, resolved_ret: None}
+        comparison :: sema_check_expression(call, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if op == BinOp.Compare -> return sema_expr_expected(comparison, expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_expr_operator_ordering_test(op, comparison, span, line), expected, environment, program, &diagnostics)
+    }
     precise := sema_expr_check_precise_binary(op, lhs, rhs, span, line, &diagnostics)
     if precise != None -> return sema_expr_expected(precise ?? lhs, expected, environment, program, &diagnostics)
     if sema_expr_precise_name(lhs.ty) != None || sema_expr_precise_name(rhs.ty) != None {

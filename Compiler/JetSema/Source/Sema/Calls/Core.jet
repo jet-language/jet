@@ -523,6 +523,8 @@ fn sema_call_core_access(record: CoreCallRecord, index: Int) -> AccessConvention
 }
 
 fn sema_call_core_check_type_args(module_name: String, member: String, expected_count: Int, infer_when_omitted: Bool, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    // Typed decodes report their own target-type count (Rust `exactly_one_type_arg`).
+    if sema_data_core_decode_member(module_name, member) -> return true
     if infer_when_omitted && type_args.len() == 0 && expected_count > 0 -> return true
     if type_args.len() == expected_count -> return true
     &diagnostics.push(sema_call_generic_count_diagnostic("{module_name}.{member}", expected_count, type_args.len(), span))

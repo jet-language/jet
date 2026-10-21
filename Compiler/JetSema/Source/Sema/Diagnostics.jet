@@ -247,6 +247,12 @@ fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     )
 }
 
+// Rust serde_diags.rs `wrong_core_arity`: a standard-library method or
+// function called with the wrong number of arguments.
+fn sema_wrong_core_arity(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+    sema_error("E0104", span, "`{name}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{name}`")
+}
+
 // The plain-words type name diagnostics print (the Rust reference's
 // `Type::show`): scalars carry a gloss and nominal names are quoted.
 fn sema_type_show(ty: Type) -> String Never! {

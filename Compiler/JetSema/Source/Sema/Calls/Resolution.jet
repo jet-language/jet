@@ -174,6 +174,16 @@ fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, 
     sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site type arguments have to line up", "provide exactly the declared type arguments")
 }
 
+// Rust direct_calls.rs (explicit call-site type arguments of a direct call).
+fn sema_call_direct_type_arg_count_diagnostic(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+    plural :: if expected == 1 -> "" else -> "s"
+    sema_error("E0119", span, "`{name}` expects {expected} type argument{plural}, got {actual}", "a generic call must provide one type for every declared type parameter", "write {name} with {expected} type argument{plural}")
+}
+
+fn sema_call_not_generic_diagnostic(name: String, span: Span) -> Diagnostic {
+    sema_error("E0119", span, "`{name}` is not generic", "only functions declared with type parameters accept call-site type arguments", "call {name} without type arguments")
+}
+
 // An explicit `Never` type argument may fill
 // only a failure-domain type parameter, one the signature names as a `!`
 // domain (`fn(T) -> U E!`); in any other parameter it puts `Never` in a value
@@ -264,7 +274,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     generic_params :: sema_inference_type_params(generic_params_source)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_call_generic_count_diagnostic(name, 0, type_args.len(), span))
+            &diagnostics.push(sema_call_not_generic_diagnostic(name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -273,7 +283,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     if type_args.len() != generic_params.len() {
-        &diagnostics.push(sema_call_generic_count_diagnostic(name, generic_params.len(), type_args.len(), span))
+        &diagnostics.push(sema_call_direct_type_arg_count_diagnostic(name, generic_params.len(), type_args.len(), span))
         return None
     }
     if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, &diagnostics) {
@@ -331,7 +341,7 @@ fn sema_call_direct_target_from_registration(function: SemaRegistrationFunction,
     generic_params :: sema_inference_registration_params(function.generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_error("E0119", span, "`{function.symbol.name}` is not generic", "only a registered generic callable accepts type arguments", "remove the explicit type arguments"))
+            &diagnostics.push(sema_call_not_generic_diagnostic(function.symbol.name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
