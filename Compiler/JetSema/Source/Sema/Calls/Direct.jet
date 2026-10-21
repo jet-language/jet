@@ -591,6 +591,24 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
+// Rust core_call.rs `("core.reflect", "of")`: the compiler-owned reflection
+// intrinsic has no typed Source contract. Its one argument is legal wherever
+// `"{x}"` interpolation is (or a Unit), and the call yields the runtime
+// reflection handle `Value`.
+fn sema_call_try_reflect_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if record.module_name != "core.reflect" || record.member != "of" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`{record.member}` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `{record.member}`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    checked :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result :: Type.Named{name: "Value"}
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{checked}, span, [Type]{}, [Bool]{false}, None, result, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
+}
+
 // `panic(message)` stops with one String message; the stop is a `Never`
 // value and its `__jet_panic__` reachability edge comes from the TIR walk.
 fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -723,6 +741,9 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
 
     term := sema_call_try_term_core_call(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if term.handled -> return term
+
+    reflect := sema_call_try_reflect_core_call(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if reflect.handled -> return reflect
 
     models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if models.handled -> return SemaDirectSpecialCheck{handled: true, value: models.value}
