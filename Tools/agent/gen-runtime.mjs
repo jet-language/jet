@@ -16,15 +16,19 @@ const runtime = resolve(args[0]);
 const check = args.includes("--check") ? ["--check"] : [];
 // Trap literals feed the runtime unit, then its export list owns the C symbols
 // that the route generator omits from the remaining Rust adapters.
+// Jet-authored generators run with the compiler built from this tree (JET).
+const jet = process.env.JET ?? "jet";
 const steps = [
-  ["gen-runtime-trap-messages.mjs", check],
+  ["GenRuntimeTrapMessages.jet", check],
   ["gen-runtime-lifecycle.mjs", check],
   ["gen-runtime-stop-exports.mjs", check],
   ["gen-c-abi-routes.mjs", [runtime, ...check]],
 ];
 let failed = false;
 for (const [name, flags] of steps) {
-  const result = spawnSync(process.execPath, [join(root, "Tools/agent", name), ...flags], { cwd: root, stdio: "inherit" });
+  const script = join("Tools/agent", name);
+  const command = name.endsWith(".jet") ? [jet, "run", script, "--", ...flags] : [process.execPath, join(root, script), ...flags];
+  const result = spawnSync(command[0], command.slice(1), { cwd: root, stdio: "inherit" });
   if (result.error || result.status !== 0) {
     console.error(`${name} failed: ${result.error?.message ?? result.signal ?? `exit ${result.status}`}`);
     failed = true;

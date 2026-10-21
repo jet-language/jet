@@ -10,11 +10,18 @@ const node = process.execPath;
 const cheap = [];
 for (const script of [
   'Tools/agent/gen-core-tables.mjs', 'Tools/agent/check-core-surface-ledger.mjs', 'Tools/agent/gen-unicode-tables.mjs',
-  'Tools/agent/gen-runtime-trap-messages.mjs', 'Tools/agent/gen-runtime-lifecycle.mjs', 'Tools/agent/gen-runtime-stop-exports.mjs',
+  'Tools/agent/gen-runtime-lifecycle.mjs', 'Tools/agent/gen-runtime-stop-exports.mjs',
   'Tools/agent/gen-runtime-host-carriers.mjs', 'Tools/agent/gen-runtime-host-errors.mjs', 'Tools/agent/gen-runtime-scheduler-messages.mjs',
   'Tools/agent/gen-runtime-services-messages.mjs', 'Tools/agent/gen-runtime-test-messages.mjs',
   'Compiler/Bootstrap/generate-prelude-derives.mjs', 'Compiler/Bootstrap/generate-core-sources.mjs',
 ]) cheap.push(start('check-' + script.split('/').pop().replace(/\.mjs$/, ''), [node, script, '--check']));
+// Jet-authored generators and their #Test blocks run with the compiler built from this tree (JET).
+const jet = process.env.JET ?? 'jet';
+for (const script of ['Tools/agent/GenRuntimeTrapMessages.jet', 'Tools/agent/LexerKeywordRows.jet']) {
+  const name = script.split('/').pop().replace(/\.jet$/, '');
+  cheap.push(start('check-' + name, [jet, 'run', script, '--', '--check']));
+  cheap.push(start('test-' + name, [jet, 'test', script]));
+}
 cheap.push(start('check-command-table', [node, 'Compiler/Bootstrap/check-command-table.mjs']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
 cheap.push(start('bootstrap-source-inventory', [node, '--test', 'Tools/agent/bootstrap-source-inventory.test.mjs']));

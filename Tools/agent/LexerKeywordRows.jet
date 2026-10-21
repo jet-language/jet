@@ -42,7 +42,7 @@ fn uncomment(text: String) -> String Never! {
     lines := [String]{}
     loop line in text.split("\n") {
         at :: line.find("//")
-        &lines.push(if at < 0 -> line else -> line.slice(0, at))
+        &lines.push(if at < 0 -> line else -> byte_slice(line, 0, at))
     }
     lines.join("\n")
 }
@@ -51,6 +51,11 @@ fn uncomment(text: String) -> String Never! {
 fn byte_slice(text: String, start: Int, end: Int) -> String Never! {
     String.from_bytes_lossy(text.bytes()[start..<end])
 }
+
+fn byte_len(text: String) -> Int Never! { text.bytes().len() }
+
+// Bytes `start` to the end of `text`.
+fn byte_tail(text: String, start: Int) -> String Never! { byte_slice(text, start, byte_len(text)) }
 
 fn is_word_byte(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
@@ -83,9 +88,9 @@ fn syntax_constant(line: String) -> SyntaxConstant? Never! {
     rest := line.trim_start()
     name :: leading_word(rest)
     if name == "" -> return None
-    rest = rest.slice(name.len(), rest.len()).trim_start()
+    rest = byte_tail(rest, byte_len(name)).trim_start()
     if !rest.starts_with("::") -> return None
-    rest = rest.slice(2, rest.len()).trim_start()
+    rest = byte_tail(rest, 2).trim_start()
     if !rest.starts_with("\"") -> return None
     bytes :: rest.bytes()
     index := 1
@@ -106,13 +111,13 @@ fn syntax_constant(line: String) -> SyntaxConstant? Never! {
     literal :: byte_slice(rest, 0, closed + 1)
     tail :: byte_slice(rest, closed + 1, bytes.len())
     comment :: tail.find("//")
-    if !is_blank(if comment < 0 -> tail else -> tail.slice(0, comment)) -> return None
+    if !is_blank(if comment < 0 -> tail else -> byte_slice(tail, 0, comment)) -> return None
     Val(SyntaxConstant{name: name, literal: literal})
 }
 
 // The value of a quoted literal with no escapes (keyword spellings have none).
 fn literal_value(literal: String) -> String? Never! {
-    inner :: literal.slice(1, literal.len() - 1)
+    inner :: byte_slice(literal, 1, byte_len(literal) - 1)
     if inner.contains("\\") -> return None
     Val(inner)
 }
@@ -138,7 +143,7 @@ fn kind_tag(kind: String) -> String Never! {
             previous :: Int.from_u8(bytes[index - 1])
             if (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) -> out = "{out}_"
         }
-        out = "{out}{kind.slice(index, index + 1)}"
+        out = "{out}{byte_slice(kind, index, index + 1)}"
     }
     "K_{out.upper()}"
 }
@@ -152,9 +157,9 @@ struct KeywordArm {
 
 fn keyword_arm(line: String) -> KeywordArm? Never! {
     rest := line
-    if rest.starts_with("LexerKeyword") -> rest = rest.slice("LexerKeyword".len(), rest.len())
+    if rest.starts_with("LexerKeyword") -> rest = byte_tail(rest, byte_len("LexerKeyword"))
     if !rest.starts_with("{{constant: \"") || !rest.ends_with("\"}},") -> return None
-    rest = rest.slice("{{constant: \"".len(), rest.len() - "\"}},".len())
+    rest = byte_slice(rest, byte_len("{{constant: \""), byte_len(rest) - byte_len("\"}},"))
     first :: rest.split_once("\", kind: \"") ?? return None
     second :: first.after.split_once("\", tag: \"") ?? return None
     constant :: first.before
@@ -198,17 +203,17 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
     loop line in tokens.split("\n") {
         if !line.starts_with("TOKEN_") -> next
         name :: leading_word(line)
-        rest :: line.slice(name.len(), line.len())
+        rest :: byte_tail(line, byte_len(name))
         if !rest.starts_with(" :: ") -> next
-        number :: rest.slice(4, rest.len()).trim_end()
+        number :: byte_tail(rest, 4).trim_end()
         if number == "" -> next
         if Int.parse(number) == {
             .Ok(_) -> {}
             .Err(_) -> next
         }
-        short :: name.slice("TOKEN_".len(), name.len())
+        short :: byte_tail(name, byte_len("TOKEN_"))
         keyword :: short.starts_with("KW_") && short.len() > 3
-        if keyword -> &token_tags.push("K_{short.slice(3, short.len())}")
+        if keyword -> &token_tags.push("K_{byte_tail(short, 3)}")
         else if short == "TRUE" || short == "FALSE" || short == "SELF" || short == "NULL" || short == "BREAK" || short == "RETURN" -> &token_tags.push("K_{short}")
     }
     distinct := [String]{}
@@ -220,7 +225,7 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
     loop line in tags.split("\n") {
         if !line.starts_with("K_") -> next
         name :: leading_word(line)
-        if line.slice(name.len(), line.len()).starts_with(" ::") -> &tag_names.push(name)
+        if byte_tail(line, byte_len(name)).starts_with(" ::") -> &tag_names.push(name)
     }
     rows := [KeywordRow]{}
     spellings := [String]{}
@@ -325,12 +330,12 @@ fn render_keyword_spans(rows: [KeywordRow]) -> String Never! {
 fn replace_keyword_spans(source: String, generated: String) -> String KeywordRowsError! {
     begin :: source.find("{OPEN}\n")
     if begin < 0 -> return Err(rows_fail("expected exactly one generated keyword span block"))
-    after_begin :: source.slice(begin + OPEN.len(), source.len())
+    after_begin :: byte_tail(source, begin + byte_len(OPEN))
     end_offset :: after_begin.find(CLOSE)
     if end_offset < 0 -> return Err(rows_fail("expected exactly one generated keyword span block"))
-    end :: begin + OPEN.len() + end_offset + CLOSE.len()
-    if source.slice(end, source.len()).contains("{OPEN}\n") -> return Err(rows_fail("expected exactly one generated keyword span block"))
-    Ok("{source.slice(0, begin)}{generated}{source.slice(end, source.len())}")
+    end :: begin + byte_len(OPEN) + end_offset + byte_len(CLOSE)
+    if byte_tail(source, end).contains("{OPEN}\n") -> return Err(rows_fail("expected exactly one generated keyword span block"))
+    Ok("{byte_slice(source, 0, begin)}{generated}{byte_tail(source, end)}")
 }
 
 fn keyword_rows_main(args: [String]) -[FS]> String KeywordRowsError! {
