@@ -1675,15 +1675,21 @@ fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
     None
 }
 
+// The binding of `name` visible at `use_span`. Inside a body a binding is
+// visible only after its declaration. Module-level bindings (the root frame:
+// items and imports) are visible everywhere in the module, and an imported
+// or staged symbol's span may come from another file, so position never
+// hides them.
 fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
     slot :: table.name_slots.get(name) ?? return None
     frame := table.current
     loop frame >= 0 {
+        module_frame :: table.frames[frame].parent < 0
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
             index :: table.name_positions[slot][cursor]
             binding :: table.bindings[index]
-            if binding.frame == frame && binding.symbol.span.start <= use_span.start -> return Val(index)
+            if binding.frame == frame && (module_frame || binding.symbol.span.start <= use_span.start) -> return Val(index)
             cursor -= 1
         }
         frame = table.frames[frame].parent
