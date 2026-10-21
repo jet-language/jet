@@ -1725,6 +1725,8 @@ LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "jet_dyn_keys", export: "jet_dyn_keys", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "Dyn"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.Text}}},
     LowerRoute{symbol: "jet_dyn_remove", export: "jet_dyn_remove", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "Dyn"}, LowerRouteCarrier.Text}, result: LowerRouteResult.Option{some: LowerRouteCarrier.Handle{name: "Dyn"}}},
     LowerRoute{symbol: "jet_dyn_set_path", export: "jet_dyn_set_path", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.HandleMut{name: "Dyn"}, LowerRouteCarrier.Handle{name: "Dyn"}, LowerRouteCarrier.Handle{name: "Dyn"}, LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Text}},
+    LowerRoute{symbol: "jet_process_stdin_close", export: "jet_process_stdin_close", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "ProcessStdin"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Unit}},
+    LowerRoute{symbol: "jet_process_stdin_write", export: "jet_process_stdin_write", native_lists: true, params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "ProcessStdin"}, LowerRouteCarrier.Text}, result: LowerRouteResult.Result{ok: LowerRouteCarrier.Unit, err: LowerRouteCarrier.Handle{name: "IOError"}}},
 } }
 
 // #5001: each table below is read in place, and its lookup is keyed: the
@@ -2564,6 +2566,8 @@ LOWER_RUNTIME_ROUTE_KEYS :: prep { [String]{
     "jet_process_spec_terminal_with_policy",
     "jet_process_spec_timeout",
     "jet_process_spec_with_directory_raw",
+    "jet_process_stdin_close",
+    "jet_process_stdin_write",
     "jet_random_os_entropy",
     "jet_random_state_raw",
     "jet_random_try_update_raw",
@@ -4246,6 +4250,8 @@ LOWER_RUNTIME_ROUTE_KEY_ROWS :: prep { [Int]{
     673,
     674,
     675,
+    1680,
+    1681,
     676,
     677,
     678,
@@ -5810,6 +5816,8 @@ LOWER_RUNTIME_HANDLES :: prep { [LowerRuntimeHandle]{
 LOWER_NATIVE_PROVIDER_HANDLES :: prep { [LowerRuntimeHandle]{
     LowerRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     LowerRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
+    LowerRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
+    LowerRuntimeHandle{jet_name: "ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
     LowerRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
     LowerRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
 } }
@@ -7172,13 +7180,17 @@ LOWER_RUNTIME_HANDLE_KEY_ROWS :: prep { [Int]{
 } }
 LOWER_NATIVE_PROVIDER_HANDLE_KEYS :: prep { [String]{
     "<corelib>/core.process::ProcessStderrStream",
+    "<corelib>/core.process::ProcessStdin",
     "<corelib>/core.process::ProcessStdoutStream",
     "ProcessStderrStream",
+    "ProcessStdin",
     "ProcessStdoutStream",
 } }
 LOWER_NATIVE_PROVIDER_HANDLE_KEY_ROWS :: prep { [Int]{
+    4,
     2,
     0,
+    5,
     3,
     1,
 } }
@@ -7793,6 +7805,7 @@ LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{
     LowerHandleField{runtime: "XMLWriter", field: "output", kind: "Handle.JetFileWriter", header_bytes: 0},
     LowerHandleField{runtime: "XMLWriter", field: "limits", kind: "Handle.EncodingLimits", header_bytes: 0},
     LowerHandleField{runtime: "XMLWriter", field: "finished", kind: "Flag", header_bytes: 0},
+    LowerHandleField{runtime: "ProcessChild", field: "stdin", kind: "Handle.ProcessStdin", header_bytes: 0},
 } }
 
 LOWER_HANDLE_FIELD_KEYS :: prep { [String]{
@@ -8012,6 +8025,7 @@ LOWER_HANDLE_FIELD_KEYS :: prep { [String]{
     "Message text",
     "ProcessChild detached",
     "ProcessChild process_group",
+    "ProcessChild stdin",
     "ProcessPlan backend",
     "ProcessPlan descendants",
     "ProcessPlan executable_identity",
@@ -8328,6 +8342,7 @@ LOWER_HANDLE_FIELD_KEY_ROWS :: prep { [Int]{
     281,
     285,
     284,
+    314,
     289,
     290,
     286,
@@ -11476,6 +11491,8 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_process_spec_terminal_with_policy",
     "jet_process_spec_timeout",
     "jet_process_spec_with_directory_raw",
+    "jet_process_stdin_close",
+    "jet_process_stdin_write",
     "jet_process_stream_line_bytes_raw",
     "jet_process_take_stream_raw",
     "jet_process_wait_raw",
@@ -12122,6 +12139,7 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_rt_handle_clone_process_resource_limit",
     "jet_rt_handle_clone_process_spec",
     "jet_rt_handle_clone_process_stderr_stream",
+    "jet_rt_handle_clone_process_stdin",
     "jet_rt_handle_clone_process_stdout_stream",
     "jet_rt_handle_clone_process_stream_mode",
     "jet_rt_handle_clone_range_error",
@@ -12811,6 +12829,7 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_rt_handle_drop_process_resource_limit",
     "jet_rt_handle_drop_process_spec",
     "jet_rt_handle_drop_process_stderr_stream",
+    "jet_rt_handle_drop_process_stdin",
     "jet_rt_handle_drop_process_stdout_stream",
     "jet_rt_handle_drop_process_stream_mode",
     "jet_rt_handle_drop_range_error",
@@ -13438,6 +13457,7 @@ LOWER_NATIVE_IMPORTS :: prep { [String]{
     "jet_rt_handle_field_message_text",
     "jet_rt_handle_field_process_child_detached",
     "jet_rt_handle_field_process_child_process_group",
+    "jet_rt_handle_field_process_child_stdin",
     "jet_rt_handle_field_process_plan_backend",
     "jet_rt_handle_field_process_plan_descendants",
     "jet_rt_handle_field_process_plan_executable_identity",
