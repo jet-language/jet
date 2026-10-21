@@ -221,11 +221,11 @@ fn pkg_render_quoted_list(values: [String]) -> String Never! {
 
 // Machine application-boundary summary. The legacy `effects` field stays for
 // existing consumers; the role fields are the canonical view.
-fn pkg_effect_summary_json_for_program_with_authority(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String Never! {
+fn pkg_effect_summary_json_for_program_with_authority(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String ReportError! {
     pkg_render_effect_projection_json(pkg_project_program_effects(program, summaries, default_entry, manifest))
 }
 
-fn pkg_render_effect_projection_json(projection: EffectProjection) -> String Never! {
+fn pkg_render_effect_projection_json(projection: EffectProjection) -> String ReportError! {
     required :: pkg_effect_texts(projection.required_effects)
     StatusEnvelope.new(EFFECT_STATUS_ACTION, true)
         .with_field("effects", required)

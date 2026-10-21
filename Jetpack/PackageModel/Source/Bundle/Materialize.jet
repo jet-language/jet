@@ -64,17 +64,21 @@ fn pkg_bundle_native_run(tool: String, args: [String], source: String, output: S
     environment :: [String:String]{"LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "TZ": "UTC"}
     foundation_run_native_sandboxed(tool, args, source, Val(output), environment, false) ?? return Err(BundleMaterializeError{reason: "checked native process authority could not run package tool: {err}"})
 }
-fn pkg_bundle_native_text(bytes: [U8]) -> String Never! { String.from_bytes_lossy(bytes) }
+// The first 4096 bytes of a tool's captured text (lossy at a cut character).
+fn pkg_bundle_native_head(text: String) -> String Never! {
+    bytes :: text.bytes()
+    String.from_bytes_lossy(bytes[0..<(if bytes.len() > 4096 -> 4096 else -> bytes.len())])
+}
 fn pkg_bundle_native_detail(run: NativeSandboxOutput) -> String Never! {
-    stdout :: pkg_bundle_native_text(run.receipt.stdout[0..<(if run.receipt.stdout.len() > 4096 -> 4096 else -> run.receipt.stdout.len())]).trim()
-    stderr :: pkg_bundle_native_text(run.receipt.stderr[0..<(if run.receipt.stderr.len() > 4096 -> 4096 else -> run.receipt.stderr.len())]).trim()
+    stdout :: pkg_bundle_native_head(run.receipt.output).trim()
+    stderr :: pkg_bundle_native_head(run.receipt.errors).trim()
     if stdout == "" && stderr == "" -> return "no tool output"
     if stdout == "" -> return "stderr: {stderr}"
     if stderr == "" -> return "stdout: {stdout}"
     "stdout: {stdout}; stderr: {stderr}"
 }
 fn pkg_bundle_native_version(run: NativeSandboxOutput) -> String BundleMaterializeError! {
-    loop text in ([String]{pkg_bundle_native_text(run.receipt.stdout), pkg_bundle_native_text(run.receipt.stderr)}) {
+    loop text in ([String]{run.receipt.output, run.receipt.errors}) {
         loop line in text.split("\n") {
             value :: line.trim()
             if value == "" -> next

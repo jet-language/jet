@@ -93,7 +93,7 @@ fn envmodel_workspace_load_checked_with_resolver(cache: &WorkspaceDeclarationCac
     source :: resolved ?? return Ok(None)
     resolver.revalidate_source(source)
     if source.role != WorkspaceSourceRole.Index -> return Ok(None)
-    Ok(Val(envmodel_workspace_load_checked_source(resolver, source)))
+    Ok(Val(envmodel_workspace_load_checked_source(resolver, ^source)))
 }
 
 // Evaluate an index from the same checked source snapshot selected by a
@@ -112,7 +112,7 @@ fn envmodel_workspace_load_checked_source(resolver: AuthorityResolver, expected:
 // Project Package membership into the historical workspace-plan read model.
 // The Package parser and checked member resolver remain the sole authority;
 // this is a view for callers that still need member ordering/selection.
-fn envmodel_workspace_evaluate_package_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS]> WorkspacePlan EnvModelEvalError! {
+fn envmodel_workspace_evaluate_package_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan EnvModelEvalError! {
     package :: resolver.checked_package(".")
     checked_members :: package.facts.checked_members_in(resolver, package.member.directory)
     members := [WorkspacePlanMember]{}
@@ -317,7 +317,7 @@ struct WorkspaceMemberIdentity {
 
 // Membership law: member paths are physical identities inside the root,
 // names are unique, and a member cannot introduce another member list.
-fn envmodel_workspace_validate_member_path(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS]> WorkspaceMemberIdentity EnvModelEvalError! {
+fn envmodel_workspace_validate_member_path(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS, Env]> WorkspaceMemberIdentity EnvModelEvalError! {
     if envmodel_workspace_escapes_root(rel_path) {
         return Err(envmodel_error(
             "E1322",
@@ -458,7 +458,10 @@ fn envmodel_workspace_member_path_string(value: CtValue) -> String? Never! {
     if value == {
         .Str(text) -> Val(text)
         .Present(inner) -> envmodel_workspace_member_path_string(inner)
-        .Bytes(bytes) -> String.from_bytes(bytes)
+        .Bytes(bytes) -> if String.from_bytes(bytes) == {
+            .Ok(text) -> Val(text)
+            .Err(_) -> None
+        }
         else -> None
     }
 }
@@ -509,7 +512,7 @@ fn envmodel_workspace_string_list(value: CtValue, span: Span) -> [String] EnvMod
 
 // ── find("./dir"): package discovery ──
 
-fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityResolver, span: Span) -[FS]> String EnvModelEvalError! {
+fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> String EnvModelEvalError! {
     if raw == "" || envmodel_workspace_escapes_root(raw) {
         return Err(envmodel_error(
             "E1322",
@@ -532,7 +535,7 @@ fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityRes
 // `Path::strip_prefix("./")`: drop one leading `.` component, else unchanged.
 fn envmodel_workspace_strip_cur_dir(raw: String) -> String Never! {
     components :: envmodel_path_components(raw)
-    if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw
+    if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw.copy()
     rest := [String]{}
     loop component in components {
         if component == .Normal(segment) -> &rest.push(segment)
@@ -542,7 +545,7 @@ fn envmodel_workspace_strip_cur_dir(raw: String) -> String Never! {
 
 // Immediate subdirectories of `scan_dir` holding a canonical `package.jet`,
 // as workspace-relative paths in the resolver's deterministic order.
-fn envmodel_workspace_find_package_dirs(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS]> [String] EnvModelEvalError! {
+fn envmodel_workspace_find_package_dirs(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> [String] EnvModelEvalError! {
     discovered :: if resolver.discover_members(scan_dir) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(envmodel_workspace_authority_error(error, Val(span))) }
