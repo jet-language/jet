@@ -478,11 +478,16 @@ struct SemaFailureUnionProjected {
 fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {
     projected := SemaFailureUnionProjected{keys: [String]{}, modules: [Int]{}, minted: false}
     rows := [SemaFailureUnionRow]{}
+    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     loop module_result in modules {
         module_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
             function_row :: sema_failure_function_row(graph, module_index, facts.function_key)
             if function_row < 0 || !sema_failure_inference_candidate(graph.modules[module_index].functions[function_row].declaration) -> next
+            // The entry `fn run` carries the default `Unit Err!` exit
+            // contract (Rust `default_entry_return`), so its failures meet
+            // `Err` instead of joining an inferred union.
+            if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" -> next
             &rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
         }
     }

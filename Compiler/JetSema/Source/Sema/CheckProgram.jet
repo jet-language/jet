@@ -9,6 +9,7 @@ use jet_foundation.[
     CompilerTraceSink,
     ContractClause,
     DIAGNOSTIC_ERROR,
+    DIAGNOSTIC_LINT,
     Diagnostic,
     core_module_export,
     Expr,
@@ -7054,6 +7055,14 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop fact in liveness.facts -> &structure_facts.push(fact)
     names :: sema_name_build_facts(final_graph, modules, structure_facts)
     if trace_sink == .Val(sink) -> sink.end("sema.names", names.references.len())
+    // Core modules are checked in the same bundle so their errors keep the
+    // program honest, but Core is library source: its lints are not the
+    // user's to act on and never reach user output.
+    reported := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if !sema_core_source_lint(diagnostic) -> &reported.push(diagnostic)
+    }
+    diagnostics = reported
     programs := [Program]{}
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> &programs.push(source_module.program)
@@ -7081,6 +7090,14 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     }
     result.registration_graph = Val(^final_graph)
     ^result
+}
+
+// A lint reported against embedded Core library source (`<corelib>/…`).
+fn sema_core_source_lint(diagnostic: Diagnostic) -> Bool Never! {
+    if diagnostic.severity != DIAGNOSTIC_LINT -> return false
+    path := diagnostic.source_path ?? ""
+    if path == "" && diagnostic.origin == .Val(origin) -> path = origin.path
+    path == "<corelib>" || path.starts_with("<corelib>/")
 }
 
 // A compiler thread is admitted for at least this many bytes of item source,

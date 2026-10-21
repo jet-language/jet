@@ -681,7 +681,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     payload := TEnumPayload.Unit
     // The enum as diagnostics name it: a Core enum by its canonical identity,
     // a program enum by its declared name.
-    payload_owner :: if owner.id.key.starts_with("<corelib>/") -> owner.id.key else -> owner.name
+    payload_owner :: if owner.module_name.starts_with("<corelib>/") -> "{owner.module_name}::{owner.name}" else -> owner.name
     if selected_variant.payload == {
         .Unit -> {
             if args.len() != 0 {
