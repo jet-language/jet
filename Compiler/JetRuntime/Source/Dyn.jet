@@ -278,7 +278,7 @@ fn data_tree_field_error(path: I64, reason: I64, err: I64, err_len: I64) -> I64 
     if data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_ARRAY -> return data_tree_field_error(path, data_tree_got("expected array, got ", tree), err, err_len)
     length :: data_tree_word(data_tree_word(tree + DATA_TREE_PAYLOAD) + DATA_SEQUENCE_LENGTH)
     found :: data_tree_array_item(tree, if (position < I64{0}) -> length + position else -> position)
-    if found == I64{0} {
+    if (found == I64{0}) {
         reason :: jet_rt_string_builder_new()
         jet_rt_string_builder_push(reason, rt_static_text("index "))
         data_tree_push_count(reason, position)
@@ -383,7 +383,7 @@ fn data_tree_scalar_error(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64
         other := I64{0}
         loop !matched && other < length {
             candidate :: bp + other * DATA_TREE_ENTRY_BYTES
-            if data_tree_word(used + other * I64{8}) == I64{0} && jet_rt_string_eq(data_tree_word(entry + DATA_TREE_ENTRY_KEY), data_tree_word(candidate + DATA_TREE_ENTRY_KEY)) && jet_dyn_equal_unordered(data_tree_word(entry + DATA_TREE_ENTRY_VALUE), data_tree_word(candidate + DATA_TREE_ENTRY_VALUE)) {
+            if (data_tree_word(used + other * I64{8}) == I64{0} && jet_rt_string_eq(data_tree_word(entry + DATA_TREE_ENTRY_KEY), data_tree_word(candidate + DATA_TREE_ENTRY_KEY)) && jet_dyn_equal_unordered(data_tree_word(entry + DATA_TREE_ENTRY_VALUE), data_tree_word(candidate + DATA_TREE_ENTRY_VALUE))) {
                 data_tree_store(used + other * I64{8}, I64{1})
                 matched = true
             }
