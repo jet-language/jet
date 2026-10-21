@@ -6985,6 +6985,16 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     }
 
     if !sema_finalize_authority(final_graph, modules, stage.package_policies, &diagnostics) -> complete = false
+    // Tag dataflow over every checked body (the Rust reference's
+    // `check_fact_tags_and_states`): a tagged value reaching a denied
+    // destination is reported, whatever else the bundle reported.
+    if trace_sink == .Val(sink) -> sink.begin("sema.taint", "", -1, -1)
+    taint_diagnostics :: sema_taint_check_graph(final_graph, diagnostics)
+    if trace_sink == .Val(sink) -> sink.end("sema.taint", taint_diagnostics.len())
+    loop diagnostic in taint_diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
+        &diagnostics.push(diagnostic)
+    }
 
     if trace_sink == .Val(sink) -> sink.begin("sema.core", "", -1, -1)
     core_modules := [SemaCoreModuleUsageResult]{}
