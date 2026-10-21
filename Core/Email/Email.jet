@@ -109,6 +109,9 @@ fn decode_dkim(text: Secret) -> Secret EmailError! {
     }
 }
 
+// `None` is a keyword, so the variant is spelled only where `SMTPAuth` is expected.
+fn no_smtp_auth() -> SMTPAuth Never! { .None }
+
 fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
     host :: sys.get("SMTP_HOST") ?? return Err(configuration_error("SMTP_HOST is required"))
     security_text :: ascii_lower(sys.get("SMTP_SECURITY") ?? "starttls")
@@ -136,7 +139,7 @@ fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
         }
         else -> {
             if password != None -> return Err(configuration_error("SMTP_USERNAME and SMTP_PASSWORD must be set together"))
-            SMTPAuth{.None}
+            no_smtp_auth()
         }
     }
     domain :: sys.get("SMTP_DKIM_DOMAIN")
@@ -150,7 +153,7 @@ fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
             signed_headers :: if headers == .Val(value) -> loop header in value.split(",").to_list() -> header.trim() else -> [String]{"from", "to", "subject", "mime-version", "content-type"}
             dkim = Val(DKIMConfig{domain: domain_text, selector: selector_text, private_key: ^private_key, signed_headers: signed_headers})
         }
-        domain != None || selector != None || encoded != None || headers != None -> {
+        domain != None || selector != None || encoded == .Val(_) || headers != None -> {
             return Err(configuration_error("SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"))
         }
         else -> {}
@@ -855,19 +858,20 @@ fn rendered_address_size(address: Address) -> Int Never! {
     parts.mailbox.bytes().len()
 }
 
-fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: String, attachments: [Attachment]) -> Message EmailError! {
+fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: HTML, attachments: [Attachment]) -> Message EmailError! {
+    html_text :: html.text()
     reject_controls(subject, "subject") ? unit -> unit ! error -> return Err(error)
     if subject.bytes().len() > 65536 -> return Err(construction_error("LimitExceeded", "subject exceeds 65536 bytes"))
     if to.len() == 0 -> return Err(construction_error("InvalidMessage", "message needs at least one visible recipient"))
     if to.len() + bcc.len() > 100 -> return Err(construction_error("LimitExceeded", "message exceeds 100 recipients"))
     if attachments.len() > 64 -> return Err(construction_error("LimitExceeded", "message exceeds 64 attachments"))
-    if text.bytes().len() == 0 && html.bytes().len() == 0 -> return Err(construction_error("InvalidMessage", "message needs text or HTML content"))
-    if text.bytes().len() > 1048576 || html.bytes().len() > 1048576 -> return Err(construction_error("LimitExceeded", "each message body is limited to 1048576 bytes"))
+    if text.bytes().len() == 0 && html_text.bytes().len() == 0 -> return Err(construction_error("InvalidMessage", "message needs text or HTML content"))
+    if text.bytes().len() > 1048576 || html_text.bytes().len() > 1048576 -> return Err(construction_error("LimitExceeded", "each message body is limited to 1048576 bytes"))
     upper := 4096 + rendered_address_size(from)
     loop address in to -> upper += rendered_address_size(address) + 4
     upper += encoded_header_size(subject) + 32
     upper += base64_lines_size(text.bytes().len()) + 256
-    upper += base64_lines_size(html.bytes().len()) + 256
+    upper += base64_lines_size(html_text.bytes().len()) + 256
     loop attachment in attachments {
         parts :: core.email.__attachment_view(attachment)
         upper += base64_lines_size(parts.bytes.len()) + parts.mime.bytes().len() + percent_encoded_len(parts.filename) + 512
@@ -888,7 +892,7 @@ fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: 
     message_bcc :: bcc.copy()
     message_subject :: subject.copy()
     message_text :: text.copy()
-    message_html :: html.copy()
+    message_html :: html_text.copy()
     message_attachments :: attachments.copy()
     Ok(core.email.__message_parts(^message_from, ^message_to, ^message_bcc, ^message_subject, ^message_text, ^message_html, ^message_attachments, ^checked_envelope, ^upper))
 }
