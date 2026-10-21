@@ -7096,6 +7096,49 @@ fn sema_finalize_authority_constrained(policies: [SemaRegistrationPackagePolicy]
     false
 }
 
+// When a function's row holds every effect because some call it reaches
+// has no known body (an unresolved or dynamically selected callee), the
+// call chain from the function to the one making that call, by name; empty
+// when the row is not maximal.
+fn sema_authority_maximal_chain(modules: [SemaGraphModuleResult], rows: [String:[Int]], start: String) -> [String] {
+    parents := [String:String]{}
+    seen := [String:Bool]{}
+    queue := [String]{start}
+    seen[start] = true
+    cursor := 0
+    loop cursor < queue.len() {
+        key :: queue[cursor]
+        cursor += 1
+        row :: rows.get(key) ?? next
+        effects :: modules[row[0]].functions[row[1]].effects
+        if effects.maximal {
+            own := true
+            loop edge in effects.call_edges {
+                edge_row :: rows.get(edge) ?? next
+                if modules[edge_row[0]].functions[edge_row[1]].effects.maximal -> own = false
+            }
+            if own {
+                chain := [String]{}
+                at := key
+                loop {
+                    at_row :: rows.get(at) ?? break
+                    &chain.push(modules[at_row[0]].functions[at_row[1]].name)
+                    at = parents.get(at) ?? break
+                }
+                &chain.reverse()
+                return chain
+            }
+        }
+        loop edge in effects.call_edges {
+            if seen.get(edge) != None -> next
+            seen[edge] = true
+            parents[edge] = key
+            &queue.push(edge)
+        }
+    }
+    [String]{}
+}
+
 // Rust `program_effects` each checked function the
 // entry reaches is judged against its package's `authority.holds` policy,
 // module by module (registered modules only), function by function. Returns
@@ -7104,6 +7147,12 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
     if !sema_finalize_authority_constrained(policies) -> return true
     complete := true
     authority_reach :: sema_authority_entry_reach(graph, modules)
+    // Function key -> (module, function) row, for naming where an unknown
+    // callee forced every effect into a function's row.
+    function_rows := [String:[Int]]{}
+    loop row_module in 0..<modules.len() {
+        loop row_function in 0..<modules[row_module].functions.len() -> function_rows[modules[row_module].functions[row_function].key] = [Int]{row_module, row_function}
+    }
     loop module_index in 0..<modules.len() {
         if sema_registration_module_index(graph, modules[module_index].module_identity) == None -> next
         policy :: sema_comptime_policy_for_package(policies, modules[module_index].package_identity) ?? next
@@ -7113,8 +7162,13 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
         prohibited :: sema_effect_authority_prohibited(policy.authority_deny ?? [String]{})
         loop function_index in 0..<modules[module_index].functions.len() {
             if authority_reach.get(modules[module_index].functions[function_index].key) == None -> next
+            reported :: diagnostics.len()
             if policy.authority_allow != None {
-                if !sema_effect_check_scope_bounds("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) -> complete = false
+                if !sema_effect_check_scope_bounds("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &diagnostics) {
+                    complete = false
+                    chain :: sema_authority_maximal_chain(modules, function_rows, modules[module_index].functions[function_index].key)
+                    if chain.len() > 0 && diagnostics.len() > reported -> diagnostics[diagnostics.len() - 1].call_chain = chain
+                }
             }
             if policy.authority_deny != None {
                 covered :: sema_effect_covered(modules[module_index].functions[function_index].effects.solved, prohibited)
@@ -7123,6 +7177,9 @@ fn sema_finalize_authority(graph: SemaRegistrationGraph, modules: [SemaGraphModu
                     complete = false
                 }
             }
+            // The function may live in any file of its package: each report carries
+            // its own module's source location.
+            if diagnostics.len() > reported && sema_registration_module_index(graph, modules[module_index].module_identity) == .Val(graph_module) -> sema_attach_diagnostic_source_locations(&diagnostics, reported, graph.modules[graph_module].source_segments)
         }
     }
     complete

@@ -123,7 +123,7 @@ struct NativeRuntimeMaterializedRoot {
 
     fn new(store: ArtifactStore) -[FS, Env, Rand]> NativeRuntimeMaterializedRoot NativeRuntimeError! {
         path :: files.join(files.join(store.root(), "staging"), "runtime-link-{sys.pid()}-{store_artifact_unique_token()}")
-        files.create_dir_all(path)
+        files.create_dir_all(path) ?? return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(err)))
         Ok(NativeRuntimeMaterializedRoot{path})
     }
 
@@ -201,10 +201,10 @@ impl PreparedRuntime.Close {
 // without runtime markers, with malformed markers, or whose runtime does not
 // compile is returned whole.
 fn store_runtime_prepare(store: ArtifactStore, identities: &NativeRuntimeIdentityCache, rustc: String, generated: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -[FS, Env, Exec, Time, Rand]> PreparedRuntime NativeRuntimeError! {
-    found :: store_runtime_split_generated(generated) ?? None
-    split :: found ?? return Ok(PreparedRuntime.inline(generated))
+    // A program with no runtime block, or with malformed markers, is returned whole.
+    split :: store_runtime_split_generated(generated) ?? return Ok(PreparedRuntime.inline(generated))
     compile_flags :: store_runtime_compile_flags(rustc_flags)
-    rustc_version :: identities.rustc_identity(rustc, rustc_env, store_runtime_targets_native_cpu(compile_flags))
+    rustc_version :: &identities.rustc_identity(rustc, rustc_env, store_runtime_targets_native_cpu(compile_flags))
     exported_runtime :: store_runtime_export_source(split.runtime)
     runtime_key :: store_runtime_cache_key(split.runtime, exported_runtime, rustc, rustc_version, compile_flags, rustc_env)
     if store_runtime_prebuilt_rlib(runtime_key) == {
@@ -258,7 +258,7 @@ fn store_runtime_export_prebuilt(key: String, rlib: String) NativeRuntimeError! 
     entry :: files.join(directory, key)
     target :: files.join(entry, STORE_RUNTIME_RLIB_FILE)
     if files.is_file(target) -> return
-    files.create_dir_all(entry)
+    files.create_dir_all(entry) ?? return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(err)))
     staged :: files.join(entry, ".{STORE_RUNTIME_RLIB_FILE}.{sys.pid()}-{store_artifact_unique_token()}")
     if files.copyfile(rlib, staged) == {
         .Err(error) -> {
@@ -335,7 +335,7 @@ fn store_runtime_compile_artifact(store: ArtifactStore, key: String, exported: S
     }
 
     staging :: files.join(files.join(store.root(), "staging"), "{STORE_RUNTIME_CRATE_NAME}-{sys.pid()}-{store_artifact_unique_token()}")
-    files.create_dir_all(staging)
+    files.create_dir_all(staging) ?? return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(err)))
     source :: files.join(staging, "runtime.rs")
     staged_rlib :: files.join(staging, "lib{STORE_RUNTIME_CRATE_NAME}.rlib")
     if files.write(source, "{STORE_RUNTIME_CRATE_PREFIX}{exported}") == {

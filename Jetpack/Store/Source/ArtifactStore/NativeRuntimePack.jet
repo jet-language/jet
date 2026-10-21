@@ -460,9 +460,14 @@ fn native_pack_decode(bytes: [U8]) -> Dyn NativeRuntimePackError! {
 }
 
 fn native_pack_fields(tree: Dyn, names: [String]) -> [String: Dyn] NativeRuntimePackError! {
-    values :: if tree == {
+    members :: if tree == {
         .Object(fields) -> fields
         else -> { return Err(NativeRuntimePackError.Invalid("publication record must be an object")) }
+    }
+    values := [String: Dyn]{}
+    loop member in members {
+        if values.get(member.key) != None -> return Err(NativeRuntimePackError.Invalid("publication record repeats {member.key}"))
+        values[member.key] = member.value
     }
     if values.len() != names.len() -> return Err(NativeRuntimePackError.Invalid("publication record has missing or unknown fields"))
     loop name in names {
