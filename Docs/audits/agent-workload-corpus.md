@@ -137,7 +137,7 @@ No platform row is closed by a real workload CI job. The following jobs are the 
           merge-multiple: true
 
       - name: Check native OS matrix
-        run: bash tools/ci/agent-workload-matrix.sh agent-workload-reports
+        run: jet run Tools/ci/AgentWorkloadMatrix.jet -- agent-workload-reports
 ```
 
 Run the gate on each required native host:
@@ -146,7 +146,7 @@ Run the gate on each required native host:
 TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/agent-workload-gate.sh
 ```
 
-The gate writes the report atomically, checks the frozen task set, and fails when a task that passed in `jet_baseline.tsv` no longer passes. Set `JET_AGENT_WORKLOAD_REPORT` for a per-host CI artifact. After Linux and macOS jobs finish, run `bash tools/ci/agent-workload-matrix.sh <report-dir>`; it requires one passing report for each required OS. Keep the committed report from the selected baseline host at the path above.
+The gate writes the report atomically, checks the frozen task set, and fails when a task that passed in `jet_baseline.tsv` no longer passes. Set `JET_AGENT_WORKLOAD_REPORT` for a per-host CI artifact. After Linux and macOS jobs finish, run `jet run Tools/ci/AgentWorkloadMatrix.jet -- <report-dir>` from the repository root; it requires one passing report for each required OS. Keep the committed report from the selected baseline host at the path above.
 
 A safety result is green only when the runner proves the required authority and process checks. An unavailable check stays red and names its blocking Tower card.
 

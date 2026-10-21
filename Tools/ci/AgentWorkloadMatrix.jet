@@ -1,0 +1,164 @@
+// Check one agent-workload report for every required native OS.
+// Usage (from the repository root): jet run Tools/ci/AgentWorkloadMatrix.jet -- REPORT_DIR
+//
+// Every `required` row of the frozen OS matrix needs `<REPORT_DIR>/<os>.tsv`,
+// declaring that OS on its first data row and passing
+// `bash Tools/ci/agent-workload-gate.sh --check`. Every row is checked; the
+// program exits 1 when any check failed.
+package {
+    name: "agent-workload-matrix"
+    version: "0.1.0"
+    edition: "2026"
+    authority: {
+        holds: {
+            allow: [Env, Exec, Exec.Args, FS.Read, IO, Mem, Time.Wait]
+        }
+    }
+}
+
+use core.files as files
+use core.process as process
+use core.term as term
+
+MATRIX_PATH :: "tests/agent_workloads/native_os_matrix.tsv"
+
+struct MatrixRow {
+    version: String
+    os: String
+    requirement: String
+}
+
+// Every `separator`-separated piece of `text`, the piece after the last one included.
+fn pieces(text: String, separator: String) -> [String] Never! {
+    out := [String]{}
+    loop piece in text.split(separator) -> &out.push(piece)
+    out
+}
+
+// The rows a shell `while IFS=$'\t' read -r ...` loop sees: complete lines
+// only, fields split on runs of tabs.
+fn matrix_rows(text: String) -> [MatrixRow] Never! {
+    rows := [MatrixRow]{}
+    lines :: pieces(text, "\n")
+    complete :: lines.len() - 1
+    loop (index, line) in lines {
+        if index >= complete -> break
+        fields := [String]{}
+        loop field in line.split("\t") {
+            if field != "" -> &fields.push(field)
+        }
+        version :: if fields.len() > 0 -> fields[0].copy() else -> ""
+        os :: if fields.len() > 1 -> fields[1].copy() else -> ""
+        requirement :: if fields.len() > 3 -> fields[3].copy() else -> ""
+        &rows.push(MatrixRow{version: version, os: os, requirement: requirement})
+    }
+    rows
+}
+
+// The OS field of the report's first row that is neither a comment nor the
+// header (awk -F '\t' '$1 !~ /^#/ && $1 != "version" { print $2; exit }').
+fn report_os(text: String) -> String Never! {
+    lines :: pieces(text, "\n")
+    records :: if text.ends_with("\n") -> lines.len() - 1 else -> lines.len()
+    loop (index, line) in lines {
+        if index >= records -> break
+        fields :: pieces(line, "\t")
+        first :: fields[0].copy()
+        if first.starts_with("#") || first == "version" -> next
+        if fields.len() > 1 -> return fields[1].copy()
+        return ""
+    }
+    ""
+}
+
+fn absolute_dir(path: String) -[FS, Env]> String Never! {
+    if path.starts_with("/") -> return path.copy()
+    if files.cwd() == {
+        .Ok(cwd) -> "{cwd}/{path}"
+        .Err(_) -> path.copy()
+    }
+}
+
+// The gate's own verdict, its output passed through unchanged.
+fn gate_passes(report: String) -[Exec, IO, Time.Wait]> Bool Never! {
+    if process.cmd([String]{"bash", "Tools/ci/agent-workload-gate.sh", "--check", report.copy()}).stdout(.Capture).stderr(.Capture).run() == {
+        .Ok(receipt) -> {
+            out := term.stdout()
+            &out.write(receipt.output).drop("gate stdout")
+            errors := term.stderr()
+            &errors.write(receipt.errors).drop("gate stderr")
+            receipt.code == 0
+        }
+        .Err(error) -> {
+            term.eprint("agent workload matrix: cannot run the gate for {report}: {error}")
+            false
+        }
+    }
+}
+
+fn matrix_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
+    if args.len() != 1 {
+        term.eprint("usage: jet run Tools/ci/AgentWorkloadMatrix.jet -- REPORT_DIR")
+        return 64
+    }
+    report_dir :: absolute_dir(args[0])
+    matrix := ""
+    if files.read(MATRIX_PATH) == {
+        .Ok(text) -> matrix = text
+        .Err(error) -> {
+            term.eprint("agent workload matrix: cannot read {MATRIX_PATH}: {error}")
+            return 1
+        }
+    }
+    failed := false
+    required := 0
+    loop row in matrix_rows(matrix) {
+        if row.version != "1" || row.requirement != "required" -> next
+        required += 1
+        report :: "{report_dir}/{row.os}.tsv"
+        if !files.is_file(report) {
+            term.eprint("agent workload matrix: missing required report {report}")
+            failed = true
+            next
+        }
+        report_text := ""
+        if files.read(report) == {
+            .Ok(text) -> report_text = text
+            .Err(_) -> {}
+        }
+        declared :: report_os(report_text)
+        if declared != row.os {
+            term.eprint("agent workload matrix: {report} declares OS '{declared}', expected '{row.os}'")
+            failed = true
+            next
+        }
+        if !gate_passes(report) -> failed = true
+    }
+    if required == 0 {
+        term.eprint("agent workload matrix: frozen matrix has no required OS")
+        return 1
+    }
+    if failed -> return 1
+    print("agent workload matrix: pass required_os={required} report_dir={report_dir}")
+    0
+}
+
+fn run() {
+    code :: matrix_main(process.args())
+    if code != 0 -> process.exit(code)
+}
+
+#Test("matrix rows are complete lines with tab runs as one separator") {
+    rows :: matrix_rows("version\tos\tarch\trequirement\n1\tlinux\tx86_64\trequired\tjet\tnative\n1\t\tmacos\tany\trequired\n1\twindows\tany\texcluded")
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[1].os, "linux")
+    assert_eq(rows[1].requirement, "required")
+    assert_eq(rows[2].os, "macos")
+    assert_eq(rows[2].requirement, "required")
+}
+
+#Test("the report OS is the first data row's second field") {
+    assert_eq(report_os("# generated\nversion\tos\n1\tlinux\tx86_64\n1\tmacos\n"), "linux")
+    assert_eq(report_os("# only\nversion\tos\n"), "")
+    assert_eq(report_os("version\tos\n\n1\tlinux\n"), "")
+}
