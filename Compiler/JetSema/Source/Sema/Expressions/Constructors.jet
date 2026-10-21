@@ -668,6 +668,9 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         return None
     }
     payload := TEnumPayload.Unit
+    // The enum as diagnostics name it: a Core enum by its canonical identity,
+    // a program enum by its declared name.
+    payload_owner :: if owner.id.key.starts_with("<corelib>/") -> owner.id.key else -> owner.name
     if selected_variant.payload == {
         .Unit -> {
             if args.len() != 0 {
@@ -692,11 +695,15 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             // module sees them (Rust `owner_type_for_reader`).
             payload_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, ty, generic_names), generic_names, generic_args)
             sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
-            checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            diagnostic_start :: diagnostics.len()
+            checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+                sema_expression_enum_payload_replace_mismatch(payload_owner, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return None
+            }
             if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
             compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
             if !compatible {
-                &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(payload_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(payload_expr)))
+                &diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
                 return None
             }
             if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
@@ -740,11 +747,15 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 supplied[found] = true
                 field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, fields[found].ty, generic_names), generic_names, generic_args)
                 sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
-                checked :: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                diagnostic_start :: diagnostics.len()
+                checked :: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+                    sema_expression_enum_payload_replace_mismatch(payload_owner, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return None
+                }
                 if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
                 compatible :: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
                 if !compatible {
-                    &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(payload_expr)))
+                    &diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
                     return None
                 }
                 if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
@@ -793,11 +804,15 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
         }
         payload_ty :: payload_types[index]
         sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
-        checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        diagnostic_start :: diagnostics.len()
+        checked :: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            sema_expression_enum_payload_replace_mismatch(enum_name, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return None
+        }
         if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
         compatible :: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
         if !compatible {
-            &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(payload_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(payload_expr)))
+            &diagnostics.push(sema_expression_enum_payload_mismatch(enum_name, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
             return None
         }
         if !sema_copy_site_record_move(payload_expr, scopes, &state, &tail_store, &context, &diagnostics) -> return None
@@ -806,6 +821,35 @@ fn sema_expression_core_enum_literal(enum_name: String, variants: [String], vari
     payload :: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
     value :: sema_tir_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Rust `check_enum_payload_assignable`: a payload value that doesn't fit its
+// declared slot is E0108 about that slot (`field` names a labeled payload).
+fn sema_expression_enum_payload_mismatch(enum_name: String, variant: String, field: String?, declared: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    required :: sema_expr_expected_type(declared, environment, program)
+    actual :: sema_expr_expected_type(offered, environment, program)
+    slot :: if field == .Val(label) -> "field `{label}` of `{enum_name}.{variant}`" else -> "the payload of `{enum_name}.{variant}`"
+    sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(actual)}", "a variant payload keeps the type its enum declaration gives it", sema_type_fix_hint(required, actual))
+}
+
+// The payload's own check rejected it against the declared slot with the
+// generic E0108 at the value; that report becomes the payload-specific one,
+// with the value's own type inferred without the slot as a target.
+fn sema_expression_enum_payload_replace_mismatch(enum_name: String, variant: String, field: String?, declared: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    value_span :: expr_span(value)
+    found := Int?{None}
+    index := diagnostic_start
+    loop index < diagnostics.len() {
+        if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(value_span)) {
+            found = Val(index)
+            break
+        }
+        index += 1
+    }
+    mismatch_index :: found ?? return
+    probe_diagnostics := [Diagnostic]{}
+    offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_expression_enum_payload_mismatch(enum_name, variant, field, declared, offered.ty, value_span, environment, program)
 }
 
 struct SemaExpressionTypedTextParts {
