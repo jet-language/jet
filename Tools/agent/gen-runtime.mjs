@@ -20,7 +20,6 @@ const check = args.includes("--check") ? ["--check"] : [];
 const jet = process.env.JET ?? "jet";
 const steps = [
   ["RuntimeGenerators", check],
-  ["gen-runtime-lifecycle.mjs", check],
   ["gen-runtime-stop-exports.mjs", check],
   ["gen-c-abi-routes.mjs", [runtime, ...check]],
 ];

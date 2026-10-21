@@ -1,4 +1,4 @@
-// The runtime's generated message tables, from their one source each.
+// The runtime's generated tables, from their one source each.
 // Usage: jet run Tools/agent/RuntimeGenerators -- [--check] [--defects-only]
 //   (default)        rewrite every stale output
 //   --check          write nothing; report every stale output
@@ -78,6 +78,10 @@ fn runtime_generators_main(args: [String]) -[FS]> String GeneratorError! {
         .Ok(text) -> &outputs.push(GeneratedFile{path: SERVICES_TARGET_PATH, text: text})
         .Err(error) -> &problems.push(error.message)
     }
+    if render_lifecycle_list() == {
+        .Ok(text) -> &outputs.push(GeneratedFile{path: LIFECYCLE_TARGET_PATH, text: text})
+        .Err(error) -> &problems.push(error.message)
+    }
     loop output in outputs {
         current :: output_current(output.path, output.text) ?? return Err(err)
         if current -> next
@@ -88,7 +92,7 @@ fn runtime_generators_main(args: [String]) -[FS]> String GeneratorError! {
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
-    if check -> return Ok("runtime generated messages are current")
+    if check -> return Ok("runtime generated tables are current")
     Ok("")
 }
 

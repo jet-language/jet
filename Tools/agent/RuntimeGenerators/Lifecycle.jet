@@ -1,0 +1,233 @@
+// Compiler/JetRuntime/lifecycle.list orders the constructor/destructor hooks
+// the runtime sources mark with a `// runtime-init: N` or `// runtime-fini: N`
+// line directly above an `#Export(c)` function. The export set itself is
+// exactly the sources' #Export(c) functions; these rows only order hooks.
+use core.files as files
+
+LIFECYCLE_TARGET_PATH :: "Compiler/JetRuntime/lifecycle.list"
+RUNTIME_SOURCES_PATH :: "Compiler/JetRuntime/sources.list"
+EXPORT_MARK :: "#Export(c)"
+MAX_LIFECYCLE_PRIORITY :: 65535
+
+struct RuntimeSource {
+    path: String
+    text: String
+}
+
+// One #Export(c) function; `lifecycle` is `init N`, `fini N` or empty.
+struct RuntimeExport {
+    name: String
+    lifecycle: String
+}
+
+struct ParsedExports {
+    exports: [RuntimeExport]
+    problems: [String]
+}
+
+fn is_space_byte(code: Int) -> Bool Never! { code == 32 || (code >= 9 && code <= 13) }
+
+fn is_name_start_byte(code: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+fn is_name_byte(code: Int) -> Bool Never! { is_name_start_byte(code) || (code >= 48 && code <= 57) }
+
+fn is_digit_byte(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
+
+// Whether `word`'s bytes start at byte `at` of `bytes`.
+fn bytes_at(bytes: [U8], at: Int, word: String) -> Bool Never! {
+    expected :: word.bytes()
+    if at + expected.len() > bytes.len() -> return false
+    loop index in 0..<expected.len() {
+        if Int.from_u8(bytes[at + index]) != Int.from_u8(expected[index]) -> return false
+    }
+    true
+}
+
+fn skip_spaces(bytes: [U8], at: Int) -> Int Never! {
+    end := at
+    loop end < bytes.len() && is_space_byte(Int.from_u8(bytes[end])) -> end += 1
+    end
+}
+
+// The name and the text up to the body's `{` of the `#Export(c) [pub] fn name`
+// declaration starting at byte `start`, or None when the line is not one (a
+// `}` before the body's `{` also means it is not a declaration head).
+struct ExportHead {
+    name: String
+    signature: String
+}
+
+fn export_head(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
+    at := start + byte_len(EXPORT_MARK)
+    spaced := skip_spaces(bytes, at)
+    if spaced == at -> return None
+    at = spaced
+    if bytes_at(bytes, at, "pub") {
+        after_pub :: skip_spaces(bytes, at + 3)
+        if after_pub > at + 3 -> at = after_pub
+    }
+    if !bytes_at(bytes, at, "fn") -> return None
+    spaced = skip_spaces(bytes, at + 2)
+    if spaced == at + 2 -> return None
+    at = spaced
+    if at >= bytes.len() || !is_name_start_byte(Int.from_u8(bytes[at])) -> return None
+    name_start :: at
+    loop at < bytes.len() && is_name_byte(Int.from_u8(bytes[at])) -> at += 1
+    name :: byte_slice(source, name_start, at)
+    signature_start :: at
+    loop at < bytes.len() {
+        code :: Int.from_u8(bytes[at])
+        if code == 123 -> return Val(ExportHead{name: name, signature: byte_slice(source, signature_start, at)})
+        if code == 125 -> return None
+        at += 1
+    }
+    None
+}
+
+// The hook a `// runtime-init: N` / `// runtime-fini: N` line names; None for
+// any other line.
+struct LifecycleHook {
+    kind: String
+    priority: Int
+}
+
+fn lifecycle_hook(line: String) -> LifecycleHook? Never! {
+    kind := ""
+    if line.starts_with("// runtime-init: ") {
+        kind = "init"
+    } else if line.starts_with("// runtime-fini: ") {
+        kind = "fini"
+    } else {
+        return None
+    }
+    digits :: byte_tail(line, byte_len("// runtime-init: "))
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        if !is_digit_byte(Int.from_u8(byte)) -> return None
+    }
+    if Int.parse(digits) == {
+        .Ok(priority) -> return Val(LifecycleHook{kind: kind, priority: priority})
+        .Err(_) -> { return None }
+    }
+}
+
+// Every `#Export(c)` function that starts a line of `source`, with the hook
+// marked on the line above it.
+fn runtime_exports(source: String, path: String) -> ParsedExports Never! {
+    bytes :: source.bytes()
+    exports := [RuntimeExport]{}
+    problems := [String]{}
+    previous_line := -1
+    line_start := 0
+    loop line_start <= bytes.len() {
+        line_end := line_start
+        loop line_end < bytes.len() && Int.from_u8(bytes[line_end]) != 10 -> line_end += 1
+        if bytes_at(bytes, line_start, EXPORT_MARK) {
+            if export_head(source, bytes, line_start) == {
+                .Val(head) -> {
+                    lifecycle := ""
+                    if previous_line >= 0 {
+                        if lifecycle_hook(byte_slice(source, previous_line, line_start - 1)) == {
+                            .Val(hook) -> {
+                                if hook.priority > MAX_LIFECYCLE_PRIORITY -> &problems.push("{path}: lifecycle priority exceeds {MAX_LIFECYCLE_PRIORITY}")
+                                lifecycle = "{hook.kind} {hook.priority}"
+                            }
+                            .None -> {}
+                        }
+                    }
+                    signature :: head.signature.trim()
+                    if !signature.starts_with("(") || !signature.contains(")") -> &problems.push("unparsed runtime #Export(c) {head.name} signature in {path}")
+                    &exports.push(RuntimeExport{name: head.name, lifecycle: lifecycle})
+                }
+                .None -> {}
+            }
+        }
+        previous_line = line_start
+        line_start = line_end + 1
+    }
+    ParsedExports{exports: exports, problems: problems}
+}
+
+// lifecycle.list for the given runtime sources: one `symbol init|fini N` row
+// per hook, in symbol order.
+fn lifecycle_list(sources: [RuntimeSource]) -> String GeneratorError! {
+    problems := [String]{}
+    names := [String]{}
+    rows := [String]{}
+    loop source in sources {
+        parsed :: runtime_exports(source.text, source.path)
+        loop problem in parsed.problems -> &problems.push(problem)
+        loop export in parsed.exports {
+            if names.contains(export.name) {
+                &problems.push("duplicate runtime #Export(c) {export.name}")
+                next
+            }
+            &names.push(export.name)
+            if export.lifecycle != "" -> &rows.push("{export.name} {export.lifecycle}")
+        }
+    }
+    if names.len() == 0 -> &problems.push("empty runtime #Export(c) declarations")
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    &rows.sort()
+    lines := [String]{
+        "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535>.",
+        "# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).",
+        "# Rows only order hooks; the export set is exactly the sources' #Export(c) functions.",
+        "# Generated by Tools/agent/RuntimeGenerators from `// runtime-init|fini: N` comments.",
+    }
+    loop row in rows -> &lines.push(row)
+    Ok("{lines.join("\n")}\n")
+}
+
+// The runtime sources sources.list names, in its order.
+fn read_runtime_sources() -[FS]> [RuntimeSource] GeneratorError! {
+    listing :: files.read(RUNTIME_SOURCES_PATH) ?? return Err(generator_fail("cannot read {RUNTIME_SOURCES_PATH}: {err}"))
+    sources := [RuntimeSource]{}
+    problems := [String]{}
+    loop raw in listing.split("\n") {
+        path :: raw.trim()
+        if path == "" || path.starts_with("#") -> next
+        if files.read(path) == {
+            .Ok(text) -> &sources.push(RuntimeSource{path: path, text: text})
+            .Err(error) -> &problems.push("cannot read {path}: {error}")
+        }
+    }
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    Ok(sources)
+}
+
+fn render_lifecycle_list() -[FS]> String GeneratorError! {
+    sources :: read_runtime_sources() ?? return Err(err)
+    lifecycle_list(sources)
+}
+
+#Test("lifecycle rows come from the hook line directly above an export") {
+    source :: "// runtime-init: 04\n#Export(c) fn b_start() {{\n}}\n// runtime-fini: 2\n#Export(c)\npub fn a_stop(handle: I64) -> Unit {{\n}}\n#Export(c) fn plain(x: I64) -> I64 {{ x }}\n// runtime-init: 1\n\n#Export(c) fn spaced() {{}}\n#Export(c) fn closed }} {{\n"
+    parsed :: runtime_exports(source, "Fixture.jet")
+    assert_eq(parsed.problems.len(), 0)
+    assert_eq(parsed.exports.len(), 4)
+    assert_eq(parsed.exports[0].lifecycle, "init 4")
+    assert_eq(parsed.exports[1].name, "a_stop")
+    assert_eq(parsed.exports[1].lifecycle, "fini 2")
+    assert_eq(parsed.exports[3].lifecycle, "")
+    if lifecycle_list([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: source}}) == {
+        .Ok(text) -> {
+            expected :: "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535>.\n# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).\n# Rows only order hooks; the export set is exactly the sources' #Export(c) functions.\n# Generated by Tools/agent/RuntimeGenerators from `// runtime-init|fini: N` comments.\na_stop fini 2\nb_start init 4\n"
+            assert_eq(text, expected)
+        }
+        .Err(error) -> assert_eq(error.message, "")
+    }
+}
+
+#Test("lifecycle rows report every bad export at once") {
+    source :: "// runtime-init: 70000\n#Export(c) fn big() {{}}\n#Export(c) fn bare {{}}\n#Export(c) fn big() {{}}\n"
+    if lifecycle_list([RuntimeSource]{RuntimeSource{path: "F.jet", text: source}}) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> {
+            expected :: "F.jet: lifecycle priority exceeds 65535\nunparsed runtime #Export(c) bare signature in F.jet\nduplicate runtime #Export(c) big"
+            assert_eq(error.message, expected)
+        }
+    }
+}
