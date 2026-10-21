@@ -162,9 +162,8 @@ fn kit_steps_parallel_start(group: Group, steps: [KitStep], index: Int, context:
     worker :: task kit_steps_send_report(step, context, state, reporter)
     // Start all remaining sends before joining this one, preserving concurrency.
     kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
-    joined :: ^worker.join() ?? {
+    ^worker.join() ?? {
         sender.send("parallel task join failed")
         return
     }
-    joined ?? panic("infallible parallel report")
 }
