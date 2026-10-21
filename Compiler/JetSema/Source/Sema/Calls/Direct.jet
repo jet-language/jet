@@ -273,6 +273,7 @@ fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: Sem
         "wrapping" | "saturating" | "checked" -> sema_call_check_special_overflow(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "approx" -> sema_call_check_special_approx(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "debug" -> sema_call_check_special_debug(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "embed_file" | "embed_bytes" | "find" -> sema_call_check_comptime_input(call, expected, environment, program, &scopes, &diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }

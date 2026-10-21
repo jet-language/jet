@@ -1513,6 +1513,7 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
     }
     if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" {
         parts :: jet_eval_compiler_value_method_owner(row.member) ?? return jet_eval_route_not_supported(&machine, span, "invalid compiler host method member")
+        if parts[0] == "Comptime" -> return jet_eval_route_comptime_input(parts[1], data, &machine, span)
         if jet_eval_reflection_metadata_supported(parts[0], parts[1]) -> return jet_eval_route_reflection_host(row, data, &machine, span)
         if jet_eval_compiler_value_method_supported(parts[0], parts[1], data.len() - 1) -> return jet_eval_route_compiler_value_host(row, data, &machine, span)
     }
@@ -1530,4 +1531,39 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
     }
     if row.family == MIRPreludeFamily.StaticPrelude && symbol.starts_with("jet_") -> return jet_eval_route_numeric_conversion(row, args, &machine, result_ty, span)
     jet_eval_route_not_supported(&machine, span, "Prelude route {row.module_name}.{row.member}")
+}
+
+// A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
+// compiler's comptime input host reads and records it. Runtime code never
+// reaches one (sema accepts the call only in comptime code).
+fn jet_eval_route_comptime_input(builtin: String, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    if machine.config.runtime_execution {
+        jet_eval_compiler_fail(&machine, span, "a comptime input reached runtime evaluation")
+        return None
+    }
+    if args.len() != 1 {
+        jet_eval_compiler_fail(&machine, span, "comptime input route lost its literal path")
+        return None
+    }
+    path :: if args[0] == {
+        .String(value) -> value
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "comptime input route lost its literal path")
+            return None
+        }
+    }
+    adapter :: if machine.config.comptime_input_adapter == {
+        .Val(installed) -> installed.clone_input_adapter()
+        .None -> {
+            jet_eval_fail(&machine, JetEvalErrorKind.Effect, span, "`{builtin}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")
+            return None
+        }
+    }
+    if adapter.comptime_input(builtin, path, span) == {
+        .Ok(value) -> Val(JetEvalRuntimeValue.Data{value: value})
+        .Err(error) -> {
+            if machine.failure == None -> machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: error.diagnostic})
+            None
+        }
+    }
 }

@@ -794,6 +794,10 @@ enum THostCall {
     EnvSet(name: TExpr, value: TExpr, location: TPanicLoc)
     NumericBounds(ty: Type, member: String)
     CCallback(symbol: String, lambda: TLambda, ret: Type?, managed: Bool, plan_digest: String?, callback_identity: String?)
+    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
+    // checked literal path or glob, relative to the source file being
+    // compiled. The compiler reads and records it; it never runs at runtime.
+    ComptimeInput(builtin: String, path: String)
 }
 
 enum TCoreClosureKind {

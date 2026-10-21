@@ -255,6 +255,9 @@ struct JetDriverCompileRequest {
     // Raw transports remain distinct from ordinary comptime IO.
     build_inputs: JetDriverSharedBuildInputs?{None}
     build_http_inputs: JetDriverSharedBuildHTTPInputs?{None}
+    // When set, every Tier-1 comptime input this compile reads (path and
+    // SHA-256), in read order, for the comptime input lock.
+    comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
     execution_host: JetDriverExecutionHost?{None}
     // Unified host/stop contract (#4720): the comptime lowering session
     // produces MIR stop points (Poll/Stopped and the budget can-stop rows)

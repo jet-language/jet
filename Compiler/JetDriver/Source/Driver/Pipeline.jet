@@ -236,7 +236,7 @@ use jet_optimizer.[
 ]
 
 use jet_repl.[repl_session_new]
-use jet_eval.[jet_eval_runtime_config]
+use jet_eval.[JetEvalComptimeInputAdapter, jet_eval_runtime_config]
 use jet_codegen.[
     JetCodegenComptimeSession,
     JetWebTimezoneAsset,
@@ -2004,7 +2004,7 @@ fn jet_driver_comptime_dependency_cycle(rows: [JetDriverComptimeWaitRow]) -> Jet
 }
 
 // The run's interpreter configuration for one evaluation, with `globals`.
-fn jet_driver_comptime_eval_config(original: JetEvalConfig, globals: ^[String:TComptimeValue]) -> JetEvalConfig {
+fn jet_driver_comptime_eval_config(original: JetEvalConfig, globals: ^[String:TComptimeValue], inputs: JetEvalComptimeInputAdapter?) -> JetEvalConfig {
     host_adapter := if original.host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
@@ -2021,6 +2021,7 @@ fn jet_driver_comptime_eval_config(original: JetEvalConfig, globals: ^[String:TC
         runtime_execution: false,
         host_adapter: host_adapter,
         build_host_adapter: build_host_adapter,
+        comptime_input_adapter: inputs,
         output_context: original.output_context,
         host_hooks: original.host_hooks,
     }
@@ -3237,7 +3238,7 @@ fn jet_driver_comptime_grow(
 // machine over the same program would, gaining the globals of the values that
 // landed since. Every field is moved out and reset (`^x.f` then
 // `x.f = None`); a field moved out without the reset is copied.
-fn jet_driver_comptime_machine_eval(owned: ^JetDriverComptimeMachine, function_id: MIRFunctionID, original: JetEvalConfig, values: [SemaComptimeItemValue]) -> JetEvalResult {
+fn jet_driver_comptime_machine_eval(owned: ^JetDriverComptimeMachine, function_id: MIRFunctionID, original: JetEvalConfig, values: [SemaComptimeItemValue], inputs: JetEvalComptimeInputAdapter?) -> JetEvalResult {
     machine := ^owned
     taken_session := ^machine.session
     machine.session = None
@@ -3247,11 +3248,11 @@ fn jet_driver_comptime_machine_eval(owned: ^JetDriverComptimeMachine, function_i
         program := ^taken_program ?? panic("a comptime flush lost its temporary program")
         globals := original.globals.copy()
         jet_driver_comptime_globals_add(&globals, values, 0)
-        return jet_eval_function(^program, function_id, [TComptimeValue]{}, jet_driver_comptime_eval_config(original, ^globals))
+        return jet_eval_function(^program, function_id, [TComptimeValue]{}, jet_driver_comptime_eval_config(original, ^globals, inputs))
     }
     added := [String:TComptimeValue]{}
     jet_driver_comptime_globals_add(&added, values, machine.globals_count)
-    jet_eval_session_function(^reused, function_id, [TComptimeValue]{}, jet_driver_comptime_eval_config(original, [String:TComptimeValue]{}), added)
+    jet_eval_session_function(^reused, function_id, [TComptimeValue]{}, jet_driver_comptime_eval_config(original, [String:TComptimeValue]{}, inputs), added)
 }
 
 // Lands or evaluates the entries of `batch` in order, exactly as the run
@@ -3403,7 +3404,7 @@ fn jet_driver_comptime_flush(
             return flushed
         }
         machine := &machines.pop() ?? panic("a comptime flush lost its evaluator machine")
-        eval_result := jet_driver_comptime_machine_eval(^machine, function_id, request.eval_config, values)
+        eval_result := jet_driver_comptime_machine_eval(^machine, function_id, request.eval_config, values, jet_driver_comptime_inputs_for(request, source.source_file))
         // Classify the evaluator's final, retired result: retirement still
         // records cleanup failures, internal problems and output.
         evaluated_value := TComptimeValue?{None}

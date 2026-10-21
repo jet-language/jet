@@ -1,0 +1,74 @@
+// Tier-1 comptime inputs: `embed_file("path") -> String`, `embed_bytes("path")
+// -> [U8]` and `find("glob") -> [String]`. Each names its input with a string
+// literal relative to the file doing the embedding, so the compiler can audit
+// and lock exactly which files a build reads. The compiler reads the input when
+// it evaluates the comptime code (the driver's rooted, no-follow read) and
+// records its hash; nothing runs at runtime.
+use jet_foundation.[
+    Call,
+    Diagnostic,
+    Expr,
+    StrPart,
+    TExprKind,
+    THostCall,
+    Type,
+]
+
+fn sema_comptime_input_builtin(name: String) -> Bool Never! {
+    name == "embed_file" || name == "embed_bytes" || name == "find"
+}
+
+fn sema_comptime_input_type(name: String) -> Type Never! {
+    if name == "embed_bytes" -> return Type.List{element: Type.Named{name: "U8"}}
+    if name == "find" -> return Type.List{element: Type.String}
+    Type.String
+}
+
+// The argument's source string literal, or None when it is computed.
+fn sema_comptime_input_literal(expression: Expr) -> String? Never! {
+    if expression == .Str(parts, _) {
+        if parts.len() == 0 -> return Val("")
+        if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+    }
+    None
+}
+
+// dispatch.rs `embed_path_err` (E0957), word for word.
+fn sema_comptime_input_path_error(builtin: String, problem: String, call: Call) -> Diagnostic {
+    span :: call.name_span
+    noun :: if builtin == "find" -> "glob" else -> "path"
+    example :: if builtin == "find" -> "{builtin}(\"content/**/*.jet\")" else -> "{builtin}(\"data/file\")"
+    if problem == "literal" -> return sema_error("E0957", span, "`{builtin}` {noun} must be a string literal", "a computed {noun} can't be audited at build time, so the compiler can't tell which file it reads", "pass the {noun} inline, e.g. `{example}`")
+    if problem == "absolute" -> return sema_error("E0957", span, "`{builtin}` {noun} must be relative", "an absolute {noun} reaches outside the project", "use a {noun} relative to this file's own directory")
+    sema_error("E0957", span, "`{builtin}` {noun} escapes the project with `..`", "`..` could read files outside your project; comptime inputs must stay inside it", "drop the `..` and use a {noun} under this file's directory")
+}
+
+fn sema_call_check_comptime_input(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    builtin :: call.name
+    failed :: SemaDirectSpecialCheck{handled: true, value: None}
+    if call.args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", call.name_span, "`{builtin}` expects 1 argument, got {call.args.len()}", "a comptime input names exactly one path", "pass one string literal"))
+        return failed
+    }
+    if scopes.comptime_execution_depth == 0 {
+        &diagnostics.push(sema_error("E0956", call.name_span, "`{builtin}` is compile-time only", "the compiler reads the file while building, so it is a value in the program, not a runtime read", "use it in a `prep` binding, e.g. `TEXT :: prep {{ {builtin}(\"file\") }}`"))
+        return failed
+    }
+    path :: sema_comptime_input_literal(call.args[0].expr) ?? {
+        &diagnostics.push(sema_comptime_input_path_error(builtin, "literal", call))
+        return failed
+    }
+    normalized :: path.replace("\\", "/")
+    if normalized.starts_with("/") {
+        &diagnostics.push(sema_comptime_input_path_error(builtin, "absolute", call))
+        return failed
+    }
+    loop part in normalized.split("/") {
+        if part == ".." {
+            &diagnostics.push(sema_comptime_input_path_error(builtin, "parent", call))
+            return failed
+        }
+    }
+    node :: sema_tir_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: normalized}}, call.name_span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, &diagnostics)}
+}

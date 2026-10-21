@@ -557,6 +557,21 @@ trait JetEvalBuildHostAdapter {
     fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult?
 }
 
+// The compiler's answer to a Tier-1 comptime input (`embed_file`,
+// `embed_bytes`, `find`) named by a checked literal path relative to the
+// source file being compiled. The driver installs it for comptime evaluation:
+// it owns the rooted, no-follow read, its bounds and the input record. A
+// failure is the diagnostic the read reports (E0955).
+#Error
+struct JetEvalComptimeInputError {
+    diagnostic: Diagnostic
+}
+
+trait JetEvalComptimeInputAdapter {
+    fn clone_input_adapter(self) -[]> JetEvalComptimeInputAdapter
+    fn comptime_input(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!
+}
+
 struct JetEvalConfig {
     // Step budget for compile-time evaluation. Runtime execution (a program
     // run) has no step limit, like a built binary.
@@ -567,6 +582,7 @@ struct JetEvalConfig {
     runtime_execution: Bool
     host_adapter: JetEvalHostAdapter?
     build_host_adapter: JetEvalBuildHostAdapter?{None}
+    comptime_input_adapter: JetEvalComptimeInputAdapter?{None}
     output_context: JetEvalOutputContext?
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.

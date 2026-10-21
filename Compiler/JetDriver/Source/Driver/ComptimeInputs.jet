@@ -1,0 +1,95 @@
+// Tier-1 comptime inputs (`embed_file`, `embed_bytes`, `find`): the driver's
+// answer to the evaluator's comptime input route. Sema has already checked the
+// literal path (relative, no `..`). Reads go through the host's raw build-input
+// transport, rooted at the directory of the file doing the embedding, with the
+// same no-follow read, tree-file bound and glob walk as `b.embed` / `b.find`
+// (dispatch.rs `eval_build_time_io`, one implementation of the path law). Each
+// file read is recorded with its SHA-256 for the comptime input lock.
+use jet_foundation.[
+    Diagnostic,
+    Span,
+    TComptimeValue,
+    diagnostic_from_registry,
+]
+use jet_eval.[JetEvalComptimeInputAdapter, JetEvalComptimeInputError]
+use jet_build_session.[BuildSessionReply, BuildSessionValue]
+use core.crypto as comptime_inputs_crypto
+
+// One locked comptime input: its path relative to the embedding file's
+// directory and the SHA-256 of its bytes.
+struct JetDriverComptimeInputRecord {
+    path: String
+    sha256: String
+}
+
+struct JetDriverComptimeInputLog {
+    records: [JetDriverComptimeInputRecord]
+}
+
+struct JetDriverComptimeInputs {
+    inputs: JetDriverSharedBuildInputs
+    base_dir: String
+    log: Shared<JetDriverComptimeInputLog>?
+}
+
+fn jet_driver_comptime_input_fail(what: String, why: String, fix: String, span: Span) -> JetEvalComptimeInputError Never! {
+    JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0955", Val(span), what, why, fix)}
+}
+
+fn jet_driver_comptime_input_record(recorder: Shared<JetDriverComptimeInputLog>?, path: String, bytes: [U8]) Never! {
+    log :: recorder ?? return
+    permit :: log.guard_edit()
+    &permit.value.records.push(JetDriverComptimeInputRecord{path: path, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
+}
+
+impl JetDriverComptimeInputs.JetEvalComptimeInputAdapter {
+    fn clone_input_adapter(self) -[]> JetEvalComptimeInputAdapter {
+        // copy: the evaluator forks the adapter for each machine; the forks share the input
+        // transport and the one input log.
+        JetDriverComptimeInputs{inputs: self.inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy()}
+    }
+    fn comptime_input(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+        if builtin == "find" -> return jet_driver_comptime_find(self, path, span)
+        bytes :: self.inputs.read_rooted(self.base_dir, path, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
+        jet_driver_comptime_input_record(self.log, path, bytes)
+        if builtin == "embed_bytes" {
+            return Ok(TComptimeValue.Bytes{value: bytes})
+        }
+        text :: String.from_bytes(bytes) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't read `{path}` as text", "the file isn't valid UTF-8; `{builtin}` returns a String", "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`", span))
+        Ok(TComptimeValue.String{value: text})
+    }
+}
+
+// dispatch.rs `eval_locked_find`: the sorted relative files the glob matches,
+// each read (and recorded) within the tree-file bound.
+fn jet_driver_comptime_find(adapter: JetDriverComptimeInputs, glob: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+    reply :: jet_driver_build_find(adapter.inputs, adapter.base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: glob}}, span)
+    found := [String]{}
+    if reply == {
+        .Value(value) -> {
+            if value == .List(values) {
+                loop item in values {
+                    if item == .Text(relative) -> &found.push(relative)
+                }
+            }
+        }
+        .Failure(error) -> return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry(error.code, Val(span), error.what, error.why, error.fix)})
+        .HostRequest(_, _) -> return Err(jet_driver_comptime_input_fail("`find` can't walk `{glob}`", "the comptime input host is unavailable", "build the program with `jet build` or `jet run`", span))
+    }
+    strings := [TComptimeValue]{}
+    loop relative in found {
+        bytes :: adapter.inputs.read_rooted(adapter.base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{relative}`", "{err.message} (matched while expanding `{glob}`)", "check the path — it is relative to the file's own directory", span))
+        jet_driver_comptime_input_record(adapter.log, relative, bytes)
+        &strings.push(TComptimeValue.String{value: relative})
+    }
+    Ok(TComptimeValue.List{values: strings})
+}
+
+// The comptime input host for an item in `source_file`: rooted at that file's
+// directory, over the request's build-input transport. A request without one
+// (a host that reads no files) has no comptime input host.
+fn jet_driver_comptime_inputs_for(request: JetDriverCompileRequest, source_file: String) -> JetEvalComptimeInputAdapter? {
+    inputs :: request.build_inputs ?? return None
+    // copy: the adapter shares the request's transport handle; the request keeps its own.
+    Val(JetDriverComptimeInputs{inputs: inputs.copy(), base_dir: jet_driver_parent_path(source_file), log: request.comptime_input_log.copy()})
+}

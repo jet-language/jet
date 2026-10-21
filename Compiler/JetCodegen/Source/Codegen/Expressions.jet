@@ -5379,6 +5379,17 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
     None
 }
 
+// A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`) inside
+// evaluated comptime code: one `core.host` `Comptime.<builtin>` route the
+// evaluator's comptime input host answers with the read value. Sema accepts the
+// call only in comptime code, so it never reaches a runtime program.
+fn jet_codegen_lower_comptime_input(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, builtin: String, path: String) -> MIRValueID Never! {
+    path_value :: jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: path}})
+    call :: jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.host", "Comptime.{builtin}", "jet_comptime_host_method", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
+    args := [MIRCallArg]{jet_codegen_numeric_call_arg(path_value, expression.span)}
+    jet_codegen_emit_host_route_call(&builder, program, expression, call, ^args, [Bool]{false})
+}
+
 fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: String) -> MIRValueID Never! {
     function :: jet_codegen_function_id_for_name(builder, program, name)
     name_value := jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "{function.value}"}})
@@ -5566,6 +5577,7 @@ fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenP
         .FixedListIndex(base, index, line) -> return jet_codegen_lower_fixed_list_index(&builder, program, expression, base, index, line)
         .YieldSend(value) -> return jet_codegen_lower_yield_send(&builder, program, expression, value)
         .MemoStats(name) -> return jet_codegen_lower_memo_stats(&builder, program, expression, name)
+        .ComptimeInput(builtin, path) -> return jet_codegen_lower_comptime_input(&builder, program, expression, builtin, path)
         .CellGuardProject(recv, paths, result_type, editable, edit_paths_disjoint) -> return jet_codegen_lower_cell_guard_project(&builder, program, expression, recv, paths, result_type, editable, edit_paths_disjoint)
         .GCRead(root) -> return jet_codegen_lower_gc_read(&builder, program, expression, root)
         .ExpectSnapshot(value, snap_path) -> return jet_codegen_lower_expect_snapshot(&builder, program, expression, value, snap_path)
