@@ -276,23 +276,6 @@ fn jet_cli_tail(items: [String], start: Int) -> [String] Never! {
     tail
 }
 
-// Source/main.rs moves the first command word to `raw[0]`, keeping the order
-// of every other word.
-fn jet_cli_command_first(items: [String], command: String) -> [String] Never! {
-    at := 0
-    loop (index, item) in items {
-        if item == command {
-            at = index
-            break
-        }
-    }
-    out := [String]{items[at].copy()}
-    loop (index, item) in items {
-        if index != at -> &out.push(item.copy())
-    }
-    out
-}
-
 fn jet_cli_has(items: [String], value: String) -> Bool Never! {
     items.contains(value)
 }
@@ -1622,8 +1605,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             if args.len() < 2 -> return jet_cli_done("", if quiet || json -> "" else -> jet_cli_command_help("try"), JET_DRIVER_EXIT_USAGE)
             return JetCLIPlan.Try{plan_path: args[1], keep: jet_argv.contains("--keep"), json: json}
         }
-        // Source/main.rs `"import"` -> CmdImport::run(&raw): raw with the command word first.
-        "import" -> return JetCLIPlan.Done{output: jet_cli_import_run(jet_cli_command_first(argv, command), json)}
         else -> {}
     }
     if jet_cli_inspect_word(command) {
