@@ -748,7 +748,10 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, module_identi
         if nominal.kind != SemaRegistrationNominalKind.Struct
             && nominal.kind != SemaRegistrationNominalKind.Enum
             && nominal.kind != SemaRegistrationNominalKind.Distinct
-            && nominal.kind != SemaRegistrationNominalKind.TypeAlias -> next
+            && nominal.kind != SemaRegistrationNominalKind.TypeAlias
+            // A trait in type position (`CompilerTraceSink?`) is a type too: a signature from
+            // another package spells it bare where the caller holds its owner-qualified name.
+            && nominal.kind != SemaRegistrationNominalKind.Trait -> next
         if !sema_registration_visible(nominal.symbol.visibility, caller.module_identity, caller.package_identity, owner_row.module_identity, owner_row.package_identity) -> next
         if found == .Val(previous) {
             if previous.module_index != owner.module_index -> return None

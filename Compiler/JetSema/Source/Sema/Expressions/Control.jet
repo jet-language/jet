@@ -447,11 +447,26 @@ fn sema_failure_conversion_leaf(ty: Type) -> String Never! {
 // the checked route carries that routine's symbol key, the identity lowering
 // resolves. 's standard-library family takes the same route
 // through `sema_prelude_error_conversion_key`.
-fn sema_failure_declared_conversion(source: Type, target: Type, scopes: SemaScopeTable) -> String? {
+fn sema_failure_declared_conversion(source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     name :: sema_failure_declared_conversion_name(sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
-    index :: sema_scope_resolve_index(scopes, name) ?? return None
+    index :: sema_scope_resolve_index(scopes, name) ?? return sema_failure_namespace_conversion(name, environment, program)
     if scopes.bindings[index].symbol.kind != SymbolKind.Function -> return None
     Val(scopes.bindings[index].symbol.id.key)
+}
+
+// A conversion declared in another member file of the same package. Its routine is a
+// generated name no source spells, so the namespace never binds it into this file's
+// scope; the package is still one namespace, so its routine applies here.
+fn sema_failure_namespace_conversion(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    graph :: program.registration_graph ?? return None
+    if !sema_registration_package_is_namespace(environment.package_identity) -> return None
+    loop module_row in graph.modules {
+        if module_row.package_identity != environment.package_identity -> next
+        loop function in module_row.functions {
+            if function.symbol.name == name -> return Val(function.symbol.id.key)
+        }
+    }
+    None
 }
 
 struct SemaFailureProvenance {
@@ -710,7 +725,7 @@ fn sema_expression_propagation_conversion(inner: TExpr, source_expr: Expr?, span
             if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return sema_expression_propagation_taken(&context, TTryConvert.DefaultErr)
             widened :: sema_expression_try_union_conversion(normalized_target, error)
             if widened == .Val(widening) -> return sema_expression_propagation_taken(&context, widening)
-            if sema_failure_declared_conversion(error, target, scopes) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
+            if sema_failure_declared_conversion(error, target, environment, program, scopes) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
             if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
             if normalized_target == (Type.Named{name: "Err"}) {
                 &diagnostics.push(sema_failure_no_default_conversion(error, span, implicit))

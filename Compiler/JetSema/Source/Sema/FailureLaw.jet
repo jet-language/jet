@@ -192,12 +192,15 @@ fn sema_error_conversion_function(name: String, from_span: Span, to_ty: String, 
 // E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked
 // routine; a rejected one is removed so it never reaches lowering. `items` is
 // rewritten in place, and a list without a conversion is left untouched.
-fn sema_error_conversion_items(items: &[Item], diagnostics: &[Diagnostic]) {
+// `package_types` are the names a sibling member file of the same package declares that
+// this file reaches: types of the package itself for the orphan rule (S28).
+fn sema_error_conversion_items(items: &[Item], package_types: [String], diagnostics: &[Diagnostic]) {
     has_conversion :: loop index in 0..<items.len() {
         if items[index] == .ErrorConv(_) -> break true
     } ?? false
     if !has_conversion -> return
-    local_types :: sema_error_conversion_local_types(items)
+    local_types := sema_error_conversion_local_types(items)
+    loop name in package_types -> &local_types.push(name)
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
     // Each item moves from `items` into `output`, in order; a conversion is

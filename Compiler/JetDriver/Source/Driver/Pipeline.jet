@@ -257,6 +257,7 @@ use jet_codegen.[
     jet_codegen_lower_cffi_facts,
     jet_codegen_lower_job_test_artifacts,
     jet_codegen_precise_helper_names,
+    jet_codegen_function_value_keys,
     jet_codegen_reachable_core_rows,
     jet_codegen_sorted_order,
     jet_rust_emit_program,
@@ -1693,6 +1694,14 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 // Rust `is_core_precise_source_target` roots it): it is checked and lowered
 // with the item, together with its own callees.
 fn jet_driver_comptime_precise_refs(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, roots: [TExpr], body: [TStmt], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
+    // Function values the body stores are lowered with it, like its callees.
+    values :: jet_codegen_function_value_keys(roots, body)
+    if values.len() > 0 {
+        if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)
+        loop key in values {
+            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(&queue, &queued, owner, key)
+        }
+    }
     names :: jet_codegen_precise_helper_names(roots, body)
     if names.len() == 0 -> return
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, &index)

@@ -29,9 +29,8 @@ enum RuntimeLockState {
 
 // A held process lock. `owner` is the FILELOCK1 lock on the canonical managed
 // root's dedicated regular file `owner_path`; `marker` pins the scope marker
-// inode that `path` must keep naming. Scope exit (or handing `owner` to a child
-// through `keep_open_for`) releases the kernel lock; both files always stay on
-// disk.
+// inode that `path` must keep naming. Scope exit releases the kernel lock; both
+// files always stay on disk.
 struct RuntimeLock {
     path: String
     owner_path: String
@@ -44,14 +43,6 @@ struct RuntimeLock {
     fn revalidate(self) IOError! -[FS]> {
         self.authority.revalidate()
         env_lock_validate_marker(self.marker_parent, self.marker, self.marker_name, self.path)
-    }
-
-    // Rust `acquire_lease_lock` + `set_inheritable`: the launched process tree
-    // inherits the lease lock so the kernel lock stays
-    // held until the last descendant exits. The parent copy closes when the
-    // spec is dropped.
-    fn keep_open_for(^self, spec: ProcessSpec) -> ProcessSpec {
-        spec.keep_open(^self.owner)
     }
 }
 

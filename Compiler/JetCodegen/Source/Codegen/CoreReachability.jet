@@ -256,6 +256,25 @@ fn jet_codegen_precise_helper_names(roots: [TExpr], body: [TStmt]) -> [String] N
 
 // The precise helpers one checked expression and every expression below it
 // lower to, each added once, read in place (tir_each_expr_child).
+// Functions an expression tree names as values (`probe: pkg_lua_render_probe`), not
+// calls: Sema records call facts only, so a compile-time body that stores a function
+// value must queue it for lowering itself. Each key once, in tree order.
+fn jet_codegen_function_value_keys(roots: [TExpr], body: [TStmt]) -> [String] Never! {
+    keys := [String]{}
+    loop root in roots -> jet_codegen_function_value_tree(root, &keys)
+    loop statement in body {
+        tir_each_stmt_child(statement, (child: TExpr) -> jet_codegen_function_value_tree(child, &keys))
+    }
+    keys
+}
+
+fn jet_codegen_function_value_tree(expression: TExpr, keys: &[String]) Never! {
+    if expression.kind == .ConstRef(symbol) {
+        if symbol.key.starts_with("function:") && !keys.contains(symbol.key) -> &keys.push(symbol.key)
+    }
+    tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_function_value_tree(child, &keys))
+}
+
 fn jet_codegen_precise_tree_names(expression: TExpr, names: &[String]) Never! {
     helper :: jet_codegen_precise_expr_helper(expression)
     if helper == .Val(name) {
