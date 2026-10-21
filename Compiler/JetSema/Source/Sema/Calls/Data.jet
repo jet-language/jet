@@ -441,7 +441,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
                 }
             }
-            if parameters.len() == 1 && method == "force" && (name == "ExpiringValue" || (core_source_owns_type(name) && name.ends_with("::Core/time/time.jet::ExpiringValue"))) {
+            if parameters.len() == 1 && method == "force" && (name == "ExpiringValue" || (core_source_owns_type(name) && core_identity_is(name, "core.time", "ExpiringValue"))) {
                 &diagnostics.push(sema_error("E0511", span, "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `.get(clock)` and handle `Expired`"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }

@@ -302,7 +302,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             variant: loadable_variant(state).to_string(),
             args: vec![(None, one(0)?.clone())],
         }),
-        // A raw per-session word; Core/perf owns its interpretation.
+        // A raw per-session word; Core/Perf owns its interpretation.
         ("core.perf", "__read_bits") => Ok(CtValue::Int(PERF_FIDELITY.with(Cell::get))),
         ("core.perf", "__write_bits") => {
             let bits = as_int(one(0)?, span)?;
@@ -1602,7 +1602,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.net.url", "data") => {
             // `mime` arg is the `core.net.mime.MIME` record (`top`/`sub`/
             // `parameters`); render its essence + parameters the same way
-            // `MIME.to_string()` (Core/net/mime.jet) does, field-for-field.
+            // `MIME.to_string()` (Core/Net/Mime.jet) does, field-for-field.
             let mime = one(0)?;
             let text = as_string(one(1)?, span)?;
             let rendered = match mime {

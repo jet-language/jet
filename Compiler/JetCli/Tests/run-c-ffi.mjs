@@ -13,7 +13,7 @@ const repo = fileURLToPath(new URL('../../../', import.meta.url));
 mkdirSync(scratch, { recursive: true });
 const filter = path => basename(path) !== '.jet';
 cpSync(join(repo, 'Examples/features/lowlevel/native_c'), join(scratch, 'native_c'), { recursive: true, filter });
-cpSync(join(repo, 'Core/vendor/sqlite3'), join(scratch, 'sqlite3'), { recursive: true, filter });
+cpSync(join(repo, 'Core/Vendor/Sqlite3'), join(scratch, 'sqlite3'), { recursive: true, filter });
 const fixtures = [
   ['native_c', readFileSync(join(repo, 'Examples/features/expected/lowlevel/native_c/run.out'), 'utf8')],
   ['sqlite3/fixture', 'sqlite-memory=42\n'],

@@ -229,7 +229,7 @@ fn core_math_rng_loader_trigger_has_a_bare_positive_and_unrelated_negative() {
         std::fs::write(&entry, source).unwrap();
         let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).expect("loader fixture parses");
         assert_eq!(
-            bundle.modules.iter().any(|module| module.path.ends_with("Core/math/random.jet")),
+            bundle.modules.iter().any(|module| module.path.ends_with("Core/Math/Random.jet")),
             expected,
             "{label}: an unrelated program must not preload RNG",
         );
@@ -345,7 +345,7 @@ fn core_math_rng_unlisted_core_alias_does_not_become_a_bare_prelude_type() {
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
         .expect("load the real embedded testing module before injecting the negative alias");
     let testing = bundle.modules.iter_mut()
-        .find(|module| module.path.ends_with("Core/testing/testing.jet"))
+        .find(|module| module.path.ends_with("Core/Testing/Testing.jet"))
         .expect("core.testing is loaded");
     let mut alias = testing.items.iter().find_map(|item| match item {
         jet::AST::Item::TypeAlias(alias) if alias.name == "RNG" => Some(alias.clone()),

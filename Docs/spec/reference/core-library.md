@@ -121,7 +121,7 @@ Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
 operation; its callers keep their own fault preflight and error resource.
 
 Devtools checked publication constructs its package/module/panel identities
-and ordered, JSON-escaped field envelope in `Core/devtools/devtools.jet`.
+and ordered, JSON-escaped field envelope in `Core/Devtools/Devtools.jet`.
 The private typed-payload leaf retains the existing validated event and global
 sink, including silent rejection of invalid events and no durable-delivery
 claim when no sink is installed. Volatile memory access retains the checked
@@ -138,7 +138,7 @@ library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
 Email address, attachment, envelope, and message construction validates in
-`Core/email/email.jet`: control-character refusal precedes address parsing,
+`Core/Email/Email.jet`: control-character refusal precedes address parsing,
 mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
 limits precede attachment size, and envelopes require 1–100 recipients.
 The same source computes the native conservative wire bound and assembles MIME:
@@ -641,7 +641,7 @@ Whole-file and metadata functions:
 false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
-`glob` and `copy_dir` own their DFS policy in `Core/files/files.jet`. Native
+`glob` and `copy_dir` own their DFS policy in `Core/Files/Files.jet`. Native
 entries contexts retain `DirEntry` and source/destination paths, not reconstructed
 UTF-8 names. Directory copy processes unsorted `ReadDir` order, copies only
 regular files, and releases each entry after use. All host failures report the
@@ -969,7 +969,7 @@ optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
 connecting.
 
 The safe limits, environment configuration, and private configuration predicates
-live in `Core/email`. Before creating a mailer, `smtp_from_env` checks limits,
+live in `Core/Email`. Before creating a mailer, `smtp_from_env` checks limits,
 host, port/security pairing, authentication name, CA PEM, and DKIM header policy,
 in that order. The first invalid limit is reported in field declaration order.
 `Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
@@ -1778,7 +1778,7 @@ cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 
 OS-fact fallback selection, release-file parsing, supplementary-group sizing,
 load-average fallback, process-time conversion, and POSIX syscall error contexts
-are implemented in `Core/sys/sys.jet`. Temporary native leaves provide only host
+are implemented in `Core/Sys/Sys.jet`. Temporary native leaves provide only host
 availability, syscall return values, errno, or host bytes. `release`/`version`
 keep the first matching release-file field, including an empty field; they do
 not interpret it as shell syntax.
@@ -1818,7 +1818,7 @@ redact the rejected value.
 
 `core.process` is the process-boundary reference for application and tool
 authors who launch or supervise child processes. Its executable contract is
-defined by [`Core/process/process.jet`](../../../Core/process/process.jet), the
+defined by [`Core/Process/Process.jet`](../../../Core/Process/Process.jet), the
 process checks in
 [`process_ui.rs`](../../../crates/jet-sema/src/Sema/CheckerCoreLib/process_ui.rs),
 and tests such as
@@ -2101,7 +2101,7 @@ results use normalized exact policies, not fieldwise record derivation.
 Decimal's named hooks, rounding, and exact rendering are also source methods,
 so loaded nominal identities and bare exact values expose the same behavior.
 
-The policies and rendering live in `Core/math/math.jet`. Checked precise TIR
+The policies and rendering live in `Core/Math/Math.jet`. Checked precise TIR
 operations resolve their reserved helpers by the loaded math module identity;
 they do not resolve a user function with the same helper spelling.
 The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
@@ -2437,7 +2437,7 @@ particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
 
 The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
-formatting, and text codecs are implemented in `Core/time/time.jet` on all
+formatting, and text codecs are implemented in `Core/Time/Time.jet` on all
 tiers. `Date` aliases `LocalDate`; immutable zone tables are plain values,
 copied with their zone, and borrowed reads need no shared-memory guard or
 `Time.Wait` effect. Native seams supply raw clock samples, environment values
@@ -2453,7 +2453,7 @@ filesystem samples as absent.
 
 Core's reserved `__` seams are loaded only through the trusted embedded-Core
 loader. To check this implementation, check a program importing `core.time`,
-not `Core/time/time.jet` as a user entry: user-written reserved names still
+not `Core/Time/Time.jet` as a user entry: user-written reserved names still
 produce E0067.
 
 Codec compatibility is intentionally separate from strict public parsing:
@@ -2467,8 +2467,8 @@ before saturating the final `Duration` to its signed nanosecond range.
 
 `zone` accepts UTC/GMT/Z and numeric offsets; the runtime host also resolves
 named IANA zones from TZif data. On native hosts, lookup checks
-`JET_TZDB_DIR`, `TZDIR`, `$JET_ROOT/Core/time/tzdb`, the repository's
-`Core/time/tzdb`, `/usr/share/zoneinfo`, `/usr/share/lib/zoneinfo`, and
+`JET_TZDB_DIR`, `TZDIR`, `$JET_ROOT/Core/Time/tzdb`, the repository's
+`Core/Time/tzdb`, `/usr/share/zoneinfo`, `/usr/share/lib/zoneinfo`, and
 `/etc/zoneinfo`. Optional `posix/` and `right/` prefixes are stripped for
 lookup. Web/WASM uses its embedded zone data. A name with `..`, a leading
 `/`, or a leading `\` is rejected; an unavailable name returns `TimeError`
@@ -2550,7 +2550,7 @@ following the Measurement/LogSpan rule. The retired module constructor and
 `force` diagnostics are unchanged.
 
 `ExpiringValue` is a reserved source-owned nominal declared in
-`Core/time/time.jet`. The canonical Core ownership inventory admits that
+`Core/Time/Time.jet`. The canonical Core ownership inventory admits that
 declaration and its impl even though the spelling remains reserved for user
 code (E0106 for redeclarations, E0301 for user impls on the builtin spelling).
 Source ownership is distinct from public export metadata and also applies
@@ -2590,7 +2590,7 @@ replayed (D-TIMERES1=A; D-DET-CAPAPI).
 week calculations without locale tables. Its module-global weekday constants
 are `MONDAY :: 0` through `SUNDAY :: 6`.
 
-All calendar behavior is implemented in the embedded `Core/time/calendar.jet`
+All calendar behavior is implemented in the embedded `Core/Time/Calendar.jet`
 source shared by the execution tiers, including epoch conversion without a
 native date-time carrier.
 
@@ -2671,8 +2671,8 @@ public typed-text carrier.
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
 
 The concrete format sources live under
-[`Core/encoding/`](../../../Core/encoding/), and typed CSV/JSON convenience
-functions are also exported by [`Core/data/data.jet`](../../../Core/data/data.jet).
+[`Core/Encoding/`](../../../Core/Encoding/), and typed CSV/JSON convenience
+functions are also exported by [`Core/Data/Data.jet`](../../../Core/Data/Data.jet).
 A decoder is only type-safe when its destination has an explicit shape; do not
 use an untyped string round trip as a substitute for a typed codec.
 
@@ -2876,7 +2876,7 @@ Its format grammar accepts optional `<` little-endian or `>`/`!` big-endian
 prefixes, repeat counts, and the `x`, `c`, `b`, `B`, `h`, `H`, `i`, `l`, `I`,
 `L`, `q`, and `Q` integer codes. Native-alignment `@` is not part of this
 portable grammar. The source is
-[`Core/encoding/binary.jet`](../../../Core/encoding/binary.jet).
+[`Core/Encoding/Binary.jet`](../../../Core/Encoding/Binary.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3073,7 +3073,7 @@ stream is terminal and does not resume iteration.
 plan and renders that plan as text or SVG. The source implementation is a
 portable inspection renderer: it does not require a GPU, and it makes missing
 values explicit as zero. The module contract is defined in
-[`Core/data/plot.jet`](../../../Core/data/plot.jet) and exercised by the plot
+[`Core/Data/Plot.jet`](../../../Core/Data/Plot.jet) and exercised by the plot
 corpus under [`tests/conformance/corpus/core/data/plot/`](../../../tests/conformance/corpus/core/data/plot/).
 
 The aggregate selector retains the native absence value, distinct from
@@ -3145,7 +3145,7 @@ with the source helpers, while application examples use public formatting.
 | `bytes(value: Int) -> String` | text | Format bytes in SI units `B`, `KB`, `MB`, `GB`, `TB`, `PB`, or `EB`, with one decimal below 10 (`1536` is `1.5 KB`, `1000` is `1 KB`). |
 | `duration(milliseconds: Int) -> String` | text | Format a duration using at most three nonzero units. |
 
-Calls run [`Core/text/fmt.jet`](../../../Core/text/fmt.jet); interpolation
+Calls run [`Core/Text/Fmt.jet`](../../../Core/Text/Fmt.jet); interpolation
 selectors and compile-time calls run the shared Prelude kernel with the same
 steps, so every tier prints the same text. Fixed-precision rounding scales by
 `10^frac` and rounds half away from zero; non-finite values print as ordinary
@@ -3157,7 +3157,7 @@ The library-call boundary is deliberate: ordinary human formatting remains expli
 `core.log` writes structured records through a configured sink. Levels are
 `debug`, `info`, `warn`, `error`, `critical`, and `fatal`; `warning` is an
 alias for `warn`. A record can carry typed fields and a redaction marker. The
-package source is [`Core/log/log.jet`](../../../Core/log/log.jet).
+package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3201,7 +3201,7 @@ at explicit suspension points; the scheduler does not turn a blocking
 computation into preemptive parallelism. Mutable task-owned values stay with
 their task; values crossing a task or channel boundary must satisfy Jet's
 sendability rules. The implementation is in
-[`Core/tasks/tasks.jet`](../../../Core/tasks/tasks.jet).
+[`Core/Tasks/Tasks.jet`](../../../Core/Tasks/Tasks.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3261,7 +3261,7 @@ one millisecond; their first delivered tick is one.
 `core.prelude` is available without a separate package import. Its functions
 are deliberately small barriers and predicates used by generic code and
 constant evaluation; they are not alternate syntax for bindings. See
-[`Core/prelude/prelude.jet`](../../../Core/prelude/prelude.jet).
+[`Core/Prelude/Prelude.jet`](../../../Core/Prelude/Prelude.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3281,7 +3281,7 @@ constant evaluation; they are not alternate syntax for bindings. See
 it does not replace `jet test`'s test discovery. A test can use a fake clock,
 fake random source, fake data, temporary directory, fixture, corpus, snapshot,
 or golden file. The public source is
-[`Core/testing/testing.jet`](../../../Core/testing/testing.jet).
+[`Core/Testing/Testing.jet`](../../../Core/Testing/Testing.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3354,7 +3354,7 @@ standard-library vocabulary.
 `core.ui` represents a UI as a typed node tree plus geometry and accessibility
 metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
-rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
+rendering capabilities. The source is [`Core/Ui/Ui.jet`](../../../Core/Ui/Ui.jet).
 
 `box` stores its children in the returned tree. Its runtime boundary therefore
 accepts an owned child list; compiler borrow-elision must not treat that native
@@ -3423,7 +3423,7 @@ existing public capability row.
 a value and version; `computed` and `derived` values track reads; an `Effect`
 can be unsubscribed. The source carrier is immutable, while the runtime
 provider supplies synchronized boxes and dependency tracking. See
-[`Core/reactive/reactive.jet`](../../../Core/reactive/reactive.jet) and the
+[`Core/Reactive/Reactive.jet`](../../../Core/Reactive/Reactive.jet) and the
 reactive conformance corpus.
 
 | Signature | Result | Description |
@@ -3458,7 +3458,7 @@ button handlers use the trailing block form, `ui.button("Click") { … }`.
 `core.reactive.loadable` models a value that is idle, loading, loaded, or
 failed. The state carries the successful value or failure reason and provides a
 retry transition; callers can inspect it without using sentinel values. Its
-source is [`Core/reactive/loadable.jet`](../../../Core/reactive/loadable.jet).
+source is [`Core/Reactive/Loadable.jet`](../../../Core/Reactive/Loadable.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3475,7 +3475,7 @@ source is [`Core/reactive/loadable.jet`](../../../Core/reactive/loadable.jet).
 
 `core.event` defines typed event values, scopes, listeners, policies, and
 bounded asynchronous delivery. It does not use a stringly named global event
-bus. The source contract is [`Core/event/event.jet`](../../../Core/event/event.jet),
+bus. The source contract is [`Core/Event/Event.jet`](../../../Core/Event/Event.jet),
 and the event conformance corpus covers listener lifetime, policy, and
 async-result behavior.
 
@@ -3508,7 +3508,7 @@ The event family is a typed Core value with no additional event syntax (`D-EVENT
 `core.web` builds server-rendered applications on top of `core.http`. An
 `App` owns routes, live state, sessions, and storage adapters; the browser
 surface is represented by typed effects rather than an assumed browser DOM.
-The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
+The module source is [`Core/Web/Web.jet`](../../../Core/Web/Web.jet).
 `App` and `WebPage` are opaque compiler-owned carriers, not constructible source
 records. The registered constructors and App builder methods retain the checked
 route graph and its typed handlers across both compiler implementations.
@@ -3632,7 +3632,7 @@ lambda.
 `core.mem` contains explicit allocator families and audited raw-memory helpers.
 Arenas are the safe fast-allocation primitive; raw pointers and volatile access
 are separate unsafe operations. The source is
-[`Core/mem/mem.jet`](../../../Core/mem/mem.jet).
+[`Core/Mem/Mem.jet`](../../../Core/Mem/Mem.jet).
 
 Raw `*T` fields in physical aggregates use the selected target's pointer size,
 alignment, and pointer-sized stride, even when the pointee's layout is opaque;
@@ -3695,7 +3695,7 @@ views cannot be returned, captured, stored, or sent across a task boundary.
 Option-returning convenience parsers. `Int.parse` and `Float.parse` are
 fallible destination-owned conversions; do not confuse their `Result` return
 with the module's Option helpers. The implementation is in
-[`Core/text/parse.jet`](../../../Core/text/parse.jet).
+[`Core/Text/Parse.jet`](../../../Core/Text/Parse.jet).
 
 The builtin method `text.count(needle)` uses the shared `jet_unicode_count`
 kernel in compile-time evaluation and at runtime. It counts non-overlapping,
@@ -3859,7 +3859,7 @@ narrowing.
 sockets, address conversion, readiness, timeouts, and DNS. Calls that need a
 provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
-[`Core/net/net.jet`](../../../Core/net/net.jet).
+[`Core/Net/Net.jet`](../../../Core/Net/Net.jet).
 
 DNS failures carry the built-in `NetDNSError` inside `NetError.DNS`: `NotFound`
 retains the queried name, while `Failure` retains the resolver's message.
@@ -3981,7 +3981,7 @@ not a copied local handle.
 
 `core.net.tls` upgrades a connected TCP stream to a verified TLS stream. Its
 configuration carriers are validated before network use, and configured ALPN
-protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](../../../Core/net/tls.jet).
+protocols are passed through the native TLS provider. See [`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4025,7 +4025,7 @@ against the checked-in local CA and checks the verified peer chain.
 migrations, and typed row decoding. SQL interpolation binds values; raw SQL
 requires the explicit `SQL.raw` escape. Database operations carry `DB` (and,
 when they wait, `Time.Wait`) effects. The module source is
-[`Core/db/db.jet`](../../../Core/db/db.jet).
+[`Core/Db/Db.jet`](../../../Core/Db/Db.jet).
 The backend-neutral driver/policy boundary keeps query operations and the user policy attached to the typed scope (`D-DBDRIVER1=A`; `D-DBPOLICY-BIND1=A`).
 
 | Signature | Result | Description |
@@ -4075,7 +4075,7 @@ adapter is held; it is not part of this source-owned Core integration.
 
 ### `core.db.sql` — pure SQL grammar and row selection
 
-[`Core/db/sql.jet`](../../../Core/db/sql.jet) is the canonical public SQL
+[`Core/Db/Sql.jet`](../../../Core/Db/Sql.jet) is the canonical public SQL
 kernel. Import it with `use core.db.sql as sql`; the former Core-private
 runtime module has been relocated, without a compatibility module or re-export.
 It carries no database connection or raw-SQL execution authority.
@@ -4105,7 +4105,7 @@ The lifted declarations retain their private visibility for other files.
 helpers, value-based differentiation, linear algebra, FFT, and serialization.
 `Auto` selects the CPU reference path; an explicit unsupported device returns a
 typed capability error rather than silently falling back. The source is
-[`Core/compute/compute.jet`](../../../Core/compute/compute.jet), with executable
+[`Core/Compute/Compute.jet`](../../../Core/Compute/Compute.jet), with executable
 examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
 The registered compute vocabulary is the sole nominal owner of tensors,
@@ -4169,7 +4169,7 @@ claiming that an arbitrary closure is a native kernel.
 `core.service` describes named service trees, bounded mailboxes, restart
 strategies, and durable delivery. The topology and delivery records are
 structured values, not an untyped supervisor log. The source is
-[`Core/service/service.jet`](../../../Core/service/service.jet); the service
+[`Core/Service/Service.jet`](../../../Core/Service/Service.jet); the service
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
@@ -4287,7 +4287,7 @@ to the selected delivery policy rather than assuming retries are free.
 ### `core.archive` — byte containers and checksummed compression
 
 `core.archive` contains bounded archive and compression primitives. The Jet
-implementation lives under [`Core/archive/`](../../../Core/archive/); it is not
+implementation lives under [`Core/Archive/`](../../../Core/Archive/); it is not
 the retired Rust `corelib/core.archive` path. Archive output is capped at
 67,108,864 bytes and archive entry counts at 4,096; file-oriented gzip and
 zstd helpers use their own 64 MiB output cap.
@@ -4326,7 +4326,7 @@ output-bomb, 4,097-entry, and traversal-name inputs for every codec.
 
 `core.archive.gzip` handles whole-buffer gzip streams and text/file adapters.
 It validates the gzip magic, size, CRC, and supported method before returning
-bytes. See [`Core/archive/gzip.jet`](../../../Core/archive/gzip.jet).
+bytes. See [`Core/Archive/Gzip.jet`](../../../Core/Archive/Gzip.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4349,7 +4349,7 @@ checksum failures. The output limit is 64 MiB.
 `core.archive.zstd` handles the supported subset of Zstandard whole-buffer
 streams and file adapters. It emits standards-valid single-segment raw blocks;
 compressed blocks and dictionaries are rejected explicitly. The source is
-[`Core/archive/zstd.jet`](../../../Core/archive/zstd.jet).
+[`Core/Archive/Zstd.jet`](../../../Core/Archive/Zstd.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4427,7 +4427,7 @@ provider calls reached while obtaining its wall-clock sample.
 
 The state transitions, SQL, row projections, CBOR payloads, signed receipts,
 retry policy, event fields, and commit-before-publication ordering are Jet
-source in `Core/jobs/jobs.jet`. The private SQLite and Devtools leaves call
+source in `Core/Jobs/Jobs.jet`. The private SQLite and Devtools leaves call
 the existing host kernels; they do not implement a second queue or sink.
 The compiler checks the declared `#Job` identity and its payload type before
 normalizing the name and forwarding `enqueue`/`delay` to their checked source

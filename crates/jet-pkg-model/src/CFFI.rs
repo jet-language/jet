@@ -3878,7 +3878,7 @@ pub fn resolve_link_for_target_with_entry(
                 candidates.push(parent.join("jet-runtime/foreign/sqlite3"));
             }
         }
-        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/vendor/sqlite3"));
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/Vendor/Sqlite3"));
         for directory in candidates {
             if directory.join("sqlite3.c").is_file() {
                 return clib_link(lib, &directory.display().to_string(), project_root);

@@ -4,7 +4,7 @@ import { nativeRecordExports, partitionNativeRecordExports } from '../../../Tool
 import { classifyNativeInventory } from '../../../Tools/agent/classify-native-route-glue.mjs';
 
 const types = Array.from({ length: 10 }, (_, index) => {
-  const key = `<corelib>/Core/fixture::Core/fixture/fixture.jet::Record${index}`;
+  const key = `<corelib>/core.fixture::Record${index}`;
   return { runtime: `Record${index}`, jetName: key, source: { key, path: 'Core/fixture/fixture.jet' },
     record: { kind: 'struct', members: [{ name: 'value', kind: ['Text', 'Int', 'Flag', 'Float', 'Tag.Color', 'Rec.Record0', 'OptText', 'OptInt', 'List.Byte', 'Entries.Rec.Record0'][index] }] } };
 });

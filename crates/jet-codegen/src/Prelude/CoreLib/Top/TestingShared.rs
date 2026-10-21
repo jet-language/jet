@@ -1,4 +1,4 @@
-// Physical leaves for Core/testing/testing.jet. Evidence classification,
+// Physical leaves for Core/Testing/testing.jet. Evidence classification,
 // sanitation, diff bounds/LCS, and lifecycle ordering stay in Jet.
 // Plain records deliberately use the existing private Core record mapper.
 #[derive(Clone, Debug, PartialEq)]

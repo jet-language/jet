@@ -3,7 +3,7 @@
 // `crypto_bridge_entropy_runtime()` (standalone Outcome + entropy provider).
 include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
 
-// Expiry ownership and exactly-once Close now run in Core/crypto/vault.jet's
+// Expiry ownership and exactly-once Close now run in Core/Crypto/Vault.jet's
 // source test; this bridge fixture exercises only the entropy/wipe raw leaves.
 
 #[cfg(test)]

@@ -2224,7 +2224,7 @@ fn core_fixed_sig_raw(
             Some(Type::Option(Box::new(Type::String))),
         )),
         // D-AUTH1=A: the process byte cell behind the Jet auth store
-        // (`Core/auth/auth.jet` owns its layout and every session rule).
+        // (`Core/Auth/Auth.jet` owns its layout and every session rule).
         ("core.auth", "__store_load") => Some((vec![], Some(Type::List(Box::new(u8_ty()))))),
         ("core.auth", "__store_replace") => Some((
             vec![
@@ -4836,7 +4836,7 @@ fn core_fixed_sig_raw(
                 encoding_error_ty(),
             )),
         )),
-        // #3593: policy-free provider leaves behind Core/files/files.jet. Only
+        // #3593: policy-free provider leaves behind Core/Files/files.jet. Only
         // embedded Core sources may spell the reserved `__` names.
         ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
             Some(result_ty(unit_ty(), io.clone())))),

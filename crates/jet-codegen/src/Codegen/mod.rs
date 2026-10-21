@@ -1112,7 +1112,7 @@ const ORDERING_ENUM: &str = concat!(
 const COMPARABLE_TRAIT: &str =
     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
 
-// Core source (`Core/font/font.jet`) compares the native `FontStyle` carrier
+// Core source (`Core/Font/Font.jet`) compares the native `FontStyle` carrier
 // with `==`, which MIR lowers through `__jet_Comparable`. HostServices.rs is
 // also included by hosts without the trait, so the impl lives beside its push.
 const FONT_STYLE_COMPARABLE: &str = "impl __jet_Comparable for JetFontStyle { fn compare(&self, rhs: &Self) -> __jet_Ordering { match (*self as u8).cmp(&(*rhs as u8)) { std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater } } }\n";

@@ -37,9 +37,9 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
 
 #Test("runtime unit lookup selects the longest installed nested unit") {
     rows :: [JetDriverCoreSource]{
-        jet_driver_runtime_test_row("core.text.runtime.assets", "Core/text/runtime/assets.jet", true),
-        jet_driver_runtime_test_row("core.text.runtime.assets.x", "Core/text/runtime/assets/x.jet", true),
-        jet_driver_runtime_test_row("core.text.runtime.assets.x.word", "Core/text/not-runtime.jet", false),
+        jet_driver_runtime_test_row("core.text.runtime.assets", "Core/Text/Runtime/assets.jet", true),
+        jet_driver_runtime_test_row("core.text.runtime.assets.x", "Core/Text/Runtime/Assets/x.jet", true),
+        jet_driver_runtime_test_row("core.text.runtime.assets.x.word", "Core/Text/not-runtime.jet", false),
     }
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.x.word"), Val(1))
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.x"), Val(1))
@@ -65,19 +65,19 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
 }
 
 #Test("runtime entry privileges require both the installed path and exact bytes") {
-    row :: jet_driver_runtime_test_row("core.text.runtime.assets", "Core/text/runtime/assets.jet", true)
+    row :: jet_driver_runtime_test_row("core.text.runtime.assets", "Core/Text/Runtime/assets.jet", true)
     rows :: [JetDriverCoreSource]{row}
     unit :: jet_driver_core_source_unit(row.module_name, row.path, 0, row.source)
     assert_eq(jet_driver_runtime_entry_row(rows, unit, row.source), Val(0))
     assert_eq(jet_driver_runtime_entry_row(rows, unit, row.source + "\n"), None)
-    other :: jet_driver_core_source_unit(row.module_name, "Core/text/runtime/other.jet", 0, row.source)
+    other :: jet_driver_core_source_unit(row.module_name, "Core/Text/Runtime/other.jet", 0, row.source)
     assert_eq(jet_driver_runtime_entry_row(rows, other, row.source), None)
     public_row :: jet_driver_runtime_test_row(row.module_name, row.path, false)
     assert_eq(jet_driver_runtime_entry_row([JetDriverCoreSource]{public_row}, unit, row.source), None)
 }
 
 #Test("an already loaded runtime unit stays private to Core importers") {
-    row :: jet_driver_runtime_test_row("core.text.runtime.assets", "Core/text/runtime/assets.jet", true)
+    row :: jet_driver_runtime_test_row("core.text.runtime.assets", "Core/Text/Runtime/assets.jet", true)
     rows :: [JetDriverCoreSource]{row}
     units := [JetDriverSourceUnit]{jet_driver_core_source_unit(row.module_name, row.path, 0, row.source)}
     queued := [Bool]{true}

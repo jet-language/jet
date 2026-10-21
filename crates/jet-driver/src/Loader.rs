@@ -5161,7 +5161,7 @@ fn schedule_core_declaration_owners(
     }
 }
 
-/// Schedule the compiler-private String receiver part `Core/text/string.jet`.
+/// Schedule the compiler-private String receiver part `Core/Text/String.jet`.
 /// It keeps its reserved internal module identity, never `core.text.string`.
 fn schedule_core_text_string_part(
     core_source_modules: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
@@ -5176,7 +5176,7 @@ fn schedule_core_text_string_part(
     }
 }
 
-/// The String receiver methods `Core/text/string.jet` owns, except `len`: a
+/// The String receiver methods `Core/Text/String.jet` owns, except `len`: a
 /// `.len()` call is usually a list's, so it never loads the Unicode kernels on
 /// its own and keeps scheduling with `core.text`.
 fn string_source_methods() -> &'static [String] {
@@ -5196,7 +5196,7 @@ fn string_source_methods() -> &'static [String] {
 }
 
 /// True when `source` spells a call `.name(` of a String method that
-/// `Core/text/string.jet` owns. Every String method call then lowers to that
+/// `Core/Text/String.jet` owns. Every String method call then lowers to that
 /// one Jet body; a hit on another receiver only schedules the part once more.
 fn source_calls_string_source_method(source: &str) -> bool {
     let methods = string_source_methods();
@@ -6389,7 +6389,7 @@ mod stale_manifest_name_tests {
 
     #[test]
     fn embedded_core_parse_failures_keep_their_source_origin() {
-        let display = "<corelib>/Core/crypto/crypto.jet";
+        let display = "<corelib>/Core/Crypto/Crypto.jet";
         let source = "fn run() { value :: 1 | 2 }\n";
         let (tokens, lexical) = Lexer::lex_generated(source);
         let diagnostics = parse_frontend_tokens(&tokens, source, lexical).unwrap_err();
@@ -6450,7 +6450,7 @@ mod stale_manifest_name_tests {
             fs::write(&entry, "use core.service as service\nfn receive(tree: &service.ServiceTree, endpoint: service.ServiceEndpoint) -> String service.ServiceError! { service.receive(&tree, endpoint) }\nfn run() {}\n").unwrap();
             let mut bundle = load_entry(entry.to_str().unwrap()).expect("service import closure loads");
             let module = bundle.modules.iter_mut()
-                .find(|module| module.display.ends_with("Core/service/service.jet"))
+                .find(|module| module.display.ends_with("Core/Service/Service.jet"))
                 .expect("service source is retained");
             let start = module.source.find("fn pending_delivery_rollback(").unwrap();
             let end = module.source[start..].find("fn pending_rollback_error(").unwrap() + start;
@@ -6499,9 +6499,9 @@ mod stale_manifest_name_tests {
         ).unwrap();
         let bundle = load_entry(entry.to_str().unwrap()).expect("Core text runtime closure loads");
         for (owner, alias, target) in [
-            ("Core/text/string.jet", "string_unicode", "core.text.runtime.kernel_unicode_string"),
-            ("Core/text/string.jet", "string_width", "core.text.runtime.kernel_text_width"),
-            ("Core/text/text.jet", "text_unicode_string", "core.text.runtime.kernel_unicode_string"),
+            ("Core/Text/String.jet", "string_unicode", "core.text.runtime.kernel_unicode_string"),
+            ("Core/Text/String.jet", "string_width", "core.text.runtime.kernel_text_width"),
+            ("Core/Text/Text.jet", "text_unicode_string", "core.text.runtime.kernel_unicode_string"),
         ] {
             let part = jet_foundation::CoreSourceParts::core_runtime_part(target).unwrap();
             assert_eq!(bundle.modules.iter().filter(|module| module.alias == part.alias).count(), 1);
@@ -6525,7 +6525,7 @@ mod stale_manifest_name_tests {
         ).expect("CBOR parse part is cataloged");
         assert_eq!(bundle.modules.iter().filter(|module| module.alias == part.source.alias).count(), 1);
         let stream = bundle.modules.iter()
-            .find(|module| module.display == "Core/encoding/cbor_stream.jet")
+            .find(|module| module.display == "Core/Encoding/CborStream.jet")
             .expect("encoding owns the CBOR stream part");
         assert!(stream.imports.iter().any(|import|
             import.alias == "parser"

@@ -9,8 +9,8 @@ fn runtime_units_come_from_the_directory() {
     let unit = jet_foundation::CoreSourceParts::core_runtime_part(
         "core.text.runtime.kernel_unicode_string",
     )
-    .expect("the text runtime unit is generated from Core/text/runtime");
-    assert_eq!(unit.path, "Core/text/runtime/kernel_unicode_string.jet");
+    .expect("the text runtime unit is generated from Core/Text/Runtime");
+    assert_eq!(unit.path, "Core/Text/Runtime/KernelUnicodeString.jet");
     assert_eq!(unit.alias, "__core_text_runtime_kernel_unicode_string");
     assert!(!jet_foundation::Syntax::is_known_core_module(unit.module));
 }

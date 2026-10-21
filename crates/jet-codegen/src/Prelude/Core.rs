@@ -1487,7 +1487,7 @@ fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
 
 /// `core.crypto.random.__os_entropy`: the one host step behind the Jet
 /// `core.crypto.random.bytes` policy (bounds, length check and error meaning
-/// live in `Core/crypto/random.jet`). A cryptographic draw is never replayed by
+/// live in `Core/Crypto/Random.jet`). A cryptographic draw is never replayed by
 /// a deterministic world, so the boundary rejects it there; otherwise this is a
 /// single fail-closed OS CSPRNG fill. A rejected provider is `None`.
 fn jet_random_os_entropy(n: i64) -> Option<Vec<u8>> {

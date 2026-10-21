@@ -1,6 +1,6 @@
 // ── D-AUTH1=A (#506): the auth store cell and `app.auth` ─────────────────────
 // Session, password, magic-link and OAuth policy and the `Session` carrier are
-// Jet (`Core/auth/auth.jet`). This file keeps the `app.auth` route descriptor
+// Jet (`Core/Auth/Auth.jet`). This file keeps the `app.auth` route descriptor
 // and the one host primitive the Jet store needs: a process-global byte cell
 // with an atomic compare-and-replace. `app.auth` reuses these Prelude symbols (I9).
 

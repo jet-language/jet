@@ -148,7 +148,7 @@ fn cbor_sealed_parser_helpers_resolve_across_source_parts() {
     };
     let part = core_private_source_part("core.encoding.cbor").expect("CBOR sealed source part");
     assert_eq!(part.source.module, CORE_ENCODING_CBOR_PARSE_MODULE);
-    assert_eq!(part.source.path, "Core/encoding/cbor_parse.jet");
+    assert_eq!(part.source.path, "Core/Encoding/CborParse.jet");
     assert_eq!(part.source.owned_members, &["parse", "narrow_bits"]);
     assert!(jet_foundation::CoreModuleExports::core_source_module(CORE_ENCODING_CBOR_PARSE_MODULE).is_none());
     assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&CORE_ENCODING_CBOR_PARSE_MODULE));

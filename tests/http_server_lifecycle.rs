@@ -7429,7 +7429,7 @@ fn static_files_mount_refuses_escapes_dotfiles_and_link_escapes() {
 }
 
 /// Runtime CORS headers: construction/defaults and wildcard-credential rejection
-/// are covered by the source-owned Core/http/server.jet #Tests.
+/// are covered by the source-owned Core/Http/Server.jet #Tests.
 #[test]
 fn cors_stamps_named_origins_and_omits_headers_without_a_policy() {
 

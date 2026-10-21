@@ -1160,7 +1160,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // A source-owned Core nominal (`source_module … types { … }`, e.g. the
     // core.http message records whose leaves collide with the native server
     // carriers) keeps its declared layout: no native carrier aliases it.
-    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
+    if (name.starts_with("<corelib>/Core/Sync::") && name.ends_with("::RowPolicy"))
         || jet_foundation::CoreModuleExports::core_source_owns_type(name)
     {
         return None;
@@ -1168,7 +1168,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // D-SIGNAL1: core.reactive's `Computed<T>` (canonical derived value) and
     // `Effect` lifecycle handle use the same runtime carriers as `Signal` /
     // `Derived`. Matched by owner: `Effect` collides with core.compiler's enum.
-    if name.starts_with("<corelib>/Core/reactive::") {
+    if name.starts_with("<corelib>/Core/Reactive::") {
         match core_source_type_leaf(name) {
             n if n == Syntax::TYPE_COMPUTED => return Some("JetDerived"),
             n if n == Syntax::TYPE_EFFECT => return Some("JetReactiveEffect"),
@@ -1414,7 +1414,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
 /// hidden secret type parameter separately.
 pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
     let name = name
-        .strip_prefix("<corelib>/Core/email::Core/email/email.jet::")
+        .strip_prefix("<corelib>/Core/Email::Core/Email/Email.jet::")
         .unwrap_or(name);
     let leaf = match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
         Some((prefix, leaf)) if matches!(prefix, "email" | "core.email" | "core::email") => leaf,
@@ -1446,8 +1446,8 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
 
 pub(crate) fn core_crypto_type_name(name: &str) -> Option<&'static str> {
     let name = name
-        .strip_prefix("<corelib>/Core/crypto::Core/crypto/crypto.jet::")
-        .or_else(|| name.strip_prefix("<corelib>/Core/crypto::Core/crypto/expert.jet::"))
+        .strip_prefix("<corelib>/Core/Crypto::Core/Crypto/Crypto.jet::")
+        .or_else(|| name.strip_prefix("<corelib>/Core/Crypto::Core/Crypto/Expert.jet::"))
         .unwrap_or(name);
     let leaf = match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
         Some((prefix, leaf)) if matches!(prefix, "crypto" | "core.crypto" | "core::crypto") => leaf,
@@ -1529,8 +1529,8 @@ pub(crate) fn file_handle_carrier(name: &str) -> Option<FileHandleCarrier> {
     if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
         return None;
     }
-    let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::")
-        || name.starts_with("<corelib>/Core/term::Core/term/term.jet::")
+    let name = if name.starts_with("<corelib>/Core/Files::Core/Files/Files.jet::")
+        || name.starts_with("<corelib>/Core/Term::Core/Term/Term.jet::")
     {
         core_source_type_leaf(name)
     } else {
@@ -3382,7 +3382,7 @@ impl Cx {
 
     fn email_secret_rust_type(&self) -> String {
         let key = self.struct_fields.keys().find(|key| {
-            key.starts_with("<corelib>/Core/crypto::") && key.ends_with("::Secret")
+            key.starts_with("<corelib>/Core/Crypto::") && key.ends_with("::Secret")
         }).expect("email carriers require the checked core.crypto.Secret declaration");
         self.rust_type(&Type::Named(key.clone()))
     }
@@ -3390,7 +3390,7 @@ impl Cx {
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
         if let Type::Named(name) = &ty {
-            if name.starts_with("<corelib>/Core/compute::") {
+            if name.starts_with("<corelib>/Core/Compute::") {
                 if let Some(native) = compute_handle_rust_type(core_source_type_leaf(name)) {
                     return format!("{}{native}", self.root_prefix);
                 }
@@ -8229,7 +8229,7 @@ mod tests {
 
     #[test]
     fn source_file_handles_use_the_native_owned_carriers() {
-        let prefix = "<corelib>/Core/files::Core/files/files.jet::";
+        let prefix = "<corelib>/Core/Files::Core/Files/Files.jet::";
         for (leaf, rust, interior_mutable_receiver) in [
             ("FileReader", "JetFileReader", true),
             ("FileWriter", "JetFileWriter", true),
@@ -8245,7 +8245,7 @@ mod tests {
 
     #[test]
     fn source_owned_router_enums_are_not_elided_as_native_enums() {
-        let prefix = "<corelib>/Core/web::Core/web/router.jet::";
+        let prefix = "<corelib>/Core/Web::Core/Web/Router.jet::";
         for leaf in [
             "WebNavigationStatus",
             "WebRouterCacheStatus",
@@ -8258,7 +8258,7 @@ mod tests {
             ));
         }
         assert!(crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(
-            "<corelib>/Core/process::Core/process/process.jet::ProcessStreamMode"
+            "<corelib>/Core/Process::Core/Process/Process.jet::ProcessStreamMode"
         ));
     }
 

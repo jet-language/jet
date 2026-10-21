@@ -3819,7 +3819,7 @@ impl<'a> Checker<'a> {
                         Type::Apply { name, .. }
                             if name == "ExpiringSecret"
                                 || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret"))
+                                    && name.ends_with("::Core/Crypto/Vault.jet::ExpiringSecret"))
                     )
         );
         // Most fact tags are type-transparent. These compiler-owned tags
@@ -6485,7 +6485,7 @@ impl<'a> Checker<'a> {
         if let Type::Apply { name, .. } = &recv_ty {
             if (name == crate::Syntax::TYPE_MEASUREMENT
                 || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                    && name.ends_with("::Core/units/units.jet::Measurement")))
+                    && name.ends_with("::Core/Units/Units.jet::Measurement")))
                 && matches!((method, args.len()), ("value" | "uncertainty", 0))
             {
                 *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
@@ -6503,7 +6503,7 @@ impl<'a> Checker<'a> {
         if let Type::Apply { name, .. } = &recv_ty {
             if method == "force" && (name == crate::Syntax::EXPIRING_VALUE_TYPE
                 || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                    && name.ends_with("::Core/time/time.jet::ExpiringValue")))
+                    && name.ends_with("::Core/Time/Time.jet::ExpiringValue")))
             {
                 self.diags.push(Diagnostic::error(
                     "E0511",
@@ -6516,7 +6516,7 @@ impl<'a> Checker<'a> {
             }
             let source_expiring_secret =
                 jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret");
+                    && name.ends_with("::Core/Crypto/Vault.jet::ExpiringSecret");
             if (name == "ExpiringSecret" || source_expiring_secret) && method == "with" {
                 if !expiring_clock_is_deterministic {
                     self.record_effect(Effect::Time.name(), span);

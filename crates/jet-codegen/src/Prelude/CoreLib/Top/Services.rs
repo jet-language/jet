@@ -1329,7 +1329,7 @@ fn jet_services_raw_tree_task_group_new() -> JetServiceTreeTaskGroup {
 }
 
 // Allocation/materialization only. Every field value, including empty stores
-// and absent records, is supplied by Core/service/service.jet::tree in the
+// and absent records, is supplied by Core/Service/Service.jet::tree in the
 // original initializer order. No policy check or default is chosen here.
 fn jet_services_raw_tree_allocate(
     authority: String, name: String, generation: i64, delivery: JetServiceDelivery,

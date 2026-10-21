@@ -13418,7 +13418,7 @@ mod checked_core_source_target_tests {
             );
             std::sync::Arc::make_mut(&mut cx.core_source_modules)
                 .insert(module.to_string(), source_module.alias.to_string());
-            let checked_module_identity = "source-package::Core/http/client.jet";
+            let checked_module_identity = "source-package::Core/Http/Client.jet";
             std::sync::Arc::make_mut(&mut cx.core_source_sigs).insert(
                 (module.to_string(), method.to_string()),
                 crate::Codegen::CoreSourceFunctionSignature {
@@ -13468,7 +13468,7 @@ mod checked_core_source_target_tests {
 
             assert_eq!(
                 format!("{rust_mod}::{rust_fn}"),
-                "source-package::Core/http/client.jet::request",
+                "source-package::Core/Http/Client.jet::request",
                 "MIR resolves imported Core calls by their sema-qualified function key"
             );
         });
@@ -13490,7 +13490,7 @@ mod checked_core_source_target_tests {
                 return_view_provenance: None,
             };
             let signature = crate::Codegen::CoreSourceFunctionSignature {
-                module_identity: "source-package::Core/web/query.jet".to_string(),
+                module_identity: "source-package::Core/Web/Query.jet".to_string(),
                 type_params: Vec::new(),
                 params: vec![(AccessConvention::Move, callback)],
                 return_type: None,
@@ -13523,7 +13523,7 @@ mod checked_core_source_target_tests {
             assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
             let program = crate::Parser::parse(&tokens).expect("parse failed");
             let cx = crate::Codegen::build_cx(&program, source_text, "caller.jet");
-            let owner = "source-package::Core/data/data.jet";
+            let owner = "source-package::Core/Data/Data.jet";
             let signature = crate::Codegen::CoreSourceFunctionSignature {
                 module_identity: owner.to_string(),
                 type_params: vec!["T".to_string()],

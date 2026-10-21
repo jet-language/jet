@@ -6178,7 +6178,7 @@ fn core_owner_stream_records_keep_source_nominals() {
             if matches!(definition.name.as_str(), "Stdout" | "Stderr" | "StdinHandle")
     )).collect();
     assert_eq!(items.len(), 3, "all source-owned stream records are exercised");
-    let module = "<corelib>/Core/term::Core/term/term.jet";
+    let module = "<corelib>/Core/Term::Core/Term/Term.jet";
     let declarations = super::tir_to_mir_types::lower_declarations_from_items(
         &items, module, &jet_foundation::Layout::TargetLayout::host(),
     );

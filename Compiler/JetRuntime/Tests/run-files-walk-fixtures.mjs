@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Native Core/files walk lane (FilesWalk/FilesIgnore/FilesPathOps): the
+// Native Core/Files walk lane (FilesWalk/FilesIgnore/FilesPathOps): the
 // runtime sources plus FilesWalkTests.jet compile to fixture.o; the C witness
 // walks a real directory, checks gitignore matching and the registry lifetime
 // (close during an operation, repeated close).

@@ -27,7 +27,7 @@ pub(crate) fn jet_fmt_grouped(value: f64, precision: i64) -> String {
 }
 
 /// One rounding rule for every fixed-precision Float display, shared with
-/// `float_fixed` in Core/text/fmt.jet: round `value * 10^precision` (the scale
+/// `float_fixed` in Core/Text/Fmt.jet: round `value * 10^precision` (the scale
 /// built by repeated `* 10.0`) half away from zero. A rounded magnitude past
 /// the exact `Int` range falls back to the value's exact binary expansion,
 /// rounded half away from zero at the same place. Non-finite values keep their
@@ -237,7 +237,7 @@ fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
 /// Rulings #4588: normalized scientific notation with a plain exponent
 /// (`1.23e3`, `1.23e-3`). The mantissa uses the fixed-decimal rounding rule, and
 /// a mantissa that rounds up to ten renormalizes (`sci(9.999, 2)` is `1.00e1`).
-/// The same steps as `sci` in Core/text/fmt.jet, so every tier agrees.
+/// The same steps as `sci` in Core/Text/Fmt.jet, so every tier agrees.
 pub(crate) fn jet_fmt_sci(value: f64, precision: i64) -> String {
     if !value.is_finite() {
         return value.to_string();

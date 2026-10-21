@@ -4504,7 +4504,7 @@ index, not a substitute for that law.
   clocks, and schedulers.
 - **D-TIME-INSTANT1=A** *(ratified 2026-09-30, card #3841)*: `time.instant()`
   returns the compiler-owned monotonic Time point on every compiler and tier;
-  Core/time has no source `Instant` struct. `t + 5min` is an `Instant`,
+  Core/Time has no source `Instant` struct. `t + 5min` is an `Instant`,
   `b - a` and `t.elapsed()` are `Duration`s, and `t.unix_ns` is E0302 pointing
   at `time.unix_ns() -[Time]> Int`, the one wall-clock Unix-nanosecond read.
 - **D-CORE-IO-BUF1=A** *(ratified 2026-09-30, card #3281)*: `core.io` stays
@@ -8171,7 +8171,7 @@ declaration teaches E0388 with the behavior-preserving edit
 row `comptime-constant-mark`); prefix `@` in code now marks a D-MEMREF1 link.
 The supported value block holds exactly one final expression: setup bindings
 must be separate prepared bindings, and validation can be a conditional within
-the final expression. `Core/sys/sys.jet` follows this form for selected-target
+the final expression. `Core/Sys/Sys.jet` follows this form for selected-target
 pointer size and `usize_max()`, keeping layout facts inside preparation rather
 than reading them in an ordinary function. Multi-statement value blocks,
 mutable `:= prep` bindings, and expression-nested `prep` still teach E0391.

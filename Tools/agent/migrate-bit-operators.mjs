@@ -46,7 +46,7 @@ const caretDecisions = new Map([
   ['Compiler/JetRuntime/Source/TaskGroup.jet:161', ['bit_xor', 'unsigned task priority ordering flips the sign bit']],
   ['Compiler/JetRuntime/Source/World.jet:395', ['bit_xor', 'xorshift PRNG mixes a left-shifted state']],
   ['Compiler/JetRuntime/Source/World.jet:396', ['bit_xor', 'xorshift PRNG mixes a masked right-shifted state']],
-  ['Core/math/math.jet:336', ['pow', 'integer exponentiation helper base and exponent']],
+  ['Core/Math/Math.jet:336', ['pow', 'integer exponentiation helper base and exponent']],
   ['Examples/features/math/int_runtime_boundary.jet:25', ['pow', 'exact integer power boundary example 3 raised to 80']],
   ['Jetpack/Store/Tests/ArtifactStore.jet:492', ['bit_xor', 'tamper test toggles one bit of the last stored byte']],
 ]);

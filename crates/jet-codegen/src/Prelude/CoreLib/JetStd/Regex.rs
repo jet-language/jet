@@ -2423,7 +2423,7 @@ mod tests {
         assert_eq!(alphabetic.find("123λ!").ok().as_deref(), Some("λ"));
     }
 
-    /// Core/regex/regex.jet gives these same answers (golden
+    /// Core/Regex/Regex.jet gives these same answers (golden
     /// text/regex_unicode_parity pins the Jet half): Unicode simple case
     /// folding, classes over scalars, \p/\P, syntax errors, character
     /// positions, and `$` replacement expansion.

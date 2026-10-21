@@ -186,7 +186,7 @@ fn run() {
         definition.name == "TempFile"
             && mir.modules.iter().any(|module| {
                 module.id == definition.module
-                    && module.path == "Core/files/files.jet"
+                    && module.path == "Core/Files/Files.jet"
                     && definition.key == format!("{}::TempFile", module.key)
             })
     }).expect("checked core.files TempFile type");

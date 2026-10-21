@@ -3026,15 +3026,15 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
         || crate::Codegen::core_email_rust_type_name(name).is_some()
         || crate::Codegen::core_crypto_rust_type_name(name).is_some()
         || crate::Codegen::core_rust_type_name(name) == Some("JetMappedFile")
-        || (source_name.starts_with("<corelib>/Core/files::")
+        || (source_name.starts_with("<corelib>/Core/Files::")
             && matches!(
                 crate::Codegen::file_handle_rust_type(source_name),
                 Some("JetFileReader" | "JetFileWriter" | "JetFileScope")
             ))
         || name == crate::Syntax::TYPE_ERR
-        // Core/compute declares its own `VJPRun` record (source-owned shape);
+        // Core/Compute declares its own `VJPRun` record (source-owned shape);
         // only the autodiff transform's bare `VJPRun` is the native carrier.
-        || (name == "VJPRun" && !source_name.starts_with("<corelib>/Core/compute::"))
+        || (name == "VJPRun" && !source_name.starts_with("<corelib>/Core/Compute::"))
         || matches!(
             name,
             "Group"
@@ -3906,7 +3906,7 @@ mod native_encoding_record_tests {
     #[test]
     fn source_owned_math_records_keep_canonical_declarations() {
         for leaf in ["Vec2", "Vec3", "Vec4", "Point2", "Delta2", "Transform", "Transform2"] {
-            let identity = format!("<corelib>/Core/math::Core/math/math.jet::{leaf}");
+            let identity = format!("<corelib>/Core/Math::Core/Math/Math.jet::{leaf}");
             assert!(jet_foundation::CoreModuleExports::core_source_owns_type(&identity));
             assert!(!is_compiler_owned_type(&identity), "{identity} is source-owned");
         }

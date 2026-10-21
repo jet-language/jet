@@ -8,7 +8,7 @@ mod common;
 
 #[test]
 fn source_http_parsers_bound_body_before_one_copy_projection() {
-    let source = include_str!("../Core/http/http.jet");
+    let source = include_str!("../Core/Http/Http.jet");
     for name in ["parse_request", "parse_response"] {
         let body = source
             .split(&format!("pub fn {name}("))

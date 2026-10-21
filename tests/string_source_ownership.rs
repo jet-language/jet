@@ -5,7 +5,7 @@ mod tir_support;
 
 #[test]
 fn string_source_part_is_not_a_public_core_module() {
-    let source = include_str!("../Core/text/string.jet");
+    let source = include_str!("../Core/Text/String.jet");
     assert!(source.contains("fn len(receiver: String) -> Int"));
     assert!(!source.contains("pub fn"));
 

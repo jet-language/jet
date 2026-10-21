@@ -855,7 +855,7 @@ const segmentationTables = [
   ["UNICODE_ALPHABETIC", mergePairRanges(alphabeticRanges), false],
   ["UNICODE_NUMERIC", mergePairRanges(numericRanges), false],
 ];
-outPaths.push(["Core/text/segmentation_tables.jet",
+outPaths.push(["Core/Text/SegmentationTables.jet",
   HEADER_COMMENT + "// Compiler-private data part; JUCD schema 1, Unicode 17.0.0, little-endian.\n"
   + segmentationTables.map(([symbol, rows, tagged]) => segmentationAsset(symbol, rows, tagged)).join("\n")]);
 for (const [rel, text] of outPaths) {
@@ -876,7 +876,7 @@ for (const [rel, text] of outPaths) {
 // pool_bytes:u32, total_bytes:u32. Offsets are byte offsets from the asset start.
 // Kinds: 1 scalar pool; 2 ranges; 3 tagged ranges; 4 mapping index;
 // 5 decomposition index; 6 composition; 7 simple fold; 8 UTF-8 names.
-const assetRoot = "Core/text/runtime/assets";
+const assetRoot = "Core/Text/Runtime/Assets";
 function bytesLiteral(bytes) {
   return `[U8]{"${Array.from(bytes, b => `\\x${b.toString(16).padStart(2, "0").toUpperCase()}`).join("")}"}`;
 }
@@ -972,7 +972,7 @@ function declarations(list) {
   return list.map(a => `use core.text.runtime.assets.${a.module} as text_${a.module}`).join("\n");
 }
 // String asset modules are attached to their canonical kernel, not normalization.
-const stringPath = "Core/text/runtime/kernel_unicode_string.jet";
+const stringPath = "Core/Text/Runtime/KernelUnicodeString.jet";
 const stringSource = readFileSync(stringPath, "utf8");
 const begin = "// BEGIN GENERATED STRING ASSETS";
 const end = "// END GENERATED STRING ASSETS";

@@ -1,5 +1,5 @@
 //! D-AUTH1=A / I9: `core.auth` ambient includes Prelude `AuthSession.rs` — the
-//! auth store byte cell behind the Jet store (`Core/auth/auth.jet`) and
+//! auth store byte cell behind the Jet store (`Core/Auth/Auth.jet`) and
 //! `app.auth`. The `Session` carrier and every session, password, magic-link,
 //! OAuth and token policy is the Jet source on every tier; this adapter only
 //! marshals the cell and the `app.auth` descriptor.

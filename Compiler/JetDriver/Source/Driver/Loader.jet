@@ -2400,7 +2400,7 @@ fn jet_driver_bind_package_namespaces(
     true
 }
 
-// Root component of every embedded Core module path (`<corelib>/Core/perf/perf.jet`),
+// Root component of every embedded Core module path (`<corelib>/Core/Perf/Perf.jet`),
 // the Rust `Diagnostics::CORE_SOURCE_ROOT`. Core is library source, not the
 // user's program; no authorized disk file ever carries this prefix.
 JET_DRIVER_CORE_SOURCE_ROOT :: prep { "<corelib>" }
@@ -2864,7 +2864,7 @@ struct JetDriverCoreIdentifierDemand {
     // A `Regex{…}` checked literal: its producer is `core.regex.compile`.
     regex_literal: Bool
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
-    // `Core/text/fmt.jet` formatter, so that source module loads.
+    // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
 }
 
@@ -2955,7 +2955,7 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
 
 // Whether an interpolation's tokens end in a selector: a `:` outside every
 // bracket followed by a selector name other than `Debug` (which renders
-// through the typed route, with no Core/text/fmt.jet formatter).
+// through the typed route, with no Core/Text/Fmt.jet formatter).
 fn jet_driver_interpolation_has_selector(tokens: [Token], tables: TokenTables) -> Bool Never! {
     depth := 0
     loop index in 0..<tokens.len() {
@@ -3865,7 +3865,7 @@ fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMo
                 }
             }
         }
-        // An interpolation selector lowers to its `Core/text/fmt.jet`
+        // An interpolation selector lowers to its `Core/Text/Fmt.jet`
         // formatter, even when the caller has no explicit core.text.fmt import.
         if demand.format_selector {
             if !bare_modules.contains("core.text.fmt") -> &bare_modules.push("core.text.fmt")

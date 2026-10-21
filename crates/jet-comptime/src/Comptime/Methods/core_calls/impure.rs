@@ -479,7 +479,7 @@ pub fn apply_impure_core_call_with_type_args(
         // it replaces are why `create_dir_all` and `remove_all` had no arm at
         // all: a shipped example (`io/watcher`) passed sema and then died at
         // run time on E0956 while AOT ran the same source.
-        // #3593: the policy-free provider leaves behind Core/files/files.jet.
+        // #3593: the policy-free provider leaves behind Core/Files/files.jet.
         ("core.files", leaf) if leaf.starts_with("__") => {
             match crate::Comptime::TextLite::apply_files_leaf(leaf, &args) {
                 Some(result) => result.map_err(|message| unsupported(&message, span)),

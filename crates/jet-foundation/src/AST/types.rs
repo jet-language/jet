@@ -2,9 +2,9 @@ use crate::Diagnostics::Span;
 use crate::AST::Expr;
 
 /// The canonical nominal of the source-owned `core.compute` Tensor
-/// declaration (`Core/compute/compute.jet`).
+/// declaration (`Core/Compute/Compute.jet`).
 pub const CORE_COMPUTE_TENSOR_IDENTITY: &str =
-    "<corelib>/Core/compute::Core/compute/compute.jet::Tensor";
+    "<corelib>/Core/Compute::Core/Compute/Compute.jet::Tensor";
 
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
 ///
@@ -1183,7 +1183,7 @@ pub fn canonicalize_union(members: Vec<Type>) -> Type {
 
 /// D-UNIONTYPE1=A: the canonical member order reads each nominal head without
 /// its module qualifier, so resolving `HTTPError` to its declaration key
-/// (`<corelib>/Core/http::…::HTTPError`) never reorders a union whose carrier
+/// (`<corelib>/Core/Http::…::HTTPError`) never reorders a union whose carrier
 /// enum (`union_enum_name`) and variants were fixed from the written members.
 fn union_member_order_key(ty: &Type) -> String {
     fn unqualified(name: &str) -> &str {

@@ -236,7 +236,7 @@ fn jet_codegen_string_format_integer(ty: Type) -> Bool Never! {
 // (`TExprKind::StrLit`): a selector is lowered to the String it renders before
 // `BuildString`, so every interpolated part is a displayed value. Display,
 // Debug take the typed render; every other selector calls its source-owned
-// `Core/text/fmt.jet` helper with the selector's constants.
+// `Core/Text/Fmt.jet` helper with the selector's constants.
 fn jet_codegen_lower_string_format_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: MIRValueID, value_type: Type, format: TStrFormat, span: Span) -> MIRValueID Never! {
     if format == {
         .Display -> {
@@ -254,7 +254,7 @@ fn jet_codegen_lower_string_format_value(builder: &JetCodegenBuilder, program: J
         row = program.function_index.next_by_name[row]
     }
     if row < 0 {
-        panic("source interpolation helper Core/text/fmt.jet::{member} is absent from the checked graph")
+        panic("source interpolation helper Core/Text/Fmt.jet::{member} is absent from the checked graph")
     }
     function :: program.function_index.rows[row]
     if function.params.len() < 1 {
@@ -2562,7 +2562,7 @@ fn jet_codegen_geometry_source_target(builder: JetCodegenBuilder, program: JetCo
     }
     selected := TFunc?{None}
     loop function in program.function_index.rows {
-        if function.module_identity != owner.module_identity || !jet_codegen_core_source_path(function.source_file, "Core/math/math.jet") -> next
+        if function.module_identity != owner.module_identity || !jet_codegen_core_source_path(function.source_file, "Core/Math/Math.jet") -> next
         if function.kind == .Method(_, _) {} else {
             next
         }

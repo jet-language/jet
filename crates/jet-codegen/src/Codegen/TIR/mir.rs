@@ -12977,7 +12977,7 @@ mod core_carrier_trait_target_tests {
     #[test]
     fn bare_core_trait_target_keeps_owner_trait_and_ambiguity() {
         let source = jet_foundation::CoreModuleExports::core_source_module("core.math").unwrap();
-        let module = "<corelib>/Core/math::Core/math/math.jet".to_string();
+        let module = "<corelib>/Core/Math::Core/Math/Math.jet".to_string();
         let owner = format!("{}::Fraction", module);
         assert!(owner.ends_with(&format!("{}::Fraction", source.path)));
         let key = FunctionTargetKey {

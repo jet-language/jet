@@ -3809,1428 +3809,1428 @@ example retains the negative unsafe-outside-vetted scan.
     },
     {
       "package": "Core",
-      "file": "Core/auth/auth.jet",
+      "file": "Core/Auth/Auth.jet",
       "line": 112,
       "column": 5,
       "reason": "auth PASETO v4.public verification uses the fixed Ed25519 primitive"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 314,
       "column": 5,
       "reason": "vault key import: validate a serialized wrapped carrier at the typed crypto boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 320,
       "column": 5,
       "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 325,
       "column": 5,
       "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 330,
       "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 698,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 1243,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 1270,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 2114,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 2227,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 2236,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/crypto.jet",
+      "file": "Core/Crypto/Crypto.jet",
       "line": 2242,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/expert_ct.jet",
+      "file": "Core/Crypto/ExpertCt.jet",
       "line": 11,
       "column": 5,
       "reason": "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/expert_ct.jet",
+      "file": "Core/Crypto/ExpertCt.jet",
       "line": 37,
       "column": 5,
       "reason": "Core fixed-limb extraction reserves its exact public output width before filling"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/expert_ct.jet",
+      "file": "Core/Crypto/ExpertCt.jet",
       "line": 323,
       "column": 5,
       "reason": "Core Ed25519 hashing reserves the exact combined public part lengths before filling"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 96,
       "column": 5,
       "reason": "Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 104,
       "column": 5,
       "reason": "Core JETC2 authenticates a bounded record before releasing its plaintext"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 112,
       "column": 5,
       "reason": "Core JETC2 borrows shared material through expert, wiping its copy before propagating HKDF success or failure"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 127,
       "column": 5,
       "reason": "Core JETC2 exposes only an operation-scoped key copy and wipes it before either seal outcome escapes"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 142,
       "column": 5,
       "reason": "Core JETC2 exposes only an operation-scoped key copy and wipes it before either authentication outcome escapes"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 157,
       "column": 5,
       "reason": "Core JETC2 copies its derived wrap nonce and file key only for sealing, wiping both copies on either outcome"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 175,
       "column": 5,
       "reason": "Core JETC2 copies its derived wrap nonce only for authentication, wiping the copy on either outcome"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 233,
       "column": 5,
       "reason": "Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/jetc.jet",
+      "file": "Core/Crypto/Jetc.jet",
       "line": 271,
       "column": 5,
       "reason": "Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 220,
       "column": 5,
       "reason": "vault typed load provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 227,
       "column": 5,
       "reason": "vault typed current provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 233,
       "column": 5,
       "reason": "vault typed status provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 240,
       "column": 5,
       "reason": "vault typed versions provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 247,
       "column": 5,
       "reason": "vault typed generation provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 254,
       "column": 5,
       "reason": "vault typed store provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 262,
       "column": 5,
       "reason": "vault key import: signing key material"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 270,
       "column": 5,
       "reason": "vault key import: X25519 secret material"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 278,
       "column": 5,
       "reason": "vault wrapped import provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 285,
       "column": 5,
       "reason": "vault typed rotation provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 292,
       "column": 5,
       "reason": "vault typed retirement provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 299,
       "column": 5,
       "reason": "vault typed revocation provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 306,
       "column": 5,
       "reason": "vault write authorization provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 313,
       "column": 5,
       "reason": "vault wrapped authorization provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 319,
       "column": 5,
       "reason": "vault typed generation commit provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 325,
       "column": 5,
       "reason": "vault typed store commit provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 331,
       "column": 5,
       "reason": "vault key import commit: signing key material"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 337,
       "column": 5,
       "reason": "vault key import commit: X25519 secret material"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 343,
       "column": 5,
       "reason": "vault wrapped import commit provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 349,
       "column": 5,
       "reason": "vault typed rotation commit provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 355,
       "column": 5,
       "reason": "vault typed retirement commit provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 361,
       "column": 5,
       "reason": "vault typed revocation commit provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 367,
       "column": 5,
       "reason": "vault passphrase export provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/crypto/vault.jet",
+      "file": "Core/Crypto/Vault.jet",
       "line": 374,
       "column": 5,
       "reason": "vault recipient export provider boundary"
     },
     {
       "package": "Core",
-      "file": "Core/data/data.jet",
+      "file": "Core/Data/Data.jet",
       "line": 1267,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
     {
       "package": "Core",
-      "file": "Core/data/data.jet",
+      "file": "Core/Data/Data.jet",
       "line": 1879,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 44,
       "column": 9,
       "reason": "consume the unique SQLite queue handle through its existing host close leaf"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 50,
       "column": 5,
       "reason": "open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 57,
       "column": 5,
       "reason": "borrow the live unique queue handle for BEGIN"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 60,
       "column": 5,
       "reason": "borrow the live unique queue handle for COMMIT"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 63,
       "column": 5,
       "reason": "borrow the live unique queue handle for ROLLBACK"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 66,
       "column": 5,
       "reason": "execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire"
     },
     {
       "package": "Core",
-      "file": "Core/db/db.jet",
+      "file": "Core/Db/Db.jet",
       "line": 71,
       "column": 5,
       "reason": "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire"
     },
     {
       "package": "Core",
-      "file": "Core/email/email.jet",
+      "file": "Core/Email/Email.jet",
       "line": 77,
       "column": 5,
       "reason": "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret"
     },
     {
       "package": "Core",
-      "file": "Core/email/email.jet",
+      "file": "Core/Email/Email.jet",
       "line": 414,
       "column": 5,
       "reason": "DKIM known-answer fixture reads only synthetic key bytes"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/cbor.jet",
+      "file": "Core/Encoding/Cbor.jet",
       "line": 95,
       "column": 5,
       "reason": "inspect private typed carriers without changing public Dyn variants"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/cbor.jet",
+      "file": "Core/Encoding/Cbor.jet",
       "line": 156,
       "column": 5,
       "reason": "validated private carriers retain byte strings for typed Encode"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/cbor_stream.jet",
+      "file": "Core/Encoding/CborStream.jet",
       "line": 216,
       "column": 9,
       "reason": "the retained key copies exactly the already validated text bytes"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/cbor_stream.jet",
+      "file": "Core/Encoding/CborStream.jet",
       "line": 319,
       "column": 17,
       "reason": "the exact CBOR text allocation passed strict UTF-8 validation"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/csv.jet",
+      "file": "Core/Encoding/Csv.jet",
       "line": 127,
       "column": 9,
       "reason": "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/csv.jet",
+      "file": "Core/Encoding/Csv.jet",
       "line": 322,
       "column": 5,
       "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/csv.jet",
+      "file": "Core/Encoding/Csv.jet",
       "line": 784,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/json.jet",
+      "file": "Core/Encoding/Json.jet",
       "line": 101,
       "column": 5,
       "reason": "preserve the shipped decoder's hidden stderr effect at its existing host boundary"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/json.jet",
+      "file": "Core/Encoding/Json.jet",
       "line": 109,
       "column": 5,
       "reason": "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/json.jet",
+      "file": "Core/Encoding/Json.jet",
       "line": 710,
       "column": 5,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/json.jet",
+      "file": "Core/Encoding/Json.jet",
       "line": 803,
       "column": 5,
       "reason": "Core rejects native byte carriers before inspecting public JSON values"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/json.jet",
+      "file": "Core/Encoding/Json.jet",
       "line": 873,
       "column": 5,
       "reason": "Core JSON rendering borrows native private payloads without exposing their constructors"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/json.jet",
+      "file": "Core/Encoding/Json.jet",
       "line": 1307,
       "column": 5,
       "reason": "Core compares compiler-private byte carriers without exposing their payloads"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 14,
       "column": 9,
       "reason": "the Object variant was checked immediately before borrowing its ordered backing"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 22,
       "column": 5,
       "reason": "transfer the owned ordered entries allocation into the native Object carrier"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 28,
       "column": 5,
       "reason": "check the private Bytes variant immediately before borrowing its backing"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 35,
       "column": 5,
       "reason": "the shared parser validated this exact numeric lexeme"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 41,
       "column": 5,
       "reason": "retain decoded JSON text until the target Decode contract is known"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 305,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 376,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 381,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 568,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 579,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 864,
       "column": 5,
       "reason": "the shared UTF-8 validator just accepted this owned allocation"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 873,
       "column": 5,
       "reason": "the byte position was checked against this String's storage length"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 1436,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 1447,
       "column": 5,
       "reason": "transfer the owned UTF-8 String buffer before re-spelling its shortest digits"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 1648,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 1791,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/stream.jet",
+      "file": "Core/Encoding/Stream.jet",
       "line": 1828,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/xml_engine.jet",
+      "file": "Core/Encoding/XmlEngine.jet",
       "line": 130,
       "column": 5,
       "reason": "all callers iterate or check the UTF-8 byte bounds before borrowing this byte"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/xml_engine.jet",
+      "file": "Core/Encoding/XmlEngine.jet",
       "line": 168,
       "column": 5,
       "reason": "the caller selected a scalar-aligned window of validated UTF-8 bytes"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/xml_engine.jet",
+      "file": "Core/Encoding/XmlEngine.jet",
       "line": 2315,
       "column": 5,
       "reason": "attribute whitespace compaction preserves the already validated UTF-8 byte sequence"
     },
     {
       "package": "Core",
-      "file": "Core/encoding/yaml.jet",
+      "file": "Core/Encoding/Yaml.jet",
       "line": 386,
       "column": 5,
       "reason": "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged"
     },
     {
       "package": "Core",
-      "file": "Core/files/files.jet",
+      "file": "Core/Files/Files.jet",
       "line": 449,
       "column": 1,
       "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
     },
     {
       "package": "Core",
-      "file": "Core/files/files.jet",
+      "file": "Core/Files/Files.jet",
       "line": 455,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
-      "file": "Core/http/server.jet",
+      "file": "Core/Http/Server.jet",
       "line": 85,
       "column": 5,
       "reason": "move the normalized response head and one-shot body into the transport carrier"
     },
     {
       "package": "Core",
-      "file": "Core/http/server.jet",
+      "file": "Core/Http/Server.jet",
       "line": 150,
       "column": 5,
       "reason": "borrow the request's stored optional route-template metadata; no route selection or formatting policy"
     },
     {
       "package": "Core",
-      "file": "Core/jobs/jobs.jet",
+      "file": "Core/Jobs/Jobs.jet",
       "line": 131,
       "column": 5,
       "reason": "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does"
     },
     {
       "package": "Core",
-      "file": "Core/jobs/jobs.jet",
+      "file": "Core/Jobs/Jobs.jet",
       "line": 136,
       "column": 5,
       "reason": "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open"
     },
     {
       "package": "Core",
-      "file": "Core/jobs/jobs.jet",
+      "file": "Core/Jobs/Jobs.jet",
       "line": 358,
       "column": 13,
       "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
     },
     {
       "package": "Core",
-      "file": "Core/jobs/jobs.jet",
+      "file": "Core/Jobs/Jobs.jet",
       "line": 539,
       "column": 5,
       "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
-      "file": "Core/jobs/jobs.jet",
+      "file": "Core/Jobs/Jobs.jet",
       "line": 554,
       "column": 5,
       "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
-      "file": "Core/mem/mem.jet",
+      "file": "Core/Mem/Mem.jet",
       "line": 34,
       "column": 1,
       "reason": "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer"
     },
     {
       "package": "Core",
-      "file": "Core/mem/mem.jet",
+      "file": "Core/Mem/Mem.jet",
       "line": 40,
       "column": 1,
       "reason": "`pointer` names a live, aligned, readable `T` for the whole access"
     },
     {
       "package": "Core",
-      "file": "Core/mem/mem.jet",
+      "file": "Core/Mem/Mem.jet",
       "line": 44,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 137,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 143,
       "column": 5,
       "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 149,
       "column": 5,
       "reason": "read the native IP address discriminant"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 193,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 200,
       "column": 5,
       "reason": "read socket IP representation; formatting stays in Jet"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 203,
       "column": 5,
       "reason": "read native socket port"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 215,
       "column": 5,
       "reason": "read native IPv6 socket scope identifier"
     },
     {
       "package": "Core",
-      "file": "Core/net/net.jet",
+      "file": "Core/Net/Net.jet",
       "line": 414,
       "column": 5,
       "reason": "read the native UDP packet's socket-address carrier"
     },
     {
       "package": "Core",
-      "file": "Core/process/process.jet",
+      "file": "Core/Process/Process.jet",
       "line": 96,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 156,
       "column": 5,
       "reason": "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 266,
       "column": 5,
       "reason": "read the existing endpoint's tree, worker and generation fields"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 273,
       "column": 5,
       "reason": "Services3081: check started before the single delivery-field write"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 280,
       "column": 5,
       "reason": "Services1415: root policy write precedes each declared group policy write"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 289,
       "column": 5,
       "reason": "Services3220: tree's exclusive write borrow covers count then clear"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 298,
       "column": 5,
       "reason": "Services3231: started and record checks precede adapter then authority writes"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 318,
       "column": 5,
       "reason": "the source exclusive tree borrow covers the same complete mutation as Rust &mut; no lock or interleaving window"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 349,
       "column": 5,
       "reason": "Services4437: authority lookup, durable load, first record, then checked framing"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 363,
       "column": 5,
       "reason": "Services4493: replay existing in-memory records without issuing a store read"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 398,
       "column": 5,
       "reason": "Services6729: copy the existing optional last-upgrade field"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 404,
       "column": 5,
       "reason": "Services1153: plain field projection; rollback store remains omitted from all text views"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 412,
       "column": 5,
       "reason": "Services1265: read the existing topology fields, preserve handler insertion order"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 430,
       "column": 5,
       "reason": "Services5867: durable replay before lookup; first matching run wins"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 445,
       "column": 5,
       "reason": "Services5879: durable replay before lookup; missing or nonterminal run is Policy"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 462,
       "column": 5,
       "reason": "Services6978: project existing runtime facts; source owns counts and text"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 547,
       "column": 5,
       "reason": "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 622,
       "column": 5,
       "reason": "read the final path component's OS metadata kind without opening an identity handle"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 648,
       "column": 5,
       "reason": "read the checked service tree's generation field without mutating or copying its scheduler carrier"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 654,
       "column": 5,
       "reason": "read event-log storage length on the checked service tree"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 660,
       "column": 5,
       "reason": "read dead-letter storage length on the checked service tree"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 862,
       "column": 5,
       "reason": "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 899,
       "column": 5,
       "reason": "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 930,
       "column": 5,
       "reason": "Services5708-5789: first recorded definition wins; replay precedes terminal checks"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 983,
       "column": 5,
       "reason": "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1018,
       "column": 5,
       "reason": "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1194,
       "column": 5,
       "reason": "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1240,
       "column": 5,
       "reason": "Services7044: counter write precedes reachable-worker selection and canonical failure policy"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1256,
       "column": 5,
       "reason": "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1276,
       "column": 5,
       "reason": "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1326,
       "column": 5,
       "reason": "Services2184: identity and pinned-generation checks precede authority validation"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1352,
       "column": 5,
       "reason": "Services6081: exact directory lookup, generation, proof, authority, running, draining order"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1376,
       "column": 5,
       "reason": "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1475,
       "column": 5,
       "reason": "ServiceAuthority2504: one existing locked durable read, then the owned entry's state"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1490,
       "column": 5,
       "reason": "ServiceAuthority2517: same locked read; receipt fields and signature are source policy"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1504,
       "column": 5,
       "reason": "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1553,
       "column": 5,
       "reason": "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1564,
       "column": 5,
       "reason": "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1653,
       "column": 5,
       "reason": "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1673,
       "column": 5,
       "reason": "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1746,
       "column": 5,
       "reason": "Services2629: no enclosing guard; existing atomic authority operations retain their locks"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1838,
       "column": 5,
       "reason": "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 1898,
       "column": 5,
       "reason": "Services1464-1544: checked function item is passed through; source owns validation and every seed"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 2040,
       "column": 5,
       "reason": "Services2917-3078: exclusive tree borrow; each write follows the native order"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 2155,
       "column": 5,
       "reason": "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match"
     },
     {
       "package": "Core",
-      "file": "Core/service/service.jet",
+      "file": "Core/Service/Service.jet",
       "line": 2176,
       "column": 5,
       "reason": "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 376,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 422,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 428,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 433,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 440,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 444,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 451,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 461,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 467,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 475,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 480,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 484,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 488,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 494,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 500,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 504,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 508,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 512,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 516,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
-      "file": "Core/sys/sys.jet",
+      "file": "Core/Sys/Sys.jet",
       "line": 520,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
     {
       "package": "Core",
-      "file": "Core/testing/testing.jet",
+      "file": "Core/Testing/Testing.jet",
       "line": 355,
       "column": 5,
       "reason": "the caller bounded this byte position by the String storage length"
     },
     {
       "package": "Core",
-      "file": "Core/testing/testing.jet",
+      "file": "Core/Testing/Testing.jet",
       "line": 376,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
     {
       "package": "Core",
-      "file": "Core/tui/tui.jet",
+      "file": "Core/Tui/Tui.jet",
       "line": 101,
       "column": 5,
       "reason": "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption"
     },
     {
       "package": "Core",
-      "file": "Core/tui/tui.jet",
+      "file": "Core/Tui/Tui.jet",
       "line": 127,
       "column": 5,
       "reason": "Core TUI samples the same stdout terminal fact consumed by terminal style/progress"
     },
     {
       "package": "Core",
-      "file": "Core/tui/tui.jet",
+      "file": "Core/Tui/Tui.jet",
       "line": 653,
       "column": 5,
       "reason": "Core TUI test: normalized style words and explicit absent UI slots"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host.jet",
+      "file": "Core/Ui/Host.jet",
       "line": 154,
       "column": 5,
       "reason": "Core UI capability facts come from the current retained provider, not a fabricated default"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host.jet",
+      "file": "Core/Ui/Host.jet",
       "line": 160,
       "column": 5,
       "reason": "Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host.jet",
+      "file": "Core/Ui/Host.jet",
       "line": 166,
       "column": 5,
       "reason": "Core UI save dialog crosses the current provider boundary with the original typed request"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host.jet",
+      "file": "Core/Ui/Host.jet",
       "line": 180,
       "column": 5,
       "reason": "Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/accessibility.jet",
+      "file": "Core/Ui/Host/Accessibility.jet",
       "line": 7,
       "column": 5,
       "reason": "Core accessibility attaches metadata to the canonical node through the current retained provider"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/accessibility.jet",
+      "file": "Core/Ui/Host/Accessibility.jet",
       "line": 16,
       "column": 5,
       "reason": "Core accessibility projects metadata from the canonical node, never a second provider tree"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/clipboard.jet",
+      "file": "Core/Ui/Host/Clipboard.jet",
       "line": 6,
       "column": 5,
       "reason": "Core clipboard reads through the current retained provider; the raw host owns platform access"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/clipboard.jet",
+      "file": "Core/Ui/Host/Clipboard.jet",
       "line": 12,
       "column": 5,
       "reason": "Core clipboard transfers the exact UTF-8 text to the current retained provider"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/drag_drop.jet",
+      "file": "Core/Ui/Host/DragDrop.jet",
       "line": 33,
       "column": 5,
       "reason": "Core drag/drop consumes one typed event from the current retained provider queue"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/ime.jet",
+      "file": "Core/Ui/Host/Ime.jet",
       "line": 25,
       "column": 5,
       "reason": "Core IME consumes one typed event from the current retained provider queue"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/shortcuts.jet",
+      "file": "Core/Ui/Host/Shortcuts.jet",
       "line": 11,
       "column": 5,
       "reason": "Core shortcut registration uses the current retained provider's canonical action registry"
     },
     {
       "package": "Core",
-      "file": "Core/ui/host/shortcuts.jet",
+      "file": "Core/Ui/Host/Shortcuts.jet",
       "line": 17,
       "column": 5,
       "reason": "Core shortcut dispatch uses the current retained provider's canonical action registry"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 126,
       "column": 5,
       "reason": "Core creates the real retained GTK renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 131,
       "column": 5,
       "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 136,
       "column": 5,
       "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 147,
       "column": 5,
       "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 164,
       "column": 5,
       "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 191,
       "column": 5,
       "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
     },
     {
       "package": "Core",
-      "file": "Core/ui/ui.jet",
+      "file": "Core/Ui/Ui.jet",
       "line": 197,
       "column": 5,
       "reason": "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions"
     },
     {
       "package": "Core",
-      "file": "Core/vendor/sqlite3/fixture/run.jet",
+      "file": "Core/Vendor/Sqlite3/Fixture/run.jet",
       "line": 17,
       "column": 5,
       "reason": "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once"
@@ -8643,210 +8643,210 @@ example retains the negative unsafe-outside-vetted scan.
 | Compiler | Compiler/JetRuntime/Tests/UnicodeTests.jet | 8:5 | "a failed Unicode runtime witness ends only its isolated test process" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
-| Core | Core/auth/auth.jet | 112:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/crypto/crypto.jet | 314:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/crypto/crypto.jet | 320:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/crypto/crypto.jet | 325:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/crypto/crypto.jet | 330:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/crypto/crypto.jet | 698:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/crypto/crypto.jet | 1243:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/crypto/crypto.jet | 1270:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/crypto/crypto.jet | 2114:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/crypto/crypto.jet | 2227:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/crypto/crypto.jet | 2236:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/crypto/crypto.jet | 2242:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
-| Core | Core/crypto/expert_ct.jet | 11:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
-| Core | Core/crypto/expert_ct.jet | 37:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
-| Core | Core/crypto/expert_ct.jet | 323:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
-| Core | Core/crypto/jetc.jet | 96:5 | "Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains" |
-| Core | Core/crypto/jetc.jet | 104:5 | "Core JETC2 authenticates a bounded record before releasing its plaintext" |
-| Core | Core/crypto/jetc.jet | 112:5 | "Core JETC2 borrows shared material through expert, wiping its copy before propagating HKDF success or failure" |
-| Core | Core/crypto/jetc.jet | 127:5 | "Core JETC2 exposes only an operation-scoped key copy and wipes it before either seal outcome escapes" |
-| Core | Core/crypto/jetc.jet | 142:5 | "Core JETC2 exposes only an operation-scoped key copy and wipes it before either authentication outcome escapes" |
-| Core | Core/crypto/jetc.jet | 157:5 | "Core JETC2 copies its derived wrap nonce and file key only for sealing, wiping both copies on either outcome" |
-| Core | Core/crypto/jetc.jet | 175:5 | "Core JETC2 copies its derived wrap nonce only for authentication, wiping the copy on either outcome" |
-| Core | Core/crypto/jetc.jet | 233:5 | "Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy" |
-| Core | Core/crypto/jetc.jet | 271:5 | "Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty" |
-| Core | Core/crypto/vault.jet | 220:5 | "vault typed load provider boundary" |
-| Core | Core/crypto/vault.jet | 227:5 | "vault typed current provider boundary" |
-| Core | Core/crypto/vault.jet | 233:5 | "vault typed status provider boundary" |
-| Core | Core/crypto/vault.jet | 240:5 | "vault typed versions provider boundary" |
-| Core | Core/crypto/vault.jet | 247:5 | "vault typed generation provider boundary" |
-| Core | Core/crypto/vault.jet | 254:5 | "vault typed store provider boundary" |
-| Core | Core/crypto/vault.jet | 262:5 | "vault key import: signing key material" |
-| Core | Core/crypto/vault.jet | 270:5 | "vault key import: X25519 secret material" |
-| Core | Core/crypto/vault.jet | 278:5 | "vault wrapped import provider boundary" |
-| Core | Core/crypto/vault.jet | 285:5 | "vault typed rotation provider boundary" |
-| Core | Core/crypto/vault.jet | 292:5 | "vault typed retirement provider boundary" |
-| Core | Core/crypto/vault.jet | 299:5 | "vault typed revocation provider boundary" |
-| Core | Core/crypto/vault.jet | 306:5 | "vault write authorization provider boundary" |
-| Core | Core/crypto/vault.jet | 313:5 | "vault wrapped authorization provider boundary" |
-| Core | Core/crypto/vault.jet | 319:5 | "vault typed generation commit provider boundary" |
-| Core | Core/crypto/vault.jet | 325:5 | "vault typed store commit provider boundary" |
-| Core | Core/crypto/vault.jet | 331:5 | "vault key import commit: signing key material" |
-| Core | Core/crypto/vault.jet | 337:5 | "vault key import commit: X25519 secret material" |
-| Core | Core/crypto/vault.jet | 343:5 | "vault wrapped import commit provider boundary" |
-| Core | Core/crypto/vault.jet | 349:5 | "vault typed rotation commit provider boundary" |
-| Core | Core/crypto/vault.jet | 355:5 | "vault typed retirement commit provider boundary" |
-| Core | Core/crypto/vault.jet | 361:5 | "vault typed revocation commit provider boundary" |
-| Core | Core/crypto/vault.jet | 367:5 | "vault passphrase export provider boundary" |
-| Core | Core/crypto/vault.jet | 374:5 | "vault recipient export provider boundary" |
-| Core | Core/data/data.jet | 1267:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/data/data.jet | 1879:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/db/db.jet | 44:9 | "consume the unique SQLite queue handle through its existing host close leaf" |
-| Core | Core/db/db.jet | 50:5 | "open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource" |
-| Core | Core/db/db.jet | 57:5 | "borrow the live unique queue handle for BEGIN" |
-| Core | Core/db/db.jet | 60:5 | "borrow the live unique queue handle for COMMIT" |
-| Core | Core/db/db.jet | 63:5 | "borrow the live unique queue handle for ROLLBACK" |
-| Core | Core/db/db.jet | 66:5 | "execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
-| Core | Core/db/db.jet | 71:5 | "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
-| Core | Core/email/email.jet | 77:5 | "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret" |
-| Core | Core/email/email.jet | 414:5 | "DKIM known-answer fixture reads only synthetic key bytes" |
-| Core | Core/encoding/cbor.jet | 95:5 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/encoding/cbor.jet | 156:5 | "validated private carriers retain byte strings for typed Encode" |
-| Core | Core/encoding/cbor_stream.jet | 216:9 | "the retained key copies exactly the already validated text bytes" |
-| Core | Core/encoding/cbor_stream.jet | 319:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/encoding/csv.jet | 127:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
-| Core | Core/encoding/csv.jet | 322:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/encoding/csv.jet | 784:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/encoding/json.jet | 101:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
-| Core | Core/encoding/json.jet | 109:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| Core | Core/encoding/json.jet | 710:5 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/encoding/json.jet | 803:5 | "Core rejects native byte carriers before inspecting public JSON values" |
-| Core | Core/encoding/json.jet | 873:5 | "Core JSON rendering borrows native private payloads without exposing their constructors" |
-| Core | Core/encoding/json.jet | 1307:5 | "Core compares compiler-private byte carriers without exposing their payloads" |
-| Core | Core/encoding/stream.jet | 14:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
-| Core | Core/encoding/stream.jet | 22:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
-| Core | Core/encoding/stream.jet | 28:5 | "check the private Bytes variant immediately before borrowing its backing" |
-| Core | Core/encoding/stream.jet | 35:5 | "the shared parser validated this exact numeric lexeme" |
-| Core | Core/encoding/stream.jet | 41:5 | "retain decoded JSON text until the target Decode contract is known" |
-| Core | Core/encoding/stream.jet | 305:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| Core | Core/encoding/stream.jet | 376:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| Core | Core/encoding/stream.jet | 381:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| Core | Core/encoding/stream.jet | 568:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| Core | Core/encoding/stream.jet | 579:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/encoding/stream.jet | 864:5 | "the shared UTF-8 validator just accepted this owned allocation" |
-| Core | Core/encoding/stream.jet | 873:5 | "the byte position was checked against this String's storage length" |
-| Core | Core/encoding/stream.jet | 1436:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/encoding/stream.jet | 1447:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
-| Core | Core/encoding/stream.jet | 1648:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/encoding/stream.jet | 1791:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/encoding/stream.jet | 1828:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
-| Core | Core/encoding/xml_engine.jet | 130:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
-| Core | Core/encoding/xml_engine.jet | 168:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
-| Core | Core/encoding/xml_engine.jet | 2315:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
-| Core | Core/encoding/yaml.jet | 386:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/files/files.jet | 449:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
-| Core | Core/files/files.jet | 455:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/http/server.jet | 85:5 | "move the normalized response head and one-shot body into the transport carrier" |
-| Core | Core/http/server.jet | 150:5 | "borrow the request's stored optional route-template metadata; no route selection or formatting policy" |
-| Core | Core/jobs/jobs.jet | 131:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
-| Core | Core/jobs/jobs.jet | 136:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
-| Core | Core/jobs/jobs.jet | 358:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
-| Core | Core/jobs/jobs.jet | 539:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
-| Core | Core/jobs/jobs.jet | 554:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
-| Core | Core/mem/mem.jet | 34:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
-| Core | Core/mem/mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
-| Core | Core/mem/mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
-| Core | Core/net/net.jet | 137:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/net/net.jet | 143:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
-| Core | Core/net/net.jet | 149:5 | "read the native IP address discriminant" |
-| Core | Core/net/net.jet | 193:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
-| Core | Core/net/net.jet | 200:5 | "read socket IP representation; formatting stays in Jet" |
-| Core | Core/net/net.jet | 203:5 | "read native socket port" |
-| Core | Core/net/net.jet | 215:5 | "read native IPv6 socket scope identifier" |
-| Core | Core/net/net.jet | 414:5 | "read the native UDP packet's socket-address carrier" |
-| Core | Core/process/process.jet | 96:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/service/service.jet | 156:5 | "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier" |
-| Core | Core/service/service.jet | 266:5 | "read the existing endpoint's tree, worker and generation fields" |
-| Core | Core/service/service.jet | 273:5 | "Services3081: check started before the single delivery-field write" |
-| Core | Core/service/service.jet | 280:5 | "Services1415: root policy write precedes each declared group policy write" |
-| Core | Core/service/service.jet | 289:5 | "Services3220: tree's exclusive write borrow covers count then clear" |
-| Core | Core/service/service.jet | 298:5 | "Services3231: started and record checks precede adapter then authority writes" |
-| Core | Core/service/service.jet | 318:5 | "the source exclusive tree borrow covers the same complete mutation as Rust &amp;mut; no lock or interleaving window" |
-| Core | Core/service/service.jet | 349:5 | "Services4437: authority lookup, durable load, first record, then checked framing" |
-| Core | Core/service/service.jet | 363:5 | "Services4493: replay existing in-memory records without issuing a store read" |
-| Core | Core/service/service.jet | 398:5 | "Services6729: copy the existing optional last-upgrade field" |
-| Core | Core/service/service.jet | 404:5 | "Services1153: plain field projection; rollback store remains omitted from all text views" |
-| Core | Core/service/service.jet | 412:5 | "Services1265: read the existing topology fields, preserve handler insertion order" |
-| Core | Core/service/service.jet | 430:5 | "Services5867: durable replay before lookup; first matching run wins" |
-| Core | Core/service/service.jet | 445:5 | "Services5879: durable replay before lookup; missing or nonterminal run is Policy" |
-| Core | Core/service/service.jet | 462:5 | "Services6978: project existing runtime facts; source owns counts and text" |
-| Core | Core/service/service.jet | 547:5 | "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order" |
-| Core | Core/service/service.jet | 622:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/service/service.jet | 648:5 | "read the checked service tree's generation field without mutating or copying its scheduler carrier" |
-| Core | Core/service/service.jet | 654:5 | "read event-log storage length on the checked service tree" |
-| Core | Core/service/service.jet | 660:5 | "read dead-letter storage length on the checked service tree" |
-| Core | Core/service/service.jet | 862:5 | "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection" |
-| Core | Core/service/service.jet | 899:5 | "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible" |
-| Core | Core/service/service.jet | 930:5 | "Services5708-5789: first recorded definition wins; replay precedes terminal checks" |
-| Core | Core/service/service.jet | 983:5 | "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state" |
-| Core | Core/service/service.jet | 1018:5 | "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent" |
-| Core | Core/service/service.jet | 1194:5 | "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering" |
-| Core | Core/service/service.jet | 1240:5 | "Services7044: counter write precedes reachable-worker selection and canonical failure policy" |
-| Core | Core/service/service.jet | 1256:5 | "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push" |
-| Core | Core/service/service.jet | 1276:5 | "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed" |
-| Core | Core/service/service.jet | 1326:5 | "Services2184: identity and pinned-generation checks precede authority validation" |
-| Core | Core/service/service.jet | 1352:5 | "Services6081: exact directory lookup, generation, proof, authority, running, draining order" |
-| Core | Core/service/service.jet | 1376:5 | "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering" |
-| Core | Core/service/service.jet | 1475:5 | "ServiceAuthority2504: one existing locked durable read, then the owned entry's state" |
-| Core | Core/service/service.jet | 1490:5 | "ServiceAuthority2517: same locked read; receipt fields and signature are source policy" |
-| Core | Core/service/service.jet | 1504:5 | "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation" |
-| Core | Core/service/service.jet | 1553:5 | "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation" |
-| Core | Core/service/service.jet | 1564:5 | "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive" |
-| Core | Core/service/service.jet | 1653:5 | "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf" |
-| Core | Core/service/service.jet | 1673:5 | "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration" |
-| Core | Core/service/service.jet | 1746:5 | "Services2629: no enclosing guard; existing atomic authority operations retain their locks" |
-| Core | Core/service/service.jet | 1838:5 | "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts" |
-| Core | Core/service/service.jet | 1898:5 | "Services1464-1544: checked function item is passed through; source owns validation and every seed" |
-| Core | Core/service/service.jet | 2040:5 | "Services2917-3078: exclusive tree borrow; each write follows the native order" |
-| Core | Core/service/service.jet | 2155:5 | "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match" |
-| Core | Core/service/service.jet | 2176:5 | "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth" |
-| Core | Core/sys/sys.jet | 376:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/sys/sys.jet | 422:5 | "posix getpgid: inspect a process group" |
-| Core | Core/sys/sys.jet | 428:5 | "posix getsid: inspect a process session" |
-| Core | Core/sys/sys.jet | 433:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/sys/sys.jet | 440:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/sys/sys.jet | 444:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/sys/sys.jet | 451:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/sys/sys.jet | 461:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/sys/sys.jet | 467:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/sys/sys.jet | 475:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/sys/sys.jet | 480:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/sys/sys.jet | 484:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/sys/sys.jet | 488:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/sys/sys.jet | 494:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/sys/sys.jet | 500:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/sys/sys.jet | 504:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/sys/sys.jet | 508:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/sys/sys.jet | 512:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/sys/sys.jet | 516:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/sys/sys.jet | 520:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/testing/testing.jet | 355:5 | "the caller bounded this byte position by the String storage length" |
-| Core | Core/testing/testing.jet | 376:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
-| Core | Core/tui/tui.jet | 101:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
-| Core | Core/tui/tui.jet | 127:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
-| Core | Core/tui/tui.jet | 653:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
-| Core | Core/ui/host.jet | 154:5 | "Core UI capability facts come from the current retained provider, not a fabricated default" |
-| Core | Core/ui/host.jet | 160:5 | "Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved" |
-| Core | Core/ui/host.jet | 166:5 | "Core UI save dialog crosses the current provider boundary with the original typed request" |
-| Core | Core/ui/host.jet | 180:5 | "Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot" |
-| Core | Core/ui/host/accessibility.jet | 7:5 | "Core accessibility attaches metadata to the canonical node through the current retained provider" |
-| Core | Core/ui/host/accessibility.jet | 16:5 | "Core accessibility projects metadata from the canonical node, never a second provider tree" |
-| Core | Core/ui/host/clipboard.jet | 6:5 | "Core clipboard reads through the current retained provider; the raw host owns platform access" |
-| Core | Core/ui/host/clipboard.jet | 12:5 | "Core clipboard transfers the exact UTF-8 text to the current retained provider" |
-| Core | Core/ui/host/drag_drop.jet | 33:5 | "Core drag/drop consumes one typed event from the current retained provider queue" |
-| Core | Core/ui/host/ime.jet | 25:5 | "Core IME consumes one typed event from the current retained provider queue" |
-| Core | Core/ui/host/shortcuts.jet | 11:5 | "Core shortcut registration uses the current retained provider's canonical action registry" |
-| Core | Core/ui/host/shortcuts.jet | 17:5 | "Core shortcut dispatch uses the current retained provider's canonical action registry" |
-| Core | Core/ui/ui.jet | 126:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
-| Core | Core/ui/ui.jet | 131:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
-| Core | Core/ui/ui.jet | 136:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
-| Core | Core/ui/ui.jet | 147:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
-| Core | Core/ui/ui.jet | 164:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
-| Core | Core/ui/ui.jet | 191:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
-| Core | Core/ui/ui.jet | 197:5 | "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions" |
-| Core | Core/vendor/sqlite3/fixture/run.jet | 17:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
+| Core | Core/Auth/Auth.jet | 112:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
+| Core | Core/Crypto/Crypto.jet | 314:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
+| Core | Core/Crypto/Crypto.jet | 320:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
+| Core | Core/Crypto/Crypto.jet | 325:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 330:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 698:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Crypto/Crypto.jet | 1243:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1270:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 2114:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 2227:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 2236:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 2242:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/ExpertCt.jet | 11:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
+| Core | Core/Crypto/ExpertCt.jet | 37:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
+| Core | Core/Crypto/ExpertCt.jet | 323:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
+| Core | Core/Crypto/Jetc.jet | 96:5 | "Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains" |
+| Core | Core/Crypto/Jetc.jet | 104:5 | "Core JETC2 authenticates a bounded record before releasing its plaintext" |
+| Core | Core/Crypto/Jetc.jet | 112:5 | "Core JETC2 borrows shared material through expert, wiping its copy before propagating HKDF success or failure" |
+| Core | Core/Crypto/Jetc.jet | 127:5 | "Core JETC2 exposes only an operation-scoped key copy and wipes it before either seal outcome escapes" |
+| Core | Core/Crypto/Jetc.jet | 142:5 | "Core JETC2 exposes only an operation-scoped key copy and wipes it before either authentication outcome escapes" |
+| Core | Core/Crypto/Jetc.jet | 157:5 | "Core JETC2 copies its derived wrap nonce and file key only for sealing, wiping both copies on either outcome" |
+| Core | Core/Crypto/Jetc.jet | 175:5 | "Core JETC2 copies its derived wrap nonce only for authentication, wiping the copy on either outcome" |
+| Core | Core/Crypto/Jetc.jet | 233:5 | "Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy" |
+| Core | Core/Crypto/Jetc.jet | 271:5 | "Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty" |
+| Core | Core/Crypto/Vault.jet | 220:5 | "vault typed load provider boundary" |
+| Core | Core/Crypto/Vault.jet | 227:5 | "vault typed current provider boundary" |
+| Core | Core/Crypto/Vault.jet | 233:5 | "vault typed status provider boundary" |
+| Core | Core/Crypto/Vault.jet | 240:5 | "vault typed versions provider boundary" |
+| Core | Core/Crypto/Vault.jet | 247:5 | "vault typed generation provider boundary" |
+| Core | Core/Crypto/Vault.jet | 254:5 | "vault typed store provider boundary" |
+| Core | Core/Crypto/Vault.jet | 262:5 | "vault key import: signing key material" |
+| Core | Core/Crypto/Vault.jet | 270:5 | "vault key import: X25519 secret material" |
+| Core | Core/Crypto/Vault.jet | 278:5 | "vault wrapped import provider boundary" |
+| Core | Core/Crypto/Vault.jet | 285:5 | "vault typed rotation provider boundary" |
+| Core | Core/Crypto/Vault.jet | 292:5 | "vault typed retirement provider boundary" |
+| Core | Core/Crypto/Vault.jet | 299:5 | "vault typed revocation provider boundary" |
+| Core | Core/Crypto/Vault.jet | 306:5 | "vault write authorization provider boundary" |
+| Core | Core/Crypto/Vault.jet | 313:5 | "vault wrapped authorization provider boundary" |
+| Core | Core/Crypto/Vault.jet | 319:5 | "vault typed generation commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 325:5 | "vault typed store commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 331:5 | "vault key import commit: signing key material" |
+| Core | Core/Crypto/Vault.jet | 337:5 | "vault key import commit: X25519 secret material" |
+| Core | Core/Crypto/Vault.jet | 343:5 | "vault wrapped import commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 349:5 | "vault typed rotation commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 355:5 | "vault typed retirement commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 361:5 | "vault typed revocation commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 367:5 | "vault passphrase export provider boundary" |
+| Core | Core/Crypto/Vault.jet | 374:5 | "vault recipient export provider boundary" |
+| Core | Core/Data/Data.jet | 1267:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Data/Data.jet | 1879:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Db/Db.jet | 44:9 | "consume the unique SQLite queue handle through its existing host close leaf" |
+| Core | Core/Db/Db.jet | 50:5 | "open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource" |
+| Core | Core/Db/Db.jet | 57:5 | "borrow the live unique queue handle for BEGIN" |
+| Core | Core/Db/Db.jet | 60:5 | "borrow the live unique queue handle for COMMIT" |
+| Core | Core/Db/Db.jet | 63:5 | "borrow the live unique queue handle for ROLLBACK" |
+| Core | Core/Db/Db.jet | 66:5 | "execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
+| Core | Core/Db/Db.jet | 71:5 | "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
+| Core | Core/Email/Email.jet | 77:5 | "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret" |
+| Core | Core/Email/Email.jet | 414:5 | "DKIM known-answer fixture reads only synthetic key bytes" |
+| Core | Core/Encoding/Cbor.jet | 95:5 | "inspect private typed carriers without changing public Dyn variants" |
+| Core | Core/Encoding/Cbor.jet | 156:5 | "validated private carriers retain byte strings for typed Encode" |
+| Core | Core/Encoding/CborStream.jet | 216:9 | "the retained key copies exactly the already validated text bytes" |
+| Core | Core/Encoding/CborStream.jet | 319:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
+| Core | Core/Encoding/Csv.jet | 127:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
+| Core | Core/Encoding/Csv.jet | 322:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| Core | Core/Encoding/Csv.jet | 784:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/Json.jet | 101:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
+| Core | Core/Encoding/Json.jet | 109:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
+| Core | Core/Encoding/Json.jet | 710:5 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 803:5 | "Core rejects native byte carriers before inspecting public JSON values" |
+| Core | Core/Encoding/Json.jet | 873:5 | "Core JSON rendering borrows native private payloads without exposing their constructors" |
+| Core | Core/Encoding/Json.jet | 1307:5 | "Core compares compiler-private byte carriers without exposing their payloads" |
+| Core | Core/Encoding/Stream.jet | 14:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
+| Core | Core/Encoding/Stream.jet | 22:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
+| Core | Core/Encoding/Stream.jet | 28:5 | "check the private Bytes variant immediately before borrowing its backing" |
+| Core | Core/Encoding/Stream.jet | 35:5 | "the shared parser validated this exact numeric lexeme" |
+| Core | Core/Encoding/Stream.jet | 41:5 | "retain decoded JSON text until the target Decode contract is known" |
+| Core | Core/Encoding/Stream.jet | 305:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| Core | Core/Encoding/Stream.jet | 376:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| Core | Core/Encoding/Stream.jet | 381:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| Core | Core/Encoding/Stream.jet | 568:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| Core | Core/Encoding/Stream.jet | 579:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| Core | Core/Encoding/Stream.jet | 864:5 | "the shared UTF-8 validator just accepted this owned allocation" |
+| Core | Core/Encoding/Stream.jet | 873:5 | "the byte position was checked against this String's storage length" |
+| Core | Core/Encoding/Stream.jet | 1436:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1447:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
+| Core | Core/Encoding/Stream.jet | 1648:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 1791:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 1828:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/XmlEngine.jet | 130:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
+| Core | Core/Encoding/XmlEngine.jet | 168:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
+| Core | Core/Encoding/XmlEngine.jet | 2315:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
+| Core | Core/Encoding/Yaml.jet | 386:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
+| Core | Core/Files/Files.jet | 449:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
+| Core | Core/Files/Files.jet | 455:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Http/Server.jet | 85:5 | "move the normalized response head and one-shot body into the transport carrier" |
+| Core | Core/Http/Server.jet | 150:5 | "borrow the request's stored optional route-template metadata; no route selection or formatting policy" |
+| Core | Core/Jobs/Jobs.jet | 131:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
+| Core | Core/Jobs/Jobs.jet | 136:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
+| Core | Core/Jobs/Jobs.jet | 358:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| Core | Core/Jobs/Jobs.jet | 539:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 554:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
+| Core | Core/Mem/Mem.jet | 34:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
+| Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
+| Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
+| Core | Core/Net/Net.jet | 137:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 143:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
+| Core | Core/Net/Net.jet | 149:5 | "read the native IP address discriminant" |
+| Core | Core/Net/Net.jet | 193:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 200:5 | "read socket IP representation; formatting stays in Jet" |
+| Core | Core/Net/Net.jet | 203:5 | "read native socket port" |
+| Core | Core/Net/Net.jet | 215:5 | "read native IPv6 socket scope identifier" |
+| Core | Core/Net/Net.jet | 414:5 | "read the native UDP packet's socket-address carrier" |
+| Core | Core/Process/Process.jet | 96:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Service/Service.jet | 156:5 | "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier" |
+| Core | Core/Service/Service.jet | 266:5 | "read the existing endpoint's tree, worker and generation fields" |
+| Core | Core/Service/Service.jet | 273:5 | "Services3081: check started before the single delivery-field write" |
+| Core | Core/Service/Service.jet | 280:5 | "Services1415: root policy write precedes each declared group policy write" |
+| Core | Core/Service/Service.jet | 289:5 | "Services3220: tree's exclusive write borrow covers count then clear" |
+| Core | Core/Service/Service.jet | 298:5 | "Services3231: started and record checks precede adapter then authority writes" |
+| Core | Core/Service/Service.jet | 318:5 | "the source exclusive tree borrow covers the same complete mutation as Rust &amp;mut; no lock or interleaving window" |
+| Core | Core/Service/Service.jet | 349:5 | "Services4437: authority lookup, durable load, first record, then checked framing" |
+| Core | Core/Service/Service.jet | 363:5 | "Services4493: replay existing in-memory records without issuing a store read" |
+| Core | Core/Service/Service.jet | 398:5 | "Services6729: copy the existing optional last-upgrade field" |
+| Core | Core/Service/Service.jet | 404:5 | "Services1153: plain field projection; rollback store remains omitted from all text views" |
+| Core | Core/Service/Service.jet | 412:5 | "Services1265: read the existing topology fields, preserve handler insertion order" |
+| Core | Core/Service/Service.jet | 430:5 | "Services5867: durable replay before lookup; first matching run wins" |
+| Core | Core/Service/Service.jet | 445:5 | "Services5879: durable replay before lookup; missing or nonterminal run is Policy" |
+| Core | Core/Service/Service.jet | 462:5 | "Services6978: project existing runtime facts; source owns counts and text" |
+| Core | Core/Service/Service.jet | 547:5 | "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order" |
+| Core | Core/Service/Service.jet | 622:5 | "read the final path component's OS metadata kind without opening an identity handle" |
+| Core | Core/Service/Service.jet | 648:5 | "read the checked service tree's generation field without mutating or copying its scheduler carrier" |
+| Core | Core/Service/Service.jet | 654:5 | "read event-log storage length on the checked service tree" |
+| Core | Core/Service/Service.jet | 660:5 | "read dead-letter storage length on the checked service tree" |
+| Core | Core/Service/Service.jet | 862:5 | "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection" |
+| Core | Core/Service/Service.jet | 899:5 | "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible" |
+| Core | Core/Service/Service.jet | 930:5 | "Services5708-5789: first recorded definition wins; replay precedes terminal checks" |
+| Core | Core/Service/Service.jet | 983:5 | "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state" |
+| Core | Core/Service/Service.jet | 1018:5 | "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent" |
+| Core | Core/Service/Service.jet | 1194:5 | "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering" |
+| Core | Core/Service/Service.jet | 1240:5 | "Services7044: counter write precedes reachable-worker selection and canonical failure policy" |
+| Core | Core/Service/Service.jet | 1256:5 | "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push" |
+| Core | Core/Service/Service.jet | 1276:5 | "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed" |
+| Core | Core/Service/Service.jet | 1326:5 | "Services2184: identity and pinned-generation checks precede authority validation" |
+| Core | Core/Service/Service.jet | 1352:5 | "Services6081: exact directory lookup, generation, proof, authority, running, draining order" |
+| Core | Core/Service/Service.jet | 1376:5 | "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering" |
+| Core | Core/Service/Service.jet | 1475:5 | "ServiceAuthority2504: one existing locked durable read, then the owned entry's state" |
+| Core | Core/Service/Service.jet | 1490:5 | "ServiceAuthority2517: same locked read; receipt fields and signature are source policy" |
+| Core | Core/Service/Service.jet | 1504:5 | "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation" |
+| Core | Core/Service/Service.jet | 1553:5 | "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation" |
+| Core | Core/Service/Service.jet | 1564:5 | "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive" |
+| Core | Core/Service/Service.jet | 1653:5 | "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf" |
+| Core | Core/Service/Service.jet | 1673:5 | "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration" |
+| Core | Core/Service/Service.jet | 1746:5 | "Services2629: no enclosing guard; existing atomic authority operations retain their locks" |
+| Core | Core/Service/Service.jet | 1838:5 | "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts" |
+| Core | Core/Service/Service.jet | 1898:5 | "Services1464-1544: checked function item is passed through; source owns validation and every seed" |
+| Core | Core/Service/Service.jet | 2040:5 | "Services2917-3078: exclusive tree borrow; each write follows the native order" |
+| Core | Core/Service/Service.jet | 2155:5 | "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match" |
+| Core | Core/Service/Service.jet | 2176:5 | "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth" |
+| Core | Core/Sys/Sys.jet | 376:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 422:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 428:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 433:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 440:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 444:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 451:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 461:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 467:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 475:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 480:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 484:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 488:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 494:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 500:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 504:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 508:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 512:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 516:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 520:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Testing/Testing.jet | 355:5 | "the caller bounded this byte position by the String storage length" |
+| Core | Core/Testing/Testing.jet | 376:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Tui/Tui.jet | 101:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
+| Core | Core/Tui/Tui.jet | 127:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
+| Core | Core/Tui/Tui.jet | 653:5 | "Core TUI test: normalized style words and explicit absent UI slots" |
+| Core | Core/Ui/Host.jet | 154:5 | "Core UI capability facts come from the current retained provider, not a fabricated default" |
+| Core | Core/Ui/Host.jet | 160:5 | "Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved" |
+| Core | Core/Ui/Host.jet | 166:5 | "Core UI save dialog crosses the current provider boundary with the original typed request" |
+| Core | Core/Ui/Host.jet | 180:5 | "Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot" |
+| Core | Core/Ui/Host/Accessibility.jet | 7:5 | "Core accessibility attaches metadata to the canonical node through the current retained provider" |
+| Core | Core/Ui/Host/Accessibility.jet | 16:5 | "Core accessibility projects metadata from the canonical node, never a second provider tree" |
+| Core | Core/Ui/Host/Clipboard.jet | 6:5 | "Core clipboard reads through the current retained provider; the raw host owns platform access" |
+| Core | Core/Ui/Host/Clipboard.jet | 12:5 | "Core clipboard transfers the exact UTF-8 text to the current retained provider" |
+| Core | Core/Ui/Host/DragDrop.jet | 33:5 | "Core drag/drop consumes one typed event from the current retained provider queue" |
+| Core | Core/Ui/Host/Ime.jet | 25:5 | "Core IME consumes one typed event from the current retained provider queue" |
+| Core | Core/Ui/Host/Shortcuts.jet | 11:5 | "Core shortcut registration uses the current retained provider's canonical action registry" |
+| Core | Core/Ui/Host/Shortcuts.jet | 17:5 | "Core shortcut dispatch uses the current retained provider's canonical action registry" |
+| Core | Core/Ui/Ui.jet | 126:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 131:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 136:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 147:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
+| Core | Core/Ui/Ui.jet | 164:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
+| Core | Core/Ui/Ui.jet | 191:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
+| Core | Core/Ui/Ui.jet | 197:5 | "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions" |
+| Core | Core/Vendor/Sqlite3/Fixture/run.jet | 17:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Examples | Examples/features/crypto/crypto_migration.jet | 31:5 | "AES-256-GCM protocol interoperability" |
 | Examples | Examples/features/crypto/crypto_suite.jet | 36:5 | "known-answer check reads the RFC 7748 shared secret" |
 | Examples | Examples/features/crypto/expert_projection.jet | 30:5 | "expert cryptography is an explicit opt-in" |
@@ -9289,182 +9289,182 @@ the function body; they do not exempt a wrapper from the proof requirement.
 <!-- unsafe-abstractions:begin -->
 ```json
 [
-  {"file": "Core/auth/auth.jet", "function": "verify_paseto", "proof": "The strict Ed25519 verifier only reads `key`, the PAE-encoded message and the 64-byte signature, all owned byte lists sliced and length-checked above; it returns a Bool and exposes no key material."},
-  {"file": "Core/crypto/crypto.jet", "function": "password_hash_with_salt", "proof": "Password and salt lengths are bounded before Argon2id runs with fixed parameters (m=65536, t=3, p=1, 32-byte output); the derived key stays in a Secret that only feeds the PHC encoding."},
-  {"file": "Core/crypto/crypto.jet", "function": "password_verify", "proof": "Every PHC field is parsed and bounded (memory, iterations, lanes, salt and digest lengths) before Argon2id runs; the derived key is compared in constant time and never leaves the function."},
-  {"file": "Core/crypto/jetc.jet", "function": "seal", "proof": "Expert AEAD seal is safe here because the nonce is unique per (key, record): writer (:265-313) seals under a fresh random file key and 16-byte prefix that the coordinator draws for every container (crypto.jet:915-919); each record's nonce = prefix ∥ LE64(index) (:62-65), with the header tag at index 0 (:306) and chunks at index 1.. (:312) strictly increasing (:326), bounded by MAX_RECORDS (:317), and a final record ends the state (:317, :327). Per-recipient wraps use their own HKDF-derived key and nonce (seal_wrap). AAD is a fixed domain per record kind (:73-94). Key / nonce lengths are enforced by expert (expert.jet:273-276)."},
-  {"file": "Core/crypto/jetc.jet", "function": "open_record", "proof": "The gate (:104-106) calls expert.xchacha20poly1305_open, which bounds key/nonce/cipher/AAD widths and returns plaintext only after the Poly1305 tag verifies in constant time (expert.jet:279-285, 195-197); every failure becomes FileCryptoError.OpenFailed. Its only caller open_key (:144) lends an operation-scoped key copy that it wipes on both outcomes. open_key's callers bound their input first: reader checks the header length, recipient count and stanza layout (:340-346) before the wrap and header-tag opens (:374-377), and open_chunk checks record shape, cipher width and remaining length (:385-389) before a record open (:390); the plaintext becomes a Secret, and the coordinator writes it only after authentication and publishes only after finish sees the final record (crypto.jet:672-677)."},
-  {"file": "Core/crypto/jetc.jet", "function": "derive_key", "proof": "expert.shared_secret_bytes (expert.jet:351) copies the SharedSecret; the copy only feeds hkdf_sha256 and is zeroized on both the Ok and Err paths before return (:113-123), while the SharedSecret keeps its own zeroizing Close (crypto.jet:285-289). The result is a Secret. jetc.jet is the private part __core_crypto_jetc (CoreSourceParts.rs:144-150), so its callers are Core: writer (:293, :297) and reader (:372-373), which derive the 32-byte wrap key and 24-byte wrap nonce with distinct domain labels over ephemeral ∥ recipient public key and the file id as salt."},
-  {"file": "Core/crypto/jetc.jet", "function": "seal_key", "proof": "expert.secret_bytes (expert.jet:349) copies the key; the copy only feeds seal (the registered nonce-uniqueness proof above) and is zeroized on both outcomes before return (:128-138); the Secret owner keeps its Close. Its Core callers supply the protocol nonces that proof covers: the header tag at nonce(prefix, 0) (:306), each chunk at nonce(prefix, index ≥ 1) (:321-322), and seal_wrap's per-recipient HKDF nonce under that recipient's own derived key (:160)."},
-  {"file": "Core/crypto/jetc.jet", "function": "open_key", "proof": "expert.secret_bytes (expert.jet:349) copies the key; the copy only feeds open_record (authenticated open, proof above) and is zeroized on both outcomes before return (:143-153); the Secret owner keeps its Close. Callers are Core only (private part __core_crypto_jetc): reader's header tag (:377), open_wrap (:177) and open_chunk (:390), each after the bounds checks listed for open_record."},
-  {"file": "Core/crypto/jetc.jet", "function": "seal_wrap", "proof": "Copies the derived wrap nonce and the file key through expert.secret_bytes, passes them to seal_key, and zeroizes both copies on Ok and Err (:157-171); the Secret owners keep their Close duty. Its only caller writer (:301) runs it once per recipient with a key and nonce from derive_key over a fresh ephemeral X25519 key (:270-273) and that recipient's public key, so each derived key seals exactly one message under one nonce. A wrong nonce width is refused by expert (expert.jet:274; test :257)."},
-  {"file": "Core/crypto/jetc.jet", "function": "open_wrap", "proof": "Copies the derived wrap nonce through expert.secret_bytes, passes it to open_key (authenticated open), and zeroizes the copy on both outcomes (:175-187). Its only caller reader (:374) supplies the stanza bytes after the header-shape checks (:340-346); the opened file key is wrapped in a Secret and must be exactly 32 bytes (:376)."},
-  {"file": "Core/crypto/jetc.jet", "function": "secret_length", "proof": "The gate (:233-238) copies the Secret through expert.secret_bytes, reads only its length, and zeroizes the copy before returning that Int; no byte of the secret leaves the function and the original owner keeps its Close (#Test :241-246). Callers are writer (:269) and reader (:376) width checks."},
-  {"file": "Core/crypto/jetc.jet", "function": "writer", "proof": "The gate (:271-273) copies the ephemeral Secret through expert.secret_bytes straight into X25519SecretKey.from_bytes, which takes the copy and accepts exactly 32 bytes (crypto.jet:244-247); :269 already checked that width, so the refusal path is unreachable. The copy then lives only in the zeroizing X25519SecretKey (Close wipes, crypto.jet:254-258) and the moved ephemeral Secret keeps its own Close. Only the derived public key (:274) and per-recipient wraps leave; the coordinator draws the four inputs fresh for each container (crypto.jet:913-919)."},
-  {"file": "Core/crypto/crypto.jet", "function": "__migrate_v1", "proof": "Reachable only from expert.migrate_v1 (expert.jet:624, the sole caller), which the checker restricts to an importing core.crypto.expert caller inside #Unsafe (CheckerCoreLib/core_call.rs:2553-2577). The legacy buffer is bounded (≤1 GiB + 34, :666-675); the plaintext is a Secret only after authentication (:676-680); the staged v2 output is verified (:919-929) before publication."},
-  {"file": "Core/crypto/crypto.jet", "function": "__vault_wrapped_from_bytes", "proof": "The gate (:314-317) forwards the moved bytes to vault.__wrapped_from_bytes (vault.jet:182-186), which returns a WrappedVaultKey only after wrapped_metadata (vault.jet:487-) bounds the blob to 16..8192 bytes and checks the JVKW magic and header fields; failures become KeyWrapError. The carrier holds the wrapped (encrypted) container, never plaintext key material. The `__` name is reserved (E0067 outside Core), so users reach it only as the typed constructor WrappedVaultKey.from_bytes (BuiltinStatics.jet:145, 148)."},
-  {"file": "Core/crypto/crypto.jet", "function": "__vault_wrapped_bytes", "proof": "vault.__wrapped_bytes (vault.jet:187) returns an owned copy of the carrier's `encoded` field: the same authenticated wrapped container that WrappedVaultKey.from_bytes validated or the vault export produced. No unwrapped key or Secret is read, and the carrier stays intact. The `__` name is reserved (E0067 outside Core), so only Core and compiler lowering call it."},
-  {"file": "Core/crypto/crypto.jet", "function": "__vault_unlock_recipient", "proof": "vault.__key_unlock_recipient (vault.jet:203-205) builds KeyUnlock{kind: 1, secret: identity.bytes[0..<len]}: a read View of the caller's X25519SecretKey bytes, not a copy, so no second copy of the identity exists and the owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Recipient(identity) (BuiltinStatics.jet:146, 149)."},
-  {"file": "Core/crypto/crypto.jet", "function": "__vault_unlock_passphrase", "proof": "vault.__key_unlock_passphrase (vault.jet:206-208) builds KeyUnlock{kind: 2, secret: passphrase.bytes[0..<len]}: a read View of the caller's Secret, not a copy, so the passphrase owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Passphrase(secret) (BuiltinStatics.jet:147, 150)."},
-  {"file": "Core/crypto/crypto.jet", "function": "poly1305", "proof": "Not a core.crypto export (Core.jet:44), so its callers are crypto.jet's chacha_poly_seal (:2146) and chacha_poly_open (:2165). Both pass otk = chacha20_block(key, nonce, 0) (:2137, :2157), the RFC 8439 §2.6 one-time key, over the AEAD framing aad ∥ pad16 ∥ ct ∥ pad16 ∥ le64(aad) ∥ le64(ct); the 64-byte block covers the 32 key bytes fixedcrypto.poly1305 reads (expert_ct.jet:628). The key is therefore one-time per (key, nonce): xchacha_seal's callers use a random 24-byte nonce for the payload (:466, :506) and HKDF nonces under fresh ephemeral keys for wraps (:486-496, :1161-1174, :1190). open compares tags in constant time before decrypting (:2166)."},
-  {"file": "Core/crypto/crypto.jet", "function": "x25519_scalarmult", "proof": "Not a core.crypto export (Core.jet:44). Its callers are x25519 (:1012), which first requires 32-byte secret and public keys (:1009-1010) and rejects an all-zero shared secret (:1013), x25519_public (:1019) after a 32-byte check (:1018), and X25519SecretKey.public_key (:251) with the fixed 32-byte base point. fixedcrypto.x25519 panics on any other width rather than reading past its inputs (expert_ct.jet:150), wipes its workspace (:201), and returns a fresh 32-byte list."},
-  {"file": "Core/crypto/crypto.jet", "function": "ed25519_sign_raw", "proof": "Not a core.crypto export (Core.jet:44). Its only caller sign (:998) requires a 32-byte SigningKey seed first (:997). fixedcrypto.ed_sign hashes the seed into a private workspace, wipes it (expert_ct.jet:355-385), and returns the 64-byte signature; the seed is never copied out."},
-  {"file": "Core/crypto/crypto.jet", "function": "ed25519_verify_raw", "proof": "Not a core.crypto export (Core.jet:44). Its only caller verify (:1005) requires a 32-byte public key and a 64-byte signature (:1002-1004); fixedcrypto.ed_verify rejects other widths itself (expert_ct.jet:512). Only public inputs are read and only a Bool returns."},
-  {"file": "Core/crypto/expert_ct.jet", "function": "arena", "proof": "__list_reserve_exact grows the exclusively lent, freshly created empty list to exactly `words` I64 elements of capacity and returns false, leaving the allocation intact, on a negative or overflowing request or no memory (JetRuntime Collections.jet:20-23); arena panics on false (:12). Length stays 0, and the loop then pushes `words` zeros (:14), so every later bounds-checked word/byte access sees initialized elements. Callers pass constants (26, 204, 684, 696). Sema admits this leaf only in the private part __core_crypto_ct (Sema/Calls/Core.jet:962; CoreSourceParts.rs:155-161)."},
-  {"file": "Core/crypto/expert_ct.jet", "function": "extract", "proof": "__list_reserve_exact reserves exactly `count` U8 capacity on a fresh empty list and the function panics on failure (:37-39); the length grows only through the following `count` pushes of bytes copied from the workspace (:40), so no uninitialized element is ever readable. Callers pass constant widths 32 (:200, :350), 64 (:382) and 16 (:651). Sema admits the leaf only in __core_crypto_ct (Sema/Calls/Core.jet:962)."},
-  {"file": "Core/crypto/expert_ct.jet", "function": "hash_parts", "proof": "__list_reserve_exact reserves exactly an + bn + msg.len() U8 capacity on a fresh empty list and the function panics on failure (:323-325); exactly that many bytes are then pushed (:326-328), so the length never exceeds what was written. Callers pass an = 32 and bn ∈ {0, 32} (:361, :366, :487). The hashed buffer and digest are zeroized before return (:331-332). Sema admits the leaf only in __core_crypto_ct (Sema/Calls/Core.jet:962)."},
-  {"file": "Core/crypto/vault.jet", "function": "load", "proof": "`validate_key` rejects a forged or foreign key reference before the typed provider runs; the provider returns the typed key value, never raw key bytes."},
-  {"file": "Core/crypto/vault.jet", "function": "current", "proof": "`validate_name` rejects an invalid vault name before the typed provider runs; the result is a typed key reference, not key material."},
-  {"file": "Core/crypto/vault.jet", "function": "status", "proof": "`validate_key` rejects a forged or foreign key reference before the provider runs; the result is a KeyStatus value."},
-  {"file": "Core/crypto/vault.jet", "function": "versions", "proof": "`validate_name` rejects an invalid vault name before the provider runs; the result is a list of typed key references."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_generate", "proof": "`validate_name` runs first; the provider returns a MutationPlan that only `authorize_write` and a commit can act on."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_store", "proof": "`validate_name` runs first and the key moves (`^key`) into the provider, so the caller keeps no copy; the result is a MutationPlan."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_import_signing", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move (`^bytes`) into the provider, so no raw copy remains with the caller."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_import_x25519", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move (`^bytes`) into the provider, so no raw copy remains with the caller."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_import_wrapped", "proof": "`validate_name` runs and the wrapped blob is bounded to 16..8192 bytes before the provider decrypts it under `unlock`; the result is a WrappedImportPlan."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_rotate", "proof": "`validate_name` runs first; the provider returns a MutationPlan that only `authorize_write` and a commit can act on."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_retire", "proof": "`validate_key` and `validate_reason` run first; the provider returns a MutationPlan, not key material."},
-  {"file": "Core/crypto/vault.jet", "function": "prepare_revoke", "proof": "`validate_key` and `validate_reason` run first; the provider returns a MutationPlan, not key material."},
-  {"file": "Core/crypto/vault.jet", "function": "authorize_write", "proof": "`validate_plan` and `validate_reason` run first; the plan is lent read-only and the result is a single-use VaultWrite token."},
-  {"file": "Core/crypto/vault.jet", "function": "authorize_wrapped_import", "proof": "`validate_wrapped_plan` and `validate_reason` run first; the result is a single-use VaultWrite token."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_generate", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_store", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_import_signing", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_import_x25519", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_import_wrapped", "proof": "The write token and wrapped plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_rotate", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a Rotation of typed key references."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_retire", "proof": "The write token and plan are validated and both move into the provider, so each is used once; nothing is returned but the error."},
-  {"file": "Core/crypto/vault.jet", "function": "commit_revoke", "proof": "The write token and plan are validated and both move into the provider, so each is used once; nothing is returned but the error."},
-  {"file": "Core/crypto/vault.jet", "function": "export_to_passphrase", "proof": "`validate_key` runs first and the passphrase is lent read-only; the result is passphrase-encrypted wrapped bytes, never the plain key."},
-  {"file": "Core/crypto/vault.jet", "function": "export_to_recipients", "proof": "`validate_key` runs and the recipient list is bounded to 1..16; the result is recipient-encrypted wrapped bytes, never the plain key."},
-  {"file":"Core/email/email.jet","function":"decode_dkim","proof":"The gate reads and writes Secret.bytes, not arbitrary memory. At email.jet:78-95 a nonempty length divisible by four bounds every quartet access and canonical padding/alphabet checks reject malformed input. The only decoded allocation is the fixed 32-byte Secret at :82; :96-104 guard every write with written < 32, never grow a secret-bearing List, and :107 rejects any non-32-byte result. Errors drop the zeroizing Secret; success moves it at :108. Callers supply only a borrowed Secret and cannot choose unchecked indices or receive a plain decoded byte list."},
-  {"file":"Core/data/data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
-  {"file":"Core/data/data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
-  {"file":"Core/process/process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
-  {"file":"Core/http/server.jet","function":"response_body","proof":"The __response_parts gate at server.jet:76 transfers typed Headers and one-shot Body ownership into the response without reading the body. :72-75 normalize every caller status to 100..599 before I64 conversion; all other transport fields at :78-79 are initialized typed constants, absent slots, or empty lists. The consuming body/headers parameters at :69 prevent the caller from reusing moved stream ownership. No pointer or foreign callback is accepted; invalid status cannot reach the unchecked head transfer."},
-  {"file":"Core/http/server.jet","function":"access_log_template","proof":"The gate at server.jet:139 calls __route_template with a borrowed typed HTTPRequest. Its provider Top/HTTPServer.rs:6321-6322 only clones the request's stored Option<String>; it neither dereferences caller-supplied addresses nor mutates routing state, consumes the request, or exports a borrowed native reference. Every caller therefore receives owned optional text regardless of whether route metadata was present."},
-{"file":"Core/db/db.jet","function":"close","proof":"db.jet:40 consumes the Close resource before passing its private raw field to __queue_raw_close(:42). The bridge uses a u64 registry key, not a memory address (jet-pkg-model/Prelude/DB.rs:66-67): removal drops the owned connection and absent keys return false. Thus even an already-absent handle cannot dereference freed storage; no connection borrow or raw pointer escapes the consuming close."},
-{"file":"Core/db/db.jet","function":"__queue_open","proof":"__queue_raw_open accepts an ordinary String path and registers the owned SQLite connection under a fresh numeric key (jet-pkg-model/Prelude/DB.rs:40-48). db.jet:49 rejects the failure sentinel zero and :50 immediately adopts the key into the Close resource; no native pointer or connection reference is returned. Arbitrary caller paths produce a resource or None, not an unchecked memory capability."},
-{"file":"Core/db/db.jet","function":"__queue_begin","proof":"The gate at db.jet:54 lends driver.raw to __queue_raw_begin without transferring the Close resource. The bridge fixes the statement to BEGIN and resolves the numeric key in DB_CONNS while its map borrow is live (jet-pkg-model/Prelude/DB.rs:95-100,115-117); missing keys return false. Callers cannot supply SQL or a pointer to this operation, and the native connection reference does not escape."},
-{"file":"Core/db/db.jet","function":"__queue_commit","proof":"db.jet:57 lends only the typed driver's numeric key to __queue_raw_commit. The bridge selects the fixed COMMIT statement and performs the registry lookup under a live map borrow (jet-pkg-model/Prelude/DB.rs:95-100,119-121), returning false for an absent key. No raw address or native reference reaches the caller, including after failed transaction admission."},
-{"file":"Core/db/db.jet","function":"__queue_rollback","proof":"db.jet:60 lends only the typed driver's numeric key to __queue_raw_rollback. Its bridge selects the fixed ROLLBACK statement and keeps the registry borrow through execution (jet-pkg-model/Prelude/DB.rs:95-100,123-125); absence is false rather than a dangling dereference. It exposes neither a native connection nor caller-selected memory."},
-{"file":"Core/db/db.jet","function":"__queue_execute","proof":"db.jet:62-64 hold the exclusive __QueueDb borrow while __queue_raw_execute marshals typed String SQL and DBValue parameters. The bridge looks up the numeric key, rejects absence, owns decoded parameters and lends them only while the prepared statement executes (jet-pkg-model/Prelude/DB.rs:183-199). No caller address is interpreted and no statement or parameter reference escapes in the owned Int/DBError result."},
-{"file":"Core/db/db.jet","function":"__queue_query","proof":"db.jet:67-69 hold the exclusive __QueueDb borrow through __queue_raw_query; SQL and parameters are typed owned values, not pointers. The bridge rejects an absent registry key and keeps connection, decoded parameters and statement alive through row reads (jet-pkg-model/Prelude/DB.rs:131-151), encoding owned results. Returned String/DBValue rows contain no references into SQLite storage, so callers cannot outlive a native row borrow."},
-{"file":"Core/net/net.jet","function":"ip_addr","proof":"__ip_from_bytes expects exactly four or sixteen octets. net.jet:136 accepts only parse_ip_bytes success: parse_ipv4_bytes(:960-979) checks four decimal octets <=255, and the IPv6 parser(:982-1048) checks eight 16-bit words including compression before expanding to sixteen bytes. The exact owned list moves at :138; callers cannot substitute a differently sized list after validation."},
-{"file":"Core/net/net.jet","function":"ip_to_string_impl","proof":"net.jet:143-144 call __ip_bytes on a borrowed typed IPAddr; Top/NetHTTP.rs:1944-1948 discriminant-matches its native IPv4/IPv6 enum and copies exactly its initialized octets into an owned list. Formatting only reads that list. No caller-selected index, raw pointer or borrowed native storage escapes."},
-{"file":"Core/net/net.jet","function":"ip_is_ipv4","proof":"__ip_is_v4 at net.jet:149 only matches the valid native IPAddr discriminant (Top/NetHTTP.rs:1951-1952). Any typed address is admitted; no payload reinterpretation, mutation or memory borrow is returned, only Bool."},
-{"file":"Core/net/net.jet","function":"socket_addr_parse","proof":"At net.jet:182-189 parsing produces exactly sixteen IPv6 bytes or four IPv4 bytes, with the IPv6 length checked at :183. parse_port(:846-856) bounds decimal port to 0..65535 and parse_scope(:1144-1154) bounds scope to 0..4294967295 before :193-194 consume the octets and IP into __ip_from_bytes/__socket_from_parts. Flow is the constant zero. Callers cannot select uninitialized representation fields or overflow the U16/U32 transfer."},
-{"file":"Core/net/net.jet","function":"socket_host","proof":"__socket_ip at net.jet:199 borrows a valid SocketAddr and copies its native IP enum (Top/NetHTTP.rs:2038-2039). ip_to_string_impl then reads copied octets for source formatting; the caller receives owned text, not a reference into the socket carrier. No raw address is accepted."},
-{"file":"Core/net/net.jet","function":"socket_port","proof":"__socket_port at net.jet:202 borrows a typed SocketAddr and widens its initialized native u16 port to Int (Top/NetHTTP.rs:2042-2043). This scalar projection accepts every valid carrier and neither exposes a borrow nor changes socket ownership."},
-{"file":"Core/net/net.jet","function":"socket_scope","proof":"__socket_scope at net.jet:215 matches the valid socket enum, returning None for IPv4 or widening the IPv6 u32 scope (Top/NetHTTP.rs:2046-2050). Source substitutes zero for None. No reinterpretation or caller-controlled pointer is involved and only an owned scalar escapes."},
-{"file":"Core/net/net.jet","function":"udp_packet_addr","proof":"__udp_packet_addr at net.jet:413 borrows a typed UDPPacket and clones its stored SocketAddr (Top/NetHTTP.rs:2851-2852); the packet remains live during the projection. The return carrier owns its address rather than pointing into packet storage, so releasing the packet cannot invalidate the result."},
-{"file":"Core/jobs/jobs.jet","function":"queue","proof":"The gates at jobs.jet:130-136 call __path_kind and __create_dir_all_raw with owned String paths computed by queue_default_path/files.dirname, after endpoint authority validation at :124-126. Metadata is a scalar kind query and recursive mkdir returns owned IOError; neither leaf accepts or returns memory addresses. The kind check at :131-132 rejects observed symlinks before the checked SQLite open. Path races do not create a borrowed descriptor or dangling pointer because these are independent pathname operations, not identity-handle transfers."},
-{"file":"Core/jobs/jobs.jet","function":"wait","proof":"The unsafe __sleep_ms leaf casts signed milliseconds to unsigned host Duration (Top/ServiceAuthority.rs:3792-3793). jobs.jet:386-387 reject negative/oversized timeout and :393 clamps the exact delay passed at :395 to 1..25, independently of wall-clock movement. No caller can reach the cast with a negative or oversized delay; the leaf only sleeps and exports no memory."},
-{"file":"Core/jobs/jobs.jet","function":"queue_publish_transition","proof":"jobs.jet:486 constructs owned JSON fields and :487 clamps negative timestamps before __publish_parts(:489). The provider Top/ServiceAuthority.rs:3772-3787 validates JetDevtoolsEvent::from_parts before publication, owns entity/fields and borrows source/kind only during the call. No native pointer, callback or mutable queue storage is transferred to a sink; caller-chosen observation text cannot escape that validation boundary."},
-{"file":"Core/jobs/jobs.jet","function":"queue_publish_status","proof":"jobs.jet:499-502 assemble owned status fields/entity and nonnegative timestamp, then __publish_parts(:504) invokes the existing validating JetDevtoolsEvent::from_parts gate (Top/ServiceAuthority.rs:3779-3786). The sink gets an owned validated event rather than references into JobQueueStatus, so callers cannot make event storage outlive a borrowed source value."},
-{"file":"Core/testing/testing.jet","function":"testing_byte","proof":"__string_byte performs an unchecked native byte read. Its local helper testing.jet:353-355 is reached by testing_boundary only with 0 < position < text.count_bytes()(:362-363), by testing_diff_lines with cursor < end <= length(:387-393), by testing_append_bytes over a bounded prefix(:408-409,412-457), and testing_ascii_name over 0..<count_bytes(:508-509). These establish nonnegative in-storage indices before U64 conversion; none expose the index-taking helper as a public Core member or allow the String borrow to escape."},
-{"file":"Core/testing/testing.jet","function":"testing_owned_text","proof":"__bytes_into_text at testing.jet:376 requires valid UTF-8. The only callers are testing_unified_diff(:503) and testing_ascii_name(:517). Diff output appends complete String bytes or scalar-aligned prefixes chosen by testing_boundary(:362-366,423-424,450-451); marker fragments are ASCII. Name output(:508-515) appends only ASCII alphanumerics, hyphen or underscore. Each exact owned list moves into String with no mutation between construction and transfer; arbitrary caller bytes cannot reach this local helper."},
-{"file":"Core/tui/tui.jet","function":"capability_env_bytes","proof":"__cap_env_bytes at tui.jet:101 borrows a String name and returns an owned optional byte list. Its provider Ui.rs:514-515 obtains var_os and consumes OsString into encoded bytes; no borrowed environment storage is returned and source does not assume UTF-8 (capability_text uses checked String.from_bytes at :112). Arbitrary names cannot manufacture a native pointer or invalidate returned storage."},
-{"file":"Core/tui/tui.jet","function":"capability_stdout_terminal","proof":"The gate at tui.jet:126-127 invokes __stdout_terminal with no caller-supplied values and returns only a copied Bool host terminal fact at :129. It lends no memory, descriptor ownership or callback to the caller; host terminal presence or absence cannot change the typed result's validity."},
-{"file":"Core/tui/tui.jet","function":"normalized_style_test_node","proof":"The local test helper at tui.jet:651-655 calls __node_transfer with initialized text/dimensions, fixed kind/role, an empty child list, explicitly absent accessibility slots and present style slots. Its sole caller(:659-663) obtains StyleWords from style_words(:416-421), whose three flags are bounded bits 1/2/4 and whose colors are normalized by color_words. No arbitrary numeric representation or uninitialized optional slot is passed; the returned retained UINode owns its payload."},
-  {"file":"Core/encoding/cbor.jet","function":"validate","proof":"The cbor.jet:95 gate only matches Dyn's private Number/TypedText variants to reject them(:97-98), and recursively validates initialized Array/Object payloads(:99-104). Discriminant matching precedes payload access; ordered Object storage is borrowed through object_entries while value remains live. No raw address, variant transmute or payload reference escapes in the error/unit result."},
-  {"file":"Core/encoding/cbor.jet","function":"encode_value","proof":"The cbor.jet:157 gate grants access to private Dyn.Bytes only after its matching branch(:171); all byte reads iterate the owned list length(:173). Object entry views are taken only in the Object branch(:179-180) and retain the value borrow throughout bounded index ordering. encode(:111) validates the tree first, rejecting internal Number/TypedText. The caller's exclusively borrowed output receives copied bytes, never native payload references."},
-  {"file":"Core/encoding/cbor_stream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 consumes stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only the exact owned copy moves into the retained key; arbitrary wire bytes cannot reach this transfer."},
-  {"file":"Core/encoding/cbor_stream.jet","function":"next_inner","proof":"For a CBOR text item cbor_stream.jet:303 obtains the owned payload, :306 strictly validates that exact list's UTF-8 and returns Syntax on failure, then :308 immediately moves it into __bytes_into_text. No mutation intervenes, and binary items(:304) never use the text transfer. Host/wire callers cannot bypass the validator with malformed payload bytes."},
-  {"file":"Core/encoding/csv.jet","function":"close_field","proof":"__bytes_into_text at csv.jet:124 consumes the whole-value parser's field. typed_records(:213-222) obtains complete scalar byte sequences from a valid String, and TypedCSV.push(:138-200) either appends the whole sequence or replaces/removes ASCII CSV syntax; doubled quotes and CRLF are ASCII. Thus field is empty or concatenated complete UTF-8 scalars at every close; it is moved and reset before reuse(:124-126), never exposed as arbitrary caller bytes."},
-  {"file":"Core/encoding/csv.jet","function":"query_text","proof":"csv.jet:315-316 enforce the bounded read's size/list limits and :317 validates sample.bytes with the strict shared UTF-8 validator. The gate at :318-319 immediately moves that same owned list into __bytes_into_text; failures return FieldError before conversion. A caller's arbitrary file contents cannot produce an invalid String or retain a native read-buffer borrow."},
-  {"file":"Core/encoding/csv.jet","function":"finish_field","proof":"CSVReader.character(:725-744) validates lead width, all continuation bytes, overlong/surrogate/out-of-range cases before next_inner(:880-882) calls push. push(:798-874) appends each entire validated scalar or only ASCII quote/CRLF escapes. Consequently finish_field's __bytes_into_text(:769) moves only complete UTF-8 storage, then resets field(:771). Partial/invalid wire scalars fail without reaching this gate."},
-  {"file":"Core/encoding/json.jet","function":"emit_coercion","proof":"json.jet:101-102 calls __coerce_emit with ordinary borrowed String text; it supplies no pointer, descriptor or callback. The reserved leaf preserves the existing stderr emission boundary, and the helper returns no borrowed storage. Caller-selected message bytes remain valid UTF-8 and cannot become an unchecked address or outlive the call as a native reference."},
-  {"file":"Core/encoding/json.jet","function":"coerce_line","proof":"The gate at json.jet:109-110 calls __coerce_now with no arguments and assigns its owned Int clock snapshot. Subsequent interpolation(:112) is safe String construction. No caller can choose a raw memory operand or receive a host borrow through this parameterless scalar query."},
-  {"file":"Core/encoding/json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
-  {"file":"Core/encoding/json.jet","function":"write_json","proof":"json.jet:855-870 discriminate private Number/TypedText/Bytes before reading each payload. Number/text are ordinary String inputs to output helpers; Bytes are read only over 0..<bytes.len()(:865-868). The caller holds an exclusive output-list borrow, which receives copied encoding bytes; no native storage reference or unchecked index is returned. Other variants leave the gate for normal recursive rendering."},
-  {"file":"Core/encoding/json.jet","function":"write_canonical","proof":"The gate at json.jet:803-805 only tests the private Dyn.Bytes discriminant without binding its payload (`.Bytes(_)`) and returns an Unsupported EncodingError; it writes nothing to the caller's output list and forms no pointer or view. Every other variant leaves the gate for the ordinary public match (:806-)."},
-  {"file":"Core/encoding/json.jet","function":"json_equal","proof":"The gate at json.jet:1307-1312 matches private Dyn.Bytes on the left, then on the right, and compares the two owned byte lists by value with checked list equality; a Bytes/non-Bytes pair is false. Only a Bool returns; no payload, pointer or borrowed view escapes. Public variants are compared outside the gate (:1313-)."},
-  {"file":"Core/encoding/stream.jet","function":"object_entries","proof":"__object_entries_view requires an Object and returns a borrowed ordered backing view. stream.jet:11 checks that exact discriminant immediately before :13; other variants panic before the intrinsic. The result's `from value` lifetime at :10 ties the view to the same borrowed Dyn, so callers cannot keep it after releasing its owner or reinterpret another payload."},
-  {"file":"Core/encoding/stream.jet","function":"object_from_entries","proof":"__object_from_entries at stream.jet:21 receives a consuming list of typed String/Dyn entries, moving its sole allocation into an initialized Object carrier. No pointer, length or discriminant is supplied separately, and the caller cannot reuse the moved list. Arbitrary duplicate keys affect encoding policy, not the validity or ownership of the native payload."},
-  {"file":"Core/encoding/stream.jet","function":"bytes_payload","proof":"stream.jet:27 checks private Dyn.Bytes before __bytes_view on the same value; all other variants panic(:29). The View<U8> result is declared `from value`(:25), retaining the owner borrow rather than exporting an independent pointer. Callers cannot select a different variant's backing or use the view after the carrier's lifetime."},
-  {"file":"Core/encoding/stream.jet","function":"typed_number","proof":"The gate at stream.jet:33-34 constructs the compiler-private Number enum from a consuming typed String; it does not reinterpret memory. Its source caller json.jet:562 is in Parser.number after numeric grammar validation and checked String construction(:561). The owned lexeme is retained for typed decoding, never used as an address or unchecked index; consumers use normal checked numeric parsing. Callers cannot corrupt enum layout or retain the moved String's storage."},
-  {"file":"Core/encoding/stream.jet","function":"typed_string","proof":"__typed_text at stream.jet:40 consumes an initialized String into the private typed-text carrier. UTF-8 is already guaranteed by the String type; this operation neither changes its bytes nor accepts a separately forgeable pointer/length. The caller loses ownership of the moved text and receives an owning Dyn enum, not an escaping borrow."},
-  {"file":"Core/encoding/stream.jet","function":"read_string","proof":"stream.jet:294 validates the exact decoded byte list, returning Syntax and releasing tracked capacity on failure(:295-296). The __bytes_into_text gate(:299-300) immediately consumes that same list without intervening mutation. Escaped or raw wire bytes therefore cannot bypass UTF-8 validation or expose a dangling parser buffer."},
-  {"file":"Core/encoding/stream.jet","function":"number","proof":"Both gates discharge separate obligations: stream.jet:360 rejects invalid JSON numeric grammar and :365 rejects invalid UTF-8 before :371 consumes that exact byte list into String. Only after those checks does :375-376 construct DataEvent.Number when typed_numbers is enabled. The valid initialized lexeme moves into its matching carrier; no unchecked numeric payload reinterpretation or raw buffer reference reaches callers."},
-  {"file":"Core/encoding/stream.jet","function":"fold_text","proof":"stream.jet:555 consumes a valid String into __text_into_bytes solely to measure allocation capacity. That byte list is not modified; :557 can fail before reconstruction, otherwise :559 immediately moves the unchanged UTF-8 list into __bytes_into_text. Budget checks affect retention, not validity; no caller receives the intermediate storage or can mutate it between conversions."},
-  {"file":"Core/encoding/stream.jet","function":"fold","proof":"stream.jet:566 checks the private DataEvent.Number discriminant before moving its initialized String through fold_text(:567) into matching Dyn.Number(:568). fold_text preserves UTF-8 while accounting allocation ownership. No other event variant is interpreted as a number; recursion and ordinary event handling occur outside the gate and no native payload borrow escapes."},
-  {"file":"Core/encoding/stream.jet","function":"text_from_bytes","proof":"stream.jet:834 strictly validates the caller's exact owned byte list, returning EncodingError on failure; :836 then immediately moves it into __bytes_into_text. No mutation or alternate allocation occurs between validation and transfer. Even arbitrary external byte input cannot return a String violating UTF-8 or retain a pointer into the moved list."},
-  {"file":"Core/encoding/stream.jet","function":"byte_at","proof":"The unchecked __string_byte at stream.jet:845 is dominated by :841-842, which reject index < 0 or index >= text.count_bytes() before U64 conversion. The borrowed String remains live for the one-byte read; only copied U8 returns. Callers cannot cause a negative, out-of-storage or dangling pointer read through this helper."},
-  {"file":"Core/encoding/stream.jet","function":"ascii_text","proof":"Despite its formatter-oriented name, ascii_text admits no unchecked caller assumption: stream.jet:1402 runs strict __utf8_validate on the exact owned list and panics on invalid UTF-8. Only the succeeding path at :1404-1405 consumes it into __bytes_into_text, with no intervening write. Malformed formatter output cannot create an invalid String."},
-  {"file":"Core/encoding/stream.jet","function":"wire_float","proof":"The gate at stream.jet:1415-1416 only transfers the owned valid String produced by Float interpolation(:1413) into __text_into_bytes. It is the safe direction of the UTF-8 transfer and accepts no raw bytes or caller pointer. Later digit editing uses a separate list and checked ascii_text reconstruction; no alias to the moved String is retained."},
-  {"file":"Core/encoding/stream.jet","function":"jsonl_tree_size","proof":"The gate at stream.jet:1648-1653 runs only in the fallback branch, after every public variant was sized (:1620-1644). It tests the private Dyn.Bytes discriminant without binding its payload (`.Bytes(_)`) and only chooses the error reason and kind; the branch always returns Err (:1654-1656). No payload, pointer or backing view is read or escapes."},
-  {"file":"Core/encoding/xml_engine.jet","function":"text_byte","proof":"__string_byte at xml_engine.jet:135 is an unchecked byte read. Its only local callers are byte_prefix_text(:139-142) and unit_prefix(:2029-2032), both iterating 0..<needle.count_bytes(), and ascii_equal(:1386-1389), which first checks equal String storage lengths then iterates 0..<left.count_bytes(). Every index is nonnegative and below the corresponding borrowed String's byte length; no pointer or view escapes the copied U8 result."},
-  {"file":"Core/encoding/xml_engine.jet","function":"byte_text","proof":"__bytes_into_text at xml_engine.jet:174 consumes a copy of source[start..<end]. Every local caller slices bytes of an existing String (DOCTYPE/entity/declaration helpers) or Scanner.source, whose sole construction path parse_document_with(:667-669) takes String.bytes(). Boundaries are zero/end or offsets adjacent to ASCII XML delimiters, quotes and whitespace, which cannot lie inside a UTF-8 continuation sequence. Checked list accesses(:172) prevent out-of-storage copies; the exact copied scalar-aligned allocation moves with no intervening mutation or escaping borrow."},
-  {"file":"Core/encoding/xml_engine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) consumes valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
-  {"file":"Core/encoding/yaml.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
-  {"file":"Core/service/service.jet","function":"__authority_validate","proof":"service.jet:155 projects owned identity fields; :156 rejects invalid identity before __endpoint_validation_snapshot(:160). Its native ServiceAuthority.rs:360-368 keeps the registry mutex across exact/candidate lookup and copies only String/scalar facts. No registry guard, endpoint pointer or mutable reference escapes; policy checks operate on owned snapshots, so caller identity cannot extend a native borrow."},
-  {"file":"Core/service/service.jet","function":"endpoint_show","proof":"__endpoint_parts at service.jet:265 only clones the initialized endpoint tree/worker Strings and widens generation (Services.rs:3273-3274). Interpolation(:266) returns owned text. Any typed endpoint is valid for this projection; no unchecked index or native reference reaches callers."},
-  {"file":"Core/service/service.jet","function":"set_delivery","proof":"service.jet:270 holds an exclusive tree borrow, :272 rejects a started tree, and :273 writes only a typed ServiceDelivery field via __tree_write_delivery. Services.rs:3259-3260 performs a normal field assignment under that borrow; no pointer or secondary tree alias is returned. Callers cannot change the validated tree concurrently with the transfer."},
-  {"file":"Core/service/service.jet","function":"set_restart","proof":"service.jet:277 lends the tree exclusively; :279 checks not started before __tree_write_restart. __group_write_restart is indexed only by 0..<__tree_group_count(:281-282), while neither write changes group storage length (Services.rs:3258-3266). Every transferred policy is a typed enum, and no group reference escapes to invalidate that count."},
-  {"file":"Core/service/service.jet","function":"drain_dead_letters","proof":"service.jet:286 holds the exclusive tree borrow and :288 checks started before counting and clearing the same dead-letter list(:289-290). Native __tree_dead_letter_count and __tree_clear_dead_letters(Services.rs:3249-3250,3268) return a copied length and clear owned storage without exporting an element borrow. Callers cannot hold a conflicting live list view across the clear."},
-  {"file":"Core/service/service.jet","function":"set_state_empty","proof":"service.jet:295 retains an exclusive tree borrow. :297-300 reject a started tree or existing snapshot/events before __tree_write_empty_adapter and __tree_clear_state_authority(:301-302), whose provider(Services.rs:3269-3272) only assigns typed fields. No stored payload reference is returned; callers cannot interleave a state-record insertion between check and replacement."},
-  {"file":"Core/service/service.jet","function":"select_state_adapter","proof":"The exclusive tree borrow at service.jet:315 covers :317-326 checks for not-started, no records, recognized migration, bounded visible store/schema and positive version before __tree_write_state_adapter/__tree_write_state_authority(:327-328). Their provider(Services.rs:3277-3284) initializes owning optional fields from typed String/scalars, not raw memory. The caller cannot replace a checked field set or retain an alias into the new authority."},
-  {"file":"Core/service/service.jet","function":"restore_snapshot","proof":"__state_load expects a present state authority (Services.rs:3292-3295). service.jet:348 checks that exact option before :349, borrows the live typed tree, and :355 checks nonempty records before reading records[0]. read_state_record(:374-392) checks schema, framing, byte length and UTF-8. Returned snapshot text is owned, not a reference into tree/store storage."},
-  {"file":"Core/service/service.jet","function":"replay_events","proof":"service.jet:362-364 call __tree_state_authority/__tree_event_records only as borrowed field projections; native Services.rs:3286-3290,3297 copy optional Strings and the event list. Each copied record passes checked framing(:367) before join. No list-element reference or native store handle is exported, so releasing or later editing the tree cannot invalidate the owned replay text."},
-  {"file":"Core/service/service.jet","function":"upgrade_receipt","proof":"__tree_upgrade_receipt at service.jet:397 clones the existing optional typed receipt (Services.rs:3425). Source rejects None before returning the owning value. No native reference, rollback-store pointer or unchecked payload access escapes for any typed tree."},
-  {"file":"Core/service/service.jet","function":"__upgrade_receipt_display","proof":"__upgrade_receipt_parts at service.jet:403 projects initialized scalar fields and cloned String/pinned-shard list (Services.rs:3426-3430), omitting rollback storage. :404-405 only format those owned fields. Caller-supplied typed receipts cannot choose a memory address or retain a borrow into the native receipt."},
-  {"file":"Core/service/service.jet","function":"tree_show","proof":"__tree_display_parts at service.jet:411 copies the live tree's initialized fields and handler-name pairs (Services.rs:3432-3439); it exports neither worker tasks nor mailbox storage. :413 iterates the returned owned list and matches typed restart/delivery enums for text. No native payload borrow or separately supplied index reaches the caller."},
-  {"file":"Core/service/service.jet","function":"workflow_history","proof":"__workflow_replay_parts at service.jet:429 uses the checked native workflow authority/replay and collects owned run-id/history/outcome records (Services.rs:3441-3445), propagating errors. :435-438 only search those copied records and join the matching list. Arbitrary run_id cannot be used as a native vector index or expose a replay guard."},
-  {"file":"Core/service/service.jet","function":"workflow_outcome","proof":"service.jet:444 obtains owned records through __workflow_replay_parts, whose provider validates authority and collects owned payloads (Services.rs:3441-3445). :450-455 match run_id and require a present typed outcome rather than indexing with caller input. The result owns its panic text/enum payload and contains no reference into mutable workflow storage."},
-  {"file":"Core/service/service.jet","function":"observe","proof":"__tree_observation_parts at service.jet:461 is a read-only projection into copied counts/booleans and typed workflow status codes (Services.rs:3447-3463). The local loop(:470-478) reads that owned list and formats text; no task, channel, mutable view or raw address is exposed. Every typed tree therefore remains valid regardless of caller observation timing."},
-  {"file":"Core/service/service.jet","function":"tree","proof":"__tree_allocate at service.jet:542 materializes every native initializer field from typed arguments. :543-566 provide generation1, typed restart/delivery, positive fixed budget, empty initialized worker/group/record collections, false started, Empty state, absent authorities/receipts and a fresh Arc task group from __tree_task_group_new. Services.rs:1327-1352 only allocate/assign those fields. The caller supplies only owned name text, not uninitialized carriers or native pointers."},
-  {"file":"Core/service/service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:617 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
-  {"file":"Core/service/service.jet","function":"directory_generation","proof":"service.jet:643 calls __tree_generation on a borrowed typed tree; Services.rs:6272-6273 only copy its initialized i64 generation into an owned Int. The caller supplies no index/address, and no scheduler or tree reference escapes this scalar projection."},
-  {"file":"Core/service/service.jet","function":"event_count","proof":"__tree_event_count at service.jet:649 only reads the live tree's event_log length (Services.rs:4735-4736), returning an owned scalar. No record element, raw backing pointer or mutable borrow is exposed, so callers cannot outlive or invalidate event storage via this query."},
-  {"file":"Core/service/service.jet","function":"dead_letter_count","proof":"__tree_dead_letter_count at service.jet:655 borrows the typed tree and reads its initialized owned list length (Services.rs:3249-3250). The result is a copied Int with no native payload reference or caller-controlled address; subsequent clear/drop cannot invalidate it."},
-  {"file":"Core/service/service.jet","function":"workflow_start","proof":"service.jet:855 retains an exclusive tree borrow through workflow_prepare(:857), identity/version validation(:861-862), __workflow_count-bounded index loops(:864,872) and cursor/handle updates. __workflow_append receives a framed String only after run-id overflow rejection(:879-881); post-append cursor selection re-reads count(:885). Provider field/index leaves(Services.rs:7244-7258) use normal bounds-checked Vec access and owned projections, never reinterpret an id as a pointer. No mutable workflow view escapes."},
-  {"file":"Core/service/service.jet","function":"workflow_step","proof":"The exclusive tree borrow at service.jet:892 covers sync(:894), bounded deterministic step checks(:898-902), and workflow_find(:903), which searches 0..<__workflow_count(:1061-1064). Cursor/history leaves operate only on that selected index; __workflow_event_at uses optional checked history.get (Services.rs:7253). :913-915 reject terminal/oversized history before framed append. No caller run_id becomes an unchecked address or borrowed history reference."},
-  {"file":"Core/service/service.jet","function":"workflow_activity","proof":"service.jet:923 exclusively borrows the tree; workflow_prepare and workflow_token checks(:925-935) precede bounded max_attempts(:937) and count-bounded workflow_find(:938). Activity-definition helpers iterate __workflow_steps_len and parse field counts(:1114-1121), not caller indices. Native index leaves use checked Vec access (Services.rs:7244-7258); :965-967 reject terminal state before framed append. Returned TaskStatus is copied, with no workflow/storage borrow escaping."},
-  {"file":"Core/service/service.jet","function":"workflow_activity_retry","proof":"service.jet:976 holds the exclusive tree borrow across sync, bounded key checks and workflow_find(:978-986). The selected activity definition is owned; :989-998 validate outcome, replay agreement, terminal state and retry bound before computing the next attempt and __workflow_append(:1000-1002). History lookups are optional checked projections and index leaves use normal Vec bounds (Services.rs:7253-7258). Callers cannot forge a vector pointer or retain mutable activity storage."},
-  {"file":"Core/service/service.jet","function":"workflow_activity_complete","proof":"service.jet:1011 exclusively borrows the tree through sync, key/outcome checks and count-bounded workflow_find(:1013-1023). The two replay entries(:1027-1028) use __workflow_event_at's checked optional history.get (Services.rs:7253); only matching initialized events advance the cursor(:1029-1030). :1038-1047 reject conflicting completion before framed append. The return is an owned typed outcome; no raw event reference or unchecked caller index escapes."},
-  {"file":"Core/service/service.jet","function":"group","proof":"service.jet:1189 rejects started state and :1190-1194 validate_group against owned topology facts before __group_reparent(:1196). validate_group(:1205-1230) proves every named worker exists and membership is unique, discharging the provider's expect at Services.rs:3310. Reparent and __group_push mutate only typed tree/task storage, with no worker reference escaping to caller code between validation and use."},
-  {"file":"Core/service/service.jet","function":"chaos_fail","proof":"service.jet:1235 rejects unstarted trees and :1237 bounds the __tree_write_chaos_count increment before :1239. __first_running_endpoint(:1240) returns an owned optional endpoint (Services.rs:3302-3303), not a vector index or pointer, and fail_worker performs endpoint validation. Only a copied count returns; arbitrary caller state cannot overflow the native counter or obtain a mutable worker borrow."},
-  {"file":"Core/service/service.jet","function":"append_event","proof":"__event_store_append requires a present authority (Services.rs:3316-3317). service.jet:1251-1255 establish started EventLog state, present authority, bounded valid payload and record-count bound before constructing the owned framed record(:1256). The durable append(:1257) must succeed before __tree_event_push(:1261); the native leaf owns its inserted String. No reference into storage or independently supplied memory length escapes."},
-  {"file":"Core/service/service.jet","function":"commit_snapshot","proof":"service.jet:1267-1270 establish started Snapshot state, present authority and bounded valid payload before framing and __snapshot_store_write(:1271-1272). Native Services.rs:3320-3326 holds the authority mutex across store write and tree.snapshot assignment and owns the record String. Callers cannot bypass the present-option precondition, interpose a write inside the leaf, or receive a reference into replaced snapshot storage."},
-  {"file":"Core/service/service.jet","function":"validate_tree_endpoint","proof":"service.jet:1295-1296 borrow typed tree/endpoint only to obtain owned route/identity parts (Services.rs:3328-3336; ServiceAuthority.rs:351-355). :1297-1301 enforce matching authority/tree and permitted generation before locked __authority_validate. Neither caller identity nor generation is interpreted as a pointer/index, and no registry/tree borrow escapes this error/unit result."},
-  {"file":"Core/service/service.jet","function":"directory_resolve","proof":"__directory_entry at service.jet:1321 finds by String and clones an optional entry (Services.rs:3338-3339), rejecting absence. :1324-1335 check generation, signed directory proof, authority and live worker before returning its owned endpoint. __worker_route searches typed identity and returns owned facts, not a worker reference. An arbitrary name or stale endpoint cannot turn into an unchecked payload index or escaping native borrow."},
-  {"file":"Core/service/service.jet","function":"send","proof":"service.jet:1345-1364 check started state, endpoint authority/generation, bounded message and live nondraining worker before __authority_try_send. That operation receives typed owned text/endpoint, not caller addresses. Post-send __worker_sent_account(:1374) uses only the index returned by a fresh __worker_route on the same tree (Services.rs:3344-3352); native Vec indexing is bounds checked and task writes retain their lock. No mailbox or task reference escapes to the caller."},
-  {"file":"Core/service/service.jet","function":"delivery_status","proof":"__delivery_read at service.jet:1444 obtains the checked durable entry and materializes owned __DeliveryFacts (ServiceAuthority.rs:2727-2744). Failure returns before any field use; :1448 returns only the typed state enum. Callers cannot choose a log-memory address or outlive a registry/log lock through this projection."},
-  {"file":"Core/service/service.jet","function":"delivery_receipt","proof":"service.jet:1459 first obtains checked owning __DeliveryFacts through __delivery_read(ServiceAuthority.rs:2727-2744). :1463-1465 require successful signature derivation before :1467 constructs a fully initialized source receipt from its owned typed fields. No native entry reference or lock guard is exposed, and invalid delivery identity/authority returns an error before a receipt is emitted."},
-  {"file":"Core/service/service.jet","function":"delivery_events","proof":"__delivery_read(true) at service.jet:1473 returns owned record fields, not a borrowed log buffer (ServiceAuthority.rs:2727-2743). Every indexed record access is dominated by the exact fields.len()==10 or ==6 checks(:1480,1494); counters parse through checked workflow_i64, signatures verify before acceptance(:1491-1493,1505-1510), and :1514 guards events[0]. Malformed caller/log data cannot access an absent field or escape a mutable durable-entry borrow."},
-  {"file":"Core/service/service.jet","function":"delivery_retry","proof":"service.jet:1522 invokes __delivery_probe, whose native ServiceAuthority.rs:2746-2747 checks the durable entry before success. :1526 materializes a typed runtime from the delivery's cloned store and constant zero retention, then __runtime_retry receives typed carriers only. The returned Delivery owns its identity fields; no log reference, pointer or guard escapes, including on retry errors."},
-  {"file":"Core/service/service.jet","function":"endpoint_receive","proof":"service.jet:1533-1537 validate owned endpoint identity before __endpoint_mailbox. Native ServiceAuthority.rs:2751-2776 captures the channel in an owning Arc and returns initialized started/draining facts, so releasing the registry lock cannot dangle the mailbox. :1542 enforces lifecycle/depth policy before one __mailbox_receive; :1544-1547 decode its status into owned message/error. No caller can supply a raw channel address or receive a borrowed queue element."},
-  {"file":"Core/service/service.jet","function":"local_delivery_ids","proof":"service.jet:1622 requires successful __worker_route before __mailbox_snapshot(:1623), using only the returned valid worker index. Native Services.rs:3362-3366 copies messages/idempotency records into owned lists; :1627-1634 match initialized identity/message fields before __delivery_id with a fully initialized zero-retention runtime. No pointer or mutable mailbox/record view is exported and arbitrary endpoint text is never used directly as an index."},
-  {"file":"Core/service/service.jet","function":"send_durable","proof":"service.jet:1642-1658 check delivery mode, state authority, bounded key/message, started state and endpoint routing before __runtime_send. Mailbox snapshot/restore indices come only from __worker_named_index(:1676,1693), which searches current workers (Services.rs:3368-3369); native restores use checked Vec access(:3378-3379). Each authority operation retains its own locks and returns owning Delivery/String facts; mailbox replacement consumes its owned message list, never exporting channel references. Dead-letter/idempotency pushes are length bounded(:1683,1702)."},
-  {"file":"Core/service/service.jet","function":"receive","proof":"service.jet:1715-1726 validate tree lifecycle/endpoint before selecting a worker. Capacity bounds :1728-1729 dominate __take_pending; each mailbox operation(:1751-1752,1774-1783) uses the index returned by a fresh __worker_route, and rollback reselects target(:1787-1790). Native Services.rs:3362-3423 use owned snapshots, checked Vec indexing and locked/Arc channel operations, not unchecked memory. :1780-1782 admit only a successful owned message; no queue element or task guard escapes to callers."},
-  {"file":"Core/service/service.jet","function":"pending_delivery_rollback","proof":"The gate at service.jet:1806 passes typed endpoint/owned pending records to __requeue_pending, then an owned prior message snapshot to __mailbox_restore in both result branches(:1809,1815). Its local callers in receive(:1759,1762) pass the index obtained from __worker_route, never caller text as an address; native Services.rs:3378-3379 still bounds-check the Vec access. Both operations own/copy their inputs under existing locks and return errors, not references into restored mailbox storage."},
-  {"file":"Core/service/service.jet","function":"worker","proof":"service.jet:1868-1876 reject started state, capacity outside1..1000000, invalid names, excess workers and duplicates before allocation. __endpoint_unchecked receives route fields/issued authority(:1878-1893), and __worker_mailbox_new receives bounded capacity plus an empty owned queue(:1894). :1906-1914 initialize task/topology and every __worker_push field; the mailbox moves rather than cloning its forkable channel. The handler is a typed checked function item, not a raw caller address; native Services.rs:7289-7305 only store initialized owned fields."},
-  {"file":"Core/service/service.jet","function":"fail_worker","proof":"service.jet:2008 holds an exclusive tree borrow and :2010-2014 validate lifecycle/endpoint before obtaining owning topology/worker facts. Target indices derive from worker_scope/worker_index(:2019-2031), group/supervisor accesses are explicitly bounded(:2023,2092,2109), and previous/desired lists are constructed for exactly facts.workers.len()(:2059-2067). Native writes(Services.rs:7308-7329) use checked Vec indexing; task partition writes hold one mutex(:7339-7341). Replacement mailboxes own their queues and move at :2103, so close/restart cannot expose dangling channel storage."},
-  {"file":"Core/service/service.jet","function":"restarts","proof":"service.jet:2125 validates the endpoint before owned topology/worker facts. :2134 checks supervisor against facts.groups.len() before selecting budget; :2136 iterates worker facts and matches tree/name before reading that worker's owning restart list. Providers preserve worker insertion order (Services.rs:3305-3307,7269-7277), and accesses are normal bounds-checked projections. The result is a copied count, not a restart-list or task reference."},
-  {"file":"Core/service/service.jet","function":"mailbox_depth","proof":"service.jet:2146 validates the endpoint, then :2151-2155 iterate owning topology/worker facts and call __worker_mailbox_depth only with the matching in-range worker index. Native Services.rs:7328-7329 bounds-check workers and copies the live Arc channel's depth. No channel pointer/view or mutable mailbox reference reaches caller code, even for stale or unknown endpoints which return errors."},
-  {"file":"Core/ui/host.jet","function":"transfer_request","proof":"__request_transfer requires kind 0/1 and explicit absent-directory state (Core/HostServices.rs:2135-2152). The local helper's only callers host.jet:172,176 supply exactly those constants, true directory_absent, an empty typed filter list and false multiple. The typed UIFSGrant is borrowed/cloned into an owning request, not interpreted as a memory address; title is valid String text. No current-host scope is accessed by this layout-only leaf and callers cannot supply unchecked tags to the local helper."},
-  {"file":"Core/ui/host.jet","function":"capabilities","proof":"The host.jet:154-155 __capabilities gate dispatches to jet_ui_host_capabilities (Core/HostServices.rs:1838-1840), which queries capability_facts through jet_ui_with_current_host. In the repaired scope (7ee5e69a8, :1786-1820), only jet_ui_with_host owns the private lifetime-bound guard: TLS stores the address of its live stack-held host reference without transmute, and Drop restores the predecessor before that reference/host borrow ends, including unwinding; safe callers cannot obtain or forget the guard. :1822-1834 hold the mutable TLS borrow across the callback, refusing recursive access and nested installation before another host reference is made; the default host also stays mutably borrowed. No caller address is accepted and the result is copied capability bits (:74-76), not a host reference."},
-  {"file":"Core/ui/host.jet","function":"open_file","proof":"host.jet:160-161 moves the typed request into __open_file, whose jet_ui_host_open_file provider (Core/HostServices.rs:1841-1845) calls jet_ui_open_file under jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 is owned only by jet_ui_with_host, keeps its stack-held host reference live without transmute, and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot leak its guard. The mutable TLS borrow at :1822-1834 stays held throughout the provider, so re-entry or nested installation fails before minting another host reference (the default host is borrowed too). Ui.rs:217-227 retain a request clone and validate the returned selection against it before success. Caller requests contain typed owned values, not host addresses; the result owns granted paths (:1348-1350) and exports no scoped host borrow."},
-  {"file":"Core/ui/host.jet","function":"save_file","proof":"host.jet:166-167 moves its typed request into __save_file; jet_ui_host_save_file (Core/HostServices.rs:1846-1850) invokes jet_ui_save_file under jet_ui_with_current_host. :1786-1820 confine the lifetime-bound guard to jet_ui_with_host, store only its live stack-held host-reference address without transmute, and restore predecessor TLS before that frame/host borrow ends, including unwind; safe callers never receive a forgettable guard. :1822-1834 keep the mutable TLS borrow across the call, rejecting recursive access or nested installation before a second host reference exists, with a borrowed default host when none is installed. Ui.rs:231-241 retain the original request clone for validating the returned save selection. Arbitrary typed requests cannot supply a raw host pointer, and successful selections own their granted paths rather than borrowing host storage."},
-  {"file":"Core/ui/host/accessibility.jet","function":"attach","proof":"accessibility.jet:7-11 consumes typed node/metadata via __attach. Its jet_ui_host_attach_accessibility provider (Ui.rs:283-293) owns the node, lends it exclusively to host.attach_accessibility only inside jet_ui_with_current_host, and returns the owned node or error; the source discards the successful node and returns unit. Core/HostServices.rs:1786-1820 give jet_ui_with_host sole ownership of a private lifetime-bound guard, storing the live stack-held host-reference address without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind, so callers cannot forget the guard. :1822-1834 retain the mutable TLS borrow across attachment, refusing re-entry and nested installation before another host reference can alias it, and borrow the default host when applicable. Neither caller-selected metadata nor the unit/error result can export a node or host borrow."},
-  {"file":"Core/ui/host/accessibility.jet","function":"project","proof":"accessibility.jet:16-17 passes typed node/id to __project; jet_ui_host_project_accessibility (Ui.rs:295-300) owns the node and lends it read-only during host.project_accessibility inside jet_ui_with_current_host. Core/HostServices.rs:1786-1820 confine the private lifetime-bound guard to jet_ui_with_host: its stack-held host reference remains live without a lifetime transmute, and predecessor TLS is restored before the frame/host borrow ends even on unwind; no safe caller can obtain or leak the guard. :1822-1834 hold the mutable TLS borrow for the entire projection, rejecting recursive access or nested installation before a second host reference, with a live default-host borrow otherwise. The id is a typed identity, not a host address; the optional projection owns node id and metadata (:1673-1676), never a reference into the consumed node or scoped host."},
-  {"file":"Core/ui/host/clipboard.jet","function":"read_text","proof":"clipboard.jet:6-7 invokes __read_text without caller memory; jet_ui_host_clipboard_read_text (Core/HostServices.rs:1852-1854) reaches host.read_clipboard_text via Ui.rs:243-247 inside jet_ui_with_current_host. The private lifetime-bound guard at :1786-1820 is owned only by jet_ui_with_host, points TLS at its live stack-held host reference without transmute, and restores predecessor TLS before that frame/host borrow ends on return or unwind; safe callers cannot forget it. :1822-1834 keep the mutable TLS borrow across the read, refusing recursive host access or nested installation before a second host reference is created and borrowing the default host otherwise. The returned clipboard carrier owns its String and optional range (:1368-1371), so dropping the host cannot invalidate returned text."},
-  {"file":"Core/ui/host/clipboard.jet","function":"write_text","proof":"clipboard.jet:12-13 lends a valid String to __write_text; jet_ui_host_clipboard_write_text (Core/HostServices.rs:1856-1860) copies that str into an owned String before passing it to host.write_clipboard_text inside jet_ui_with_current_host. :1786-1820 confine the lifetime-bound guard to jet_ui_with_host, retaining its live stack-held host reference without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind; safe callers never receive a forgettable guard. :1822-1834 hold the mutable TLS borrow across writing, rejecting re-entry or nested installation before another host reference is formed and keeping the default host borrowed otherwise. The host receives owned UTF-8 text, not a caller buffer pointer, and the result contains only a copied character count (:1374-1376) or owned error, never a scoped borrow."},
-  {"file":"Core/ui/host/drag_drop.jet","function":"poll","proof":"drag_drop.jet:33-34 calls __poll with no caller-selected address; jet_ui_host_drag_poll (Core/HostServices.rs:1867-1869) invokes host.poll_drag_event inside jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 belongs only to jet_ui_with_host, which keeps its stack-held host reference live without transmute and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot obtain/leak its guard. :1822-1834 hold the mutable TLS borrow across polling, refusing recursive access or nested installation before a second host reference exists and borrowing the default host otherwise. The optional typed drag event is returned by value, with owned item storage rather than a host queue reference; no host borrow escapes even when the queue is empty or the provider errors."},
-  {"file":"Core/ui/host/ime.jet","function":"poll","proof":"ime.jet:25-26 invokes __poll without caller memory; jet_ui_host_ime_poll (Core/HostServices.rs:1863-1865) calls host.poll_ime_event inside jet_ui_with_current_host. :1786-1820 give only jet_ui_with_host the private lifetime-bound guard: TLS addresses its live stack-held host reference without transmute, and predecessor TLS is restored before that frame/host borrow ends on return or unwind, so safe callers cannot forget the guard. :1822-1834 retain the mutable TLS borrow through polling, rejecting recursive access and nested installation before another host reference could alias it and borrowing the default host otherwise. The optional IME event is an owned typed value, including its optional composition text/ranges, not a borrowed queue element; no scoped reference reaches the caller."},
-  {"file":"Core/ui/host/shortcuts.jet","function":"register","proof":"shortcuts.jet:11-12 moves the typed binding into __register; jet_ui_host_shortcuts_register (Core/HostServices.rs:1871-1875) passes it by value to host.register_shortcut inside jet_ui_with_current_host. The private lifetime-bound guard at :1786-1820 remains solely in jet_ui_with_host, keeps its stack-held host reference live without transmute, and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot obtain or leak it. :1822-1834 hold the mutable TLS borrow throughout registration, refusing re-entry or nested installation before a second host reference is minted and borrowing the default host otherwise. Any typed binding owns its action String (:1543-1547), not a caller memory address; the returned binding/error is owned and carries no scoped host or registry borrow."},
-  {"file":"Core/ui/host/shortcuts.jet","function":"dispatch","proof":"shortcuts.jet:17-18 moves its typed shortcut into __dispatch; jet_ui_host_shortcuts_dispatch (Core/HostServices.rs:1877-1881) calls host.dispatch_shortcut inside jet_ui_with_current_host. :1786-1820 confine the private lifetime-bound guard to jet_ui_with_host, using its live stack-held host-reference address without transmute and restoring predecessor TLS before that frame/host borrow ends on return or unwind; safe callers cannot forget the guard. :1822-1834 keep the mutable TLS borrow live throughout dispatch, rejecting recursive current-host access or nested installation before another host reference can alias it and borrowing the default host otherwise. Caller shortcut text is typed owned data, not an executable pointer; dispatch returns an owned Dispatched binding or Unhandled (:1569-1572), or an owned error, never a scoped host/registry reference."},
-  {"file":"Core/ui/ui.jet","function":"gtk_backend","proof":"ui.jet:126-127 invoke __gtk_backend without caller-supplied memory or callbacks. Its provider UiGtk.rs:2069-2070 calls JetGtkBackend::new(:1346-1371), allocating an owning Arc<Mutex<GtkState>> with every field initialized, empty queues and null not-yet-initialized GTK handles. Construction neither dereferences those handles nor installs/borrows the current host. The caller receives the owned backend carrier, not a pointer into a scoped provider."},
-  {"file":"Core/ui/ui.jet","function":"tui_backend","proof":"__tui_backend at ui.jet:132 has no arguments and allocates JetTuiBackend through Ui.rs:1860-1861,1572-1591. The provider owns a fresh Arc<Mutex<State>> with initialized capability facts, absent frames/focus, zero counters and an empty grid. It performs no current-host scope dereference and exports no borrow of constructor-local storage; arbitrary safe callers cannot supply a forged native backing pointer."},
-  {"file":"Core/ui/ui.jet","function":"null_backend","proof":"__null_backend at ui.jet:137 has no caller-selected fields and calls JetNullBackend::new (Ui.rs:1856-1857,1346-1356). That constructor owns a new Arc<Mutex<State>> containing initialized absent frame/event/focus slots and an empty command list; it neither accesses scoped host pointers nor returns references into temporary storage. The returned carrier keeps its allocation alive independently of the caller frame."},
-  {"file":"Core/ui/ui.jet","function":"node_accessibility","proof":"ui.jet:148 calls __accessibility_transfer with typed UINode/UIAccessibility and the explicit present=true flag. Ui.rs:302-308 only assign Some(metadata) to the owning node then return that node; no discriminant reinterpretation, unchecked index, callback invocation or current-host access occurs. Caller metadata remains an initialized typed record and the result owns its Strings/lists rather than borrowing source storage."},
-  {"file":"Core/ui/ui.jet","function":"node_shortcut","proof":"ui.jet:165 passes initialized typed node/shortcut with present=true to __shortcut_transfer. Its provider Ui.rs:311-317 only stores the typed shortcut in the node's Option and returns the owning node, with no scoped-host dispatch or raw address access. Any valid typed shortcut therefore preserves layout/lifetimes, and no native registry borrow escapes."},
-  {"file":"Core/ui/ui.jet","function":"transfer_node","proof":"__node_transfer trusts numeric role/kind/absence/style representations (Ui.rs:1938-1985). ui.jet:173-184 derives role solely as -1 or0..3 and kind solely as0..4 from typed enums. :185-192 couples color presence to initialized text, fixes all six absent-slot bits to63, and marks style absent with zero initialized words. Native :1987-2002 own the copied label/color and typed children, never dereferencing caller addresses. Width/height are stored floats, not memory lengths; invalid geometry cannot cause an unchecked allocation transfer here."},
-  {"file":"Core/ui/ui.jet","function":"transfer_viewport","proof":"__viewport_transfer converts numeric device/dimensions/scale to native enum/u32/u16 (Core/Preview.rs:895-908). The local helper's only callers ui.jet:115-117 supply device tags0,1,2, positive dimensions390..1280/800..1119 and scale1 or2; each fits its native width and all fields are initialized before the gate(:197-198). It accesses no current host and returns an owning plain viewport rather than a pointer or borrowed resource; arbitrary external numbers cannot reach this local transfer."},
-  {"file":"Core/vendor/sqlite3/fixture/run.jet","function":"run","proof":"The no-argument fixture supplies only fixed SQL and an in-memory database name. Exclusive U64 out-slots start at zero; successful sqlite3_open_v2 and sqlite3_prepare_v2 checks dominate all database/statement uses. SQLite owns the resulting handles; the fixture never forges an address, lends a callback, or exposes a handle to callers. It steps the statement before reading column zero, finalizes it once before closing the database once, and uses neither afterward. Borrowed String storage remains live for each synchronous call; any failed operation stops before further handle use."},
-  {"file": "Core/sys/sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
-  {"file": "Core/sys/sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."}
+  {"file": "Core/Auth/Auth.jet", "function": "verify_paseto", "proof": "The strict Ed25519 verifier only reads `key`, the PAE-encoded message and the 64-byte signature, all owned byte lists sliced and length-checked above; it returns a Bool and exposes no key material."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "password_hash_with_salt", "proof": "Password and salt lengths are bounded before Argon2id runs with fixed parameters (m=65536, t=3, p=1, 32-byte output); the derived key stays in a Secret that only feeds the PHC encoding."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "password_verify", "proof": "Every PHC field is parsed and bounded (memory, iterations, lanes, salt and digest lengths) before Argon2id runs; the derived key is compared in constant time and never leaves the function."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "seal", "proof": "Expert AEAD seal is safe here because the nonce is unique per (key, record): writer (:265-313) seals under a fresh random file key and 16-byte prefix that the coordinator draws for every container (crypto.jet:915-919); each record's nonce = prefix ∥ LE64(index) (:62-65), with the header tag at index 0 (:306) and chunks at index 1.. (:312) strictly increasing (:326), bounded by MAX_RECORDS (:317), and a final record ends the state (:317, :327). Per-recipient wraps use their own HKDF-derived key and nonce (seal_wrap). AAD is a fixed domain per record kind (:73-94). Key / nonce lengths are enforced by expert (expert.jet:273-276)."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "open_record", "proof": "The gate (:104-106) calls expert.xchacha20poly1305_open, which bounds key/nonce/cipher/AAD widths and returns plaintext only after the Poly1305 tag verifies in constant time (expert.jet:279-285, 195-197); every failure becomes FileCryptoError.OpenFailed. Its only caller open_key (:144) lends an operation-scoped key copy that it wipes on both outcomes. open_key's callers bound their input first: reader checks the header length, recipient count and stanza layout (:340-346) before the wrap and header-tag opens (:374-377), and open_chunk checks record shape, cipher width and remaining length (:385-389) before a record open (:390); the plaintext becomes a Secret, and the coordinator writes it only after authentication and publishes only after finish sees the final record (crypto.jet:672-677)."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "derive_key", "proof": "expert.shared_secret_bytes (expert.jet:351) copies the SharedSecret; the copy only feeds hkdf_sha256 and is zeroized on both the Ok and Err paths before return (:113-123), while the SharedSecret keeps its own zeroizing Close (crypto.jet:285-289). The result is a Secret. jetc.jet is the private part __core_crypto_jetc (CoreSourceParts.rs:144-150), so its callers are Core: writer (:293, :297) and reader (:372-373), which derive the 32-byte wrap key and 24-byte wrap nonce with distinct domain labels over ephemeral ∥ recipient public key and the file id as salt."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "seal_key", "proof": "expert.secret_bytes (expert.jet:349) copies the key; the copy only feeds seal (the registered nonce-uniqueness proof above) and is zeroized on both outcomes before return (:128-138); the Secret owner keeps its Close. Its Core callers supply the protocol nonces that proof covers: the header tag at nonce(prefix, 0) (:306), each chunk at nonce(prefix, index ≥ 1) (:321-322), and seal_wrap's per-recipient HKDF nonce under that recipient's own derived key (:160)."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "open_key", "proof": "expert.secret_bytes (expert.jet:349) copies the key; the copy only feeds open_record (authenticated open, proof above) and is zeroized on both outcomes before return (:143-153); the Secret owner keeps its Close. Callers are Core only (private part __core_crypto_jetc): reader's header tag (:377), open_wrap (:177) and open_chunk (:390), each after the bounds checks listed for open_record."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "seal_wrap", "proof": "Copies the derived wrap nonce and the file key through expert.secret_bytes, passes them to seal_key, and zeroizes both copies on Ok and Err (:157-171); the Secret owners keep their Close duty. Its only caller writer (:301) runs it once per recipient with a key and nonce from derive_key over a fresh ephemeral X25519 key (:270-273) and that recipient's public key, so each derived key seals exactly one message under one nonce. A wrong nonce width is refused by expert (expert.jet:274; test :257)."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "open_wrap", "proof": "Copies the derived wrap nonce through expert.secret_bytes, passes it to open_key (authenticated open), and zeroizes the copy on both outcomes (:175-187). Its only caller reader (:374) supplies the stanza bytes after the header-shape checks (:340-346); the opened file key is wrapped in a Secret and must be exactly 32 bytes (:376)."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "secret_length", "proof": "The gate (:233-238) copies the Secret through expert.secret_bytes, reads only its length, and zeroizes the copy before returning that Int; no byte of the secret leaves the function and the original owner keeps its Close (#Test :241-246). Callers are writer (:269) and reader (:376) width checks."},
+  {"file": "Core/Crypto/Jetc.jet", "function": "writer", "proof": "The gate (:271-273) copies the ephemeral Secret through expert.secret_bytes straight into X25519SecretKey.from_bytes, which takes the copy and accepts exactly 32 bytes (crypto.jet:244-247); :269 already checked that width, so the refusal path is unreachable. The copy then lives only in the zeroizing X25519SecretKey (Close wipes, crypto.jet:254-258) and the moved ephemeral Secret keeps its own Close. Only the derived public key (:274) and per-recipient wraps leave; the coordinator draws the four inputs fresh for each container (crypto.jet:913-919)."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "__migrate_v1", "proof": "Reachable only from expert.migrate_v1 (expert.jet:624, the sole caller), which the checker restricts to an importing core.crypto.expert caller inside #Unsafe (CheckerCoreLib/core_call.rs:2553-2577). The legacy buffer is bounded (≤1 GiB + 34, :666-675); the plaintext is a Secret only after authentication (:676-680); the staged v2 output is verified (:919-929) before publication."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_from_bytes", "proof": "The gate (:314-317) forwards the moved bytes to vault.__wrapped_from_bytes (vault.jet:182-186), which returns a WrappedVaultKey only after wrapped_metadata (vault.jet:487-) bounds the blob to 16..8192 bytes and checks the JVKW magic and header fields; failures become KeyWrapError. The carrier holds the wrapped (encrypted) container, never plaintext key material. The `__` name is reserved (E0067 outside Core), so users reach it only as the typed constructor WrappedVaultKey.from_bytes (BuiltinStatics.jet:145, 148)."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_bytes", "proof": "vault.__wrapped_bytes (vault.jet:187) returns an owned copy of the carrier's `encoded` field: the same authenticated wrapped container that WrappedVaultKey.from_bytes validated or the vault export produced. No unwrapped key or Secret is read, and the carrier stays intact. The `__` name is reserved (E0067 outside Core), so only Core and compiler lowering call it."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_recipient", "proof": "vault.__key_unlock_recipient (vault.jet:203-205) builds KeyUnlock{kind: 1, secret: identity.bytes[0..<len]}: a read View of the caller's X25519SecretKey bytes, not a copy, so no second copy of the identity exists and the owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Recipient(identity) (BuiltinStatics.jet:146, 149)."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_passphrase", "proof": "vault.__key_unlock_passphrase (vault.jet:206-208) builds KeyUnlock{kind: 2, secret: passphrase.bytes[0..<len]}: a read View of the caller's Secret, not a copy, so the passphrase owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Passphrase(secret) (BuiltinStatics.jet:147, 150)."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "poly1305", "proof": "Not a core.crypto export (Core.jet:44), so its callers are crypto.jet's chacha_poly_seal (:2146) and chacha_poly_open (:2165). Both pass otk = chacha20_block(key, nonce, 0) (:2137, :2157), the RFC 8439 §2.6 one-time key, over the AEAD framing aad ∥ pad16 ∥ ct ∥ pad16 ∥ le64(aad) ∥ le64(ct); the 64-byte block covers the 32 key bytes fixedcrypto.poly1305 reads (expert_ct.jet:628). The key is therefore one-time per (key, nonce): xchacha_seal's callers use a random 24-byte nonce for the payload (:466, :506) and HKDF nonces under fresh ephemeral keys for wraps (:486-496, :1161-1174, :1190). open compares tags in constant time before decrypting (:2166)."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "x25519_scalarmult", "proof": "Not a core.crypto export (Core.jet:44). Its callers are x25519 (:1012), which first requires 32-byte secret and public keys (:1009-1010) and rejects an all-zero shared secret (:1013), x25519_public (:1019) after a 32-byte check (:1018), and X25519SecretKey.public_key (:251) with the fixed 32-byte base point. fixedcrypto.x25519 panics on any other width rather than reading past its inputs (expert_ct.jet:150), wipes its workspace (:201), and returns a fresh 32-byte list."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "ed25519_sign_raw", "proof": "Not a core.crypto export (Core.jet:44). Its only caller sign (:998) requires a 32-byte SigningKey seed first (:997). fixedcrypto.ed_sign hashes the seed into a private workspace, wipes it (expert_ct.jet:355-385), and returns the 64-byte signature; the seed is never copied out."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "ed25519_verify_raw", "proof": "Not a core.crypto export (Core.jet:44). Its only caller verify (:1005) requires a 32-byte public key and a 64-byte signature (:1002-1004); fixedcrypto.ed_verify rejects other widths itself (expert_ct.jet:512). Only public inputs are read and only a Bool returns."},
+  {"file": "Core/Crypto/ExpertCt.jet", "function": "arena", "proof": "__list_reserve_exact grows the exclusively lent, freshly created empty list to exactly `words` I64 elements of capacity and returns false, leaving the allocation intact, on a negative or overflowing request or no memory (JetRuntime Collections.jet:20-23); arena panics on false (:12). Length stays 0, and the loop then pushes `words` zeros (:14), so every later bounds-checked word/byte access sees initialized elements. Callers pass constants (26, 204, 684, 696). Sema admits this leaf only in the private part __core_crypto_ct (Sema/Calls/Core.jet:962; CoreSourceParts.rs:155-161)."},
+  {"file": "Core/Crypto/ExpertCt.jet", "function": "extract", "proof": "__list_reserve_exact reserves exactly `count` U8 capacity on a fresh empty list and the function panics on failure (:37-39); the length grows only through the following `count` pushes of bytes copied from the workspace (:40), so no uninitialized element is ever readable. Callers pass constant widths 32 (:200, :350), 64 (:382) and 16 (:651). Sema admits the leaf only in __core_crypto_ct (Sema/Calls/Core.jet:962)."},
+  {"file": "Core/Crypto/ExpertCt.jet", "function": "hash_parts", "proof": "__list_reserve_exact reserves exactly an + bn + msg.len() U8 capacity on a fresh empty list and the function panics on failure (:323-325); exactly that many bytes are then pushed (:326-328), so the length never exceeds what was written. Callers pass an = 32 and bn ∈ {0, 32} (:361, :366, :487). The hashed buffer and digest are zeroized before return (:331-332). Sema admits the leaf only in __core_crypto_ct (Sema/Calls/Core.jet:962)."},
+  {"file": "Core/Crypto/Vault.jet", "function": "load", "proof": "`validate_key` rejects a forged or foreign key reference before the typed provider runs; the provider returns the typed key value, never raw key bytes."},
+  {"file": "Core/Crypto/Vault.jet", "function": "current", "proof": "`validate_name` rejects an invalid vault name before the typed provider runs; the result is a typed key reference, not key material."},
+  {"file": "Core/Crypto/Vault.jet", "function": "status", "proof": "`validate_key` rejects a forged or foreign key reference before the provider runs; the result is a KeyStatus value."},
+  {"file": "Core/Crypto/Vault.jet", "function": "versions", "proof": "`validate_name` rejects an invalid vault name before the provider runs; the result is a list of typed key references."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_generate", "proof": "`validate_name` runs first; the provider returns a MutationPlan that only `authorize_write` and a commit can act on."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_store", "proof": "`validate_name` runs first and the key moves (`^key`) into the provider, so the caller keeps no copy; the result is a MutationPlan."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_signing", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move (`^bytes`) into the provider, so no raw copy remains with the caller."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_x25519", "proof": "`validate_name` runs and the material must be exactly 32 bytes; the bytes move (`^bytes`) into the provider, so no raw copy remains with the caller."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_import_wrapped", "proof": "`validate_name` runs and the wrapped blob is bounded to 16..8192 bytes before the provider decrypts it under `unlock`; the result is a WrappedImportPlan."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_rotate", "proof": "`validate_name` runs first; the provider returns a MutationPlan that only `authorize_write` and a commit can act on."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_retire", "proof": "`validate_key` and `validate_reason` run first; the provider returns a MutationPlan, not key material."},
+  {"file": "Core/Crypto/Vault.jet", "function": "prepare_revoke", "proof": "`validate_key` and `validate_reason` run first; the provider returns a MutationPlan, not key material."},
+  {"file": "Core/Crypto/Vault.jet", "function": "authorize_write", "proof": "`validate_plan` and `validate_reason` run first; the plan is lent read-only and the result is a single-use VaultWrite token."},
+  {"file": "Core/Crypto/Vault.jet", "function": "authorize_wrapped_import", "proof": "`validate_wrapped_plan` and `validate_reason` run first; the result is a single-use VaultWrite token."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_generate", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_store", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_import_signing", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_import_x25519", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_import_wrapped", "proof": "The write token and wrapped plan are validated and both move into the provider, so each is used once; the result is a typed key reference."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_rotate", "proof": "The write token and plan are validated and both move into the provider, so each is used once; the result is a Rotation of typed key references."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_retire", "proof": "The write token and plan are validated and both move into the provider, so each is used once; nothing is returned but the error."},
+  {"file": "Core/Crypto/Vault.jet", "function": "commit_revoke", "proof": "The write token and plan are validated and both move into the provider, so each is used once; nothing is returned but the error."},
+  {"file": "Core/Crypto/Vault.jet", "function": "export_to_passphrase", "proof": "`validate_key` runs first and the passphrase is lent read-only; the result is passphrase-encrypted wrapped bytes, never the plain key."},
+  {"file": "Core/Crypto/Vault.jet", "function": "export_to_recipients", "proof": "`validate_key` runs and the recipient list is bounded to 1..16; the result is recipient-encrypted wrapped bytes, never the plain key."},
+  {"file":"Core/Email/Email.jet","function":"decode_dkim","proof":"The gate reads and writes Secret.bytes, not arbitrary memory. At email.jet:78-95 a nonempty length divisible by four bounds every quartet access and canonical padding/alphabet checks reject malformed input. The only decoded allocation is the fixed 32-byte Secret at :82; :96-104 guard every write with written < 32, never grow a secret-bearing List, and :107 rejects any non-32-byte result. Errors drop the zeroizing Secret; success moves it at :108. Callers supply only a borrowed Secret and cannot choose unchecked indices or receive a plain decoded byte list."},
+  {"file":"Core/Data/Data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
+  {"file":"Core/Data/Data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
+  {"file":"Core/Process/Process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
+  {"file":"Core/Http/Server.jet","function":"response_body","proof":"The __response_parts gate at server.jet:76 transfers typed Headers and one-shot Body ownership into the response without reading the body. :72-75 normalize every caller status to 100..599 before I64 conversion; all other transport fields at :78-79 are initialized typed constants, absent slots, or empty lists. The consuming body/headers parameters at :69 prevent the caller from reusing moved stream ownership. No pointer or foreign callback is accepted; invalid status cannot reach the unchecked head transfer."},
+  {"file":"Core/Http/Server.jet","function":"access_log_template","proof":"The gate at server.jet:139 calls __route_template with a borrowed typed HTTPRequest. Its provider Top/HTTPServer.rs:6321-6322 only clones the request's stored Option<String>; it neither dereferences caller-supplied addresses nor mutates routing state, consumes the request, or exports a borrowed native reference. Every caller therefore receives owned optional text regardless of whether route metadata was present."},
+{"file":"Core/Db/Db.jet","function":"close","proof":"db.jet:40 consumes the Close resource before passing its private raw field to __queue_raw_close(:42). The bridge uses a u64 registry key, not a memory address (jet-pkg-model/Prelude/DB.rs:66-67): removal drops the owned connection and absent keys return false. Thus even an already-absent handle cannot dereference freed storage; no connection borrow or raw pointer escapes the consuming close."},
+{"file":"Core/Db/Db.jet","function":"__queue_open","proof":"__queue_raw_open accepts an ordinary String path and registers the owned SQLite connection under a fresh numeric key (jet-pkg-model/Prelude/DB.rs:40-48). db.jet:49 rejects the failure sentinel zero and :50 immediately adopts the key into the Close resource; no native pointer or connection reference is returned. Arbitrary caller paths produce a resource or None, not an unchecked memory capability."},
+{"file":"Core/Db/Db.jet","function":"__queue_begin","proof":"The gate at db.jet:54 lends driver.raw to __queue_raw_begin without transferring the Close resource. The bridge fixes the statement to BEGIN and resolves the numeric key in DB_CONNS while its map borrow is live (jet-pkg-model/Prelude/DB.rs:95-100,115-117); missing keys return false. Callers cannot supply SQL or a pointer to this operation, and the native connection reference does not escape."},
+{"file":"Core/Db/Db.jet","function":"__queue_commit","proof":"db.jet:57 lends only the typed driver's numeric key to __queue_raw_commit. The bridge selects the fixed COMMIT statement and performs the registry lookup under a live map borrow (jet-pkg-model/Prelude/DB.rs:95-100,119-121), returning false for an absent key. No raw address or native reference reaches the caller, including after failed transaction admission."},
+{"file":"Core/Db/Db.jet","function":"__queue_rollback","proof":"db.jet:60 lends only the typed driver's numeric key to __queue_raw_rollback. Its bridge selects the fixed ROLLBACK statement and keeps the registry borrow through execution (jet-pkg-model/Prelude/DB.rs:95-100,123-125); absence is false rather than a dangling dereference. It exposes neither a native connection nor caller-selected memory."},
+{"file":"Core/Db/Db.jet","function":"__queue_execute","proof":"db.jet:62-64 hold the exclusive __QueueDb borrow while __queue_raw_execute marshals typed String SQL and DBValue parameters. The bridge looks up the numeric key, rejects absence, owns decoded parameters and lends them only while the prepared statement executes (jet-pkg-model/Prelude/DB.rs:183-199). No caller address is interpreted and no statement or parameter reference escapes in the owned Int/DBError result."},
+{"file":"Core/Db/Db.jet","function":"__queue_query","proof":"db.jet:67-69 hold the exclusive __QueueDb borrow through __queue_raw_query; SQL and parameters are typed owned values, not pointers. The bridge rejects an absent registry key and keeps connection, decoded parameters and statement alive through row reads (jet-pkg-model/Prelude/DB.rs:131-151), encoding owned results. Returned String/DBValue rows contain no references into SQLite storage, so callers cannot outlive a native row borrow."},
+{"file":"Core/Net/Net.jet","function":"ip_addr","proof":"__ip_from_bytes expects exactly four or sixteen octets. net.jet:136 accepts only parse_ip_bytes success: parse_ipv4_bytes(:960-979) checks four decimal octets <=255, and the IPv6 parser(:982-1048) checks eight 16-bit words including compression before expanding to sixteen bytes. The exact owned list moves at :138; callers cannot substitute a differently sized list after validation."},
+{"file":"Core/Net/Net.jet","function":"ip_to_string_impl","proof":"net.jet:143-144 call __ip_bytes on a borrowed typed IPAddr; Top/NetHTTP.rs:1944-1948 discriminant-matches its native IPv4/IPv6 enum and copies exactly its initialized octets into an owned list. Formatting only reads that list. No caller-selected index, raw pointer or borrowed native storage escapes."},
+{"file":"Core/Net/Net.jet","function":"ip_is_ipv4","proof":"__ip_is_v4 at net.jet:149 only matches the valid native IPAddr discriminant (Top/NetHTTP.rs:1951-1952). Any typed address is admitted; no payload reinterpretation, mutation or memory borrow is returned, only Bool."},
+{"file":"Core/Net/Net.jet","function":"socket_addr_parse","proof":"At net.jet:182-189 parsing produces exactly sixteen IPv6 bytes or four IPv4 bytes, with the IPv6 length checked at :183. parse_port(:846-856) bounds decimal port to 0..65535 and parse_scope(:1144-1154) bounds scope to 0..4294967295 before :193-194 consume the octets and IP into __ip_from_bytes/__socket_from_parts. Flow is the constant zero. Callers cannot select uninitialized representation fields or overflow the U16/U32 transfer."},
+{"file":"Core/Net/Net.jet","function":"socket_host","proof":"__socket_ip at net.jet:199 borrows a valid SocketAddr and copies its native IP enum (Top/NetHTTP.rs:2038-2039). ip_to_string_impl then reads copied octets for source formatting; the caller receives owned text, not a reference into the socket carrier. No raw address is accepted."},
+{"file":"Core/Net/Net.jet","function":"socket_port","proof":"__socket_port at net.jet:202 borrows a typed SocketAddr and widens its initialized native u16 port to Int (Top/NetHTTP.rs:2042-2043). This scalar projection accepts every valid carrier and neither exposes a borrow nor changes socket ownership."},
+{"file":"Core/Net/Net.jet","function":"socket_scope","proof":"__socket_scope at net.jet:215 matches the valid socket enum, returning None for IPv4 or widening the IPv6 u32 scope (Top/NetHTTP.rs:2046-2050). Source substitutes zero for None. No reinterpretation or caller-controlled pointer is involved and only an owned scalar escapes."},
+{"file":"Core/Net/Net.jet","function":"udp_packet_addr","proof":"__udp_packet_addr at net.jet:413 borrows a typed UDPPacket and clones its stored SocketAddr (Top/NetHTTP.rs:2851-2852); the packet remains live during the projection. The return carrier owns its address rather than pointing into packet storage, so releasing the packet cannot invalidate the result."},
+{"file":"Core/Jobs/Jobs.jet","function":"queue","proof":"The gates at jobs.jet:130-136 call __path_kind and __create_dir_all_raw with owned String paths computed by queue_default_path/files.dirname, after endpoint authority validation at :124-126. Metadata is a scalar kind query and recursive mkdir returns owned IOError; neither leaf accepts or returns memory addresses. The kind check at :131-132 rejects observed symlinks before the checked SQLite open. Path races do not create a borrowed descriptor or dangling pointer because these are independent pathname operations, not identity-handle transfers."},
+{"file":"Core/Jobs/Jobs.jet","function":"wait","proof":"The unsafe __sleep_ms leaf casts signed milliseconds to unsigned host Duration (Top/ServiceAuthority.rs:3792-3793). jobs.jet:386-387 reject negative/oversized timeout and :393 clamps the exact delay passed at :395 to 1..25, independently of wall-clock movement. No caller can reach the cast with a negative or oversized delay; the leaf only sleeps and exports no memory."},
+{"file":"Core/Jobs/Jobs.jet","function":"queue_publish_transition","proof":"jobs.jet:486 constructs owned JSON fields and :487 clamps negative timestamps before __publish_parts(:489). The provider Top/ServiceAuthority.rs:3772-3787 validates JetDevtoolsEvent::from_parts before publication, owns entity/fields and borrows source/kind only during the call. No native pointer, callback or mutable queue storage is transferred to a sink; caller-chosen observation text cannot escape that validation boundary."},
+{"file":"Core/Jobs/Jobs.jet","function":"queue_publish_status","proof":"jobs.jet:499-502 assemble owned status fields/entity and nonnegative timestamp, then __publish_parts(:504) invokes the existing validating JetDevtoolsEvent::from_parts gate (Top/ServiceAuthority.rs:3779-3786). The sink gets an owned validated event rather than references into JobQueueStatus, so callers cannot make event storage outlive a borrowed source value."},
+{"file":"Core/Testing/Testing.jet","function":"testing_byte","proof":"__string_byte performs an unchecked native byte read. Its local helper testing.jet:353-355 is reached by testing_boundary only with 0 < position < text.count_bytes()(:362-363), by testing_diff_lines with cursor < end <= length(:387-393), by testing_append_bytes over a bounded prefix(:408-409,412-457), and testing_ascii_name over 0..<count_bytes(:508-509). These establish nonnegative in-storage indices before U64 conversion; none expose the index-taking helper as a public Core member or allow the String borrow to escape."},
+{"file":"Core/Testing/Testing.jet","function":"testing_owned_text","proof":"__bytes_into_text at testing.jet:376 requires valid UTF-8. The only callers are testing_unified_diff(:503) and testing_ascii_name(:517). Diff output appends complete String bytes or scalar-aligned prefixes chosen by testing_boundary(:362-366,423-424,450-451); marker fragments are ASCII. Name output(:508-515) appends only ASCII alphanumerics, hyphen or underscore. Each exact owned list moves into String with no mutation between construction and transfer; arbitrary caller bytes cannot reach this local helper."},
+{"file":"Core/Tui/Tui.jet","function":"capability_env_bytes","proof":"__cap_env_bytes at tui.jet:101 borrows a String name and returns an owned optional byte list. Its provider Ui.rs:514-515 obtains var_os and consumes OsString into encoded bytes; no borrowed environment storage is returned and source does not assume UTF-8 (capability_text uses checked String.from_bytes at :112). Arbitrary names cannot manufacture a native pointer or invalidate returned storage."},
+{"file":"Core/Tui/Tui.jet","function":"capability_stdout_terminal","proof":"The gate at tui.jet:126-127 invokes __stdout_terminal with no caller-supplied values and returns only a copied Bool host terminal fact at :129. It lends no memory, descriptor ownership or callback to the caller; host terminal presence or absence cannot change the typed result's validity."},
+{"file":"Core/Tui/Tui.jet","function":"normalized_style_test_node","proof":"The local test helper at tui.jet:651-655 calls __node_transfer with initialized text/dimensions, fixed kind/role, an empty child list, explicitly absent accessibility slots and present style slots. Its sole caller(:659-663) obtains StyleWords from style_words(:416-421), whose three flags are bounded bits 1/2/4 and whose colors are normalized by color_words. No arbitrary numeric representation or uninitialized optional slot is passed; the returned retained UINode owns its payload."},
+  {"file":"Core/Encoding/Cbor.jet","function":"validate","proof":"The cbor.jet:95 gate only matches Dyn's private Number/TypedText variants to reject them(:97-98), and recursively validates initialized Array/Object payloads(:99-104). Discriminant matching precedes payload access; ordered Object storage is borrowed through object_entries while value remains live. No raw address, variant transmute or payload reference escapes in the error/unit result."},
+  {"file":"Core/Encoding/Cbor.jet","function":"encode_value","proof":"The cbor.jet:157 gate grants access to private Dyn.Bytes only after its matching branch(:171); all byte reads iterate the owned list length(:173). Object entry views are taken only in the Object branch(:179-180) and retain the value borrow throughout bounded index ordering. encode(:111) validates the tree first, rejecting internal Number/TypedText. The caller's exclusively borrowed output receives copied bytes, never native payload references."},
+  {"file":"Core/Encoding/CborStream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 consumes stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only the exact owned copy moves into the retained key; arbitrary wire bytes cannot reach this transfer."},
+  {"file":"Core/Encoding/CborStream.jet","function":"next_inner","proof":"For a CBOR text item cbor_stream.jet:303 obtains the owned payload, :306 strictly validates that exact list's UTF-8 and returns Syntax on failure, then :308 immediately moves it into __bytes_into_text. No mutation intervenes, and binary items(:304) never use the text transfer. Host/wire callers cannot bypass the validator with malformed payload bytes."},
+  {"file":"Core/Encoding/Csv.jet","function":"close_field","proof":"__bytes_into_text at csv.jet:124 consumes the whole-value parser's field. typed_records(:213-222) obtains complete scalar byte sequences from a valid String, and TypedCSV.push(:138-200) either appends the whole sequence or replaces/removes ASCII CSV syntax; doubled quotes and CRLF are ASCII. Thus field is empty or concatenated complete UTF-8 scalars at every close; it is moved and reset before reuse(:124-126), never exposed as arbitrary caller bytes."},
+  {"file":"Core/Encoding/Csv.jet","function":"query_text","proof":"csv.jet:315-316 enforce the bounded read's size/list limits and :317 validates sample.bytes with the strict shared UTF-8 validator. The gate at :318-319 immediately moves that same owned list into __bytes_into_text; failures return FieldError before conversion. A caller's arbitrary file contents cannot produce an invalid String or retain a native read-buffer borrow."},
+  {"file":"Core/Encoding/Csv.jet","function":"finish_field","proof":"CSVReader.character(:725-744) validates lead width, all continuation bytes, overlong/surrogate/out-of-range cases before next_inner(:880-882) calls push. push(:798-874) appends each entire validated scalar or only ASCII quote/CRLF escapes. Consequently finish_field's __bytes_into_text(:769) moves only complete UTF-8 storage, then resets field(:771). Partial/invalid wire scalars fail without reaching this gate."},
+  {"file":"Core/Encoding/Json.jet","function":"emit_coercion","proof":"json.jet:101-102 calls __coerce_emit with ordinary borrowed String text; it supplies no pointer, descriptor or callback. The reserved leaf preserves the existing stderr emission boundary, and the helper returns no borrowed storage. Caller-selected message bytes remain valid UTF-8 and cannot become an unchecked address or outlive the call as a native reference."},
+  {"file":"Core/Encoding/Json.jet","function":"coerce_line","proof":"The gate at json.jet:109-110 calls __coerce_now with no arguments and assigns its owned Int clock snapshot. Subsequent interpolation(:112) is safe String construction. No caller can choose a raw memory operand or receive a host borrow through this parameterless scalar query."},
+  {"file":"Core/Encoding/Json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
+  {"file":"Core/Encoding/Json.jet","function":"write_json","proof":"json.jet:855-870 discriminate private Number/TypedText/Bytes before reading each payload. Number/text are ordinary String inputs to output helpers; Bytes are read only over 0..<bytes.len()(:865-868). The caller holds an exclusive output-list borrow, which receives copied encoding bytes; no native storage reference or unchecked index is returned. Other variants leave the gate for normal recursive rendering."},
+  {"file":"Core/Encoding/Json.jet","function":"write_canonical","proof":"The gate at json.jet:803-805 only tests the private Dyn.Bytes discriminant without binding its payload (`.Bytes(_)`) and returns an Unsupported EncodingError; it writes nothing to the caller's output list and forms no pointer or view. Every other variant leaves the gate for the ordinary public match (:806-)."},
+  {"file":"Core/Encoding/Json.jet","function":"json_equal","proof":"The gate at json.jet:1307-1312 matches private Dyn.Bytes on the left, then on the right, and compares the two owned byte lists by value with checked list equality; a Bytes/non-Bytes pair is false. Only a Bool returns; no payload, pointer or borrowed view escapes. Public variants are compared outside the gate (:1313-)."},
+  {"file":"Core/Encoding/Stream.jet","function":"object_entries","proof":"__object_entries_view requires an Object and returns a borrowed ordered backing view. stream.jet:11 checks that exact discriminant immediately before :13; other variants panic before the intrinsic. The result's `from value` lifetime at :10 ties the view to the same borrowed Dyn, so callers cannot keep it after releasing its owner or reinterpret another payload."},
+  {"file":"Core/Encoding/Stream.jet","function":"object_from_entries","proof":"__object_from_entries at stream.jet:21 receives a consuming list of typed String/Dyn entries, moving its sole allocation into an initialized Object carrier. No pointer, length or discriminant is supplied separately, and the caller cannot reuse the moved list. Arbitrary duplicate keys affect encoding policy, not the validity or ownership of the native payload."},
+  {"file":"Core/Encoding/Stream.jet","function":"bytes_payload","proof":"stream.jet:27 checks private Dyn.Bytes before __bytes_view on the same value; all other variants panic(:29). The View<U8> result is declared `from value`(:25), retaining the owner borrow rather than exporting an independent pointer. Callers cannot select a different variant's backing or use the view after the carrier's lifetime."},
+  {"file":"Core/Encoding/Stream.jet","function":"typed_number","proof":"The gate at stream.jet:33-34 constructs the compiler-private Number enum from a consuming typed String; it does not reinterpret memory. Its source caller json.jet:562 is in Parser.number after numeric grammar validation and checked String construction(:561). The owned lexeme is retained for typed decoding, never used as an address or unchecked index; consumers use normal checked numeric parsing. Callers cannot corrupt enum layout or retain the moved String's storage."},
+  {"file":"Core/Encoding/Stream.jet","function":"typed_string","proof":"__typed_text at stream.jet:40 consumes an initialized String into the private typed-text carrier. UTF-8 is already guaranteed by the String type; this operation neither changes its bytes nor accepts a separately forgeable pointer/length. The caller loses ownership of the moved text and receives an owning Dyn enum, not an escaping borrow."},
+  {"file":"Core/Encoding/Stream.jet","function":"read_string","proof":"stream.jet:294 validates the exact decoded byte list, returning Syntax and releasing tracked capacity on failure(:295-296). The __bytes_into_text gate(:299-300) immediately consumes that same list without intervening mutation. Escaped or raw wire bytes therefore cannot bypass UTF-8 validation or expose a dangling parser buffer."},
+  {"file":"Core/Encoding/Stream.jet","function":"number","proof":"Both gates discharge separate obligations: stream.jet:360 rejects invalid JSON numeric grammar and :365 rejects invalid UTF-8 before :371 consumes that exact byte list into String. Only after those checks does :375-376 construct DataEvent.Number when typed_numbers is enabled. The valid initialized lexeme moves into its matching carrier; no unchecked numeric payload reinterpretation or raw buffer reference reaches callers."},
+  {"file":"Core/Encoding/Stream.jet","function":"fold_text","proof":"stream.jet:555 consumes a valid String into __text_into_bytes solely to measure allocation capacity. That byte list is not modified; :557 can fail before reconstruction, otherwise :559 immediately moves the unchanged UTF-8 list into __bytes_into_text. Budget checks affect retention, not validity; no caller receives the intermediate storage or can mutate it between conversions."},
+  {"file":"Core/Encoding/Stream.jet","function":"fold","proof":"stream.jet:566 checks the private DataEvent.Number discriminant before moving its initialized String through fold_text(:567) into matching Dyn.Number(:568). fold_text preserves UTF-8 while accounting allocation ownership. No other event variant is interpreted as a number; recursion and ordinary event handling occur outside the gate and no native payload borrow escapes."},
+  {"file":"Core/Encoding/Stream.jet","function":"text_from_bytes","proof":"stream.jet:834 strictly validates the caller's exact owned byte list, returning EncodingError on failure; :836 then immediately moves it into __bytes_into_text. No mutation or alternate allocation occurs between validation and transfer. Even arbitrary external byte input cannot return a String violating UTF-8 or retain a pointer into the moved list."},
+  {"file":"Core/Encoding/Stream.jet","function":"byte_at","proof":"The unchecked __string_byte at stream.jet:845 is dominated by :841-842, which reject index < 0 or index >= text.count_bytes() before U64 conversion. The borrowed String remains live for the one-byte read; only copied U8 returns. Callers cannot cause a negative, out-of-storage or dangling pointer read through this helper."},
+  {"file":"Core/Encoding/Stream.jet","function":"ascii_text","proof":"Despite its formatter-oriented name, ascii_text admits no unchecked caller assumption: stream.jet:1402 runs strict __utf8_validate on the exact owned list and panics on invalid UTF-8. Only the succeeding path at :1404-1405 consumes it into __bytes_into_text, with no intervening write. Malformed formatter output cannot create an invalid String."},
+  {"file":"Core/Encoding/Stream.jet","function":"wire_float","proof":"The gate at stream.jet:1415-1416 only transfers the owned valid String produced by Float interpolation(:1413) into __text_into_bytes. It is the safe direction of the UTF-8 transfer and accepts no raw bytes or caller pointer. Later digit editing uses a separate list and checked ascii_text reconstruction; no alias to the moved String is retained."},
+  {"file":"Core/Encoding/Stream.jet","function":"jsonl_tree_size","proof":"The gate at stream.jet:1648-1653 runs only in the fallback branch, after every public variant was sized (:1620-1644). It tests the private Dyn.Bytes discriminant without binding its payload (`.Bytes(_)`) and only chooses the error reason and kind; the branch always returns Err (:1654-1656). No payload, pointer or backing view is read or escapes."},
+  {"file":"Core/Encoding/XmlEngine.jet","function":"text_byte","proof":"__string_byte at xml_engine.jet:135 is an unchecked byte read. Its only local callers are byte_prefix_text(:139-142) and unit_prefix(:2029-2032), both iterating 0..<needle.count_bytes(), and ascii_equal(:1386-1389), which first checks equal String storage lengths then iterates 0..<left.count_bytes(). Every index is nonnegative and below the corresponding borrowed String's byte length; no pointer or view escapes the copied U8 result."},
+  {"file":"Core/Encoding/XmlEngine.jet","function":"byte_text","proof":"__bytes_into_text at xml_engine.jet:174 consumes a copy of source[start..<end]. Every local caller slices bytes of an existing String (DOCTYPE/entity/declaration helpers) or Scanner.source, whose sole construction path parse_document_with(:667-669) takes String.bytes(). Boundaries are zero/end or offsets adjacent to ASCII XML delimiters, quotes and whitespace, which cannot lie inside a UTF-8 continuation sequence. Checked list accesses(:172) prevent out-of-storage copies; the exact copied scalar-aligned allocation moves with no intervening mutation or escaping borrow."},
+  {"file":"Core/Encoding/XmlEngine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) consumes valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
+  {"file":"Core/Encoding/Yaml.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
+  {"file":"Core/Service/Service.jet","function":"__authority_validate","proof":"service.jet:155 projects owned identity fields; :156 rejects invalid identity before __endpoint_validation_snapshot(:160). Its native ServiceAuthority.rs:360-368 keeps the registry mutex across exact/candidate lookup and copies only String/scalar facts. No registry guard, endpoint pointer or mutable reference escapes; policy checks operate on owned snapshots, so caller identity cannot extend a native borrow."},
+  {"file":"Core/Service/Service.jet","function":"endpoint_show","proof":"__endpoint_parts at service.jet:265 only clones the initialized endpoint tree/worker Strings and widens generation (Services.rs:3273-3274). Interpolation(:266) returns owned text. Any typed endpoint is valid for this projection; no unchecked index or native reference reaches callers."},
+  {"file":"Core/Service/Service.jet","function":"set_delivery","proof":"service.jet:270 holds an exclusive tree borrow, :272 rejects a started tree, and :273 writes only a typed ServiceDelivery field via __tree_write_delivery. Services.rs:3259-3260 performs a normal field assignment under that borrow; no pointer or secondary tree alias is returned. Callers cannot change the validated tree concurrently with the transfer."},
+  {"file":"Core/Service/Service.jet","function":"set_restart","proof":"service.jet:277 lends the tree exclusively; :279 checks not started before __tree_write_restart. __group_write_restart is indexed only by 0..<__tree_group_count(:281-282), while neither write changes group storage length (Services.rs:3258-3266). Every transferred policy is a typed enum, and no group reference escapes to invalidate that count."},
+  {"file":"Core/Service/Service.jet","function":"drain_dead_letters","proof":"service.jet:286 holds the exclusive tree borrow and :288 checks started before counting and clearing the same dead-letter list(:289-290). Native __tree_dead_letter_count and __tree_clear_dead_letters(Services.rs:3249-3250,3268) return a copied length and clear owned storage without exporting an element borrow. Callers cannot hold a conflicting live list view across the clear."},
+  {"file":"Core/Service/Service.jet","function":"set_state_empty","proof":"service.jet:295 retains an exclusive tree borrow. :297-300 reject a started tree or existing snapshot/events before __tree_write_empty_adapter and __tree_clear_state_authority(:301-302), whose provider(Services.rs:3269-3272) only assigns typed fields. No stored payload reference is returned; callers cannot interleave a state-record insertion between check and replacement."},
+  {"file":"Core/Service/Service.jet","function":"select_state_adapter","proof":"The exclusive tree borrow at service.jet:315 covers :317-326 checks for not-started, no records, recognized migration, bounded visible store/schema and positive version before __tree_write_state_adapter/__tree_write_state_authority(:327-328). Their provider(Services.rs:3277-3284) initializes owning optional fields from typed String/scalars, not raw memory. The caller cannot replace a checked field set or retain an alias into the new authority."},
+  {"file":"Core/Service/Service.jet","function":"restore_snapshot","proof":"__state_load expects a present state authority (Services.rs:3292-3295). service.jet:348 checks that exact option before :349, borrows the live typed tree, and :355 checks nonempty records before reading records[0]. read_state_record(:374-392) checks schema, framing, byte length and UTF-8. Returned snapshot text is owned, not a reference into tree/store storage."},
+  {"file":"Core/Service/Service.jet","function":"replay_events","proof":"service.jet:362-364 call __tree_state_authority/__tree_event_records only as borrowed field projections; native Services.rs:3286-3290,3297 copy optional Strings and the event list. Each copied record passes checked framing(:367) before join. No list-element reference or native store handle is exported, so releasing or later editing the tree cannot invalidate the owned replay text."},
+  {"file":"Core/Service/Service.jet","function":"upgrade_receipt","proof":"__tree_upgrade_receipt at service.jet:397 clones the existing optional typed receipt (Services.rs:3425). Source rejects None before returning the owning value. No native reference, rollback-store pointer or unchecked payload access escapes for any typed tree."},
+  {"file":"Core/Service/Service.jet","function":"__upgrade_receipt_display","proof":"__upgrade_receipt_parts at service.jet:403 projects initialized scalar fields and cloned String/pinned-shard list (Services.rs:3426-3430), omitting rollback storage. :404-405 only format those owned fields. Caller-supplied typed receipts cannot choose a memory address or retain a borrow into the native receipt."},
+  {"file":"Core/Service/Service.jet","function":"tree_show","proof":"__tree_display_parts at service.jet:411 copies the live tree's initialized fields and handler-name pairs (Services.rs:3432-3439); it exports neither worker tasks nor mailbox storage. :413 iterates the returned owned list and matches typed restart/delivery enums for text. No native payload borrow or separately supplied index reaches the caller."},
+  {"file":"Core/Service/Service.jet","function":"workflow_history","proof":"__workflow_replay_parts at service.jet:429 uses the checked native workflow authority/replay and collects owned run-id/history/outcome records (Services.rs:3441-3445), propagating errors. :435-438 only search those copied records and join the matching list. Arbitrary run_id cannot be used as a native vector index or expose a replay guard."},
+  {"file":"Core/Service/Service.jet","function":"workflow_outcome","proof":"service.jet:444 obtains owned records through __workflow_replay_parts, whose provider validates authority and collects owned payloads (Services.rs:3441-3445). :450-455 match run_id and require a present typed outcome rather than indexing with caller input. The result owns its panic text/enum payload and contains no reference into mutable workflow storage."},
+  {"file":"Core/Service/Service.jet","function":"observe","proof":"__tree_observation_parts at service.jet:461 is a read-only projection into copied counts/booleans and typed workflow status codes (Services.rs:3447-3463). The local loop(:470-478) reads that owned list and formats text; no task, channel, mutable view or raw address is exposed. Every typed tree therefore remains valid regardless of caller observation timing."},
+  {"file":"Core/Service/Service.jet","function":"tree","proof":"__tree_allocate at service.jet:542 materializes every native initializer field from typed arguments. :543-566 provide generation1, typed restart/delivery, positive fixed budget, empty initialized worker/group/record collections, false started, Empty state, absent authorities/receipts and a fresh Arc task group from __tree_task_group_new. Services.rs:1327-1352 only allocate/assign those fields. The caller supplies only owned name text, not uninitialized carriers or native pointers."},
+  {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:617 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
+  {"file":"Core/Service/Service.jet","function":"directory_generation","proof":"service.jet:643 calls __tree_generation on a borrowed typed tree; Services.rs:6272-6273 only copy its initialized i64 generation into an owned Int. The caller supplies no index/address, and no scheduler or tree reference escapes this scalar projection."},
+  {"file":"Core/Service/Service.jet","function":"event_count","proof":"__tree_event_count at service.jet:649 only reads the live tree's event_log length (Services.rs:4735-4736), returning an owned scalar. No record element, raw backing pointer or mutable borrow is exposed, so callers cannot outlive or invalidate event storage via this query."},
+  {"file":"Core/Service/Service.jet","function":"dead_letter_count","proof":"__tree_dead_letter_count at service.jet:655 borrows the typed tree and reads its initialized owned list length (Services.rs:3249-3250). The result is a copied Int with no native payload reference or caller-controlled address; subsequent clear/drop cannot invalidate it."},
+  {"file":"Core/Service/Service.jet","function":"workflow_start","proof":"service.jet:855 retains an exclusive tree borrow through workflow_prepare(:857), identity/version validation(:861-862), __workflow_count-bounded index loops(:864,872) and cursor/handle updates. __workflow_append receives a framed String only after run-id overflow rejection(:879-881); post-append cursor selection re-reads count(:885). Provider field/index leaves(Services.rs:7244-7258) use normal bounds-checked Vec access and owned projections, never reinterpret an id as a pointer. No mutable workflow view escapes."},
+  {"file":"Core/Service/Service.jet","function":"workflow_step","proof":"The exclusive tree borrow at service.jet:892 covers sync(:894), bounded deterministic step checks(:898-902), and workflow_find(:903), which searches 0..<__workflow_count(:1061-1064). Cursor/history leaves operate only on that selected index; __workflow_event_at uses optional checked history.get (Services.rs:7253). :913-915 reject terminal/oversized history before framed append. No caller run_id becomes an unchecked address or borrowed history reference."},
+  {"file":"Core/Service/Service.jet","function":"workflow_activity","proof":"service.jet:923 exclusively borrows the tree; workflow_prepare and workflow_token checks(:925-935) precede bounded max_attempts(:937) and count-bounded workflow_find(:938). Activity-definition helpers iterate __workflow_steps_len and parse field counts(:1114-1121), not caller indices. Native index leaves use checked Vec access (Services.rs:7244-7258); :965-967 reject terminal state before framed append. Returned TaskStatus is copied, with no workflow/storage borrow escaping."},
+  {"file":"Core/Service/Service.jet","function":"workflow_activity_retry","proof":"service.jet:976 holds the exclusive tree borrow across sync, bounded key checks and workflow_find(:978-986). The selected activity definition is owned; :989-998 validate outcome, replay agreement, terminal state and retry bound before computing the next attempt and __workflow_append(:1000-1002). History lookups are optional checked projections and index leaves use normal Vec bounds (Services.rs:7253-7258). Callers cannot forge a vector pointer or retain mutable activity storage."},
+  {"file":"Core/Service/Service.jet","function":"workflow_activity_complete","proof":"service.jet:1011 exclusively borrows the tree through sync, key/outcome checks and count-bounded workflow_find(:1013-1023). The two replay entries(:1027-1028) use __workflow_event_at's checked optional history.get (Services.rs:7253); only matching initialized events advance the cursor(:1029-1030). :1038-1047 reject conflicting completion before framed append. The return is an owned typed outcome; no raw event reference or unchecked caller index escapes."},
+  {"file":"Core/Service/Service.jet","function":"group","proof":"service.jet:1189 rejects started state and :1190-1194 validate_group against owned topology facts before __group_reparent(:1196). validate_group(:1205-1230) proves every named worker exists and membership is unique, discharging the provider's expect at Services.rs:3310. Reparent and __group_push mutate only typed tree/task storage, with no worker reference escaping to caller code between validation and use."},
+  {"file":"Core/Service/Service.jet","function":"chaos_fail","proof":"service.jet:1235 rejects unstarted trees and :1237 bounds the __tree_write_chaos_count increment before :1239. __first_running_endpoint(:1240) returns an owned optional endpoint (Services.rs:3302-3303), not a vector index or pointer, and fail_worker performs endpoint validation. Only a copied count returns; arbitrary caller state cannot overflow the native counter or obtain a mutable worker borrow."},
+  {"file":"Core/Service/Service.jet","function":"append_event","proof":"__event_store_append requires a present authority (Services.rs:3316-3317). service.jet:1251-1255 establish started EventLog state, present authority, bounded valid payload and record-count bound before constructing the owned framed record(:1256). The durable append(:1257) must succeed before __tree_event_push(:1261); the native leaf owns its inserted String. No reference into storage or independently supplied memory length escapes."},
+  {"file":"Core/Service/Service.jet","function":"commit_snapshot","proof":"service.jet:1267-1270 establish started Snapshot state, present authority and bounded valid payload before framing and __snapshot_store_write(:1271-1272). Native Services.rs:3320-3326 holds the authority mutex across store write and tree.snapshot assignment and owns the record String. Callers cannot bypass the present-option precondition, interpose a write inside the leaf, or receive a reference into replaced snapshot storage."},
+  {"file":"Core/Service/Service.jet","function":"validate_tree_endpoint","proof":"service.jet:1295-1296 borrow typed tree/endpoint only to obtain owned route/identity parts (Services.rs:3328-3336; ServiceAuthority.rs:351-355). :1297-1301 enforce matching authority/tree and permitted generation before locked __authority_validate. Neither caller identity nor generation is interpreted as a pointer/index, and no registry/tree borrow escapes this error/unit result."},
+  {"file":"Core/Service/Service.jet","function":"directory_resolve","proof":"__directory_entry at service.jet:1321 finds by String and clones an optional entry (Services.rs:3338-3339), rejecting absence. :1324-1335 check generation, signed directory proof, authority and live worker before returning its owned endpoint. __worker_route searches typed identity and returns owned facts, not a worker reference. An arbitrary name or stale endpoint cannot turn into an unchecked payload index or escaping native borrow."},
+  {"file":"Core/Service/Service.jet","function":"send","proof":"service.jet:1345-1364 check started state, endpoint authority/generation, bounded message and live nondraining worker before __authority_try_send. That operation receives typed owned text/endpoint, not caller addresses. Post-send __worker_sent_account(:1374) uses only the index returned by a fresh __worker_route on the same tree (Services.rs:3344-3352); native Vec indexing is bounds checked and task writes retain their lock. No mailbox or task reference escapes to the caller."},
+  {"file":"Core/Service/Service.jet","function":"delivery_status","proof":"__delivery_read at service.jet:1444 obtains the checked durable entry and materializes owned __DeliveryFacts (ServiceAuthority.rs:2727-2744). Failure returns before any field use; :1448 returns only the typed state enum. Callers cannot choose a log-memory address or outlive a registry/log lock through this projection."},
+  {"file":"Core/Service/Service.jet","function":"delivery_receipt","proof":"service.jet:1459 first obtains checked owning __DeliveryFacts through __delivery_read(ServiceAuthority.rs:2727-2744). :1463-1465 require successful signature derivation before :1467 constructs a fully initialized source receipt from its owned typed fields. No native entry reference or lock guard is exposed, and invalid delivery identity/authority returns an error before a receipt is emitted."},
+  {"file":"Core/Service/Service.jet","function":"delivery_events","proof":"__delivery_read(true) at service.jet:1473 returns owned record fields, not a borrowed log buffer (ServiceAuthority.rs:2727-2743). Every indexed record access is dominated by the exact fields.len()==10 or ==6 checks(:1480,1494); counters parse through checked workflow_i64, signatures verify before acceptance(:1491-1493,1505-1510), and :1514 guards events[0]. Malformed caller/log data cannot access an absent field or escape a mutable durable-entry borrow."},
+  {"file":"Core/Service/Service.jet","function":"delivery_retry","proof":"service.jet:1522 invokes __delivery_probe, whose native ServiceAuthority.rs:2746-2747 checks the durable entry before success. :1526 materializes a typed runtime from the delivery's cloned store and constant zero retention, then __runtime_retry receives typed carriers only. The returned Delivery owns its identity fields; no log reference, pointer or guard escapes, including on retry errors."},
+  {"file":"Core/Service/Service.jet","function":"endpoint_receive","proof":"service.jet:1533-1537 validate owned endpoint identity before __endpoint_mailbox. Native ServiceAuthority.rs:2751-2776 captures the channel in an owning Arc and returns initialized started/draining facts, so releasing the registry lock cannot dangle the mailbox. :1542 enforces lifecycle/depth policy before one __mailbox_receive; :1544-1547 decode its status into owned message/error. No caller can supply a raw channel address or receive a borrowed queue element."},
+  {"file":"Core/Service/Service.jet","function":"local_delivery_ids","proof":"service.jet:1622 requires successful __worker_route before __mailbox_snapshot(:1623), using only the returned valid worker index. Native Services.rs:3362-3366 copies messages/idempotency records into owned lists; :1627-1634 match initialized identity/message fields before __delivery_id with a fully initialized zero-retention runtime. No pointer or mutable mailbox/record view is exported and arbitrary endpoint text is never used directly as an index."},
+  {"file":"Core/Service/Service.jet","function":"send_durable","proof":"service.jet:1642-1658 check delivery mode, state authority, bounded key/message, started state and endpoint routing before __runtime_send. Mailbox snapshot/restore indices come only from __worker_named_index(:1676,1693), which searches current workers (Services.rs:3368-3369); native restores use checked Vec access(:3378-3379). Each authority operation retains its own locks and returns owning Delivery/String facts; mailbox replacement consumes its owned message list, never exporting channel references. Dead-letter/idempotency pushes are length bounded(:1683,1702)."},
+  {"file":"Core/Service/Service.jet","function":"receive","proof":"service.jet:1715-1726 validate tree lifecycle/endpoint before selecting a worker. Capacity bounds :1728-1729 dominate __take_pending; each mailbox operation(:1751-1752,1774-1783) uses the index returned by a fresh __worker_route, and rollback reselects target(:1787-1790). Native Services.rs:3362-3423 use owned snapshots, checked Vec indexing and locked/Arc channel operations, not unchecked memory. :1780-1782 admit only a successful owned message; no queue element or task guard escapes to callers."},
+  {"file":"Core/Service/Service.jet","function":"pending_delivery_rollback","proof":"The gate at service.jet:1806 passes typed endpoint/owned pending records to __requeue_pending, then an owned prior message snapshot to __mailbox_restore in both result branches(:1809,1815). Its local callers in receive(:1759,1762) pass the index obtained from __worker_route, never caller text as an address; native Services.rs:3378-3379 still bounds-check the Vec access. Both operations own/copy their inputs under existing locks and return errors, not references into restored mailbox storage."},
+  {"file":"Core/Service/Service.jet","function":"worker","proof":"service.jet:1868-1876 reject started state, capacity outside1..1000000, invalid names, excess workers and duplicates before allocation. __endpoint_unchecked receives route fields/issued authority(:1878-1893), and __worker_mailbox_new receives bounded capacity plus an empty owned queue(:1894). :1906-1914 initialize task/topology and every __worker_push field; the mailbox moves rather than cloning its forkable channel. The handler is a typed checked function item, not a raw caller address; native Services.rs:7289-7305 only store initialized owned fields."},
+  {"file":"Core/Service/Service.jet","function":"fail_worker","proof":"service.jet:2008 holds an exclusive tree borrow and :2010-2014 validate lifecycle/endpoint before obtaining owning topology/worker facts. Target indices derive from worker_scope/worker_index(:2019-2031), group/supervisor accesses are explicitly bounded(:2023,2092,2109), and previous/desired lists are constructed for exactly facts.workers.len()(:2059-2067). Native writes(Services.rs:7308-7329) use checked Vec indexing; task partition writes hold one mutex(:7339-7341). Replacement mailboxes own their queues and move at :2103, so close/restart cannot expose dangling channel storage."},
+  {"file":"Core/Service/Service.jet","function":"restarts","proof":"service.jet:2125 validates the endpoint before owned topology/worker facts. :2134 checks supervisor against facts.groups.len() before selecting budget; :2136 iterates worker facts and matches tree/name before reading that worker's owning restart list. Providers preserve worker insertion order (Services.rs:3305-3307,7269-7277), and accesses are normal bounds-checked projections. The result is a copied count, not a restart-list or task reference."},
+  {"file":"Core/Service/Service.jet","function":"mailbox_depth","proof":"service.jet:2146 validates the endpoint, then :2151-2155 iterate owning topology/worker facts and call __worker_mailbox_depth only with the matching in-range worker index. Native Services.rs:7328-7329 bounds-check workers and copies the live Arc channel's depth. No channel pointer/view or mutable mailbox reference reaches caller code, even for stale or unknown endpoints which return errors."},
+  {"file":"Core/Ui/Host.jet","function":"transfer_request","proof":"__request_transfer requires kind 0/1 and explicit absent-directory state (Core/HostServices.rs:2135-2152). The local helper's only callers host.jet:172,176 supply exactly those constants, true directory_absent, an empty typed filter list and false multiple. The typed UIFSGrant is borrowed/cloned into an owning request, not interpreted as a memory address; title is valid String text. No current-host scope is accessed by this layout-only leaf and callers cannot supply unchecked tags to the local helper."},
+  {"file":"Core/Ui/Host.jet","function":"capabilities","proof":"The host.jet:154-155 __capabilities gate dispatches to jet_ui_host_capabilities (Core/HostServices.rs:1838-1840), which queries capability_facts through jet_ui_with_current_host. In the repaired scope (7ee5e69a8, :1786-1820), only jet_ui_with_host owns the private lifetime-bound guard: TLS stores the address of its live stack-held host reference without transmute, and Drop restores the predecessor before that reference/host borrow ends, including unwinding; safe callers cannot obtain or forget the guard. :1822-1834 hold the mutable TLS borrow across the callback, refusing recursive access and nested installation before another host reference is made; the default host also stays mutably borrowed. No caller address is accepted and the result is copied capability bits (:74-76), not a host reference."},
+  {"file":"Core/Ui/Host.jet","function":"open_file","proof":"host.jet:160-161 moves the typed request into __open_file, whose jet_ui_host_open_file provider (Core/HostServices.rs:1841-1845) calls jet_ui_open_file under jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 is owned only by jet_ui_with_host, keeps its stack-held host reference live without transmute, and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot leak its guard. The mutable TLS borrow at :1822-1834 stays held throughout the provider, so re-entry or nested installation fails before minting another host reference (the default host is borrowed too). Ui.rs:217-227 retain a request clone and validate the returned selection against it before success. Caller requests contain typed owned values, not host addresses; the result owns granted paths (:1348-1350) and exports no scoped host borrow."},
+  {"file":"Core/Ui/Host.jet","function":"save_file","proof":"host.jet:166-167 moves its typed request into __save_file; jet_ui_host_save_file (Core/HostServices.rs:1846-1850) invokes jet_ui_save_file under jet_ui_with_current_host. :1786-1820 confine the lifetime-bound guard to jet_ui_with_host, store only its live stack-held host-reference address without transmute, and restore predecessor TLS before that frame/host borrow ends, including unwind; safe callers never receive a forgettable guard. :1822-1834 keep the mutable TLS borrow across the call, rejecting recursive access or nested installation before a second host reference exists, with a borrowed default host when none is installed. Ui.rs:231-241 retain the original request clone for validating the returned save selection. Arbitrary typed requests cannot supply a raw host pointer, and successful selections own their granted paths rather than borrowing host storage."},
+  {"file":"Core/Ui/Host/Accessibility.jet","function":"attach","proof":"accessibility.jet:7-11 consumes typed node/metadata via __attach. Its jet_ui_host_attach_accessibility provider (Ui.rs:283-293) owns the node, lends it exclusively to host.attach_accessibility only inside jet_ui_with_current_host, and returns the owned node or error; the source discards the successful node and returns unit. Core/HostServices.rs:1786-1820 give jet_ui_with_host sole ownership of a private lifetime-bound guard, storing the live stack-held host-reference address without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind, so callers cannot forget the guard. :1822-1834 retain the mutable TLS borrow across attachment, refusing re-entry and nested installation before another host reference can alias it, and borrow the default host when applicable. Neither caller-selected metadata nor the unit/error result can export a node or host borrow."},
+  {"file":"Core/Ui/Host/Accessibility.jet","function":"project","proof":"accessibility.jet:16-17 passes typed node/id to __project; jet_ui_host_project_accessibility (Ui.rs:295-300) owns the node and lends it read-only during host.project_accessibility inside jet_ui_with_current_host. Core/HostServices.rs:1786-1820 confine the private lifetime-bound guard to jet_ui_with_host: its stack-held host reference remains live without a lifetime transmute, and predecessor TLS is restored before the frame/host borrow ends even on unwind; no safe caller can obtain or leak the guard. :1822-1834 hold the mutable TLS borrow for the entire projection, rejecting recursive access or nested installation before a second host reference, with a live default-host borrow otherwise. The id is a typed identity, not a host address; the optional projection owns node id and metadata (:1673-1676), never a reference into the consumed node or scoped host."},
+  {"file":"Core/Ui/Host/Clipboard.jet","function":"read_text","proof":"clipboard.jet:6-7 invokes __read_text without caller memory; jet_ui_host_clipboard_read_text (Core/HostServices.rs:1852-1854) reaches host.read_clipboard_text via Ui.rs:243-247 inside jet_ui_with_current_host. The private lifetime-bound guard at :1786-1820 is owned only by jet_ui_with_host, points TLS at its live stack-held host reference without transmute, and restores predecessor TLS before that frame/host borrow ends on return or unwind; safe callers cannot forget it. :1822-1834 keep the mutable TLS borrow across the read, refusing recursive host access or nested installation before a second host reference is created and borrowing the default host otherwise. The returned clipboard carrier owns its String and optional range (:1368-1371), so dropping the host cannot invalidate returned text."},
+  {"file":"Core/Ui/Host/Clipboard.jet","function":"write_text","proof":"clipboard.jet:12-13 lends a valid String to __write_text; jet_ui_host_clipboard_write_text (Core/HostServices.rs:1856-1860) copies that str into an owned String before passing it to host.write_clipboard_text inside jet_ui_with_current_host. :1786-1820 confine the lifetime-bound guard to jet_ui_with_host, retaining its live stack-held host reference without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind; safe callers never receive a forgettable guard. :1822-1834 hold the mutable TLS borrow across writing, rejecting re-entry or nested installation before another host reference is formed and keeping the default host borrowed otherwise. The host receives owned UTF-8 text, not a caller buffer pointer, and the result contains only a copied character count (:1374-1376) or owned error, never a scoped borrow."},
+  {"file":"Core/Ui/Host/DragDrop.jet","function":"poll","proof":"drag_drop.jet:33-34 calls __poll with no caller-selected address; jet_ui_host_drag_poll (Core/HostServices.rs:1867-1869) invokes host.poll_drag_event inside jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 belongs only to jet_ui_with_host, which keeps its stack-held host reference live without transmute and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot obtain/leak its guard. :1822-1834 hold the mutable TLS borrow across polling, refusing recursive access or nested installation before a second host reference exists and borrowing the default host otherwise. The optional typed drag event is returned by value, with owned item storage rather than a host queue reference; no host borrow escapes even when the queue is empty or the provider errors."},
+  {"file":"Core/Ui/Host/Ime.jet","function":"poll","proof":"ime.jet:25-26 invokes __poll without caller memory; jet_ui_host_ime_poll (Core/HostServices.rs:1863-1865) calls host.poll_ime_event inside jet_ui_with_current_host. :1786-1820 give only jet_ui_with_host the private lifetime-bound guard: TLS addresses its live stack-held host reference without transmute, and predecessor TLS is restored before that frame/host borrow ends on return or unwind, so safe callers cannot forget the guard. :1822-1834 retain the mutable TLS borrow through polling, rejecting recursive access and nested installation before another host reference could alias it and borrowing the default host otherwise. The optional IME event is an owned typed value, including its optional composition text/ranges, not a borrowed queue element; no scoped reference reaches the caller."},
+  {"file":"Core/Ui/Host/Shortcuts.jet","function":"register","proof":"shortcuts.jet:11-12 moves the typed binding into __register; jet_ui_host_shortcuts_register (Core/HostServices.rs:1871-1875) passes it by value to host.register_shortcut inside jet_ui_with_current_host. The private lifetime-bound guard at :1786-1820 remains solely in jet_ui_with_host, keeps its stack-held host reference live without transmute, and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot obtain or leak it. :1822-1834 hold the mutable TLS borrow throughout registration, refusing re-entry or nested installation before a second host reference is minted and borrowing the default host otherwise. Any typed binding owns its action String (:1543-1547), not a caller memory address; the returned binding/error is owned and carries no scoped host or registry borrow."},
+  {"file":"Core/Ui/Host/Shortcuts.jet","function":"dispatch","proof":"shortcuts.jet:17-18 moves its typed shortcut into __dispatch; jet_ui_host_shortcuts_dispatch (Core/HostServices.rs:1877-1881) calls host.dispatch_shortcut inside jet_ui_with_current_host. :1786-1820 confine the private lifetime-bound guard to jet_ui_with_host, using its live stack-held host-reference address without transmute and restoring predecessor TLS before that frame/host borrow ends on return or unwind; safe callers cannot forget the guard. :1822-1834 keep the mutable TLS borrow live throughout dispatch, rejecting recursive current-host access or nested installation before another host reference can alias it and borrowing the default host otherwise. Caller shortcut text is typed owned data, not an executable pointer; dispatch returns an owned Dispatched binding or Unhandled (:1569-1572), or an owned error, never a scoped host/registry reference."},
+  {"file":"Core/Ui/Ui.jet","function":"gtk_backend","proof":"ui.jet:126-127 invoke __gtk_backend without caller-supplied memory or callbacks. Its provider UiGtk.rs:2069-2070 calls JetGtkBackend::new(:1346-1371), allocating an owning Arc<Mutex<GtkState>> with every field initialized, empty queues and null not-yet-initialized GTK handles. Construction neither dereferences those handles nor installs/borrows the current host. The caller receives the owned backend carrier, not a pointer into a scoped provider."},
+  {"file":"Core/Ui/Ui.jet","function":"tui_backend","proof":"__tui_backend at ui.jet:132 has no arguments and allocates JetTuiBackend through Ui.rs:1860-1861,1572-1591. The provider owns a fresh Arc<Mutex<State>> with initialized capability facts, absent frames/focus, zero counters and an empty grid. It performs no current-host scope dereference and exports no borrow of constructor-local storage; arbitrary safe callers cannot supply a forged native backing pointer."},
+  {"file":"Core/Ui/Ui.jet","function":"null_backend","proof":"__null_backend at ui.jet:137 has no caller-selected fields and calls JetNullBackend::new (Ui.rs:1856-1857,1346-1356). That constructor owns a new Arc<Mutex<State>> containing initialized absent frame/event/focus slots and an empty command list; it neither accesses scoped host pointers nor returns references into temporary storage. The returned carrier keeps its allocation alive independently of the caller frame."},
+  {"file":"Core/Ui/Ui.jet","function":"node_accessibility","proof":"ui.jet:148 calls __accessibility_transfer with typed UINode/UIAccessibility and the explicit present=true flag. Ui.rs:302-308 only assign Some(metadata) to the owning node then return that node; no discriminant reinterpretation, unchecked index, callback invocation or current-host access occurs. Caller metadata remains an initialized typed record and the result owns its Strings/lists rather than borrowing source storage."},
+  {"file":"Core/Ui/Ui.jet","function":"node_shortcut","proof":"ui.jet:165 passes initialized typed node/shortcut with present=true to __shortcut_transfer. Its provider Ui.rs:311-317 only stores the typed shortcut in the node's Option and returns the owning node, with no scoped-host dispatch or raw address access. Any valid typed shortcut therefore preserves layout/lifetimes, and no native registry borrow escapes."},
+  {"file":"Core/Ui/Ui.jet","function":"transfer_node","proof":"__node_transfer trusts numeric role/kind/absence/style representations (Ui.rs:1938-1985). ui.jet:173-184 derives role solely as -1 or0..3 and kind solely as0..4 from typed enums. :185-192 couples color presence to initialized text, fixes all six absent-slot bits to63, and marks style absent with zero initialized words. Native :1987-2002 own the copied label/color and typed children, never dereferencing caller addresses. Width/height are stored floats, not memory lengths; invalid geometry cannot cause an unchecked allocation transfer here."},
+  {"file":"Core/Ui/Ui.jet","function":"transfer_viewport","proof":"__viewport_transfer converts numeric device/dimensions/scale to native enum/u32/u16 (Core/Preview.rs:895-908). The local helper's only callers ui.jet:115-117 supply device tags0,1,2, positive dimensions390..1280/800..1119 and scale1 or2; each fits its native width and all fields are initialized before the gate(:197-198). It accesses no current host and returns an owning plain viewport rather than a pointer or borrowed resource; arbitrary external numbers cannot reach this local transfer."},
+  {"file":"Core/Vendor/Sqlite3/Fixture/run.jet","function":"run","proof":"The no-argument fixture supplies only fixed SQL and an in-memory database name. Exclusive U64 out-slots start at zero; successful sqlite3_open_v2 and sqlite3_prepare_v2 checks dominate all database/statement uses. SQLite owns the resulting handles; the fixture never forges an address, lends a callback, or exposes a handle to callers. It steps the statement before reading column zero, finalizes it once before closing the database once, and uses neither afterward. Borrowed String storage remains live for each synchronous call; any failed operation stops before further handle use."},
+  {"file": "Core/Sys/Sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
+  {"file": "Core/Sys/Sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."}
 ]
 ```
 <!-- unsafe-abstractions:end -->

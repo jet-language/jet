@@ -148,8 +148,8 @@ const SKIP_FILES = new Set([
   'tests/ui/copy_sigil_retired_e0941.jet',
 ]);
 const SKIP_TEXT = [
-  ['Core/encoding/json.jet', 'escape `~` and `/`'],
-  ['Core/encoding/json.jet', 'in a JSON Pointer must be'],
+  ['Core/Encoding/Json.jet', 'escape `~` and `/`'],
+  ['Core/Encoding/Json.jet', 'in a JSON Pointer must be'],
   ['Examples/features/serde/json_pointer.jet', 'spells `~` inside one step'],
   ['Jetpack/Provider/Source/Registries/ScriptRegistryProvider.jet', 'upper bound of `~`'],
   ['Jetpack/Store/Source/ArtifactStore/Identity.jet', 'LTO entries join with `~`'],

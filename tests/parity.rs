@@ -1793,9 +1793,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     // MIME methods are ordinary authored Core impls, not specialized native
     // receiver dispatch entries in this inventory.
     assert!(jet_foundation::CoreModuleExports::core_source_owns_type(
-        "<corelib>/Core/net::Core/net/mime.jet::MIME"
+        "<corelib>/Core/Net::Core/Net/Mime.jet::MIME"
     ));
-    let mime_source = read("Core/net/mime.jet");
+    let mime_source = read("Core/Net/Mime.jet");
     for method in [
         "media_type",
         "subtype",

@@ -888,7 +888,7 @@ impl<'a> Checker<'a> {
     /// than one spelling: a Core leaf written through its module alias stays
     /// the bare leaf (`DataArrowBatch`), while a value returned by an earlier
     /// imported call carries the canonical owner path
-    /// (`<corelib>/Core/data::…::DataArrowBatch`). Assignment already compares
+    /// (`<corelib>/Core/Data::…::DataArrowBatch`). Assignment already compares
     /// them by declared identity; generic inference must use that same
     /// identity, or `T` in `DataArrowBatch<T>` never binds.
     fn align_nominal_spelling(

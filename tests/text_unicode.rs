@@ -212,7 +212,7 @@ fn run() { classify("Ⅻ") }
                 .funcs
                 .iter()
                 .find(|function| {
-                    function.source_file.ends_with("Core/text/text.jet")
+                    function.source_file.ends_with("Core/Text/Text.jet")
                         && function.name.ends_with(name)
                 })
                 .expect("predicate must retain its checked source body");
@@ -230,7 +230,7 @@ fn run() { classify("Ⅻ") }
             }
         }
         let protected_keys = tir.funcs.iter()
-            .filter(|function| function.source_file.ends_with("Core/text/text.jet")
+            .filter(|function| function.source_file.ends_with("Core/Text/Text.jet")
                 && ["is_alphabetic", "is_numeric", "alphabetic_suffix", "numeric_suffix",
                     "is_alpha_cp", "is_digit_cp", "unicode_scalar_at"].iter()
                     .any(|name| function.name.ends_with(*name)))
@@ -842,7 +842,7 @@ fn string_from_bytes_matches_golden_on_all_run_tiers() {
 fn text_parser_helpers_preserve_optional_failure_across_tiers() {
     let files = [
         ("main.jet", TEXT_PARSER_HELPERS_SOURCE),
-        ("combinators.jet", include_str!("../Core/text/combinators.jet")),
+        ("combinators.jet", include_str!("../Core/Text/Combinators.jet")),
     ];
     for (tier, result) in [
         (

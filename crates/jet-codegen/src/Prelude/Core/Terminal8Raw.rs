@@ -1,4 +1,4 @@
-// OWNER #32 bootstrap host adapters. Terminal policy is Core/term/term.jet.
+// OWNER #32 bootstrap host adapters. Terminal policy is Core/Term/term.jet.
 // Replaced by Jet runtime layer L7; every adapter dies at cutover.
 // Included in the same Prelude closure as Term.rs and IoLineStream.rs.
 fn jet_terminal8_fault(name: &str) -> bool {

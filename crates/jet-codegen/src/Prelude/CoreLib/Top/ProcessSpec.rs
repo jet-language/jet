@@ -1,6 +1,6 @@
 const JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
-// Layout transfer only. Core/process/process.jet supplies every field,
+// Layout transfer only. Core/Process/Process.jet supplies every field,
 // including all absence flags and default values.
 #[allow(clippy::too_many_arguments)]
 fn jet_process_spec_fields_raw(

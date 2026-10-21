@@ -490,7 +490,7 @@ pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, 
 pub fn geometry_nominal_leaf(name: &str) -> &str {
     if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
         if let Some((owner, leaf)) = name.rsplit_once("::") {
-            if owner.ends_with("::Core/math/math.jet") {
+            if owner.ends_with("::Core/Math/Math.jet") {
                 return leaf;
             }
         }
@@ -1058,7 +1058,7 @@ mod geometry_source_identity_tests {
     use super::*;
 
     fn owned(leaf: &str) -> String {
-        format!("<corelib>/Core/math::Core/math/math.jet::{leaf}")
+        format!("<corelib>/Core/Math::Core/Math/Math.jet::{leaf}")
     }
 
     #[test]

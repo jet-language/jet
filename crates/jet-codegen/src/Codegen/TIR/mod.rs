@@ -11165,35 +11165,35 @@ mod checked_function_reference_tests {
     #[test]
     fn core_module_function_reference_is_a_reachability_edge() {
         let reference = jet_foundation::Names::NameReference {
-            module_path: "Core/http/http.jet".to_string(),
+            module_path: "Core/Http/Http.jet".to_string(),
             kind: "semantic".to_string(),
             def_span: crate::Diagnostics::Span::new(1, 2),
             semantic_identity: Some(
-                "fn:<corelib>/Core/http::Core/http/client.jet::request".to_string(),
+                "fn:<corelib>/Core/Http::Core/Http/Client.jet::request".to_string(),
             ),
         };
 
         assert_eq!(
             checked_function_reference_identity(&reference),
-            Some("<corelib>/Core/http::Core/http/client.jet::request")
+            Some("<corelib>/Core/Http::Core/Http/Client.jet::request")
         );
         assert!(is_checked_function_reference(&reference));
         assert_eq!(
             checked_callable_template_identity(
-                "<corelib>/Core/data::Core/data/data.jet::DataErrorKind::Comparable::compare<DataErrorKind>"
+                "<corelib>/Core/Data::Core/Data/Data.jet::DataErrorKind::Comparable::compare<DataErrorKind>"
             ),
-            "<corelib>/Core/data::Core/data/data.jet::DataErrorKind::Comparable::compare"
+            "<corelib>/Core/Data::Core/Data/Data.jet::DataErrorKind::Comparable::compare"
         );
         assert_eq!(
             checked_callable_template_identity("pkg::Box<Int>::convert<List<String>>"),
             "pkg::Box<Int>::convert"
         );
-        assert_eq!(checked_callable_template_identity("<corelib>/Core/data::run"), "<corelib>/Core/data::run");
+        assert_eq!(checked_callable_template_identity("<corelib>/Core/Data::run"), "<corelib>/Core/Data::run");
     }
 
     #[test]
     fn direct_and_import_alias_core_calls_share_checked_source_target() {
-        let source_path = "Core/http/http.jet";
+        let source_path = "Core/Http/Http.jet";
         let direct_span = crate::Diagnostics::Span::new(0, 4);
         let alias_span = crate::Diagnostics::Span::new(20, 28);
         let mut name_ledger = jet_foundation::Names::NameLedger::default();
@@ -11225,7 +11225,7 @@ mod checked_function_reference_tests {
         );
         let alias_receiver = Expr::Ident("provider".to_string(), alias_span);
         let signature = crate::Codegen::CoreSourceFunctionSignature {
-            module_identity: "<corelib>/Core/http::Core/http/client.jet".to_string(),
+            module_identity: "<corelib>/Core/Http::Core/Http/Client.jet".to_string(),
             type_params: Vec::new(),
             params: Vec::new(),
             return_type: Some(Type::Named("HTTPRequest".to_string())),
@@ -11253,7 +11253,7 @@ mod checked_function_reference_tests {
             .expect("loaded source-owned Core function");
             assert_eq!(
                 signature.module_identity,
-                "<corelib>/Core/http::Core/http/client.jet"
+                "<corelib>/Core/Http::Core/Http/Client.jet"
             );
         }
         assert!(checked_core_source_signature(
@@ -11300,7 +11300,7 @@ mod checked_function_reference_tests {
         assert_eq!(source.alias, "core_core_data");
         assert_eq!(source.module, "core.data");
 
-        let owner = "<corelib>/Core/data::Core/data/data.jet";
+        let owner = "<corelib>/Core/Data::Core/Data/Data.jet";
         let signature = crate::Codegen::CoreSourceFunctionSignature {
             module_identity: owner.to_string(),
             type_params: vec!["T".to_string()],

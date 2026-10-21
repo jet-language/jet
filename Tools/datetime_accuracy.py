@@ -63,7 +63,7 @@ SELECTED_ARITHMETIC_ZONES = [
 def configure_shared_tzpath() -> str:
     """Make Python use the committed TZif root that Jet can read everywhere."""
 
-    path = ROOT / "Core/time/tzdb"
+    path = ROOT / "Core/Time/tzdb"
     reset_tzpath([str(path)])
     if not (path / "Australia/Lord_Howe").is_file():
         raise RuntimeError(f"bundled TZif database is missing {path / 'Australia/Lord_Howe'}")

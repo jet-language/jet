@@ -757,7 +757,7 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'
         }
         Type::Apply { name, .. }
             if jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret") => false,
+                && name.ends_with("::Core/Crypto/Vault.jet::ExpiringSecret") => false,
         // A task or imported Arrow batch owns one release duty.  Copying either
         // carrier would hand two bindings the same cleanup authority, so both
         // runtime carriers implement no `Clone` and neither does the language
@@ -1518,7 +1518,7 @@ pub(crate) fn is_clock_type(ty: &Type) -> bool {
 }
 
 /// The canonical owner prefix of the source-owned `core.crypto` declarations.
-const CORE_CRYPTO_CANONICAL_PREFIX: &str = "<corelib>/Core/crypto::Core/crypto/crypto.jet::";
+const CORE_CRYPTO_CANONICAL_PREFIX: &str = "<corelib>/Core/Crypto::Core/Crypto/Crypto.jet::";
 
 /// The leaf of a canonical `core.crypto` nominal, e.g. `Secret`.
 fn canonical_core_crypto_leaf(name: &str) -> Option<&str> {
@@ -1647,7 +1647,7 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 /// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDNSError`).
 ///
 /// A source-owned Core error arrives under its canonical owner identity
-/// (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`); membership is
+/// (`<corelib>/Core/Crypto::Core/Crypto/Uuid.jet::UUIDError`); membership is
 /// decided by its leaf.
 pub fn is_core_error_family_type(name: &str) -> bool {
     matches!(

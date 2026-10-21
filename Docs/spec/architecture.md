@@ -570,7 +570,7 @@ own source manifest. The
 checks that boundary; the
 [`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
 keeps observation aligned with public-by-default declarations and private fields.
-The compiler's private `Core/build` kernel uses the same declared enum payload
+The compiler's private `Core/Build` kernel uses the same declared enum payload
 labels and write-access calls as ordinary Jet. Stable plan keys use integer
 quotients and sorted, collected map keys. Legacy declaration validation copies
 its transactional trial before opening the final state write window.
@@ -620,7 +620,7 @@ its receiver.
 
 Precise operations may also be synthesized after authored-call reachability,
 including implicit `Int / Int` arithmetic inside a string interpolation.
-Bootstrap lowering roots the exact canonical Core/math helpers registered for
+Bootstrap lowering roots the exact canonical Core/Math helpers registered for
 those operations, and their checked callee closure, even without an explicit
 Fraction type in the caller. An arbitrary private helper sharing a prefix is
 not a provider. The Jet MIR reachability walk retains the same registered
@@ -1349,7 +1349,7 @@ their declared widths and floating-point register classes, and writable scalar
 arguments use C-width temporary slots followed by native writeback.
 
 SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
-`Core/vendor/sqlite3`, with its license and the seed's bundled feature flags,
+`Core/Vendor/Sqlite3`, with its license and the seed's bundled feature flags,
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
 Packaging ships those sources beside the runtime. User foreign
@@ -1375,7 +1375,7 @@ one packed byte buffer (empty sentinel 1), `__bytes_unpack` makes an independent
 owned copy, and `__bytes_free` releases the pack once with its original length.
 C String parameters instead use per-call NUL-terminated copies; their String
 results are copied before those temporaries are released.
-`Core/mem/mem.jet` keeps private-loan and packed-byte tests in the trusted
+`Core/Mem/Mem.jet` keeps private-loan and packed-byte tests in the trusted
 embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
 `Compiler/JetCli/Tests/run-c-ffi.mjs` covers declared-source scalar ABI and the
 bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
@@ -1944,10 +1944,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
   | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
   | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `ServiceAuthority.rs` and `Services.rs`; structured export uses the existing `core.log` sink, and `ServicesLite` marshals the service calls. |
-  | `core.data.sketch.cms` | Jet | `Core/data/sketch/cms.jet` owns seeded hash selection, unit saturation and additive source merge over plain value storage. |
-  | `core.data.sketch.hll` | Jet | `Core/data/sketch/hll.jet` owns the 256-register estimator over plain value storage; seeded FNV lives in `Core/data/sketch.jet`. |
-  | `core.data.sketch.reservoir` | Jet | `Core/data/sketch/reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over plain value storage. |
-  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over plain value centroid storage. |
+  | `core.data.sketch.cms` | Jet | `Core/Data/Sketch/Cms.jet` owns seeded hash selection, unit saturation and additive source merge over plain value storage. |
+  | `core.data.sketch.hll` | Jet | `Core/Data/Sketch/Hll.jet` owns the 256-register estimator over plain value storage; seeded FNV lives in `Core/Data/Sketch.jet`. |
+  | `core.data.sketch.reservoir` | Jet | `Core/Data/Sketch/Reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over plain value storage. |
+  | `core.data.sketch.tdigest` | Jet | `Core/Data/Sketch/Tdigest.jet` owns unit-weight insertion, compression and step quantiles over plain value centroid storage. |
   | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime marshals state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |

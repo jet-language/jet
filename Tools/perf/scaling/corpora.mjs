@@ -271,7 +271,7 @@ function dataTables(n, r) {
   return finish('data_tables', files, ['tables_total']);
 }
 
-// core.time is left out: the generated compiler rejects Core/time today
+// core.time is left out: the generated compiler rejects Core/Time today
 // (E0312/E0109 on LocalDate comparisons).
 const CORE_IMPORTS = ['use core.math as math', 'use core.text as text', 'use core.collections as collections', 'use core.term as term'];
 

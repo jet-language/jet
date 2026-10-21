@@ -114,7 +114,7 @@ fn run() {{}}
 #[test]
 fn module_alias_qualified_core_enum_variants_keep_the_source_owner() {
     let (_, diagnostics) = check(&[
-        ("<corelib>/Core/encoding/encoding.jet", "core_encoding", "#Equatable enum EncodingFormat { JSON CSV }\n#Equatable enum EncodingErrorKind { Unsupported Syntax }\n"),
+        ("<corelib>/Core/Encoding/Encoding.jet", "core_encoding", "#Equatable enum EncodingFormat { JSON CSV }\n#Equatable enum EncodingErrorKind { Unsupported Syntax }\n"),
         ("pkg/main.jet", "main", r#"
 use core.encoding as comptime_encoding
 fn format() -> comptime_encoding.EncodingFormat Never! { comptime_encoding.EncodingFormat.JSON }
@@ -162,11 +162,11 @@ fn dyn_datetime_restore_does_not_expose_number_constructor() {
 
 #[test]
 fn dyn_datetime_toml_number_helpers_transfer_validated_text() {
-    let stream = include_str!("../../../Core/encoding/stream.jet");
+    let stream = include_str!("../../../Core/Encoding/Stream.jet");
     let typed_number = stream.split_once("fn typed_number(").unwrap().1
         .split_once("\nfn typed_string(").unwrap().0;
     let stream_source = format!("fn typed_number({typed_number}");
-    let toml = include_str!("../../../Core/encoding/toml.jet");
+    let toml = include_str!("../../../Core/Encoding/Toml.jet");
     let numeric_helpers = toml.split_once("fn number_tree(").unwrap().1;
     let toml_source = format!(
         "use __core_encoding_stream as stream\nfn number_tree({numeric_helpers}\n\
@@ -181,8 +181,8 @@ fn dyn_datetime_toml_number_helpers_transfer_validated_text() {
          }}\n"
     );
     let (_, diagnostics) = check(&[
-        ("<corelib>/Core/encoding/stream.jet", "__core_encoding_stream", &stream_source),
-        ("<corelib>/Core/encoding/toml.jet", "__core_encoding_toml", &toml_source),
+        ("<corelib>/Core/Encoding/Stream.jet", "__core_encoding_stream", &stream_source),
+        ("<corelib>/Core/Encoding/Toml.jet", "__core_encoding_toml", &toml_source),
         ("pkg/main.jet", "main", "fn run() {}\n"),
     ]);
     assert_no_errors(&diagnostics);
@@ -190,12 +190,12 @@ fn dyn_datetime_toml_number_helpers_transfer_validated_text() {
 
 #[test]
 fn core_auth_store_replacement_transfers_owned_bytes() {
-    let auth = include_str!("../../../Core/auth/auth.jet");
+    let auth = include_str!("../../../Core/Auth/Auth.jet");
     let store_replace = auth.split_once("fn __store_replace(").unwrap().1
         .split_once("\n/// Register").unwrap().0;
     let auth_source = format!("use core as core\nfn __store_replace({store_replace}");
     let (_, diagnostics) = check(&[
-        ("<corelib>/Core/auth/auth.jet", "core_core_auth", &auth_source),
+        ("<corelib>/Core/Auth/Auth.jet", "core_core_auth", &auth_source),
         ("pkg/main.jet", "main", "fn run() {}\n"),
     ]);
     assert_no_errors(&diagnostics);

@@ -515,7 +515,7 @@ fn sema_copy_apply_facts(
 ) -> SemaCopyTypeFacts Never! {
     dynamic_loan :: sema_copy_apply_is_dynamic_loan(name)
     nested :: sema_copy_apply_nested_facts(args, graph, caller_module_identity, generic_params, &walk)
-    if core_source_owns_type(name) && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret") {
+    if core_source_owns_type(name) && core_identity_is(name, "core.crypto.vault", "ExpiringSecret") {
         return sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true)
     }
     if graph == .Val(registered) {

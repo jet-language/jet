@@ -7,7 +7,7 @@
 // I9 violation; `tests/data_one_kernel.rs` fails the build on one.
 
 /// Raw host metadata query. Bytes are split only at ASCII boundaries from
-/// OsString::into_encoded_bytes; all PATH policy remains in Core/data/data.jet.
+/// OsString::into_encoded_bytes; all PATH policy remains in Core/Data/data.jet.
 pub(crate) fn jet_data_host_path_is_file(path: &Vec<u8>) -> Result<bool, jet_std::EncodingCause> {
     let native = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(path) };
     std::fs::metadata(native).map(|metadata| metadata.is_file()).map_err(|error| jet_std::EncodingCause {

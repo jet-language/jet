@@ -129,7 +129,7 @@ pub fn generated_ffi_does_not_move_baseline() {
 pub fn corelib_wrapper_needs_unsafe_or_proof() {
     let fixture = Fixture::new("corelib");
     let laundering = "fn fork() -> Int IOError! {\n    #Unsafe(\"posix fork\") {\n        return core.sys.fork()\n    }\n}\n";
-    fixture.write("Core/sys/sys.jet", laundering);
+    fixture.write("Core/Sys/Sys.jet", laundering);
     let output = ratchet(&fixture, true);
     assert!(
         !output.status.success(),
@@ -140,7 +140,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
 
     // Default-value braces belong to the parameter list, not the function body.
     fixture.write(
-        "Core/sys/sys.jet",
+        "Core/Sys/Sys.jet",
         "fn default_gated(value: Int{0}, option: Int?{None}) -> Int Never! {\n    #Unsafe(\"default fixture gate\") { value }\n}\nfn default_plain(value: Int{0}) -> Int Never! { value }\n",
     );
     let output = ratchet(&fixture, true);
@@ -150,7 +150,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
     assert!(!stderr.contains("fn default_plain"), "{stderr}");
 
     fixture.write(
-        "Core/sys/sys.jet",
+        "Core/Sys/Sys.jet",
         "fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
     );
     let output = ratchet(&fixture, true);
@@ -165,7 +165,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
     );
 
     fixture.write(
-        "Core/sys/sys.jet",
+        "Core/Sys/Sys.jet",
         "#Unsafe(\"the caller reaps the child\") fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
     );
     seed(&fixture);
@@ -176,8 +176,8 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    fixture.write("Core/sys/sys.jet", laundering);
-    let registry = "\n<!-- unsafe-abstractions:begin -->\n```json\n[{\"file\": \"Core/sys/sys.jet\", \"function\": \"fork\", \"proof\": \"fixture proof: the wrapper reaps the child it creates\"}]\n```\n<!-- unsafe-abstractions:end -->\n";
+    fixture.write("Core/Sys/Sys.jet", laundering);
+    let registry = "\n<!-- unsafe-abstractions:begin -->\n```json\n[{\"file\": \"Core/Sys/sys.jet\", \"function\": \"fork\", \"proof\": \"fixture proof: the wrapper reaps the child it creates\"}]\n```\n<!-- unsafe-abstractions:end -->\n";
     let mut baseline = fs::read_to_string(fixture.baseline()).unwrap();
     baseline.push_str(registry);
     fs::write(fixture.baseline(), baseline).unwrap();
@@ -189,7 +189,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    fixture.write("Core/sys/sys.jet", "#Unsafe(\"the caller reaps the child\") fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n");
+    fixture.write("Core/Sys/Sys.jet", "#Unsafe(\"the caller reaps the child\") fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n");
     seed_allowing_corelib(&fixture);
     let output = ratchet(&fixture, false);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -205,7 +205,7 @@ pub fn corelib_wrapper_with_brace_defaults_is_still_seen() {
     // end the signature: the wrapper below still launders its gate.
     let fixture = Fixture::new("corelib-defaults");
     fixture.write(
-        "Core/sys/sys.jet",
+        "Core/Sys/Sys.jet",
         "fn fork(label: String?{None}, flags: [U8]{[U8]{}}) -> Int IOError! {\n    #Unsafe(\"posix fork\") {\n        return core.sys.fork()\n    }\n}\n",
     );
     let output = ratchet(&fixture, true);

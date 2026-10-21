@@ -63,7 +63,7 @@ function run(binary, args, name, cwd = out) {
 if (mode === 'prepare') {
   writeFileSync(join(out, 'cases.json'), JSON.stringify(cases, null, 2) + '\n');
   writeFileSync(join(out, 'source.jet'), jet);
-  writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/text/fmt.jet')));
+  writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/Text/Fmt.jet')));
   writeFileSync(join(out, 'package.jet'), 'name: "fmt_source_parity"\nversion: "0.0.1"\nedition: "2028"\n');
   console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
   if (checker) writeFileSync(join(out, 'expected.out'), readFileSync(resolve(checker)));
@@ -71,7 +71,7 @@ if (mode === 'prepare') {
 } else {
   // Refresh the source body after Core parity fixes without regenerating or
   // weakening the saved Rust oracle bytes.
-  writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/text/fmt.jet')));
+  writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/Text/Fmt.jet')));
   writeFileSync(join(out, 'source.jet'), jet);
   const checkerPath = realpathSync(resolve(checker));
   const checkerSha256 = createHash('sha256').update(readFileSync(checkerPath)).digest('hex');
@@ -90,7 +90,7 @@ if (mode === 'prepare') {
   const wanted = blocks(expected), got = blocks(actual);
   const sourceLines = readFileSync(join(out, 'fmt_source.jet'), 'utf8').split('\n');
   const rows = cases.map(row => ({ id: row.id, kernel: row.kernel, input: row.args,
-    source: `Core/text/fmt.jet:${sourceLines.findIndex(line => new RegExp(`^(?:pub )?fn ${members[row.kernel] ?? row.kernel}\\(`).test(line)) + 1}`,
+    source: `Core/Text/Fmt.jet:${sourceLines.findIndex(line => new RegExp(`^(?:pub )?fn ${members[row.kernel] ?? row.kernel}\\(`).test(line)) + 1}`,
     byte_equal: wanted.get(row.id) === got.get(row.id), expected: wanted.get(row.id), actual: got.get(row.id) }));
   const failures = rows.filter(row => !row.byte_equal);
   writeFileSync(join(out, 'parity.json'), JSON.stringify({ label: 'Rust-seed source-body byte parity; NOT native selector migration parity', checker: { path: checkerPath, sha256: checkerSha256 }, expected_sha256: createHash('sha256').update(expected).digest('hex'), kernels: kernels.length, cases: cases.length, failures: failures.length, stdout_equal: actual === expected, rows }, null, 2) + '\n');

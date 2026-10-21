@@ -166,7 +166,7 @@ impl EncodingError {
         "use core.encoding as encoding\nfn make() -> encoding.EncodingError Never! { encoding.EncodingError.new(\"invalid\") }\nfn run() {}\n",
     ] {
         let (_, diagnostics) = check_modules(&[
-            ("<corelib>/Core/encoding/encoding.jet", core, &[]),
+            ("<corelib>/Core/Encoding/Encoding.jet", core, &[]),
             ("pkg-a/src/main.jet", source, &[]),
         ]);
         assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -229,7 +229,7 @@ fn native_core_enum_cases_in_embedded_source_keep_the_native_leaf() {
     let source = "use core.event.[EventConfigError]\n\
 fn failure() -> EventConfigError Never! { EventConfigError.InvalidCapacity }\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/event/event.jet", source, &[]),
+        ("<corelib>/Core/Event/Event.jet", source, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -270,7 +270,7 @@ fn forward(error: EncodingError) EncodingError! {\n\
 }\n\
 fn run() {}\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/encoding/encoding.jet", core, &[]),
+        ("<corelib>/Core/Encoding/Encoding.jet", core, &[]),
         ("pkg-a/src/main.jet", source, &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -282,7 +282,7 @@ fn io_context_annotations_remain_core_only() {
     IOContext{operation: IOOperation.Read, resource: None, os_code: None, cause: None}\n\
 }\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/files/files.jet", source, &[]),
+        ("<corelib>/Core/Files/Files.jet", source, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -293,7 +293,7 @@ fn io_context_annotations_remain_core_only() {
 #[test]
 fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/math/math.jet",
+        ("<corelib>/Core/Math/Math.jet",
          "struct Decimal { value: Int }\nimpl Decimal.Display { fn display(self) -> String Never! { \"decimal\" } }\n",
          &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
@@ -308,13 +308,13 @@ fn core_data_error_display_is_source_owned_and_duplicates_still_fail() {
 impl DataError.Display { fn display(self) -> String { self.reason.copy() } }\n";
     let user = "use core.data\nfn show(error: data.DataError) -> String { \"{error}\" }\nfn run() {}\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/data/data.jet", core, &[]),
+        ("<corelib>/Core/Data/Data.jet", core, &[]),
         ("pkg-a/src/main.jet", user, &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
     let duplicate = format!("{core}\nimpl DataError.Display {{ fn display(self) -> String {{ \"duplicate\" }} }}\n");
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/data/data.jet", &duplicate, &[]),
+        ("<corelib>/Core/Data/Data.jet", &duplicate, &[]),
         ("pkg-a/src/main.jet", user, &[]),
     ]);
     assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
@@ -349,8 +349,8 @@ fn verify(reader: jetc.Reader) -> Int {\n\
 }\n";
     let jetc = "use core.crypto\npub struct Reader { key: crypto.Secret }\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/crypto/crypto.jet", crypto, &[("jetc", 1)]),
-        ("<corelib>/Core/crypto/jetc.jet", jetc, &[]),
+        ("<corelib>/Core/Crypto/Crypto.jet", crypto, &[("jetc", 1)]),
+        ("<corelib>/Core/Crypto/Jetc.jet", jetc, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -359,7 +359,7 @@ fn verify(reader: jetc.Reader) -> Int {\n\
 #[test]
 fn unrelated_core_module_cannot_redefine_decimal() {
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/time/time.jet", "struct Decimal { value: Int }\n", &[]),
+        ("<corelib>/Core/Time/Time.jet", "struct Decimal { value: Int }\n", &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(diagnostics.iter().any(|d| d.code == "E0106"), "{diagnostics:?}");
@@ -369,13 +369,13 @@ fn unrelated_core_module_cannot_redefine_decimal() {
 fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fails() {
     let source = "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Vec3 Never! { rhs } }\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/math/math.jet", source, &[]),
+        ("<corelib>/Core/Math/Math.jet", source, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(!diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
     let duplicate = format!("{source}\nimpl Float.Div(Vec3) {{ fn div(self, rhs: Vec3) -> Vec3 Never! {{ rhs }} }}\n");
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/math/math.jet", &duplicate, &[]),
+        ("<corelib>/Core/Math/Math.jet", &duplicate, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
@@ -384,7 +384,7 @@ fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fai
 #[test]
 fn imported_core_primitive_left_operator_uses_source_result() {
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/math/math.jet",
+        ("<corelib>/Core/Math/Math.jet",
          "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Int Never! { 17 } }\n",
          &[]),
         ("pkg-a/src/main.jet",
@@ -398,7 +398,7 @@ fn imported_core_primitive_left_operator_uses_source_result() {
 #[test]
 fn core_rng_private_method_resolves_inside_own_impl() {
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/math/random.jet",
+        ("<corelib>/Core/Math/Random.jet",
          "struct RNG { state: Int }\nimpl RNG { fn float_open(self) -> Float Never! { 0.5 } fn sample(self) -> Float Never! { self.float_open() } }\n",
          &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
@@ -411,7 +411,7 @@ fn core_rng_private_method_resolves_inside_own_impl() {
 fn io_operation_annotations_are_core_only() {
     let source = "fn retain(operation: IOOperation) -> IOOperation Never! { operation }\n";
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("<corelib>/Core/Term/Term.jet", source, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "Core IOOperation: {diagnostics:?}");
@@ -429,7 +429,7 @@ fn context(operation: IOOperation) -> IOContext Never! {
 fn retain(operation: IOOperation) -> IOOperation Never! { operation.copy() }
 "#;
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("<corelib>/Core/Term/Term.jet", source, &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
     ]);
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
@@ -463,10 +463,10 @@ fn run() {
 #[test]
 fn opaque_core_impl_methods_displace_only_their_builtin_names() {
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/tasks/tasks.jet",
+        ("<corelib>/Core/Tasks/Tasks.jet",
          "impl Condition { fn notify_one(self) Never! {} fn notify_all(self) Never! {} }\nfn own(condition: Condition) Never! { condition.notify_one() }\n",
          &[]),
-        ("<corelib>/Core/rt/rt.jet",
+        ("<corelib>/Core/Rt/Rt.jet",
          "impl RealtimeStream { fn is_cancelled(self) -> Bool Never! { true } }\n",
          &[]),
         ("pkg-a/src/main.jet",
@@ -479,10 +479,10 @@ fn opaque_core_impl_methods_displace_only_their_builtin_names() {
 #[test]
 fn source_only_core_qualified_calls_resolve_inside_and_across_core_modules() {
     let (_, diagnostics) = check_modules(&[
-        ("<corelib>/Core/sys/sys.jet",
+        ("<corelib>/Core/Sys/Sys.jet",
          "fn usize_max() -> U64 Never! { U64{255} }\nfn own() -> U64 Never! { core.sys.usize_max() }\n",
          &[]),
-        ("<corelib>/Core/tui/tui.jet",
+        ("<corelib>/Core/Tui/Tui.jet",
          "fn foreign() -> U64 Never! { core.sys.usize_max() }\n",
          &[]),
         ("pkg-a/src/main.jet", "fn run() {}\n", &[]),

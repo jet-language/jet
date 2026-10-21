@@ -528,7 +528,7 @@ fn run() {
 mod auth_session_boundary {
     // The shared Prelude seam keeps only the store cell and `app.auth`; the
     // Session carrier and every session, magic-link and OAuth policy test live
-    // in Core/auth/auth.jet.
+    // in Core/Auth/auth.jet.
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
     #[test]

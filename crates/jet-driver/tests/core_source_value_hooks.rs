@@ -56,7 +56,7 @@ fn run() {
         ).expect("checked Core value hooks must survive lowering");
         mir.validate().expect("Core hooks have valid checked MIR");
         let clock = mir.types.iter().find(|definition| {
-            definition.key.ends_with("::Core/time/time.jet::Clock")
+            definition.key.ends_with("::Core/Time/Time.jet::Clock")
         }).expect("the regression must use the source-owned, Shared-backed Clock");
         let clock_type = mir.type_instances.iter().find(|ty| {
             ty.identity == Some(clock.id)
@@ -77,7 +77,7 @@ fn run() {
             fields[0].ty, bundle.name_ledger.effective_alias(bundle.entry, "Clock"),
             bundle.modules[bundle.entry].imports);
         let expiring = mir.types.iter().find(|definition| {
-            definition.key.ends_with("::Core/time/time.jet::ExpiringValue")
+            definition.key.ends_with("::Core/Time/Time.jet::ExpiringValue")
         }).expect("imported Core retains the generic private Show provider");
         assert_eq!(expiring.generic_params.len(), 1);
         let expiring_type = mir.type_instances.iter().find(|ty| {
@@ -162,7 +162,7 @@ fn run() Never! {
                 jet_foundation::MIR::MirFunctionForm::TraitMethod { owner, trait_ref, .. }
                     if trait_ref.name == "Display"
                         && owner.nominal_name().is_some_and(|name| {
-                            name.ends_with("::Core/math/math.jet::Fraction")
+                            name.ends_with("::Core/Math/Math.jet::Fraction")
                         }))
         }), "Core Fraction Display must remain materialized");
         for name in ["__fraction_sub", "__fraction_from_parts"] {

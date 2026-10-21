@@ -60,7 +60,7 @@ pub struct JetModGrant {
 }
 
 /// D-MOD-ERR1=A: every load refusal is one of four cases. The provider
-/// reports it as `<Case>: <reason>`, and Core/mod/mod.jet turns the case word
+/// reports it as `<Case>: <reason>`, and Core/Mod/Mod.jet turns the case word
 /// into the matching `ModError` case, so every tier shares one mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum JetModFailure {

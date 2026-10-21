@@ -14,7 +14,7 @@ for (const [input, expected] of [
   ['jet_rt_already_snake', 'jet_rt_already_snake'],
 ]) assert.equal(runtimeAbiAtom(input), expected);
 assert.throws(() => runtimeAbiAtom('bad/atom'), /invalid runtime ABI atom/);
-const type = {runtime:'HTTPClient',jetName:'HTTPClient',source:{path:'Core/net/http.jet',key:'HTTPClient'},clone:true,
+const type = {runtime:'HTTPClient',jetName:'HTTPClient',source:{path:'Core/Net/http.jet',key:'HTTPClient'},clone:true,
   record:{kind:'enum',members:[{name:'NotFound',kind:null},{name:'Reply',kind:'List.Byte'}]}};
 assert.ok(nativeHandleExports([type]).some(row => row.name === 'jet_rt_handle_clone_http_client' && row.runtime === 'HTTPClient'));
 assert.ok(nativeRecordExports([type]).some(row => row.name === 'jet_rt_record_new_http_client_not_found' && row.member === 'NotFound'));

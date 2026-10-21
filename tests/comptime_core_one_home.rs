@@ -76,7 +76,7 @@ fn mime_and_email_have_one_semantic_home() {
 
 #[test]
 fn sketches_have_one_semantic_home() {
-    // HLL/count-min/reservoir/TDigest are ordinary Jet carriers in Core/data/sketch*.jet;
+    // HLL/count-min/reservoir/TDigest are ordinary Jet carriers in Core/Data/sketch*.jet;
     // no tier may regain the deleted Rust kernel.
     let kernel = "Core/Sketch.rs";
     for path in [
@@ -89,7 +89,7 @@ fn sketches_have_one_semantic_home() {
     assert!(!Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates/jet-codegen/src/Prelude/Core/Sketch.rs")
         .exists());
-    for path in ["Core/data/sketch/hll.jet", "Core/data/sketch/cms.jet", "Core/data/sketch/reservoir.jet"] {
+    for path in ["Core/Data/Sketch/Hll.jet", "Core/Data/Sketch/Cms.jet", "Core/Data/Sketch/Reservoir.jet"] {
         assert!(read(path).contains("#Test"), "{path} must cover its sketch policy");
     }
 
@@ -113,7 +113,7 @@ fn sketches_have_one_semantic_home() {
 
 #[test]
 fn solver_has_one_semantic_home() {
-    let source = read("Core/compute/solve.jet");
+    let source = read("Core/Compute/Solve.jet");
     assert!(source.contains("self.checked += 1"));
     assert!(source.contains("if !ok -> self.failures += 1"));
     assert!(source.contains("fn __show(self)"));
@@ -232,7 +232,7 @@ fn xml_has_one_semantic_home() {
 
 #[test]
 fn measurement_has_one_semantic_home() {
-    let source = read("Core/units/units.jet");
+    let source = read("Core/Units/Units.jet");
     assert!(source.contains("struct Measurement<T>"));
     for function in ["new", "from_relative", "add", "sub", "mul", "div", "sqrt", "show"] {
         assert!(source.contains(&format!("fn __measurement_{function}(")));
@@ -353,7 +353,7 @@ fn round_three_value_kernels_have_one_semantic_home() {
     ] {
         assert!(!kernel.contains(name), "{name} must live in Jet Core");
     }
-    for path in ["Core/encoding/hex.jet", "Core/encoding/base64.jet", "Core/encoding/base32.jet"] {
+    for path in ["Core/Encoding/Hex.jet", "Core/Encoding/Base64.jet", "Core/Encoding/Base32.jet"] {
         assert!(read(path).contains("#Test"), "{path} must cover its codec kernels");
     }
     let core_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");

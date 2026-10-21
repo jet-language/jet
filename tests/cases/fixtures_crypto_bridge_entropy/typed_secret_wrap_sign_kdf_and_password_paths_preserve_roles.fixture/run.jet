@@ -42,7 +42,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     assert(crypto.constant_time_equal(secret, unwrapped))
     derived :: crypto.hkdf_sha256(secret.bytes, [U8]{}, "domain".bytes(), 32) ?? panic("derive")
     assert(!crypto.constant_time_equal(secret, derived))
-    // Core/crypto/crypto.jet282: Length; payload/Display RETIRE.
+    // Core/Crypto/crypto.jet282: Length; payload/Display RETIRE.
     assert_eq(crypto.hkdf_sha256(secret.bytes, [U8]{}, [U8]{}, -1), Err(crypto.CryptoError.Length))
     signing :: crypto.SigningKey.new_random() ?? panic("signing")
     message :: "release".bytes()
@@ -50,7 +50,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     assert(crypto.verify(signing.public_key(), message, signature) ?? panic("verify"))
     stored :: crypto.password_hash(secret) ?? panic("hash")
     assert(crypto.password_verify(secret, stored) ?? panic("password verify"))
-    // Core/crypto/crypto.jet795-799: KeyRejected for unsupported PHC algorithm/version/extra parameters.
+    // Core/Crypto/crypto.jet795-799: KeyRejected for unsupported PHC algorithm/version/extra parameters.
     extra :: crypto.PasswordHash{text: stored.text.replace(",p=1$", ",p=1,x=1$")}
     assert_eq(crypto.password_verify(secret, extra), Err(crypto.CryptoError.KeyRejected))
     loop algorithm in ["argon2i", "argon2d", "argon2x"] {

@@ -260,7 +260,7 @@ fn decode_under_ambient_core_call(
 }
 
 // Aliases for the exact existing D-JSON3 clock and stderr leaves. The walk
-// and audit formatting stay in Core/encoding/json.jet.
+// and audit formatting stay in Core/Encoding/json.jet.
 fn coerce_ambient_core_call(
     module: &str,
     method: &str,

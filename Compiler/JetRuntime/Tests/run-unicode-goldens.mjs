@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// L3b exit witness: run Unicode and Core/text casing goldens against a pack
+// L3b exit witness: run Unicode and Core/Text casing goldens against a pack
 // containing the Jet runtime object. --plan writes the exact nonempty corpus
 // without compiling, linking, running a checker, or executing a golden.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

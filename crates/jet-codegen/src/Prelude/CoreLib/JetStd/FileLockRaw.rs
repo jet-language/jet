@@ -1,5 +1,5 @@
 // D-CORE-FILELOCK1=A. Seed syscall transports; replaced by Jet runtime L7,
-// dies at cutover. Core/files/files.jet owns validation, errors, identity
+// dies at cutover. Core/Files/Files.jet owns validation, errors, identity
 // retry and descriptor ownership. Included once by AOT and the interpreter.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct JetFsLockCall {

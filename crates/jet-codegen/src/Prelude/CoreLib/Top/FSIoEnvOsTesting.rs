@@ -876,7 +876,7 @@ fn jet_sys_env_key_compare_raw(left: &Vec<u8>, right: &Vec<u8>) -> i64 {
 
 // Temporary dotenv I/O seed. No injected FS checkpoint: the native typed
 // config reader did not take that rail. File selection, missing-file policy,
-// overlay, tree construction and error provenance are now Core/sys source.
+// overlay, tree construction and error provenance are now Core/Sys source.
 // Replaced by Jet runtime L7; dies at cutover (CoreFiles1-2 ledger).
 fn jet_sys_dotenv_read_raw(path: &str) -> Result<String, (bool, String)> {
     std::fs::read_to_string(path).map_err(|error| (

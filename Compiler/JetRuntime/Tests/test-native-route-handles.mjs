@@ -5,7 +5,7 @@ import { nativeHandleExports, partitionNativeHandleExports } from "../../../Tool
 // generic instantiations. Layout is deliberately absent: Lower owns it.
 const types = Array.from({ length: 10 }, (_, index) => ({
   runtime: `Source${index}`,
-  jetName: `<corelib>/Core/fixture::Core/fixture/fixture.jet::Source${index}`,
+  jetName: `<corelib>/core.fixture::Source${index}`,
   jetNames: [`Source${index}`],
   clone: index % 2 === 0,
   eq: index % 3 === 0,

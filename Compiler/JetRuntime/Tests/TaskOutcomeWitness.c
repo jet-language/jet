@@ -1,5 +1,5 @@
 /* Real native exports; link --wrap=jet_rt_free. Expected bytes, not receipts.
- * Contract: Core/service/service.jet:91-125 at 497daa7a0, read-only.
+ * Contract: Core/Service/Service.jet:91-125 at 497daa7a0, read-only.
  * Its exact a\"b display/debug vector is asserted below. No workflow proof.
  * wrong mode must use the shared canonical record-variant panic, exit70. */
 #include <assert.h>

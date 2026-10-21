@@ -84,7 +84,7 @@ fn is_source_owned_core_web_query_shape() {}
   put("Compiler/JetRuntime/Source/Fixture.jet", "#Export(c) fn jet_fixture_scalar(value: Float) -> Float { value }\n");
   put("Compiler/JetRuntime/exports.list", "jet_fixture_scalar\n");
   put("Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet", "");
-  put("Core/units/units.jet", "struct Measurement<T> { value: T, uncertainty: T }\nstruct Pair<A,B> { first: A, second: B }\n");
+  put("Core/Units/Units.jet", "struct Measurement<T> { value: T, uncertainty: T }\nstruct Pair<A,B> { first: A, second: B }\n");
   const registry = (extra) => `CoreCallRecord::new("core.fixture", "scalar", "jet_fixture_scalar", true)\nCoreCallRecord::new("core.fixture", "plain", "jet_fixture_plain", true)\n${extra}`;
   // Canonical scalar codec adapters also require the real FieldError Clone
   // declaration (Prelude/CoreLib/JetStd/Dyn.rs:11-15), even in this

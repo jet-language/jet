@@ -4,11 +4,11 @@ Use this record when implementing, reviewing, or documenting Jet's encoding
 contracts. It defines the shared `Dyn` and bounded reader/writer model,
 then the selected wire formats and decoder policies. Executable names and
 carriers are registered in [`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet)
-and sourced from [`Core/encoding`](../../Core/encoding/encoding.jet); the
+and sourced from [`Core/Encoding`](../../Core/Encoding/Encoding.jet); the
 shared Prelude ABI is in
 [`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
 and source stream policy is in
-[`stream.jet`](../../Core/encoding/stream.jet). The native file handle
+[`stream.jet`](../../Core/Encoding/Stream.jet). The native file handle
 constructors remain in
 [`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs)
 until the owned-callback holder cutover (#4739) is proven.
@@ -79,7 +79,7 @@ format handles and format-only options/events in
 `core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
 remain `core.files` types; do not add duplicate re-exports. (D-ENCSTREAM-SURFACE1=A)
 The handle-free event, format, cause, error, and limits declarations are ordinary
-Jet source nominals in `Core/encoding/encoding.jet`. Encoding error Display and
+Jet source nominals in `Core/Encoding/Encoding.jet`. Encoding error Display and
 Debug use the shared location ladder: format, kind, byte offset, optional line
 and column, optional nonempty path, then reason. Attaching a cause does not
 change this rendering. `Dyn` remains the native nominal pending the

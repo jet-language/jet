@@ -43,7 +43,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     bytes :: crypto.sealed_bytes(sealed)
     assert_eq(cut(bytes, 0, 4), "JETV".bytes())
     assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, aad) ?? panic("open"), plain)
-    // Core/crypto/crypto.jet447,477 public tag OpenFailed.
+    // Core/Crypto/crypto.jet447,477 public tag OpenFailed.
     assert_eq(crypto.open(wrong, crypto.Sealed{bytes: bytes.copy()}, aad), Err(crypto.CryptoError.OpenFailed))
     assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, "wrong".bytes()), Err(crypto.CryptoError.OpenFailed))
     tampered := bytes.copy()

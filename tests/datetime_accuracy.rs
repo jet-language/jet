@@ -217,7 +217,7 @@ fn run_witness(
         .current_dir(root)
         .env("JET_STORE_DIR", cache.join("build"))
         .env("JET_STORE_DIR", cache.join("run"))
-        .env("JET_TZDB_DIR", root.join("Core/time/tzdb"))
+        .env("JET_TZDB_DIR", root.join("Core/Time/tzdb"))
         .env("JETPACK_ENV", "1")
         .env("NO_COLOR", "1")
         .output()

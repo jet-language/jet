@@ -59,7 +59,7 @@ fn unit_fallbacks_resolve_grouped_and_qualified_error_domains() {
     ] {
         let source = format!("{import}\nfn fail(error: {error}) {error}! {{ Err(error) }}\nfn forward(error: {error}) {error}! {{\n fail(error) ?? return Err(err)\n Ok(())\n}}\nfn run() {{}}\n");
         let errors = check_sources(&[
-            ("<corelib>/Core/encoding/encoding.jet", "core_encoding", "#Error struct EncodingError { reason: String }\n", &[]),
+            ("<corelib>/Core/Encoding/Encoding.jet", "core_encoding", "#Error struct EncodingError { reason: String }\n", &[]),
             ("pkg/main.jet", "main", &source, &[]),
         ]);
         assert!(errors.is_empty(), "{errors:?}");
@@ -81,7 +81,7 @@ fn sealed_part_grouped_import_does_not_require_its_reserved_module_alias() {
     let part = jet_foundation::CoreSourceParts::core_private_source_part_by_alias("__core_files_path_components").unwrap();
     let errors = check_sources(&[
         (&format!("<corelib>/{}", part.source.path), part.source.alias, "enum PathPlatform { Posix Windows }\n", &[]),
-        ("<corelib>/Core/sys/sys.jet", "core_core_sys", "use __core_files_path_components as host_path\nuse __core_files_path_components.[PathPlatform]\nfn platform(value: PathPlatform) -> PathPlatform Never! { value.copy() }\n", &[]),
+        ("<corelib>/Core/Sys/Sys.jet", "core_core_sys", "use __core_files_path_components as host_path\nuse __core_files_path_components.[PathPlatform]\nfn platform(value: PathPlatform) -> PathPlatform Never! { value.copy() }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
@@ -91,12 +91,12 @@ fn sealed_part_grouped_import_does_not_require_its_reserved_module_alias() {
 fn private_native_email_view_is_nameable_only_by_its_core_owner() {
     let source = "fn subject(message: __EmailMessageView) -> String Never! { message.subject.copy() }\n";
     let errors = check_sources(&[
-        ("<corelib>/Core/email/email.jet", "core_core_email", source, &[]),
+        ("<corelib>/Core/Email/Email.jet", "core_core_email", source, &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
     let errors = check_sources(&[
-        ("<corelib>/Core/files/files.jet", "core_files", source, &[]),
+        ("<corelib>/Core/Files/Files.jet", "core_files", source, &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.iter().any(|error| error.starts_with("E0119:")), "{errors:?}");
@@ -193,9 +193,9 @@ fn value_match_braced_error_arm_keeps_optional_sibling_context() {
 #[test]
 fn source_core_enum_and_struct_keep_their_declaration_identity() {
     let errors = check_sources(&[
-        ("<corelib>/Core/service/service.jet", "core_core_service", "#Error enum ServiceError { Full(String) }\n", &[]),
-        ("<corelib>/Core/jobs/jobs.jet", "core_core_jobs", "use core as core\nuse core.service.[ServiceError]\nuse core.service as service\nstruct Wrapped { error: service.ServiceError }\nfn wrap(error: ServiceError) -> Wrapped Never! { Wrapped{error: error} }\nfn forward() ServiceError! {\n endpoint :: core.service.__active_endpoint() ?? return Err(err)\n parts :: core.service.__endpoint_authority_parts(endpoint) ?? return Err(err)\n Ok(())\n}\n", &[]),
-        ("<corelib>/Core/crypto/crypto.jet", "core_core_crypto", "use bridge as jetc\nstruct Secret { bytes: [U8] }\nfn wrap() -> jetc.Wrapped Never! { jetc.Wrapped{key: Secret{bytes: [U8]{}}} }\n", &[("jetc", 3)]),
+        ("<corelib>/Core/Service/Service.jet", "core_core_service", "#Error enum ServiceError { Full(String) }\n", &[]),
+        ("<corelib>/Core/Jobs/Jobs.jet", "core_core_jobs", "use core as core\nuse core.service.[ServiceError]\nuse core.service as service\nstruct Wrapped { error: service.ServiceError }\nfn wrap(error: ServiceError) -> Wrapped Never! { Wrapped{error: error} }\nfn forward() ServiceError! {\n endpoint :: core.service.__active_endpoint() ?? return Err(err)\n parts :: core.service.__endpoint_authority_parts(endpoint) ?? return Err(err)\n Ok(())\n}\n", &[]),
+        ("<corelib>/Core/Crypto/Crypto.jet", "core_core_crypto", "use bridge as jetc\nstruct Secret { bytes: [U8] }\nfn wrap() -> jetc.Wrapped Never! { jetc.Wrapped{key: Secret{bytes: [U8]{}}} }\n", &[("jetc", 3)]),
         ("pkg/bridge.jet", "bridge", "use core.crypto as crypto\nstruct Wrapped { key: crypto.Secret }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
@@ -205,13 +205,13 @@ fn source_core_enum_and_struct_keep_their_declaration_identity() {
 #[test]
 fn native_core_enum_and_error_constructors_resolve_without_public_exports() {
     let errors = check_sources(&[
-        ("<corelib>/Core/service/service.jet", "core_core_service", "use core as core\nfn adapter() -> __TreeStateAdapter Never! { __TreeStateAdapter.Empty }\nfn failure() -> TaskFailure Never! { TaskFailure.Cancelled }\n", &[]),
-        ("<corelib>/Core/time/time.jet", "core_time", "use core as core\nfn expired() -> Int Expired! { Err(Expired{}) }\nstruct Clock {}\nimpl Clock { fn now(self) -> Int Never! { 1 } }\nfn sample(clock: Clock) -> Int Never! { clock.now() }\n", &[]),
+        ("<corelib>/Core/Service/Service.jet", "core_core_service", "use core as core\nfn adapter() -> __TreeStateAdapter Never! { __TreeStateAdapter.Empty }\nfn failure() -> TaskFailure Never! { TaskFailure.Cancelled }\n", &[]),
+        ("<corelib>/Core/Time/Time.jet", "core_time", "use core as core\nfn expired() -> Int Expired! { Err(Expired{}) }\nstruct Clock {}\nimpl Clock { fn now(self) -> Int Never! { 1 } }\nfn sample(clock: Clock) -> Int Never! { clock.now() }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
     let errors = check_sources(&[
-        ("<corelib>/Core/files/files.jet", "core_files", "fn adapter() -> __TreeStateAdapter Never! { __TreeStateAdapter.Empty }\n", &[]),
+        ("<corelib>/Core/Files/Files.jet", "core_files", "fn adapter() -> __TreeStateAdapter Never! { __TreeStateAdapter.Empty }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.iter().any(|error| error.starts_with("E0119:")), "{errors:?}");
@@ -246,7 +246,7 @@ fn sample(clock: &Clock, other: Clock, duration: Duration) -> Int Never! {
 }
 "#;
     let errors = check_sources(&[
-        ("<corelib>/Core/time/time.jet", "core_time", core, &[]),
+        ("<corelib>/Core/Time/Time.jet", "core_time", core, &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
@@ -258,19 +258,19 @@ fn retained_core_arguments_accept_fresh_values_but_not_unmarked_places() {
     for value in ["event.copy()", "\"fresh\""] {
         let source = source.replace("event.copy()", value);
         let errors = check_sources(&[
-            ("<corelib>/Core/service/service.jet", "core_core_service", &source, &[]),
+            ("<corelib>/Core/Service/Service.jet", "core_core_service", &source, &[]),
             ("pkg/main.jet", "main", "fn run() {}\n", &[]),
         ]);
         assert!(errors.is_empty(), "{errors:?}");
     }
     let errors = check_sources(&[
-        ("<corelib>/Core/service/service.jet", "core_core_service", "use core as core\nfn group(tree: &ServiceTree, events: [String]) Never! { core.service.__group_push(&tree, \"fresh\", events[0..<1]) }\n", &[]),
+        ("<corelib>/Core/Service/Service.jet", "core_core_service", "use core as core\nfn group(tree: &ServiceTree, events: [String]) Never! { core.service.__group_push(&tree, \"fresh\", events[0..<1]) }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
     let source = source.replace("event.copy()", "event");
     let errors = check_sources(&[
-        ("<corelib>/Core/service/service.jet", "core_core_service", &source, &[]),
+        ("<corelib>/Core/Service/Service.jet", "core_core_service", &source, &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.iter().any(|error| error.starts_with("E0201:")), "{errors:?}");
@@ -279,9 +279,9 @@ fn retained_core_arguments_accept_fresh_values_but_not_unmarked_places() {
 #[test]
 fn private_xml_alias_keeps_the_engine_enum_owner() {
     let errors = check_sources(&[
-        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "enum EntityPolicy { Preserve Expand }\nenum RenderEncoding { UTF8 UTF16 }\n", &[]),
-        ("<corelib>/Core/encoding/xml.jet", "core_xml", "struct XMLReader {}\n", &[]),
-        ("<corelib>/Core/encoding/xml_kernel.jet", "__core_encoding_xml_kernel", "use __core_encoding_xml_engine as xml\nfn policy() -> xml.EntityPolicy Never! { xml.EntityPolicy.Preserve }\nfn encoding() -> xml.RenderEncoding Never! { xml.RenderEncoding.UTF8 }\n", &[]),
+        ("<corelib>/Core/Encoding/XmlEngine.jet", "__core_encoding_xml_engine", "enum EntityPolicy { Preserve Expand }\nenum RenderEncoding { UTF8 UTF16 }\n", &[]),
+        ("<corelib>/Core/Encoding/Xml.jet", "core_xml", "struct XMLReader {}\n", &[]),
+        ("<corelib>/Core/Encoding/XmlKernel.jet", "__core_encoding_xml_kernel", "use __core_encoding_xml_engine as xml\nfn policy() -> xml.EntityPolicy Never! { xml.EntityPolicy.Preserve }\nfn encoding() -> xml.RenderEncoding Never! { xml.RenderEncoding.UTF8 }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
@@ -292,9 +292,9 @@ fn same_named_source_records_keep_their_declared_fields_and_nominal_owner() {
     let engine = "struct Limits { max_depth: Int }\nfn safe() -> Limits Never! { Limits{max_depth: 8} }\n";
     let kernel = "use __core_encoding_xml_engine as xml\nfn safe() -> xml.Limits Never! { xml.Limits{max_depth: 8} }\n";
     let errors = check_sources(&[
-        ("<corelib>/Core/email/email.jet", "core_core_email", "struct Limits { max_reply_line_bytes: Int }\n", &[]),
-        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", engine, &[]),
-        ("<corelib>/Core/encoding/xml_kernel.jet", "__core_encoding_xml_kernel", kernel, &[]),
+        ("<corelib>/Core/Email/Email.jet", "core_core_email", "struct Limits { max_reply_line_bytes: Int }\n", &[]),
+        ("<corelib>/Core/Encoding/XmlEngine.jet", "__core_encoding_xml_engine", engine, &[]),
+        ("<corelib>/Core/Encoding/XmlKernel.jet", "__core_encoding_xml_kernel", kernel, &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
@@ -335,13 +335,13 @@ fn core_sources_share_private_declarations_without_public_exports() {
     let time = "fn __expiry_deadline(now_ms: Int, ttl: Duration) -> Int Never! { now_ms + ttl.ns }\nstruct __Observer { value: Int }\n";
     let core = "use core.time as time\nfn failure() -> Int time.Expired! { Err(time.Expired{}) }\nfn deadline(ttl: Duration) -> Int Never! { time.__expiry_deadline(1, ttl) }\nfn observe(value: time.__Observer) -> Int Never! { value.value }\n";
     let errors = check_sources(&[
-        ("<corelib>/Core/time/time.jet", "core_time", time, &[]),
-        ("<corelib>/Core/crypto/vault.jet", "core_core_crypto_vault", core, &[]),
+        ("<corelib>/Core/Time/Time.jet", "core_time", time, &[]),
+        ("<corelib>/Core/Crypto/Vault.jet", "core_core_crypto_vault", core, &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
     let errors = check_sources(&[
-        ("<corelib>/Core/time/time.jet", "core_time", time, &[]),
+        ("<corelib>/Core/Time/Time.jet", "core_time", time, &[]),
         ("pkg/main.jet", "main", "use core.time as time\nfn failure() -> Int time.Expired! { Err(time.Expired{}) }\nfn run() {}\n", &[]),
     ]);
     assert!(!errors.is_empty(), "Core-private native carrier leaked to user code");
@@ -357,8 +357,8 @@ fn core_sources_share_private_declarations_without_public_exports() {
 #[test]
 fn loaded_core_source_functions_resolve_without_a_native_catalog_row() {
     let errors = check_sources(&[
-        ("<corelib>/Core/text/text.jet", "core_text", "fn encode_cp(value: Int) -> String Never! { \"scalar\" }\n", &[]),
-        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "use core.text as unicode\nfn carriage_return() -> String Never! { unicode.encode_cp(13) }\n", &[]),
+        ("<corelib>/Core/Text/Text.jet", "core_text", "fn encode_cp(value: Int) -> String Never! { \"scalar\" }\n", &[]),
+        ("<corelib>/Core/Encoding/XmlEngine.jet", "__core_encoding_xml_engine", "use core.text as unicode\nfn carriage_return() -> String Never! { unicode.encode_cp(13) }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");
@@ -374,13 +374,13 @@ fn private_crypto_preallocation_admits_only_exact_reserve() {
              }}\n}}\n"
         );
         let errors = check_sources(&[
-            ("<corelib>/Core/crypto/expert_ct.jet", "__core_crypto_ct", &source, &[]),
+            ("<corelib>/Core/Crypto/ExpertCt.jet", "__core_crypto_ct", &source, &[]),
             ("pkg/main.jet", "main", "fn run() {}\n", &[]),
         ]);
         assert!(errors.is_empty(), "{errors:?}");
         for (path, alias) in [
-            ("<corelib>/Core/crypto/jetc.jet", "__core_crypto_jetc"),
-            ("<corelib>/Core/crypto/vault.jet", "core_core_crypto_vault"),
+            ("<corelib>/Core/Crypto/Jetc.jet", "__core_crypto_jetc"),
+            ("<corelib>/Core/Crypto/Vault.jet", "core_core_crypto_vault"),
         ] {
             let errors = check_sources(&[
                 (path, alias, &source, &[]),
@@ -394,7 +394,7 @@ fn private_crypto_preallocation_admits_only_exact_reserve() {
         "use core.mem as mem\nfn size() -> Int Never! { mem.__type_size<U8>() }\n",
     ] {
         let errors = check_sources(&[
-            ("<corelib>/Core/crypto/expert_ct.jet", "__core_crypto_ct", source, &[]),
+            ("<corelib>/Core/Crypto/ExpertCt.jet", "__core_crypto_ct", source, &[]),
             ("pkg/main.jet", "main", "fn run() {}\n", &[]),
         ]);
         assert!(errors.iter().any(|error| error.starts_with("E0510:")), "{errors:?}");

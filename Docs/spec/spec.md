@@ -3255,8 +3255,8 @@ binder implementation and CLI dispatch live in
 `core.web` is the server-rendered web application surface over `core.http`; its
 `App`, pages, sessions, forms, and live records are Jet values. Browser-owned
 operations carry the `Browser` effect and are lowered by the web target. The
-source authority is [`Core/web/web.jet`](../../Core/web/web.jet), while the
-browser test controller is [`Core/web/browser.jet`](../../Core/web/browser.jet). (D-FLAGSHIP-WEBAPI1)
+source authority is [`Core/Web/Web.jet`](../../Core/Web/Web.jet), while the
+browser test controller is [`Core/Web/Browser.jet`](../../Core/Web/Browser.jet). (D-FLAGSHIP-WEBAPI1)
 
 ### Browser events, values, and storage
 
@@ -3307,7 +3307,7 @@ queued payloads and invalidation targets under
 `$HOME/.local/state/jet/web-query-queue.v1`; it uses a temporary file and atomic
 rename and reports a durability error when no usable state directory or queue
 file is available. Query state and queue transitions are defined by
-[`Core/web/query.jet`](../../Core/web/query.jet) and
+[`Core/Web/Query.jet`](../../Core/Web/Query.jet) and
 [`CoreLib/Top/WebQuery.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs). (D-WEBQUERY1)
 
 ### Events and hooks
@@ -3372,7 +3372,7 @@ a source-call match alone is not a runtime observation. The observation writer
 bounds event history and does not include channel values, task locals,
 environment, or credentials. The executable event example is covered by
 [`tests/canvas.rs`](../../tests/canvas.rs) and the public API by
-[`Core/event/event.jet`](../../Core/event/event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
+[`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 
 ## Terminal direct input
 

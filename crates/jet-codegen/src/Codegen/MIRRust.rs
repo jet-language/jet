@@ -17,7 +17,7 @@ use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Syntax::CoreCallSymbol;
 use jet_foundation::MIR::*;
 
-const CORE_NET_RESOLVE_ERROR_TYPE: &str = "<corelib>/Core/net::Core/net/net.jet::__ResolveError";
+const CORE_NET_RESOLVE_ERROR_TYPE: &str = "<corelib>/Core/Net::Core/Net/Net.jet::__ResolveError";
 
 #[derive(Default)]
 pub(super) struct CloseFacts {
@@ -4870,7 +4870,7 @@ fn mangle_variant(name: &str) -> String {
 fn core_native_probe_name(name: &str) -> &str {
     // Keep canonical Core source types when their shape differs from a
     // same-leaf native carrier.
-    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
+    if (name.starts_with("<corelib>/Core/Sync::") && name.ends_with("::RowPolicy"))
         || jet_foundation::CoreModuleExports::core_source_owns_type(name)
     {
         name
@@ -5134,48 +5134,48 @@ fn run() {
 
     #[test]
     fn imported_core_native_names_project_without_matching_user_qualified_names() {
-        let compute_error = "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError";
-        let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun";
-        let query_mode = "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode";
-        let mutation_status = "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus";
-        let query_status = "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus";
+        let compute_error = "<corelib>/Core/Compute::Core/Compute/Compute.jet::ComputeError";
+        let vjp_run = "<corelib>/Core/Compute::Core/Compute/Compute.jet::VJPRun";
+        let query_mode = "<corelib>/Core/Web::Core/Web/Query.jet::WebQueryNetworkMode";
+        let mutation_status = "<corelib>/Core/Web::Core/Web/Query.jet::WebMutationStatus";
+        let query_status = "<corelib>/Core/Web::Core/Web/Query.jet::WebQueryStatus";
 
         for source_type in [
             compute_error,
             vjp_run,
-            "<corelib>/Core/compute::Core/compute/compute.jet::ComputeDevice",
-            "<corelib>/Core/compute::Core/compute/compute.jet::Tensor",
-            "<corelib>/Core/compute::Core/compute/compute.jet::ComputeStream",
-            "<corelib>/Core/compute::Core/compute/compute.jet::SparseTensor",
+            "<corelib>/Core/Compute::Core/Compute/Compute.jet::ComputeDevice",
+            "<corelib>/Core/Compute::Core/Compute/Compute.jet::Tensor",
+            "<corelib>/Core/Compute::Core/Compute/Compute.jet::ComputeStream",
+            "<corelib>/Core/Compute::Core/Compute/Compute.jet::SparseTensor",
         ] {
             assert_eq!(core_native_probe_name(source_type), crate::Codegen::core_source_type_leaf(source_type));
             assert!(is_canonical_core_native_type(source_type));
         }
         for source_record in [
-            "<corelib>/Core/web::Core/web/query.jet::WebQuery",
-            "<corelib>/Core/web::Core/web/query.jet::WebQueryState",
-            "<corelib>/Core/web::Core/web/query.jet::WebMutationState",
-            "<corelib>/Core/regex::Core/regex/regex.jet::Regex",
-            "<corelib>/Core/regex::Core/regex/regex.jet::Match",
-            "<corelib>/Core/regex::Core/regex/regex.jet::RegexFlags",
-            "<corelib>/Core/web::Core/web/table.jet::WebTable",
-            "<corelib>/Core/web::Core/web/table.jet::WebTableSort",
-            "<corelib>/Core/web::Core/web/table.jet::WebTableState",
-            "<corelib>/Core/http::Core/http/http.jet::Body",
-            "<corelib>/Core/http::Core/http/http.jet::Headers",
-            "<corelib>/Core/http::Core/http/http.jet::Query",
-            "<corelib>/Core/time::Core/time/time.jet::LocalDate",
-            "<corelib>/Core/time::Core/time/time.jet::LocalTime",
-            "<corelib>/Core/time::Core/time/time.jet::DateTime",
-            "<corelib>/Core/time::Core/time/time.jet::Period",
-            "<corelib>/Core/time::Core/time/time.jet::Zone",
-            "<corelib>/Core/time::Core/time/time.jet::ZonedDateTime",
-            "<corelib>/Core/time::Core/time/time.jet::Instant",
-            "<corelib>/Core/time::Core/time/time.jet::TimeError",
-            "<corelib>/Core/time::Core/time/time.jet::Clock",
-            "<corelib>/Core/time::Core/time/time.jet::ExpiringValue",
-            "<corelib>/Core/watcher::Core/watcher/watcher.jet::WatchEvent",
-            "<corelib>/Core/compute::Core/compute/solve.jet::Solver",
+            "<corelib>/Core/Web::Core/Web/Query.jet::WebQuery",
+            "<corelib>/Core/Web::Core/Web/Query.jet::WebQueryState",
+            "<corelib>/Core/Web::Core/Web/Query.jet::WebMutationState",
+            "<corelib>/Core/Regex::Core/Regex/Regex.jet::Regex",
+            "<corelib>/Core/Regex::Core/Regex/Regex.jet::Match",
+            "<corelib>/Core/Regex::Core/Regex/Regex.jet::RegexFlags",
+            "<corelib>/Core/Web::Core/Web/Table.jet::WebTable",
+            "<corelib>/Core/Web::Core/Web/Table.jet::WebTableSort",
+            "<corelib>/Core/Web::Core/Web/Table.jet::WebTableState",
+            "<corelib>/Core/Http::Core/Http/Http.jet::Body",
+            "<corelib>/Core/Http::Core/Http/Http.jet::Headers",
+            "<corelib>/Core/Http::Core/Http/Http.jet::Query",
+            "<corelib>/Core/Time::Core/Time/Time.jet::LocalDate",
+            "<corelib>/Core/Time::Core/Time/Time.jet::LocalTime",
+            "<corelib>/Core/Time::Core/Time/Time.jet::DateTime",
+            "<corelib>/Core/Time::Core/Time/Time.jet::Period",
+            "<corelib>/Core/Time::Core/Time/Time.jet::Zone",
+            "<corelib>/Core/Time::Core/Time/Time.jet::ZonedDateTime",
+            "<corelib>/Core/Time::Core/Time/Time.jet::Instant",
+            "<corelib>/Core/Time::Core/Time/Time.jet::TimeError",
+            "<corelib>/Core/Time::Core/Time/Time.jet::Clock",
+            "<corelib>/Core/Time::Core/Time/Time.jet::ExpiringValue",
+            "<corelib>/Core/Watcher::Core/Watcher/Watcher.jet::WatchEvent",
+            "<corelib>/Core/Compute::Core/Compute/Solve.jet::Solver",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));
@@ -5217,23 +5217,23 @@ fn run() {
             assert!(!is_canonical_core_native_type(source_enum));
         }
         assert!(!is_canonical_core_native_type(
-            "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
+            "<corelib>/Core/Web::Core/Web/Query.jet::WebQueryError"
         ));
-        let source_owned_policy = "<corelib>/Core/sync::Core/sync/policy.jet::RowPolicy";
+        let source_owned_policy = "<corelib>/Core/Sync::Core/Sync/policy.jet::RowPolicy";
         assert_eq!(core_native_probe_name(source_owned_policy), source_owned_policy);
         assert!(!is_canonical_core_native_type(source_owned_policy));
         for (source_record, native_record) in [
-            ("<corelib>/Core/net::Core/net/net.jet::SocketAddr", "JetSocketAddr"),
-            ("<corelib>/Core/net::Core/net/net.jet::UDPPacket", "JetUDPPacket"),
-            ("<corelib>/Core/net::Core/net/net.jet::UnixListener", "JetUnixListener"),
-            ("<corelib>/Core/net::Core/net/net.jet::UnixStream", "JetUnixStream"),
-            ("<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate", "JetTLSCertificate"),
-            ("<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity", "JetTLSPeerIdentity"),
+            ("<corelib>/Core/Net::Core/Net/Net.jet::SocketAddr", "JetSocketAddr"),
+            ("<corelib>/Core/Net::Core/Net/Net.jet::UDPPacket", "JetUDPPacket"),
+            ("<corelib>/Core/Net::Core/Net/Net.jet::UnixListener", "JetUnixListener"),
+            ("<corelib>/Core/Net::Core/Net/Net.jet::UnixStream", "JetUnixStream"),
+            ("<corelib>/Core/Net/tls::Core/Net/Tls.jet::TLSCertificate", "JetTLSCertificate"),
+            ("<corelib>/Core/Net/tls::Core/Net/Tls.jet::TLSPeerIdentity", "JetTLSPeerIdentity"),
         ] {
             assert!(is_canonical_core_native_type(source_record));
             assert_eq!(crate::Codegen::core_rust_type_name(source_record), Some(native_record));
         }
-        let srv_record = "<corelib>/Core/net::Core/net/net.jet::SRVRecord";
+        let srv_record = "<corelib>/Core/Net::Core/Net/Net.jet::SRVRecord";
         assert!(!is_canonical_core_native_type(srv_record));
         assert_eq!(crate::Codegen::core_rust_type_name(srv_record), None);
 
@@ -5537,7 +5537,7 @@ mod emit_misc_regression_tests {
     #[test]
     fn source_owned_core_stream_handles_have_no_native_carrier() {
         for leaf in ["Stdout", "Stderr", "StdinHandle"] {
-            let key = format!("<corelib>/Core/term::Core/term/term.jet::{leaf}");
+            let key = format!("<corelib>/Core/Term::Core/Term/Term.jet::{leaf}");
             assert_eq!(crate::Codegen::file_handle_rust_type(&key), None, "{key}");
         }
     }
@@ -5593,7 +5593,7 @@ pub(crate) fn append_web_time_zones(out: &mut String) -> std::io::Result<()> {
     RustEmitter::emit_web_time_zones(out)
 }
 fn canonical_core_email_rust_type_name(name: &str) -> Option<&'static str> {
-    let name = name.strip_prefix("<corelib>/Core/email::Core/email/email.jet::")?;
+    let name = name.strip_prefix("<corelib>/Core/Email::Core/Email/Email.jet::")?;
     crate::Codegen::core_email_rust_type_name(name)
 }
 
@@ -8864,7 +8864,7 @@ impl<'a> RustEmitter<'a> {
 
     fn is_core_http_type(&self, type_id: MirTypeId, leaf: &str) -> bool {
         let key = &self.type_def(type_id).key;
-        key.starts_with("<corelib>/Core/http::")
+        key.starts_with("<corelib>/Core/Http::")
             && !jet_foundation::CoreModuleExports::core_source_owns_type(key)
             && key.rsplit_once("::").is_some_and(|(_, name)| name == leaf)
     }
@@ -15845,7 +15845,7 @@ impl<'a> RustEmitter<'a> {
              let name = name.strip_prefix(\"right/\").unwrap_or(name);\n\
              match name {\n",
         );
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/time/tzdb");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/Time/tzdb");
         visit(&root, &root, out)?;
         out.push_str("_ => None,\n}\n}\n");
         Ok(())
@@ -32189,7 +32189,7 @@ impl<'a> RustEmitter<'a> {
         match (member, args) {
             ("smtp", [config]) => {
                 let secret = self.program.types.iter().find(|definition| {
-                    definition.key.starts_with("<corelib>/Core/crypto::") && definition.key.ends_with("::Secret")
+                    definition.key.starts_with("<corelib>/Core/Crypto::") && definition.key.ends_with("::Secret")
                 }).expect("SMTP requires checked Secret");
                 let MirTypeDefKind::Struct { fields, .. } = &secret.kind else {
                     panic!("checked Secret must be a record");

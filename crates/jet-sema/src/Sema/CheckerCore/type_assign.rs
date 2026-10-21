@@ -763,8 +763,8 @@ impl<'a> Checker<'a> {
                 }
                 let source_expiring_secret =
                     jet_foundation::CoreModuleExports::core_source_owns_type(name)
-                        && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret");
-                let source_formal = self.module_path.ends_with("Core/crypto/vault.jet")
+                        && name.ends_with("::Core/Crypto/Vault.jet::ExpiringSecret");
+                let source_formal = self.module_path.ends_with("Core/Crypto/Vault.jet")
                     && args.first().is_some_and(|arg| matches!(arg,
                         Type::Named(parameter) if self.type_param_scope.iter().any(|p| p.name == *parameter)));
                 if (is_core_generic && lookup_name == "ExpiringSecret" || source_expiring_secret)

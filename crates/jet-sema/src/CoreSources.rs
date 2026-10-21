@@ -11,16 +11,16 @@ use jet_foundation::CoreSourceParts::{CORE_TEXT_STRING_MODULE, CORE_ENCODING_STR
 include!("CoreSourceTexts.rs");
 
 const CORE_PRIVATE_SOURCE_TEXTS: &[(&str, &str)] = &[
-    (CORE_TEXT_STRING_MODULE, include_str!("../../../Core/text/string.jet")),
-    ("__core_text_segmentation_tables", include_str!("../../../Core/text/segmentation_tables.jet")),
-    (CORE_ENCODING_STREAM_MODULE, include_str!("../../../Core/encoding/stream.jet")),
-    (CORE_ENCODING_CBOR_PARSE_MODULE, include_str!("../../../Core/encoding/cbor_parse.jet")),
-    (CORE_FILES_PATH_COMPONENTS_SOURCE_PART.source.module, include_str!("../../../Core/files/runtime/kernel_path_components.jet")),
-    (CORE_ENCODING_CBOR_STREAM_ALIAS, include_str!("../../../Core/encoding/cbor_stream.jet")),
-    (CORE_ENCODING_XML_ENGINE_MODULE, include_str!("../../../Core/encoding/xml_engine.jet")),
-    (CORE_ENCODING_XML_KERNEL_MODULE, include_str!("../../../Core/encoding/xml_kernel.jet")),
-    (CORE_CRYPTO_JETC_MODULE, include_str!("../../../Core/crypto/jetc.jet")),
-    ("__core_crypto_ct", include_str!("../../../Core/crypto/expert_ct.jet")),
+    (CORE_TEXT_STRING_MODULE, include_str!("../../../Core/Text/String.jet")),
+    ("__core_text_segmentation_tables", include_str!("../../../Core/Text/SegmentationTables.jet")),
+    (CORE_ENCODING_STREAM_MODULE, include_str!("../../../Core/Encoding/Stream.jet")),
+    (CORE_ENCODING_CBOR_PARSE_MODULE, include_str!("../../../Core/Encoding/CborParse.jet")),
+    (CORE_FILES_PATH_COMPONENTS_SOURCE_PART.source.module, include_str!("../../../Core/Files/Runtime/KernelPathComponents.jet")),
+    (CORE_ENCODING_CBOR_STREAM_ALIAS, include_str!("../../../Core/Encoding/CborStream.jet")),
+    (CORE_ENCODING_XML_ENGINE_MODULE, include_str!("../../../Core/Encoding/XmlEngine.jet")),
+    (CORE_ENCODING_XML_KERNEL_MODULE, include_str!("../../../Core/Encoding/XmlKernel.jet")),
+    (CORE_CRYPTO_JETC_MODULE, include_str!("../../../Core/Crypto/Jetc.jet")),
+    ("__core_crypto_ct", include_str!("../../../Core/Crypto/ExpertCt.jet")),
 ];
 
 /// Source text of the Core source module (public, private part, or runtime
@@ -55,10 +55,10 @@ mod tests {
             .expect("crypto chunk engine private part");
         assert_eq!(part.owner, "core.crypto");
         assert_eq!(part.source.alias, "__core_crypto_jetc");
-        assert_eq!(part.source.path, "Core/crypto/jetc.jet");
+        assert_eq!(part.source.path, "Core/Crypto/Jetc.jet");
         assert!(part.source.owned_members.is_empty());
         assert_eq!(super::core_source_text(part.source.module),
-            Some(include_str!("../../../Core/crypto/jetc.jet")));
+            Some(include_str!("../../../Core/Crypto/Jetc.jet")));
         assert!(jet_foundation::CoreModuleExports::core_source_module(part.source.module).is_none());
         assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&part.source.module));
     }
@@ -67,7 +67,7 @@ mod tests {
     fn crypto_private_part_matches_generated_cli_projection() {
         let projection = include_str!("../../../Compiler/JetCli/Source/Cli/CoreSources.jet");
         assert!(projection.contains(
-            "JetDriverCoreSource{module_name: \"__core_crypto_jetc\", alias: \"__core_crypto_jetc\", path: \"Core/crypto/jetc.jet\", owner: \"core.crypto\", owned_members: [String]{}, source: \"\"}"
+            "JetDriverCoreSource{module_name: \"__core_crypto_jetc\", alias: \"__core_crypto_jetc\", path: \"Core/Crypto/jetc.jet\", owner: \"core.crypto\", owned_members: [String]{}, source: \"\"}"
         ));
     }
 }

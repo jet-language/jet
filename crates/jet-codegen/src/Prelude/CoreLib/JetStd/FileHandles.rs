@@ -2,7 +2,7 @@
 // D-CORE-FILESTAT1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1, D-CORE-HANDLEFD1).
 //
 // Each function here performs one operating-system call and maps its errno
-// through the shared `io_error_at` mapper. Core/files/files.jet owns the
+// through the shared `io_error_at` mapper. Core/Files/Files.jet owns the
 // public types, defaults, name validation, part-by-part walking, and error
 // wording; AOT and the interpreter include this same file inside `jet_std`.
 //

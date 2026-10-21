@@ -14,7 +14,7 @@ fn parse_trusted_core(name: &str, source: &str) {
 
 #[test]
 fn civil_core_internals_use_the_trusted_loader_lexing_contract() {
-    let source = include_str!("../../../Core/time/time.jet");
+    let source = include_str!("../../../Core/Time/Time.jet");
     // Embedded Core uses generated lexing; checking this file as a user entry
     // must not grant access to the reserved namespace.
     parse_trusted_core("time", source);
@@ -25,9 +25,9 @@ fn civil_core_internals_use_the_trusted_loader_lexing_contract() {
 #[test]
 fn system_process_and_files_internals_parse_as_trusted_core() {
     for (name, source) in [
-        ("sys", include_str!("../../../Core/sys/sys.jet")),
-        ("process", include_str!("../../../Core/process/process.jet")),
-        ("files", include_str!("../../../Core/files/files.jet")),
+        ("sys", include_str!("../../../Core/Sys/Sys.jet")),
+        ("process", include_str!("../../../Core/Process/Process.jet")),
+        ("files", include_str!("../../../Core/Files/Files.jet")),
     ] {
         parse_trusted_core(name, source);
     }
@@ -35,7 +35,7 @@ fn system_process_and_files_internals_parse_as_trusted_core() {
 
 #[test]
 fn terminal_policy_internals_parse_as_trusted_core() {
-    let source = include_str!("../../../Core/term/term.jet");
+    let source = include_str!("../../../Core/Term/Term.jet");
     let (tokens, diagnostics) = Lexer::lex_generated(source);
     assert!(diagnostics.is_empty(), "terminal trusted lexing: {diagnostics:#?}");
     Parser::parse(&tokens).expect("terminal policy must parse");
@@ -44,8 +44,8 @@ fn terminal_policy_internals_parse_as_trusted_core() {
 #[test]
 fn raylib_and_font_host_policies_parse_as_trusted_core() {
     for (name, source) in [
-        ("raylib", include_str!("../../../Core/game/raylib.jet")),
-        ("font", include_str!("../../../Core/font/font.jet")),
+        ("raylib", include_str!("../../../Core/Game/Raylib.jet")),
+        ("font", include_str!("../../../Core/Font/Font.jet")),
     ] {
         let (tokens, diagnostics) = Lexer::lex_generated(source);
         assert!(diagnostics.is_empty(), "{name} trusted lexing: {diagnostics:#?}");

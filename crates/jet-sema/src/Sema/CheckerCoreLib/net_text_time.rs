@@ -58,7 +58,7 @@ pub(crate) fn http_nominal_leaf(name: &str) -> Option<&str> {
 /// otherwise `?` and handler types split one error into two nominals.
 pub fn core_http_carrier_leaf(identity: &str) -> Option<&str> {
     let leaf = identity
-        .strip_prefix("<corelib>/Core/http::")?
+        .strip_prefix("<corelib>/Core/Http::")?
         .rsplit("::")
         .next()?;
     (leaf == "HTTPError").then_some(leaf)
@@ -70,8 +70,8 @@ pub fn core_http_carrier_leaf(identity: &str) -> Option<&str> {
 #[doc(hidden)]
 pub fn core_net_handle_dispatch_name(type_name: &str) -> Option<&'static str> {
     match type_name {
-        "TCPStream" | "<corelib>/Core/net::Core/net/net.jet::TCPStream" => Some("TCPStream"),
-        "TCPListener" | "<corelib>/Core/net::Core/net/net.jet::TCPListener" => Some("TCPListener"),
+        "TCPStream" | "<corelib>/Core/Net::Core/Net/Net.jet::TCPStream" => Some("TCPStream"),
+        "TCPListener" | "<corelib>/Core/Net::Core/Net/Net.jet::TCPListener" => Some("TCPListener"),
         _ => None,
     }
 }

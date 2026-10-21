@@ -28,7 +28,7 @@ impl Span {
 }
 
 /// Root component of every embedded Core source module path
-/// (`<corelib>/Core/math/math.jet`). Core is library source, not the user's
+/// (`<corelib>/Core/Math/Math.jet`). Core is library source, not the user's
 /// program: user-facing lints never report against it.
 pub const CORE_SOURCE_ROOT: &str = "<corelib>";
 

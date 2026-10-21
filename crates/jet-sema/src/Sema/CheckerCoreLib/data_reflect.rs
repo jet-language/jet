@@ -4,7 +4,7 @@ use crate::AST::Type;
 /// A fixed data row accepts its canonical Core owner, never a same-leaf
 /// user-qualified nominal. Bare names remain the bootstrap row spelling.
 pub fn data_nominal_leaf(name: &str) -> Option<&str> {
-    if name.starts_with("<corelib>/Core/data::") {
+    if name.starts_with("<corelib>/Core/Data::") {
         return name.rsplit("::").next();
     }
     (!name.contains("::") && !name.contains('.')).then_some(name)
@@ -157,10 +157,10 @@ mod data_nominal_tests {
     fn accepts_core_data_owners_without_erasing_user_nominals() {
         assert_eq!(data_nominal_leaf("Query"), Some("Query"));
         assert_eq!(
-            data_nominal_leaf("<corelib>/Core/data::Core/data/arrow.jet::DataArrowBatch"),
+            data_nominal_leaf("<corelib>/Core/Data::Core/Data/Arrow.jet::DataArrowBatch"),
             Some("DataArrowBatch")
         );
-        assert_eq!(data_nominal_leaf("<corelib>/Core/data::Query"), Some("Query"));
+        assert_eq!(data_nominal_leaf("<corelib>/Core/Data::Query"), Some("Query"));
         assert_eq!(data_nominal_leaf("user::Query"), None);
         assert_eq!(data_nominal_leaf("user.Query"), None);
         assert_eq!(data_nominal_leaf("<corelib>/Core/database::Query"), None);

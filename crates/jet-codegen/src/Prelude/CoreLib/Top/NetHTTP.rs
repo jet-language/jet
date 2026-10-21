@@ -1929,7 +1929,7 @@ fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result
     Ok(())
 }
 
-// Compiler-private carrier transfers. Their callers in Core/net/net.jet
+// Compiler-private carrier transfers. Their callers in Core/Net/Net.jet
 // establish the 4/16-byte representation immediately before the unsafe call.
 fn jet_net_raw_ip_from_bytes(bytes: Vec<u8>) -> JetIpAddr {
     let inner = if bytes.len() == 4 {

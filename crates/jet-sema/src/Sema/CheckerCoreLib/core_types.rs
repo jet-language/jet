@@ -3455,16 +3455,16 @@ pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
 #[doc(hidden)]
 pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
     match handle_ty {
-        "FileScope" | "<corelib>/Core/files::Core/files/files.jet::FileScope" => {
+        "FileScope" | "<corelib>/Core/Files::Core/Files/Files.jet::FileScope" => {
             Some("FileScope")
         }
-        "FileReader" | "<corelib>/Core/files::Core/files/files.jet::FileReader" => {
+        "FileReader" | "<corelib>/Core/Files::Core/Files/Files.jet::FileReader" => {
             Some("FileReader")
         }
-        "FileWriter" | "<corelib>/Core/files::Core/files/files.jet::FileWriter" => {
+        "FileWriter" | "<corelib>/Core/Files::Core/Files/Files.jet::FileWriter" => {
             Some("FileWriter")
         }
-        "StdinHandle" | "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => {
+        "StdinHandle" | "<corelib>/Core/Term::Core/Term/Term.jet::StdinHandle" => {
             Some("StdinHandle")
         }
         // `core.term` declares `Stdout`/`Stderr` with their own methods

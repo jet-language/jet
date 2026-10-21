@@ -226,7 +226,7 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
         }
         else -> ""
     }
-    if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && name.ends_with("::Core/units/units.jet::Measurement")) -> return None
+    if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) -> return None
     nominal_row :: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
     if nominal_row == .Val(row) {
         owner :: graph.modules[row.module_index].nominals[row.row]

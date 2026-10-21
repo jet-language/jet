@@ -132,7 +132,7 @@ if (options.bootstrap) {
         if (!sourceFiles?.length) throw new Error('absent-prelude test has no loaded-source inventory');
         for (const source of sourceFiles) {
           const path = source.fields.find(([name]) => name === 'path')?.[1]?.v;
-          if (path === 'Core/prelude/prelude.jet' || path?.endsWith('/Core/prelude/prelude.jet')) throw new Error('unmentioned optional-to-failure body loaded core.prelude');
+          if (path === 'Core/Prelude/Prelude.jet' || path?.endsWith('/Core/Prelude/Prelude.jet')) throw new Error('unmentioned optional-to-failure body loaded core.prelude');
         }
       }
       const value = converter.convert(node, { k: 'named', name: 'MIRProgram' });

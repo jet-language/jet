@@ -1024,7 +1024,7 @@ and capacity-sized frees. Runtime execution and route enrollment are separate
 admission steps; the witness source alone does not establish execution parity.
 
 Service workflow start, step, activity, retry and completion decisions live in
-`Core/service/service.jet`. They retain the exclusive tree borrow across durable
+`Core/Service/Service.jet`. They retain the exclusive tree borrow across durable
 synchronization, validation, replay checks and cursor updates. The existing
 durable append and handle creation operations remain registered bootstrap leaves;
 field leaves only project or assign the existing carrier and die at cutover.
@@ -1138,7 +1138,7 @@ bytes, not allocation identity.
 
 Show and Display preserve the raw `Panicked(reason)` bytes. Debug delegates the
 reason to the canonical `rt_text_push_rust_debug_str` renderer. This matches the
-read-only contract in `Core/service/service.jet:91-125` at497daa7a0, including
+read-only contract in `Core/Service/Service.jet:91-125` at497daa7a0, including
 the `a"b` source test vector; that source file is not imported by this carrier
 batch. `Tests/TaskOutcomeWitness.c` constructs through the real producers and
 checks every variant, deep clone/getter ownership, embedded NUL, Unicode,

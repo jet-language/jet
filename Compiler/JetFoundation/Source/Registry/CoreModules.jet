@@ -132,11 +132,11 @@ fn core_source_owns_type(name: String) -> Bool Never! {
 
 // The table is a read parameter, so the scan reads its rows in place.
 fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool Never! {
-    if !name.starts_with("<corelib>/") -> return false
+    module_name :: core_identity_module(name) ?? return false
     parts :: name.split("::").to_list()
-    if parts.len() < 3 -> return false
+    if parts.len() < 2 -> return false
     leaf :: parts[parts.len() - 1]
-    file :: parts[parts.len() - 2]
+    file :: core_module_source_path(module_name) ?? return false
     loop row in rows {
         if row.name == leaf && row.path == file -> return true
     }
@@ -146,7 +146,7 @@ fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool N
 // The existing public bool(p) arity targets one reserved source
 // method. This is not an overload mechanism or a native receiver route.
 CORE_SOURCE_BOOL_P_OWNER :: [CoreSourceOwnedType]{
-    {path: "Core/math/random.jet", name: "RNG"},
+    {path: "Core/Math/Random.jet", name: "RNG"},
 }
 fn core_source_receiver_method(identity: String, method: String, nargs: Int) -> String Never! {
     if method == "bool" && nargs == 1 && core_source_owns_type(identity) && core_source_owns_type_in(CORE_SOURCE_BOOL_P_OWNER, identity) -> return "__bool_p"
@@ -208,7 +208,7 @@ fn core_root_type(name: String) -> Bool Never! {
 // short nominal spelling. They do not add public trait implementations.
 fn core_source_value_hook(name: String, operation: String) -> String? Never! {
     if !name.starts_with("<corelib>/") -> return None
-    if !name.ends_with("::Core/compute/solve.jet::Solver") -> return None
+    if !core_identity_is(name, "core.compute.solve", "Solver") -> return None
     if operation == {
         "show" -> Val("__show")
         "debug" -> Val("__debug")
@@ -265,6 +265,30 @@ struct CoreRecordLiteralRow {
     owner: String
     fields: [TypeTupleField]
     core_only: Bool{false}
+}
+
+// The Core module a Core declaration key or module identity names
+// (`<corelib>/core.crypto.vault::Secret` -> `core.crypto.vault`).
+fn core_identity_module(key: String) -> String? Never! {
+    if !key.starts_with("<corelib>/") -> return None
+    rest :: key.slice("<corelib>/".len(), key.len())
+    if rest.split_once("::") == .Val(parts) -> return Val(parts.before)
+    Val(rest)
+}
+
+// The source path of Core module `module_name` (`core.crypto.vault` ->
+// `Core/Crypto/Vault.jet`), from the Core source table.
+fn core_module_source_path(module_name: String) -> String? Never! {
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name == module_name -> return Val(row.path)
+    }
+    None
+}
+
+// Whether `key` is exactly the declaration `leaf` of Core module `module_name`.
+fn core_identity_is(key: String, module_name: String, leaf: String) -> Bool Never! {
+    expected :: "<corelib>/{module_name}::{leaf}"
+    key == expected
 }
 
 // Whether a Core module identity or declaration key belongs to Core module

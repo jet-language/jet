@@ -3767,7 +3767,7 @@ fn jet_job_queue_event_time(timestamp_ms: i64) -> u64 {
     timestamp_ms.max(0) as u64
 }
 
-// Raw marshaling only: Core/jobs/jobs.jet owns the timestamp, event fields,
+// Raw marshaling only: Core/Jobs/Jobs.jet owns the timestamp, event fields,
 // and post-commit ordering; retain the existing validated event and sink.
 fn jet_job_queue_publish_parts(
     timestamp_ms: i64,

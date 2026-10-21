@@ -25,7 +25,7 @@ impl EncodingLimits {
 
 // BEGIN GENERATED CORE ENCODING FORMATS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 10c74bbceb2134396ac1c8e41e2901119f4a4083e20ba799d777514512297c29
+// Source SHA-256: 157b03fe2853c04d81ab89d293138fc7c7de7b92aaefc90849947f88df94fb4d
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum EncodingFormat {
     JSON,
@@ -60,7 +60,7 @@ pub enum EncodingErrorKind {
     State,
 }
 
-// Private plain CSV read facts; policy lives in Core/encoding/csv.jet.
+// Private plain CSV read facts; policy lives in Core/Encoding/csv.jet.
 #[derive(Clone, Debug)]
 pub struct __QueryRead {
     pub size: u64,

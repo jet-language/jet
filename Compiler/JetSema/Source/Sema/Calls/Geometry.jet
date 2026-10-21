@@ -30,7 +30,7 @@ struct SemaCallGeometryTransformParts {
 fn sema_geometry_nominal_leaf(name: String) -> String Never! {
     if !core_source_owns_type(name) -> return name.copy()
     parts :: name.split("::").to_list()
-    if parts.len() >= 2 && parts[parts.len() - 2] == "Core/math/math.jet" -> return parts[parts.len() - 1].copy()
+    if parts.len() >= 2 && core_identity_module(name) == (Val("core.math")) -> return parts[parts.len() - 1].copy()
     name.copy()
 }
 

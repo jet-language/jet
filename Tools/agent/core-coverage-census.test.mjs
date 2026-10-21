@@ -6,11 +6,11 @@ import { dirname, join } from "node:path";
 import { callSites, census, embeddedPrograms, main, moduleName, publicFunctions, ratchetDecision } from "./core-coverage-census.mjs";
 
 const rows = [
-  ...publicFunctions("Core/text/text.jet", `fn trim(x: String) -> String Never! { x }
+  ...publicFunctions("Core/Text/Text.jet", `fn trim(x: String) -> String Never! { x }
     fn split<T>(x: T) -> String Never! { "" }
     fn unused() {}`),
-  ...publicFunctions("Core/math/math.jet", "fn trim() -> Int Never! { 1 }"),
-  ...publicFunctions("Core/crypto/crypto.jet", `struct Hasher {
+  ...publicFunctions("Core/Math/Math.jet", "fn trim() -> Int Never! { 1 }"),
+  ...publicFunctions("Core/Crypto/Crypto.jet", `struct Hasher {
     fn new() -> Hasher Never! { {} }
     fn digest(self) -> String Never! { "" }
   }
@@ -19,11 +19,11 @@ const rows = [
 const ids = (source, context) => callSites(source, rows, context).map((call) => call.id);
 
 test("module layout matches Core module keys, including app and nested roots", () => {
-  assert.equal(moduleName("Core/text/text.jet"), "core.text");
-  assert.equal(moduleName("Core/data/sketch/cms.jet"), "core.data.sketch.cms");
-  assert.equal(moduleName("Core/web/storage/local.jet"), "core.web.storage.local");
-  assert.equal(moduleName("Core/app/app.jet"), "app");
-  assert.equal(moduleName("Core/mod/mod.jet"), "core.mod");
+  assert.equal(moduleName("Core/Text/Text.jet"), "core.text");
+  assert.equal(moduleName("Core/Data/Sketch/Cms.jet"), "core.data.sketch.cms");
+  assert.equal(moduleName("Core/Web/Storage/Local.jet"), "core.web.storage.local");
+  assert.equal(moduleName("Core/App/App.jet"), "app");
+  assert.equal(moduleName("Core/Mod/Mod.jet"), "core.mod");
 });
 
 test("every public function, including same-named methods, is inventoried", () => {

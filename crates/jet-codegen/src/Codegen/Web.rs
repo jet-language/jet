@@ -293,7 +293,7 @@ fn web_tzdb_files() -> Result<Vec<(String, Vec<u8>)>, std::io::Error> {
         Ok(())
     }
 
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Core/time/tzdb");
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Core/Time/tzdb");
     let mut files = Vec::new();
     collect(&root, &root, &mut files)?;
     files.sort_by(|left, right| left.0.cmp(&right.0));

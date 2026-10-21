@@ -86,8 +86,8 @@ fn imported_module_type_resolves_associated_function() {
 #[test]
 fn sealed_core_module_type_resolves_associated_function() {
     let errors = check_sources(&[
-        ("<corelib>/Core/encoding/xml_engine.jet", "__core_encoding_xml_engine", "struct StreamScanner { value: Int }\nimpl StreamScanner { fn new(value: Int) -> StreamScanner Never! { StreamScanner{value: value} } }\n", &[]),
-        ("<corelib>/Core/encoding/xml.jet", "core_xml", "use __core_encoding_xml_engine as engine\nfn value() -> Int Never! { scanner :: engine.StreamScanner.new(7)\n scanner.value }\n", &[]),
+        ("<corelib>/Core/Encoding/XmlEngine.jet", "__core_encoding_xml_engine", "struct StreamScanner { value: Int }\nimpl StreamScanner { fn new(value: Int) -> StreamScanner Never! { StreamScanner{value: value} } }\n", &[]),
+        ("<corelib>/Core/Encoding/Xml.jet", "core_xml", "use __core_encoding_xml_engine as engine\nfn value() -> Int Never! { scanner :: engine.StreamScanner.new(7)\n scanner.value }\n", &[]),
         ("pkg/main.jet", "main", "fn run() {}\n", &[]),
     ]);
     assert!(errors.is_empty(), "{errors:?}");

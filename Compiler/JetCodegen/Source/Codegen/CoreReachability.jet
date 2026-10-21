@@ -48,7 +48,7 @@ fn jet_codegen_core_source_path(path: String, relative: String) -> Bool Never! {
 }
 
 fn jet_codegen_string_format_source(function: TFunc) -> Bool Never! {
-    function.module_identity.starts_with("<corelib>/") && jet_codegen_core_source_path(function.source_file, "Core/text/fmt.jet") && jet_codegen_core_reach_is_top_level(function.kind)
+    function.module_identity.starts_with("<corelib>/") && jet_codegen_core_source_path(function.source_file, "Core/Text/Fmt.jet") && jet_codegen_core_reach_is_top_level(function.kind)
 }
 
 fn jet_codegen_precise_source_family(name: String, owner: String, prefix: String) -> Bool Never! {
@@ -59,7 +59,7 @@ fn jet_codegen_precise_source_family(name: String, owner: String, prefix: String
 
 // Rust `is_core_precise_source_target`: a precise operation (Int.abs and the
 // Fraction, Decimal and Complex registry; Float has no source helper) lowers
-// to its `Core/math/math.jet` helper by name (`jet_codegen_lower_precise_builtin`)
+// to its `Core/Math/Math.jet` helper by name (`jet_codegen_lower_precise_builtin`)
 // from sites with no keyed call: registered `core.math.fraction`/`decimal`
 // constructors, constants and synthesized operations. That closed registry is
 // rooted, not every `__` helper in the file.
@@ -69,7 +69,7 @@ fn jet_codegen_precise_source_name(name: String) -> Bool Never! {
 }
 
 fn jet_codegen_precise_source_target(function: TFunc) -> Bool Never! {
-    function.module_identity.starts_with("<corelib>/") && jet_codegen_core_source_path(function.source_file, "Core/math/math.jet") && jet_codegen_core_reach_is_top_level(function.kind) && jet_codegen_precise_source_name(function.name)
+    function.module_identity.starts_with("<corelib>/") && jet_codegen_core_source_path(function.source_file, "Core/Math/Math.jet") && jet_codegen_core_reach_is_top_level(function.kind) && jet_codegen_precise_source_name(function.name)
 }
 
 fn jet_codegen_core_reach_add(keys: &[String], key: String) Never! {
@@ -225,7 +225,7 @@ fn jet_codegen_core_reach_tree_keys(expression: TExpr, functions: [TFunc], keys:
     tir_each_expr_child(expression, (child: TExpr) -> jet_codegen_core_reach_tree_keys(child, functions, &keys, fmt_keys))
 }
 
-// The `Core/math/math.jet` helper one checked expression lowers to by name
+// The `Core/Math/Math.jet` helper one checked expression lowers to by name
 // (`jet_codegen_lower_precise_builtin`): a precise operation, `Int.abs`, or a
 // registered `core.math.fraction`/`decimal` constructor.
 fn jet_codegen_precise_expr_helper(expression: TExpr) -> String? Never! {
@@ -356,10 +356,10 @@ fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core
     assert(jet_codegen_precise_source_name("__complex_abs"))
     assert(!jet_codegen_precise_source_name("__decimal_normalized"))
     assert(!jet_codegen_precise_source_name("__fraction_"))
-    assert(jet_codegen_core_source_path("Core/math/math.jet", "Core/math/math.jet"))
-    assert(jet_codegen_core_source_path("/toolchain/Core/math/math.jet", "Core/math/math.jet"))
-    assert(jet_codegen_core_source_path("<corelib>/Core/text/fmt.jet", "Core/text/fmt.jet"))
-    assert(!jet_codegen_core_source_path("/toolchain/MyCore/text/fmt.jet", "Core/text/fmt.jet"))
+    assert(jet_codegen_core_source_path("Core/Math/Math.jet", "Core/Math/Math.jet"))
+    assert(jet_codegen_core_source_path("/toolchain/Core/Math/Math.jet", "Core/Math/Math.jet"))
+    assert(jet_codegen_core_source_path("<corelib>/Core/Text/Fmt.jet", "Core/Text/Fmt.jet"))
+    assert(!jet_codegen_core_source_path("/toolchain/MyCore/text/fmt.jet", "Core/Text/Fmt.jet"))
 }
 
 #Test("A comptime closure finds the precise helper a nested literal lowers to") {

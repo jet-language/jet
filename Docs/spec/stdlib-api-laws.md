@@ -586,7 +586,7 @@ the explicit write-access marker; cancellation does not consume the stream.
 ## Testing evidence source policy
 
 `core.testing.golden` and `fixture` own success/failure selection and exact
-evidence messages in `Core/testing/testing.jet`. Golden diffs compare at most
+evidence messages in `Core/Testing/Testing.jet`. Golden diffs compare at most
 64 KiB and 256 inclusive-newline lines per input; their delete-first LCS tie
 rule and UTF-8-safe 32 KiB output limit preserve the existing native policy.
 The host supplies only file-read facts, failure TLS transport, and selected
@@ -617,7 +617,7 @@ callback/handle-unregister/wait/close/scope-restore order is unchanged.
 
 The private state and locale fields, seed-bit conversion, exact locale salt,
 fixed draw order, tables, Display, Debug, clone, and equality belong to
-`Core/testing/testing.jet::Fake`. The seeded helper is the existing source
+`Core/Testing/Testing.jet::Fake`. The seeded helper is the existing source
 `core.math.random.__seeded_int`, not another RNG or native Fake carrier.
 
 Removed native routes → source replacements (reviewed pre-removal line anchors):
@@ -657,7 +657,7 @@ live timeout/locked conversions, and included AOT providers are unchanged.
 
 ### Realtime receipt presentation
 
-`Core/rt/rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
+`Core/Rt/Rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
 `frames_per_buffer`. The first two preserve the eight native receipt fields'
 fixed labels, order, punctuation and whitespace (`Realtime.rs:119-144`
 before removal); the last returns `requested_frames` (`Realtime.rs:147-149`).
