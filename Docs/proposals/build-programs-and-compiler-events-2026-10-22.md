@@ -3,7 +3,8 @@
 Status: discussion document, 2026-10-22, revised the same day after owner
 direction. The owner has set the direction for question 1: `Build`, `Dev` and
 `Test` become Core types, and `BuildPlan` folds into `Build`. Question 2 is
-still open. Every spelling below is an illustration; a chosen surface goes on
+still open on its exact surface, but the goal is set: full Jai power. Every
+spelling below is an illustration; a chosen surface goes on
 a Tower ballot before any code. This document replaces the earlier
 "verification and build programs" proposal, which answered the wrong
 question.
@@ -12,9 +13,9 @@ The document covers two language questions:
 
 1. How `fn build(b: Build)`, `fn dev(d: Dev)` and `fn test(t: Test)` receive
    real Core types, and why they don't already.
-2. How user code should take part in compilation. Earlier drafts compared a
-   Jai-style message loop, hooks, and a hybrid. This revision starts again
-   from what users need and proposes something smaller than any of them.
+2. How Jet offers full Jai-level compiler control (message loop, adding and
+   rewriting code, macros, unrestricted compile-time execution) while
+   keeping code easy to reason about and the power easy to limit and audit.
 
 ## 1. Build, Dev and Test as Core types
 
@@ -182,127 +183,189 @@ method must be evaluator-callable with the same meaning as the compiled form.
 That is the existing rule for compile-time code, not a new one. The cutover
 removes the host-method router in one change, per the greenfield rule.
 
-## 2. Taking part in compilation, from first principles
+## 2. Full compiler control, designed the Jet way
 
-### What people actually need
+### The goal
 
-Ask what a programmer is trying to get done, not which compiler mechanism to
-expose. Four jobs come up again and again:
+Anything Jai's metaprogramming can do, Jet should be able to do. That
+includes:
 
-|Job|Examples|Jet today|
-|---|---|---|
-|Collect: build a table from marked declarations|HTTP routes, CLI commands, plugin registries, game systems, migrations|Missing|
-|Derive: write per-type code|Serialize, compare, debug print|Derives|
-|Bind: turn an outside file into code|Protobuf, C headers, SQL schemas|`b.generate`, generated modules|
-|Enforce: apply a project rule|No allocation in `#Hot` functions; every public error has a code|Missing|
+- driving the compiler from a program;
+- receiving a message for each declaration as it is checked;
+- adding code at any point before checking ends;
+- rewriting the body of a checked function;
+- expanding macros in place;
+- running arbitrary code at compile time;
+- controlling build options and outputs.
 
-Only Collect and Enforce are missing. Neither one needs to change the
-program or invent new declarations. Collect produces a value, a table.
-Enforce produces errors. That observation is the whole design.
+Read-only reflection plus additive generation is not enough.
 
-### The rule that keeps it readable
+The question is how to offer that power without giving up what Jet ranks
+highest: code a reader can reason about, a fast and parallel compiler,
+deterministic builds, editor parity, and power that a team can see, limit
+and audit.
 
-**Nothing runs, and no code exists, unless a line you can read asks for it.**
+### Four rules that make the power safe to have
 
-A reader who sees `ROUTES` can jump to its definition and find the one line
-that builds it. No code runs because a library was imported. No function
-appears that no file contains. Message loops and hooks both break this rule:
-with hooks, the reason a piece of behavior exists lives in a library you
-never call; with a loop, it lives in a stateful event handler you have to
-simulate in your head.
+1. **Power is a value you hold.** Full control is one Core value, `Compiler`.
+   Only the root build program can obtain it. Anything else gets it only when
+   it is passed in explicitly. Searching for `Compiler` finds every place in a
+   project that has the power.
+2. **Every change is visible.** Every added, rewritten or expanded piece of
+   code records who made it. `jet expand` prints the final code of any
+   function. The editor shows a "rewritten by" lens. A diagnostic inside
+   rewritten code points both at the source and at the line that rewrote it.
+3. **The compiler still checks everything.** Added and rewritten code goes
+   back through sema like hand-written code. Memory safety, type safety and
+   `#Unsafe` auditing hold for metaprograms exactly as for programs. Codegen
+   only ever sees checked code.
+4. **You pay only for what you watch.** The compiler pauses only the
+   declarations a metaprogram asked to see. Everything else keeps compiling
+   in parallel.
 
-### Collect: a query that returns a list
+### The ladder: one mechanism, three heights
 
-A program asks for its own marked declarations with one compile-time call and
-gets back an ordinary list of values:
+There is one mechanism, the compiler message stream, reached through
+`Compiler`. Everything else is an ordinary Core function built on it, so a
+user climbs only as high as the job needs.
+
+**Height 1: everyday forms (no `Compiler` needed).**
+
+Derives, `b.generate`, and two small library functions cover most real uses:
 
 ```jet
 #Route("GET /users/{id}")
 fn get_user(id: Int) -> User { … }
 
-#Route("POST /users")
-fn create_user(body: NewUser) -> User { … }
-
-ROUTES :: Program.functions(marked: Route)
+ROUTES :: Program.functions(marked: Route)      // a plain list
 
 fn main() {
     web.serve(port: 8080, routes: ROUTES)
 }
 ```
 
-Each element holds the function value and the marker's checked arguments.
-`web.serve` takes a plain list. It does not know where the list came from,
-and a test can pass it a hand-written one. A CLI library, a plugin registry
-and a game's system list all work the same way: mark the declarations, ask
-for them, and pass the list to a normal function.
+```jet
+fn build(b: Build) {
+    loop f in b.program().functions(marked: Hot) {
+        if f.allocates -> b.error(at: f.span, what: "`{f.name}` allocates", why: "`#Hot` functions must not allocate", fix: "move the allocation out or remove `#Hot`")
+    }
+}
+```
 
-The same query exists for types (`Program.types(marked: …)` and
-`Program.types(implementing: …)`), which covers registries keyed by type.
+These are implemented in Core on top of the message stream. They are not a
+second mechanism.
 
-### Enforce: the build program reports errors
+**Height 2: macros and inserted code.**
 
-Project rules live in `fn build` as ordinary code over the checked program,
-and fail the build with Jet's usual what, why and fix:
+A macro is a compile-time function from code to code. It is called with a
+`#` so a reader always knows the call expands:
+
+```jet
+macro retry(times: Int, body: Code) -> Code {
+    #code {
+        loop attempt in 1...#(times) {
+            if #(body) == .Ok(value) -> break value
+        }
+    }
+}
+
+user :: #retry(3) { fetch_user(id) }
+```
+
+`#insert` places a `Code` value computed at compile time, as Jai's `#insert`
+does. `Code` is a typed syntax tree. It can be written as a quote,
+`#code { … }` with `#( … )` splices, or built as data, and every name in it
+resolves where the macro was written (hygiene) unless it is spliced in.
+
+**Height 3: the compiler loop, with full control (`Compiler` only).**
 
 ```jet
 fn build(b: Build) {
     app :: b.executable("app", sources: b.find("Source/**/*.jet"))
+    meta :: b.compiler(app)
 
-    loop f in b.program().functions(marked: Hot) {
-        if f.allocates {
-            b.error(at: f.span, what: "`{f.name}` allocates", why: "`#Hot` functions must not allocate", fix: "move the allocation out of the function or remove `#Hot`")
+    loop message in meta.messages(watch: .Functions(marked: Traced)) {
+        if message == {
+            .Checked(.Function(f)) -> {
+                meta.rewrite_body(f, #code {
+                    trace.enter(#(f.name))
+                    defer trace.exit(#(f.name))
+                    #(f.body)
+                })
+            }
+            .Stuck(waiting) -> meta.add(module: "generated.handlers", code: handlers_for(waiting))
+            .Done -> break
+            else -> {}
         }
     }
-
-    b.default(app)
 }
 ```
 
-A library can ship a rule as a function, `web.check_routes(b)`, and the
-application turns it on by calling it. The call is the audit trail: a
-reviewer reads one file to see every rule a project enforces.
+This is Jai's `compiler_wait_for_message` loop. `Checked` matches Jai's
+TYPECHECKED message. `Stuck` matches TYPECHECKED_ALL_WE_CAN: the compiler
+cannot continue until someone adds the names it is waiting for.
+`rewrite_body` matches `compiler_modify_procedure`. `meta.add` matches
+`add_build_string`. Build options, targets, outputs and post-build steps are
+methods on `Build`, which section 1 already makes a Core type.
 
-### Why there are no events, rounds or ordering rules
+A library can offer a whole metaprogram, but only as a function that takes
+the power from the application:
 
-Collect queries read declarations (names, signatures and markers), never
-function bodies, and they return values, not declarations. Nothing a query
-returns can change what another query sees, so:
+```jet
+trace.install(meta, marked: Traced)
+```
 
-- **There is one pass.** The compiler checks declarations, answers queries,
-  then checks bodies. There are no rounds and no fixed point.
-- **It stays parallel and cached.** A query is a pure function of the
-  declarations it reads, and compile-time calls are already cached by their
-  inputs. The editor and the build compute the same answer.
-- **It is deterministic.** Results come back in declaration-path order.
-- **It cannot loop.** A declaration whose signature depends on a query result
-  is an ordinary cycle error, reported like any other.
+That line is the entire audit trail for tracing.
 
-Enforce runs once, after checking is complete. It sees full facts, including
-inferred effects, and can only add errors.
+### How each Jai weakness is designed away
 
-### What it deliberately leaves out
+|Jai weakness|Jet design|
+|---|---|
+|The loop serializes compilation|`watch:` filters what the loop sees. Only watched declarations, and the code that depends on them, wait for the loop; everything else compiles in parallel.|
+|Message order depends on timing|Messages arrive in a fixed order: by phase, then by declaration path. The same program always gives the same message sequence on every machine.|
+|One big hand-merged metaprogram|Libraries ship metaprograms as ordinary functions that take `Compiler` (`trace.install(meta)`). The application composes them by calling them, in the order it writes.|
+|Hard to see what code really runs|Provenance on every node, `jet expand`, the editor lens, and diagnostics that name both the source line and the rewriting line.|
+|Rewritten code can break anything|It is re-checked by sema. A rewrite that introduces unsafe code needs `#Unsafe` like any other code. Codegen never sees unchecked code.|
+|Compile-time code can do anything to the machine|Compile-time effects are checked. Files, network, processes and FFI at compile time need an explicit grant (`b.allow(.Files, .Network)`), and every granted read becomes a cache input.|
+|The editor cannot run the loop|The loop runs in the language server in the background, with the same inputs and the same fixed message order, and is cached by the facts it read. The editor shows the same final code as the build.|
+|Incremental builds rerun everything|The compiler records which messages the loop received and what it did. If no watched declaration changed, it replays the recorded actions without running the loop.|
+|Errors stop the metaprogram|The loop also receives `.Error` messages and can keep going. A failing macro or rewrite becomes a diagnostic row, and the compiler continues with everything else.|
+|Anyone can rewrite anyone's code|Rewriting a function from another package requires the application to say so: `meta.allow_rewrite(package: "orm")`. A team can forbid that, or forbid `Compiler` entirely, in the package manifest, and `jet audit meta` lists every power in use with its location.|
 
-- **Generating new functions or types from the program.** Every case found so
-  far is a table (Collect) or per-type code (Derive). S26 already draws the
-  line here. A real counterexample gets its own ballot.
-- **Code that runs because you imported a library.** That convenience is what
-  makes hook systems hard to read and audit.
-- **A message loop.** It serializes the compiler and asks the reader to run a
-  state machine in their head. D-METAMUTATE1 rejected it, and nothing here
-  reopens it.
+### Control for teams
 
-### What this replaces
+The package manifest sets the ceiling, and CI can enforce it:
 
-Earlier revisions of this document compared a message loop, hooks, and a
-hybrid of the two. All three answered "how should user code join the
-compiler's pipeline?" The better question is "what does the user want to
-produce?" Collect and Enforce answer it with one query, one error method, and
-no new execution model.
+```toml
+[meta]
+compiler = "root"        # "none" | "root" (default) | "any"
+rewrite = "own-package"  # "none" | "own-package" | "any"
+compile-time-effects = ["Files"]
+```
+
+`jet audit meta` prints every `Compiler` use, every macro, every rewrite and
+every compile-time effect grant. It shows where each one is and which
+declarations it touched.
+
+### What this changes in existing rulings
+
+Full control reopens three standing rulings: D-METAMUTATE1 (AST mutation,
+message loop and user macros), S26 (compile-time code never creates or
+selects types), and the metaprogramming ceiling. The owner has set the goal;
+the exact surface still goes on a Tower ballot. The ballot should cover:
+
+- the `Compiler` value and the message set;
+- `Code`, `#code`, `#( … )`, `macro` and `#insert`;
+- `rewrite_body` and its cross-package rule;
+- the manifest keys.
 
 ### Questions for the owner
 
-1. Are `Program.functions(marked:)`, `Program.types(marked:)`,
-   `Program.types(implementing:)`, `b.program()` and `b.error(...)` the right
-   spellings?
-2. Is "no new declarations generated from program facts" the right line?
-3. Should project rules live in `fn build`, in `fn test`, or in both?
+1. Is "one stream, three heights" the right shape, with heights 1 and 2
+   implemented as Core library code over height 3?
+2. Do you want macros as a `macro` function called with `#name(...)`, or
+   another spelling?
+3. Should cross-package rewrites be allowed by default (as in Jai) or require
+   `allow_rewrite`?
+4. Should the manifest default be `compiler = "root"`, or should a fresh
+   package start with `compiler = "none"`?
