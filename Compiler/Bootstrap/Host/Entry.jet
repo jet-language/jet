@@ -21,11 +21,11 @@ use jet_cli.[
     jet_cli_compile_request,
     jet_cli_keep_going_enabled,
     jet_cli_keep_going_report,
+    jet_cli_lowering_inputs,
     jet_cli_runtime_library,
     jet_cli_native_c_sources,
     jet_cli_native_executable,
     jet_cli_native_level,
-    jet_cli_native_lowering_rows,
     jet_cli_runtime_key,
     JET_CLI_RUNTIME_PACK_FILE,
 ]
@@ -66,19 +66,19 @@ fn jet_bootstrap_library_object(request: ^JetDriverCompileRequest, prefix: Strin
 
 // The native feed is `jet build`'s own native route (Host.jet
 // `jet_cli_native_executable`) at `build`'s level (O1, jet_cli_native_level), so
-// the factory's stage1 and the CLI's stage2 get identical passes, link inputs,
-// order and flags.
+// the factory's stage1 and the CLI's stage2 get identical IR, link inputs, order and flags.
 // JET_RUNTIME_PACK names `<jet-runtime>/<key>/jet_runtime.pack.o` inside a
 // packaged runtime directory whose `native.key` is `<key>`; that directory
 // is the one `jet build` finds beside `jet`. A program with a C closure links
 // its sibling jet_runtime_jet.o plus the closure, exactly as `jet build` does.
-// Without JET_RUNTIME_PACK the feed still writes `{prefix}.o` (lowering
-// discovery), then refuses to link.
+// Without JET_RUNTIME_PACK the feed still writes `{prefix}.o` (IR build and
+// selection discovery), then refuses to link.
 // Neither an emitted Rust program nor a Rust MIR conversion enters this path.
-// Under JET_KEEP_GOING the feed runs whenever the front end produced MIR, even
-// with census rows: each native lowering, object and link finding is one more
-// row (jet_cli_native_executable `census`), appended to the result's rows and
-// to JET_KEEP_GOING_REPORT, so a failed native step reports every defect.
+// Under JET_KEEP_GOING the feed runs whenever the front end produced its
+// checked inputs, even with census rows: each IR build, selection, object and
+// link finding is one more row (jet_cli_native_executable `census`),
+// appended to the result's rows and to JET_KEEP_GOING_REPORT, so a failed
+// native step reports every defect.
 fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
     // Capture only the C declarations before the request moves into the compiler.
     sources :: jet_cli_native_c_sources(request.authorized_sources) ?? return jet_bootstrap_native_escaped([String]{}, "native feed cannot resolve C sources: {err.message}")
@@ -92,22 +92,22 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
     }
     // copy: a three-field row; the request moves into the compiler below.
     compiler_threads :: request.compiler_threads.copy()
-    result := jet_bootstrap_mir(^request) ?? return jet_bootstrap_native_escaped([String]{}, "the native front end failed outside every compile stage")
+    front := jet_cli_lowering_inputs(^request, None)
+    result := ^front.compile
     result.compiler_threads = compiler_threads
     keep_going :: jet_cli_keep_going_enabled()
-    if keep_going && result.mir == None -> return result
+    if keep_going && front.inputs == None -> return result
     if !keep_going && (!result.complete || result.internal_problem != None) -> return result
-    if result.mir == None -> return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without MIR")
+    inputs := ^front.inputs ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without its checked functions")
     census := [String]{}
-    native :: jet_cli_native_executable(&result, sources, jet_cli_native_level("build", false), runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, None, &census)
+    native :: jet_cli_native_executable(result, ^inputs, sources, jet_cli_native_level("build", false), runtime_dir, "{prefix}.o", "{prefix}.exe", keep_going, &census)
     failure :: native ?? return jet_bootstrap_native_census(^result, census)
     if failure == {
-        .Lowering(functions, messages, _) -> { cli_files.write("{prefix}.issues", jet_cli_native_lowering_rows(functions, messages, "\t").join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native lowering findings") }
-        .Object(errors, _) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native object findings") }
+        .Build(rows) -> { cli_files.write("{prefix}.issues", rows.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native IR build findings") }
+        .Object(errors) -> { cli_files.write("{prefix}.issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native object findings") }
         .Link(errors) -> { cli_files.write("{prefix}.pack-issues", errors.join("\n")) ?? return jet_bootstrap_native_escaped(result.keep_going_rows, "cannot write native link findings") }
         .RustForeign(error) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed foreign Rust: {error.what}") }
         .NoEntry -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "the native front end finished without an entry") }
-        .LostEntry -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native lowering lost its entry") }
         .Write(what) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed: {what}") }
         .RuntimeKey(what) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, if runtime_dir == "" -> "native feed requires JET_RUNTIME_PACK" else -> "native feed: {what}") }
         .Runtime(what) -> { return jet_bootstrap_native_escaped(result.keep_going_rows, "native feed: {what}") }

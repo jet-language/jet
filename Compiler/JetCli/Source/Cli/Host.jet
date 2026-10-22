@@ -7,13 +7,7 @@ use core.sys as cli_sys
 use core.term as cli_term
 use core.time as cli_time
 use jet_backend.[
-    LIRFunctionID,
-    LIRLowering,
-    LIRModule,
-    lir_lower_entry_in_place,
-    lir_lower_entry_keep_going_in_place,
     x64_link_executable,
-    x64_relocatable_object_owned,
 ]
 use jet_driver.[
     JetDriverDevConfig,
@@ -23,11 +17,9 @@ use jet_driver.[
     JetDriverCompileMode,
     JetDriverCompileRequest,
     JetDriverCompileResult,
-    JetDriverCompileTarget,
     JetDriverDocModule,
-    JetDriverForeignLinkFacts,
+    JetDriverLoweringInputs,
     JetDriverRustForeignError,
-    JetDriverRustForeignFacts,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USAGE,
@@ -46,11 +38,8 @@ use jet_eval.[
     jet_eval_retire_result,
 ]
 use jet_foundation.[
-    CompilerTraceSink,
     CtValue,
     Diagnostic,
-    MIRFunctionID,
-    MIRProgram,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     GateLedger,
@@ -65,12 +54,24 @@ use jet_foundation.[
     diagnostic_render_all,
     gate_ledger_push,
     mir_sha256_hex,
+    compiler_transfer_rows,
     CompilerThreads,
+    TConstantDef,
+    TImplDef,
+    TTypeDef,
+]
+use jet_ir.[
+    IRFunction,
+    IROp,
+    ir_build_program,
+    ir_optimize_module,
+    ir_x64_compile_module,
+    ir_x64_object,
 ]
 use jet_parser.[
     jet_format_source,
 ]
-use jet_sema.[sema_user_template_ct_value]
+use jet_sema.[SemaCheckedForeignFunction, sema_user_template_ct_value]
 use jet_pkg_model.[
     ManifestEntry,
     PackageFacts,
@@ -167,18 +168,18 @@ fn jet_cli_write_notice(notice: String) {
     &stderr_handle.write(notice).drop("jet stderr")
 }
 
-// `jet emit --<tier> <file>`. `--ast` parses the file (Emit.jet). `--mir` and
-// `--lir` check it in Run mode (an entry with no `fn run` is E0101); errors
-// stop them with the problem count; visible lints (not a11y) go to stderr
-// without a summary; they print their EmitTree.
+// `jet emit --<tier> <file>`. `--ast` parses the file (Emit.jet). `--ir`
+// checks it in Run mode (an entry with no `fn run` is E0101); errors stop it
+// with the problem count; visible lints (not a11y) go to stderr without a
+// summary; it prints its EmitTree.
 fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if tier == "ast" -> return jet_cli_emit_ast(file, source, color, json, function)
     requires_run :: jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_entry(file, color, false, None, JetDriverCompileMode.Program, None, trace_sink)
-    if compiled == {
-        .Refused(refusal) -> output = ^refusal
-        .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_emit_tier_result(file, source, color, json, requires_run, tier, function, result, snapshot))
+    compiled := jet_cli_compile_executable_file(file, color, None, false, trace_sink)
+    if ^compiled == {
+        .Refused(refusal) -> output = refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_emit_ir_result(file, source, color, json, requires_run, function, result, ^inputs, snapshot))
     }
     output
 }
@@ -300,6 +301,9 @@ JET_CLI_RUNTIME_PACK_FILE :: "jet_runtime.pack.o"
 JET_CLI_RUNTIME_OBJECT_FILE :: "jet_runtime_jet.o"
 // Written by packaging: the toolchain's native runtime key for every profile.
 JET_CLI_RUNTIME_KEY_FILE :: "native.key"
+// Written by packaging beside the pack: every symbol the runtime exports, one
+// per line.
+JET_CLI_RUNTIME_EXPORTS_FILE :: "runtime.exports"
 
 // jet-runtime/ beside the `jet` executable.
 fn jet_cli_runtime_dir() -[Env]> String Never! {
@@ -322,12 +326,11 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
 enum JetCLINativeFailure {
     RustForeign(error: JetDriverRustForeignError)
     NoEntry
-    // One row per lowering finding: its function and its message. `dump` is
-    // the directory holding the faulting functions' MIR and LIR, if written.
-    Lowering(functions: [String], messages: [String], dump: String?)
-    LostEntry
-    // `dump` is the directory holding the failing functions' LIR, if written.
-    Object(errors: [String], dump: String?)
+    // One row per function the IR builder can't build yet, then one per
+    // selection finding.
+    Build(rows: [String])
+    // The object writer's findings.
+    Object(errors: [String])
     // A build-directory write; `what` names the path and the cause.
     Write(what: String)
     RuntimeKey(what: String)
@@ -336,198 +339,138 @@ enum JetCLINativeFailure {
     Link(errors: [String])
 }
 
-// The lowering findings as "{function}{separator}{message}" rows.
-fn jet_cli_native_lowering_rows(functions: [String], messages: [String], separator: String) -> [String] Never! {
-    loop index in 0..<functions.len() -> "{functions[index]}{separator}{messages[index]}"
-}
-
-// The report line that points at a fault dump (jet_cli_emit_fault_dump,
-// jet_cli_emit_fault_lir); `tiers` names what it holds.
-fn jet_cli_native_dump_note(dump: String?, tiers: String) -> String Never! {
-    directory :: dump ?? return ""
-    "\nthe {tiers} of the failing functions are in {directory}"
-}
-
 // One JET_KEEP_GOING census row (phase, item, code, message, span), in the
 // driver's TSV shape (jet_driver_keep_going_row).
 fn jet_cli_keep_going_row(phase: String, item: String, message: String) -> String Never! {
     "{phase}\t{jet_driver_keep_going_field(item)}\tE2104\t{jet_driver_keep_going_field(message)}\t-"
 }
 
-// The one native executable route of `jet build` and the bootstrap native
-// feed (Compiler/Bootstrap/Host/Entry.jet): lower checked MIR to LIR, apply
-// the profile passes, write `object_path`, realize the program's C closure
-// (c@path archives, #FFI(c) inline bodies, the musl platform), then use the
-// in-process linker to bind the packaged runtime of `runtime_dir` into a
-// static x86-64 executable at `executable_path` (the one compiled
-// runtime). Link inputs are always [object, runtime, C closure...]; a program
-// with a C closure links the Jet-only runtime object instead of the pack.
-// `keep_going` (JET_KEEP_GOING, the bootstrap feed only): a function whose
-// lowering or compilation fails is a trap and every finding is one row of
-// `census`; lowering and object findings no longer stop the route while it
-// still has an entry and object bytes, so each later phase reports too.
-// `fault_dump` (`jet build`: `<executable>.ice`): a lowering failure also
-// writes the failing functions' MIR and LIR there (jet_cli_emit_fault_dump),
-// an object failure their final LIR (jet_cli_emit_fault_lir), named in the
-// report.
-fn jet_cli_native_executable(result: &JetDriverCompileResult, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, fault_dump: String?, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
-    // The checked MIR is lowered where the result holds it: native lowering
-    // indexes it in place (lir_lower_entry_in_place), so neither a local
-    // binding nor the lowering copies the whole program for the length of
-    // the native route. Only a program with a Rust foreign helper owns an
-    // attached copy.
-    entry_function :: result.entry_function
-    rust_foreign :: result.rust_foreign
-    fronts := [JetCLINativeFront]{}
-    if &result.mir == {
-        None -> {}
-        .Val(program) -> {
-            if result.trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
-            helper := JetCLIRustForeignArtifact?{None}
-            if jet_cli_rust_foreign_realize(rust_foreign, result.foreign_link) == {
-                .Ok(realized) -> helper = realized
-                .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
-            }
-            attached := jet_cli_rust_foreign_attached(helper, program) ?? return Val(JetCLINativeFailure.RustForeign{error: err})
-            if result.trace_sink == .Val(sink) -> sink.end("native.rust_foreign", attached.len())
-            rust_helper :: if helper == .Val(artifact) -> Val(jet_cli_rust_foreign_archive(artifact)) else -> None
-            stopped :: if attached.len() == 1 -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &attached[0], result.foreign_link, rust_helper, sources, runtime_dir, keep_going, fault_dump, &fronts, &census) else -> jet_cli_native_front(entry_function, result.trace_sink, result.compiler_threads, &program, result.foreign_link, rust_helper, sources, runtime_dir, keep_going, fault_dump, &fronts, &census)
-            if stopped != None -> return stopped
-        }
-    }
-    front := &fronts.pop() ?? return Val(JetCLINativeFailure.NoEntry)
-    // Nothing reads the checked MIR after the lowering and the C inputs
-    // (jet_cli_native_front), and no caller reads it after the route: the
-    // whole program is released before the object compile instead of
-    // staying resident through native.object and native.link (about 9 GB of
-    // the self-host unit's 34 GB peak).
-    result.mir = None
-    jet_cli_native_back(^front, result.trace_sink, result.compiler_threads, level, runtime_dir, object_path, executable_path, keep_going, fault_dump, &census)
-}
-
-// None, or the one copy of `program` the realized Rust foreign helper
-// `helper` attaches to.
-fn jet_cli_rust_foreign_attached(helper: JetCLIRustForeignArtifact?, program: MIRProgram) -> [MIRProgram] JetDriverRustForeignError! {
-    if helper == {
-        // copy: the program stays the compile result's (owner: result.mir, read by the native
-        // route and the caller afterwards); the Rust foreign helper attaches to its own
-        // rewritten program (owner: the returned list). Only programs with a helper pay this.
-        .Val(artifact) -> { return Ok([MIRProgram]{jet_cli_rust_foreign_attach(artifact, program.copy())}) }
-        .None -> { return Ok([MIRProgram]{}) }
-    }
-}
-
+// The one native executable route of `jet build`, `jet run` (every profile)
+// and the bootstrap native feed (Compiler/Bootstrap/Host/Entry.jet): build
+// the slot IR of every checked function the entry reaches (Compiler/JetIR),
+// select x86-64 for it, write `object_path`, realize the program's C closure
+// (c@path archives, #FFI(c) inline bodies, a Rust foreign helper's archive,
+// the musl platform), then use the in-process linker to bind the packaged
+// runtime of `runtime_dir` into a static x86-64 executable at
+// `executable_path` (the one compiled runtime). Link inputs are always
+// [object, runtime, C closure...]; a program with a C closure links the
+// Jet-only runtime object instead of the pack.
+// A function the builder can't build becomes one trap, so selection still
+// runs over the whole module and the failure lists every builder and
+// selection finding. `level` is the IR passes' optimization level
+// (jet_cli_native_level). `keep_going` (JET_KEEP_GOING): every finding is
+// one row of `census` instead, and the route goes on
+// while it still has object bytes, so each later phase reports too.
 // JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
-// trace sink (`trace_sink`, the result's): `native.lower` (MIR to LIR, on the
-// threads `threads` admits), `native.foreign` (the C closure, the last reader
-// of the MIR), `native.object` (per function on the threads `threads`
-// admits: the LIR passes of `level`, the one LIR lint, x64 selection and
-// encoding; then the object) and `native.link`; before them `native.sources`
-// (the C sources the snapshot declares) and `native.rust_foreign` (a Rust
-// foreign helper's realization). A span a failure returns from stays open.
-// The lowered module moves into the object compile, which replaces each
-// function's body by its final form and releases it once compiled and
-// inlined (x64_compile_module_owned), so no phase holds two copies of it.
-//
-// The MIR half of the route: lowers the entry's functions and realizes the C
-// inputs, then pushes both onto `fronts` for jet_cli_native_back, so the
-// caller can release the MIR before the object compile. A C closure that
-// fails is kept as its message and reported where the route reaches it
-// (after the object is written), so the reports keep their order. Only this
-// half holds both the MIR and the LIR, so only a lowering failure writes a
-// `fault_dump` of both; an object failure (jet_cli_native_back) writes the
-// LIR its per-function jobs hand back, the MIR being released by then.
-fn jet_cli_native_front(entry_function: MIRFunctionID?, trace_sink: CompilerTraceSink?, threads: CompilerThreads, unpruned: &MIRProgram, foreign_link: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, keep_going: Bool, fault_dump: String?, fronts: &[JetCLINativeFront], census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
-    entry_id :: entry_function ?? return Val(JetCLINativeFailure.NoEntry)
-    // Only functions the entry reaches are lowered, generic ones per instance.
-    if trace_sink == .Val(sink) -> sink.begin("native.lower", "", -1, -1)
-    lowered :: if keep_going -> lir_lower_entry_keep_going_in_place(&unpruned, entry_id, threads) else -> lir_lower_entry_in_place(&unpruned, entry_id, threads)
-    function_count :: lowered.lir.functions.len()
-    if trace_sink == .Val(sink) -> sink.end("native.lower", function_count)
-    jet_cli_trace_lir_counters(trace_sink, "native.lower", lowered.lir)
-    if lowered.issues.len() > 0 {
-        if keep_going {
-            loop issue in lowered.issues -> &census.push(jet_cli_keep_going_row("native.lower", issue.function, issue.message))
-        }
-        if !keep_going || lowered.entry == None {
-            functions :: loop issue in lowered.issues -> issue.function
-            messages :: loop issue in lowered.issues -> issue.message
-            dump := String?{None}
-            if fault_dump == .Val(directory) -> dump = jet_cli_emit_fault_dump(unpruned, lowered.lir, functions, directory)
-            return Val(JetCLINativeFailure.Lowering{functions: functions, messages: messages, dump: dump})
-        }
+// trace sink: `native.rust_foreign` (a Rust foreign helper's realization),
+// `ir.build`, `ir.opt` (level > 0), `ir.x64` (on the threads the compile
+// admits), `ir.object`, `native.foreign` (the C closure) and `native.link`.
+// A span a failure returns from stays open.
+fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, sources: JetCLIForeignSources, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
+    trace_sink :: result.trace_sink
+    checked := ^inputs
+    entry_key :: checked.entry_key ?? return Val(JetCLINativeFailure.NoEntry)
+    if trace_sink == .Val(sink) -> sink.begin("native.rust_foreign", "", -1, -1)
+    helper := JetCLIRustForeignArtifact?{None}
+    if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == {
+        .Ok(realized) -> helper = realized
+        .Err(error) -> return Val(JetCLINativeFailure.RustForeign{error: error})
     }
-    found :: lowered.entry ?? return Val(JetCLINativeFailure.LostEntry)
-    // A fresh ID: `lowered` moves into the front below, and `found` views it.
-    entry :: LIRFunctionID{value: found.value}
-    if trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
-    foreign := JetCLIForeignInputs?{None}
-    foreign_error := ""
-    if jet_cli_native_c_inputs(foreign_link, rust_helper, sources, runtime_dir) == {
-        .Ok(inputs) -> foreign = Val(inputs)
-        .Err(error) -> foreign_error = error.message
+    if trace_sink == .Val(sink) -> sink.end("native.rust_foreign", if helper == None -> 0 else -> 1)
+    rust_helper :: if helper == .Val(artifact) -> Val(jet_cli_rust_foreign_archive(artifact)) else -> None
+    // The builder reads every checked module's declarations, in module order.
+    type_defs := [TTypeDef]{}
+    impls := [TImplDef]{}
+    constants := [TConstantDef]{}
+    foreign_rows := [SemaCheckedForeignFunction]{}
+    loop index in 0..<checked.modules.len() {
+        compiler_transfer_rows<TTypeDef>(&type_defs, &checked.modules[index].declarations.type_defs)
+        compiler_transfer_rows<TImplDef>(&impls, &checked.modules[index].declarations.impls)
+        compiler_transfer_rows<TConstantDef>(&constants, &checked.modules[index].declarations.constants)
+        compiler_transfer_rows<SemaCheckedForeignFunction>(&foreign_rows, &checked.modules[index].foreign_functions)
     }
-    if trace_sink == .Val(sink) -> sink.end("native.foreign", if foreign == .Val(inputs) -> inputs.names.len() else -> 0)
-    &fronts.push(JetCLINativeFront{entry: entry, function_count: function_count, foreign: ^foreign, foreign_error: foreign_error, lowered: ^lowered})
-    None
-}
-
-// What the MIR half of the native route hands the object half: the lowered
-// module, its entry, and the C inputs (or the message of their failure).
-struct JetCLINativeFront {
-    entry: LIRFunctionID
-    function_count: Int
-    foreign: JetCLIForeignInputs?
-    foreign_error: String
-    lowered: LIRLowering
-}
-
-// The object half of the native route: the object, the runtime and the C
-// inputs linked into the executable.
-// A failing object compile writes each failing function's final LIR to
-// `fault_dump` (jet_cli_emit_fault_lir); the MIR is released by then.
-fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?, threads: CompilerThreads, level: Int, runtime_dir: String, object_path: String, executable_path: String, keep_going: Bool, fault_dump: String?, census: &[String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeFailure? Never! {
-    // No absolute source root enters DWARF: comp_dir stays "." on every
-    // route, so the output never depends on the checkout path.
-    if trace_sink == .Val(sink) -> sink.begin("native.object", "", -1, -1)
+    // The program's C closure defines its foreign functions' symbols.
+    closure_symbols := [String:Bool]{}
+    loop row in foreign_rows -> closure_symbols[row.symbol.copy()] = true
+    if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
+    built := ir_build_program(^checked.functions, ^type_defs, ^impls, ^checked.sources, ^constants, ^foreign_rows, entry_key)
+    function_count :: built.program.functions.len()
+    if trace_sink == .Val(sink) -> sink.end("ir.build", function_count)
+    rows := [String]{}
+    loop failure in built.failures {
+        item :: "{failure.name} [{failure.key}]"
+        message :: "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
+        if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
+        if built.program.function_rows.get(failure.key) == .Val(id) -> jet_cli_ir_trap(&built.program.functions[id])
+    }
+    // A runtime call the runtime does not export would fail the whole link;
+    // its function fails here instead, like any construct the builder rejects.
+    key :: jet_cli_runtime_key(runtime_dir) ?? return Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})
+    exports_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
+    exports_text :: cli_files.read(exports_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})
+    exported := [String:Bool]{}
+    loop line in exports_text.split("\n").to_list() {
+        if line != "" -> exported[line] = true
+    }
+    loop index in 0..<built.program.functions.len() {
+        missing := String?{None}
+        loop (at, op) in built.program.functions[index].op {
+            if op == .CallRuntime && exported.get(built.program.names[built.program.functions[index].a[at]]) == None && closure_symbols.get(built.program.names[built.program.functions[index].a[at]]) == None {
+                missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
+                break
+            }
+        }
+        symbol :: missing ?? next
+        item :: "{built.program.functions[index].name} [{built.program.functions[index].key}]"
+        message :: "runtime route {symbol}: the Jet runtime {key} exports no `{symbol}`"
+        if keep_going -> &census.push(jet_cli_keep_going_row("ir.build", item, message)) else -> &rows.push("{item}: {message}")
+        jet_cli_ir_trap(&built.program.functions[index])
+    }
     // The memory term is read now: the compile before this holds most of it.
-    object_threads :: CompilerThreads{cap: threads.cap, cores: threads.cores, memory_available: jet_cli_memory_available()}
-    // `outcome.faults` carries the final LIR of every function whose job
-    // failed (a lint finding or a compile error), for a fault dump.
-    outcome := x64_relocatable_object_owned(^front.lowered.lir, front.entry, object_threads, level, keep_going)
-    object := ^outcome.object
+    threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    if level > 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
+        _ := ir_optimize_module(&built.program, level, threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
+    }
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
+    compiled := ir_x64_compile_module(^built.program, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
+    loop error in compiled.errors {
+        if keep_going -> &census.push(jet_cli_keep_going_row("ir.x64", "-", error)) else -> &rows.push(error)
+    }
+    if rows.len() > 0 -> return Val(JetCLINativeFailure.Build{rows: rows})
+    if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
+    object := ir_x64_object(^compiled)
     if trace_sink == .Val(sink) {
-        sink.end("native.object", front.function_count)
-        sink.progress("counters.native.object.bytes", object.bytes.len(), -1)
+        sink.end("ir.object", function_count)
+        sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)
     }
     if object.errors.len() > 0 {
         if keep_going {
-            loop error in object.errors -> &census.push(jet_cli_keep_going_row("native.object", "-", error))
+            loop error in object.errors -> &census.push(jet_cli_keep_going_row("ir.object", "-", error))
         }
-        if !keep_going || object.bytes.len() == 0 {
-            dump := String?{None}
-            if fault_dump == .Val(directory) {
-                // Bounded like the lowering dump (JET_CLI_EMIT_FAULT_DUMP_FUNCTIONS).
-                loop (index, function) in outcome.faults {
-                    if index >= JET_CLI_EMIT_FAULT_DUMP_FUNCTIONS -> break
-                    if jet_cli_emit_fault_lir(function, index, directory) != None -> dump = Val(directory)
-                }
-            }
-            return Val(JetCLINativeFailure.Object{errors: object.errors, dump: dump})
-        }
+        if !keep_going || object.bytes.len() == 0 -> return Val(JetCLINativeFailure.Object{errors: object.errors})
     }
+    if trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
+    foreign := JetCLIForeignInputs?{None}
+    foreign_error := ""
+    if jet_cli_native_c_inputs(result.foreign_link, rust_helper, sources, runtime_dir) == {
+        .Ok(found) -> foreign = Val(found)
+        .Err(error) -> foreign_error = error.message
+    }
+    if trace_sink == .Val(sink) -> sink.end("native.foreign", if foreign == .Val(found) -> found.names.len() else -> 0)
     cli_files.write_bytes(object_path, object.bytes) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {object_path}: {err}"})
-    key :: jet_cli_runtime_key(runtime_dir) ?? return Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})
-    foreign :: front.foreign ?? return Val(JetCLINativeFailure.Foreign{message: front.foreign_error})
-    runtime_file :: if foreign.platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
+    closure :: foreign ?? return Val(JetCLINativeFailure.Foreign{message: foreign_error})
+    runtime_file :: if closure.platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
     runtime_path :: "{runtime_dir}/{key}/{runtime_file}"
     runtime :: cli_files.read_bytes(runtime_path) ?? return Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"})
     // Input names appear only in link diagnostics; the image is a function of
     // the bytes and their order. The object and runtime move in, uncopied.
     names := [String]{object_path, runtime_path}
     bytes := [[U8]]{^object.bytes, ^runtime}
-    loop name in foreign.names -> &names.push(name)
-    loop input in foreign.bytes -> &bytes.push(input)
+    loop name in closure.names -> &names.push(name)
+    loop input in closure.bytes -> &bytes.push(input)
     input_count :: names.len()
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     image :: x64_link_executable(names, ^bytes)
@@ -546,48 +489,55 @@ fn jet_cli_native_back(front: ^JetCLINativeFront, trace_sink: CompilerTraceSink?
     None
 }
 
-// AGENTS.md I9: `run` (and dev) is O0, `build` O1, `--release` O2.
-fn jet_cli_native_level(command: String, release: Bool) -> Int Never! {
-    if release -> return 2
-    if command == "build" -> 1 else -> 0
+// The body of a function the IR builder can't build: one Unreachable. Its
+// slots and parameters stay, so its callers' calls still select.
+fn jet_cli_ir_trap(function: &IRFunction) Never! {
+    function.op = [IROp]{IROp.Unreachable}
+    function.dst = [Int]{-1}
+    function.a = [Int]{-1}
+    function.b = [Int]{-1}
+    function.c = [Int]{-1}
+    function.code_line = [Int]{0}
+    function.args = [Int]{}
+    function.open = [Int]{}
 }
 
-// SPEED-500K work counters of a LIR phase, after its span closed:
-// `counters.<phase>.functions` and `counters.<phase>.lir_insts` (block
-// instructions and terminators).
-fn jet_cli_trace_lir_counters(trace_sink: CompilerTraceSink?, phase: String, lir: LIRModule) Never! {
-    if trace_sink == .Val(sink) {
-        insts := 0
-        loop function in lir.functions {
-            loop block in function.blocks -> insts += block.insts.len() + 1
-        }
-        sink.progress("counters.{phase}.functions", lir.functions.len(), -1)
-        sink.progress("counters.{phase}.lir_insts", insts, -1)
-    }
-}
-
-// `jet build`'s report of the native route. Report all native findings
-// without switching to a different backend.
-fn jet_cli_build_native(file: String, command: String, release: Bool, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    if result.mir == None -> return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+// `jet build`'s and `jet run`'s report of the native route, at the command's
+// level (jet_cli_native_level). Report all native findings without switching
+// to a different backend. Under JET_KEEP_GOING every finding is a row of
+// JET_KEEP_GOING_REPORT after the front end's, and the executable is still
+// written while the route has object bytes (each failed function traps).
+fn jet_cli_build_native(file: String, command: String, release: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("native.sources", "", -1, -1)
     sources :: jet_cli_native_c_sources(snapshot) ?? return jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err.message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
     if result.trace_sink == .Val(sink) -> sink.end("native.sources", -1)
     fix :: "correct the reported native backend problems, then retry `jet {command} {file}`"
+    keep_going :: jet_cli_keep_going_enabled()
     census := [String]{}
-    failure :: jet_cli_native_executable(&result, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), "{binary}.o", binary, false, Val("{binary}.ice"), &census) ?? return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    native :: jet_cli_native_executable(result, ^inputs, sources, jet_cli_native_level(command, release), jet_cli_runtime_dir(), "{binary}.o", binary, keep_going, &census)
+    if census.len() > 0 {
+        problem :: jet_cli_keep_going_append(census)
+        if problem != "" -> return jet_cli_ice(problem)
+        if native == None -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet: {census.len()} findings in JET_KEEP_GOING_REPORT; {binary} traps at each", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    failure :: native ?? return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if failure == {
         .RustForeign(error) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(error, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         .NoEntry -> jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
-        .Lowering(functions, messages, dump) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{jet_cli_native_lowering_rows(functions, messages, ": ").join("\n")}{jet_cli_native_dump_note(dump, "MIR and LIR")}", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-        .LostEntry -> jet_cli_ice("the MIR program of `{file}` lost its entry function")
-        .Object(errors, dump) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{errors.join("\n")}{jet_cli_native_dump_note(dump, "LIR")}", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        .Build(rows) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{rows.join("\n")}", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        .Object(errors) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "the Jet backend can't build `{file}` yet:\n{errors.join("\n")}", jet_cli_why("E2104"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         .Write(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "check that the build directory is writable", color)
         .RuntimeKey(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the key and the runtime pack", color)
         .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the runtime pack and object", color)
         .Foreign(message) -> jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
         .Link(errors) -> jet_cli_ice("linking `{file}` with the Jet runtime failed:\n{errors.join("\n")}")
     }
+}
+
+// AGENTS.md I9: `run` (and dev) is O0, `build` O1, `--release` O2.
+fn jet_cli_native_level(command: String, release: Bool) -> Int Never! {
+    if release -> return 2
+    if command == "build" -> 1 else -> 0
 }
 
 enum JetCLIBuilt {
@@ -598,16 +548,17 @@ enum JetCLIBuilt {
 }
 
 // Write `.jet/build/<stem>` in the source root for a compile with no errors,
-// through the native backend at the command's level (jet_cli_native_level).
+// through the native route (one route at every profile).
 // `name` is the binary's name in .jet/build: the file stem, or a build target's name.
-fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool, release: Bool, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
+fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool, release: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) -> return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     if !result.complete -> return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}
+    checked := ^inputs ?? return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")}
     root :: snapshot.roots[0].canonical_path
     build_dir :: "{root}/.jet/build"
     cli_files.create_dir_all(build_dir) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)}
     binary :: "{build_dir}/{name}"
-    built :: jet_cli_build_native(file, command, release, &result, snapshot, binary, color)
+    built :: jet_cli_build_native(file, command, release, result, ^checked, snapshot, binary, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return JetCLIBuilt.Failed{output: built}
     JetCLIBuilt.Binary{path: binary}
 }
@@ -617,9 +568,9 @@ fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool
 // leaves undecided a right the program requires (Authority.jet). A script
 // answers with the `-A` rows (`jet_cli_source_invocation`).
 // Traced as `cli.authority`.
-fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -> JetDriverVerbOutput? Never! {
+fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?) -> JetDriverVerbOutput? Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
-    authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, invocation))
+    authority :: jet_cli_executable_authority(result, inputs, jet_cli_source_invocation(source, invocation))
     if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
     jet_cli_authority_report(file, source, color, command, authority)
 }
@@ -646,7 +597,7 @@ fn jet_cli_present_shown(result: JetDriverCompileResult, snapshot: JetDriverAuth
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // the way the Rust host does, check the application authority, then write
 // the executable.
-fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, release: Bool, invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, release: Bool, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
@@ -654,43 +605,33 @@ fn jet_cli_build_result(file: String, name: String, source: String, color: Bool,
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if jet_cli_authority_check(file, source, color, "build", invocation, result) == .Val(refusal) -> return refusal
-    if jet_cli_build_binary(file, name, "build", color, release, &result, snapshot) == {
+    if jet_cli_authority_check(file, source, color, "build", invocation, result, inputs) == .Val(refusal) -> return refusal
+    if jet_cli_build_binary(file, name, "build", color, release, result, ^inputs, snapshot) == {
         .Failed(failure) -> return failure
         .Binary(_) -> {}
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// A compiled result's source snapshot, copied out through a read parameter
-// so the caller can borrow the result exclusively afterwards.
-fn jet_cli_compiled_snapshot(compiled: JetCLICompiled) -> JetDriverAuthorizedSourceSnapshot? Never! {
-    // copy: a few source-root rows; the result keeps its own snapshot.
-    if compiled == .Compiled(_, snapshot) -> return Val(snapshot.copy())
-    None
-}
-
 // One build target of a package build: compile `file` into .jet/build/`name` and return,
 // so the package build continues with its next target.
 fn jet_cli_compile_target(file: String, name: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
-    authorized :: jet_cli_compiled_snapshot(compiled)
-    if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> return jet_cli_build_result(file, name, source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"))
-    jet_cli_ice("the compile of `{file}` was neither refused nor compiled")
+    compiled := jet_cli_compile_executable_file(file, color, threads, release, trace_sink)
+    if ^compiled == {
+        .Refused(refusal) -> refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_build_result(file, name, source, color, release, invocation, result, ^inputs, snapshot)
+    }
 }
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    // The result is matched in place: binding it out of an owned local
-    // would copy its whole MIR program for the length of the native route.
-    compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
-    // The snapshot is copied out before `compiled` is borrowed exclusively below.
-    authorized :: jet_cli_compiled_snapshot(compiled)
-    if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, release, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot")))
-    // Unreached (a compile is refused or compiled); a value-returning verb
-    // never ends in its Never exit call.
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled := jet_cli_compile_executable_file(file, color, threads, release, trace_sink)
+    if ^compiled == {
+        .Refused(refusal) -> output = refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, release, invocation, result, ^inputs, snapshot))
+    }
+    // Reached only by a refusal: a value-returning verb never ends in its
+    // Never exit call.
     output
 }
 
@@ -748,17 +689,17 @@ fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagno
 // an error stop the run, and so does the application authority check;
 // `run` hides advisory lints unless `--verbose`. With `dev` the built
 // program is not run: its path is the output's stdout.
-fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, dev: Bool) -> JetDriverVerbOutput {
+fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, dev: Bool) -> JetDriverVerbOutput {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_cli_errors(result.diagnostics)
     if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if jet_cli_authority_check(file, source, color, "run", invocation, result) == .Val(refusal) -> return refusal
+    if jet_cli_authority_check(file, source, color, "run", invocation, result, inputs) == .Val(refusal) -> return refusal
     if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    built :: jet_cli_build_binary(file, jet_cli_stem(file), "run", color, release, &result, snapshot)
+    built :: jet_cli_build_binary(file, jet_cli_stem(file), "run", color, release, result, ^inputs, snapshot)
     if built == {
         .Failed(failure) -> output = ^failure
         .Binary(binary) -> output = if dev -> JetDriverVerbOutput{stdout: binary, stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_exec(binary, program_args, color)
@@ -770,21 +711,20 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     // A traced or verbose run reports its compile, so only a plain script run
     // may reuse a kept program.
     if jet_cli_is_script(source) && !verbose && trace_sink == None -> return jet_cli_compile_script(file, source, color, release, threads, program_args, invocation)
-    output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    // Matched in place, as jet_cli_compile_build does.
-    compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
-    // The snapshot is copied out before `compiled` is borrowed exclusively below.
-    authorized :: jet_cli_compiled_snapshot(compiled)
-    if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"), false))
-    // Unreached, as in jet_cli_compile_build.
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled := jet_cli_compile_executable_file(file, color, threads, release, trace_sink)
+    if ^compiled == {
+        .Refused(refusal) -> output = refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, result, ^inputs, snapshot, false))
+    }
+    // Reached only by a refusal, as in jet_cli_compile_build.
     output
 }
 
 // `jet run` of a script: run the program kept for exactly these inputs, or
 // compile it, keep it, and run it (ScriptCache.jet).
 fn jet_cli_compile_script(file: String, source: String, color: Bool, release: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput {
-    output :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     held :: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
     toolchain :: jet_cli_script_toolchain(release)
     if held == .Held(snapshot) {
@@ -797,21 +737,24 @@ fn jet_cli_compile_script(file: String, source: String, color: Bool, release: Bo
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
     }
     keep :: jet_cli_script_keeper(toolchain, release)
-    compiled := jet_cli_compile_prepared(^prepared, false, JetDriverCompileTarget.Native, release, jet_cli_script_input_log(keep), None)
-    // The snapshot is copied out before `compiled` is borrowed exclusively below.
-    authorized :: jet_cli_compiled_snapshot(compiled)
-    if compiled == .Refused(refusal) -> return ^refusal
-    if &compiled == .Compiled(result, _) -> jet_cli_finish(jet_cli_script_build_and_run(file, source, color, release, program_args, invocation, &result, authorized ?? panic("a compiled result carries its source snapshot"), keep))
-    // Unreached, as in jet_cli_compile_build.
+    compiled := jet_cli_compile_executable(^prepared, release, jet_cli_script_input_log(keep), None)
+    if ^compiled == {
+        .Refused(refusal) -> output = refusal
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_script_build_and_run(file, source, color, release, program_args, invocation, result, ^inputs, snapshot, keep))
+    }
+    // Reached only by a refusal, as in jet_cli_compile_build.
     output
 }
 
 // Build a compiled script as `jet run` does, keep the program under `keep`
 // (ScriptCache.jet), then run it.
-fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: &JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetDriverVerbOutput {
-    built :: jet_cli_run_result(file, source, color, release, false, program_args, invocation, &result, snapshot, true)
+fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, release: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetDriverVerbOutput {
+    // The kept program's authority is the compile's own, before the build
+    // takes the checked functions.
+    authority :: jet_cli_executable_authority(result, inputs, None)
+    built :: jet_cli_run_result(file, source, color, release, false, program_args, invocation, result, ^inputs, snapshot, true)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
-    if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, built.stdout, jet_cli_application_authority(result, None))
+    if keep == .Val(kept) -> jet_cli_script_keep(kept, snapshot, built.stdout, authority)
     jet_cli_exec(built.stdout, program_args, color)
 }
 fn jet_cli_native_test_unrun_check_report() -> String Never! {
@@ -1892,11 +1835,13 @@ fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, thr
             cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
             hot_noted = true
         }
-        compiled := jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, false, threads, JetDriverCompileMode.Program, JetDriverCompileTarget.Native, release, trace_sink)
-        authorized :: jet_cli_compiled_snapshot(compiled)
-        if !configured {
-        } else if &compiled == .Compiled(result, _) {
-            built :: jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, &result, authorized ?? panic("a compiled result carries its snapshot"), true)
+        compiled := jet_cli_compile_executable_file(file, color, threads, release, trace_sink)
+        ran := JetDriverVerbOutput?{None}
+        if ^compiled == {
+            .Refused(refusal) -> if configured -> cli_term.eprint(refusal.stderr)
+            .Checked(result, inputs, snapshot) -> if configured -> ran = Val(jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, result, ^inputs, snapshot, true))
+        }
+        if ran == .Val(built) {
             if built.exit_code == JET_DRIVER_EXIT_OK && built.stdout != "" {
                 argv := [String]{built.stdout}
                 loop argument in program_args -> &argv.push(argument)
@@ -1912,8 +1857,6 @@ fn jet_cli_dev_loop(file: String, color: Bool, release: Bool, verbose: Bool, thr
             } else {
                 cli_term.eprint(built.stderr)
             }
-        } else if compiled == .Refused(refusal) {
-            cli_term.eprint(refusal.stderr)
         }
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
         loop jet_cli_dev_stamp(root, config.watch) == stamp -> cli_time.sleep(200ms)

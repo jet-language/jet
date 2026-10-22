@@ -9,7 +9,7 @@ use core.encoding.json as cli_rust_json
 use core.encoding.json.[pointer]
 use core.encoding.[Dyn]
 use jet_driver.[JetDriverForeignLinkFacts, JetDriverRustForeignFacts, JetDriverRustForeignPlan, JetDriverRustForeignError, jet_driver_foreign_link_cache_identity, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_TARGET]
-use jet_foundation.[MIRProgram, MIRForeignLanguage, MIRLinkUnit, MIRLinkUnitID, MIRLinkArtifact, MIRLinkArtifactKind, MIRTargetApplicability, mir_module_id, stable_id, mir_sha256_bytes, mir_sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+use jet_foundation.[stable_id, mir_sha256_bytes, mir_sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
 
 JET_CLI_RUST_ARTIFACT_SCHEMA :: "jet-ffi-artifacts-v2"
 JET_CLI_RUST_PROVENANCE_SCHEMA :: "jet-ffi-bridge-provenance-v1"
@@ -553,32 +553,6 @@ fn jet_cli_rust_foreign_build(plan: JetDriverRustForeignPlan, cache: String, sou
     jet_cli_rust_foreign_publish(released, "{plan.crate_name}.provenance", provenance.bytes())
     if !jet_cli_rust_foreign_verified(plan, source, release, toolchain, link_closure) -> return Err(jet_cli_rust_foreign_io("published FFI artifact failed digest/provenance verification"))
     Ok(())
-}
-
-// The program's own copy with every checked Rust foreign row linked to the
-// realized helper, for MIR lowering's `_cabi` descriptor adapters.
-fn jet_cli_rust_foreign_attach(artifact: JetCLIRustForeignArtifact, program: ^MIRProgram) -> MIRProgram JetDriverRustForeignError! {
-    plan :: artifact.plan
-    result := ^program
-    id :: MIRLinkUnitID{value: stable_id("mir-link", "rust-helper:{plan.key}")}
-    dependencies := [MIRLinkUnitID]{}
-    loop unit in result.links -> &dependencies.push(unit.id)
-    attached := 0
-    loop index in 0..<result.foreign.len() {
-        if result.foreign[index].foreign_language != MIRForeignLanguage.Rust -> next
-        loop entry in plan.entries {
-            if result.foreign[index].module_id == mir_module_id(entry.module_identity) && result.foreign[index].name == entry.declaration.name {
-                result.foreign[index].link = Val(id)
-                attached += 1
-                break
-            }
-        }
-    }
-    if attached != plan.entries.len() -> return Err(jet_cli_rust_foreign_io("checked Rust foreign rows do not match the helper's module/name entries"))
-    &result.links.push(MIRLinkUnit{id: id, crate_spec: plan.crate_name, cache_identity: plan.key, target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: false}, artifacts: [MIRLinkArtifact]{MIRLinkArtifact{kind: MIRLinkArtifactKind.StaticLibrary, path: jet_cli_rust_foreign_archive(artifact)}}, dependency_dirs: [String]{"{artifact.release}/deps", "{artifact.target_dir}/release/deps"}, link_closure: dependencies})
-    // The checked symbol is deliberately unchanged; native lowering uses its
-    // canonical `_cabi` descriptor adapter and this exact StaticLibrary.
-    Ok(^result)
 }
 
 fn jet_cli_rust_foreign_realize(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignArtifact? JetDriverRustForeignError! {

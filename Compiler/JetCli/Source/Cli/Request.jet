@@ -27,6 +27,8 @@ use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverKeepGoing,
+    JetDriverLoweringInputs,
+    JetDriverLoweringInputsResult,
     JetDriverCompileTarget,
     JetDriverCoreSource,
     JetDriverComptimeInputLog,
@@ -36,6 +38,7 @@ use jet_driver.[
     jet_driver_compile,
     jet_driver_compile_mir,
     jet_driver_compile_keep_going,
+    jet_driver_lowering_inputs,
     jet_driver_compile_escaped_failure,
     jet_driver_shared_build_inputs,
     jet_driver_shared_build_http_inputs,
@@ -68,6 +71,24 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool, t
     result
 }
 
+// jet_cli_compile_request for the native executable route: the compile
+// stopped before lowering, with the checked inputs the route builds from
+// (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
+fn jet_cli_lowering_inputs(request: ^JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
+    if !jet_cli_keep_going_enabled() -> return jet_driver_lowering_inputs(^request, None)
+    skip := [String]{}
+    loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
+        if row.trim().len() > 0 -> &skip.push(row.trim())
+    }
+    front := jet_driver_lowering_inputs(^request, Val(JetDriverKeepGoing{skip: skip}))
+    if front.compile.keep_going_rows.len() > 0 -> front.compile.complete = false
+    if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
+    problem :: jet_cli_keep_going_report(front.compile.keep_going_rows)
+    if trace_sink == .Val(sink) -> sink.end("keepgoing.report", front.compile.keep_going_rows.len())
+    if problem != "" -> return JetDriverLoweringInputsResult{compile: jet_driver_compile_escaped_failure(problem), inputs: None}
+    front
+}
+
 // JET_KEEP_GOING=1 selects the all-phases collector (here and in the
 // bootstrap native feed, Compiler/Bootstrap/Host/Entry.jet).
 fn jet_cli_keep_going_enabled() -> Bool Never! {
@@ -83,6 +104,15 @@ fn jet_cli_keep_going_report(rows: [String]) -> String {
     &lines.push("")
     cli_files.write(report, lines.join("\n")) ?? return "cannot write the compiler failure census: {err}"
     ""
+}
+
+// Appends `rows` to the JET_KEEP_GOING_REPORT census the front end wrote
+// (jet_cli_keep_going_report); the write's failure text, else "".
+fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
+    report :: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return ""
+    text :: rows.join("\n")
+    problem :: jet_cli_trace_append(report, "{text}\n") ?? return ""
+    "cannot append to the compiler failure census `{report}`: {problem}"
 }
 
 // Packaging uses the ordinary hosted source loader and checked NativeLibrary
@@ -1032,6 +1062,51 @@ fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, emit_rust: Bool, target: 
             result.trace_sink = jet_cli_trace_boxed(trace_sink)
             result.compiler_threads = compiler_threads
             JetCLICompiled.Compiled{result: result, snapshot: snapshot}
+        }
+    }
+}
+
+// The checked compile of an executable (`jet build`, `jet run`, a script,
+// `jet dev`): the driver's compile stopped before lowering, with the checked
+// inputs the native route builds from (Host.jet jet_cli_native_executable).
+enum JetCLIExecutableCompiled {
+    // `inputs` is None when the compile stopped before lowering; the result's
+    // diagnostics say why. `snapshot` as in JetCLICompiled.Compiled.
+    Checked(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot)
+    Refused(output: JetDriverVerbOutput)
+}
+
+// The executable compile of `file` (its source walk is the `sources` span).
+fn jet_cli_compile_executable_file(file: String, color: Bool, threads: Int?, release: Bool, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    jet_cli_compile_executable(^prepared, release, None, trace_sink)
+}
+
+// jet_cli_compile_prepared for the native executable route: `release`
+// selects the release profile of the front end; `input_log` as there.
+fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, release: Bool, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+    if ^prepared == {
+        .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
+        .Prepared(request, snapshot) -> {
+            selected := request
+            selected.target = JetDriverCompileTarget.Native
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            // copy: the caller keeps its handle on the one shared log.
+            selected.comptime_input_log = input_log.copy()
+            if release {
+                selected.profile = "release"
+                selected.build_mode = MIRArtifactBuildMode.Release
+            }
+            // copy: a three-field row; the request moves into the compiler below.
+            compiler_threads :: selected.compiler_threads.copy()
+            front := jet_cli_lowering_inputs(^selected, trace_sink)
+            // The native route traces through the same sink and builds on the
+            // request's threads (Host.jet jet_cli_native_executable).
+            front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)
+            front.compile.compiler_threads = compiler_threads
+            JetCLIExecutableCompiled.Checked{result: ^front.compile, inputs: ^front.inputs, snapshot: snapshot}
         }
     }
 }

@@ -3,11 +3,11 @@
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
 // `run [<file>|<dir>]`, `test <file>`, `new <name>`, `doc <file>`, `fmt`,
-// and `emit --ast|--mir|--lir <file>`; a bare or directory target
+// and `emit --ast|--ir <file>`; a bare or directory target
 // resolves the project entry, Entry.jet), and the inspect group
 // (Inspect.jet). Every report is the Rust host's exact bytes and exit
 // status for the same argv, except `jet emit`, which is Jet-only: its
-// `--ast`/`--mir`/`--lir` tiers, `--fn`, and the E2102 reports for a target
+// `--ast`/`--ir` tiers, `--fn`, and the E2102 reports for a target
 // with no mode flag or with two. A command whose Jet port has not landed yet
 // is refused with E2104 instead of guessing its behavior.
 use core.files as cli_files
@@ -73,7 +73,7 @@ enum JetCLIPlan {
     // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
     // `inspect.doc` status, `check` reports undocumented public items.
     Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
-    // `jet emit --ast|--mir|--lir <file>`: print one tier of the entry;
+    // `jet emit --ast|--ir <file>`: print one tier of the entry;
     // `function` is the `--fn` selection.
     Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?)
     // `jet eval <file>` (CmdDevTools.rs `run_eval`): evaluate the entry's
@@ -1184,13 +1184,12 @@ fn jet_cli_fuzz_command(jet_argv: [String], args: [String], color: Bool, quiet: 
     jet_cli_with_notices([String]{notice}, jet_cli_fuzz(file, test_name, iterations, color))
 }
 
-// The tiers `jet emit` prints, one mode flag each (`--ast`, `--mir`,
-// `--lir`).
-JET_CLI_EMIT_TIERS :: [String]{"ast", "mir", "lir"}
+// The tiers `jet emit` prints, one mode flag each (`--ast`, `--ir`).
+JET_CLI_EMIT_TIERS :: [String]{"ast", "ir"}
 
-// `jet emit --ast|--mir|--lir <file>`: with no target the command's help is
-// a usage error; a target needs exactly one mode flag (E2102); the file is
-// read as typed. `--fn NAME` selects one function's tree.
+// `jet emit --ast|--ir <file>`: with no target the command's help is a usage
+// error; a target needs exactly one mode flag (E2102); the file is read as
+// typed. `--fn NAME` selects one function's tree.
 fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("emit"), JET_DRIVER_EXIT_USAGE)
     modes := [String]{}
@@ -1198,7 +1197,7 @@ fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
         if jet_argv.contains("--{tier}") -> &modes.push(tier)
     }
     if modes.len() == 0 {
-        return jet_cli_fail("E2102", "usage: jet emit --ast|--mir|--lir <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --mir <file.jet>`; `--ast` and `--lir` print the other tiers", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2102", "usage: jet emit --ast|--ir <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --ir <file.jet>`; `--ast` prints the parsed tier", color, JET_DRIVER_EXIT_USAGE)
     }
     if modes.len() > 1 {
         return jet_cli_fail("E2102", "`jet emit` prints one tier, but both `--{modes[0]}` and `--{modes[1]}` were given", "`emit` writes a single tier so its output has one meaning", "keep one of the mode flags", color, JET_DRIVER_EXIT_USAGE)
