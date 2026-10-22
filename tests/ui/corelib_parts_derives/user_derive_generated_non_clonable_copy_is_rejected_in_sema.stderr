@@ -1,8 +1,8 @@
 Error [E0211]: `fn(Int) -> Int` can't be copied
   --> user_derive_generated_non_clonable_copy_is_rejected_in_sema.jet:3:44
     |
-  3 |     fn duplicate(self) -> fn(Int) -> Int { ~self.callback }
-    |                                            ^^^^^^^^^^^^^^
+  3 |     fn duplicate(self) -> fn(Int) -> Int { self.callback.copy() }
+    |                                            ^^^^^^^^^^^^^^^^^^
  Why: Copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet
  Fix: Move it instead with the move marker `^` (`^name` if this is its last use), or change the type so every part can be copied
 More: jet-lang.dev/e/E0211

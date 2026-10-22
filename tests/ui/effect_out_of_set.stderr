@@ -1,8 +1,10 @@
-Error [E0740]: `load` uses the effect `FS`, which its signature doesn't allow
-  --> tests/ui/effect_out_of_set.jet:3:32
+Error [E0740]: `load` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/effect_out_of_set.jet:3:25
     |
-  3 | fn load(path: String) String -[Net]> fs.read(~path) ?? ""
-    |                                ^^^
- Why: The signature declares `-[Net]>`, so the body may only use those; `FS` is outside that set
- Fix: Add `FS` to the effect list, or stop using it in `load`
+  3 | fn load(path: String) -[Net]> String { fs.read(path.copy()) ?? "" }
+    |                         ^^^
+ Why: The signature declares `-[Net]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `load`
+ Denial: invocation
+ Call chain: load
 More: jet-lang.dev/e/E0740

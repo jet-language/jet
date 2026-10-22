@@ -5,13 +5,15 @@ Error [E3401]: `print` is not allowed in comptime code
     |     ^^^^^
  Why: Build calls `print`, which touches the outside world — comptime must give the same answer on every machine
  Fix: Compute this at runtime instead; the exceptions are `embed_file("path")`, `embed_bytes("path")`, and `find("glob")`
+ Denial: comptime
+ Call chain: build → print
 More: jet-lang.dev/e/E3401
 
-Error [E0107]: Nothing named `@x` exists here
+Error [E0107]: Nothing named `X` exists here
   --> tests/ui/comptime_impure.jet:8:20
     |
-  8 | fn run() { print("{@x}") }
-    |                    ^^
+  8 | fn run() { print("{X}") }
+    |                    ^
  Why: A name must be declared before it's used
- Fix: Declare it first: `@x :: ...`
+ Fix: Declare it first: `X :: ...`
 More: jet-lang.dev/e/E0107

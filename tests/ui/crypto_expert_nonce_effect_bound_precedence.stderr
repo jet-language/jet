@@ -1,8 +1,10 @@
 Error [E0740]: `protect` uses the effect `IO`, which its signature doesn't allow
-  --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:9:20
+  --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:9:16
     |
-  9 | fn protect() Int -[FS]> {
-    |                    ^^
+  9 | fn protect() -[FS]> Int {
+    |                ^^
  Why: The signature declares `-[FS]>`, so the body may only use those; `IO` is outside that set
  Fix: Add `IO` to the effect list, or stop using it in `protect`
+ Denial: invocation
+ Call chain: protect
 More: jet-lang.dev/e/E0740
