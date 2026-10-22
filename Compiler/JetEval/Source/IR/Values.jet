@@ -37,19 +37,22 @@ fn jet_eval_ir_comptime(closure: ^[TFunc], item: ^TFunc, type_defs: ^[TTypeDef],
         loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))
         return JetEvalIRResult{value: None, complete: false, error: None, internal_problem: None, stdout: "", steps: 0, build_failures: lines}
     }
-    jet_eval_ir_entry(^built.program, ^layouts, config, span)
+    // The item itself, not the program entry: the generated entry drops a
+    // valued result (ir_entry_function).
+    function :: built.program.function_rows.get(key) ?? -1
+    jet_eval_ir_entry(^built.program, function, ^layouts, config, span)
 }
 
 fn jet_eval_ir_build_failure_text(failure: IRBuildFailure) -> String Never! {
     "{failure.name} [{failure.key}]: {failure.message}"
 }
 
-// Runs the module's entry (no parameters) and reads its result back.
-fn jet_eval_ir_entry(built: ^IRModule, type_defs: ^[TTypeDef], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
+// Runs function `entry` of the module (no parameters) and reads its result
+// back.
+fn jet_eval_ir_entry(built: ^IRModule, entry: Int, type_defs: ^[TTypeDef], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     m := ^built
     p := ir_program_new([TFunc]{}, ^type_defs, [TImplDef]{}, [String:String]{}, [TConstantDef]{})
     s := jet_eval_ir_state_new(m, config, span)
-    entry :: m.entry
     if entry < 0 || entry >= m.functions.len() {
         jet_eval_ir_problem(&s, "the module has no entry function")
         return jet_eval_ir_result(s, None)
