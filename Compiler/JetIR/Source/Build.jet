@@ -546,7 +546,14 @@ fn ir_own(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
     ir_runtime(&m, &b, symbol, [Int]{slot}, row)
 }
 
+// The most instructions one function's build may emit. A build that passes
+// it fails like any unsupported construct (its function is not built and
+// the census records it) instead of growing until the process dies.
+IR_BUILD_INSTRUCTION_BUDGET :: 1000000
+
 fn ir_new_slot(b: &IRBuilder, ty: Int, kind: IRSlotKind, name: Int) -> Int Never! {
+    emitted :: b.f.op.len()
+    if emitted > IR_BUILD_INSTRUCTION_BUDGET -> ir_fail(&b, Span{start: 0, end: 0}, "budget exceeded: {emitted} instructions (budget {IR_BUILD_INSTRUCTION_BUDGET})")
     &b.fresh.push(false)
     ir_slot(&b.f, ty, kind, name, b.line)
 }
