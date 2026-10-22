@@ -201,11 +201,19 @@ clean, also on 6944afbd6):
   in the object as functions.
 - Spike differential: `jet ir run` at O0, `jet ir build` at O1, `jet ir build --release` at O2, each against
   the old backend's cached run (byte-identical stdout, stderr and exit). The programs were the 280 the IR route
-  builds identically at O0 (IRIntegrate3 int2). The first run was cut off at its 3600 s limit. Every one of the
-  at least 229 programs it finished was identical at all three levels; 51 programs were not reached. `ir.opt`
-  is under the trace's 10 ms resolution per program. On the two programs of the smoke run, object bytes were
-  15936 (O0), 16360 (O1) and 18584 (O2).
-- Not yet measured: the native perf cells timed at IR O0/O1/O2 against the table above.
+  builds identically at O0 (IRIntegrate3 int2). The first run was cut off at its 3600 s limit. The rerun on
+  dev 6944afbd6 plus the pass patch (landed as 55aaeee3b) finished in 2072 s: 280/280 identical and golden at
+  each of O0, O1 and O2. `ir.opt` is under the trace's 10 ms resolution per program. Object bytes summed over
+  the 280: 3374656 (O0), 3524872 (O1, +4.5%), 3697936 (O2, +9.6%).
+- Native perf cells at IR O0/O1/O2 (minimum of 5 runs, seconds; one build of the patched compiler, so the
+  ratios are indicative): output matched the expected file on every built cell at every level. O1/O0 and
+  O2/O0: closures/apply_calls 1.05/0.88, closures/map_filter_collect 0.94/1.67, collections/int_map
+  1.20/1.21, collections/list_fresh 0.82/0.86, collections/list_reuse 0.79/0.79, collections/temp_collection
+  0.99/0.98, numerics/collatz 1.01/1.04, numerics/fib 0.97/0.97, numerics/mandelbrot 0.79/0.84,
+  numerics/multi_return 0.96/0.91, numerics/recursion_aggregate 1.03/1.04, text/byte_scan 0.89/0.89,
+  text/split_join 1.00/1.01, text/string_fresh 0.98/0.98. Optimized code slower than O0 on int_map (O1, O2)
+  and map_filter_collect (O2) is an open finding. numerics/sieve does not build at any level: the IR builder
+  does not yet lower a range loop with a computed step.
 
 ## Row map
 
